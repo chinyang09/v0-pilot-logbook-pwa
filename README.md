@@ -14,7 +14,7 @@ Any changes you make to your deployed app will be automatically pushed to this r
 
 Your project is live at:
 
-**[https://vercel.com/chin-yangs-projects/v0-pilot-logbook-pwa](https://000I.vercel.app)**
+**[https://vercel.com/chin-yangs-projects/v0-pilot-logbook-pwa](https://vercel.com/chin-yangs-projects/v0-pilot-logbook-pwa)**
 
 ## Build your app
 

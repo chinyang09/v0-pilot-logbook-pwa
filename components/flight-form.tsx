@@ -309,7 +309,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
                 value={formData.date}
                 onChange={(e) => updateField("date", e.target.value)}
                 required
-                className="bg-input [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-50"
+                className="bg-input h-10 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-50"
               />
             </div>
             <div className="space-y-2">
@@ -485,7 +485,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
             </div>
           )}
 
-          {/* Pilot Role - Updated to include P1US */}
+          {/* Pilot Role */}
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-muted-foreground">
               <Users className="h-4 w-4" />
@@ -532,6 +532,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
             </div>
           </div>
 
+          {/* IFR and Instrument Times */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="ifrTime" className="flex items-center justify-between">
@@ -541,7 +542,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-5 px-1.5 text-xs text-muted-foreground"
+                    className="h-6 px-2 text-xs"
                     onClick={() => copyFlightTime("ifrTime")}
                   >
                     <Copy className="h-3 w-3 mr-1" />
@@ -552,7 +553,6 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
               <Input
                 id="ifrTime"
                 type="time"
-                placeholder="00:00"
                 value={formData.ifrTime}
                 onChange={(e) => updateField("ifrTime", e.target.value)}
                 className="bg-input"
@@ -566,7 +566,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-5 px-1.5 text-xs text-muted-foreground"
+                    className="h-6 px-2 text-xs"
                     onClick={() => copyFlightTime("actualInstrumentTime")}
                   >
                     <Copy className="h-3 w-3 mr-1" />
@@ -577,7 +577,6 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
               <Input
                 id="actualInstrumentTime"
                 type="time"
-                placeholder="00:00"
                 value={formData.actualInstrumentTime}
                 onChange={(e) => updateField("actualInstrumentTime", e.target.value)}
                 className="bg-input"
@@ -591,7 +590,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-5 px-1.5 text-xs text-muted-foreground"
+                    className="h-6 px-2 text-xs"
                     onClick={() => copyFlightTime("simulatedInstrumentTime")}
                   >
                     <Copy className="h-3 w-3 mr-1" />
@@ -602,7 +601,6 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
               <Input
                 id="simulatedInstrumentTime"
                 type="time"
-                placeholder="00:00"
                 value={formData.simulatedInstrumentTime}
                 onChange={(e) => updateField("simulatedInstrumentTime", e.target.value)}
                 className="bg-input"
@@ -641,25 +639,24 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
             <Label htmlFor="remarks">Remarks</Label>
             <Textarea
               id="remarks"
-              placeholder="Additional notes..."
+              placeholder="Any additional notes..."
               value={formData.remarks}
               onChange={(e) => updateField("remarks", e.target.value)}
-              className="bg-input resize-none"
-              rows={2}
+              className="bg-input min-h-[80px]"
             />
           </div>
 
-          {/* Submit */}
+          {/* Submit Buttons */}
           <div className="flex gap-3">
-            <Button type="submit" disabled={isSubmitting} className="flex-1">
-              <Save className="h-4 w-4 mr-2" />
-              {isSubmitting ? "Saving..." : editingFlight ? "Save Changes" : "Log Flight"}
-            </Button>
             {onClose && (
-              <Button type="button" variant="outline" onClick={onClose}>
+              <Button type="button" variant="outline" onClick={onClose} className="flex-1 bg-transparent">
                 Cancel
               </Button>
             )}
+            <Button type="submit" disabled={isSubmitting} className="flex-1 gap-2">
+              <Save className="h-4 w-4" />
+              {isSubmitting ? "Saving..." : editingFlight ? "Update Flight" : "Save Flight"}
+            </Button>
           </div>
         </form>
       </CardContent>

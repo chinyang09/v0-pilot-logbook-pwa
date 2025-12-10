@@ -58,19 +58,17 @@ class SyncService {
   }
 
   private notifyDataChanged() {
-    console.log("[v0] Notifying data changed to", this.onDataChangedCallbacks.size, "listeners")
     this.onDataChangedCallbacks.forEach((cb) => cb())
   }
 
   async fullSync(): Promise<{ pushed: number; pulled: number; failed: number }> {
     if (!navigator.onLine || this.syncInProgress) {
-      console.log("[v0] Skipping sync - offline or already in progress")
       return { pushed: 0, pulled: 0, failed: 0 }
     }
 
     const dbReady = await initializeDB()
     if (!dbReady) {
-      console.error("[v0] DB not ready for sync")
+      console.error("DB not ready for sync")
       return { pushed: 0, pulled: 0, failed: 0 }
     }
 
@@ -82,25 +80,20 @@ class SyncService {
     let failed = 0
 
     try {
-      // 1. Push local changes first
-      console.log("[v0] Starting push...")
+      const pullResult = await this.pullFromServer()
+      pulled = pullResult.count
+
+      // 2. Then push local changes (this ensures we don't overwrite newer server data)
       const pushResult = await this.pushPendingChanges()
       pushed = pushResult.success
       failed = pushResult.failed
-      console.log("[v0] Push complete:", pushResult)
-
-      // 2. Pull from server
-      console.log("[v0] Starting pull...")
-      const pullResult = await this.pullFromServer()
-      pulled = pullResult.count
-      console.log("[v0] Pull complete:", pullResult)
 
       // 3. Update last sync time
       await setLastSyncTime(Date.now())
 
       this.notifyDataChanged()
     } catch (error) {
-      console.error("[v0] Full sync error:", error)
+      console.error("Full sync error:", error)
     } finally {
       this.syncInProgress = false
       this.setStatus(navigator.onLine ? "online" : "offline")
@@ -115,7 +108,6 @@ class SyncService {
     }
 
     const queue = await getSyncQueue()
-    console.log("[v0] Sync queue has", queue.length, "items")
     let success = 0
     let failed = 0
 
@@ -140,11 +132,11 @@ class SyncService {
           success++
         } else {
           const errorText = await response.text()
-          console.error("[v0] Push failed for item:", item.id, errorText)
+          console.error("Push failed for item:", item.id, errorText)
           failed++
         }
       } catch (error) {
-        console.error("[v0] Push sync error:", error)
+        console.error("Push sync error:", error)
         failed++
       }
     }
@@ -157,7 +149,6 @@ class SyncService {
 
     let count = 0
     const lastSyncTime = await getLastSyncTime()
-    console.log("[v0] Last sync time:", lastSyncTime, new Date(lastSyncTime).toISOString())
 
     try {
       // Pull all collections
@@ -170,7 +161,6 @@ class SyncService {
           if (response.ok) {
             const data = await response.json()
             const records = data.records || []
-            console.log(`[v0] Pulled ${records.length} ${collection} from server`)
 
             for (const record of records) {
               try {
@@ -190,18 +180,18 @@ class SyncService {
                 }
                 count++
               } catch (upsertError) {
-                console.error(`[v0] Error upserting ${collection} record:`, upsertError, record)
+                console.error(`Error upserting ${collection} record:`, upsertError, record)
               }
             }
           } else {
-            console.error(`[v0] Failed to fetch ${collection}:`, response.status)
+            console.error(`Failed to fetch ${collection}:`, response.status)
           }
         } catch (fetchError) {
-          console.error(`[v0] Error fetching ${collection}:`, fetchError)
+          console.error(`Error fetching ${collection}:`, fetchError)
         }
       }
     } catch (error) {
-      console.error("[v0] Pull sync error:", error)
+      console.error("Pull sync error:", error)
     }
 
     return { count }

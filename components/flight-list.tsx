@@ -70,7 +70,6 @@ function SwipeableFlightCard({
     const diffX = currentX - startX.current
     const diffY = currentY - startY.current
 
-    // Determine swipe direction on first significant movement
     if (isHorizontalSwipe.current === null && (Math.abs(diffX) > 10 || Math.abs(diffY) > 10)) {
       isHorizontalSwipe.current = Math.abs(diffX) > Math.abs(diffY)
     }
@@ -88,7 +87,6 @@ function SwipeableFlightCard({
 
   const handleTouchEnd = () => {
     setIsSwiping(false)
-    // Snap to open or closed
     if (swipeX < -SWIPE_THRESHOLD / 2) {
       setSwipeX(-SWIPE_THRESHOLD)
     } else {
@@ -97,7 +95,6 @@ function SwipeableFlightCard({
   }
 
   const handleClick = () => {
-    // If swiped open, close it; otherwise edit
     if (swipeX < 0) {
       setSwipeX(0)
     } else {
@@ -109,7 +106,6 @@ function SwipeableFlightCard({
 
   return (
     <div className="relative overflow-hidden rounded-lg">
-      {/* Delete button on right */}
       <div
         className={cn(
           "absolute inset-y-0 right-0 flex items-center justify-center bg-destructive transition-opacity",
@@ -130,7 +126,6 @@ function SwipeableFlightCard({
         </Button>
       </div>
 
-      {/* Swipeable card */}
       <Card
         className={cn(
           "bg-card border-border cursor-pointer relative",
@@ -145,13 +140,11 @@ function SwipeableFlightCard({
         <CardContent className="p-4">
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
-              {/* Flight number and date */}
               <div className="flex items-center gap-2 mb-1 text-sm text-muted-foreground">
                 {flight.flightNumber && <span className="font-medium text-foreground">{flight.flightNumber}</span>}
                 <span>{new Date(flight.date).toLocaleDateString()}</span>
               </div>
 
-              {/* Route */}
               <div className="flex items-center gap-2 mb-2">
                 <span className="font-semibold text-foreground">{flight.departureIcao}</span>
                 <div className="flex-1 h-px bg-border relative max-w-[120px]">
@@ -160,7 +153,6 @@ function SwipeableFlightCard({
                 <span className="font-semibold text-foreground">{flight.arrivalIcao}</span>
               </div>
 
-              {/* OOOI Times */}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mb-2">
                 <span>OUT {formatTime(flight.outTime)}</span>
                 <span>OFF {formatTime(flight.offTime)}</span>
@@ -207,7 +199,6 @@ function SwipeableFlightCard({
               </div>
             </div>
 
-            {/* Sync status */}
             <div className="flex items-center shrink-0">
               <div
                 className={cn(
@@ -250,22 +241,18 @@ export function FlightList({
 
   const filteredFlights = useMemo(() => {
     return flights.filter((flight) => {
-      // Filter by flight number
       if (filterFlightNumber && !flight.flightNumber?.toLowerCase().includes(filterFlightNumber.toLowerCase())) {
         return false
       }
-      // Filter by aircraft
       if (filterAircraft !== "all" && flight.aircraftId !== filterAircraft) {
         return false
       }
-      // Filter by airport (departure or arrival)
       if (filterAirport !== "all") {
         const airport = airports.find((a) => a.id === filterAirport)
         if (airport && flight.departureIcao !== airport.icao && flight.arrivalIcao !== airport.icao) {
           return false
         }
       }
-      // Filter by personnel
       if (filterPersonnel !== "all" && !flight.crewIds?.includes(filterPersonnel)) {
         return false
       }
@@ -469,7 +456,6 @@ export function FlightList({
         )}
       </div>
 
-      {/* Delete confirmation dialog */}
       <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -484,7 +470,7 @@ export function FlightList({
             <AlertDialogAction
               onClick={handleDelete}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-destructive-foreground"
             >
               {isDeleting ? "Deleting..." : "Delete"}
             </AlertDialogAction>

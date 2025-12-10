@@ -30,8 +30,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const mongoClient = await getClient()
     const db = mongoClient.db("skylog")
 
-    // For subsequent syncs, only fetch records updated since last sync
-    const query = since > 0 ? { $or: [{ updatedAt: { $gt: since } }, { createdAt: { $gt: since } }] } : {}
+    const query =
+      since > 0
+        ? { $or: [{ updatedAt: { $gt: since } }, { createdAt: { $gt: since } }, { syncedAt: { $gt: since } }] }
+        : {}
 
     const records = await db
       .collection(collection)
@@ -40,13 +42,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       .toArray()
 
     const transformedRecords = records.map((record) => {
-      const { _id, localId, syncedAt, ...rest } = record
+      const { _id, syncedAt, ...rest } = record
 
       // Create base record with proper ID mapping
       const transformed: Record<string, unknown> = {
         ...rest,
         // Use localId if exists (was created from this app), otherwise generate from mongoId
-        id: localId || `mongo_${_id.toString()}`,
+        id: rest.localId || `mongo_${_id.toString()}`,
         mongoId: _id.toString(),
         syncStatus: "synced",
       }
@@ -89,6 +91,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         // Ensure string fields exist
         if (!transformed.remarks) transformed.remarks = ""
         if (!transformed.flightNumber) transformed.flightNumber = ""
+        if (!transformed.pilotRole) transformed.pilotRole = "FO"
       }
 
       return transformed

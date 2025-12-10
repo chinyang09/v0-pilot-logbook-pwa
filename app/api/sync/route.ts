@@ -26,6 +26,8 @@ export async function POST(request: NextRequest) {
 
     const result: { mongoId?: string } = {}
 
+    const { syncStatus, ...dataWithoutSyncStatus } = data
+
     switch (type) {
       case "create":
         const existing = await coll.findOne({ localId: data.id })
@@ -35,7 +37,7 @@ export async function POST(request: NextRequest) {
             { localId: data.id },
             {
               $set: {
-                ...data,
+                ...dataWithoutSyncStatus,
                 localId: data.id,
                 updatedAt: data.updatedAt || Date.now(),
                 syncedAt: Date.now(),
@@ -45,9 +47,11 @@ export async function POST(request: NextRequest) {
           result.mongoId = existing._id.toString()
         } else {
           const insertResult = await coll.insertOne({
-            ...data,
+            ...dataWithoutSyncStatus,
             _id: new ObjectId(),
             localId: data.id,
+            createdAt: data.createdAt || Date.now(),
+            updatedAt: data.updatedAt || Date.now(),
             syncedAt: Date.now(),
           })
           result.mongoId = insertResult.insertedId.toString()
@@ -59,7 +63,7 @@ export async function POST(request: NextRequest) {
           { $or: [{ localId: data.id }, { _id: data.mongoId ? new ObjectId(data.mongoId) : new ObjectId() }] },
           {
             $set: {
-              ...data,
+              ...dataWithoutSyncStatus,
               localId: data.id,
               updatedAt: data.updatedAt || Date.now(),
               syncedAt: Date.now(),
