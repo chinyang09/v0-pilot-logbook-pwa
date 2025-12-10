@@ -3,14 +3,16 @@
 import type React from "react"
 
 import { useState, useMemo, useRef } from "react"
-import type { FlightLog } from "@/lib/indexed-db"
+import type { FlightLog, Aircraft, Airport, Personnel } from "@/lib/indexed-db"
 import { deleteFlight } from "@/lib/indexed-db"
 import { formatHHMMDisplay } from "@/lib/time-utils"
 import { syncService } from "@/lib/sync-service"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,7 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Plane, Cloud, CloudOff, Moon, ChevronDown, Trash2 } from "lucide-react"
+import { Plane, Cloud, CloudOff, Moon, ChevronDown, Trash2, Search, X, Filter } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface FlightListProps {
@@ -29,6 +31,9 @@ interface FlightListProps {
   isLoading?: boolean
   onEdit?: (flight: FlightLog) => void
   onDeleted?: () => void
+  aircraft?: Aircraft[]
+  airports?: Airport[]
+  personnel?: Personnel[]
 }
 
 const INITIAL_LOAD = 10
@@ -70,8 +75,14 @@ function SwipeableFlightCard({
       isHorizontalSwipe.current = Math.abs(diffX) > Math.abs(diffY)
     }
 
-    if (isHorizontalSwipe.current && diffX < 0) {
-      setSwipeX(Math.max(diffX, -(SWIPE_THRESHOLD + 20)))
+    if (isHorizontalSwipe.current) {
+      if (diffX < 0) {
+        // Swiping left - reveal delete
+        setSwipeX(Math.max(diffX, -(SWIPE_THRESHOLD + 20)))
+      } else if (swipeX < 0) {
+        // Swiping right while delete is shown - hide delete
+        setSwipeX(Math.min(0, swipeX + diffX))
+      }
     }
   }
 
@@ -98,6 +109,7 @@ function SwipeableFlightCard({
 
   return (
     <div className="relative overflow-hidden rounded-lg">
+      {/* Delete button on right */}
       <div
         className={cn(
           "absolute inset-y-0 right-0 flex items-center justify-center bg-destructive transition-opacity",
@@ -217,17 +229,66 @@ function SwipeableFlightCard({
   )
 }
 
-export function FlightList({ flights, isLoading, onEdit, onDeleted }: FlightListProps) {
+export function FlightList({
+  flights,
+  isLoading,
+  onEdit,
+  onDeleted,
+  aircraft = [],
+  airports = [],
+  personnel = [],
+}: FlightListProps) {
   const [visibleCount, setVisibleCount] = useState(INITIAL_LOAD)
   const [deleteTarget, setDeleteTarget] = useState<FlightLog | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  const visibleFlights = useMemo(() => flights.slice(0, visibleCount), [flights, visibleCount])
+  const [showFilters, setShowFilters] = useState(false)
+  const [filterFlightNumber, setFilterFlightNumber] = useState("")
+  const [filterAircraft, setFilterAircraft] = useState<string>("all")
+  const [filterAirport, setFilterAirport] = useState<string>("all")
+  const [filterPersonnel, setFilterPersonnel] = useState<string>("all")
 
-  const hasMore = visibleCount < flights.length
+  const filteredFlights = useMemo(() => {
+    return flights.filter((flight) => {
+      // Filter by flight number
+      if (filterFlightNumber && !flight.flightNumber?.toLowerCase().includes(filterFlightNumber.toLowerCase())) {
+        return false
+      }
+      // Filter by aircraft
+      if (filterAircraft !== "all" && flight.aircraftId !== filterAircraft) {
+        return false
+      }
+      // Filter by airport (departure or arrival)
+      if (filterAirport !== "all") {
+        const airport = airports.find((a) => a.id === filterAirport)
+        if (airport && flight.departureIcao !== airport.icao && flight.arrivalIcao !== airport.icao) {
+          return false
+        }
+      }
+      // Filter by personnel
+      if (filterPersonnel !== "all" && !flight.crewIds?.includes(filterPersonnel)) {
+        return false
+      }
+      return true
+    })
+  }, [flights, filterFlightNumber, filterAircraft, filterAirport, filterPersonnel, airports])
+
+  const visibleFlights = useMemo(() => filteredFlights.slice(0, visibleCount), [filteredFlights, visibleCount])
+
+  const hasMore = visibleCount < filteredFlights.length
+
+  const hasActiveFilters =
+    filterFlightNumber || filterAircraft !== "all" || filterAirport !== "all" || filterPersonnel !== "all"
+
+  const clearFilters = () => {
+    setFilterFlightNumber("")
+    setFilterAircraft("all")
+    setFilterAirport("all")
+    setFilterPersonnel("all")
+  }
 
   const loadMore = () => {
-    setVisibleCount((prev) => Math.min(prev + LOAD_INCREMENT, flights.length))
+    setVisibleCount((prev) => Math.min(prev + LOAD_INCREMENT, filteredFlights.length))
   }
 
   const handleDelete = async () => {
@@ -288,6 +349,99 @@ export function FlightList({ flights, isLoading, onEdit, onDeleted }: FlightList
 
   return (
     <>
+      <div className="mb-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Button
+            variant={showFilters ? "secondary" : "outline"}
+            size="sm"
+            onClick={() => setShowFilters(!showFilters)}
+            className="gap-2"
+          >
+            <Filter className="h-4 w-4" />
+            Filter
+            {hasActiveFilters && (
+              <Badge variant="default" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs">
+                !
+              </Badge>
+            )}
+          </Button>
+          {hasActiveFilters && (
+            <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-1 text-muted-foreground">
+              <X className="h-3 w-3" />
+              Clear
+            </Button>
+          )}
+          <span className="text-sm text-muted-foreground ml-auto">
+            {filteredFlights.length} flight{filteredFlights.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+
+        {showFilters && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 bg-secondary/30 rounded-lg">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Flight Number</label>
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                <Input
+                  placeholder="Search..."
+                  value={filterFlightNumber}
+                  onChange={(e) => setFilterFlightNumber(e.target.value)}
+                  className="h-8 pl-7 text-sm bg-background"
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Aircraft</label>
+              <Select value={filterAircraft} onValueChange={setFilterAircraft}>
+                <SelectTrigger className="h-8 text-sm bg-background">
+                  <SelectValue placeholder="All aircraft" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All aircraft</SelectItem>
+                  {aircraft.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.registration}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Airport</label>
+              <Select value={filterAirport} onValueChange={setFilterAirport}>
+                <SelectTrigger className="h-8 text-sm bg-background">
+                  <SelectValue placeholder="All airports" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All airports</SelectItem>
+                  {airports.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.icao} - {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Crew</label>
+              <Select value={filterPersonnel} onValueChange={setFilterPersonnel}>
+                <SelectTrigger className="h-8 text-sm bg-background">
+                  <SelectValue placeholder="All crew" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All crew</SelectItem>
+                  {personnel.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.firstName} {p.lastName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="space-y-3">
         {visibleFlights.map((flight) => (
           <SwipeableFlightCard
@@ -298,11 +452,18 @@ export function FlightList({ flights, isLoading, onEdit, onDeleted }: FlightList
           />
         ))}
 
+        {filteredFlights.length === 0 && hasActiveFilters && (
+          <div className="text-center py-8">
+            <Search className="h-8 w-8 mx-auto text-muted-foreground/50 mb-2" />
+            <p className="text-muted-foreground">No flights match your filters</p>
+          </div>
+        )}
+
         {hasMore && (
           <div className="flex justify-center pt-2">
             <Button variant="ghost" onClick={loadMore} className="gap-2">
               <ChevronDown className="h-4 w-4" />
-              Load More ({flights.length - visibleCount} remaining)
+              Load More ({filteredFlights.length - visibleCount} remaining)
             </Button>
           </div>
         )}

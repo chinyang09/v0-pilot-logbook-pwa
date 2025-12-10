@@ -78,9 +78,14 @@ function SwipeableItem({
       isHorizontalSwipe.current = Math.abs(diffX) > Math.abs(diffY)
     }
 
-    // Swipe LEFT to reveal delete
-    if (isHorizontalSwipe.current && diffX < 0) {
-      setSwipeX(Math.max(diffX, -(SWIPE_THRESHOLD + 20)))
+    if (isHorizontalSwipe.current) {
+      if (diffX < 0) {
+        // Swiping left - reveal delete
+        setSwipeX(Math.max(diffX, -(SWIPE_THRESHOLD + 20)))
+      } else if (swipeX < 0) {
+        // Swiping right while delete is shown - hide delete
+        setSwipeX(Math.min(0, swipeX + diffX))
+      }
     }
   }
 
@@ -631,11 +636,11 @@ export function ManageData() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="apLong" className="text-xs">
+                  <Label htmlFor="apLng" className="text-xs">
                     Longitude
                   </Label>
                   <Input
-                    id="apLong"
+                    id="apLng"
                     type="number"
                     step="0.0001"
                     placeholder="103.9915"
@@ -657,11 +662,11 @@ export function ManageData() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="apUtc" className="text-xs">
+                  <Label htmlFor="apUtcOffset" className="text-xs">
                     UTC Offset
                   </Label>
                   <Input
-                    id="apUtc"
+                    id="apUtcOffset"
                     type="number"
                     step="0.5"
                     placeholder="8"
@@ -704,10 +709,9 @@ export function ManageData() {
                         <div className="flex items-center justify-between">
                           <div>
                             <span className="font-medium">{a.icao}</span>
-                            {a.iata && <span className="text-muted-foreground ml-1">({a.iata})</span>}
                             <span className="text-muted-foreground ml-2">{a.name}</span>
                           </div>
-                          <span className="text-xs text-muted-foreground">{a.city}</span>
+                          <Badge variant="outline">{a.iata}</Badge>
                         </div>
                       </SwipeableItem>
                     ))}
@@ -740,19 +744,19 @@ export function ManageData() {
                   </Label>
                   <Input
                     id="pLastName"
-                    placeholder="Smith"
+                    placeholder="Doe"
                     value={personnelForm.lastName}
                     onChange={(e) => setPersonnelForm({ ...personnelForm, lastName: e.target.value })}
                     className="bg-input"
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="pEmpId" className="text-xs">
+                  <Label htmlFor="pEmployeeId" className="text-xs">
                     Employee ID
                   </Label>
                   <Input
-                    id="pEmpId"
-                    placeholder="EMP001"
+                    id="pEmployeeId"
+                    placeholder="EMP123"
                     value={personnelForm.employeeId}
                     onChange={(e) => setPersonnelForm({ ...personnelForm, employeeId: e.target.value })}
                     className="bg-input"
@@ -770,10 +774,9 @@ export function ManageData() {
                     <SelectContent>
                       <SelectItem value="CAPT">Captain</SelectItem>
                       <SelectItem value="FO">First Officer</SelectItem>
-                      <SelectItem value="SO">Second Officer</SelectItem>
-                      <SelectItem value="FE">Flight Engineer</SelectItem>
-                      <SelectItem value="IP">Instructor Pilot</SelectItem>
-                      <SelectItem value="EP">Examiner Pilot</SelectItem>
+                      <SelectItem value="INSTRUCTOR">Instructor</SelectItem>
+                      <SelectItem value="STUDENT">Student</SelectItem>
+                      <SelectItem value="OTHER">Other</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -783,7 +786,7 @@ export function ManageData() {
                   </Label>
                   <Input
                     id="pLicense"
-                    placeholder="ATPL-12345"
+                    placeholder="ATP12345"
                     value={personnelForm.licenseNumber}
                     onChange={(e) => setPersonnelForm({ ...personnelForm, licenseNumber: e.target.value })}
                     className="bg-input"
@@ -808,7 +811,7 @@ export function ManageData() {
                   <Input
                     id="pEmail"
                     type="email"
-                    placeholder="john.smith@airline.com"
+                    placeholder="john.doe@airline.com"
                     value={personnelForm.email}
                     onChange={(e) => setPersonnelForm({ ...personnelForm, email: e.target.value })}
                     className="bg-input"
@@ -850,7 +853,7 @@ export function ManageData() {
                             <span className="font-medium">
                               {p.firstName} {p.lastName}
                             </span>
-                            {p.employeeId && <span className="text-muted-foreground ml-2">({p.employeeId})</span>}
+                            {p.company && <span className="text-muted-foreground ml-2">{p.company}</span>}
                           </div>
                           <Badge variant="outline">{p.role}</Badge>
                         </div>
@@ -867,7 +870,7 @@ export function ManageData() {
         </CardContent>
       </Card>
 
-      {/* Delete confirmation dialogs */}
+      {/* Delete Dialogs */}
       <AlertDialog open={!!deleteAircraftTarget} onOpenChange={() => setDeleteAircraftTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -881,7 +884,7 @@ export function ManageData() {
             <AlertDialogAction
               onClick={handleDeleteAircraft}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {isDeleting ? "Deleting..." : "Delete"}
             </AlertDialogAction>
@@ -894,7 +897,7 @@ export function ManageData() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Airport</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete {deleteAirportTarget?.icao} ({deleteAirportTarget?.name})? This action
+              Are you sure you want to delete {deleteAirportTarget?.icao} - {deleteAirportTarget?.name}? This action
               cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -903,7 +906,7 @@ export function ManageData() {
             <AlertDialogAction
               onClick={handleDeleteAirport}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {isDeleting ? "Deleting..." : "Delete"}
             </AlertDialogAction>
@@ -925,7 +928,7 @@ export function ManageData() {
             <AlertDialogAction
               onClick={handleDeletePersonnel}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {isDeleting ? "Deleting..." : "Delete"}
             </AlertDialogAction>

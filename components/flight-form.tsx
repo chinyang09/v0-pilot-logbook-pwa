@@ -24,13 +24,15 @@ import {
 import { calculateTimesFromOOOI, calculateNightTime } from "@/lib/night-time-calculator"
 import { formatHHMMDisplay } from "@/lib/time-utils"
 import { syncService } from "@/lib/sync-service"
-import { Plane, Clock, MapPin, Save, Users, Timer, Moon, X } from "lucide-react"
+import { Plane, Clock, MapPin, Save, Users, Timer, Moon, X, Copy } from "lucide-react"
 
 interface FlightFormProps {
   onFlightAdded: (flight: FlightLog) => void
   onClose?: () => void
   editingFlight?: FlightLog | null
 }
+
+type PilotRole = "PIC" | "FO" | "P1US" | "STUDENT" | "INSTRUCTOR"
 
 export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -50,7 +52,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
     onTime: "",
     inTime: "",
     // Role and crew
-    pilotRole: "FO" as "PIC" | "FO" | "STUDENT" | "INSTRUCTOR",
+    pilotRole: "FO" as PilotRole,
     crewIds: [] as string[],
     // Conditions - Now stored as HH:MM
     ifrTime: "",
@@ -101,7 +103,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
         offTime: editingFlight.offTime || "",
         onTime: editingFlight.onTime || "",
         inTime: editingFlight.inTime || "",
-        pilotRole: editingFlight.pilotRole || "FO",
+        pilotRole: (editingFlight.pilotRole as PilotRole) || "FO",
         crewIds: editingFlight.crewIds || [],
         ifrTime: editingFlight.ifrTime || "",
         actualInstrumentTime: editingFlight.actualInstrumentTime || "",
@@ -167,7 +169,6 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
         )
       }
 
-      // Calculate hours based on role
       let p1Time = "00:00",
         p2Time = "00:00",
         p1usTime = "00:00",
@@ -180,6 +181,10 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
           break
         case "FO":
           p2Time = flightTime
+          break
+        case "P1US":
+          // P1 Under Supervision - P2 is pilot flying but PIC supervises
+          p1usTime = flightTime
           break
         case "STUDENT":
           dualTime = flightTime
@@ -280,6 +285,10 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
     }))
   }
 
+  const copyFlightTime = (field: string) => {
+    updateField(field, calculatedTimes.flightTime)
+  }
+
   return (
     <Card className="bg-card border-border">
       <CardHeader className="pb-4">
@@ -300,7 +309,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
                 value={formData.date}
                 onChange={(e) => updateField("date", e.target.value)}
                 required
-                className="bg-input"
+                className="bg-input [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-50"
               />
             </div>
             <div className="space-y-2">
@@ -466,6 +475,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
                   <p className="text-muted-foreground">
                     {formData.pilotRole === "PIC" && "P1 Time"}
                     {formData.pilotRole === "FO" && "P2 Time"}
+                    {formData.pilotRole === "P1US" && "P1 U/S Time"}
                     {formData.pilotRole === "STUDENT" && "Dual Time"}
                     {formData.pilotRole === "INSTRUCTOR" && "Instructor Time"}
                   </p>
@@ -475,24 +485,26 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
             </div>
           )}
 
-          {/* Pilot Role */}
+          {/* Pilot Role - Updated to include P1US */}
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-muted-foreground">
               <Users className="h-4 w-4" />
               <span className="text-sm font-medium">Your Role</span>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {(["PIC", "FO", "STUDENT", "INSTRUCTOR"] as const).map((role) => (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {(["PIC", "FO", "P1US", "STUDENT", "INSTRUCTOR"] as const).map((role) => (
                 <Button
                   key={role}
                   type="button"
                   variant={formData.pilotRole === role ? "default" : "outline"}
                   onClick={() => updateField("pilotRole", role)}
-                  className="w-full"
+                  className="w-full text-sm"
+                  size="sm"
                 >
                   {role === "PIC" && "Captain (P1)"}
-                  {role === "FO" && "First Officer (P2)"}
-                  {role === "STUDENT" && "Student (Dual)"}
+                  {role === "FO" && "F/O (P2)"}
+                  {role === "P1US" && "P1 U/S"}
+                  {role === "STUDENT" && "Student"}
                   {role === "INSTRUCTOR" && "Instructor"}
                 </Button>
               ))}
@@ -520,9 +532,23 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="ifrTime">IFR Time</Label>
+              <Label htmlFor="ifrTime" className="flex items-center justify-between">
+                <span>IFR Time</span>
+                {calculatedTimes.flightTime !== "00:00" && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1.5 text-xs text-muted-foreground"
+                    onClick={() => copyFlightTime("ifrTime")}
+                  >
+                    <Copy className="h-3 w-3 mr-1" />
+                    Use total
+                  </Button>
+                )}
+              </Label>
               <Input
                 id="ifrTime"
                 type="time"
@@ -533,7 +559,21 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="actualInstrumentTime">Actual IMC</Label>
+              <Label htmlFor="actualInstrumentTime" className="flex items-center justify-between">
+                <span>Actual IMC</span>
+                {calculatedTimes.flightTime !== "00:00" && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1.5 text-xs text-muted-foreground"
+                    onClick={() => copyFlightTime("actualInstrumentTime")}
+                  >
+                    <Copy className="h-3 w-3 mr-1" />
+                    Use total
+                  </Button>
+                )}
+              </Label>
               <Input
                 id="actualInstrumentTime"
                 type="time"
@@ -544,11 +584,40 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="simulatedInstrumentTime" className="flex items-center justify-between">
+                <span>Simulated IMC</span>
+                {calculatedTimes.flightTime !== "00:00" && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1.5 text-xs text-muted-foreground"
+                    onClick={() => copyFlightTime("simulatedInstrumentTime")}
+                  >
+                    <Copy className="h-3 w-3 mr-1" />
+                    Use total
+                  </Button>
+                )}
+              </Label>
+              <Input
+                id="simulatedInstrumentTime"
+                type="time"
+                placeholder="00:00"
+                value={formData.simulatedInstrumentTime}
+                onChange={(e) => updateField("simulatedInstrumentTime", e.target.value)}
+                className="bg-input"
+              />
+            </div>
+          </div>
+
+          {/* Landings */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
               <Label htmlFor="dayLandings">Day Landings</Label>
               <Input
                 id="dayLandings"
                 type="number"
-                placeholder="1"
+                min="0"
                 value={formData.dayLandings}
                 onChange={(e) => updateField("dayLandings", e.target.value)}
                 className="bg-input"
@@ -559,7 +628,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
               <Input
                 id="nightLandings"
                 type="number"
-                placeholder="0"
+                min="0"
                 value={formData.nightLandings}
                 onChange={(e) => updateField("nightLandings", e.target.value)}
                 className="bg-input"
@@ -572,18 +641,19 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
             <Label htmlFor="remarks">Remarks</Label>
             <Textarea
               id="remarks"
-              placeholder="Flight notes, delays, weather conditions..."
+              placeholder="Additional notes..."
               value={formData.remarks}
               onChange={(e) => updateField("remarks", e.target.value)}
-              className="bg-input min-h-[80px]"
+              className="bg-input resize-none"
+              rows={2}
             />
           </div>
 
           {/* Submit */}
-          <div className="flex gap-3 pt-2">
+          <div className="flex gap-3">
             <Button type="submit" disabled={isSubmitting} className="flex-1">
               <Save className="h-4 w-4 mr-2" />
-              {isSubmitting ? "Saving..." : editingFlight ? "Update Flight" : "Save Flight"}
+              {isSubmitting ? "Saving..." : editingFlight ? "Save Changes" : "Log Flight"}
             </Button>
             {onClose && (
               <Button type="button" variant="outline" onClick={onClose}>

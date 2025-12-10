@@ -12,7 +12,15 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { FlightLog } from "@/lib/indexed-db"
 import { syncService } from "@/lib/sync-service"
-import { useFlights, useFlightStats, refreshAllData, useDBReady } from "@/hooks/use-indexed-db"
+import {
+  useFlights,
+  useFlightStats,
+  refreshAllData,
+  useDBReady,
+  useAircraft,
+  useAirports,
+  usePersonnel,
+} from "@/hooks/use-indexed-db"
 import { RefreshCw, AlertCircle } from "lucide-react"
 
 type NavTab = "logbook" | "data"
@@ -21,6 +29,9 @@ export default function Home() {
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
   const { stats, isLoading: statsLoading, refresh: refreshStats } = useFlightStats()
+  const { aircraft } = useAircraft()
+  const { airports } = useAirports()
+  const { personnel } = usePersonnel()
 
   const [isSyncing, setIsSyncing] = useState(false)
   const [showForm, setShowForm] = useState(false)
@@ -174,6 +185,9 @@ export default function Home() {
                 isLoading={flightsLoading || isLoading}
                 onEdit={handleEditFlight}
                 onDeleted={handleFlightDeleted}
+                aircraft={aircraft}
+                airports={airports}
+                personnel={personnel}
               />
             </section>
           </>
