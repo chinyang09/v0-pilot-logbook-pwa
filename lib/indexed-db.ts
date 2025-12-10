@@ -418,6 +418,16 @@ export async function updateAircraft(id: string, updates: Partial<Aircraft>): Pr
   return updatedAircraft
 }
 
+export async function deleteAircraft(id: string): Promise<boolean> {
+  const db = await getDB()
+  const aircraft = await db.get("aircraft", id)
+  if (!aircraft) return false
+
+  await db.delete("aircraft", id)
+  await addToSyncQueue("delete", "aircraft", { id, mongoId: aircraft.mongoId })
+  return true
+}
+
 export async function getAllAircraft(): Promise<Aircraft[]> {
   const db = await getDB()
   return db.getAll("aircraft")
@@ -503,6 +513,16 @@ export async function updateAirport(id: string, updates: Partial<Airport>): Prom
   await addToSyncQueue("update", "airports", updatedAirport)
 
   return updatedAirport
+}
+
+export async function deleteAirport(id: string): Promise<boolean> {
+  const db = await getDB()
+  const airport = await db.get("airports", id)
+  if (!airport) return false
+
+  await db.delete("airports", id)
+  await addToSyncQueue("delete", "airports", { id, mongoId: airport.mongoId })
+  return true
 }
 
 export async function getAllAirports(): Promise<Airport[]> {
@@ -598,6 +618,16 @@ export async function updatePersonnel(id: string, updates: Partial<Personnel>): 
   await addToSyncQueue("update", "personnel", updatedPersonnel)
 
   return updatedPersonnel
+}
+
+export async function deletePersonnel(id: string): Promise<boolean> {
+  const db = await getDB()
+  const person = await db.get("personnel", id)
+  if (!person) return false
+
+  await db.delete("personnel", id)
+  await addToSyncQueue("delete", "personnel", { id, mongoId: person.mongoId })
+  return true
 }
 
 export async function getAllPersonnel(): Promise<Personnel[]> {

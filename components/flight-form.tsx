@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import {
   addFlight,
+  updateFlight,
   type FlightLog,
   type Aircraft,
   type Airport,
@@ -22,14 +23,16 @@ import {
 } from "@/lib/indexed-db"
 import { calculateTimesFromOOOI, calculateNightTime } from "@/lib/night-time-calculator"
 import { formatHHMMDisplay } from "@/lib/time-utils"
+import { syncService } from "@/lib/sync-service"
 import { Plane, Clock, MapPin, Save, Users, Timer, Moon, X } from "lucide-react"
 
 interface FlightFormProps {
   onFlightAdded: (flight: FlightLog) => void
   onClose?: () => void
+  editingFlight?: FlightLog | null
 }
 
-export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
+export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [aircraft, setAircraft] = useState<Aircraft[]>([])
   const [airports, setAirports] = useState<Airport[]>([])
@@ -85,6 +88,40 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
     }
     loadData()
   }, [])
+
+  useEffect(() => {
+    if (editingFlight) {
+      setFormData({
+        date: editingFlight.date,
+        flightNumber: editingFlight.flightNumber || "",
+        aircraftId: editingFlight.aircraftId || "",
+        departureIcao: editingFlight.departureIcao || "",
+        arrivalIcao: editingFlight.arrivalIcao || "",
+        outTime: editingFlight.outTime || "",
+        offTime: editingFlight.offTime || "",
+        onTime: editingFlight.onTime || "",
+        inTime: editingFlight.inTime || "",
+        pilotRole: editingFlight.pilotRole || "FO",
+        crewIds: editingFlight.crewIds || [],
+        ifrTime: editingFlight.ifrTime || "",
+        actualInstrumentTime: editingFlight.actualInstrumentTime || "",
+        simulatedInstrumentTime: editingFlight.simulatedInstrumentTime || "",
+        dayLandings: String(editingFlight.dayLandings || 0),
+        nightLandings: String(editingFlight.nightLandings || 0),
+        remarks: editingFlight.remarks || "",
+      })
+      setCalculatedTimes({
+        blockTime: editingFlight.blockTime || "00:00",
+        flightTime: editingFlight.flightTime || "00:00",
+        nightTime: editingFlight.nightTime || "00:00",
+        p1Time: editingFlight.p1Time || "00:00",
+        p2Time: editingFlight.p2Time || "00:00",
+        p1usTime: editingFlight.p1usTime || "00:00",
+        dualTime: editingFlight.dualTime || "00:00",
+        instructorTime: editingFlight.instructorTime || "00:00",
+      })
+    }
+  }, [editingFlight])
 
   // Get selected aircraft details
   const selectedAircraft = useMemo(() => {
@@ -180,7 +217,7 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
     setIsSubmitting(true)
 
     try {
-      const flight = await addFlight({
+      const flightData = {
         date: formData.date,
         flightNumber: formData.flightNumber,
         aircraftId: formData.aircraftId,
@@ -210,12 +247,23 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
         pilotRole: formData.pilotRole,
         crewIds: formData.crewIds,
         remarks: formData.remarks,
-      })
+      }
 
-      onFlightAdded(flight)
-      onClose?.()
+      let flight: FlightLog | null
+
+      if (editingFlight) {
+        flight = await updateFlight(editingFlight.id, flightData)
+      } else {
+        flight = await addFlight(flightData)
+      }
+
+      if (flight) {
+        if (navigator.onLine) syncService.fullSync()
+        onFlightAdded(flight)
+        onClose?.()
+      }
     } catch (error) {
-      console.error("Failed to add flight:", error)
+      console.error("Failed to save flight:", error)
     } finally {
       setIsSubmitting(false)
     }
@@ -237,7 +285,7 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
       <CardHeader className="pb-4">
         <CardTitle className="flex items-center gap-2 text-foreground">
           <Plane className="h-5 w-5 text-primary" />
-          Log New Flight
+          {editingFlight ? "Edit Flight" : "Log New Flight"}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -535,7 +583,7 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
           <div className="flex gap-3 pt-2">
             <Button type="submit" disabled={isSubmitting} className="flex-1">
               <Save className="h-4 w-4 mr-2" />
-              {isSubmitting ? "Saving..." : "Save Flight"}
+              {isSubmitting ? "Saving..." : editingFlight ? "Update Flight" : "Save Flight"}
             </Button>
             {onClose && (
               <Button type="button" variant="outline" onClick={onClose}>

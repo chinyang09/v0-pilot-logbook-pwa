@@ -23,6 +23,7 @@ export default function Home() {
   const [showForm, setShowForm] = useState(false)
   const [showManageData, setShowManageData] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [editingFlight, setEditingFlight] = useState<FlightLog | null>(null)
 
   useEffect(() => {
     const unsubscribe = syncService.onDataChanged(() => {
@@ -41,7 +42,6 @@ export default function Home() {
         try {
           const result = await syncService.fullSync()
           console.log("[v0] Initial sync complete:", result)
-          // Refresh data after sync
           await refreshAllData()
         } catch (error) {
           console.error("[v0] Initial sync failed:", error)
@@ -76,15 +76,30 @@ export default function Home() {
   }
 
   const handleFlightAdded = async (flight: FlightLog) => {
-    // Refresh flights and stats
     await refreshFlights()
     await refreshStats()
     setShowForm(false)
+    setEditingFlight(null)
 
-    // Trigger sync in background
     if (navigator.onLine) {
       syncService.fullSync()
     }
+  }
+
+  const handleEditFlight = (flight: FlightLog) => {
+    setEditingFlight(flight)
+    setShowForm(true)
+    setShowManageData(false)
+  }
+
+  const handleFlightDeleted = async () => {
+    await refreshFlights()
+    await refreshStats()
+  }
+
+  const handleCloseForm = () => {
+    setShowForm(false)
+    setEditingFlight(null)
   }
 
   const isLoading = dbLoading || !dbReady
@@ -94,7 +109,6 @@ export default function Home() {
       <Header />
 
       <main className="container mx-auto px-4 py-6 pb-24 space-y-6">
-        {/* Sync Error Banner */}
         {syncError && (
           <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
             <AlertCircle className="h-4 w-4 flex-shrink-0" />
@@ -105,7 +119,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Stats Dashboard */}
         <section>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-foreground">Overview</h2>
@@ -131,12 +144,16 @@ export default function Home() {
           )}
         </section>
 
-        {/* Action Buttons */}
         <section className="flex gap-3">
           <Button
             onClick={() => {
-              setShowForm(!showForm)
-              setShowManageData(false)
+              if (showForm && !editingFlight) {
+                handleCloseForm()
+              } else {
+                setEditingFlight(null)
+                setShowForm(true)
+                setShowManageData(false)
+              }
             }}
             className="flex-1"
             size="lg"
@@ -144,12 +161,13 @@ export default function Home() {
             disabled={isLoading}
           >
             <Plus className="h-5 w-5 mr-2" />
-            {showForm ? "Cancel" : "Log Flight"}
+            {showForm && !editingFlight ? "Cancel" : "Log Flight"}
           </Button>
           <Button
             onClick={() => {
               setShowManageData(!showManageData)
               setShowForm(false)
+              setEditingFlight(null)
             }}
             size="lg"
             variant={showManageData ? "secondary" : "outline"}
@@ -160,10 +178,9 @@ export default function Home() {
           </Button>
         </section>
 
-        {/* Forms */}
         {showForm && (
           <section>
-            <FlightForm onFlightAdded={handleFlightAdded} onClose={() => setShowForm(false)} />
+            <FlightForm onFlightAdded={handleFlightAdded} onClose={handleCloseForm} editingFlight={editingFlight} />
           </section>
         )}
 
@@ -173,10 +190,14 @@ export default function Home() {
           </section>
         )}
 
-        {/* Flight List */}
         <section>
           <h2 className="text-lg font-semibold text-foreground mb-4">Recent Flights</h2>
-          <FlightList flights={flights} isLoading={flightsLoading || isLoading} />
+          <FlightList
+            flights={flights}
+            isLoading={flightsLoading || isLoading}
+            onEdit={handleEditFlight}
+            onDeleted={handleFlightDeleted}
+          />
         </section>
       </main>
 
