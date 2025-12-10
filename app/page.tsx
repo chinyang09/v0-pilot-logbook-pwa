@@ -7,12 +7,15 @@ import { FlightList } from "@/components/flight-list"
 import { StatsDashboard } from "@/components/stats-dashboard"
 import { ManageData } from "@/components/manage-data"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
+import { BottomNavbar } from "@/components/bottom-navbar"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { FlightLog } from "@/lib/indexed-db"
 import { syncService } from "@/lib/sync-service"
 import { useFlights, useFlightStats, refreshAllData, useDBReady } from "@/hooks/use-indexed-db"
-import { Plus, Database, RefreshCw, AlertCircle } from "lucide-react"
+import { RefreshCw, AlertCircle } from "lucide-react"
+
+type NavTab = "logbook" | "data"
 
 export default function Home() {
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
@@ -21,7 +24,7 @@ export default function Home() {
 
   const [isSyncing, setIsSyncing] = useState(false)
   const [showForm, setShowForm] = useState(false)
-  const [showManageData, setShowManageData] = useState(false)
+  const [activeTab, setActiveTab] = useState<NavTab>("logbook")
   const [syncError, setSyncError] = useState<string | null>(null)
   const [editingFlight, setEditingFlight] = useState<FlightLog | null>(null)
 
@@ -89,7 +92,7 @@ export default function Home() {
   const handleEditFlight = (flight: FlightLog) => {
     setEditingFlight(flight)
     setShowForm(true)
-    setShowManageData(false)
+    setActiveTab("logbook")
   }
 
   const handleFlightDeleted = async () => {
@@ -100,6 +103,18 @@ export default function Home() {
   const handleCloseForm = () => {
     setShowForm(false)
     setEditingFlight(null)
+  }
+
+  const handleTabChange = (tab: NavTab) => {
+    setActiveTab(tab)
+    setShowForm(false)
+    setEditingFlight(null)
+  }
+
+  const handleAddFlight = () => {
+    setActiveTab("logbook")
+    setEditingFlight(null)
+    setShowForm(true)
   }
 
   const isLoading = dbLoading || !dbReady
@@ -119,87 +134,59 @@ export default function Home() {
           </div>
         )}
 
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-foreground">Overview</h2>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleManualSync}
-              disabled={isSyncing || isLoading}
-              className="gap-2"
-            >
-              <RefreshCw className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
-              {isSyncing ? "Syncing..." : "Sync"}
-            </Button>
-          </div>
-          {statsLoading || isLoading ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <Skeleton key={i} className="h-24 rounded-xl" />
-              ))}
-            </div>
-          ) : (
-            <StatsDashboard stats={stats} />
-          )}
-        </section>
+        {activeTab === "logbook" && (
+          <>
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-foreground">Overview</h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleManualSync}
+                  disabled={isSyncing || isLoading}
+                  className="gap-2"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
+                  {isSyncing ? "Syncing..." : "Sync"}
+                </Button>
+              </div>
+              {statsLoading || isLoading ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <Skeleton key={i} className="h-24 rounded-xl" />
+                  ))}
+                </div>
+              ) : (
+                <StatsDashboard stats={stats} />
+              )}
+            </section>
 
-        <section className="flex gap-3">
-          <Button
-            onClick={() => {
-              if (showForm && !editingFlight) {
-                handleCloseForm()
-              } else {
-                setEditingFlight(null)
-                setShowForm(true)
-                setShowManageData(false)
-              }
-            }}
-            className="flex-1"
-            size="lg"
-            variant={showForm ? "secondary" : "default"}
-            disabled={isLoading}
-          >
-            <Plus className="h-5 w-5 mr-2" />
-            {showForm && !editingFlight ? "Cancel" : "Log Flight"}
-          </Button>
-          <Button
-            onClick={() => {
-              setShowManageData(!showManageData)
-              setShowForm(false)
-              setEditingFlight(null)
-            }}
-            size="lg"
-            variant={showManageData ? "secondary" : "outline"}
-            disabled={isLoading}
-          >
-            <Database className="h-5 w-5 mr-2" />
-            Data
-          </Button>
-        </section>
+            {showForm && (
+              <section>
+                <FlightForm onFlightAdded={handleFlightAdded} onClose={handleCloseForm} editingFlight={editingFlight} />
+              </section>
+            )}
 
-        {showForm && (
-          <section>
-            <FlightForm onFlightAdded={handleFlightAdded} onClose={handleCloseForm} editingFlight={editingFlight} />
-          </section>
+            <section>
+              <h2 className="text-lg font-semibold text-foreground mb-4">Recent Flights</h2>
+              <FlightList
+                flights={flights}
+                isLoading={flightsLoading || isLoading}
+                onEdit={handleEditFlight}
+                onDeleted={handleFlightDeleted}
+              />
+            </section>
+          </>
         )}
 
-        {showManageData && (
+        {activeTab === "data" && (
           <section>
-            <ManageData onClose={() => setShowManageData(false)} />
+            <ManageData />
           </section>
         )}
-
-        <section>
-          <h2 className="text-lg font-semibold text-foreground mb-4">Recent Flights</h2>
-          <FlightList
-            flights={flights}
-            isLoading={flightsLoading || isLoading}
-            onEdit={handleEditFlight}
-            onDeleted={handleFlightDeleted}
-          />
-        </section>
       </main>
+
+      <BottomNavbar activeTab={activeTab} onTabChange={handleTabChange} onAddFlight={handleAddFlight} />
 
       <PWAInstallPrompt />
     </div>

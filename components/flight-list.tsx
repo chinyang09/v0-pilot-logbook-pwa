@@ -21,7 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Plane, Clock, Cloud, CloudOff, Moon, ChevronDown, Trash2 } from "lucide-react"
+import { Plane, Cloud, CloudOff, Moon, ChevronDown, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface FlightListProps {
@@ -108,7 +108,7 @@ function SwipeableFlightCard({
         <Button
           variant="ghost"
           size="icon"
-          className="h-full w-full rounded-none text-destructive-foreground hover:bg-destructive/90"
+          className="h-full w-full rounded-none text-destructive-foreground"
           onClick={(e) => {
             e.stopPropagation()
             onDelete()
@@ -121,7 +121,7 @@ function SwipeableFlightCard({
       {/* Swipeable card */}
       <Card
         className={cn(
-          "bg-card border-border active:bg-accent/50 transition-colors cursor-pointer relative",
+          "bg-card border-border cursor-pointer relative",
           !isSwiping && "transition-transform duration-200",
         )}
         style={{ transform: `translateX(${swipeX}px)` }}
@@ -154,17 +154,6 @@ function SwipeableFlightCard({
                 <span>OFF {formatTime(flight.offTime)}</span>
                 <span>ON {formatTime(flight.onTime)}</span>
                 <span>IN {formatTime(flight.inTime)}</span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Clock className="h-3.5 w-3.5" />
-                  <span className="font-mono">{formatHHMMDisplay(flight.blockTime)}</span> block
-                </span>
-                <span className="font-mono">{formatHHMMDisplay(flight.flightTime)} flight</span>
-                <span>
-                  {flight.aircraftType} ({flight.aircraftReg})
-                </span>
               </div>
 
               <div className="flex flex-wrap gap-2 mt-2">

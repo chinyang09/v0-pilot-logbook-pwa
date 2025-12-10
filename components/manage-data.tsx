@@ -37,12 +37,8 @@ import {
 } from "@/lib/indexed-db"
 import { useAircraft, useAirports, usePersonnel } from "@/hooks/use-indexed-db"
 import { syncService } from "@/lib/sync-service"
-import { Plane, MapPin, Users, Plus, X, Loader2, Trash2, Save } from "lucide-react"
+import { Plane, MapPin, Users, Plus, Loader2, Trash2, Save } from "lucide-react"
 import { cn } from "@/lib/utils"
-
-interface ManageDataProps {
-  onClose?: () => void
-}
 
 const SWIPE_THRESHOLD = 80
 
@@ -118,7 +114,7 @@ function SwipeableItem({
         <Button
           variant="ghost"
           size="icon"
-          className="h-full w-full rounded-none text-destructive-foreground hover:bg-destructive/90"
+          className="h-full w-full rounded-none text-destructive-foreground"
           onClick={(e) => {
             e.stopPropagation()
             onDelete()
@@ -131,9 +127,9 @@ function SwipeableItem({
       {/* Swipeable content */}
       <div
         className={cn(
-          "p-2 cursor-pointer active:bg-secondary/80",
+          "p-2 cursor-pointer bg-secondary",
           !isSwiping && "transition-transform duration-200",
-          isActive ? "bg-primary/20 border-l-2 border-primary" : "bg-secondary",
+          isActive && "border-l-2 border-primary",
         )}
         style={{ transform: `translateX(${swipeX}px)` }}
         onTouchStart={handleTouchStart}
@@ -147,7 +143,7 @@ function SwipeableItem({
   )
 }
 
-export function ManageData({ onClose }: ManageDataProps) {
+export function ManageData() {
   const { aircraft, isLoading: aircraftLoading, refresh: refreshAircraft } = useAircraft()
   const { airports, isLoading: airportsLoading, refresh: refreshAirports } = useAirports()
   const { personnel, isLoading: personnelLoading, refresh: refreshPersonnel } = usePersonnel()
@@ -430,13 +426,8 @@ export function ManageData({ onClose }: ManageDataProps) {
   return (
     <>
       <Card className="bg-card border-border">
-        <CardHeader className="pb-4 flex flex-row items-center justify-between">
+        <CardHeader className="pb-4">
           <CardTitle className="text-foreground">Manage Data</CardTitle>
-          {onClose && (
-            <Button variant="ghost" size="icon" onClick={onClose}>
-              <X className="h-4 w-4" />
-            </Button>
-          )}
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="aircraft" className="w-full">
@@ -640,11 +631,11 @@ export function ManageData({ onClose }: ManageDataProps) {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="apLon" className="text-xs">
+                  <Label htmlFor="apLong" className="text-xs">
                     Longitude
                   </Label>
                   <Input
-                    id="apLon"
+                    id="apLong"
                     type="number"
                     step="0.0001"
                     placeholder="103.9915"
@@ -654,11 +645,11 @@ export function ManageData({ onClose }: ManageDataProps) {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="apTz" className="text-xs">
+                  <Label htmlFor="apTimezone" className="text-xs">
                     Timezone
                   </Label>
                   <Input
-                    id="apTz"
+                    id="apTimezone"
                     placeholder="Asia/Singapore"
                     value={airportForm.timezone}
                     onChange={(e) => setAirportForm({ ...airportForm, timezone: e.target.value })}
@@ -713,7 +704,7 @@ export function ManageData({ onClose }: ManageDataProps) {
                         <div className="flex items-center justify-between">
                           <div>
                             <span className="font-medium">{a.icao}</span>
-                            {a.iata && <span className="text-muted-foreground">/{a.iata}</span>}
+                            {a.iata && <span className="text-muted-foreground ml-1">({a.iata})</span>}
                             <span className="text-muted-foreground ml-2">{a.name}</span>
                           </div>
                           <span className="text-xs text-muted-foreground">{a.city}</span>
@@ -732,11 +723,11 @@ export function ManageData({ onClose }: ManageDataProps) {
             <TabsContent value="personnel" className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="space-y-1">
-                  <Label htmlFor="pFirst" className="text-xs">
+                  <Label htmlFor="pFirstName" className="text-xs">
                     First Name
                   </Label>
                   <Input
-                    id="pFirst"
+                    id="pFirstName"
                     placeholder="John"
                     value={personnelForm.firstName}
                     onChange={(e) => setPersonnelForm({ ...personnelForm, firstName: e.target.value })}
@@ -744,11 +735,11 @@ export function ManageData({ onClose }: ManageDataProps) {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="pLast" className="text-xs">
+                  <Label htmlFor="pLastName" className="text-xs">
                     Last Name
                   </Label>
                   <Input
-                    id="pLast"
+                    id="pLastName"
                     placeholder="Smith"
                     value={personnelForm.lastName}
                     onChange={(e) => setPersonnelForm({ ...personnelForm, lastName: e.target.value })}
@@ -761,7 +752,7 @@ export function ManageData({ onClose }: ManageDataProps) {
                   </Label>
                   <Input
                     id="pEmpId"
-                    placeholder="SQ12345"
+                    placeholder="EMP001"
                     value={personnelForm.employeeId}
                     onChange={(e) => setPersonnelForm({ ...personnelForm, employeeId: e.target.value })}
                     className="bg-input"
@@ -780,10 +771,48 @@ export function ManageData({ onClose }: ManageDataProps) {
                       <SelectItem value="CAPT">Captain</SelectItem>
                       <SelectItem value="FO">First Officer</SelectItem>
                       <SelectItem value="SO">Second Officer</SelectItem>
-                      <SelectItem value="INS">Instructor</SelectItem>
-                      <SelectItem value="EXM">Examiner</SelectItem>
+                      <SelectItem value="FE">Flight Engineer</SelectItem>
+                      <SelectItem value="IP">Instructor Pilot</SelectItem>
+                      <SelectItem value="EP">Examiner Pilot</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="pLicense" className="text-xs">
+                    License Number
+                  </Label>
+                  <Input
+                    id="pLicense"
+                    placeholder="ATPL-12345"
+                    value={personnelForm.licenseNumber}
+                    onChange={(e) => setPersonnelForm({ ...personnelForm, licenseNumber: e.target.value })}
+                    className="bg-input"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="pCompany" className="text-xs">
+                    Company
+                  </Label>
+                  <Input
+                    id="pCompany"
+                    placeholder="Singapore Airlines"
+                    value={personnelForm.company}
+                    onChange={(e) => setPersonnelForm({ ...personnelForm, company: e.target.value })}
+                    className="bg-input"
+                  />
+                </div>
+                <div className="space-y-1 col-span-2">
+                  <Label htmlFor="pEmail" className="text-xs">
+                    Email
+                  </Label>
+                  <Input
+                    id="pEmail"
+                    type="email"
+                    placeholder="john.smith@airline.com"
+                    value={personnelForm.email}
+                    onChange={(e) => setPersonnelForm({ ...personnelForm, email: e.target.value })}
+                    className="bg-input"
+                  />
                 </div>
               </div>
               <div className="flex gap-2">
@@ -838,7 +867,7 @@ export function ManageData({ onClose }: ManageDataProps) {
         </CardContent>
       </Card>
 
-      {/* Delete Confirmation Dialogs */}
+      {/* Delete confirmation dialogs */}
       <AlertDialog open={!!deleteAircraftTarget} onOpenChange={() => setDeleteAircraftTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -852,7 +881,7 @@ export function ManageData({ onClose }: ManageDataProps) {
             <AlertDialogAction
               onClick={handleDeleteAircraft}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-destructive-foreground"
             >
               {isDeleting ? "Deleting..." : "Delete"}
             </AlertDialogAction>
@@ -874,7 +903,7 @@ export function ManageData({ onClose }: ManageDataProps) {
             <AlertDialogAction
               onClick={handleDeleteAirport}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-destructive-foreground"
             >
               {isDeleting ? "Deleting..." : "Delete"}
             </AlertDialogAction>
@@ -896,7 +925,7 @@ export function ManageData({ onClose }: ManageDataProps) {
             <AlertDialogAction
               onClick={handleDeletePersonnel}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-destructive-foreground"
             >
               {isDeleting ? "Deleting..." : "Delete"}
             </AlertDialogAction>
