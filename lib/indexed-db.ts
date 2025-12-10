@@ -318,33 +318,69 @@ export async function getPendingFlights(): Promise<FlightLog[]> {
 export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<void> {
   const db = await getDB()
 
-  // Check if we have this flight by mongoId
+  // Ensure the record has all required fields with proper defaults
+  const normalizedFlight: FlightLog = {
+    id: serverFlight.id,
+    date: serverFlight.date || new Date().toISOString().split("T")[0],
+    aircraftId: serverFlight.aircraftId || "",
+    aircraftType: serverFlight.aircraftType || "",
+    aircraftReg: serverFlight.aircraftReg || "",
+    departureAirportId: serverFlight.departureAirportId || "",
+    arrivalAirportId: serverFlight.arrivalAirportId || "",
+    departureIcao: serverFlight.departureIcao || "",
+    arrivalIcao: serverFlight.arrivalIcao || "",
+    outTime: serverFlight.outTime || "",
+    offTime: serverFlight.offTime || "",
+    onTime: serverFlight.onTime || "",
+    inTime: serverFlight.inTime || "",
+    blockTime: serverFlight.blockTime || "00:00",
+    flightTime: serverFlight.flightTime || "00:00",
+    p1Time: serverFlight.p1Time || "00:00",
+    p1usTime: serverFlight.p1usTime || "00:00",
+    p2Time: serverFlight.p2Time || "00:00",
+    dualTime: serverFlight.dualTime || "00:00",
+    instructorTime: serverFlight.instructorTime || "00:00",
+    nightTime: serverFlight.nightTime || "00:00",
+    ifrTime: serverFlight.ifrTime || "00:00",
+    actualInstrumentTime: serverFlight.actualInstrumentTime || "00:00",
+    simulatedInstrumentTime: serverFlight.simulatedInstrumentTime || "00:00",
+    dayLandings: serverFlight.dayLandings || 0,
+    nightLandings: serverFlight.nightLandings || 0,
+    crewIds: serverFlight.crewIds || [],
+    pilotRole: serverFlight.pilotRole || "FO",
+    flightNumber: serverFlight.flightNumber || "",
+    remarks: serverFlight.remarks || "",
+    createdAt: serverFlight.createdAt || Date.now(),
+    updatedAt: serverFlight.updatedAt || Date.now(),
+    syncStatus: "synced",
+    mongoId: serverFlight.mongoId,
+  }
+
+  // Check if we have this flight by mongoId first
   let existingFlight: FlightLog | undefined
-  if (serverFlight.mongoId) {
-    existingFlight = await db.getFromIndex("flights", "by-mongoId", serverFlight.mongoId)
+  if (normalizedFlight.mongoId) {
+    existingFlight = await db.getFromIndex("flights", "by-mongoId", normalizedFlight.mongoId)
   }
 
   // Also check by local id
-  if (!existingFlight && serverFlight.id) {
-    existingFlight = await db.get("flights", serverFlight.id)
+  if (!existingFlight && normalizedFlight.id) {
+    existingFlight = await db.get("flights", normalizedFlight.id)
   }
 
   if (existingFlight) {
     // Only update if server version is newer
-    if (serverFlight.updatedAt > existingFlight.updatedAt) {
+    const serverTime = normalizedFlight.updatedAt || normalizedFlight.createdAt
+    const localTime = existingFlight.updatedAt || existingFlight.createdAt
+
+    if (serverTime >= localTime) {
       await db.put("flights", {
-        ...serverFlight,
+        ...normalizedFlight,
         id: existingFlight.id, // Keep local ID
-        syncStatus: "synced",
       })
     }
   } else {
     // New flight from server
-    await db.put("flights", {
-      ...serverFlight,
-      id: serverFlight.id || crypto.randomUUID(),
-      syncStatus: "synced",
-    })
+    await db.put("flights", normalizedFlight)
   }
 }
 
@@ -400,20 +436,38 @@ export async function getAircraftByRegistration(registration: string): Promise<A
 export async function upsertAircraftFromServer(serverAircraft: Aircraft): Promise<void> {
   const db = await getDB()
 
-  let existing: Aircraft | undefined
-  if (serverAircraft.mongoId) {
-    existing = await db.getFromIndex("aircraft", "by-mongoId", serverAircraft.mongoId)
+  const normalized: Aircraft = {
+    id: serverAircraft.id,
+    registration: serverAircraft.registration || "",
+    type: serverAircraft.type || "",
+    typeDesignator: serverAircraft.typeDesignator || "",
+    model: serverAircraft.model || "",
+    category: serverAircraft.category || "",
+    engineType: serverAircraft.engineType || "SEP",
+    isComplex: serverAircraft.isComplex || false,
+    isHighPerformance: serverAircraft.isHighPerformance || false,
+    createdAt: serverAircraft.createdAt || Date.now(),
+    updatedAt: serverAircraft.updatedAt,
+    syncStatus: "synced",
+    mongoId: serverAircraft.mongoId,
   }
-  if (!existing && serverAircraft.id) {
-    existing = await db.get("aircraft", serverAircraft.id)
+
+  let existing: Aircraft | undefined
+  if (normalized.mongoId) {
+    existing = await db.getFromIndex("aircraft", "by-mongoId", normalized.mongoId)
+  }
+  if (!existing && normalized.id) {
+    existing = await db.get("aircraft", normalized.id)
   }
 
   if (existing) {
-    if ((serverAircraft.updatedAt || serverAircraft.createdAt) > (existing.updatedAt || existing.createdAt)) {
-      await db.put("aircraft", { ...serverAircraft, id: existing.id, syncStatus: "synced" })
+    const serverTime = normalized.updatedAt || normalized.createdAt
+    const localTime = existing.updatedAt || existing.createdAt
+    if (serverTime >= localTime) {
+      await db.put("aircraft", { ...normalized, id: existing.id })
     }
   } else {
-    await db.put("aircraft", { ...serverAircraft, id: serverAircraft.id || crypto.randomUUID(), syncStatus: "synced" })
+    await db.put("aircraft", normalized)
   }
 }
 
@@ -474,20 +528,41 @@ export async function getAirportByIata(iata: string): Promise<Airport | undefine
 export async function upsertAirportFromServer(serverAirport: Airport): Promise<void> {
   const db = await getDB()
 
-  let existing: Airport | undefined
-  if (serverAirport.mongoId) {
-    existing = await db.getFromIndex("airports", "by-mongoId", serverAirport.mongoId)
+  const normalized: Airport = {
+    id: serverAirport.id,
+    icao: serverAirport.icao || "",
+    iata: serverAirport.iata || "",
+    name: serverAirport.name || "",
+    city: serverAirport.city || "",
+    country: serverAirport.country || "",
+    latitude: serverAirport.latitude || 0,
+    longitude: serverAirport.longitude || 0,
+    elevation: serverAirport.elevation || 0,
+    timezone: serverAirport.timezone || "UTC",
+    utcOffset: serverAirport.utcOffset || 0,
+    dstObserved: serverAirport.dstObserved || false,
+    createdAt: serverAirport.createdAt || Date.now(),
+    updatedAt: serverAirport.updatedAt,
+    syncStatus: "synced",
+    mongoId: serverAirport.mongoId,
   }
-  if (!existing && serverAirport.id) {
-    existing = await db.get("airports", serverAirport.id)
+
+  let existing: Airport | undefined
+  if (normalized.mongoId) {
+    existing = await db.getFromIndex("airports", "by-mongoId", normalized.mongoId)
+  }
+  if (!existing && normalized.id) {
+    existing = await db.get("airports", normalized.id)
   }
 
   if (existing) {
-    if ((serverAirport.updatedAt || serverAirport.createdAt) > (existing.updatedAt || existing.createdAt)) {
-      await db.put("airports", { ...serverAirport, id: existing.id, syncStatus: "synced" })
+    const serverTime = normalized.updatedAt || normalized.createdAt
+    const localTime = existing.updatedAt || existing.createdAt
+    if (serverTime >= localTime) {
+      await db.put("airports", { ...normalized, id: existing.id })
     }
   } else {
-    await db.put("airports", { ...serverAirport, id: serverAirport.id || crypto.randomUUID(), syncStatus: "synced" })
+    await db.put("airports", normalized)
   }
 }
 
@@ -543,24 +618,38 @@ export async function getPersonnelByRole(role: Personnel["role"]): Promise<Perso
 export async function upsertPersonnelFromServer(serverPersonnel: Personnel): Promise<void> {
   const db = await getDB()
 
-  let existing: Personnel | undefined
-  if (serverPersonnel.mongoId) {
-    existing = await db.getFromIndex("personnel", "by-mongoId", serverPersonnel.mongoId)
+  const normalized: Personnel = {
+    id: serverPersonnel.id,
+    firstName: serverPersonnel.firstName || "",
+    lastName: serverPersonnel.lastName || "",
+    employeeId: serverPersonnel.employeeId,
+    licenseNumber: serverPersonnel.licenseNumber,
+    role: serverPersonnel.role || "OTHER",
+    company: serverPersonnel.company,
+    email: serverPersonnel.email,
+    notes: serverPersonnel.notes,
+    createdAt: serverPersonnel.createdAt || Date.now(),
+    updatedAt: serverPersonnel.updatedAt,
+    syncStatus: "synced",
+    mongoId: serverPersonnel.mongoId,
   }
-  if (!existing && serverPersonnel.id) {
-    existing = await db.get("personnel", serverPersonnel.id)
+
+  let existing: Personnel | undefined
+  if (normalized.mongoId) {
+    existing = await db.getFromIndex("personnel", "by-mongoId", normalized.mongoId)
+  }
+  if (!existing && normalized.id) {
+    existing = await db.get("personnel", normalized.id)
   }
 
   if (existing) {
-    if ((serverPersonnel.updatedAt || serverPersonnel.createdAt) > (existing.updatedAt || existing.createdAt)) {
-      await db.put("personnel", { ...serverPersonnel, id: existing.id, syncStatus: "synced" })
+    const serverTime = normalized.updatedAt || normalized.createdAt
+    const localTime = existing.updatedAt || existing.createdAt
+    if (serverTime >= localTime) {
+      await db.put("personnel", { ...normalized, id: existing.id })
     }
   } else {
-    await db.put("personnel", {
-      ...serverPersonnel,
-      id: serverPersonnel.id || crypto.randomUUID(),
-      syncStatus: "synced",
-    })
+    await db.put("personnel", normalized)
   }
 }
 
@@ -622,7 +711,7 @@ export async function setLastSyncTime(timestamp: number): Promise<void> {
 }
 
 export async function getFlightStats() {
-  const { hhmmToDecimal, sumHHMM } = await import("./time-utils")
+  const { sumHHMM } = await import("./time-utils")
   const flights = await getAllFlights()
 
   const totalFlights = flights.length

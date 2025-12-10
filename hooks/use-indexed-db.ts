@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback } from "react"
+import { useCallback, useEffect, useState } from "react"
 import useSWR, { mutate } from "swr"
 import {
   initializeDB,
@@ -25,35 +25,55 @@ export const CACHE_KEYS = {
   dbReady: "idb:ready",
 }
 
+let dbInitialized = false
+let dbInitPromise: Promise<boolean> | null = null
+
 // Initialize DB and return ready state
 async function checkDBReady(): Promise<boolean> {
   if (typeof window === "undefined") return false
-  return initializeDB()
+
+  if (dbInitialized) return true
+
+  if (!dbInitPromise) {
+    dbInitPromise = initializeDB().then((ready) => {
+      dbInitialized = ready
+      return ready
+    })
+  }
+
+  return dbInitPromise
 }
 
-// Fetchers that wait for DB to be ready
 async function fetchFlights(): Promise<FlightLog[]> {
   const ready = await checkDBReady()
   if (!ready) return []
-  return getAllFlights()
+  const flights = await getAllFlights()
+  console.log("[v0] Fetched flights from IndexedDB:", flights.length)
+  return flights
 }
 
 async function fetchAircraft(): Promise<Aircraft[]> {
   const ready = await checkDBReady()
   if (!ready) return []
-  return getAllAircraft()
+  const aircraft = await getAllAircraft()
+  console.log("[v0] Fetched aircraft from IndexedDB:", aircraft.length)
+  return aircraft
 }
 
 async function fetchAirports(): Promise<Airport[]> {
   const ready = await checkDBReady()
   if (!ready) return []
-  return getAllAirports()
+  const airports = await getAllAirports()
+  console.log("[v0] Fetched airports from IndexedDB:", airports.length)
+  return airports
 }
 
 async function fetchPersonnel(): Promise<Personnel[]> {
   const ready = await checkDBReady()
   if (!ready) return []
-  return getAllPersonnel()
+  const personnel = await getAllPersonnel()
+  console.log("[v0] Fetched personnel from IndexedDB:", personnel.length)
+  return personnel
 }
 
 async function fetchStats() {
@@ -80,104 +100,126 @@ async function fetchStats() {
 
 // Hook for DB ready state
 export function useDBReady() {
-  const { data: isReady, isLoading } = useSWR(CACHE_KEYS.dbReady, checkDBReady, {
-    revalidateOnFocus: false,
-    revalidateOnReconnect: false,
-  })
-  return { isReady: isReady ?? false, isLoading }
+  const [isReady, setIsReady] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    checkDBReady().then((ready) => {
+      setIsReady(ready)
+      setIsLoading(false)
+    })
+  }, [])
+
+  return { isReady, isLoading }
 }
 
-// Hook for flights with lazy loading support
 export function useFlights() {
+  const { isReady } = useDBReady()
+
   const {
     data,
     error,
     isLoading,
+    isValidating,
     mutate: mutateFlights,
-  } = useSWR(CACHE_KEYS.flights, fetchFlights, {
+  } = useSWR(isReady ? CACHE_KEYS.flights : null, fetchFlights, {
     revalidateOnFocus: false,
-    dedupingInterval: 2000,
+    revalidateOnMount: true,
+    dedupingInterval: 0, // Always fetch fresh
   })
 
   const refresh = useCallback(() => {
-    return mutateFlights()
+    console.log("[v0] Refreshing flights...")
+    return mutateFlights(undefined, { revalidate: true })
   }, [mutateFlights])
 
   return {
     flights: data ?? [],
-    isLoading,
+    isLoading: isLoading || isValidating,
     error,
     refresh,
   }
 }
 
-// Hook for aircraft
 export function useAircraft() {
+  const { isReady } = useDBReady()
+
   const {
     data,
     error,
     isLoading,
+    isValidating,
     mutate: mutateAircraft,
-  } = useSWR(CACHE_KEYS.aircraft, fetchAircraft, {
+  } = useSWR(isReady ? CACHE_KEYS.aircraft : null, fetchAircraft, {
     revalidateOnFocus: false,
-    dedupingInterval: 5000,
+    revalidateOnMount: true,
+    dedupingInterval: 0,
   })
 
   const refresh = useCallback(() => {
-    return mutateAircraft()
+    console.log("[v0] Refreshing aircraft...")
+    return mutateAircraft(undefined, { revalidate: true })
   }, [mutateAircraft])
 
   return {
     aircraft: data ?? [],
-    isLoading,
+    isLoading: isLoading || isValidating,
     error,
     refresh,
   }
 }
 
-// Hook for airports
 export function useAirports() {
+  const { isReady } = useDBReady()
+
   const {
     data,
     error,
     isLoading,
+    isValidating,
     mutate: mutateAirports,
-  } = useSWR(CACHE_KEYS.airports, fetchAirports, {
+  } = useSWR(isReady ? CACHE_KEYS.airports : null, fetchAirports, {
     revalidateOnFocus: false,
-    dedupingInterval: 5000,
+    revalidateOnMount: true,
+    dedupingInterval: 0,
   })
 
   const refresh = useCallback(() => {
-    return mutateAirports()
+    console.log("[v0] Refreshing airports...")
+    return mutateAirports(undefined, { revalidate: true })
   }, [mutateAirports])
 
   return {
     airports: data ?? [],
-    isLoading,
+    isLoading: isLoading || isValidating,
     error,
     refresh,
   }
 }
 
-// Hook for personnel
 export function usePersonnel() {
+  const { isReady } = useDBReady()
+
   const {
     data,
     error,
     isLoading,
+    isValidating,
     mutate: mutatePersonnel,
-  } = useSWR(CACHE_KEYS.personnel, fetchPersonnel, {
+  } = useSWR(isReady ? CACHE_KEYS.personnel : null, fetchPersonnel, {
     revalidateOnFocus: false,
-    dedupingInterval: 5000,
+    revalidateOnMount: true,
+    dedupingInterval: 0,
   })
 
   const refresh = useCallback(() => {
-    return mutatePersonnel()
+    console.log("[v0] Refreshing personnel...")
+    return mutatePersonnel(undefined, { revalidate: true })
   }, [mutatePersonnel])
 
   return {
     personnel: data ?? [],
-    isLoading,
+    isLoading: isLoading || isValidating,
     error,
     refresh,
   }
@@ -185,18 +227,22 @@ export function usePersonnel() {
 
 // Hook for stats
 export function useFlightStats() {
+  const { isReady } = useDBReady()
+
   const {
     data,
     error,
     isLoading,
+    isValidating,
     mutate: mutateStats,
-  } = useSWR(CACHE_KEYS.stats, fetchStats, {
+  } = useSWR(isReady ? CACHE_KEYS.stats : null, fetchStats, {
     revalidateOnFocus: false,
-    dedupingInterval: 2000,
+    revalidateOnMount: true,
+    dedupingInterval: 0,
   })
 
   const refresh = useCallback(() => {
-    return mutateStats()
+    return mutateStats(undefined, { revalidate: true })
   }, [mutateStats])
 
   return {
@@ -215,19 +261,20 @@ export function useFlightStats() {
       uniqueAircraft: 0,
       uniqueAirports: 0,
     },
-    isLoading,
+    isLoading: isLoading || isValidating,
     error,
     refresh,
   }
 }
 
-// Utility to refresh all data after sync
 export async function refreshAllData() {
+  console.log("[v0] Refreshing all data from IndexedDB...")
   await Promise.all([
-    mutate(CACHE_KEYS.flights),
-    mutate(CACHE_KEYS.aircraft),
-    mutate(CACHE_KEYS.airports),
-    mutate(CACHE_KEYS.personnel),
-    mutate(CACHE_KEYS.stats),
+    mutate(CACHE_KEYS.flights, undefined, { revalidate: true }),
+    mutate(CACHE_KEYS.aircraft, undefined, { revalidate: true }),
+    mutate(CACHE_KEYS.airports, undefined, { revalidate: true }),
+    mutate(CACHE_KEYS.personnel, undefined, { revalidate: true }),
+    mutate(CACHE_KEYS.stats, undefined, { revalidate: true }),
   ])
+  console.log("[v0] All data refreshed")
 }
