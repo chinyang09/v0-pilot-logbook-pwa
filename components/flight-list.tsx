@@ -1,10 +1,13 @@
 "use client"
 
+import { useState, useMemo } from "react"
 import type { FlightLog } from "@/lib/indexed-db"
 import { formatHHMMDisplay } from "@/lib/time-utils"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Plane, Clock, Cloud, CloudOff, Loader2, Moon } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Plane, Clock, Cloud, CloudOff, Moon, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface FlightListProps {
@@ -12,11 +15,49 @@ interface FlightListProps {
   isLoading?: boolean
 }
 
+const INITIAL_LOAD = 10
+const LOAD_INCREMENT = 10
+
 export function FlightList({ flights, isLoading }: FlightListProps) {
+  const [visibleCount, setVisibleCount] = useState(INITIAL_LOAD)
+
+  const visibleFlights = useMemo(() => flights.slice(0, visibleCount), [flights, visibleCount])
+
+  const hasMore = visibleCount < flights.length
+
+  const loadMore = () => {
+    setVisibleCount((prev) => Math.min(prev + LOAD_INCREMENT, flights.length))
+  }
+
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Card key={i} className="bg-card border-border">
+            <CardContent className="p-4">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-4 w-16" />
+                  <Skeleton className="h-4 w-24" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-6 w-12" />
+                  <Skeleton className="h-px w-20" />
+                  <Skeleton className="h-6 w-12" />
+                </div>
+                <div className="flex gap-3">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-4 w-20" />
+                </div>
+                <div className="flex gap-2">
+                  <Skeleton className="h-5 w-16 rounded-full" />
+                  <Skeleton className="h-5 w-16 rounded-full" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
     )
   }
@@ -31,11 +72,11 @@ export function FlightList({ flights, isLoading }: FlightListProps) {
     )
   }
 
-  const formatTime = (time: string) => time.slice(0, 5)
+  const formatTime = (time: string) => time?.slice(0, 5) || "--:--"
 
   return (
     <div className="space-y-3">
-      {flights.map((flight) => (
+      {visibleFlights.map((flight) => (
         <Card
           key={flight.id}
           className="bg-card border-border hover:border-primary/50 transition-colors cursor-pointer"
@@ -133,6 +174,15 @@ export function FlightList({ flights, isLoading }: FlightListProps) {
           </CardContent>
         </Card>
       ))}
+
+      {hasMore && (
+        <div className="flex justify-center pt-2">
+          <Button variant="ghost" onClick={loadMore} className="gap-2">
+            <ChevronDown className="h-4 w-4" />
+            Load More ({flights.length - visibleCount} remaining)
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

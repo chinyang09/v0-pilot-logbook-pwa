@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -9,27 +9,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import {
-  addAircraft,
-  addAirport,
-  addPersonnel,
-  getAllAircraft,
-  getAllAirports,
-  getAllPersonnel,
-  type Aircraft,
-  type Airport,
-  type Personnel,
-} from "@/lib/indexed-db"
-import { Plane, MapPin, Users, Plus, X } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
+import { addAircraft, addAirport, addPersonnel, type Aircraft, type Personnel } from "@/lib/indexed-db"
+import { useAircraft, useAirports, usePersonnel } from "@/hooks/use-indexed-db"
+import { syncService } from "@/lib/sync-service"
+import { Plane, MapPin, Users, Plus, X, Loader2 } from "lucide-react"
 
 interface ManageDataProps {
   onClose?: () => void
 }
 
 export function ManageData({ onClose }: ManageDataProps) {
-  const [aircraft, setAircraft] = useState<Aircraft[]>([])
-  const [airports, setAirports] = useState<Airport[]>([])
-  const [personnel, setPersonnel] = useState<Personnel[]>([])
+  const { aircraft, isLoading: aircraftLoading, refresh: refreshAircraft } = useAircraft()
+  const { airports, isLoading: airportsLoading, refresh: refreshAirports } = useAirports()
+  const { personnel, isLoading: personnelLoading, refresh: refreshPersonnel } = usePersonnel()
+
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Aircraft form
@@ -71,17 +65,6 @@ export function ManageData({ onClose }: ManageDataProps) {
     notes: "",
   })
 
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  const loadData = async () => {
-    const [a, ap, p] = await Promise.all([getAllAircraft(), getAllAirports(), getAllPersonnel()])
-    setAircraft(a)
-    setAirports(ap)
-    setPersonnel(p)
-  }
-
   const handleAddAircraft = async () => {
     if (!aircraftForm.registration || !aircraftForm.type) return
     setIsSubmitting(true)
@@ -106,7 +89,8 @@ export function ManageData({ onClose }: ManageDataProps) {
         isComplex: true,
         isHighPerformance: true,
       })
-      loadData()
+      await refreshAircraft()
+      if (navigator.onLine) syncService.fullSync()
     } finally {
       setIsSubmitting(false)
     }
@@ -142,7 +126,8 @@ export function ManageData({ onClose }: ManageDataProps) {
         utcOffset: "",
         dstObserved: false,
       })
-      loadData()
+      await refreshAirports()
+      if (navigator.onLine) syncService.fullSync()
     } finally {
       setIsSubmitting(false)
     }
@@ -172,11 +157,20 @@ export function ManageData({ onClose }: ManageDataProps) {
         email: "",
         notes: "",
       })
-      loadData()
+      await refreshPersonnel()
+      if (navigator.onLine) syncService.fullSync()
     } finally {
       setIsSubmitting(false)
     }
   }
+
+  const ListSkeleton = () => (
+    <div className="space-y-2">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <Skeleton key={i} className="h-12 w-full rounded" />
+      ))}
+    </div>
+  )
 
   return (
     <Card className="bg-card border-border">
@@ -264,26 +258,31 @@ export function ManageData({ onClose }: ManageDataProps) {
               </div>
             </div>
             <Button onClick={handleAddAircraft} disabled={isSubmitting} size="sm">
-              <Plus className="h-4 w-4 mr-1" /> Add Aircraft
+              {isSubmitting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Plus className="h-4 w-4 mr-1" />}
+              Add Aircraft
             </Button>
 
             <ScrollArea className="h-[200px] border rounded-md p-2">
-              <div className="space-y-2">
-                {aircraft.map((a) => (
-                  <div key={a.id} className="flex items-center justify-between p-2 bg-secondary rounded">
-                    <div>
-                      <span className="font-medium">{a.registration}</span>
-                      <span className="text-muted-foreground ml-2">
-                        {a.type} - {a.model}
-                      </span>
+              {aircraftLoading ? (
+                <ListSkeleton />
+              ) : (
+                <div className="space-y-2">
+                  {aircraft.map((a) => (
+                    <div key={a.id} className="flex items-center justify-between p-2 bg-secondary rounded">
+                      <div>
+                        <span className="font-medium">{a.registration}</span>
+                        <span className="text-muted-foreground ml-2">
+                          {a.type} - {a.model}
+                        </span>
+                      </div>
+                      <Badge variant="outline">{a.engineType}</Badge>
                     </div>
-                    <Badge variant="outline">{a.engineType}</Badge>
-                  </div>
-                ))}
-                {aircraft.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">No aircraft added</p>
-                )}
-              </div>
+                  ))}
+                  {aircraft.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">No aircraft added</p>
+                  )}
+                </div>
+              )}
             </ScrollArea>
           </TabsContent>
 
@@ -406,24 +405,29 @@ export function ManageData({ onClose }: ManageDataProps) {
               </div>
             </div>
             <Button onClick={handleAddAirport} disabled={isSubmitting} size="sm">
-              <Plus className="h-4 w-4 mr-1" /> Add Airport
+              {isSubmitting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Plus className="h-4 w-4 mr-1" />}
+              Add Airport
             </Button>
 
             <ScrollArea className="h-[200px] border rounded-md p-2">
-              <div className="space-y-2">
-                {airports.map((a) => (
-                  <div key={a.id} className="flex items-center justify-between p-2 bg-secondary rounded">
-                    <div>
-                      <span className="font-medium">{a.icao}</span>
-                      <span className="text-muted-foreground ml-2">{a.name}</span>
+              {airportsLoading ? (
+                <ListSkeleton />
+              ) : (
+                <div className="space-y-2">
+                  {airports.map((a) => (
+                    <div key={a.id} className="flex items-center justify-between p-2 bg-secondary rounded">
+                      <div>
+                        <span className="font-medium">{a.icao}</span>
+                        <span className="text-muted-foreground ml-2">{a.name}</span>
+                      </div>
+                      <Badge variant="outline">{a.iata}</Badge>
                     </div>
-                    <Badge variant="outline">{a.iata}</Badge>
-                  </div>
-                ))}
-                {airports.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">No airports added</p>
-                )}
-              </div>
+                  ))}
+                  {airports.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">No airports added</p>
+                  )}
+                </div>
+              )}
             </ScrollArea>
           </TabsContent>
 
@@ -486,26 +490,31 @@ export function ManageData({ onClose }: ManageDataProps) {
               </div>
             </div>
             <Button onClick={handleAddPersonnel} disabled={isSubmitting} size="sm">
-              <Plus className="h-4 w-4 mr-1" /> Add Personnel
+              {isSubmitting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Plus className="h-4 w-4 mr-1" />}
+              Add Personnel
             </Button>
 
             <ScrollArea className="h-[200px] border rounded-md p-2">
-              <div className="space-y-2">
-                {personnel.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between p-2 bg-secondary rounded">
-                    <div>
-                      <span className="font-medium">
-                        {p.firstName} {p.lastName}
-                      </span>
-                      {p.employeeId && <span className="text-muted-foreground ml-2">#{p.employeeId}</span>}
+              {personnelLoading ? (
+                <ListSkeleton />
+              ) : (
+                <div className="space-y-2">
+                  {personnel.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between p-2 bg-secondary rounded">
+                      <div>
+                        <span className="font-medium">
+                          {p.firstName} {p.lastName}
+                        </span>
+                        {p.employeeId && <span className="text-muted-foreground ml-2">#{p.employeeId}</span>}
+                      </div>
+                      <Badge variant="outline">{p.role}</Badge>
                     </div>
-                    <Badge variant="outline">{p.role}</Badge>
-                  </div>
-                ))}
-                {personnel.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">No personnel added</p>
-                )}
-              </div>
+                  ))}
+                  {personnel.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">No personnel added</p>
+                  )}
+                </div>
+              )}
             </ScrollArea>
           </TabsContent>
         </Tabs>

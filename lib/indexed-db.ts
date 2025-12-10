@@ -166,11 +166,14 @@ interface LogbookDB extends DBSchema {
 }
 
 let dbInstance: IDBPDatabase<LogbookDB> | null = null
+let dbInitPromise: Promise<IDBPDatabase<LogbookDB>> | null = null
 
 export async function getDB(): Promise<IDBPDatabase<LogbookDB>> {
   if (dbInstance) return dbInstance
 
-  dbInstance = await openDB<LogbookDB>("skylog-db", 3, {
+  if (dbInitPromise) return dbInitPromise
+
+  dbInitPromise = openDB<LogbookDB>("skylog-db", 3, {
     upgrade(db, oldVersion) {
       // Flights store
       if (!db.objectStoreNames.contains("flights")) {
@@ -223,12 +226,24 @@ export async function getDB(): Promise<IDBPDatabase<LogbookDB>> {
         db.createObjectStore("syncMeta", { keyPath: "key" })
       }
     },
+  }).then((db) => {
+    dbInstance = db
+    return db
   })
 
-  return dbInstance
+  return dbInitPromise
 }
 
-// Flight operations
+export async function initializeDB(): Promise<boolean> {
+  try {
+    await getDB()
+    return true
+  } catch (error) {
+    console.error("Failed to initialize IndexedDB:", error)
+    return false
+  }
+}
+
 export async function addFlight(
   flight: Omit<FlightLog, "id" | "createdAt" | "updatedAt" | "syncStatus">,
 ): Promise<FlightLog> {

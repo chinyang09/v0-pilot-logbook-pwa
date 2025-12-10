@@ -8,6 +8,7 @@ import {
   upsertPersonnelFromServer,
   getLastSyncTime,
   setLastSyncTime,
+  initializeDB,
   type FlightLog,
   type Aircraft,
   type Airport,
@@ -20,6 +21,7 @@ class SyncService {
   private status: SyncStatus = "offline"
   private listeners: Set<(status: SyncStatus) => void> = new Set()
   private syncInProgress = false
+  private onDataChangedCallbacks: Set<() => void> = new Set()
 
   constructor() {
     if (typeof window !== "undefined") {
@@ -50,8 +52,23 @@ class SyncService {
     return () => this.listeners.delete(listener)
   }
 
+  onDataChanged(callback: () => void): () => void {
+    this.onDataChangedCallbacks.add(callback)
+    return () => this.onDataChangedCallbacks.delete(callback)
+  }
+
+  private notifyDataChanged() {
+    this.onDataChangedCallbacks.forEach((cb) => cb())
+  }
+
   async fullSync(): Promise<{ pushed: number; pulled: number; failed: number }> {
     if (!navigator.onLine || this.syncInProgress) {
+      return { pushed: 0, pulled: 0, failed: 0 }
+    }
+
+    const dbReady = await initializeDB()
+    if (!dbReady) {
+      console.error("[v0] DB not ready for sync")
       return { pushed: 0, pulled: 0, failed: 0 }
     }
 
@@ -74,6 +91,10 @@ class SyncService {
 
       // 3. Update last sync time
       await setLastSyncTime(Date.now())
+
+      if (pushed > 0 || pulled > 0) {
+        this.notifyDataChanged()
+      }
     } catch (error) {
       console.error("Full sync error:", error)
     } finally {
