@@ -11,7 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,7 +37,7 @@ import {
 } from "@/lib/indexed-db"
 import { useAircraft, useAirports, usePersonnel } from "@/hooks/use-indexed-db"
 import { syncService } from "@/lib/sync-service"
-import { Plane, MapPin, Users, Plus, X, Loader2, Trash2 } from "lucide-react"
+import { Plane, MapPin, Users, Plus, X, Loader2, Trash2, Save } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface ManageDataProps {
@@ -51,10 +50,12 @@ function SwipeableItem({
   children,
   onTap,
   onDelete,
+  isActive,
 }: {
   children: React.ReactNode
   onTap: () => void
   onDelete: () => void
+  isActive?: boolean
 }) {
   const [swipeX, setSwipeX] = useState(0)
   const [isSwiping, setIsSwiping] = useState(false)
@@ -130,8 +131,9 @@ function SwipeableItem({
       {/* Swipeable content */}
       <div
         className={cn(
-          "bg-secondary p-2 cursor-pointer active:bg-secondary/80",
+          "p-2 cursor-pointer active:bg-secondary/80",
           !isSwiping && "transition-transform duration-200",
+          isActive ? "bg-primary/20 border-l-2 border-primary" : "bg-secondary",
         )}
         style={{ transform: `translateX(${swipeX}px)` }}
         onTouchStart={handleTouchStart}
@@ -152,10 +154,9 @@ export function ManageData({ onClose }: ManageDataProps) {
 
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Edit states
-  const [editingAircraft, setEditingAircraft] = useState<Aircraft | null>(null)
-  const [editingAirport, setEditingAirport] = useState<Airport | null>(null)
-  const [editingPersonnel, setEditingPersonnel] = useState<Personnel | null>(null)
+  const [editingAircraftId, setEditingAircraftId] = useState<string | null>(null)
+  const [editingAirportId, setEditingAirportId] = useState<string | null>(null)
+  const [editingPersonnelId, setEditingPersonnelId] = useState<string | null>(null)
 
   // Delete states
   const [deleteAircraftTarget, setDeleteAircraftTarget] = useState<Aircraft | null>(null)
@@ -202,11 +203,101 @@ export function ManageData({ onClose }: ManageDataProps) {
     notes: "",
   })
 
-  const handleAddAircraft = async () => {
+  const handleEditAircraft = (a: Aircraft) => {
+    setEditingAircraftId(a.id)
+    setAircraftForm({
+      registration: a.registration,
+      type: a.type,
+      typeDesignator: a.typeDesignator || "",
+      model: a.model || "",
+      category: a.category || "MEL",
+      engineType: a.engineType,
+      isComplex: a.isComplex ?? true,
+      isHighPerformance: a.isHighPerformance ?? true,
+    })
+  }
+
+  const handleEditAirport = (a: Airport) => {
+    setEditingAirportId(a.id)
+    setAirportForm({
+      icao: a.icao,
+      iata: a.iata || "",
+      name: a.name,
+      city: a.city || "",
+      country: a.country || "",
+      latitude: a.latitude?.toString() || "",
+      longitude: a.longitude?.toString() || "",
+      elevation: a.elevation?.toString() || "",
+      timezone: a.timezone || "",
+      utcOffset: a.utcOffset?.toString() || "",
+      dstObserved: a.dstObserved ?? false,
+    })
+  }
+
+  const handleEditPersonnel = (p: Personnel) => {
+    setEditingPersonnelId(p.id)
+    setPersonnelForm({
+      firstName: p.firstName,
+      lastName: p.lastName,
+      employeeId: p.employeeId || "",
+      licenseNumber: p.licenseNumber || "",
+      role: p.role,
+      company: p.company || "",
+      email: p.email || "",
+      notes: p.notes || "",
+    })
+  }
+
+  const cancelAircraftEdit = () => {
+    setEditingAircraftId(null)
+    setAircraftForm({
+      registration: "",
+      type: "",
+      typeDesignator: "",
+      model: "",
+      category: "MEL",
+      engineType: "JET",
+      isComplex: true,
+      isHighPerformance: true,
+    })
+  }
+
+  const cancelAirportEdit = () => {
+    setEditingAirportId(null)
+    setAirportForm({
+      icao: "",
+      iata: "",
+      name: "",
+      city: "",
+      country: "",
+      latitude: "",
+      longitude: "",
+      elevation: "",
+      timezone: "",
+      utcOffset: "",
+      dstObserved: false,
+    })
+  }
+
+  const cancelPersonnelEdit = () => {
+    setEditingPersonnelId(null)
+    setPersonnelForm({
+      firstName: "",
+      lastName: "",
+      employeeId: "",
+      licenseNumber: "",
+      role: "FO",
+      company: "",
+      email: "",
+      notes: "",
+    })
+  }
+
+  const handleSaveAircraft = async () => {
     if (!aircraftForm.registration || !aircraftForm.type) return
     setIsSubmitting(true)
     try {
-      await addAircraft({
+      const data = {
         registration: aircraftForm.registration.toUpperCase(),
         type: aircraftForm.type.toUpperCase(),
         typeDesignator: aircraftForm.typeDesignator.toUpperCase(),
@@ -215,30 +306,14 @@ export function ManageData({ onClose }: ManageDataProps) {
         engineType: aircraftForm.engineType,
         isComplex: aircraftForm.isComplex,
         isHighPerformance: aircraftForm.isHighPerformance,
-      })
-      setAircraftForm({
-        registration: "",
-        type: "",
-        typeDesignator: "",
-        model: "",
-        category: "MEL",
-        engineType: "JET",
-        isComplex: true,
-        isHighPerformance: true,
-      })
-      await refreshAircraft()
-      if (navigator.onLine) syncService.fullSync()
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
+      }
 
-  const handleUpdateAircraft = async () => {
-    if (!editingAircraft) return
-    setIsSubmitting(true)
-    try {
-      await updateAircraft(editingAircraft.id, editingAircraft)
-      setEditingAircraft(null)
+      if (editingAircraftId) {
+        await updateAircraft(editingAircraftId, data)
+      } else {
+        await addAircraft(data)
+      }
+      cancelAircraftEdit()
       await refreshAircraft()
       if (navigator.onLine) syncService.fullSync()
     } finally {
@@ -259,11 +334,11 @@ export function ManageData({ onClose }: ManageDataProps) {
     }
   }
 
-  const handleAddAirport = async () => {
+  const handleSaveAirport = async () => {
     if (!airportForm.icao || !airportForm.name) return
     setIsSubmitting(true)
     try {
-      await addAirport({
+      const data = {
         icao: airportForm.icao.toUpperCase(),
         iata: airportForm.iata.toUpperCase(),
         name: airportForm.name,
@@ -275,33 +350,14 @@ export function ManageData({ onClose }: ManageDataProps) {
         timezone: airportForm.timezone,
         utcOffset: Number.parseFloat(airportForm.utcOffset) || 0,
         dstObserved: airportForm.dstObserved,
-      })
-      setAirportForm({
-        icao: "",
-        iata: "",
-        name: "",
-        city: "",
-        country: "",
-        latitude: "",
-        longitude: "",
-        elevation: "",
-        timezone: "",
-        utcOffset: "",
-        dstObserved: false,
-      })
-      await refreshAirports()
-      if (navigator.onLine) syncService.fullSync()
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
+      }
 
-  const handleUpdateAirport = async () => {
-    if (!editingAirport) return
-    setIsSubmitting(true)
-    try {
-      await updateAirport(editingAirport.id, editingAirport)
-      setEditingAirport(null)
+      if (editingAirportId) {
+        await updateAirport(editingAirportId, data)
+      } else {
+        await addAirport(data)
+      }
+      cancelAirportEdit()
       await refreshAirports()
       if (navigator.onLine) syncService.fullSync()
     } finally {
@@ -322,11 +378,11 @@ export function ManageData({ onClose }: ManageDataProps) {
     }
   }
 
-  const handleAddPersonnel = async () => {
+  const handleSavePersonnel = async () => {
     if (!personnelForm.firstName || !personnelForm.lastName) return
     setIsSubmitting(true)
     try {
-      await addPersonnel({
+      const data = {
         firstName: personnelForm.firstName,
         lastName: personnelForm.lastName,
         employeeId: personnelForm.employeeId,
@@ -335,30 +391,14 @@ export function ManageData({ onClose }: ManageDataProps) {
         company: personnelForm.company,
         email: personnelForm.email,
         notes: personnelForm.notes,
-      })
-      setPersonnelForm({
-        firstName: "",
-        lastName: "",
-        employeeId: "",
-        licenseNumber: "",
-        role: "FO",
-        company: "",
-        email: "",
-        notes: "",
-      })
-      await refreshPersonnel()
-      if (navigator.onLine) syncService.fullSync()
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
+      }
 
-  const handleUpdatePersonnel = async () => {
-    if (!editingPersonnel) return
-    setIsSubmitting(true)
-    try {
-      await updatePersonnel(editingPersonnel.id, editingPersonnel)
-      setEditingPersonnel(null)
+      if (editingPersonnelId) {
+        await updatePersonnel(editingPersonnelId, data)
+      } else {
+        await addPersonnel(data)
+      }
+      cancelPersonnelEdit()
       await refreshPersonnel()
       if (navigator.onLine) syncService.fullSync()
     } finally {
@@ -473,10 +513,23 @@ export function ManageData({ onClose }: ManageDataProps) {
                   </Select>
                 </div>
               </div>
-              <Button onClick={handleAddAircraft} disabled={isSubmitting} size="sm">
-                {isSubmitting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Plus className="h-4 w-4 mr-1" />}
-                Add Aircraft
-              </Button>
+              <div className="flex gap-2">
+                <Button onClick={handleSaveAircraft} disabled={isSubmitting} size="sm">
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : editingAircraftId ? (
+                    <Save className="h-4 w-4 mr-1" />
+                  ) : (
+                    <Plus className="h-4 w-4 mr-1" />
+                  )}
+                  {editingAircraftId ? "Save" : "Add Aircraft"}
+                </Button>
+                {editingAircraftId && (
+                  <Button variant="outline" size="sm" onClick={cancelAircraftEdit}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
 
               <ScrollArea className="h-[200px] border rounded-md p-2">
                 {aircraftLoading ? (
@@ -486,8 +539,9 @@ export function ManageData({ onClose }: ManageDataProps) {
                     {aircraft.map((a) => (
                       <SwipeableItem
                         key={a.id}
-                        onTap={() => setEditingAircraft(a)}
+                        onTap={() => handleEditAircraft(a)}
                         onDelete={() => setDeleteAircraftTarget(a)}
+                        isActive={editingAircraftId === a.id}
                       >
                         <div className="flex items-center justify-between">
                           <div>
@@ -626,10 +680,23 @@ export function ManageData({ onClose }: ManageDataProps) {
                   />
                 </div>
               </div>
-              <Button onClick={handleAddAirport} disabled={isSubmitting} size="sm">
-                {isSubmitting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Plus className="h-4 w-4 mr-1" />}
-                Add Airport
-              </Button>
+              <div className="flex gap-2">
+                <Button onClick={handleSaveAirport} disabled={isSubmitting} size="sm">
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : editingAirportId ? (
+                    <Save className="h-4 w-4 mr-1" />
+                  ) : (
+                    <Plus className="h-4 w-4 mr-1" />
+                  )}
+                  {editingAirportId ? "Save" : "Add Airport"}
+                </Button>
+                {editingAirportId && (
+                  <Button variant="outline" size="sm" onClick={cancelAirportEdit}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
 
               <ScrollArea className="h-[200px] border rounded-md p-2">
                 {airportsLoading ? (
@@ -639,8 +706,9 @@ export function ManageData({ onClose }: ManageDataProps) {
                     {airports.map((a) => (
                       <SwipeableItem
                         key={a.id}
-                        onTap={() => setEditingAirport(a)}
+                        onTap={() => handleEditAirport(a)}
                         onDelete={() => setDeleteAirportTarget(a)}
+                        isActive={editingAirportId === a.id}
                       >
                         <div className="flex items-center justify-between">
                           <div>
@@ -718,10 +786,23 @@ export function ManageData({ onClose }: ManageDataProps) {
                   </Select>
                 </div>
               </div>
-              <Button onClick={handleAddPersonnel} disabled={isSubmitting} size="sm">
-                {isSubmitting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Plus className="h-4 w-4 mr-1" />}
-                Add Personnel
-              </Button>
+              <div className="flex gap-2">
+                <Button onClick={handleSavePersonnel} disabled={isSubmitting} size="sm">
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : editingPersonnelId ? (
+                    <Save className="h-4 w-4 mr-1" />
+                  ) : (
+                    <Plus className="h-4 w-4 mr-1" />
+                  )}
+                  {editingPersonnelId ? "Save" : "Add Personnel"}
+                </Button>
+                {editingPersonnelId && (
+                  <Button variant="outline" size="sm" onClick={cancelPersonnelEdit}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
 
               <ScrollArea className="h-[200px] border rounded-md p-2">
                 {personnelLoading ? (
@@ -731,8 +812,9 @@ export function ManageData({ onClose }: ManageDataProps) {
                     {personnel.map((p) => (
                       <SwipeableItem
                         key={p.id}
-                        onTap={() => setEditingPersonnel(p)}
+                        onTap={() => handleEditPersonnel(p)}
                         onDelete={() => setDeletePersonnelTarget(p)}
+                        isActive={editingPersonnelId === p.id}
                       >
                         <div className="flex items-center justify-between">
                           <div>
@@ -755,255 +837,6 @@ export function ManageData({ onClose }: ManageDataProps) {
           </Tabs>
         </CardContent>
       </Card>
-
-      {/* Edit Aircraft Dialog */}
-      <Dialog open={!!editingAircraft} onOpenChange={() => setEditingAircraft(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Aircraft</DialogTitle>
-          </DialogHeader>
-          {editingAircraft && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Registration</Label>
-                <Input
-                  value={editingAircraft.registration}
-                  onChange={(e) =>
-                    setEditingAircraft({ ...editingAircraft, registration: e.target.value.toUpperCase() })
-                  }
-                  className="uppercase"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Type</Label>
-                <Input
-                  value={editingAircraft.type}
-                  onChange={(e) => setEditingAircraft({ ...editingAircraft, type: e.target.value.toUpperCase() })}
-                  className="uppercase"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Model</Label>
-                <Input
-                  value={editingAircraft.model}
-                  onChange={(e) => setEditingAircraft({ ...editingAircraft, model: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Engine Type</Label>
-                <Select
-                  value={editingAircraft.engineType}
-                  onValueChange={(v) =>
-                    setEditingAircraft({ ...editingAircraft, engineType: v as Aircraft["engineType"] })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="SEP">SEP</SelectItem>
-                    <SelectItem value="MEP">MEP</SelectItem>
-                    <SelectItem value="SET">SET</SelectItem>
-                    <SelectItem value="MET">MET</SelectItem>
-                    <SelectItem value="JET">JET</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingAircraft(null)}>
-              Cancel
-            </Button>
-            <Button onClick={handleUpdateAircraft} disabled={isSubmitting}>
-              {isSubmitting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Airport Dialog */}
-      <Dialog open={!!editingAirport} onOpenChange={() => setEditingAirport(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Airport</DialogTitle>
-          </DialogHeader>
-          {editingAirport && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">ICAO</Label>
-                <Input
-                  value={editingAirport.icao}
-                  onChange={(e) => setEditingAirport({ ...editingAirport, icao: e.target.value.toUpperCase() })}
-                  className="uppercase"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">IATA</Label>
-                <Input
-                  value={editingAirport.iata}
-                  onChange={(e) => setEditingAirport({ ...editingAirport, iata: e.target.value.toUpperCase() })}
-                  className="uppercase"
-                />
-              </div>
-              <div className="space-y-1 col-span-2">
-                <Label className="text-xs">Name</Label>
-                <Input
-                  value={editingAirport.name}
-                  onChange={(e) => setEditingAirport({ ...editingAirport, name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">City</Label>
-                <Input
-                  value={editingAirport.city}
-                  onChange={(e) => setEditingAirport({ ...editingAirport, city: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Country</Label>
-                <Input
-                  value={editingAirport.country}
-                  onChange={(e) => setEditingAirport({ ...editingAirport, country: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Latitude</Label>
-                <Input
-                  type="number"
-                  step="0.0001"
-                  value={editingAirport.latitude}
-                  onChange={(e) =>
-                    setEditingAirport({ ...editingAirport, latitude: Number.parseFloat(e.target.value) || 0 })
-                  }
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Longitude</Label>
-                <Input
-                  type="number"
-                  step="0.0001"
-                  value={editingAirport.longitude}
-                  onChange={(e) =>
-                    setEditingAirport({ ...editingAirport, longitude: Number.parseFloat(e.target.value) || 0 })
-                  }
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Timezone</Label>
-                <Input
-                  value={editingAirport.timezone}
-                  onChange={(e) => setEditingAirport({ ...editingAirport, timezone: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">UTC Offset</Label>
-                <Input
-                  type="number"
-                  step="0.5"
-                  value={editingAirport.utcOffset}
-                  onChange={(e) =>
-                    setEditingAirport({ ...editingAirport, utcOffset: Number.parseFloat(e.target.value) || 0 })
-                  }
-                />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingAirport(null)}>
-              Cancel
-            </Button>
-            <Button onClick={handleUpdateAirport} disabled={isSubmitting}>
-              {isSubmitting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Personnel Dialog */}
-      <Dialog open={!!editingPersonnel} onOpenChange={() => setEditingPersonnel(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Personnel</DialogTitle>
-          </DialogHeader>
-          {editingPersonnel && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">First Name</Label>
-                <Input
-                  value={editingPersonnel.firstName}
-                  onChange={(e) => setEditingPersonnel({ ...editingPersonnel, firstName: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Last Name</Label>
-                <Input
-                  value={editingPersonnel.lastName}
-                  onChange={(e) => setEditingPersonnel({ ...editingPersonnel, lastName: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Employee ID</Label>
-                <Input
-                  value={editingPersonnel.employeeId}
-                  onChange={(e) => setEditingPersonnel({ ...editingPersonnel, employeeId: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Role</Label>
-                <Select
-                  value={editingPersonnel.role}
-                  onValueChange={(v) => setEditingPersonnel({ ...editingPersonnel, role: v as Personnel["role"] })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="CAPT">Captain</SelectItem>
-                    <SelectItem value="FO">First Officer</SelectItem>
-                    <SelectItem value="SO">Second Officer</SelectItem>
-                    <SelectItem value="INS">Instructor</SelectItem>
-                    <SelectItem value="EXM">Examiner</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">License Number</Label>
-                <Input
-                  value={editingPersonnel.licenseNumber}
-                  onChange={(e) => setEditingPersonnel({ ...editingPersonnel, licenseNumber: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Company</Label>
-                <Input
-                  value={editingPersonnel.company}
-                  onChange={(e) => setEditingPersonnel({ ...editingPersonnel, company: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1 col-span-2">
-                <Label className="text-xs">Email</Label>
-                <Input
-                  type="email"
-                  value={editingPersonnel.email}
-                  onChange={(e) => setEditingPersonnel({ ...editingPersonnel, email: e.target.value })}
-                />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingPersonnel(null)}>
-              Cancel
-            </Button>
-            <Button onClick={handleUpdatePersonnel} disabled={isSubmitting}>
-              {isSubmitting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Delete Confirmation Dialogs */}
       <AlertDialog open={!!deleteAircraftTarget} onOpenChange={() => setDeleteAircraftTarget(null)}>
