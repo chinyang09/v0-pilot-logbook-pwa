@@ -5,26 +5,33 @@ import { Header } from "@/components/header"
 import { FlightForm } from "@/components/flight-form"
 import { FlightList } from "@/components/flight-list"
 import { StatsDashboard } from "@/components/stats-dashboard"
+import { ManageData } from "@/components/manage-data"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { Button } from "@/components/ui/button"
 import { getAllFlights, getFlightStats, type FlightLog } from "@/lib/indexed-db"
 import { syncService } from "@/lib/sync-service"
-import { Plus } from "lucide-react"
+import { Plus, Database } from "lucide-react"
 
 export default function Home() {
   const [flights, setFlights] = useState<FlightLog[]>([])
   const [stats, setStats] = useState({
     totalFlights: 0,
-    totalTime: 0,
-    picTime: 0,
+    blockTime: 0,
+    flightTime: 0,
+    p1Time: 0,
+    p2Time: 0,
+    p1usTime: 0,
+    dualTime: 0,
     nightTime: 0,
     ifrTime: 0,
-    totalLandings: 0,
+    totalDayLandings: 0,
+    totalNightLandings: 0,
     uniqueAircraft: 0,
     uniqueAirports: 0,
   })
   const [isLoading, setIsLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [showManageData, setShowManageData] = useState(false)
 
   const loadData = async () => {
     try {
@@ -41,7 +48,6 @@ export default function Home() {
   useEffect(() => {
     loadData()
 
-    // Try to sync on mount if online
     if (navigator.onLine) {
       syncService.syncPendingChanges()
     }
@@ -52,15 +58,17 @@ export default function Home() {
     setStats((prev) => ({
       ...prev,
       totalFlights: prev.totalFlights + 1,
-      totalTime: prev.totalTime + flight.totalTime,
-      picTime: prev.picTime + flight.picTime,
+      blockTime: prev.blockTime + flight.blockTime,
+      flightTime: prev.flightTime + flight.flightTime,
+      p1Time: prev.p1Time + flight.p1Time,
+      p2Time: prev.p2Time + flight.p2Time,
       nightTime: prev.nightTime + flight.nightTime,
       ifrTime: prev.ifrTime + flight.ifrTime,
-      totalLandings: prev.totalLandings + flight.landings,
+      totalDayLandings: prev.totalDayLandings + flight.dayLandings,
+      totalNightLandings: prev.totalNightLandings + flight.nightLandings,
     }))
     setShowForm(false)
 
-    // Try to sync the new flight
     syncService.syncPendingChanges()
   }
 
@@ -75,17 +83,45 @@ export default function Home() {
           <StatsDashboard stats={stats} />
         </section>
 
-        {/* Flight Form / Add Button */}
-        <section>
-          {showForm ? (
-            <FlightForm onFlightAdded={handleFlightAdded} onClose={() => setShowForm(false)} />
-          ) : (
-            <Button onClick={() => setShowForm(true)} className="w-full" size="lg">
-              <Plus className="h-5 w-5 mr-2" />
-              Log New Flight
-            </Button>
-          )}
+        {/* Action Buttons */}
+        <section className="flex gap-3">
+          <Button
+            onClick={() => {
+              setShowForm(!showForm)
+              setShowManageData(false)
+            }}
+            className="flex-1"
+            size="lg"
+            variant={showForm ? "secondary" : "default"}
+          >
+            <Plus className="h-5 w-5 mr-2" />
+            {showForm ? "Cancel" : "Log Flight"}
+          </Button>
+          <Button
+            onClick={() => {
+              setShowManageData(!showManageData)
+              setShowForm(false)
+            }}
+            size="lg"
+            variant={showManageData ? "secondary" : "outline"}
+          >
+            <Database className="h-5 w-5 mr-2" />
+            Data
+          </Button>
         </section>
+
+        {/* Forms */}
+        {showForm && (
+          <section>
+            <FlightForm onFlightAdded={handleFlightAdded} onClose={() => setShowForm(false)} />
+          </section>
+        )}
+
+        {showManageData && (
+          <section>
+            <ManageData onClose={() => setShowManageData(false)} />
+          </section>
+        )}
 
         {/* Flight List */}
         <section>

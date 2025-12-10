@@ -2,7 +2,8 @@
 
 import type { FlightLog } from "@/lib/indexed-db"
 import { Card, CardContent } from "@/components/ui/card"
-import { Plane, Clock, Cloud, CloudOff, Loader2 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Plane, Clock, Cloud, CloudOff, Loader2, Moon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface FlightListProps {
@@ -29,6 +30,8 @@ export function FlightList({ flights, isLoading }: FlightListProps) {
     )
   }
 
+  const formatTime = (time: string) => time.slice(0, 5)
+
   return (
     <div className="space-y-3">
       {flights.map((flight) => (
@@ -39,44 +42,77 @@ export function FlightList({ flights, isLoading }: FlightListProps) {
           <CardContent className="p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
+                {/* Flight number and date */}
+                <div className="flex items-center gap-2 mb-1 text-sm text-muted-foreground">
+                  {flight.flightNumber && <span className="font-medium text-foreground">{flight.flightNumber}</span>}
+                  <span>{new Date(flight.date).toLocaleDateString()}</span>
+                </div>
+
                 {/* Route */}
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="font-semibold text-foreground">{flight.departureAirport}</span>
-                  <div className="flex-1 h-px bg-border relative">
+                  <span className="font-semibold text-foreground">{flight.departureIcao}</span>
+                  <div className="flex-1 h-px bg-border relative max-w-[120px]">
                     <Plane className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-4 w-4 text-primary bg-card px-1" />
                   </div>
-                  <span className="font-semibold text-foreground">{flight.arrivalAirport}</span>
+                  <span className="font-semibold text-foreground">{flight.arrivalIcao}</span>
+                </div>
+
+                {/* OOOI Times */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mb-2">
+                  <span>OUT {formatTime(flight.outTime)}</span>
+                  <span>OFF {formatTime(flight.offTime)}</span>
+                  <span>ON {formatTime(flight.onTime)}</span>
+                  <span>IN {formatTime(flight.inTime)}</span>
                 </div>
 
                 {/* Details */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                  <span>{new Date(flight.date).toLocaleDateString()}</span>
                   <span className="flex items-center gap-1">
                     <Clock className="h-3.5 w-3.5" />
-                    {flight.totalTime.toFixed(1)}h
+                    {flight.blockTime.toFixed(1)}h block
                   </span>
+                  <span>{flight.flightTime.toFixed(1)}h flight</span>
                   <span>
                     {flight.aircraftType} ({flight.aircraftReg})
                   </span>
                 </div>
 
-                {/* Time breakdown */}
+                {/* Time breakdown badges */}
                 <div className="flex flex-wrap gap-2 mt-2">
-                  {flight.picTime > 0 && (
-                    <span className="text-xs bg-secondary px-2 py-0.5 rounded">PIC: {flight.picTime.toFixed(1)}</span>
+                  {flight.p1Time > 0 && (
+                    <Badge variant="secondary" className="text-xs">
+                      P1: {flight.p1Time.toFixed(1)}
+                    </Badge>
+                  )}
+                  {flight.p2Time > 0 && (
+                    <Badge variant="secondary" className="text-xs">
+                      P2: {flight.p2Time.toFixed(1)}
+                    </Badge>
+                  )}
+                  {flight.p1usTime > 0 && (
+                    <Badge variant="secondary" className="text-xs">
+                      P1US: {flight.p1usTime.toFixed(1)}
+                    </Badge>
+                  )}
+                  {flight.dualTime > 0 && (
+                    <Badge variant="secondary" className="text-xs">
+                      Dual: {flight.dualTime.toFixed(1)}
+                    </Badge>
                   )}
                   {flight.nightTime > 0 && (
-                    <span className="text-xs bg-secondary px-2 py-0.5 rounded">
-                      Night: {flight.nightTime.toFixed(1)}
-                    </span>
+                    <Badge variant="secondary" className="text-xs flex items-center gap-1">
+                      <Moon className="h-3 w-3" /> {flight.nightTime.toFixed(1)}
+                    </Badge>
                   )}
                   {flight.ifrTime > 0 && (
-                    <span className="text-xs bg-secondary px-2 py-0.5 rounded">IFR: {flight.ifrTime.toFixed(1)}</span>
+                    <Badge variant="secondary" className="text-xs">
+                      IFR: {flight.ifrTime.toFixed(1)}
+                    </Badge>
                   )}
-                  {flight.landings > 0 && (
-                    <span className="text-xs bg-secondary px-2 py-0.5 rounded">
-                      {flight.landings} landing{flight.landings !== 1 ? "s" : ""}
-                    </span>
+                  {(flight.dayLandings > 0 || flight.nightLandings > 0) && (
+                    <Badge variant="secondary" className="text-xs">
+                      {flight.dayLandings + flight.nightLandings} ldg
+                    </Badge>
                   )}
                 </div>
               </div>
@@ -84,7 +120,7 @@ export function FlightList({ flights, isLoading }: FlightListProps) {
               {/* Sync status */}
               <div
                 className={cn(
-                  "p-2 rounded-full",
+                  "p-2 rounded-full shrink-0",
                   flight.syncStatus === "synced" && "bg-[var(--status-synced)]/10",
                   flight.syncStatus === "pending" && "bg-[var(--status-pending)]/10",
                   flight.syncStatus === "error" && "bg-[var(--status-offline)]/10",

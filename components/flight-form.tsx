@@ -2,14 +2,26 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { addFlight, type FlightLog } from "@/lib/indexed-db"
-import { Plane, Clock, MapPin, Save } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Badge } from "@/components/ui/badge"
+import {
+  addFlight,
+  type FlightLog,
+  type Aircraft,
+  type Airport,
+  type Personnel,
+  getAllAircraft,
+  getAllAirports,
+  getAllPersonnel,
+} from "@/lib/indexed-db"
+import { calculateTimesFromOOOI, calculateNightTime } from "@/lib/night-time-calculator"
+import { Plane, Clock, MapPin, Save, Users, Timer, Moon, X } from "lucide-react"
 
 interface FlightFormProps {
   onFlightAdded: (flight: FlightLog) => void
@@ -18,24 +30,151 @@ interface FlightFormProps {
 
 export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [aircraft, setAircraft] = useState<Aircraft[]>([])
+  const [airports, setAirports] = useState<Airport[]>([])
+  const [personnel, setPersonnel] = useState<Personnel[]>([])
+
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split("T")[0],
-    aircraftType: "",
-    aircraftReg: "",
-    departureAirport: "",
-    arrivalAirport: "",
-    departureTime: "",
-    arrivalTime: "",
-    totalTime: "",
-    picTime: "",
-    sicTime: "",
-    dualTime: "",
-    nightTime: "",
+    flightNumber: "",
+    aircraftId: "",
+    departureIcao: "",
+    arrivalIcao: "",
+    // OOOI Times
+    outTime: "",
+    offTime: "",
+    onTime: "",
+    inTime: "",
+    // Role and crew
+    pilotRole: "FO" as "PIC" | "FO" | "STUDENT" | "INSTRUCTOR",
+    crewIds: [] as string[],
+    // Conditions
     ifrTime: "",
-    landings: "",
-    nightLandings: "",
+    actualInstrumentTime: "",
+    simulatedInstrumentTime: "",
+    // Landings
+    dayLandings: "1",
+    nightLandings: "0",
+    // Remarks
     remarks: "",
   })
+
+  // Calculated values
+  const [calculatedTimes, setCalculatedTimes] = useState({
+    blockTime: 0,
+    flightTime: 0,
+    nightTime: 0,
+    p1Time: 0,
+    p2Time: 0,
+    p1usTime: 0,
+    dualTime: 0,
+    instructorTime: 0,
+  })
+
+  // Load reference data
+  useEffect(() => {
+    const loadData = async () => {
+      const [aircraftData, airportData, personnelData] = await Promise.all([
+        getAllAircraft(),
+        getAllAirports(),
+        getAllPersonnel(),
+      ])
+      setAircraft(aircraftData)
+      setAirports(airportData)
+      setPersonnel(personnelData)
+    }
+    loadData()
+  }, [])
+
+  // Get selected aircraft details
+  const selectedAircraft = useMemo(() => {
+    return aircraft.find((a) => a.id === formData.aircraftId)
+  }, [aircraft, formData.aircraftId])
+
+  // Get departure and arrival airports
+  const departureAirport = useMemo(() => {
+    return airports.find((a) => a.icao === formData.departureIcao.toUpperCase())
+  }, [airports, formData.departureIcao])
+
+  const arrivalAirport = useMemo(() => {
+    return airports.find((a) => a.icao === formData.arrivalIcao.toUpperCase())
+  }, [airports, formData.arrivalIcao])
+
+  // Calculate times when OOOI changes
+  useEffect(() => {
+    if (formData.outTime && formData.offTime && formData.onTime && formData.inTime) {
+      const { blockTime, flightTime } = calculateTimesFromOOOI(
+        formData.outTime,
+        formData.offTime,
+        formData.onTime,
+        formData.inTime,
+        formData.date,
+      )
+
+      // Calculate night time if we have airport coordinates
+      let nightTime = 0
+      if (departureAirport && arrivalAirport) {
+        const offDateTime = new Date(`${formData.date}T${formData.offTime}:00Z`)
+        const onDateTime = new Date(`${formData.date}T${formData.onTime}:00Z`)
+        // Handle overnight
+        if (onDateTime < offDateTime) {
+          onDateTime.setUTCDate(onDateTime.getUTCDate() + 1)
+        }
+
+        nightTime = calculateNightTime(
+          offDateTime,
+          onDateTime,
+          departureAirport.latitude,
+          departureAirport.longitude,
+          arrivalAirport.latitude,
+          arrivalAirport.longitude,
+        )
+      }
+
+      // Calculate hours based on role
+      let p1Time = 0,
+        p2Time = 0,
+        p1usTime = 0,
+        dualTime = 0,
+        instructorTime = 0
+
+      switch (formData.pilotRole) {
+        case "PIC":
+          p1Time = flightTime
+          break
+        case "FO":
+          p2Time = flightTime
+          break
+        case "STUDENT":
+          dualTime = flightTime
+          break
+        case "INSTRUCTOR":
+          instructorTime = flightTime
+          p1Time = flightTime // Instructor also logs P1
+          break
+      }
+
+      setCalculatedTimes({
+        blockTime,
+        flightTime,
+        nightTime,
+        p1Time,
+        p2Time,
+        p1usTime,
+        dualTime,
+        instructorTime,
+      })
+    }
+  }, [
+    formData.outTime,
+    formData.offTime,
+    formData.onTime,
+    formData.inTime,
+    formData.date,
+    formData.pilotRole,
+    departureAirport,
+    arrivalAirport,
+  ])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -44,20 +183,33 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
     try {
       const flight = await addFlight({
         date: formData.date,
-        aircraftType: formData.aircraftType,
-        aircraftReg: formData.aircraftReg.toUpperCase(),
-        departureAirport: formData.departureAirport.toUpperCase(),
-        arrivalAirport: formData.arrivalAirport.toUpperCase(),
-        departureTime: formData.departureTime,
-        arrivalTime: formData.arrivalTime,
-        totalTime: Number.parseFloat(formData.totalTime) || 0,
-        picTime: Number.parseFloat(formData.picTime) || 0,
-        sicTime: Number.parseFloat(formData.sicTime) || 0,
-        dualTime: Number.parseFloat(formData.dualTime) || 0,
-        nightTime: Number.parseFloat(formData.nightTime) || 0,
+        flightNumber: formData.flightNumber,
+        aircraftId: formData.aircraftId,
+        aircraftType: selectedAircraft?.type || "",
+        aircraftReg: selectedAircraft?.registration || "",
+        departureAirportId: departureAirport?.id || "",
+        arrivalAirportId: arrivalAirport?.id || "",
+        departureIcao: formData.departureIcao.toUpperCase(),
+        arrivalIcao: formData.arrivalIcao.toUpperCase(),
+        outTime: formData.outTime,
+        offTime: formData.offTime,
+        onTime: formData.onTime,
+        inTime: formData.inTime,
+        blockTime: calculatedTimes.blockTime,
+        flightTime: calculatedTimes.flightTime,
+        p1Time: calculatedTimes.p1Time,
+        p1usTime: calculatedTimes.p1usTime,
+        p2Time: calculatedTimes.p2Time,
+        dualTime: calculatedTimes.dualTime,
+        instructorTime: calculatedTimes.instructorTime,
+        nightTime: calculatedTimes.nightTime,
         ifrTime: Number.parseFloat(formData.ifrTime) || 0,
-        landings: Number.parseInt(formData.landings) || 0,
+        actualInstrumentTime: Number.parseFloat(formData.actualInstrumentTime) || 0,
+        simulatedInstrumentTime: Number.parseFloat(formData.simulatedInstrumentTime) || 0,
+        dayLandings: Number.parseInt(formData.dayLandings) || 0,
         nightLandings: Number.parseInt(formData.nightLandings) || 0,
+        pilotRole: formData.pilotRole,
+        crewIds: formData.crewIds,
         remarks: formData.remarks,
       })
 
@@ -70,9 +222,18 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
     }
   }
 
-  const updateField = (field: string, value: string) => {
+  const updateField = (field: string, value: string | string[]) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
   }
+
+  const toggleCrewMember = (id: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      crewIds: prev.crewIds.includes(id) ? prev.crewIds.filter((c) => c !== id) : [...prev.crewIds, id],
+    }))
+  }
+
+  const formatHours = (hours: number) => hours.toFixed(1)
 
   return (
     <Card className="bg-card border-border">
@@ -84,7 +245,7 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Date and Aircraft */}
+          {/* Date, Flight Number, and Aircraft */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="date">Date</Label>
@@ -98,26 +259,29 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="aircraftType">Aircraft Type</Label>
+              <Label htmlFor="flightNumber">Flight Number</Label>
               <Input
-                id="aircraftType"
-                placeholder="C172"
-                value={formData.aircraftType}
-                onChange={(e) => updateField("aircraftType", e.target.value)}
-                required
-                className="bg-input"
+                id="flightNumber"
+                placeholder="SQ123"
+                value={formData.flightNumber}
+                onChange={(e) => updateField("flightNumber", e.target.value)}
+                className="bg-input uppercase"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="aircraftReg">Registration</Label>
-              <Input
-                id="aircraftReg"
-                placeholder="N12345"
-                value={formData.aircraftReg}
-                onChange={(e) => updateField("aircraftReg", e.target.value)}
-                required
-                className="bg-input uppercase"
-              />
+              <Label htmlFor="aircraft">Aircraft</Label>
+              <Select value={formData.aircraftId} onValueChange={(v) => updateField("aircraftId", v)}>
+                <SelectTrigger className="bg-input">
+                  <SelectValue placeholder="Select aircraft" />
+                </SelectTrigger>
+                <SelectContent>
+                  {aircraft.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.registration} ({a.type})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -127,147 +291,225 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
               <MapPin className="h-4 w-4" />
               <span className="text-sm font-medium">Route</span>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="departureAirport">From</Label>
+                <Label htmlFor="departureIcao">Departure (ICAO)</Label>
                 <Input
-                  id="departureAirport"
-                  placeholder="KJFK"
-                  value={formData.departureAirport}
-                  onChange={(e) => updateField("departureAirport", e.target.value)}
+                  id="departureIcao"
+                  placeholder="WSSS"
+                  value={formData.departureIcao}
+                  onChange={(e) => updateField("departureIcao", e.target.value)}
                   required
                   className="bg-input uppercase"
+                  list="departure-airports"
                 />
+                <datalist id="departure-airports">
+                  {airports.map((a) => (
+                    <option key={a.id} value={a.icao}>
+                      {a.name} ({a.iata})
+                    </option>
+                  ))}
+                </datalist>
+                {departureAirport && <p className="text-xs text-muted-foreground">{departureAirport.name}</p>}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="arrivalAirport">To</Label>
+                <Label htmlFor="arrivalIcao">Arrival (ICAO)</Label>
                 <Input
-                  id="arrivalAirport"
-                  placeholder="KLAX"
-                  value={formData.arrivalAirport}
-                  onChange={(e) => updateField("arrivalAirport", e.target.value)}
+                  id="arrivalIcao"
+                  placeholder="VHHH"
+                  value={formData.arrivalIcao}
+                  onChange={(e) => updateField("arrivalIcao", e.target.value)}
                   required
                   className="bg-input uppercase"
+                  list="arrival-airports"
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="departureTime">Departure</Label>
-                <Input
-                  id="departureTime"
-                  type="time"
-                  value={formData.departureTime}
-                  onChange={(e) => updateField("departureTime", e.target.value)}
-                  required
-                  className="bg-input"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="arrivalTime">Arrival</Label>
-                <Input
-                  id="arrivalTime"
-                  type="time"
-                  value={formData.arrivalTime}
-                  onChange={(e) => updateField("arrivalTime", e.target.value)}
-                  required
-                  className="bg-input"
-                />
+                <datalist id="arrival-airports">
+                  {airports.map((a) => (
+                    <option key={a.id} value={a.icao}>
+                      {a.name} ({a.iata})
+                    </option>
+                  ))}
+                </datalist>
+                {arrivalAirport && <p className="text-xs text-muted-foreground">{arrivalAirport.name}</p>}
               </div>
             </div>
           </div>
 
-          {/* Flight Times */}
+          {/* OOOI Times */}
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-muted-foreground">
-              <Clock className="h-4 w-4" />
-              <span className="text-sm font-medium">Flight Time (hours)</span>
+              <Timer className="h-4 w-4" />
+              <span className="text-sm font-medium">OOOI Times (UTC)</span>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="totalTime">Total</Label>
+                <Label htmlFor="outTime">OUT (Block Off)</Label>
                 <Input
-                  id="totalTime"
-                  type="number"
-                  step="0.1"
-                  placeholder="0.0"
-                  value={formData.totalTime}
-                  onChange={(e) => updateField("totalTime", e.target.value)}
+                  id="outTime"
+                  type="time"
+                  value={formData.outTime}
+                  onChange={(e) => updateField("outTime", e.target.value)}
                   required
                   className="bg-input"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="picTime">PIC</Label>
+                <Label htmlFor="offTime">OFF (Takeoff)</Label>
                 <Input
-                  id="picTime"
-                  type="number"
-                  step="0.1"
-                  placeholder="0.0"
-                  value={formData.picTime}
-                  onChange={(e) => updateField("picTime", e.target.value)}
+                  id="offTime"
+                  type="time"
+                  value={formData.offTime}
+                  onChange={(e) => updateField("offTime", e.target.value)}
+                  required
                   className="bg-input"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="sicTime">SIC</Label>
+                <Label htmlFor="onTime">ON (Landing)</Label>
                 <Input
-                  id="sicTime"
-                  type="number"
-                  step="0.1"
-                  placeholder="0.0"
-                  value={formData.sicTime}
-                  onChange={(e) => updateField("sicTime", e.target.value)}
+                  id="onTime"
+                  type="time"
+                  value={formData.onTime}
+                  onChange={(e) => updateField("onTime", e.target.value)}
+                  required
                   className="bg-input"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="dualTime">Dual</Label>
+                <Label htmlFor="inTime">IN (Block On)</Label>
                 <Input
-                  id="dualTime"
-                  type="number"
-                  step="0.1"
-                  placeholder="0.0"
-                  value={formData.dualTime}
-                  onChange={(e) => updateField("dualTime", e.target.value)}
-                  className="bg-input"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="nightTime">Night</Label>
-                <Input
-                  id="nightTime"
-                  type="number"
-                  step="0.1"
-                  placeholder="0.0"
-                  value={formData.nightTime}
-                  onChange={(e) => updateField("nightTime", e.target.value)}
-                  className="bg-input"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ifrTime">IFR</Label>
-                <Input
-                  id="ifrTime"
-                  type="number"
-                  step="0.1"
-                  placeholder="0.0"
-                  value={formData.ifrTime}
-                  onChange={(e) => updateField("ifrTime", e.target.value)}
+                  id="inTime"
+                  type="time"
+                  value={formData.inTime}
+                  onChange={(e) => updateField("inTime", e.target.value)}
+                  required
                   className="bg-input"
                 />
               </div>
             </div>
           </div>
 
-          {/* Landings */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* Calculated Times Display */}
+          {calculatedTimes.blockTime > 0 && (
+            <div className="bg-secondary/50 rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2 text-foreground">
+                <Clock className="h-4 w-4 text-primary" />
+                <span className="text-sm font-medium">Calculated Times</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <p className="text-muted-foreground">Block Time</p>
+                  <p className="text-lg font-semibold">{formatHours(calculatedTimes.blockTime)}h</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Flight Time</p>
+                  <p className="text-lg font-semibold">{formatHours(calculatedTimes.flightTime)}h</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <div>
+                    <p className="text-muted-foreground flex items-center gap-1">
+                      <Moon className="h-3 w-3" /> Night Time
+                    </p>
+                    <p className="text-lg font-semibold">{formatHours(calculatedTimes.nightTime)}h</p>
+                  </div>
+                  {!departureAirport || !arrivalAirport ? (
+                    <Badge variant="outline" className="text-xs">
+                      Add airports to DB
+                    </Badge>
+                  ) : null}
+                </div>
+                <div>
+                  <p className="text-muted-foreground">
+                    {formData.pilotRole === "PIC" && "P1 Time"}
+                    {formData.pilotRole === "FO" && "P2 Time"}
+                    {formData.pilotRole === "STUDENT" && "Dual Time"}
+                    {formData.pilotRole === "INSTRUCTOR" && "Instructor Time"}
+                  </p>
+                  <p className="text-lg font-semibold">{formatHours(calculatedTimes.flightTime)}h</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Pilot Role */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Users className="h-4 w-4" />
+              <span className="text-sm font-medium">Your Role</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {(["PIC", "FO", "STUDENT", "INSTRUCTOR"] as const).map((role) => (
+                <Button
+                  key={role}
+                  type="button"
+                  variant={formData.pilotRole === role ? "default" : "outline"}
+                  onClick={() => updateField("pilotRole", role)}
+                  className="w-full"
+                >
+                  {role === "PIC" && "Captain (P1)"}
+                  {role === "FO" && "First Officer (P2)"}
+                  {role === "STUDENT" && "Student (Dual)"}
+                  {role === "INSTRUCTOR" && "Instructor"}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {/* Crew Selection */}
+          <div className="space-y-3">
+            <Label>Crew Members</Label>
+            <div className="flex flex-wrap gap-2">
+              {personnel.map((person) => (
+                <Badge
+                  key={person.id}
+                  variant={formData.crewIds.includes(person.id) ? "default" : "outline"}
+                  className="cursor-pointer px-3 py-1.5"
+                  onClick={() => toggleCrewMember(person.id)}
+                >
+                  {person.firstName} {person.lastName}
+                  {person.role === "CAPT" && " (CAPT)"}
+                  {person.role === "FO" && " (FO)"}
+                  {formData.crewIds.includes(person.id) && <X className="h-3 w-3 ml-1" />}
+                </Badge>
+              ))}
+              {personnel.length === 0 && <p className="text-sm text-muted-foreground">No crew members added yet</p>}
+            </div>
+          </div>
+
+          {/* Conditions and Landings */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="landings">Day Landings</Label>
+              <Label htmlFor="ifrTime">IFR Time</Label>
               <Input
-                id="landings"
+                id="ifrTime"
                 type="number"
-                placeholder="0"
-                value={formData.landings}
-                onChange={(e) => updateField("landings", e.target.value)}
+                step="0.1"
+                placeholder="0.0"
+                value={formData.ifrTime}
+                onChange={(e) => updateField("ifrTime", e.target.value)}
+                className="bg-input"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="actualInstrumentTime">Actual IMC</Label>
+              <Input
+                id="actualInstrumentTime"
+                type="number"
+                step="0.1"
+                placeholder="0.0"
+                value={formData.actualInstrumentTime}
+                onChange={(e) => updateField("actualInstrumentTime", e.target.value)}
+                className="bg-input"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="dayLandings">Day Landings</Label>
+              <Input
+                id="dayLandings"
+                type="number"
+                placeholder="1"
+                value={formData.dayLandings}
+                onChange={(e) => updateField("dayLandings", e.target.value)}
                 className="bg-input"
               />
             </div>
@@ -289,7 +531,7 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
             <Label htmlFor="remarks">Remarks</Label>
             <Textarea
               id="remarks"
-              placeholder="Flight notes, weather conditions, training maneuvers..."
+              placeholder="Flight notes, delays, weather conditions..."
               value={formData.remarks}
               onChange={(e) => updateField("remarks", e.target.value)}
               className="bg-input min-h-[80px]"
