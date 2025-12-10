@@ -70,17 +70,16 @@ function SwipeableFlightCard({
       isHorizontalSwipe.current = Math.abs(diffX) > Math.abs(diffY)
     }
 
-    // Only handle horizontal swipes (swipe right to reveal delete)
-    if (isHorizontalSwipe.current && diffX > 0) {
-      setSwipeX(Math.min(diffX, SWIPE_THRESHOLD + 20))
+    if (isHorizontalSwipe.current && diffX < 0) {
+      setSwipeX(Math.max(diffX, -(SWIPE_THRESHOLD + 20)))
     }
   }
 
   const handleTouchEnd = () => {
     setIsSwiping(false)
     // Snap to open or closed
-    if (swipeX > SWIPE_THRESHOLD / 2) {
-      setSwipeX(SWIPE_THRESHOLD)
+    if (swipeX < -SWIPE_THRESHOLD / 2) {
+      setSwipeX(-SWIPE_THRESHOLD)
     } else {
       setSwipeX(0)
     }
@@ -88,7 +87,7 @@ function SwipeableFlightCard({
 
   const handleClick = () => {
     // If swiped open, close it; otherwise edit
-    if (swipeX > 0) {
+    if (swipeX < 0) {
       setSwipeX(0)
     } else {
       onEdit()
@@ -99,11 +98,10 @@ function SwipeableFlightCard({
 
   return (
     <div className="relative overflow-hidden rounded-lg">
-      {/* Delete button background */}
       <div
         className={cn(
-          "absolute inset-y-0 left-0 flex items-center justify-center bg-destructive transition-opacity",
-          swipeX > 0 ? "opacity-100" : "opacity-0",
+          "absolute inset-y-0 right-0 flex items-center justify-center bg-destructive transition-opacity",
+          swipeX < 0 ? "opacity-100" : "opacity-0",
         )}
         style={{ width: SWIPE_THRESHOLD }}
       >
@@ -226,13 +224,6 @@ function SwipeableFlightCard({
           </div>
         </CardContent>
       </Card>
-
-      {/* Hint text when swiped */}
-      {swipeX > SWIPE_THRESHOLD / 2 && (
-        <div className="absolute top-1/2 left-2 -translate-y-1/2 text-xs text-destructive-foreground font-medium">
-          Tap to delete
-        </div>
-      )}
     </div>
   )
 }
@@ -308,10 +299,6 @@ export function FlightList({ flights, isLoading, onEdit, onDeleted }: FlightList
 
   return (
     <>
-      <p className="text-xs text-muted-foreground mb-3 text-center">
-        Tap a flight to edit &bull; Swipe right to delete
-      </p>
-
       <div className="space-y-3">
         {visibleFlights.map((flight) => (
           <SwipeableFlightCard

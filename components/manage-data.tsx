@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import type React from "react"
+import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -10,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,10 +38,111 @@ import {
 } from "@/lib/indexed-db"
 import { useAircraft, useAirports, usePersonnel } from "@/hooks/use-indexed-db"
 import { syncService } from "@/lib/sync-service"
-import { Plane, MapPin, Users, Plus, X, Loader2, Pencil, Trash2 } from "lucide-react"
+import { Plane, MapPin, Users, Plus, X, Loader2, Trash2 } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 interface ManageDataProps {
   onClose?: () => void
+}
+
+const SWIPE_THRESHOLD = 80
+
+function SwipeableItem({
+  children,
+  onTap,
+  onDelete,
+}: {
+  children: React.ReactNode
+  onTap: () => void
+  onDelete: () => void
+}) {
+  const [swipeX, setSwipeX] = useState(0)
+  const [isSwiping, setIsSwiping] = useState(false)
+  const startX = useRef(0)
+  const startY = useRef(0)
+  const isHorizontalSwipe = useRef<boolean | null>(null)
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    startX.current = e.touches[0].clientX
+    startY.current = e.touches[0].clientY
+    isHorizontalSwipe.current = null
+    setIsSwiping(true)
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isSwiping) return
+
+    const currentX = e.touches[0].clientX
+    const currentY = e.touches[0].clientY
+    const diffX = currentX - startX.current
+    const diffY = currentY - startY.current
+
+    if (isHorizontalSwipe.current === null && (Math.abs(diffX) > 10 || Math.abs(diffY) > 10)) {
+      isHorizontalSwipe.current = Math.abs(diffX) > Math.abs(diffY)
+    }
+
+    // Swipe LEFT to reveal delete
+    if (isHorizontalSwipe.current && diffX < 0) {
+      setSwipeX(Math.max(diffX, -(SWIPE_THRESHOLD + 20)))
+    }
+  }
+
+  const handleTouchEnd = () => {
+    setIsSwiping(false)
+    if (swipeX < -SWIPE_THRESHOLD / 2) {
+      setSwipeX(-SWIPE_THRESHOLD)
+    } else {
+      setSwipeX(0)
+    }
+  }
+
+  const handleClick = () => {
+    if (swipeX < 0) {
+      setSwipeX(0)
+    } else {
+      onTap()
+    }
+  }
+
+  return (
+    <div className="relative overflow-hidden rounded">
+      {/* Delete button on right */}
+      <div
+        className={cn(
+          "absolute inset-y-0 right-0 flex items-center justify-center bg-destructive transition-opacity",
+          swipeX < 0 ? "opacity-100" : "opacity-0",
+        )}
+        style={{ width: SWIPE_THRESHOLD }}
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-full w-full rounded-none text-destructive-foreground hover:bg-destructive/90"
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+        >
+          <Trash2 className="h-5 w-5" />
+        </Button>
+      </div>
+
+      {/* Swipeable content */}
+      <div
+        className={cn(
+          "bg-secondary p-2 cursor-pointer active:bg-secondary/80",
+          !isSwiping && "transition-transform duration-200",
+        )}
+        style={{ transform: `translateX(${swipeX}px)` }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onClick={handleClick}
+      >
+        {children}
+      </div>
+    </div>
+  )
 }
 
 export function ManageData({ onClose }: ManageDataProps) {
@@ -382,35 +484,21 @@ export function ManageData({ onClose }: ManageDataProps) {
                 ) : (
                   <div className="space-y-2">
                     {aircraft.map((a) => (
-                      <div key={a.id} className="flex items-center justify-between p-2 bg-secondary rounded group">
-                        <div>
-                          <span className="font-medium">{a.registration}</span>
-                          <span className="text-muted-foreground ml-2">
-                            {a.type} - {a.model}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">{a.engineType}</Badge>
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => setEditingAircraft(a)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-destructive hover:text-destructive"
-                              onClick={() => setDeleteAircraftTarget(a)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                      <SwipeableItem
+                        key={a.id}
+                        onTap={() => setEditingAircraft(a)}
+                        onDelete={() => setDeleteAircraftTarget(a)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-medium">{a.registration}</span>
+                            <span className="text-muted-foreground ml-2">
+                              {a.type} - {a.model}
+                            </span>
                           </div>
+                          <Badge variant="outline">{a.engineType}</Badge>
                         </div>
-                      </div>
+                      </SwipeableItem>
                     ))}
                     {aircraft.length === 0 && (
                       <p className="text-sm text-muted-foreground text-center py-4">No aircraft added</p>
@@ -549,33 +637,20 @@ export function ManageData({ onClose }: ManageDataProps) {
                 ) : (
                   <div className="space-y-2">
                     {airports.map((a) => (
-                      <div key={a.id} className="flex items-center justify-between p-2 bg-secondary rounded group">
-                        <div>
-                          <span className="font-medium">{a.icao}</span>
-                          <span className="text-muted-foreground ml-2">{a.name}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">{a.iata}</Badge>
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => setEditingAirport(a)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-destructive hover:text-destructive"
-                              onClick={() => setDeleteAirportTarget(a)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                      <SwipeableItem
+                        key={a.id}
+                        onTap={() => setEditingAirport(a)}
+                        onDelete={() => setDeleteAirportTarget(a)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-medium">{a.icao}</span>
+                            {a.iata && <span className="text-muted-foreground">/{a.iata}</span>}
+                            <span className="text-muted-foreground ml-2">{a.name}</span>
                           </div>
+                          <span className="text-xs text-muted-foreground">{a.city}</span>
                         </div>
-                      </div>
+                      </SwipeableItem>
                     ))}
                     {airports.length === 0 && (
                       <p className="text-sm text-muted-foreground text-center py-4">No airports added</p>
@@ -589,11 +664,11 @@ export function ManageData({ onClose }: ManageDataProps) {
             <TabsContent value="personnel" className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="space-y-1">
-                  <Label htmlFor="pFirstName" className="text-xs">
+                  <Label htmlFor="pFirst" className="text-xs">
                     First Name
                   </Label>
                   <Input
-                    id="pFirstName"
+                    id="pFirst"
                     placeholder="John"
                     value={personnelForm.firstName}
                     onChange={(e) => setPersonnelForm({ ...personnelForm, firstName: e.target.value })}
@@ -601,14 +676,26 @@ export function ManageData({ onClose }: ManageDataProps) {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="pLastName" className="text-xs">
+                  <Label htmlFor="pLast" className="text-xs">
                     Last Name
                   </Label>
                   <Input
-                    id="pLastName"
-                    placeholder="Doe"
+                    id="pLast"
+                    placeholder="Smith"
                     value={personnelForm.lastName}
                     onChange={(e) => setPersonnelForm({ ...personnelForm, lastName: e.target.value })}
+                    className="bg-input"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="pEmpId" className="text-xs">
+                    Employee ID
+                  </Label>
+                  <Input
+                    id="pEmpId"
+                    placeholder="SQ12345"
+                    value={personnelForm.employeeId}
+                    onChange={(e) => setPersonnelForm({ ...personnelForm, employeeId: e.target.value })}
                     className="bg-input"
                   />
                 </div>
@@ -624,23 +711,11 @@ export function ManageData({ onClose }: ManageDataProps) {
                     <SelectContent>
                       <SelectItem value="CAPT">Captain</SelectItem>
                       <SelectItem value="FO">First Officer</SelectItem>
-                      <SelectItem value="INSTRUCTOR">Instructor</SelectItem>
-                      <SelectItem value="STUDENT">Student</SelectItem>
-                      <SelectItem value="OTHER">Other</SelectItem>
+                      <SelectItem value="SO">Second Officer</SelectItem>
+                      <SelectItem value="INS">Instructor</SelectItem>
+                      <SelectItem value="EXM">Examiner</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="pEmpId" className="text-xs">
-                    Employee ID
-                  </Label>
-                  <Input
-                    id="pEmpId"
-                    placeholder="12345"
-                    value={personnelForm.employeeId}
-                    onChange={(e) => setPersonnelForm({ ...personnelForm, employeeId: e.target.value })}
-                    className="bg-input"
-                  />
                 </div>
               </div>
               <Button onClick={handleAddPersonnel} disabled={isSubmitting} size="sm">
@@ -654,35 +729,21 @@ export function ManageData({ onClose }: ManageDataProps) {
                 ) : (
                   <div className="space-y-2">
                     {personnel.map((p) => (
-                      <div key={p.id} className="flex items-center justify-between p-2 bg-secondary rounded group">
-                        <div>
-                          <span className="font-medium">
-                            {p.firstName} {p.lastName}
-                          </span>
-                          {p.employeeId && <span className="text-muted-foreground ml-2">#{p.employeeId}</span>}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">{p.role}</Badge>
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => setEditingPersonnel(p)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-destructive hover:text-destructive"
-                              onClick={() => setDeletePersonnelTarget(p)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                      <SwipeableItem
+                        key={p.id}
+                        onTap={() => setEditingPersonnel(p)}
+                        onDelete={() => setDeletePersonnelTarget(p)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-medium">
+                              {p.firstName} {p.lastName}
+                            </span>
+                            {p.employeeId && <span className="text-muted-foreground ml-2">({p.employeeId})</span>}
                           </div>
+                          <Badge variant="outline">{p.role}</Badge>
                         </div>
-                      </div>
+                      </SwipeableItem>
                     ))}
                     {personnel.length === 0 && (
                       <p className="text-sm text-muted-foreground text-center py-4">No personnel added</p>
@@ -702,166 +763,162 @@ export function ManageData({ onClose }: ManageDataProps) {
             <DialogTitle>Edit Aircraft</DialogTitle>
           </DialogHeader>
           {editingAircraft && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Registration</Label>
-                  <Input
-                    value={editingAircraft.registration}
-                    onChange={(e) =>
-                      setEditingAircraft({ ...editingAircraft, registration: e.target.value.toUpperCase() })
-                    }
-                    className="uppercase"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Type</Label>
-                  <Input
-                    value={editingAircraft.type}
-                    onChange={(e) => setEditingAircraft({ ...editingAircraft, type: e.target.value.toUpperCase() })}
-                    className="uppercase"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Model</Label>
-                  <Input
-                    value={editingAircraft.model}
-                    onChange={(e) => setEditingAircraft({ ...editingAircraft, model: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Engine Type</Label>
-                  <Select
-                    value={editingAircraft.engineType}
-                    onValueChange={(v) =>
-                      setEditingAircraft({ ...editingAircraft, engineType: v as Aircraft["engineType"] })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="SEP">SEP</SelectItem>
-                      <SelectItem value="MEP">MEP</SelectItem>
-                      <SelectItem value="SET">SET</SelectItem>
-                      <SelectItem value="MET">MET</SelectItem>
-                      <SelectItem value="JET">JET</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Registration</Label>
+                <Input
+                  value={editingAircraft.registration}
+                  onChange={(e) =>
+                    setEditingAircraft({ ...editingAircraft, registration: e.target.value.toUpperCase() })
+                  }
+                  className="uppercase"
+                />
               </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setEditingAircraft(null)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleUpdateAircraft} disabled={isSubmitting}>
-                  {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                  Save Changes
-                </Button>
+              <div className="space-y-1">
+                <Label className="text-xs">Type</Label>
+                <Input
+                  value={editingAircraft.type}
+                  onChange={(e) => setEditingAircraft({ ...editingAircraft, type: e.target.value.toUpperCase() })}
+                  className="uppercase"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Model</Label>
+                <Input
+                  value={editingAircraft.model}
+                  onChange={(e) => setEditingAircraft({ ...editingAircraft, model: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Engine Type</Label>
+                <Select
+                  value={editingAircraft.engineType}
+                  onValueChange={(v) =>
+                    setEditingAircraft({ ...editingAircraft, engineType: v as Aircraft["engineType"] })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="SEP">SEP</SelectItem>
+                    <SelectItem value="MEP">MEP</SelectItem>
+                    <SelectItem value="SET">SET</SelectItem>
+                    <SelectItem value="MET">MET</SelectItem>
+                    <SelectItem value="JET">JET</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingAircraft(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateAircraft} disabled={isSubmitting}>
+              {isSubmitting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Edit Airport Dialog */}
       <Dialog open={!!editingAirport} onOpenChange={() => setEditingAirport(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Airport</DialogTitle>
           </DialogHeader>
           {editingAirport && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>ICAO</Label>
-                  <Input
-                    value={editingAirport.icao}
-                    onChange={(e) => setEditingAirport({ ...editingAirport, icao: e.target.value.toUpperCase() })}
-                    className="uppercase"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>IATA</Label>
-                  <Input
-                    value={editingAirport.iata}
-                    onChange={(e) => setEditingAirport({ ...editingAirport, iata: e.target.value.toUpperCase() })}
-                    className="uppercase"
-                  />
-                </div>
-                <div className="space-y-2 col-span-2">
-                  <Label>Name</Label>
-                  <Input
-                    value={editingAirport.name}
-                    onChange={(e) => setEditingAirport({ ...editingAirport, name: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>City</Label>
-                  <Input
-                    value={editingAirport.city}
-                    onChange={(e) => setEditingAirport({ ...editingAirport, city: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Country</Label>
-                  <Input
-                    value={editingAirport.country}
-                    onChange={(e) => setEditingAirport({ ...editingAirport, country: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Latitude</Label>
-                  <Input
-                    type="number"
-                    step="0.0001"
-                    value={editingAirport.latitude}
-                    onChange={(e) =>
-                      setEditingAirport({ ...editingAirport, latitude: Number.parseFloat(e.target.value) || 0 })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Longitude</Label>
-                  <Input
-                    type="number"
-                    step="0.0001"
-                    value={editingAirport.longitude}
-                    onChange={(e) =>
-                      setEditingAirport({ ...editingAirport, longitude: Number.parseFloat(e.target.value) || 0 })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Timezone</Label>
-                  <Input
-                    value={editingAirport.timezone}
-                    onChange={(e) => setEditingAirport({ ...editingAirport, timezone: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>UTC Offset</Label>
-                  <Input
-                    type="number"
-                    step="0.5"
-                    value={editingAirport.utcOffset}
-                    onChange={(e) =>
-                      setEditingAirport({ ...editingAirport, utcOffset: Number.parseFloat(e.target.value) || 0 })
-                    }
-                  />
-                </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">ICAO</Label>
+                <Input
+                  value={editingAirport.icao}
+                  onChange={(e) => setEditingAirport({ ...editingAirport, icao: e.target.value.toUpperCase() })}
+                  className="uppercase"
+                />
               </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setEditingAirport(null)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleUpdateAirport} disabled={isSubmitting}>
-                  {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                  Save Changes
-                </Button>
+              <div className="space-y-1">
+                <Label className="text-xs">IATA</Label>
+                <Input
+                  value={editingAirport.iata}
+                  onChange={(e) => setEditingAirport({ ...editingAirport, iata: e.target.value.toUpperCase() })}
+                  className="uppercase"
+                />
+              </div>
+              <div className="space-y-1 col-span-2">
+                <Label className="text-xs">Name</Label>
+                <Input
+                  value={editingAirport.name}
+                  onChange={(e) => setEditingAirport({ ...editingAirport, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">City</Label>
+                <Input
+                  value={editingAirport.city}
+                  onChange={(e) => setEditingAirport({ ...editingAirport, city: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Country</Label>
+                <Input
+                  value={editingAirport.country}
+                  onChange={(e) => setEditingAirport({ ...editingAirport, country: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Latitude</Label>
+                <Input
+                  type="number"
+                  step="0.0001"
+                  value={editingAirport.latitude}
+                  onChange={(e) =>
+                    setEditingAirport({ ...editingAirport, latitude: Number.parseFloat(e.target.value) || 0 })
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Longitude</Label>
+                <Input
+                  type="number"
+                  step="0.0001"
+                  value={editingAirport.longitude}
+                  onChange={(e) =>
+                    setEditingAirport({ ...editingAirport, longitude: Number.parseFloat(e.target.value) || 0 })
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Timezone</Label>
+                <Input
+                  value={editingAirport.timezone}
+                  onChange={(e) => setEditingAirport({ ...editingAirport, timezone: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">UTC Offset</Label>
+                <Input
+                  type="number"
+                  step="0.5"
+                  value={editingAirport.utcOffset}
+                  onChange={(e) =>
+                    setEditingAirport({ ...editingAirport, utcOffset: Number.parseFloat(e.target.value) || 0 })
+                  }
+                />
               </div>
             </div>
           )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingAirport(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateAirport} disabled={isSubmitting}>
+              {isSubmitting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -872,77 +929,83 @@ export function ManageData({ onClose }: ManageDataProps) {
             <DialogTitle>Edit Personnel</DialogTitle>
           </DialogHeader>
           {editingPersonnel && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>First Name</Label>
-                  <Input
-                    value={editingPersonnel.firstName}
-                    onChange={(e) => setEditingPersonnel({ ...editingPersonnel, firstName: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Last Name</Label>
-                  <Input
-                    value={editingPersonnel.lastName}
-                    onChange={(e) => setEditingPersonnel({ ...editingPersonnel, lastName: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Role</Label>
-                  <Select
-                    value={editingPersonnel.role}
-                    onValueChange={(v) => setEditingPersonnel({ ...editingPersonnel, role: v as Personnel["role"] })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="CAPT">Captain</SelectItem>
-                      <SelectItem value="FO">First Officer</SelectItem>
-                      <SelectItem value="INSTRUCTOR">Instructor</SelectItem>
-                      <SelectItem value="STUDENT">Student</SelectItem>
-                      <SelectItem value="OTHER">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Employee ID</Label>
-                  <Input
-                    value={editingPersonnel.employeeId || ""}
-                    onChange={(e) => setEditingPersonnel({ ...editingPersonnel, employeeId: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>License Number</Label>
-                  <Input
-                    value={editingPersonnel.licenseNumber || ""}
-                    onChange={(e) => setEditingPersonnel({ ...editingPersonnel, licenseNumber: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Company</Label>
-                  <Input
-                    value={editingPersonnel.company || ""}
-                    onChange={(e) => setEditingPersonnel({ ...editingPersonnel, company: e.target.value })}
-                  />
-                </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">First Name</Label>
+                <Input
+                  value={editingPersonnel.firstName}
+                  onChange={(e) => setEditingPersonnel({ ...editingPersonnel, firstName: e.target.value })}
+                />
               </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setEditingPersonnel(null)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleUpdatePersonnel} disabled={isSubmitting}>
-                  {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                  Save Changes
-                </Button>
+              <div className="space-y-1">
+                <Label className="text-xs">Last Name</Label>
+                <Input
+                  value={editingPersonnel.lastName}
+                  onChange={(e) => setEditingPersonnel({ ...editingPersonnel, lastName: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Employee ID</Label>
+                <Input
+                  value={editingPersonnel.employeeId}
+                  onChange={(e) => setEditingPersonnel({ ...editingPersonnel, employeeId: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Role</Label>
+                <Select
+                  value={editingPersonnel.role}
+                  onValueChange={(v) => setEditingPersonnel({ ...editingPersonnel, role: v as Personnel["role"] })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CAPT">Captain</SelectItem>
+                    <SelectItem value="FO">First Officer</SelectItem>
+                    <SelectItem value="SO">Second Officer</SelectItem>
+                    <SelectItem value="INS">Instructor</SelectItem>
+                    <SelectItem value="EXM">Examiner</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">License Number</Label>
+                <Input
+                  value={editingPersonnel.licenseNumber}
+                  onChange={(e) => setEditingPersonnel({ ...editingPersonnel, licenseNumber: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Company</Label>
+                <Input
+                  value={editingPersonnel.company}
+                  onChange={(e) => setEditingPersonnel({ ...editingPersonnel, company: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1 col-span-2">
+                <Label className="text-xs">Email</Label>
+                <Input
+                  type="email"
+                  value={editingPersonnel.email}
+                  onChange={(e) => setEditingPersonnel({ ...editingPersonnel, email: e.target.value })}
+                />
               </div>
             </div>
           )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingPersonnel(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdatePersonnel} disabled={isSubmitting}>
+              {isSubmitting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmations */}
+      {/* Delete Confirmation Dialogs */}
       <AlertDialog open={!!deleteAircraftTarget} onOpenChange={() => setDeleteAircraftTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
