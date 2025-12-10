@@ -8,79 +8,127 @@ import { StatsDashboard } from "@/components/stats-dashboard"
 import { ManageData } from "@/components/manage-data"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { Button } from "@/components/ui/button"
-import { getAllFlights, getFlightStats, type FlightLog } from "@/lib/indexed-db"
+import { Skeleton } from "@/components/ui/skeleton"
+import type { FlightLog } from "@/lib/indexed-db"
 import { syncService } from "@/lib/sync-service"
-import { Plus, Database } from "lucide-react"
+import { useFlights, useFlightStats, refreshAllData, useDBReady } from "@/hooks/use-indexed-db"
+import { Plus, Database, RefreshCw, AlertCircle } from "lucide-react"
 
 export default function Home() {
-  const [flights, setFlights] = useState<FlightLog[]>([])
-  const [stats, setStats] = useState({
-    totalFlights: 0,
-    blockTime: 0,
-    flightTime: 0,
-    p1Time: 0,
-    p2Time: 0,
-    p1usTime: 0,
-    dualTime: 0,
-    nightTime: 0,
-    ifrTime: 0,
-    totalDayLandings: 0,
-    totalNightLandings: 0,
-    uniqueAircraft: 0,
-    uniqueAirports: 0,
-  })
-  const [isLoading, setIsLoading] = useState(true)
+  const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
+  const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
+  const { stats, isLoading: statsLoading, refresh: refreshStats } = useFlightStats()
+
+  const [isSyncing, setIsSyncing] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [showManageData, setShowManageData] = useState(false)
-
-  const loadData = async () => {
-    try {
-      const [flightData, statsData] = await Promise.all([getAllFlights(), getFlightStats()])
-      setFlights(flightData)
-      setStats(statsData)
-    } catch (error) {
-      console.error("Failed to load data:", error)
-    } finally {
-      setIsLoading(false)
-    }
-  }
+  const [syncError, setSyncError] = useState<string | null>(null)
 
   useEffect(() => {
-    loadData()
-
-    if (navigator.onLine) {
-      syncService.syncPendingChanges()
-    }
+    const unsubscribe = syncService.onDataChanged(() => {
+      refreshAllData()
+    })
+    return unsubscribe
   }, [])
 
-  const handleFlightAdded = (flight: FlightLog) => {
-    setFlights((prev) => [flight, ...prev])
-    setStats((prev) => ({
-      ...prev,
-      totalFlights: prev.totalFlights + 1,
-      blockTime: prev.blockTime + flight.blockTime,
-      flightTime: prev.flightTime + flight.flightTime,
-      p1Time: prev.p1Time + flight.p1Time,
-      p2Time: prev.p2Time + flight.p2Time,
-      nightTime: prev.nightTime + flight.nightTime,
-      ifrTime: prev.ifrTime + flight.ifrTime,
-      totalDayLandings: prev.totalDayLandings + flight.dayLandings,
-      totalNightLandings: prev.totalNightLandings + flight.nightLandings,
-    }))
+  useEffect(() => {
+    if (!dbReady) return
+
+    const doInitialSync = async () => {
+      if (navigator.onLine) {
+        setIsSyncing(true)
+        setSyncError(null)
+        try {
+          const result = await syncService.fullSync()
+          console.log("[v0] Initial sync complete:", result)
+          // Refresh data after sync
+          await refreshAllData()
+        } catch (error) {
+          console.error("[v0] Initial sync failed:", error)
+          setSyncError("Sync failed. Data may be outdated.")
+        } finally {
+          setIsSyncing(false)
+        }
+      }
+    }
+
+    doInitialSync()
+  }, [dbReady])
+
+  const handleManualSync = async () => {
+    if (!navigator.onLine) {
+      setSyncError("You are offline. Sync will happen when connection is restored.")
+      return
+    }
+
+    setIsSyncing(true)
+    setSyncError(null)
+    try {
+      const result = await syncService.fullSync()
+      console.log("[v0] Manual sync complete:", result)
+      await refreshAllData()
+    } catch (error) {
+      console.error("[v0] Manual sync failed:", error)
+      setSyncError("Sync failed. Please try again.")
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  const handleFlightAdded = async (flight: FlightLog) => {
+    // Refresh flights and stats
+    await refreshFlights()
+    await refreshStats()
     setShowForm(false)
 
-    syncService.syncPendingChanges()
+    // Trigger sync in background
+    if (navigator.onLine) {
+      syncService.fullSync()
+    }
   }
+
+  const isLoading = dbLoading || !dbReady
 
   return (
     <div className="min-h-screen bg-background">
       <Header />
 
       <main className="container mx-auto px-4 py-6 pb-24 space-y-6">
+        {/* Sync Error Banner */}
+        {syncError && (
+          <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+            <span>{syncError}</span>
+            <Button variant="ghost" size="sm" className="ml-auto h-7 text-xs" onClick={() => setSyncError(null)}>
+              Dismiss
+            </Button>
+          </div>
+        )}
+
         {/* Stats Dashboard */}
         <section>
-          <h2 className="text-lg font-semibold text-foreground mb-4">Overview</h2>
-          <StatsDashboard stats={stats} />
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-foreground">Overview</h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleManualSync}
+              disabled={isSyncing || isLoading}
+              className="gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
+              {isSyncing ? "Syncing..." : "Sync"}
+            </Button>
+          </div>
+          {statsLoading || isLoading ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <Skeleton key={i} className="h-24 rounded-xl" />
+              ))}
+            </div>
+          ) : (
+            <StatsDashboard stats={stats} />
+          )}
         </section>
 
         {/* Action Buttons */}
@@ -93,6 +141,7 @@ export default function Home() {
             className="flex-1"
             size="lg"
             variant={showForm ? "secondary" : "default"}
+            disabled={isLoading}
           >
             <Plus className="h-5 w-5 mr-2" />
             {showForm ? "Cancel" : "Log Flight"}
@@ -104,6 +153,7 @@ export default function Home() {
             }}
             size="lg"
             variant={showManageData ? "secondary" : "outline"}
+            disabled={isLoading}
           >
             <Database className="h-5 w-5 mr-2" />
             Data
@@ -126,7 +176,7 @@ export default function Home() {
         {/* Flight List */}
         <section>
           <h2 className="text-lg font-semibold text-foreground mb-4">Recent Flights</h2>
-          <FlightList flights={flights} isLoading={isLoading} />
+          <FlightList flights={flights} isLoading={flightsLoading || isLoading} />
         </section>
       </main>
 

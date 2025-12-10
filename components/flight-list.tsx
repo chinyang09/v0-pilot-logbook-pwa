@@ -1,9 +1,13 @@
 "use client"
 
+import { useState, useMemo } from "react"
 import type { FlightLog } from "@/lib/indexed-db"
+import { formatHHMMDisplay } from "@/lib/time-utils"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Plane, Clock, Cloud, CloudOff, Loader2, Moon } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Plane, Clock, Cloud, CloudOff, Moon, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface FlightListProps {
@@ -11,11 +15,49 @@ interface FlightListProps {
   isLoading?: boolean
 }
 
+const INITIAL_LOAD = 10
+const LOAD_INCREMENT = 10
+
 export function FlightList({ flights, isLoading }: FlightListProps) {
+  const [visibleCount, setVisibleCount] = useState(INITIAL_LOAD)
+
+  const visibleFlights = useMemo(() => flights.slice(0, visibleCount), [flights, visibleCount])
+
+  const hasMore = visibleCount < flights.length
+
+  const loadMore = () => {
+    setVisibleCount((prev) => Math.min(prev + LOAD_INCREMENT, flights.length))
+  }
+
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Card key={i} className="bg-card border-border">
+            <CardContent className="p-4">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-4 w-16" />
+                  <Skeleton className="h-4 w-24" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-6 w-12" />
+                  <Skeleton className="h-px w-20" />
+                  <Skeleton className="h-6 w-12" />
+                </div>
+                <div className="flex gap-3">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-4 w-20" />
+                </div>
+                <div className="flex gap-2">
+                  <Skeleton className="h-5 w-16 rounded-full" />
+                  <Skeleton className="h-5 w-16 rounded-full" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
     )
   }
@@ -30,11 +72,11 @@ export function FlightList({ flights, isLoading }: FlightListProps) {
     )
   }
 
-  const formatTime = (time: string) => time.slice(0, 5)
+  const formatTime = (time: string) => time?.slice(0, 5) || "--:--"
 
   return (
     <div className="space-y-3">
-      {flights.map((flight) => (
+      {visibleFlights.map((flight) => (
         <Card
           key={flight.id}
           className="bg-card border-border hover:border-primary/50 transition-colors cursor-pointer"
@@ -65,48 +107,46 @@ export function FlightList({ flights, isLoading }: FlightListProps) {
                   <span>IN {formatTime(flight.inTime)}</span>
                 </div>
 
-                {/* Details */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
                   <span className="flex items-center gap-1">
                     <Clock className="h-3.5 w-3.5" />
-                    {flight.blockTime.toFixed(1)}h block
+                    <span className="font-mono">{formatHHMMDisplay(flight.blockTime)}</span> block
                   </span>
-                  <span>{flight.flightTime.toFixed(1)}h flight</span>
+                  <span className="font-mono">{formatHHMMDisplay(flight.flightTime)} flight</span>
                   <span>
                     {flight.aircraftType} ({flight.aircraftReg})
                   </span>
                 </div>
 
-                {/* Time breakdown badges */}
                 <div className="flex flex-wrap gap-2 mt-2">
-                  {flight.p1Time > 0 && (
-                    <Badge variant="secondary" className="text-xs">
-                      P1: {flight.p1Time.toFixed(1)}
+                  {flight.p1Time && flight.p1Time !== "00:00" && (
+                    <Badge variant="secondary" className="text-xs font-mono">
+                      P1: {formatHHMMDisplay(flight.p1Time)}
                     </Badge>
                   )}
-                  {flight.p2Time > 0 && (
-                    <Badge variant="secondary" className="text-xs">
-                      P2: {flight.p2Time.toFixed(1)}
+                  {flight.p2Time && flight.p2Time !== "00:00" && (
+                    <Badge variant="secondary" className="text-xs font-mono">
+                      P2: {formatHHMMDisplay(flight.p2Time)}
                     </Badge>
                   )}
-                  {flight.p1usTime > 0 && (
-                    <Badge variant="secondary" className="text-xs">
-                      P1US: {flight.p1usTime.toFixed(1)}
+                  {flight.p1usTime && flight.p1usTime !== "00:00" && (
+                    <Badge variant="secondary" className="text-xs font-mono">
+                      P1US: {formatHHMMDisplay(flight.p1usTime)}
                     </Badge>
                   )}
-                  {flight.dualTime > 0 && (
-                    <Badge variant="secondary" className="text-xs">
-                      Dual: {flight.dualTime.toFixed(1)}
+                  {flight.dualTime && flight.dualTime !== "00:00" && (
+                    <Badge variant="secondary" className="text-xs font-mono">
+                      Dual: {formatHHMMDisplay(flight.dualTime)}
                     </Badge>
                   )}
-                  {flight.nightTime > 0 && (
-                    <Badge variant="secondary" className="text-xs flex items-center gap-1">
-                      <Moon className="h-3 w-3" /> {flight.nightTime.toFixed(1)}
+                  {flight.nightTime && flight.nightTime !== "00:00" && (
+                    <Badge variant="secondary" className="text-xs flex items-center gap-1 font-mono">
+                      <Moon className="h-3 w-3" /> {formatHHMMDisplay(flight.nightTime)}
                     </Badge>
                   )}
-                  {flight.ifrTime > 0 && (
-                    <Badge variant="secondary" className="text-xs">
-                      IFR: {flight.ifrTime.toFixed(1)}
+                  {flight.ifrTime && flight.ifrTime !== "00:00" && (
+                    <Badge variant="secondary" className="text-xs font-mono">
+                      IFR: {formatHHMMDisplay(flight.ifrTime)}
                     </Badge>
                   )}
                   {(flight.dayLandings > 0 || flight.nightLandings > 0) && (
@@ -134,6 +174,15 @@ export function FlightList({ flights, isLoading }: FlightListProps) {
           </CardContent>
         </Card>
       ))}
+
+      {hasMore && (
+        <div className="flex justify-center pt-2">
+          <Button variant="ghost" onClick={loadMore} className="gap-2">
+            <ChevronDown className="h-4 w-4" />
+            Load More ({flights.length - visibleCount} remaining)
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

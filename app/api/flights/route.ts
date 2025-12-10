@@ -22,28 +22,60 @@ export async function GET(request: NextRequest) {
     const db = mongoClient.db("skylog")
     const flights = await db.collection("flights").find({}).sort({ date: -1 }).toArray()
 
-    // Transform MongoDB documents to match local format
     const transformedFlights = flights.map((flight) => ({
       id: flight.localId || flight._id.toString(),
       mongoId: flight._id.toString(),
-      date: flight.date,
-      aircraftType: flight.aircraftType,
-      aircraftReg: flight.aircraftReg,
-      departureAirport: flight.departureAirport,
-      arrivalAirport: flight.arrivalAirport,
-      departureTime: flight.departureTime,
-      arrivalTime: flight.arrivalTime,
-      totalTime: flight.totalTime,
-      picTime: flight.picTime,
-      sicTime: flight.sicTime,
-      dualTime: flight.dualTime,
-      nightTime: flight.nightTime,
-      ifrTime: flight.ifrTime,
-      landings: flight.landings,
-      nightLandings: flight.nightLandings,
-      remarks: flight.remarks,
-      createdAt: flight.createdAt,
-      updatedAt: flight.updatedAt,
+      date: flight.date || "",
+
+      // Aircraft reference
+      aircraftId: flight.aircraftId || "",
+      aircraftType: flight.aircraftType || "",
+      aircraftReg: flight.aircraftReg || "",
+
+      // Route with airport references
+      departureAirportId: flight.departureAirportId || "",
+      arrivalAirportId: flight.arrivalAirportId || "",
+      departureIcao: flight.departureIcao || "",
+      arrivalIcao: flight.arrivalIcao || "",
+
+      // OOOI Times (UTC) - HH:MM format
+      outTime: flight.outTime || "",
+      offTime: flight.offTime || "",
+      onTime: flight.onTime || "",
+      inTime: flight.inTime || "",
+
+      // Calculated Times - HH:MM format
+      blockTime: flight.blockTime || "00:00",
+      flightTime: flight.flightTime || "00:00",
+
+      // CAAS Hours Categories - HH:MM format
+      p1Time: flight.p1Time || "00:00",
+      p1usTime: flight.p1usTime || "00:00",
+      p2Time: flight.p2Time || "00:00",
+      dualTime: flight.dualTime || "00:00",
+      instructorTime: flight.instructorTime || "00:00",
+
+      // Conditions - HH:MM format
+      nightTime: flight.nightTime || "00:00",
+      ifrTime: flight.ifrTime || "00:00",
+      actualInstrumentTime: flight.actualInstrumentTime || "00:00",
+      simulatedInstrumentTime: flight.simulatedInstrumentTime || "00:00",
+
+      // Landings
+      dayLandings: flight.dayLandings || 0,
+      nightLandings: flight.nightLandings || 0,
+
+      // Crew
+      crewIds: flight.crewIds || [],
+      pilotRole: flight.pilotRole || "FO",
+
+      // Additional
+      flightNumber: flight.flightNumber || "",
+      remarks: flight.remarks || "",
+
+      // Metadata
+      createdAt: flight.createdAt || Date.now(),
+      updatedAt: flight.updatedAt || Date.now(),
       syncStatus: "synced" as const,
     }))
 

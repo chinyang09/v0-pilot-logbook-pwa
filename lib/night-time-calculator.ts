@@ -124,7 +124,7 @@ export function isNight(dateTime: Date, latitude: number, longitude: number): bo
 
 /**
  * Calculate night time between two UTC datetimes at two locations
- * Returns hours of night flying
+ * Returns HH:MM format instead of decimal hours
  */
 export function calculateNightTime(
   departureTime: Date,
@@ -133,9 +133,9 @@ export function calculateNightTime(
   depLon: number,
   arrLat: number,
   arrLon: number,
-): number {
+): string {
   const totalMinutes = (arrivalTime.getTime() - departureTime.getTime()) / (1000 * 60)
-  if (totalMinutes <= 0) return 0
+  if (totalMinutes <= 0) return "00:00"
 
   // Sample every 5 minutes along the flight path (linear interpolation)
   const samples = Math.max(Math.ceil(totalMinutes / 5), 2)
@@ -154,12 +154,14 @@ export function calculateNightTime(
     }
   }
 
-  return Math.round((nightMinutes / 60) * 10) / 10 // Round to 1 decimal
+  const hours = Math.floor(nightMinutes / 60)
+  const mins = Math.round(nightMinutes % 60)
+  return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`
 }
 
 /**
  * Calculate block time and flight time from OOOI times
- * Returns times in decimal hours
+ * Returns times in HH:MM format instead of decimal
  */
 export function calculateTimesFromOOOI(
   outTime: string,
@@ -167,7 +169,7 @@ export function calculateTimesFromOOOI(
   onTime: string,
   inTime: string,
   date: string,
-): { blockTime: number; flightTime: number } {
+): { blockTime: string; flightTime: string } {
   const baseDate = date
 
   const parseTime = (time: string): Date => {
@@ -190,8 +192,14 @@ export function calculateTimesFromOOOI(
   const blockMinutes = (inGate.getTime() - out.getTime()) / (1000 * 60)
   const flightMinutes = (on.getTime() - off.getTime()) / (1000 * 60)
 
+  const formatMinutesToHHMM = (minutes: number): string => {
+    const hours = Math.floor(minutes / 60)
+    const mins = Math.round(minutes % 60)
+    return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`
+  }
+
   return {
-    blockTime: Math.round((blockMinutes / 60) * 10) / 10,
-    flightTime: Math.round((flightMinutes / 60) * 10) / 10,
+    blockTime: formatMinutesToHHMM(blockMinutes),
+    flightTime: formatMinutesToHHMM(flightMinutes),
   }
 }

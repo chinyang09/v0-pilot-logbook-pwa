@@ -1,18 +1,19 @@
 "use client"
 
 import { Card, CardContent } from "@/components/ui/card"
+import { formatHHMMDisplay } from "@/lib/time-utils"
 import { Clock, Plane, MapPin, Moon, Navigation, LandPlot, Users, Timer } from "lucide-react"
 
 interface Stats {
   totalFlights: number
-  blockTime: number
-  flightTime: number
-  p1Time: number
-  p2Time: number
-  p1usTime: number
-  dualTime: number
-  nightTime: number
-  ifrTime: number
+  blockTime: string
+  flightTime: string
+  p1Time: string
+  p2Time: string
+  p1usTime: string
+  dualTime: string
+  nightTime: string
+  ifrTime: string
   totalDayLandings: number
   totalNightLandings: number
   uniqueAircraft: number
@@ -27,37 +28,37 @@ export function StatsDashboard({ stats }: StatsDashboardProps) {
   const statCards = [
     {
       label: "Block Time",
-      value: `${stats.blockTime.toFixed(1)}h`,
+      value: formatHHMMDisplay(stats.blockTime),
       icon: Timer,
       color: "text-primary",
     },
     {
       label: "Flight Time",
-      value: `${stats.flightTime.toFixed(1)}h`,
+      value: formatHHMMDisplay(stats.flightTime),
       icon: Clock,
       color: "text-accent",
     },
     {
       label: "P1 (PIC)",
-      value: `${stats.p1Time.toFixed(1)}h`,
+      value: formatHHMMDisplay(stats.p1Time),
       icon: Navigation,
       color: "text-chart-4",
     },
     {
       label: "P2 (SIC)",
-      value: `${stats.p2Time.toFixed(1)}h`,
+      value: formatHHMMDisplay(stats.p2Time),
       icon: Users,
       color: "text-chart-2",
     },
     {
       label: "Night Time",
-      value: `${stats.nightTime.toFixed(1)}h`,
+      value: formatHHMMDisplay(stats.nightTime),
       icon: Moon,
       color: "text-chart-3",
     },
     {
       label: "IFR Time",
-      value: `${stats.ifrTime.toFixed(1)}h`,
+      value: formatHHMMDisplay(stats.ifrTime),
       icon: Navigation,
       color: "text-chart-5",
     },
@@ -98,10 +99,10 @@ export function StatsDashboard({ stats }: StatsDashboardProps) {
                 <stat.icon className="h-4 w-4" />
               </div>
               <div>
-                <p className="text-xl font-bold text-foreground">
+                <p className="text-xl font-bold text-foreground font-mono">
                   {stat.value}
                   {stat.subValue && (
-                    <span className="text-xs font-normal text-muted-foreground ml-1">{stat.subValue}</span>
+                    <span className="text-xs font-normal text-muted-foreground ml-1 font-sans">{stat.subValue}</span>
                   )}
                 </p>
                 <p className="text-xs text-muted-foreground">{stat.label}</p>

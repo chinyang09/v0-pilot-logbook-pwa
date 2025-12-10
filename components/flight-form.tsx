@@ -21,6 +21,7 @@ import {
   getAllPersonnel,
 } from "@/lib/indexed-db"
 import { calculateTimesFromOOOI, calculateNightTime } from "@/lib/night-time-calculator"
+import { formatHHMMDisplay } from "@/lib/time-utils"
 import { Plane, Clock, MapPin, Save, Users, Timer, Moon, X } from "lucide-react"
 
 interface FlightFormProps {
@@ -48,7 +49,7 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
     // Role and crew
     pilotRole: "FO" as "PIC" | "FO" | "STUDENT" | "INSTRUCTOR",
     crewIds: [] as string[],
-    // Conditions
+    // Conditions - Now stored as HH:MM
     ifrTime: "",
     actualInstrumentTime: "",
     simulatedInstrumentTime: "",
@@ -59,16 +60,15 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
     remarks: "",
   })
 
-  // Calculated values
   const [calculatedTimes, setCalculatedTimes] = useState({
-    blockTime: 0,
-    flightTime: 0,
-    nightTime: 0,
-    p1Time: 0,
-    p2Time: 0,
-    p1usTime: 0,
-    dualTime: 0,
-    instructorTime: 0,
+    blockTime: "00:00",
+    flightTime: "00:00",
+    nightTime: "00:00",
+    p1Time: "00:00",
+    p2Time: "00:00",
+    p1usTime: "00:00",
+    dualTime: "00:00",
+    instructorTime: "00:00",
   })
 
   // Load reference data
@@ -100,7 +100,6 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
     return airports.find((a) => a.icao === formData.arrivalIcao.toUpperCase())
   }, [airports, formData.arrivalIcao])
 
-  // Calculate times when OOOI changes
   useEffect(() => {
     if (formData.outTime && formData.offTime && formData.onTime && formData.inTime) {
       const { blockTime, flightTime } = calculateTimesFromOOOI(
@@ -112,7 +111,7 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
       )
 
       // Calculate night time if we have airport coordinates
-      let nightTime = 0
+      let nightTime = "00:00"
       if (departureAirport && arrivalAirport) {
         const offDateTime = new Date(`${formData.date}T${formData.offTime}:00Z`)
         const onDateTime = new Date(`${formData.date}T${formData.onTime}:00Z`)
@@ -132,11 +131,11 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
       }
 
       // Calculate hours based on role
-      let p1Time = 0,
-        p2Time = 0,
-        p1usTime = 0,
-        dualTime = 0,
-        instructorTime = 0
+      let p1Time = "00:00",
+        p2Time = "00:00",
+        p1usTime = "00:00",
+        dualTime = "00:00",
+        instructorTime = "00:00"
 
       switch (formData.pilotRole) {
         case "PIC":
@@ -203,9 +202,9 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
         dualTime: calculatedTimes.dualTime,
         instructorTime: calculatedTimes.instructorTime,
         nightTime: calculatedTimes.nightTime,
-        ifrTime: Number.parseFloat(formData.ifrTime) || 0,
-        actualInstrumentTime: Number.parseFloat(formData.actualInstrumentTime) || 0,
-        simulatedInstrumentTime: Number.parseFloat(formData.simulatedInstrumentTime) || 0,
+        ifrTime: formData.ifrTime || "00:00",
+        actualInstrumentTime: formData.actualInstrumentTime || "00:00",
+        simulatedInstrumentTime: formData.simulatedInstrumentTime || "00:00",
         dayLandings: Number.parseInt(formData.dayLandings) || 0,
         nightLandings: Number.parseInt(formData.nightLandings) || 0,
         pilotRole: formData.pilotRole,
@@ -232,8 +231,6 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
       crewIds: prev.crewIds.includes(id) ? prev.crewIds.filter((c) => c !== id) : [...prev.crewIds, id],
     }))
   }
-
-  const formatHours = (hours: number) => hours.toFixed(1)
 
   return (
     <Card className="bg-card border-border">
@@ -389,8 +386,7 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
             </div>
           </div>
 
-          {/* Calculated Times Display */}
-          {calculatedTimes.blockTime > 0 && (
+          {calculatedTimes.blockTime !== "00:00" && (
             <div className="bg-secondary/50 rounded-lg p-4 space-y-3">
               <div className="flex items-center gap-2 text-foreground">
                 <Clock className="h-4 w-4 text-primary" />
@@ -399,18 +395,18 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
                   <p className="text-muted-foreground">Block Time</p>
-                  <p className="text-lg font-semibold">{formatHours(calculatedTimes.blockTime)}h</p>
+                  <p className="text-lg font-semibold font-mono">{formatHHMMDisplay(calculatedTimes.blockTime)}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Flight Time</p>
-                  <p className="text-lg font-semibold">{formatHours(calculatedTimes.flightTime)}h</p>
+                  <p className="text-lg font-semibold font-mono">{formatHHMMDisplay(calculatedTimes.flightTime)}</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <div>
                     <p className="text-muted-foreground flex items-center gap-1">
                       <Moon className="h-3 w-3" /> Night Time
                     </p>
-                    <p className="text-lg font-semibold">{formatHours(calculatedTimes.nightTime)}h</p>
+                    <p className="text-lg font-semibold font-mono">{formatHHMMDisplay(calculatedTimes.nightTime)}</p>
                   </div>
                   {!departureAirport || !arrivalAirport ? (
                     <Badge variant="outline" className="text-xs">
@@ -425,7 +421,7 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
                     {formData.pilotRole === "STUDENT" && "Dual Time"}
                     {formData.pilotRole === "INSTRUCTOR" && "Instructor Time"}
                   </p>
-                  <p className="text-lg font-semibold">{formatHours(calculatedTimes.flightTime)}h</p>
+                  <p className="text-lg font-semibold font-mono">{formatHHMMDisplay(calculatedTimes.flightTime)}</p>
                 </div>
               </div>
             </div>
@@ -476,15 +472,13 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
             </div>
           </div>
 
-          {/* Conditions and Landings */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="space-y-2">
               <Label htmlFor="ifrTime">IFR Time</Label>
               <Input
                 id="ifrTime"
-                type="number"
-                step="0.1"
-                placeholder="0.0"
+                type="time"
+                placeholder="00:00"
                 value={formData.ifrTime}
                 onChange={(e) => updateField("ifrTime", e.target.value)}
                 className="bg-input"
@@ -494,9 +488,8 @@ export function FlightForm({ onFlightAdded, onClose }: FlightFormProps) {
               <Label htmlFor="actualInstrumentTime">Actual IMC</Label>
               <Input
                 id="actualInstrumentTime"
-                type="number"
-                step="0.1"
-                placeholder="0.0"
+                type="time"
+                placeholder="00:00"
                 value={formData.actualInstrumentTime}
                 onChange={(e) => updateField("actualInstrumentTime", e.target.value)}
                 className="bg-input"
