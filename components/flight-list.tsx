@@ -1,6 +1,8 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import type React from "react"
+
+import { useState, useMemo, useRef } from "react"
 import type { FlightLog } from "@/lib/indexed-db"
 import { deleteFlight } from "@/lib/indexed-db"
 import { formatHHMMDisplay } from "@/lib/time-utils"
@@ -19,8 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Plane, Clock, Cloud, CloudOff, Moon, ChevronDown, MoreVertical, Pencil, Trash2 } from "lucide-react"
+import { Plane, Clock, Cloud, CloudOff, Moon, ChevronDown, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface FlightListProps {
@@ -32,6 +33,209 @@ interface FlightListProps {
 
 const INITIAL_LOAD = 10
 const LOAD_INCREMENT = 10
+const SWIPE_THRESHOLD = 80
+
+function SwipeableFlightCard({
+  flight,
+  onEdit,
+  onDelete,
+}: {
+  flight: FlightLog
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const [swipeX, setSwipeX] = useState(0)
+  const [isSwiping, setIsSwiping] = useState(false)
+  const startX = useRef(0)
+  const startY = useRef(0)
+  const isHorizontalSwipe = useRef<boolean | null>(null)
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    startX.current = e.touches[0].clientX
+    startY.current = e.touches[0].clientY
+    isHorizontalSwipe.current = null
+    setIsSwiping(true)
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isSwiping) return
+
+    const currentX = e.touches[0].clientX
+    const currentY = e.touches[0].clientY
+    const diffX = currentX - startX.current
+    const diffY = currentY - startY.current
+
+    // Determine swipe direction on first significant movement
+    if (isHorizontalSwipe.current === null && (Math.abs(diffX) > 10 || Math.abs(diffY) > 10)) {
+      isHorizontalSwipe.current = Math.abs(diffX) > Math.abs(diffY)
+    }
+
+    // Only handle horizontal swipes (swipe right to reveal delete)
+    if (isHorizontalSwipe.current && diffX > 0) {
+      setSwipeX(Math.min(diffX, SWIPE_THRESHOLD + 20))
+    }
+  }
+
+  const handleTouchEnd = () => {
+    setIsSwiping(false)
+    // Snap to open or closed
+    if (swipeX > SWIPE_THRESHOLD / 2) {
+      setSwipeX(SWIPE_THRESHOLD)
+    } else {
+      setSwipeX(0)
+    }
+  }
+
+  const handleClick = () => {
+    // If swiped open, close it; otherwise edit
+    if (swipeX > 0) {
+      setSwipeX(0)
+    } else {
+      onEdit()
+    }
+  }
+
+  const formatTime = (time: string) => time?.slice(0, 5) || "--:--"
+
+  return (
+    <div className="relative overflow-hidden rounded-lg">
+      {/* Delete button background */}
+      <div
+        className={cn(
+          "absolute inset-y-0 left-0 flex items-center justify-center bg-destructive transition-opacity",
+          swipeX > 0 ? "opacity-100" : "opacity-0",
+        )}
+        style={{ width: SWIPE_THRESHOLD }}
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-full w-full rounded-none text-destructive-foreground hover:bg-destructive/90"
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+        >
+          <Trash2 className="h-6 w-6" />
+        </Button>
+      </div>
+
+      {/* Swipeable card */}
+      <Card
+        className={cn(
+          "bg-card border-border active:bg-accent/50 transition-colors cursor-pointer relative",
+          !isSwiping && "transition-transform duration-200",
+        )}
+        style={{ transform: `translateX(${swipeX}px)` }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onClick={handleClick}
+      >
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              {/* Flight number and date */}
+              <div className="flex items-center gap-2 mb-1 text-sm text-muted-foreground">
+                {flight.flightNumber && <span className="font-medium text-foreground">{flight.flightNumber}</span>}
+                <span>{new Date(flight.date).toLocaleDateString()}</span>
+              </div>
+
+              {/* Route */}
+              <div className="flex items-center gap-2 mb-2">
+                <span className="font-semibold text-foreground">{flight.departureIcao}</span>
+                <div className="flex-1 h-px bg-border relative max-w-[120px]">
+                  <Plane className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-4 w-4 text-primary bg-card px-1" />
+                </div>
+                <span className="font-semibold text-foreground">{flight.arrivalIcao}</span>
+              </div>
+
+              {/* OOOI Times */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mb-2">
+                <span>OUT {formatTime(flight.outTime)}</span>
+                <span>OFF {formatTime(flight.offTime)}</span>
+                <span>ON {formatTime(flight.onTime)}</span>
+                <span>IN {formatTime(flight.inTime)}</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3.5 w-3.5" />
+                  <span className="font-mono">{formatHHMMDisplay(flight.blockTime)}</span> block
+                </span>
+                <span className="font-mono">{formatHHMMDisplay(flight.flightTime)} flight</span>
+                <span>
+                  {flight.aircraftType} ({flight.aircraftReg})
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2 mt-2">
+                {flight.p1Time && flight.p1Time !== "00:00" && (
+                  <Badge variant="secondary" className="text-xs font-mono">
+                    P1: {formatHHMMDisplay(flight.p1Time)}
+                  </Badge>
+                )}
+                {flight.p2Time && flight.p2Time !== "00:00" && (
+                  <Badge variant="secondary" className="text-xs font-mono">
+                    P2: {formatHHMMDisplay(flight.p2Time)}
+                  </Badge>
+                )}
+                {flight.p1usTime && flight.p1usTime !== "00:00" && (
+                  <Badge variant="secondary" className="text-xs font-mono">
+                    P1US: {formatHHMMDisplay(flight.p1usTime)}
+                  </Badge>
+                )}
+                {flight.dualTime && flight.dualTime !== "00:00" && (
+                  <Badge variant="secondary" className="text-xs font-mono">
+                    Dual: {formatHHMMDisplay(flight.dualTime)}
+                  </Badge>
+                )}
+                {flight.nightTime && flight.nightTime !== "00:00" && (
+                  <Badge variant="secondary" className="text-xs flex items-center gap-1 font-mono">
+                    <Moon className="h-3 w-3" /> {formatHHMMDisplay(flight.nightTime)}
+                  </Badge>
+                )}
+                {flight.ifrTime && flight.ifrTime !== "00:00" && (
+                  <Badge variant="secondary" className="text-xs font-mono">
+                    IFR: {formatHHMMDisplay(flight.ifrTime)}
+                  </Badge>
+                )}
+                {(flight.dayLandings > 0 || flight.nightLandings > 0) && (
+                  <Badge variant="secondary" className="text-xs">
+                    {flight.dayLandings + flight.nightLandings} ldg
+                  </Badge>
+                )}
+              </div>
+            </div>
+
+            {/* Sync status */}
+            <div className="flex items-center shrink-0">
+              <div
+                className={cn(
+                  "p-2 rounded-full",
+                  flight.syncStatus === "synced" && "bg-[var(--status-synced)]/10",
+                  flight.syncStatus === "pending" && "bg-[var(--status-pending)]/10",
+                  flight.syncStatus === "error" && "bg-[var(--status-offline)]/10",
+                )}
+              >
+                {flight.syncStatus === "synced" && <Cloud className="h-4 w-4 text-[var(--status-synced)]" />}
+                {flight.syncStatus === "pending" && <CloudOff className="h-4 w-4 text-[var(--status-pending)]" />}
+                {flight.syncStatus === "error" && <CloudOff className="h-4 w-4 text-[var(--status-offline)]" />}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Hint text when swiped */}
+      {swipeX > SWIPE_THRESHOLD / 2 && (
+        <div className="absolute top-1/2 left-2 -translate-y-1/2 text-xs text-destructive-foreground font-medium">
+          Tap to delete
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function FlightList({ flights, isLoading, onEdit, onDeleted }: FlightListProps) {
   const [visibleCount, setVisibleCount] = useState(INITIAL_LOAD)
@@ -102,129 +306,20 @@ export function FlightList({ flights, isLoading, onEdit, onDeleted }: FlightList
     )
   }
 
-  const formatTime = (time: string) => time?.slice(0, 5) || "--:--"
-
   return (
     <>
+      <p className="text-xs text-muted-foreground mb-3 text-center">
+        Tap a flight to edit &bull; Swipe right to delete
+      </p>
+
       <div className="space-y-3">
         {visibleFlights.map((flight) => (
-          <Card key={flight.id} className="bg-card border-border hover:border-primary/50 transition-colors">
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  {/* Flight number and date */}
-                  <div className="flex items-center gap-2 mb-1 text-sm text-muted-foreground">
-                    {flight.flightNumber && <span className="font-medium text-foreground">{flight.flightNumber}</span>}
-                    <span>{new Date(flight.date).toLocaleDateString()}</span>
-                  </div>
-
-                  {/* Route */}
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="font-semibold text-foreground">{flight.departureIcao}</span>
-                    <div className="flex-1 h-px bg-border relative max-w-[120px]">
-                      <Plane className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-4 w-4 text-primary bg-card px-1" />
-                    </div>
-                    <span className="font-semibold text-foreground">{flight.arrivalIcao}</span>
-                  </div>
-
-                  {/* OOOI Times */}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mb-2">
-                    <span>OUT {formatTime(flight.outTime)}</span>
-                    <span>OFF {formatTime(flight.offTime)}</span>
-                    <span>ON {formatTime(flight.onTime)}</span>
-                    <span>IN {formatTime(flight.inTime)}</span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3.5 w-3.5" />
-                      <span className="font-mono">{formatHHMMDisplay(flight.blockTime)}</span> block
-                    </span>
-                    <span className="font-mono">{formatHHMMDisplay(flight.flightTime)} flight</span>
-                    <span>
-                      {flight.aircraftType} ({flight.aircraftReg})
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {flight.p1Time && flight.p1Time !== "00:00" && (
-                      <Badge variant="secondary" className="text-xs font-mono">
-                        P1: {formatHHMMDisplay(flight.p1Time)}
-                      </Badge>
-                    )}
-                    {flight.p2Time && flight.p2Time !== "00:00" && (
-                      <Badge variant="secondary" className="text-xs font-mono">
-                        P2: {formatHHMMDisplay(flight.p2Time)}
-                      </Badge>
-                    )}
-                    {flight.p1usTime && flight.p1usTime !== "00:00" && (
-                      <Badge variant="secondary" className="text-xs font-mono">
-                        P1US: {formatHHMMDisplay(flight.p1usTime)}
-                      </Badge>
-                    )}
-                    {flight.dualTime && flight.dualTime !== "00:00" && (
-                      <Badge variant="secondary" className="text-xs font-mono">
-                        Dual: {formatHHMMDisplay(flight.dualTime)}
-                      </Badge>
-                    )}
-                    {flight.nightTime && flight.nightTime !== "00:00" && (
-                      <Badge variant="secondary" className="text-xs flex items-center gap-1 font-mono">
-                        <Moon className="h-3 w-3" /> {formatHHMMDisplay(flight.nightTime)}
-                      </Badge>
-                    )}
-                    {flight.ifrTime && flight.ifrTime !== "00:00" && (
-                      <Badge variant="secondary" className="text-xs font-mono">
-                        IFR: {formatHHMMDisplay(flight.ifrTime)}
-                      </Badge>
-                    )}
-                    {(flight.dayLandings > 0 || flight.nightLandings > 0) && (
-                      <Badge variant="secondary" className="text-xs">
-                        {flight.dayLandings + flight.nightLandings} ldg
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-
-                {/* Actions and sync status */}
-                <div className="flex items-center gap-2 shrink-0">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <MoreVertical className="h-4 w-4" />
-                        <span className="sr-only">Actions</span>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => onEdit?.(flight)}>
-                        <Pencil className="h-4 w-4 mr-2" />
-                        Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setDeleteTarget(flight)}
-                        className="text-destructive focus:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-
-                  <div
-                    className={cn(
-                      "p-2 rounded-full",
-                      flight.syncStatus === "synced" && "bg-[var(--status-synced)]/10",
-                      flight.syncStatus === "pending" && "bg-[var(--status-pending)]/10",
-                      flight.syncStatus === "error" && "bg-[var(--status-offline)]/10",
-                    )}
-                  >
-                    {flight.syncStatus === "synced" && <Cloud className="h-4 w-4 text-[var(--status-synced)]" />}
-                    {flight.syncStatus === "pending" && <CloudOff className="h-4 w-4 text-[var(--status-pending)]" />}
-                    {flight.syncStatus === "error" && <CloudOff className="h-4 w-4 text-[var(--status-offline)]" />}
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <SwipeableFlightCard
+            key={flight.id}
+            flight={flight}
+            onEdit={() => onEdit?.(flight)}
+            onDelete={() => setDeleteTarget(flight)}
+          />
         ))}
 
         {hasMore && (
