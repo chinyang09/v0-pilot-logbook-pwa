@@ -28,25 +28,46 @@ export async function POST(request: NextRequest) {
 
     switch (type) {
       case "create":
-        const insertResult = await coll.insertOne({
-          ...data,
-          _id: new ObjectId(),
-          localId: data.id,
-          syncedAt: new Date(),
-        })
-        result.mongoId = insertResult.insertedId.toString()
+        const existing = await coll.findOne({ localId: data.id })
+        if (existing) {
+          // Update instead
+          await coll.updateOne(
+            { localId: data.id },
+            {
+              $set: {
+                ...data,
+                localId: data.id,
+                updatedAt: data.updatedAt || Date.now(),
+                syncedAt: Date.now(),
+              },
+            },
+          )
+          result.mongoId = existing._id.toString()
+        } else {
+          const insertResult = await coll.insertOne({
+            ...data,
+            _id: new ObjectId(),
+            localId: data.id,
+            syncedAt: Date.now(),
+          })
+          result.mongoId = insertResult.insertedId.toString()
+        }
         break
 
       case "update":
-        await coll.updateOne(
-          { localId: data.id },
+        const updateResult = await coll.findOneAndUpdate(
+          { $or: [{ localId: data.id }, { _id: data.mongoId ? new ObjectId(data.mongoId) : new ObjectId() }] },
           {
             $set: {
               ...data,
-              syncedAt: new Date(),
+              localId: data.id,
+              updatedAt: data.updatedAt || Date.now(),
+              syncedAt: Date.now(),
             },
           },
+          { upsert: true, returnDocument: "after" },
         )
+        result.mongoId = updateResult?._id?.toString()
         break
 
       case "delete":

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Header } from "@/components/header"
 import { FlightForm } from "@/components/flight-form"
 import { FlightList } from "@/components/flight-list"
@@ -10,30 +10,31 @@ import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { Button } from "@/components/ui/button"
 import { getAllFlights, getFlightStats, type FlightLog } from "@/lib/indexed-db"
 import { syncService } from "@/lib/sync-service"
-import { Plus, Database } from "lucide-react"
+import { Plus, Database, RefreshCw } from "lucide-react"
 
 export default function Home() {
   const [flights, setFlights] = useState<FlightLog[]>([])
   const [stats, setStats] = useState({
     totalFlights: 0,
-    blockTime: 0,
-    flightTime: 0,
-    p1Time: 0,
-    p2Time: 0,
-    p1usTime: 0,
-    dualTime: 0,
-    nightTime: 0,
-    ifrTime: 0,
+    blockTime: "00:00",
+    flightTime: "00:00",
+    p1Time: "00:00",
+    p2Time: "00:00",
+    p1usTime: "00:00",
+    dualTime: "00:00",
+    nightTime: "00:00",
+    ifrTime: "00:00",
     totalDayLandings: 0,
     totalNightLandings: 0,
     uniqueAircraft: 0,
     uniqueAirports: 0,
   })
   const [isLoading, setIsLoading] = useState(true)
+  const [isSyncing, setIsSyncing] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [showManageData, setShowManageData] = useState(false)
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const [flightData, statsData] = await Promise.all([getAllFlights(), getFlightStats()])
       setFlights(flightData)
@@ -43,33 +44,54 @@ export default function Home() {
     } finally {
       setIsLoading(false)
     }
-  }
-
-  useEffect(() => {
-    loadData()
-
-    if (navigator.onLine) {
-      syncService.syncPendingChanges()
-    }
   }, [])
 
-  const handleFlightAdded = (flight: FlightLog) => {
+  useEffect(() => {
+    const initSync = async () => {
+      await loadData()
+
+      if (navigator.onLine) {
+        setIsSyncing(true)
+        try {
+          await syncService.fullSync()
+          // Reload data after sync to get any new records from server
+          await loadData()
+        } catch (error) {
+          console.error("Initial sync failed:", error)
+        } finally {
+          setIsSyncing(false)
+        }
+      }
+    }
+
+    initSync()
+  }, [loadData])
+
+  const handleManualSync = async () => {
+    if (!navigator.onLine) return
+
+    setIsSyncing(true)
+    try {
+      await syncService.fullSync()
+      await loadData()
+    } catch (error) {
+      console.error("Manual sync failed:", error)
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  const handleFlightAdded = async (flight: FlightLog) => {
     setFlights((prev) => [flight, ...prev])
-    setStats((prev) => ({
-      ...prev,
-      totalFlights: prev.totalFlights + 1,
-      blockTime: prev.blockTime + flight.blockTime,
-      flightTime: prev.flightTime + flight.flightTime,
-      p1Time: prev.p1Time + flight.p1Time,
-      p2Time: prev.p2Time + flight.p2Time,
-      nightTime: prev.nightTime + flight.nightTime,
-      ifrTime: prev.ifrTime + flight.ifrTime,
-      totalDayLandings: prev.totalDayLandings + flight.dayLandings,
-      totalNightLandings: prev.totalNightLandings + flight.nightLandings,
-    }))
+    // Reload stats to get accurate totals
+    const statsData = await getFlightStats()
+    setStats(statsData)
     setShowForm(false)
 
-    syncService.syncPendingChanges()
+    // Trigger sync
+    if (navigator.onLine) {
+      syncService.fullSync()
+    }
   }
 
   return (
@@ -79,7 +101,19 @@ export default function Home() {
       <main className="container mx-auto px-4 py-6 pb-24 space-y-6">
         {/* Stats Dashboard */}
         <section>
-          <h2 className="text-lg font-semibold text-foreground mb-4">Overview</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-foreground">Overview</h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleManualSync}
+              disabled={isSyncing || !navigator.onLine}
+              className="gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
+              {isSyncing ? "Syncing..." : "Sync"}
+            </Button>
+          </div>
           <StatsDashboard stats={stats} />
         </section>
 
