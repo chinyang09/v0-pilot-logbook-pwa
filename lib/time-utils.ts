@@ -1,11 +1,3 @@
-/**
- * Time utility functions for HH:MM format storage
- * All times are stored as "HH:MM" strings for accurate post-processing
- */
-
-/**
- * Convert decimal hours to HH:MM string
- */
 export function decimalToHHMM(decimal: number): string {
   if (decimal <= 0) return "00:00"
   const hours = Math.floor(decimal)

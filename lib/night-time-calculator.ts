@@ -1,9 +1,3 @@
-/**
- * Calculate solar position and determine if it's night time
- * Based on NOAA solar calculator algorithms
- * Uses civil twilight (sun 6 degrees below horizon) as per aviation standards
- */
-
 interface SunTimes {
   sunrise: Date
   sunset: Date

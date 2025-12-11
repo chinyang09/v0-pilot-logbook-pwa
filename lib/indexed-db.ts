@@ -44,11 +44,13 @@ export interface FlightLog {
 
   // Crew
   crewIds: string[] // Personnel IDs
-  pilotRole: "PIC" | "FO" | "STUDENT" | "INSTRUCTOR"
+  pilotRole: "PIC" | "FO" | "STUDENT" | "INSTRUCTOR" | "P1US"
 
   // Additional
   flightNumber: string
   remarks: string
+
+  isLocked?: boolean
 
   // Metadata
   createdAt: number
@@ -354,6 +356,7 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     updatedAt: serverFlight.updatedAt || Date.now(),
     syncStatus: "synced",
     mongoId: serverFlight.mongoId,
+    isLocked: serverFlight.isLocked,
   }
 
   // Check if we have this flight by mongoId first
