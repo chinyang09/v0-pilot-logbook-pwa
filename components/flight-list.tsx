@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useMemo, useRef } from "react"
+import { useState, useMemo, useRef, useEffect } from "react"
 import type { FlightLog, Aircraft, Airport, Personnel } from "@/lib/indexed-db"
 import { deleteFlight } from "@/lib/indexed-db"
 import { formatHHMMDisplay } from "@/lib/time-utils"
@@ -34,11 +34,28 @@ interface FlightListProps {
   aircraft?: Aircraft[]
   airports?: Airport[]
   personnel?: Personnel[]
+  onFlightVisible?: (flight: FlightLog) => void
+  showMonthHeaders?: boolean
 }
 
 const INITIAL_LOAD = 10
 const LOAD_INCREMENT = 10
 const SWIPE_THRESHOLD = 80
+
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+]
 
 function SwipeableFlightCard({
   flight,
@@ -76,10 +93,8 @@ function SwipeableFlightCard({
 
     if (isHorizontalSwipe.current) {
       if (diffX < 0) {
-        // Swiping left - reveal delete
         setSwipeX(Math.max(diffX, -(SWIPE_THRESHOLD + 20)))
       } else if (swipeX < 0) {
-        // Swiping right while delete is shown - hide delete
         setSwipeX(Math.min(0, swipeX + diffX))
       }
     }
@@ -228,6 +243,8 @@ export function FlightList({
   aircraft = [],
   airports = [],
   personnel = [],
+  onFlightVisible,
+  showMonthHeaders = false,
 }: FlightListProps) {
   const [visibleCount, setVisibleCount] = useState(INITIAL_LOAD)
   const [deleteTarget, setDeleteTarget] = useState<FlightLog | null>(null)
@@ -238,6 +255,37 @@ export function FlightList({
   const [filterAircraft, setFilterAircraft] = useState<string>("all")
   const [filterAirport, setFilterAirport] = useState<string>("all")
   const [filterPersonnel, setFilterPersonnel] = useState<string>("all")
+
+  const observerRef = useRef<IntersectionObserver | null>(null)
+  const flightRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+
+  // Set up intersection observer for flight visibility tracking
+  useEffect(() => {
+    if (!onFlightVisible) return
+
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const flightId = entry.target.id.replace("flight-", "")
+            const flight = flights.find((f) => f.id === flightId)
+            if (flight) {
+              onFlightVisible(flight)
+            }
+          }
+        })
+      },
+      { threshold: 0.5, rootMargin: "-100px 0px -100px 0px" },
+    )
+
+    flightRefs.current.forEach((element) => {
+      observerRef.current?.observe(element)
+    })
+
+    return () => {
+      observerRef.current?.disconnect()
+    }
+  }, [flights, onFlightVisible])
 
   const filteredFlights = useMemo(() => {
     return flights.filter((flight) => {
@@ -259,6 +307,41 @@ export function FlightList({
       return true
     })
   }, [flights, filterFlightNumber, filterAircraft, filterAirport, filterPersonnel, airports])
+
+  // Group flights by month if showMonthHeaders is true
+  const flightsByMonth = useMemo(() => {
+    if (!showMonthHeaders) return null
+
+    const grouped: { month: string; year: number; monthNum: number; flights: FlightLog[] }[] = []
+    const monthMap = new Map<string, FlightLog[]>()
+
+    filteredFlights.forEach((flight) => {
+      const date = new Date(flight.date)
+      const key = `${date.getFullYear()}-${date.getMonth()}`
+      if (!monthMap.has(key)) {
+        monthMap.set(key, [])
+      }
+      monthMap.get(key)!.push(flight)
+    })
+
+    monthMap.forEach((flights, key) => {
+      const [year, month] = key.split("-").map(Number)
+      grouped.push({
+        month: MONTHS[month],
+        year,
+        monthNum: month,
+        flights,
+      })
+    })
+
+    // Sort by date descending
+    grouped.sort((a, b) => {
+      if (a.year !== b.year) return b.year - a.year
+      return b.monthNum - a.monthNum
+    })
+
+    return grouped
+  }, [filteredFlights, showMonthHeaders])
 
   const visibleFlights = useMemo(() => filteredFlights.slice(0, visibleCount), [filteredFlights, visibleCount])
 
@@ -288,6 +371,19 @@ export function FlightList({
     } finally {
       setIsDeleting(false)
       setDeleteTarget(null)
+    }
+  }
+
+  const registerFlightRef = (id: string, element: HTMLDivElement | null) => {
+    if (element) {
+      flightRefs.current.set(id, element)
+      observerRef.current?.observe(element)
+    } else {
+      const existing = flightRefs.current.get(id)
+      if (existing) {
+        observerRef.current?.unobserve(existing)
+        flightRefs.current.delete(id)
+      }
     }
   }
 
@@ -333,6 +429,12 @@ export function FlightList({
       </div>
     )
   }
+
+  const renderFlightCard = (flight: FlightLog) => (
+    <div key={flight.id} id={`flight-${flight.id}`} ref={(el) => registerFlightRef(flight.id, el)}>
+      <SwipeableFlightCard flight={flight} onEdit={() => onEdit?.(flight)} onDelete={() => setDeleteTarget(flight)} />
+    </div>
+  )
 
   return (
     <>
@@ -430,14 +532,20 @@ export function FlightList({
       </div>
 
       <div className="space-y-3">
-        {visibleFlights.map((flight) => (
-          <SwipeableFlightCard
-            key={flight.id}
-            flight={flight}
-            onEdit={() => onEdit?.(flight)}
-            onDelete={() => setDeleteTarget(flight)}
-          />
-        ))}
+        {showMonthHeaders && flightsByMonth
+          ? // Render with month headers
+            flightsByMonth.map(({ month, year, flights: monthFlights }) => (
+              <div key={`${year}-${month}`} className="space-y-3">
+                <div className="sticky top-24 z-10 bg-background/95 backdrop-blur-sm py-2">
+                  <h3 className="text-sm font-semibold text-muted-foreground">
+                    {month} {year}
+                  </h3>
+                </div>
+                {monthFlights.slice(0, visibleCount).map(renderFlightCard)}
+              </div>
+            ))
+          : // Render flat list
+            visibleFlights.map(renderFlightCard)}
 
         {filteredFlights.length === 0 && hasActiveFilters && (
           <div className="text-center py-8">

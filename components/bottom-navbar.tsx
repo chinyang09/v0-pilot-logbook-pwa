@@ -2,18 +2,13 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Book, Database, Plus } from "lucide-react"
+import { Home, Book, Database, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
+import Link from "next/link"
+import { usePathname } from "next/navigation"
 
-type NavTab = "logbook" | "data"
-
-interface BottomNavbarProps {
-  activeTab: NavTab
-  onTabChange: (tab: NavTab) => void
-  onAddFlight: () => void
-}
-
-export function BottomNavbar({ activeTab, onTabChange, onAddFlight }: BottomNavbarProps) {
+export function BottomNavbar() {
+  const pathname = usePathname()
   const [isVisible, setIsVisible] = useState(true)
   const [lastScrollY, setLastScrollY] = useState(0)
 
@@ -36,6 +31,10 @@ export function BottomNavbar({ activeTab, onTabChange, onAddFlight }: BottomNavb
     return () => window.removeEventListener("scroll", handleScroll)
   }, [lastScrollY])
 
+  // Determine active tab from pathname
+  const activeTab =
+    pathname === "/" ? "dashboard" : pathname === "/logbook" ? "logbook" : pathname === "/data" ? "data" : null
+
   return (
     <nav
       className={cn(
@@ -45,27 +44,41 @@ export function BottomNavbar({ activeTab, onTabChange, onAddFlight }: BottomNavb
     >
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-around h-16">
-          <Button
-            variant="ghost"
-            className={cn("flex flex-col items-center gap-1 h-14 px-6", activeTab === "logbook" && "text-primary")}
-            onClick={() => onTabChange("logbook")}
-          >
-            <Book className="h-5 w-5" />
-            <span className="text-xs">Logbook</span>
-          </Button>
+          <Link href="/">
+            <Button
+              variant="ghost"
+              className={cn("flex flex-col items-center gap-1 h-14 px-6", activeTab === "dashboard" && "text-primary")}
+            >
+              <Home className="h-5 w-5" />
+              <span className="text-xs">Dashboard</span>
+            </Button>
+          </Link>
 
-          <Button size="lg" className="h-12 w-12 rounded-full shadow-lg" onClick={onAddFlight}>
-            <Plus className="h-6 w-6" />
-          </Button>
+          <Link href="/logbook">
+            <Button
+              variant="ghost"
+              className={cn("flex flex-col items-center gap-1 h-14 px-6", activeTab === "logbook" && "text-primary")}
+            >
+              <Book className="h-5 w-5" />
+              <span className="text-xs">Logbook</span>
+            </Button>
+          </Link>
 
-          <Button
-            variant="ghost"
-            className={cn("flex flex-col items-center gap-1 h-14 px-6", activeTab === "data" && "text-primary")}
-            onClick={() => onTabChange("data")}
-          >
-            <Database className="h-5 w-5" />
-            <span className="text-xs">Data</span>
-          </Button>
+          <Link href="/new-flight">
+            <Button size="lg" className="h-12 w-12 rounded-full shadow-lg">
+              <Plus className="h-6 w-6" />
+            </Button>
+          </Link>
+
+          <Link href="/data">
+            <Button
+              variant="ghost"
+              className={cn("flex flex-col items-center gap-1 h-14 px-6", activeTab === "data" && "text-primary")}
+            >
+              <Database className="h-5 w-5" />
+              <span className="text-xs">Data</span>
+            </Button>
+          </Link>
         </div>
       </div>
     </nav>
