@@ -4,13 +4,7 @@ import type React from "react"
 import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,104 +31,150 @@ import {
 } from "@/lib/indexed-db"
 import { useAircraft, useAirports, usePersonnel } from "@/hooks/use-indexed-db"
 import { syncService } from "@/lib/sync-service"
-import { Plane, MapPin, Users, Plus, Loader2, Trash2, Save } from "lucide-react"
+import { Plane, MapPin, Users, Save, X, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const SWIPE_THRESHOLD = 80
+type TabType = "aircraft" | "airports" | "personnel"
+
+function SwipeableRow({
+  label,
+  children,
+  onClear,
+  showClear = true,
+}: {
+  label: string
+  children: React.ReactNode
+  onClear?: () => void
+  showClear?: boolean
+}) {
+  const [swiped, setSwiped] = useState(false)
+  const startX = useRef(0)
+  const currentX = useRef(0)
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    startX.current = e.touches[0].clientX
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    currentX.current = e.touches[0].clientX
+  }
+
+  const handleTouchEnd = () => {
+    const diff = startX.current - currentX.current
+    if (diff > 50) {
+      setSwiped(true)
+    } else if (diff < -50) {
+      setSwiped(false)
+    }
+  }
+
+  return (
+    <div className="relative overflow-hidden">
+      {showClear && onClear && (
+        <button
+          type="button"
+          onClick={() => {
+            onClear()
+            setSwiped(false)
+          }}
+          className="absolute right-0 top-0 bottom-0 w-16 bg-destructive text-destructive-foreground flex items-center justify-center z-0"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      )}
+      <div
+        className={cn(
+          "flex items-center gap-3 py-2 px-1 transition-transform duration-200 bg-card relative z-10",
+          swiped && "-translate-x-16",
+        )}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onClick={() => swiped && setSwiped(false)}
+      >
+        <span className="text-sm text-muted-foreground w-24 flex-shrink-0">{label}</span>
+        <div className="flex-1 flex justify-end">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+function SectionHeader({ title }: { title: string }) {
+  return (
+    <div className="bg-secondary/50 px-3 py-2 -mx-3 mt-4 first:mt-0">
+      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{title}</h3>
+    </div>
+  )
+}
 
 function SwipeableItem({
   children,
-  onTap,
+  onEdit,
   onDelete,
   isActive,
 }: {
   children: React.ReactNode
-  onTap: () => void
+  onEdit: () => void
   onDelete: () => void
   isActive?: boolean
 }) {
   const [swipeX, setSwipeX] = useState(0)
   const [isSwiping, setIsSwiping] = useState(false)
   const startX = useRef(0)
-  const startY = useRef(0)
-  const isHorizontalSwipe = useRef<boolean | null>(null)
 
   const handleTouchStart = (e: React.TouchEvent) => {
     startX.current = e.touches[0].clientX
-    startY.current = e.touches[0].clientY
-    isHorizontalSwipe.current = null
     setIsSwiping(true)
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (!isSwiping) return
-
-    const currentX = e.touches[0].clientX
-    const currentY = e.touches[0].clientY
-    const diffX = currentX - startX.current
-    const diffY = currentY - startY.current
-
-    if (isHorizontalSwipe.current === null && (Math.abs(diffX) > 10 || Math.abs(diffY) > 10)) {
-      isHorizontalSwipe.current = Math.abs(diffX) > Math.abs(diffY)
-    }
-
-    if (isHorizontalSwipe.current) {
-      if (diffX < 0) {
-        // Swiping left - reveal delete
-        setSwipeX(Math.max(diffX, -(SWIPE_THRESHOLD + 20)))
-      } else if (swipeX < 0) {
-        // Swiping right while delete is shown - hide delete
-        setSwipeX(Math.min(0, swipeX + diffX))
-      }
+    const diff = e.touches[0].clientX - startX.current
+    if (diff < 0) {
+      setSwipeX(Math.max(diff, -80))
+    } else if (swipeX < 0) {
+      setSwipeX(Math.min(0, swipeX + diff))
     }
   }
 
   const handleTouchEnd = () => {
     setIsSwiping(false)
-    if (swipeX < -SWIPE_THRESHOLD / 2) {
-      setSwipeX(-SWIPE_THRESHOLD)
-    } else {
-      setSwipeX(0)
-    }
+    setSwipeX(swipeX < -40 ? -80 : 0)
   }
 
   const handleClick = () => {
     if (swipeX < 0) {
       setSwipeX(0)
     } else {
-      onTap()
+      onEdit()
     }
   }
 
   return (
-    <div className="relative overflow-hidden rounded">
-      {/* Delete button on right */}
+    <div className="relative overflow-hidden rounded-lg">
       <div
         className={cn(
-          "absolute inset-y-0 right-0 flex items-center justify-center bg-destructive transition-opacity",
+          "absolute inset-y-0 right-0 flex items-center justify-center bg-destructive transition-opacity z-0",
           swipeX < 0 ? "opacity-100" : "opacity-0",
         )}
-        style={{ width: SWIPE_THRESHOLD }}
+        style={{ width: 80 }}
       >
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-full w-full rounded-none text-destructive-foreground"
+        <button
+          type="button"
           onClick={(e) => {
             e.stopPropagation()
             onDelete()
           }}
+          className="h-full w-full flex items-center justify-center text-destructive-foreground"
         >
           <Trash2 className="h-5 w-5" />
-        </Button>
+        </button>
       </div>
-
-      {/* Swipeable content */}
       <div
         className={cn(
-          "p-2 cursor-pointer bg-secondary",
-          !isSwiping && "transition-transform duration-200",
-          isActive && "border-l-2 border-primary",
+          "p-3 bg-secondary/50 rounded-lg cursor-pointer relative z-10 transition-transform",
+          !isSwiping && "duration-200",
+          isActive && "ring-2 ring-primary",
         )}
         style={{ transform: `translateX(${swipeX}px)` }}
         onTouchStart={handleTouchStart}
@@ -149,32 +189,27 @@ function SwipeableItem({
 }
 
 export function ManageData() {
-  const { aircraft, isLoading: aircraftLoading, refresh: refreshAircraft } = useAircraft()
-  const { airports, isLoading: airportsLoading, refresh: refreshAirports } = useAirports()
-  const { personnel, isLoading: personnelLoading, refresh: refreshPersonnel } = usePersonnel()
+  const [activeTab, setActiveTab] = useState<TabType>("aircraft")
+  const { aircraft, refresh: refreshAircraft } = useAircraft()
+  const { airports, refresh: refreshAirports } = useAirports()
+  const { personnel, refresh: refreshPersonnel } = usePersonnel()
 
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  const [editingAircraftId, setEditingAircraftId] = useState<string | null>(null)
-  const [editingAirportId, setEditingAirportId] = useState<string | null>(null)
-  const [editingPersonnelId, setEditingPersonnelId] = useState<string | null>(null)
-
-  // Delete states
-  const [deleteAircraftTarget, setDeleteAircraftTarget] = useState<Aircraft | null>(null)
-  const [deleteAirportTarget, setDeleteAirportTarget] = useState<Airport | null>(null)
-  const [deletePersonnelTarget, setDeletePersonnelTarget] = useState<Personnel | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ type: TabType; item: Aircraft | Airport | Personnel } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+
+  // Edit state
+  const [editingAircraft, setEditingAircraft] = useState<Aircraft | null>(null)
+  const [editingAirport, setEditingAirport] = useState<Airport | null>(null)
+  const [editingPersonnel, setEditingPersonnel] = useState<Personnel | null>(null)
 
   // Aircraft form
   const [aircraftForm, setAircraftForm] = useState({
     registration: "",
     type: "",
     typeDesignator: "",
-    model: "",
-    category: "MEL",
-    engineType: "JET" as Aircraft["engineType"],
-    isComplex: true,
-    isHighPerformance: true,
+    category: "ASEL",
+    engineType: "JET",
   })
 
   // Airport form
@@ -186,10 +221,7 @@ export function ManageData() {
     country: "",
     latitude: "",
     longitude: "",
-    elevation: "",
     timezone: "",
-    utcOffset: "",
-    dstObserved: false,
   })
 
   // Personnel form
@@ -197,100 +229,58 @@ export function ManageData() {
     firstName: "",
     lastName: "",
     employeeId: "",
-    licenseNumber: "",
-    role: "FO" as Personnel["role"],
-    company: "",
-    email: "",
-    notes: "",
+    role: "FO",
   })
 
-  const handleEditAircraft = (a: Aircraft) => {
-    setEditingAircraftId(a.id)
+  const inputClassName = "bg-input h-9 text-sm text-right w-full"
+
+  const resetAircraftForm = () => {
+    setAircraftForm({ registration: "", type: "", typeDesignator: "", category: "ASEL", engineType: "JET" })
+    setEditingAircraft(null)
+  }
+
+  const resetAirportForm = () => {
+    setAirportForm({ icao: "", iata: "", name: "", city: "", country: "", latitude: "", longitude: "", timezone: "" })
+    setEditingAirport(null)
+  }
+
+  const resetPersonnelForm = () => {
+    setPersonnelForm({ firstName: "", lastName: "", employeeId: "", role: "FO" })
+    setEditingPersonnel(null)
+  }
+
+  const handleEditAircraft = (ac: Aircraft) => {
+    setEditingAircraft(ac)
     setAircraftForm({
-      registration: a.registration,
-      type: a.type,
-      typeDesignator: a.typeDesignator || "",
-      model: a.model || "",
-      category: a.category || "MEL",
-      engineType: a.engineType,
-      isComplex: a.isComplex ?? true,
-      isHighPerformance: a.isHighPerformance ?? true,
+      registration: ac.registration,
+      type: ac.type,
+      typeDesignator: ac.typeDesignator || "",
+      category: ac.category || "ASEL",
+      engineType: ac.engineType || "JET",
     })
   }
 
-  const handleEditAirport = (a: Airport) => {
-    setEditingAirportId(a.id)
+  const handleEditAirport = (ap: Airport) => {
+    setEditingAirport(ap)
     setAirportForm({
-      icao: a.icao,
-      iata: a.iata || "",
-      name: a.name,
-      city: a.city || "",
-      country: a.country || "",
-      latitude: a.latitude?.toString() || "",
-      longitude: a.longitude?.toString() || "",
-      elevation: a.elevation?.toString() || "",
-      timezone: a.timezone || "",
-      utcOffset: a.utcOffset?.toString() || "",
-      dstObserved: a.dstObserved ?? false,
+      icao: ap.icao,
+      iata: ap.iata || "",
+      name: ap.name,
+      city: ap.city || "",
+      country: ap.country || "",
+      latitude: String(ap.latitude),
+      longitude: String(ap.longitude),
+      timezone: ap.timezone || "",
     })
   }
 
   const handleEditPersonnel = (p: Personnel) => {
-    setEditingPersonnelId(p.id)
+    setEditingPersonnel(p)
     setPersonnelForm({
       firstName: p.firstName,
       lastName: p.lastName,
       employeeId: p.employeeId || "",
-      licenseNumber: p.licenseNumber || "",
       role: p.role,
-      company: p.company || "",
-      email: p.email || "",
-      notes: p.notes || "",
-    })
-  }
-
-  const cancelAircraftEdit = () => {
-    setEditingAircraftId(null)
-    setAircraftForm({
-      registration: "",
-      type: "",
-      typeDesignator: "",
-      model: "",
-      category: "MEL",
-      engineType: "JET",
-      isComplex: true,
-      isHighPerformance: true,
-    })
-  }
-
-  const cancelAirportEdit = () => {
-    setEditingAirportId(null)
-    setAirportForm({
-      icao: "",
-      iata: "",
-      name: "",
-      city: "",
-      country: "",
-      latitude: "",
-      longitude: "",
-      elevation: "",
-      timezone: "",
-      utcOffset: "",
-      dstObserved: false,
-    })
-  }
-
-  const cancelPersonnelEdit = () => {
-    setEditingPersonnelId(null)
-    setPersonnelForm({
-      firstName: "",
-      lastName: "",
-      employeeId: "",
-      licenseNumber: "",
-      role: "FO",
-      company: "",
-      email: "",
-      notes: "",
     })
   }
 
@@ -298,40 +288,16 @@ export function ManageData() {
     if (!aircraftForm.registration || !aircraftForm.type) return
     setIsSubmitting(true)
     try {
-      const data = {
-        registration: aircraftForm.registration.toUpperCase(),
-        type: aircraftForm.type.toUpperCase(),
-        typeDesignator: aircraftForm.typeDesignator.toUpperCase(),
-        model: aircraftForm.model,
-        category: aircraftForm.category,
-        engineType: aircraftForm.engineType,
-        isComplex: aircraftForm.isComplex,
-        isHighPerformance: aircraftForm.isHighPerformance,
-      }
-
-      if (editingAircraftId) {
-        await updateAircraft(editingAircraftId, data)
+      if (editingAircraft) {
+        await updateAircraft(editingAircraft.id, aircraftForm)
       } else {
-        await addAircraft(data)
+        await addAircraft(aircraftForm)
       }
-      cancelAircraftEdit()
+      resetAircraftForm()
       await refreshAircraft()
       if (navigator.onLine) syncService.fullSync()
     } finally {
       setIsSubmitting(false)
-    }
-  }
-
-  const handleDeleteAircraft = async () => {
-    if (!deleteAircraftTarget) return
-    setIsDeleting(true)
-    try {
-      await deleteAircraft(deleteAircraftTarget.id)
-      setDeleteAircraftTarget(null)
-      await refreshAircraft()
-      if (navigator.onLine) syncService.fullSync()
-    } finally {
-      setIsDeleting(false)
     }
   }
 
@@ -340,42 +306,20 @@ export function ManageData() {
     setIsSubmitting(true)
     try {
       const data = {
-        icao: airportForm.icao.toUpperCase(),
-        iata: airportForm.iata.toUpperCase(),
-        name: airportForm.name,
-        city: airportForm.city,
-        country: airportForm.country,
+        ...airportForm,
         latitude: Number.parseFloat(airportForm.latitude) || 0,
         longitude: Number.parseFloat(airportForm.longitude) || 0,
-        elevation: Number.parseFloat(airportForm.elevation) || 0,
-        timezone: airportForm.timezone,
-        utcOffset: Number.parseFloat(airportForm.utcOffset) || 0,
-        dstObserved: airportForm.dstObserved,
       }
-
-      if (editingAirportId) {
-        await updateAirport(editingAirportId, data)
+      if (editingAirport) {
+        await updateAirport(editingAirport.id, data)
       } else {
         await addAirport(data)
       }
-      cancelAirportEdit()
+      resetAirportForm()
       await refreshAirports()
       if (navigator.onLine) syncService.fullSync()
     } finally {
       setIsSubmitting(false)
-    }
-  }
-
-  const handleDeleteAirport = async () => {
-    if (!deleteAirportTarget) return
-    setIsDeleting(true)
-    try {
-      await deleteAirport(deleteAirportTarget.id)
-      setDeleteAirportTarget(null)
-      await refreshAirports()
-      if (navigator.onLine) syncService.fullSync()
-    } finally {
-      setIsDeleting(false)
     }
   }
 
@@ -383,23 +327,12 @@ export function ManageData() {
     if (!personnelForm.firstName || !personnelForm.lastName) return
     setIsSubmitting(true)
     try {
-      const data = {
-        firstName: personnelForm.firstName,
-        lastName: personnelForm.lastName,
-        employeeId: personnelForm.employeeId,
-        licenseNumber: personnelForm.licenseNumber,
-        role: personnelForm.role,
-        company: personnelForm.company,
-        email: personnelForm.email,
-        notes: personnelForm.notes,
-      }
-
-      if (editingPersonnelId) {
-        await updatePersonnel(editingPersonnelId, data)
+      if (editingPersonnel) {
+        await updatePersonnel(editingPersonnel.id, personnelForm)
       } else {
-        await addPersonnel(data)
+        await addPersonnel(personnelForm)
       }
-      cancelPersonnelEdit()
+      resetPersonnelForm()
       await refreshPersonnel()
       if (navigator.onLine) syncService.fullSync()
     } finally {
@@ -407,534 +340,369 @@ export function ManageData() {
     }
   }
 
-  const handleDeletePersonnel = async () => {
-    if (!deletePersonnelTarget) return
+  const handleDelete = async () => {
+    if (!deleteTarget) return
     setIsDeleting(true)
     try {
-      await deletePersonnel(deletePersonnelTarget.id)
-      setDeletePersonnelTarget(null)
-      await refreshPersonnel()
+      switch (deleteTarget.type) {
+        case "aircraft":
+          await deleteAircraft(deleteTarget.item.id)
+          await refreshAircraft()
+          break
+        case "airports":
+          await deleteAirport(deleteTarget.item.id)
+          await refreshAirports()
+          break
+        case "personnel":
+          await deletePersonnel(deleteTarget.item.id)
+          await refreshPersonnel()
+          break
+      }
       if (navigator.onLine) syncService.fullSync()
     } finally {
       setIsDeleting(false)
+      setDeleteTarget(null)
     }
   }
 
-  const ListSkeleton = () => (
-    <div className="space-y-2">
-      {Array.from({ length: 3 }).map((_, i) => (
-        <Skeleton key={i} className="h-12 w-full rounded" />
-      ))}
-    </div>
-  )
+  const tabs = [
+    { id: "aircraft" as TabType, label: "Aircraft", icon: Plane },
+    { id: "airports" as TabType, label: "Airports", icon: MapPin },
+    { id: "personnel" as TabType, label: "Personnel", icon: Users },
+  ]
 
   return (
-    <>
-      <Card className="bg-card border-border">
-        <CardHeader className="pb-4">
-          <CardTitle className="text-foreground">Manage Data</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Tabs defaultValue="aircraft" className="w-full">
-            <TabsList className="grid w-full grid-cols-3 mb-4">
-              <TabsTrigger value="aircraft" className="flex items-center gap-1">
-                <Plane className="h-4 w-4" />
-                Aircraft
-              </TabsTrigger>
-              <TabsTrigger value="airports" className="flex items-center gap-1">
-                <MapPin className="h-4 w-4" />
-                Airports
-              </TabsTrigger>
-              <TabsTrigger value="personnel" className="flex items-center gap-1">
-                <Users className="h-4 w-4" />
-                Personnel
-              </TabsTrigger>
-            </TabsList>
+    <div className="space-y-4">
+      {/* Tab buttons */}
+      <div className="flex gap-1 p-1 bg-secondary/30 rounded-lg">
+        {tabs.map((tab) => (
+          <Button
+            key={tab.id}
+            variant={activeTab === tab.id ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => setActiveTab(tab.id)}
+            className="flex-1 gap-2"
+          >
+            <tab.icon className="h-4 w-4" />
+            {tab.label}
+          </Button>
+        ))}
+      </div>
 
-            {/* Aircraft Tab */}
-            <TabsContent value="aircraft" className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="space-y-1">
-                  <Label htmlFor="acReg" className="text-xs">
-                    Registration
-                  </Label>
-                  <Input
-                    id="acReg"
-                    placeholder="9V-SMA"
-                    value={aircraftForm.registration}
-                    onChange={(e) => setAircraftForm({ ...aircraftForm, registration: e.target.value })}
-                    className="bg-input uppercase"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="acType" className="text-xs">
-                    Type
-                  </Label>
-                  <Input
-                    id="acType"
-                    placeholder="A350"
-                    value={aircraftForm.type}
-                    onChange={(e) => setAircraftForm({ ...aircraftForm, type: e.target.value })}
-                    className="bg-input uppercase"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="acModel" className="text-xs">
-                    Model
-                  </Label>
-                  <Input
-                    id="acModel"
-                    placeholder="A350-941"
-                    value={aircraftForm.model}
-                    onChange={(e) => setAircraftForm({ ...aircraftForm, model: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Engine Type</Label>
-                  <Select
-                    value={aircraftForm.engineType}
-                    onValueChange={(v) => setAircraftForm({ ...aircraftForm, engineType: v as Aircraft["engineType"] })}
-                  >
-                    <SelectTrigger className="bg-input">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="SEP">SEP</SelectItem>
-                      <SelectItem value="MEP">MEP</SelectItem>
-                      <SelectItem value="SET">SET</SelectItem>
-                      <SelectItem value="MET">MET</SelectItem>
-                      <SelectItem value="JET">JET</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={handleSaveAircraft} disabled={isSubmitting} size="sm">
-                  {isSubmitting ? (
-                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                  ) : editingAircraftId ? (
-                    <Save className="h-4 w-4 mr-1" />
-                  ) : (
-                    <Plus className="h-4 w-4 mr-1" />
-                  )}
-                  {editingAircraftId ? "Save" : "Add Aircraft"}
+      {/* Aircraft Tab */}
+      {activeTab === "aircraft" && (
+        <div className="bg-card rounded-lg border border-border">
+          <div className="flex items-center justify-between p-3 border-b border-border">
+            <h3 className="font-semibold">{editingAircraft ? "Edit Aircraft" : "Add Aircraft"}</h3>
+            <div className="flex gap-2">
+              {editingAircraft && (
+                <Button variant="ghost" size="sm" onClick={resetAircraftForm}>
+                  <X className="h-4 w-4" />
                 </Button>
-                {editingAircraftId && (
-                  <Button variant="outline" size="sm" onClick={cancelAircraftEdit}>
-                    Cancel
-                  </Button>
-                )}
-              </div>
+              )}
+              <Button size="sm" onClick={handleSaveAircraft} disabled={isSubmitting}>
+                <Save className="h-4 w-4 mr-1" />
+                {editingAircraft ? "Update" : "Add"}
+              </Button>
+            </div>
+          </div>
+          <div className="px-3 pb-3">
+            <SwipeableRow label="Registration" onClear={() => setAircraftForm((p) => ({ ...p, registration: "" }))}>
+              <Input
+                placeholder="9V-SWA"
+                value={aircraftForm.registration}
+                onChange={(e) => setAircraftForm((p) => ({ ...p, registration: e.target.value.toUpperCase() }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="Type" onClear={() => setAircraftForm((p) => ({ ...p, type: "" }))}>
+              <Input
+                placeholder="B777-300ER"
+                value={aircraftForm.type}
+                onChange={(e) => setAircraftForm((p) => ({ ...p, type: e.target.value }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="ICAO Type" onClear={() => setAircraftForm((p) => ({ ...p, typeDesignator: "" }))}>
+              <Input
+                placeholder="B77W"
+                value={aircraftForm.typeDesignator}
+                onChange={(e) => setAircraftForm((p) => ({ ...p, typeDesignator: e.target.value.toUpperCase() }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="Category" showClear={false}>
+              <Select
+                value={aircraftForm.category}
+                onValueChange={(v) => setAircraftForm((p) => ({ ...p, category: v }))}
+              >
+                <SelectTrigger className={inputClassName}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ASEL">ASEL</SelectItem>
+                  <SelectItem value="AMEL">AMEL</SelectItem>
+                  <SelectItem value="ASES">ASES</SelectItem>
+                  <SelectItem value="AMES">AMES</SelectItem>
+                  <SelectItem value="HELO">Helicopter</SelectItem>
+                  <SelectItem value="GLIDER">Glider</SelectItem>
+                </SelectContent>
+              </Select>
+            </SwipeableRow>
+            <SwipeableRow label="Engine" showClear={false}>
+              <Select
+                value={aircraftForm.engineType}
+                onValueChange={(v) => setAircraftForm((p) => ({ ...p, engineType: v }))}
+              >
+                <SelectTrigger className={inputClassName}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="JET">Jet</SelectItem>
+                  <SelectItem value="TURBOPROP">Turboprop</SelectItem>
+                  <SelectItem value="PISTON">Piston</SelectItem>
+                  <SelectItem value="ELECTRIC">Electric</SelectItem>
+                </SelectContent>
+              </Select>
+            </SwipeableRow>
+          </div>
 
-              <ScrollArea className="h-[200px] border rounded-md p-2">
-                {aircraftLoading ? (
-                  <ListSkeleton />
-                ) : (
-                  <div className="space-y-2">
-                    {aircraft.map((a) => (
-                      <SwipeableItem
-                        key={a.id}
-                        onTap={() => handleEditAircraft(a)}
-                        onDelete={() => setDeleteAircraftTarget(a)}
-                        isActive={editingAircraftId === a.id}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="font-medium">{a.registration}</span>
-                            <span className="text-muted-foreground ml-2">
-                              {a.type} - {a.model}
-                            </span>
-                          </div>
-                          <Badge variant="outline">{a.engineType}</Badge>
-                        </div>
-                      </SwipeableItem>
-                    ))}
-                    {aircraft.length === 0 && (
-                      <p className="text-sm text-muted-foreground text-center py-4">No aircraft added</p>
-                    )}
-                  </div>
-                )}
-              </ScrollArea>
-            </TabsContent>
+          {/* Aircraft List */}
+          <div className="border-t border-border p-3 space-y-2 max-h-64 overflow-y-auto">
+            {aircraft.map((ac) => (
+              <SwipeableItem
+                key={ac.id}
+                onEdit={() => handleEditAircraft(ac)}
+                onDelete={() => setDeleteTarget({ type: "aircraft", item: ac })}
+                isActive={editingAircraft?.id === ac.id}
+              >
+                <div className="flex justify-between items-center">
+                  <span className="font-medium">{ac.registration}</span>
+                  <span className="text-sm text-muted-foreground">{ac.type}</span>
+                </div>
+              </SwipeableItem>
+            ))}
+            {aircraft.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No aircraft added yet</p>
+            )}
+          </div>
+        </div>
+      )}
 
-            {/* Airports Tab */}
-            <TabsContent value="airports" className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="space-y-1">
-                  <Label htmlFor="apIcao" className="text-xs">
-                    ICAO
-                  </Label>
-                  <Input
-                    id="apIcao"
-                    placeholder="WSSS"
-                    value={airportForm.icao}
-                    onChange={(e) => setAirportForm({ ...airportForm, icao: e.target.value })}
-                    className="bg-input uppercase"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="apIata" className="text-xs">
-                    IATA
-                  </Label>
-                  <Input
-                    id="apIata"
-                    placeholder="SIN"
-                    value={airportForm.iata}
-                    onChange={(e) => setAirportForm({ ...airportForm, iata: e.target.value })}
-                    className="bg-input uppercase"
-                  />
-                </div>
-                <div className="space-y-1 col-span-2">
-                  <Label htmlFor="apName" className="text-xs">
-                    Name
-                  </Label>
-                  <Input
-                    id="apName"
-                    placeholder="Singapore Changi Airport"
-                    value={airportForm.name}
-                    onChange={(e) => setAirportForm({ ...airportForm, name: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="apCity" className="text-xs">
-                    City
-                  </Label>
-                  <Input
-                    id="apCity"
-                    placeholder="Singapore"
-                    value={airportForm.city}
-                    onChange={(e) => setAirportForm({ ...airportForm, city: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="apCountry" className="text-xs">
-                    Country
-                  </Label>
-                  <Input
-                    id="apCountry"
-                    placeholder="Singapore"
-                    value={airportForm.country}
-                    onChange={(e) => setAirportForm({ ...airportForm, country: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="apLat" className="text-xs">
-                    Latitude
-                  </Label>
-                  <Input
-                    id="apLat"
-                    type="number"
-                    step="0.0001"
-                    placeholder="1.3644"
-                    value={airportForm.latitude}
-                    onChange={(e) => setAirportForm({ ...airportForm, latitude: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="apLng" className="text-xs">
-                    Longitude
-                  </Label>
-                  <Input
-                    id="apLng"
-                    type="number"
-                    step="0.0001"
-                    placeholder="103.9915"
-                    value={airportForm.longitude}
-                    onChange={(e) => setAirportForm({ ...airportForm, longitude: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="apTimezone" className="text-xs">
-                    Timezone
-                  </Label>
-                  <Input
-                    id="apTimezone"
-                    placeholder="Asia/Singapore"
-                    value={airportForm.timezone}
-                    onChange={(e) => setAirportForm({ ...airportForm, timezone: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="apUtcOffset" className="text-xs">
-                    UTC Offset
-                  </Label>
-                  <Input
-                    id="apUtcOffset"
-                    type="number"
-                    step="0.5"
-                    placeholder="8"
-                    value={airportForm.utcOffset}
-                    onChange={(e) => setAirportForm({ ...airportForm, utcOffset: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={handleSaveAirport} disabled={isSubmitting} size="sm">
-                  {isSubmitting ? (
-                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                  ) : editingAirportId ? (
-                    <Save className="h-4 w-4 mr-1" />
-                  ) : (
-                    <Plus className="h-4 w-4 mr-1" />
-                  )}
-                  {editingAirportId ? "Save" : "Add Airport"}
+      {/* Airports Tab */}
+      {activeTab === "airports" && (
+        <div className="bg-card rounded-lg border border-border">
+          <div className="flex items-center justify-between p-3 border-b border-border">
+            <h3 className="font-semibold">{editingAirport ? "Edit Airport" : "Add Airport"}</h3>
+            <div className="flex gap-2">
+              {editingAirport && (
+                <Button variant="ghost" size="sm" onClick={resetAirportForm}>
+                  <X className="h-4 w-4" />
                 </Button>
-                {editingAirportId && (
-                  <Button variant="outline" size="sm" onClick={cancelAirportEdit}>
-                    Cancel
-                  </Button>
-                )}
-              </div>
+              )}
+              <Button size="sm" onClick={handleSaveAirport} disabled={isSubmitting}>
+                <Save className="h-4 w-4 mr-1" />
+                {editingAirport ? "Update" : "Add"}
+              </Button>
+            </div>
+          </div>
+          <div className="px-3 pb-3">
+            <SwipeableRow label="ICAO" onClear={() => setAirportForm((p) => ({ ...p, icao: "" }))}>
+              <Input
+                placeholder="WSSS"
+                value={airportForm.icao}
+                onChange={(e) => setAirportForm((p) => ({ ...p, icao: e.target.value.toUpperCase() }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="IATA" onClear={() => setAirportForm((p) => ({ ...p, iata: "" }))}>
+              <Input
+                placeholder="SIN"
+                value={airportForm.iata}
+                onChange={(e) => setAirportForm((p) => ({ ...p, iata: e.target.value.toUpperCase() }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="Name" onClear={() => setAirportForm((p) => ({ ...p, name: "" }))}>
+              <Input
+                placeholder="Singapore Changi"
+                value={airportForm.name}
+                onChange={(e) => setAirportForm((p) => ({ ...p, name: e.target.value }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="City" onClear={() => setAirportForm((p) => ({ ...p, city: "" }))}>
+              <Input
+                placeholder="Singapore"
+                value={airportForm.city}
+                onChange={(e) => setAirportForm((p) => ({ ...p, city: e.target.value }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="Country" onClear={() => setAirportForm((p) => ({ ...p, country: "" }))}>
+              <Input
+                placeholder="Singapore"
+                value={airportForm.country}
+                onChange={(e) => setAirportForm((p) => ({ ...p, country: e.target.value }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="Latitude" onClear={() => setAirportForm((p) => ({ ...p, latitude: "" }))}>
+              <Input
+                type="number"
+                step="0.0001"
+                placeholder="1.3644"
+                value={airportForm.latitude}
+                onChange={(e) => setAirportForm((p) => ({ ...p, latitude: e.target.value }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="Longitude" onClear={() => setAirportForm((p) => ({ ...p, longitude: "" }))}>
+              <Input
+                type="number"
+                step="0.0001"
+                placeholder="103.9915"
+                value={airportForm.longitude}
+                onChange={(e) => setAirportForm((p) => ({ ...p, longitude: e.target.value }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="Timezone" onClear={() => setAirportForm((p) => ({ ...p, timezone: "" }))}>
+              <Input
+                placeholder="Asia/Singapore"
+                value={airportForm.timezone}
+                onChange={(e) => setAirportForm((p) => ({ ...p, timezone: e.target.value }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+          </div>
 
-              <ScrollArea className="h-[200px] border rounded-md p-2">
-                {airportsLoading ? (
-                  <ListSkeleton />
-                ) : (
-                  <div className="space-y-2">
-                    {airports.map((a) => (
-                      <SwipeableItem
-                        key={a.id}
-                        onTap={() => handleEditAirport(a)}
-                        onDelete={() => setDeleteAirportTarget(a)}
-                        isActive={editingAirportId === a.id}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="font-medium">{a.icao}</span>
-                            <span className="text-muted-foreground ml-2">{a.name}</span>
-                          </div>
-                          <Badge variant="outline">{a.iata}</Badge>
-                        </div>
-                      </SwipeableItem>
-                    ))}
-                    {airports.length === 0 && (
-                      <p className="text-sm text-muted-foreground text-center py-4">No airports added</p>
-                    )}
-                  </div>
-                )}
-              </ScrollArea>
-            </TabsContent>
+          {/* Airports List */}
+          <div className="border-t border-border p-3 space-y-2 max-h-64 overflow-y-auto">
+            {airports.map((ap) => (
+              <SwipeableItem
+                key={ap.id}
+                onEdit={() => handleEditAirport(ap)}
+                onDelete={() => setDeleteTarget({ type: "airports", item: ap })}
+                isActive={editingAirport?.id === ap.id}
+              >
+                <div className="flex justify-between items-center">
+                  <span className="font-medium">{ap.icao}</span>
+                  <span className="text-sm text-muted-foreground truncate ml-2">{ap.name}</span>
+                </div>
+              </SwipeableItem>
+            ))}
+            {airports.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No airports added yet</p>
+            )}
+          </div>
+        </div>
+      )}
 
-            {/* Personnel Tab */}
-            <TabsContent value="personnel" className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="space-y-1">
-                  <Label htmlFor="pFirstName" className="text-xs">
-                    First Name
-                  </Label>
-                  <Input
-                    id="pFirstName"
-                    placeholder="John"
-                    value={personnelForm.firstName}
-                    onChange={(e) => setPersonnelForm({ ...personnelForm, firstName: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="pLastName" className="text-xs">
-                    Last Name
-                  </Label>
-                  <Input
-                    id="pLastName"
-                    placeholder="Doe"
-                    value={personnelForm.lastName}
-                    onChange={(e) => setPersonnelForm({ ...personnelForm, lastName: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="pEmployeeId" className="text-xs">
-                    Employee ID
-                  </Label>
-                  <Input
-                    id="pEmployeeId"
-                    placeholder="EMP123"
-                    value={personnelForm.employeeId}
-                    onChange={(e) => setPersonnelForm({ ...personnelForm, employeeId: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Role</Label>
-                  <Select
-                    value={personnelForm.role}
-                    onValueChange={(v) => setPersonnelForm({ ...personnelForm, role: v as Personnel["role"] })}
-                  >
-                    <SelectTrigger className="bg-input">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="CAPT">Captain</SelectItem>
-                      <SelectItem value="FO">First Officer</SelectItem>
-                      <SelectItem value="INSTRUCTOR">Instructor</SelectItem>
-                      <SelectItem value="STUDENT">Student</SelectItem>
-                      <SelectItem value="OTHER">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="pLicense" className="text-xs">
-                    License Number
-                  </Label>
-                  <Input
-                    id="pLicense"
-                    placeholder="ATP12345"
-                    value={personnelForm.licenseNumber}
-                    onChange={(e) => setPersonnelForm({ ...personnelForm, licenseNumber: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="pCompany" className="text-xs">
-                    Company
-                  </Label>
-                  <Input
-                    id="pCompany"
-                    placeholder="Singapore Airlines"
-                    value={personnelForm.company}
-                    onChange={(e) => setPersonnelForm({ ...personnelForm, company: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-                <div className="space-y-1 col-span-2">
-                  <Label htmlFor="pEmail" className="text-xs">
-                    Email
-                  </Label>
-                  <Input
-                    id="pEmail"
-                    type="email"
-                    placeholder="john.doe@airline.com"
-                    value={personnelForm.email}
-                    onChange={(e) => setPersonnelForm({ ...personnelForm, email: e.target.value })}
-                    className="bg-input"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={handleSavePersonnel} disabled={isSubmitting} size="sm">
-                  {isSubmitting ? (
-                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                  ) : editingPersonnelId ? (
-                    <Save className="h-4 w-4 mr-1" />
-                  ) : (
-                    <Plus className="h-4 w-4 mr-1" />
-                  )}
-                  {editingPersonnelId ? "Save" : "Add Personnel"}
+      {/* Personnel Tab */}
+      {activeTab === "personnel" && (
+        <div className="bg-card rounded-lg border border-border">
+          <div className="flex items-center justify-between p-3 border-b border-border">
+            <h3 className="font-semibold">{editingPersonnel ? "Edit Personnel" : "Add Personnel"}</h3>
+            <div className="flex gap-2">
+              {editingPersonnel && (
+                <Button variant="ghost" size="sm" onClick={resetPersonnelForm}>
+                  <X className="h-4 w-4" />
                 </Button>
-                {editingPersonnelId && (
-                  <Button variant="outline" size="sm" onClick={cancelPersonnelEdit}>
-                    Cancel
-                  </Button>
-                )}
-              </div>
+              )}
+              <Button size="sm" onClick={handleSavePersonnel} disabled={isSubmitting}>
+                <Save className="h-4 w-4 mr-1" />
+                {editingPersonnel ? "Update" : "Add"}
+              </Button>
+            </div>
+          </div>
+          <div className="px-3 pb-3">
+            <SwipeableRow label="First Name" onClear={() => setPersonnelForm((p) => ({ ...p, firstName: "" }))}>
+              <Input
+                placeholder="John"
+                value={personnelForm.firstName}
+                onChange={(e) => setPersonnelForm((p) => ({ ...p, firstName: e.target.value }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="Last Name" onClear={() => setPersonnelForm((p) => ({ ...p, lastName: "" }))}>
+              <Input
+                placeholder="Smith"
+                value={personnelForm.lastName}
+                onChange={(e) => setPersonnelForm((p) => ({ ...p, lastName: e.target.value }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="Employee ID" onClear={() => setPersonnelForm((p) => ({ ...p, employeeId: "" }))}>
+              <Input
+                placeholder="E12345"
+                value={personnelForm.employeeId}
+                onChange={(e) => setPersonnelForm((p) => ({ ...p, employeeId: e.target.value }))}
+                className={inputClassName}
+              />
+            </SwipeableRow>
+            <SwipeableRow label="Role" showClear={false}>
+              <Select value={personnelForm.role} onValueChange={(v) => setPersonnelForm((p) => ({ ...p, role: v }))}>
+                <SelectTrigger className={inputClassName}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CAPT">Captain</SelectItem>
+                  <SelectItem value="FO">First Officer</SelectItem>
+                  <SelectItem value="SO">Second Officer</SelectItem>
+                  <SelectItem value="FE">Flight Engineer</SelectItem>
+                  <SelectItem value="IP">Instructor Pilot</SelectItem>
+                  <SelectItem value="CP">Check Pilot</SelectItem>
+                </SelectContent>
+              </Select>
+            </SwipeableRow>
+          </div>
 
-              <ScrollArea className="h-[200px] border rounded-md p-2">
-                {personnelLoading ? (
-                  <ListSkeleton />
-                ) : (
-                  <div className="space-y-2">
-                    {personnel.map((p) => (
-                      <SwipeableItem
-                        key={p.id}
-                        onTap={() => handleEditPersonnel(p)}
-                        onDelete={() => setDeletePersonnelTarget(p)}
-                        isActive={editingPersonnelId === p.id}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="font-medium">
-                              {p.firstName} {p.lastName}
-                            </span>
-                            {p.company && <span className="text-muted-foreground ml-2">{p.company}</span>}
-                          </div>
-                          <Badge variant="outline">{p.role}</Badge>
-                        </div>
-                      </SwipeableItem>
-                    ))}
-                    {personnel.length === 0 && (
-                      <p className="text-sm text-muted-foreground text-center py-4">No personnel added</p>
-                    )}
-                  </div>
-                )}
-              </ScrollArea>
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
+          {/* Personnel List */}
+          <div className="border-t border-border p-3 space-y-2 max-h-64 overflow-y-auto">
+            {personnel.map((p) => (
+              <SwipeableItem
+                key={p.id}
+                onEdit={() => handleEditPersonnel(p)}
+                onDelete={() => setDeleteTarget({ type: "personnel", item: p })}
+                isActive={editingPersonnel?.id === p.id}
+              >
+                <div className="flex justify-between items-center">
+                  <span className="font-medium">
+                    {p.firstName} {p.lastName}
+                  </span>
+                  <span className="text-sm text-muted-foreground">{p.role}</span>
+                </div>
+              </SwipeableItem>
+            ))}
+            {personnel.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No personnel added yet</p>
+            )}
+          </div>
+        </div>
+      )}
 
-      {/* Delete Dialogs */}
-      <AlertDialog open={!!deleteAircraftTarget} onOpenChange={() => setDeleteAircraftTarget(null)}>
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Aircraft</AlertDialogTitle>
+            <AlertDialogTitle>Delete {deleteTarget?.type.slice(0, -1)}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete {deleteAircraftTarget?.registration}? This action cannot be undone.
+              Are you sure you want to delete this item? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleDeleteAircraft}
+              onClick={handleDelete}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-destructive-foreground"
             >
               {isDeleting ? "Deleting..." : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <AlertDialog open={!!deleteAirportTarget} onOpenChange={() => setDeleteAirportTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Airport</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete {deleteAirportTarget?.icao} - {deleteAirportTarget?.name}? This action
-              cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteAirport}
-              disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {isDeleting ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={!!deletePersonnelTarget} onOpenChange={() => setDeletePersonnelTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Personnel</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete {deletePersonnelTarget?.firstName} {deletePersonnelTarget?.lastName}? This
-              action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeletePersonnel}
-              disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {isDeleting ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+    </div>
   )
 }
