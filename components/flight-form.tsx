@@ -25,7 +25,7 @@ import {
 import { calculateTimesFromOOOI, calculateNightTime } from "@/lib/night-time-calculator"
 import { formatHHMMDisplay } from "@/lib/time-utils"
 import { syncService } from "@/lib/sync-service"
-import { Save, X, ArrowLeftRight, Trash2, GripVertical, Settings, Check } from "lucide-react"
+import { Save, X, ArrowLeftRight, Trash2, GripVertical } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface FlightFormProps {
@@ -111,8 +111,8 @@ function SwipeableRow({ label, children, onClear, showClear = true }: SwipeableR
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        <span className="text-sm text-muted-foreground w-20 flex-shrink-0 text-left">{label}</span>
-        <div className="flex-1 flex justify-end">{children}</div>
+        <span className="text-sm text-muted-foreground w-24 flex-shrink-0 text-left">{label}</span>
+        <div className="flex-1">{children}</div>
       </div>
     </div>
   )
@@ -222,7 +222,7 @@ export function FlightForm({
         dayTakeoffs: String((editingFlight as any).dayTakeoffs || 0),
         dayLandings: String(editingFlight.dayLandings || 0),
         nightTakeoffs: String((editingFlight as any).nightTakeoffs || 0),
-        nightLandings: String(editingFlight.nightLandings || 0),
+        nightLandings: String((editingFlight as any).nightLandings || 0),
         autolands: String((editingFlight as any).autolands || 0),
         approach1: (editingFlight as any).approach1 || "",
         approach2: (editingFlight as any).approach2 || "",
@@ -1087,23 +1087,29 @@ export function FlightForm({
         onDragOver={(e) => handleDragOver(e, section, fieldKey)}
         onDragEnd={() => handleDragEnd(section)}
         onDrop={(e) => e.preventDefault()}
-        className={cn("flex items-center gap-2", draggedField?.field === fieldKey && "opacity-50")}
+        className={cn(
+          "flex items-stretch gap-2",
+          draggedField?.field === fieldKey && "opacity-50",
+          isConfigMode && "cursor-move",
+        )}
       >
-        {isConfigMode && <GripVertical className="h-4 w-4 text-muted-foreground flex-shrink-0 cursor-move" />}
-        <div className="flex-1">{component}</div>
+        <GripVertical className="h-10 w-4 text-muted-foreground flex-shrink-0 self-center" />
+        <div className="flex-1 min-w-0">{component}</div>
       </div>
     )
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-1 px-3 pb-6">
-      <SectionHeader title="A) Flight">
-        {fieldOrder.map((fieldKey) => wrapFieldWithDrag("flight", fieldKey, allFieldComponents[fieldKey]))}
-      </SectionHeader>
+      <SectionHeader title="A) Flight" />
+      {fieldOrder.map((fieldKey) => (
+        <div key={fieldKey}>{wrapFieldWithDrag("flight", fieldKey, allFieldComponents[fieldKey])}</div>
+      ))}
 
-      <SectionHeader title="B) Time">
-        {timeFieldOrder.map((fieldKey) => wrapFieldWithDrag("time", fieldKey, allFieldComponents[fieldKey]))}
-      </SectionHeader>
+      <SectionHeader title="B) Time" />
+      {timeFieldOrder.map((fieldKey) => (
+        <div key={fieldKey}>{wrapFieldWithDrag("time", fieldKey, allFieldComponents[fieldKey])}</div>
+      ))}
 
       <SectionHeader title="C) Crew">
         <Button
@@ -1117,54 +1123,37 @@ export function FlightForm({
           <ArrowLeftRight className="h-3 w-3" />
           Swap PIC/SIC
         </Button>
-        {crewFieldOrder.map((fieldKey) => wrapFieldWithDrag("crew", fieldKey, allFieldComponents[fieldKey]))}
       </SectionHeader>
+      {crewFieldOrder.map((fieldKey) => (
+        <div key={fieldKey}>{wrapFieldWithDrag("crew", fieldKey, allFieldComponents[fieldKey])}</div>
+      ))}
 
-      <SectionHeader title="D) Landings">
-        {landingsFieldOrder.map((fieldKey) => wrapFieldWithDrag("landings", fieldKey, allFieldComponents[fieldKey]))}
-      </SectionHeader>
+      <SectionHeader title="D) Landings" />
+      {landingsFieldOrder.map((fieldKey) => (
+        <div key={fieldKey}>{wrapFieldWithDrag("landings", fieldKey, allFieldComponents[fieldKey])}</div>
+      ))}
 
-      <SectionHeader title="E) App and Hold">
-        {approachesFieldOrder.map((fieldKey) =>
-          wrapFieldWithDrag("approaches", fieldKey, allFieldComponents[fieldKey]),
+      <SectionHeader title="E) App and Hold" />
+      {approachesFieldOrder.map((fieldKey) => (
+        <div key={fieldKey}>{wrapFieldWithDrag("approaches", fieldKey, allFieldComponents[fieldKey])}</div>
+      ))}
+
+      <SectionHeader title="F) Notes" />
+      {notesFieldOrder.map((fieldKey) => (
+        <div key={fieldKey}>{wrapFieldWithDrag("notes", fieldKey, allFieldComponents[fieldKey])}</div>
+      ))}
+
+      <div className="flex items-center justify-between pt-4 mt-4 border-t border-border">
+        {onClose && (
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            <X className="h-4 w-4 mr-1" />
+            Cancel
+          </Button>
         )}
-      </SectionHeader>
-
-      <SectionHeader title="F) Notes">
-        {notesFieldOrder.map((fieldKey) => wrapFieldWithDrag("notes", fieldKey, allFieldComponents[fieldKey]))}
-      </SectionHeader>
-
-      <div className="flex items-center justify-between p-3 border-t border-border">
-        <h2 className="font-semibold text-foreground">{editingFlight ? "Edit Flight" : "New Entry"}</h2>
-        <div className="flex items-center gap-2">
-          {onClose && (
-            <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-              <X className="h-4 w-4" />
-            </Button>
-          )}
-          <Button type="submit" size="sm" disabled={isSubmitting}>
-            <Save className="h-4 w-4 mr-1" />
-            {isSubmitting ? "Saving..." : "Save"}
-          </Button>
-          <Button
-            type="button"
-            variant={isConfigMode ? "default" : "ghost"}
-            size="sm"
-            onClick={() => onConfigModeChange?.(!isConfigMode)}
-          >
-            {isConfigMode ? (
-              <>
-                <Check className="h-4 w-4 mr-1" />
-                Done
-              </>
-            ) : (
-              <>
-                <Settings className="h-4 w-4 mr-1" />
-                Config
-              </>
-            )}
-          </Button>
-        </div>
+        <Button type="submit" size="sm" disabled={isSubmitting || isConfigMode} className="ml-auto">
+          <Save className="h-4 w-4 mr-1" />
+          {isSubmitting ? "Saving..." : editingFlight ? "Update" : "Save"}
+        </Button>
       </div>
     </form>
   )

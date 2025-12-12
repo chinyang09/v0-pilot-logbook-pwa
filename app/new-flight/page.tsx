@@ -12,6 +12,8 @@ import { refreshAllData, useDBReady } from "@/hooks/use-indexed-db"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Check, Settings } from "lucide-react"
 
 function NewFlightContent() {
   const router = useRouter()
@@ -66,7 +68,23 @@ function NewFlightContent() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      <Header
+        rightAction={
+          <Button variant="ghost" size="sm" onClick={() => setIsConfigMode(!isConfigMode)} className="gap-1">
+            {isConfigMode ? (
+              <>
+                <Check className="h-4 w-4" />
+                Done
+              </>
+            ) : (
+              <>
+                <Settings className="h-4 w-4" />
+                Config
+              </>
+            )}
+          </Button>
+        }
+      />
 
       <main className="container mx-auto px-4 py-6 pb-24">
         {isLoadingFlight ? (
