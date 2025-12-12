@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Home, Book, Database, Plus } from "lucide-react"
+import { Home, Book, Database, Plus, Settings } from "lucide-react"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -33,7 +33,15 @@ export function BottomNavbar() {
 
   // Determine active tab from pathname
   const activeTab =
-    pathname === "/" ? "dashboard" : pathname === "/logbook" ? "logbook" : pathname === "/data" ? "data" : null
+    pathname === "/"
+      ? "dashboard"
+      : pathname === "/logbook"
+        ? "logbook"
+        : pathname === "/data"
+          ? "data"
+          : pathname === "/settings"
+            ? "settings"
+            : null
 
   return (
     <nav
@@ -47,17 +55,17 @@ export function BottomNavbar() {
           <Link href="/">
             <Button
               variant="ghost"
-              className={cn("flex flex-col items-center gap-1 h-14 px-6", activeTab === "dashboard" && "text-primary")}
+              className={cn("flex flex-col items-center gap-1 h-14 px-4", activeTab === "dashboard" && "text-primary")}
             >
               <Home className="h-5 w-5" />
-              <span className="text-xs">Dashboard</span>
+              <span className="text-xs">Home</span>
             </Button>
           </Link>
 
           <Link href="/logbook">
             <Button
               variant="ghost"
-              className={cn("flex flex-col items-center gap-1 h-14 px-6", activeTab === "logbook" && "text-primary")}
+              className={cn("flex flex-col items-center gap-1 h-14 px-4", activeTab === "logbook" && "text-primary")}
             >
               <Book className="h-5 w-5" />
               <span className="text-xs">Logbook</span>
@@ -73,10 +81,20 @@ export function BottomNavbar() {
           <Link href="/data">
             <Button
               variant="ghost"
-              className={cn("flex flex-col items-center gap-1 h-14 px-6", activeTab === "data" && "text-primary")}
+              className={cn("flex flex-col items-center gap-1 h-14 px-4", activeTab === "data" && "text-primary")}
             >
               <Database className="h-5 w-5" />
               <span className="text-xs">Data</span>
+            </Button>
+          </Link>
+
+          <Link href="/settings">
+            <Button
+              variant="ghost"
+              className={cn("flex flex-col items-center gap-1 h-14 px-4", activeTab === "settings" && "text-primary")}
+            >
+              <Settings className="h-5 w-5" />
+              <span className="text-xs">Settings</span>
             </Button>
           </Link>
         </div>

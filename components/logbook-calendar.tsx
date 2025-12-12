@@ -16,7 +16,7 @@ interface CalendarHandle {
   scrollToMonth: (year: number, month: number) => void
 }
 
-const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 const DAYS = ["S", "M", "T", "W", "T", "F", "S"]
 
 export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(function LogbookCalendar(
@@ -28,30 +28,30 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
   const calendarData = useMemo(() => {
     const now = new Date()
-    const startDate = new Date(now.getFullYear() - 1, now.getMonth(), 1)
-    const endDate = new Date(now.getFullYear() + 1, now.getMonth() + 1, 0)
+    const startDate = new Date(now.getFullYear() - 5, 0, 1) // 5 years ago, January 1st
+    const endDate = new Date(now.getFullYear() + 5, 11, 31) // 5 years future, December 31st
 
-    const weeks: { days: { date: Date; isCurrentMonth: boolean }[]; monthStart?: { year: number; month: number } }[] =
-      []
+    const weeks: {
+      days: { date: Date; monthYear: { year: number; month: number } }[]
+      monthStart?: { year: number; month: number }
+    }[] = []
     const current = new Date(startDate)
 
     // Adjust to start on Sunday
     current.setDate(current.getDate() - current.getDay())
 
-    let currentWeek: { date: Date; isCurrentMonth: boolean }[] = []
-    const lastMonth = -1
+    let currentWeek: { date: Date; monthYear: { year: number; month: number } }[] = []
 
     while (current <= endDate || currentWeek.length > 0) {
-      const isCurrentMonth = current.getMonth() === selectedMonth.month && current.getFullYear() === selectedMonth.year
+      const monthYear = { year: current.getFullYear(), month: current.getMonth() }
 
       currentWeek.push({
         date: new Date(current),
-        isCurrentMonth: current >= startDate && current <= endDate,
+        monthYear,
       })
 
       if (currentWeek.length === 7) {
         // Check if this week starts a new month
-        const firstDayOfWeek = currentWeek[0].date
         let monthStart: { year: number; month: number } | undefined
 
         for (const day of currentWeek) {
@@ -71,7 +71,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     }
 
     return weeks
-  }, [selectedMonth])
+  }, [])
 
   // Get all dates with flights
   const flightDates = useMemo(() => {
@@ -92,8 +92,6 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
     isScrolling.current = true
 
-    // Find the week that contains the first day of the month
-    const targetDate = `${year}-${String(month + 1).padStart(2, "0")}-01`
     const weekElement = container.querySelector(`[data-month-start="${year}-${month}"]`)
 
     if (weekElement) {
@@ -107,7 +105,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
   useImperativeHandle(ref, () => ({ scrollToMonth }), [scrollToMonth])
 
-  // Handle scroll to detect current visible month
+  // Handle scroll to detect current visible month (month in focus)
   useEffect(() => {
     const container = scrollContainerRef.current
     if (!container) return
@@ -116,9 +114,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       if (isScrolling.current) return
 
       const containerRect = container.getBoundingClientRect()
-      const centerY = containerRect.top + 100 // Check near top of visible area
+      const centerY = containerRect.top + 100
 
-      // Find which month is currently visible
       const monthMarkers = container.querySelectorAll("[data-month-start]")
       let closestMonth: { year: number; month: number } | null = null
       let closestDistance = Number.POSITIVE_INFINITY
@@ -182,8 +179,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
               const hasFlights = !!flightInfo
               const isToday = dateStr === today
               const isSelected = dateStr === selectedDate
-              const isActiveMonth =
-                dayInfo.date.getMonth() === selectedMonth.month && dayInfo.date.getFullYear() === selectedMonth.year
+              const isInFocusMonth =
+                dayInfo.monthYear.month === selectedMonth.month && dayInfo.monthYear.year === selectedMonth.year
 
               return (
                 <button
@@ -193,9 +190,9 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                   disabled={!hasFlights}
                   className={cn(
                     "aspect-square flex items-center justify-center text-xs rounded-md relative transition-colors",
-                    isActiveMonth ? "text-foreground" : "text-muted-foreground/40",
-                    hasFlights && isActiveMonth && "bg-primary/20 text-primary font-semibold",
-                    hasFlights && !isActiveMonth && "bg-primary/10 text-primary/60 font-medium",
+                    isInFocusMonth ? "text-foreground font-medium" : "text-muted-foreground/30",
+                    hasFlights && isInFocusMonth && "bg-primary/20 text-primary font-semibold",
+                    hasFlights && !isInFocusMonth && "bg-primary/5 text-primary/40",
                     flightInfo?.hasNight && "bg-indigo-500/20 text-indigo-400",
                     isToday && "ring-1 ring-primary",
                     isSelected && "ring-2 ring-primary bg-primary/30",

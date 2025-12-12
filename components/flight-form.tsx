@@ -41,24 +41,44 @@ interface SwipeableRowProps {
 
 function SwipeableRow({ label, children, onClear, showClear = true }: SwipeableRowProps) {
   const [swiped, setSwiped] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
   const startX = useRef(0)
+  const startY = useRef(0)
   const currentX = useRef(0)
 
   const handleTouchStart = (e: React.TouchEvent) => {
     startX.current = e.touches[0].clientX
+    startY.current = e.touches[0].clientY
+    setIsDragging(false)
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    currentX.current = e.touches[0].clientX
+    const deltaX = startX.current - e.touches[0].clientX
+    const deltaY = Math.abs(startY.current - e.touches[0].clientY)
+
+    // Only swipe if horizontal movement > vertical movement
+    if (Math.abs(deltaX) > 10 && Math.abs(deltaX) > deltaY) {
+      setIsDragging(true)
+      currentX.current = e.touches[0].clientX
+    }
   }
 
   const handleTouchEnd = () => {
+    if (!isDragging) {
+      // If not dragging, treat as tap to close if already swiped
+      if (swiped) {
+        setSwiped(false)
+      }
+      return
+    }
+
     const diff = startX.current - currentX.current
     if (diff > 50) {
       setSwiped(true)
     } else if (diff < -50) {
       setSwiped(false)
     }
+    setIsDragging(false)
   }
 
   return (
@@ -66,26 +86,26 @@ function SwipeableRow({ label, children, onClear, showClear = true }: SwipeableR
       {showClear && onClear && (
         <button
           type="button"
-          onClick={() => {
+          onClick={(e) => {
+            e.stopPropagation()
             onClear()
             setSwiped(false)
           }}
-          className="absolute right-0 top-0 bottom-0 w-16 bg-destructive text-destructive-foreground flex items-center justify-center z-0"
+          className="absolute right-0 top-0 bottom-0 w-20 bg-destructive hover:bg-destructive/90 text-destructive-foreground flex items-center justify-center z-0 rounded-lg"
         >
           <Trash2 className="h-4 w-4" />
         </button>
       )}
       <div
         className={cn(
-          "flex items-center gap-3 py-2 px-1 transition-transform duration-200 bg-card relative z-10",
-          swiped && "-translate-x-16",
+          "flex items-center gap-2 py-1.5 px-1 transition-transform duration-200 bg-card relative z-10",
+          swiped && "-translate-x-20",
         )}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        onClick={() => swiped && setSwiped(false)}
       >
-        <span className="text-sm text-muted-foreground w-24 flex-shrink-0">{label}</span>
+        <span className="text-sm text-muted-foreground w-20 flex-shrink-0 text-left">{label}</span>
         <div className="flex-1 flex justify-end">{children}</div>
       </div>
     </div>
@@ -117,7 +137,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
     offTime: "",
     onTime: "",
     inTime: "",
-    pilotRole: "FO" as PilotRole,
+    isPilotFlying: false, // Changed from pilotRole to isPilotFlying toggle
     picCrewId: "",
     sicCrewId: "",
     observerCrewId: "",
@@ -177,7 +197,9 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
         offTime: editingFlight.offTime || "",
         onTime: editingFlight.onTime || "",
         inTime: editingFlight.inTime || "",
-        pilotRole: (editingFlight.pilotRole as PilotRole) || "FO",
+        // Removed pilotRole, added isPilotFlying based on its original value
+        isPilotFlying:
+          (editingFlight as any).pilotRole === "PIC" || (editingFlight as any).pilotRole === "INSTRUCTOR" || false,
         picCrewId: crewIds[0] || "",
         sicCrewId: crewIds[1] || "",
         observerCrewId: crewIds[2] || "",
@@ -249,17 +271,13 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
         )
       }
 
-      const isPilotFlying = formData.pilotRole === "PIC" || formData.pilotRole === "INSTRUCTOR"
-      const hasNightTime = nightTime !== "00:00"
-
-      if (isPilotFlying && !editingFlight) {
-        // Check if takeoff is during night
+      // Auto-populate landings based on PF status and timing
+      if (formData.isPilotFlying && !editingFlight) {
         let takeoffIsNight = false
         let landingIsNight = false
 
         if (departureAirport && formData.offTime) {
           const offDateTime = new Date(`${formData.date}T${formData.offTime}:00Z`)
-          // Simple night check: between 6pm and 6am local
           const hour = offDateTime.getUTCHours()
           takeoffIsNight = hour >= 18 || hour < 6
         }
@@ -279,31 +297,38 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
         }))
       }
 
+      // Calculate hours based on crew position and PF toggle
       let p1Time = "00:00",
         p2Time = "00:00",
-        p1usTime = "00:00",
-        dualTime = "00:00",
-        instructorTime = "00:00"
-      switch (formData.pilotRole) {
-        case "PIC":
-          p1Time = flightTime
-          break
-        case "FO":
-          p2Time = flightTime
-          break
-        case "P1US":
-          p1usTime = flightTime
-          break
-        case "STUDENT":
-          dualTime = flightTime
-          break
-        case "INSTRUCTOR":
-          instructorTime = flightTime
-          p1Time = flightTime
-          break
+        p1usTime = "00:00"
+
+      // Find "self" in crew
+      const selfId = personnel.find(
+        (p) => p.firstName.toLowerCase() === "self" || p.lastName.toLowerCase() === "self",
+      )?.id
+      const isInPIC = formData.picCrewId === selfId
+      const isInSIC = formData.sicCrewId === selfId
+
+      if (isInPIC) {
+        p1Time = flightTime
+      } else if (isInSIC) {
+        if (formData.isPilotFlying) {
+          p1usTime = flightTime // PF as SIC = P1 U/S
+        } else {
+          p2Time = flightTime // Not PF as SIC = SIC
+        }
       }
 
-      setCalculatedTimes({ blockTime, flightTime, nightTime, p1Time, p2Time, p1usTime, dualTime, instructorTime })
+      setCalculatedTimes({
+        blockTime,
+        flightTime,
+        nightTime,
+        p1Time,
+        p2Time,
+        p1usTime,
+        dualTime: "00:00",
+        instructorTime: "00:00",
+      })
     }
   }, [
     formData.outTime,
@@ -311,9 +336,12 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
     formData.onTime,
     formData.inTime,
     formData.date,
-    formData.pilotRole,
+    formData.isPilotFlying,
+    formData.picCrewId,
+    formData.sicCrewId,
     departureAirport,
     arrivalAirport,
+    personnel,
     editingFlight,
   ])
 
@@ -323,6 +351,23 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
 
     try {
       const crewIds = [formData.picCrewId, formData.sicCrewId, formData.observerCrewId].filter(Boolean)
+
+      // Determine pilotRole based on isPilotFlying and crew position
+      let pilotRole: PilotRole = "FO" // Default to FO
+      const selfId = personnel.find(
+        (p) => p.firstName.toLowerCase() === "self" || p.lastName.toLowerCase() === "self",
+      )?.id
+      if (formData.picCrewId === selfId) {
+        pilotRole = formData.isPilotFlying ? "PIC" : "FO" // Assuming PIC is always PF
+      } else if (formData.sicCrewId === selfId) {
+        pilotRole = formData.isPilotFlying ? "P1US" : "FO"
+      } else {
+        // If 'self' is not in PIC or SIC, we need to infer from existing data or leave as default
+        // For now, we'll use the previous value if editing, or default
+        if (editingFlight) {
+          pilotRole = editingFlight.pilotRole as PilotRole
+        }
+      }
 
       const flightData = {
         date: formData.date,
@@ -358,7 +403,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
         approach1: formData.approach1,
         approach2: formData.approach2,
         holds: Number.parseInt(formData.holds) || 0,
-        pilotRole: formData.pilotRole,
+        pilotRole: pilotRole, // Use the determined pilotRole
         crewIds,
         remarks: formData.remarks,
         ipcIcc: formData.ipcIcc,
@@ -403,7 +448,12 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
     }))
   }
 
-  const inputClassName = "bg-input h-9 text-sm text-right w-full"
+  const inputClassName = "bg-input h-10 text-base text-right w-full"
+
+  const selfId = personnel.find((p) => p.firstName.toLowerCase() === "self" || p.lastName.toLowerCase() === "self")?.id
+  const selfInCrew =
+    formData.picCrewId === selfId || formData.sicCrewId === selfId || formData.observerCrewId === selfId
+  const pfDisabled = !selfInCrew || formData.sicCrewId !== selfId
 
   return (
     <form onSubmit={handleSubmit} className="bg-card rounded-lg border border-border">
@@ -422,7 +472,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
         </div>
       </div>
 
-      <div className="px-3 pb-3 divide-y divide-border">
+      <div className="px-2 pb-2 divide-y divide-border">
         {/* A) Flight Section */}
         <div>
           <SectionHeader title="Flight" />
@@ -535,25 +585,60 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
         <div>
           <SectionHeader title="Time" />
 
-          <SwipeableRow label="Total" showClear={false}>
-            <div className="flex items-center gap-2 justify-end">
-              <span className="font-mono text-sm font-semibold">{formatHHMMDisplay(calculatedTimes.blockTime)}</span>
-              <span className="text-xs text-muted-foreground">
-                (Flt: {formatHHMMDisplay(calculatedTimes.flightTime)})
-              </span>
-            </div>
+          <SwipeableRow
+            label="Total"
+            onClear={() => {
+              setCalculatedTimes((prev) => ({ ...prev, blockTime: "00:00" }))
+            }}
+          >
+            <Input
+              type="time"
+              value={calculatedTimes.blockTime}
+              onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, blockTime: e.target.value }))}
+              className={cn(inputClassName, "font-mono font-semibold")}
+            />
           </SwipeableRow>
 
-          <SwipeableRow label="Night" showClear={false}>
-            <span className="font-mono text-sm text-right">{formatHHMMDisplay(calculatedTimes.nightTime)}</span>
+          <SwipeableRow
+            label="Night"
+            onClear={() => {
+              setCalculatedTimes((prev) => ({ ...prev, nightTime: "00:00" }))
+            }}
+          >
+            <Input
+              type="time"
+              value={calculatedTimes.nightTime}
+              onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, nightTime: e.target.value }))}
+              className={cn(inputClassName, "font-mono")}
+            />
           </SwipeableRow>
 
-          <SwipeableRow label="P1 U/S" showClear={false}>
-            <span className="font-mono text-sm text-right">{formatHHMMDisplay(calculatedTimes.p1usTime)}</span>
+          <SwipeableRow
+            label="P1 U/S"
+            onClear={() => {
+              setCalculatedTimes((prev) => ({ ...prev, p1usTime: "00:00" }))
+            }}
+          >
+            <Input
+              type="time"
+              value={calculatedTimes.p1usTime}
+              onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, p1usTime: e.target.value }))}
+              className={cn(inputClassName, "font-mono")}
+            />
           </SwipeableRow>
 
-          <SwipeableRow label="SIC" showClear={false}>
-            <span className="font-mono text-sm text-right">{formatHHMMDisplay(calculatedTimes.p2Time)}</span>
+          <SwipeableRow
+            label="SIC"
+            onClear={() => {
+              setCalculatedTimes((prev) => ({ ...prev, p2Time: "00:00" }))
+            }}
+          >
+            <Input
+              type="time"
+              value={calculatedTimes.p2Time}
+              onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, p2Time: e.target.value }))}
+              className={cn(inputClassName, "font-mono")}
+            />
           </SwipeableRow>
 
           <SwipeableRow label="XC" onClear={() => clearField("crossCountryTime")}>
@@ -562,15 +647,18 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
                 type="time"
                 value={formData.crossCountryTime}
                 onChange={(e) => updateField("crossCountryTime", e.target.value)}
-                className={cn(inputClassName, "pr-20")}
+                className={cn(inputClassName, "pr-24")}
+                style={{ WebkitAppearance: "none" }}
               />
-              <button
-                type="button"
-                onClick={() => copyFlightTime("crossCountryTime")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-primary"
-              >
-                Use {formatHHMMDisplay(calculatedTimes.flightTime)}
-              </button>
+              {!formData.crossCountryTime && (
+                <button
+                  type="button"
+                  onClick={() => copyFlightTime("crossCountryTime")}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
+                >
+                  Use {formatHHMMDisplay(calculatedTimes.flightTime)}
+                </button>
+              )}
             </div>
           </SwipeableRow>
 
@@ -580,15 +668,18 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
                 type="time"
                 value={formData.ifrTime}
                 onChange={(e) => updateField("ifrTime", e.target.value)}
-                className={cn(inputClassName, "pr-20")}
+                className={cn(inputClassName, "pr-24")}
+                style={{ WebkitAppearance: "none" }}
               />
-              <button
-                type="button"
-                onClick={() => copyFlightTime("ifrTime")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-primary"
-              >
-                Use {formatHHMMDisplay(calculatedTimes.flightTime)}
-              </button>
+              {!formData.ifrTime && (
+                <button
+                  type="button"
+                  onClick={() => copyFlightTime("ifrTime")}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
+                >
+                  Use {formatHHMMDisplay(calculatedTimes.flightTime)}
+                </button>
+              )}
             </div>
           </SwipeableRow>
 
@@ -598,15 +689,18 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
                 type="time"
                 value={formData.actualInstrumentTime}
                 onChange={(e) => updateField("actualInstrumentTime", e.target.value)}
-                className={cn(inputClassName, "pr-20")}
+                className={cn(inputClassName, "pr-24")}
+                style={{ WebkitAppearance: "none" }}
               />
-              <button
-                type="button"
-                onClick={() => copyFlightTime("actualInstrumentTime")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-primary"
-              >
-                Use {formatHHMMDisplay(calculatedTimes.flightTime)}
-              </button>
+              {!formData.actualInstrumentTime && (
+                <button
+                  type="button"
+                  onClick={() => copyFlightTime("actualInstrumentTime")}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
+                >
+                  Use {formatHHMMDisplay(calculatedTimes.flightTime)}
+                </button>
+              )}
             </div>
           </SwipeableRow>
 
@@ -616,15 +710,18 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
                 type="time"
                 value={formData.simulatedInstrumentTime}
                 onChange={(e) => updateField("simulatedInstrumentTime", e.target.value)}
-                className={cn(inputClassName, "pr-20")}
+                className={cn(inputClassName, "pr-24")}
+                style={{ WebkitAppearance: "none" }}
               />
-              <button
-                type="button"
-                onClick={() => copyFlightTime("simulatedInstrumentTime")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-primary"
-              >
-                Use {formatHHMMDisplay(calculatedTimes.flightTime)}
-              </button>
+              {!formData.simulatedInstrumentTime && (
+                <button
+                  type="button"
+                  onClick={() => copyFlightTime("simulatedInstrumentTime")}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
+                >
+                  Use {formatHHMMDisplay(calculatedTimes.flightTime)}
+                </button>
+              )}
             </div>
           </SwipeableRow>
         </div>
@@ -632,11 +729,22 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
         {/* C) Crew Section */}
         <div>
           <SectionHeader title="Crew">
-            <Button type="button" variant="ghost" size="sm" onClick={swapCrew} className="h-6 px-2 text-xs gap-1">
-              <ArrowLeftRight className="h-3 w-3" />
-              Swap
+            <Button type="button" variant="ghost" size="sm" onClick={swapCrew} className="h-7 text-xs">
+              <ArrowLeftRight className="h-3 w-3 mr-1" />
+              Swap PIC/SIC
             </Button>
           </SectionHeader>
+
+          <SwipeableRow label="PF" showClear={false}>
+            <div className="flex items-center gap-2 justify-end">
+              <span className="text-sm text-muted-foreground">{formData.isPilotFlying ? "Yes" : "No"}</span>
+              <Switch
+                checked={formData.isPilotFlying}
+                onCheckedChange={(checked) => updateField("isPilotFlying", checked)}
+                disabled={pfDisabled}
+              />
+            </div>
+          </SwipeableRow>
 
           <SwipeableRow label="PIC/P1" onClear={() => clearField("picCrewId")}>
             <Select value={formData.picCrewId} onValueChange={(v) => updateField("picCrewId", v)}>
@@ -646,7 +754,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
               <SelectContent>
                 {personnel.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
-                    {p.firstName} {p.lastName} ({p.role})
+                    {p.firstName} {p.lastName}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -661,7 +769,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
               <SelectContent>
                 {personnel.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
-                    {p.firstName} {p.lastName} ({p.role})
+                    {p.firstName} {p.lastName}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -679,21 +787,6 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
                     {p.firstName} {p.lastName}
                   </SelectItem>
                 ))}
-              </SelectContent>
-            </Select>
-          </SwipeableRow>
-
-          <SwipeableRow label="My Role" onClear={() => clearField("pilotRole", "FO")}>
-            <Select value={formData.pilotRole} onValueChange={(v) => updateField("pilotRole", v)}>
-              <SelectTrigger className={inputClassName}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="PIC">PIC</SelectItem>
-                <SelectItem value="FO">FO / SIC</SelectItem>
-                <SelectItem value="P1US">P1 U/S</SelectItem>
-                <SelectItem value="STUDENT">Student</SelectItem>
-                <SelectItem value="INSTRUCTOR">Instructor</SelectItem>
               </SelectContent>
             </Select>
           </SwipeableRow>
@@ -760,7 +853,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
 
           <SwipeableRow label="App 1" onClear={() => clearField("approach1")}>
             <Input
-              placeholder="ILS 02L"
+              placeholder="ILS 20C"
               value={formData.approach1}
               onChange={(e) => updateField("approach1", e.target.value)}
               className={inputClassName}
@@ -769,7 +862,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
 
           <SwipeableRow label="App 2" onClear={() => clearField("approach2")}>
             <Input
-              placeholder="RNAV 20"
+              placeholder="VOR 02L"
               value={formData.approach2}
               onChange={(e) => updateField("approach2", e.target.value)}
               className={inputClassName}
@@ -793,17 +886,17 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
 
           <SwipeableRow label="Remarks" onClear={() => clearField("remarks")}>
             <Textarea
-              placeholder="Additional notes..."
               value={formData.remarks}
               onChange={(e) => updateField("remarks", e.target.value)}
-              className="bg-input text-sm min-h-[60px] text-right w-full"
+              className={cn(inputClassName, "min-h-20 resize-none")}
+              placeholder="Additional notes..."
             />
           </SwipeableRow>
 
           <SwipeableRow label="IPC/ICC" showClear={false}>
             <div className="flex items-center gap-2 justify-end">
               <span className="text-sm text-muted-foreground">{formData.ipcIcc ? "Yes" : "No"}</span>
-              <Switch checked={formData.ipcIcc} onCheckedChange={(v) => updateField("ipcIcc", v)} />
+              <Switch checked={formData.ipcIcc} onCheckedChange={(checked) => updateField("ipcIcc", checked)} />
             </div>
           </SwipeableRow>
         </div>
