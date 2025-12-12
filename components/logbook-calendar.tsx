@@ -45,24 +45,21 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
   const calendarDays = useMemo(() => {
     const firstDay = new Date(selectedMonth.year, selectedMonth.month, 1)
     const lastDay = new Date(selectedMonth.year, selectedMonth.month + 1, 0)
-    const startDay = firstDay.getDay() // Day of week (0-6)
+    const startDay = firstDay.getDay()
     const daysInMonth = lastDay.getDate()
 
     const days: { date: Date | null; dateStr: string | null }[] = []
 
-    // Add previous month days
     for (let i = 0; i < startDay; i++) {
       const prevDate = new Date(selectedMonth.year, selectedMonth.month, -(startDay - i - 1))
       days.push({ date: prevDate, dateStr: prevDate.toISOString().split("T")[0] })
     }
 
-    // Add current month days
     for (let i = 1; i <= daysInMonth; i++) {
       const date = new Date(selectedMonth.year, selectedMonth.month, i)
       days.push({ date, dateStr: date.toISOString().split("T")[0] })
     }
 
-    // Add next month days to fill grid
     const remainingDays = 7 - (days.length % 7)
     if (remainingDays < 7) {
       for (let i = 1; i <= remainingDays; i++) {
@@ -94,9 +91,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     const diffY = Math.abs(e.touches[0].clientY - swipeStartY)
     const diffX = Math.abs(e.touches[0].clientX - swipeStartX)
 
-    // Detect if it's a horizontal swipe (month navigation) vs vertical scroll
-    if (diffX > diffY && diffX > 20) {
-      e.preventDefault() // Prevent vertical scroll when swiping horizontally
+    if (diffY > diffX && diffY > 20) {
+      e.preventDefault()
     }
   }
 
@@ -104,18 +100,17 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     if (!isSwiping) return
     setIsSwiping(false)
 
-    const diffX = swipeStartX - e.changedTouches[0].clientX
-    const diffY = Math.abs(swipeStartY - e.changedTouches[0].clientY)
+    const diffY = swipeStartY - e.changedTouches[0].clientY
+    const diffX = Math.abs(swipeStartX - e.changedTouches[0].clientX)
 
-    // Only change month if horizontal swipe is dominant
-    if (Math.abs(diffX) > 50 && Math.abs(diffX) > diffY) {
-      if (diffX > 0) {
-        // Swipe left = next month
+    if (Math.abs(diffY) > 50 && Math.abs(diffY) > diffX) {
+      if (diffY > 0) {
+        // Swipe up = next month
         const nextMonth = selectedMonth.month === 11 ? 0 : selectedMonth.month + 1
         const nextYear = selectedMonth.month === 11 ? selectedMonth.year + 1 : selectedMonth.year
         onMonthChange(nextYear, nextMonth)
       } else {
-        // Swipe right = previous month
+        // Swipe down = previous month
         const prevMonth = selectedMonth.month === 0 ? 11 : selectedMonth.month - 1
         const prevYear = selectedMonth.month === 0 ? selectedMonth.year - 1 : selectedMonth.year
         onMonthChange(prevYear, prevMonth)

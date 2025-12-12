@@ -1,7 +1,9 @@
 "use client"
 
+import { useRef } from "react"
+
 import type React from "react"
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -21,14 +23,15 @@ import {
 import { calculateTimesFromOOOI, calculateNightTime } from "@/lib/night-time-calculator"
 import { formatHHMMDisplay } from "@/lib/time-utils"
 import { syncService } from "@/lib/sync-service"
-import { Save, X, ArrowLeftRight, Trash2 } from "lucide-react"
+import { Save, X, ArrowLeftRight, Trash2, GripVertical, Settings, Check } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface FlightFormProps {
   onFlightAdded: (flight: FlightLog) => void
   onClose?: () => void
   editingFlight?: FlightLog | null
-  isConfigMode?: boolean // Add config mode prop
+  isConfigMode?: boolean
+  onConfigModeChange?: (mode: boolean) => void
 }
 
 type PilotRole = "PIC" | "FO" | "P1US" | "STUDENT" | "INSTRUCTOR"
@@ -122,7 +125,13 @@ function SectionHeader({ title, children }: { title: string; children?: React.Re
   )
 }
 
-export function FlightForm({ onFlightAdded, onClose, editingFlight, isConfigMode = false }: FlightFormProps) {
+export function FlightForm({
+  onFlightAdded,
+  onClose,
+  editingFlight,
+  isConfigMode = false,
+  onConfigModeChange,
+}: FlightFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [aircraft, setAircraft] = useState<Aircraft[]>([])
   const [airports, setAirports] = useState<Airport[]>([])
@@ -468,6 +477,7 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight, isConfigMode
     "inTime",
   ])
   const [draggedField, setDraggedField] = useState<string | null>(null)
+  const [dragOverField, setDragOverField] = useState<string | null>(null)
 
   useEffect(() => {
     const saved = localStorage.getItem("flightFieldOrder")
@@ -485,29 +495,40 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight, isConfigMode
     localStorage.setItem("flightFieldOrder", JSON.stringify(newOrder))
   }
 
-  const handleDragStart = (field: string) => {
+  const handleDragStart = (e: React.DragEvent, field: string) => {
+    e.dataTransfer.effectAllowed = "move"
     setDraggedField(field)
   }
 
   const handleDragOver = (e: React.DragEvent, targetField: string) => {
     e.preventDefault()
+    e.dataTransfer.dropEffect = "move"
+
     if (!draggedField || draggedField === targetField) return
+    setDragOverField(targetField)
 
     const newOrder = [...fieldOrder]
     const draggedIndex = newOrder.indexOf(draggedField)
     const targetIndex = newOrder.indexOf(targetField)
 
-    newOrder.splice(draggedIndex, 1)
-    newOrder.splice(targetIndex, 0, draggedField)
-
-    setFieldOrder(newOrder)
+    if (draggedIndex !== -1 && targetIndex !== -1) {
+      newOrder.splice(draggedIndex, 1)
+      newOrder.splice(targetIndex, 0, draggedField)
+      setFieldOrder(newOrder)
+    }
   }
 
   const handleDragEnd = () => {
     if (draggedField) {
       saveFieldOrder(fieldOrder)
       setDraggedField(null)
+      setDragOverField(null)
     }
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOverField(null)
   }
 
   const fieldComponents: Record<string, React.ReactNode> = {
@@ -863,6 +884,66 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight, isConfigMode
         </div>
       </SwipeableRow>
     ),
+    blockTime: (
+      <SwipeableRow
+        label="Total"
+        onClear={() => {
+          setCalculatedTimes((prev) => ({ ...prev, blockTime: "00:00" }))
+        }}
+      >
+        <Input
+          type="time"
+          value={calculatedTimes.blockTime}
+          onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, blockTime: e.target.value }))}
+          className={cn(inputClassName, "font-mono font-semibold")}
+        />
+      </SwipeableRow>
+    ),
+    nightTime: (
+      <SwipeableRow
+        label="Night"
+        onClear={() => {
+          setCalculatedTimes((prev) => ({ ...prev, nightTime: "00:00" }))
+        }}
+      >
+        <Input
+          type="time"
+          value={calculatedTimes.nightTime}
+          onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, nightTime: e.target.value }))}
+          className={cn(inputClassName, "font-mono")}
+        />
+      </SwipeableRow>
+    ),
+    p1usTime: (
+      <SwipeableRow
+        label="P1 U/S"
+        onClear={() => {
+          setCalculatedTimes((prev) => ({ ...prev, p1usTime: "00:00" }))
+        }}
+      >
+        <Input
+          type="time"
+          value={calculatedTimes.p1usTime}
+          onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, p1usTime: e.target.value }))}
+          className={cn(inputClassName, "font-mono")}
+        />
+      </SwipeableRow>
+    ),
+    p2Time: (
+      <SwipeableRow
+        label="SIC"
+        onClear={() => {
+          setCalculatedTimes((prev) => ({ ...prev, p2Time: "00:00" }))
+        }}
+      >
+        <Input
+          type="time"
+          value={calculatedTimes.p2Time}
+          onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, p2Time: e.target.value }))}
+          className={cn(inputClassName, "font-mono")}
+        />
+      </SwipeableRow>
+    ),
   }
 
   return (
@@ -879,6 +960,24 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight, isConfigMode
             <Save className="h-4 w-4 mr-1" />
             {isSubmitting ? "Saving..." : "Save"}
           </Button>
+          <Button
+            type="button"
+            variant={isConfigMode ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onConfigModeChange?.(!isConfigMode)}
+          >
+            {isConfigMode ? (
+              <>
+                <Check className="h-4 w-4 mr-1" />
+                Done
+              </>
+            ) : (
+              <>
+                <Settings className="h-4 w-4 mr-1" />
+                Config
+              </>
+            )}
+          </Button>
         </div>
       </div>
 
@@ -890,18 +989,15 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight, isConfigMode
             <div
               key={fieldKey}
               draggable={isConfigMode}
-              onDragStart={() => handleDragStart(fieldKey)}
+              onDragStart={(e) => handleDragStart(e, fieldKey)}
               onDragOver={(e) => handleDragOver(e, fieldKey)}
               onDragEnd={handleDragEnd}
-              className={cn("relative", isConfigMode && "cursor-move")}
+              onDrop={handleDrop}
+              className={cn("relative", isConfigMode && "cursor-move", dragOverField === fieldKey && "bg-accent/20")}
             >
               {isConfigMode && (
-                <div className="absolute right-0 top-0 bottom-0 flex items-center justify-center w-12 bg-secondary/50 rounded-r-lg z-20">
-                  <div className="flex flex-col gap-0.5">
-                    <div className="w-4 h-0.5 bg-muted-foreground" />
-                    <div className="w-4 h-0.5 bg-muted-foreground" />
-                    <div className="w-4 h-0.5 bg-muted-foreground" />
-                  </div>
+                <div className="absolute right-0 top-0 bottom-0 flex items-center justify-center w-12 bg-secondary/50 rounded-r-lg z-20 pointer-events-none">
+                  <GripVertical className="h-4 w-4 text-muted-foreground" />
                 </div>
               )}
               {fieldComponents[fieldKey]}
@@ -909,65 +1005,17 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight, isConfigMode
           ))}
         </div>
 
-        {/* B) Time Section */}
+        {/* B) Time Section with all fields */}
         <div>
           <SectionHeader title="Time" />
-
-          <SwipeableRow
-            label="Total"
-            onClear={() => {
-              setCalculatedTimes((prev) => ({ ...prev, blockTime: "00:00" }))
-            }}
-          >
-            <Input
-              type="time"
-              value={calculatedTimes.blockTime}
-              onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, blockTime: e.target.value }))}
-              className={cn(inputClassName, "font-mono font-semibold")}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow
-            label="Night"
-            onClear={() => {
-              setCalculatedTimes((prev) => ({ ...prev, nightTime: "00:00" }))
-            }}
-          >
-            <Input
-              type="time"
-              value={calculatedTimes.nightTime}
-              onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, nightTime: e.target.value }))}
-              className={cn(inputClassName, "font-mono")}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow
-            label="P1 U/S"
-            onClear={() => {
-              setCalculatedTimes((prev) => ({ ...prev, p1usTime: "00:00" }))
-            }}
-          >
-            <Input
-              type="time"
-              value={calculatedTimes.p1usTime}
-              onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, p1usTime: e.target.value }))}
-              className={cn(inputClassName, "font-mono")}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow
-            label="SIC"
-            onClear={() => {
-              setCalculatedTimes((prev) => ({ ...prev, p2Time: "00:00" }))
-            }}
-          >
-            <Input
-              type="time"
-              value={calculatedTimes.p2Time}
-              onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, p2Time: e.target.value }))}
-              className={cn(inputClassName, "font-mono")}
-            />
-          </SwipeableRow>
+          {fieldComponents.blockTime}
+          {fieldComponents.nightTime}
+          {fieldComponents.p1usTime}
+          {fieldComponents.p2Time}
+          {fieldComponents.crossCountryTime}
+          {fieldComponents.ifrTime}
+          {fieldComponents.actualInstrumentTime}
+          {fieldComponents.simulatedInstrumentTime}
         </div>
 
         {/* C) Crew Section */}
@@ -989,21 +1037,35 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight, isConfigMode
               />
             </div>
           </SwipeableRow>
+
+          {fieldComponents.picCrewId}
+          {fieldComponents.sicCrewId}
+          {fieldComponents.observerCrewId}
         </div>
 
         {/* D) Landings Section */}
         <div>
           <SectionHeader title="Landings" />
+          {fieldComponents.dayTakeoffs}
+          {fieldComponents.dayLandings}
+          {fieldComponents.nightTakeoffs}
+          {fieldComponents.nightLandings}
+          {fieldComponents.autolands}
         </div>
 
         {/* E) App and Hold Section */}
         <div>
           <SectionHeader title="App and Hold" />
+          {fieldComponents.approach1}
+          {fieldComponents.approach2}
+          {fieldComponents.holds}
         </div>
 
         {/* F) Notes Section */}
         <div>
           <SectionHeader title="Notes" />
+          {fieldComponents.remarks}
+          {fieldComponents.ipcIcc}
         </div>
       </div>
     </form>
