@@ -33,6 +33,8 @@ export default function LogbookPage() {
 
   const [activeFilterType, setActiveFilterType] = useState<"none" | "flight" | "aircraft" | "airport" | "crew">("none")
   const [searchQuery, setSearchQuery] = useState("")
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false)
+  const [selectedFilters, setSelectedFilters] = useState<string[]>([])
 
   const calendarRef = useRef<{ scrollToMonth: (year: number, month: number) => void } | null>(null)
   const flightListRef = useRef<HTMLDivElement>(null)
@@ -71,6 +73,48 @@ export default function LogbookPage() {
     await refreshFlights()
   }
 
+  const filterOptions = useMemo(() => {
+    const options = new Set<string>()
+    const query = searchQuery.toLowerCase()
+
+    switch (activeFilterType) {
+      case "flight":
+        flights.forEach((f) => {
+          if (f.flightNumber && f.flightNumber.toLowerCase().includes(query)) {
+            options.add(f.flightNumber)
+          }
+        })
+        break
+      case "aircraft":
+        aircraft.forEach((a) => {
+          if (
+            (a.registration && a.registration.toLowerCase().includes(query)) ||
+            (a.type && a.type.toLowerCase().includes(query))
+          ) {
+            options.add(`${a.registration} (${a.type})`)
+          }
+        })
+        break
+      case "airport":
+        airports.forEach((a) => {
+          if ((a.icao && a.icao.toLowerCase().includes(query)) || (a.name && a.name.toLowerCase().includes(query))) {
+            options.add(`${a.icao} - ${a.name}`)
+          }
+        })
+        break
+      case "crew":
+        personnel.forEach((p) => {
+          const name = `${p.firstName} ${p.lastName}`
+          if (name.toLowerCase().includes(query)) {
+            options.add(name)
+          }
+        })
+        break
+    }
+
+    return Array.from(options).slice(0, 10) // Limit to 10 options
+  }, [activeFilterType, searchQuery, flights, aircraft, airports, personnel])
+
   const filteredFlights = useMemo(() => {
     let result = flights
 
@@ -79,28 +123,31 @@ export default function LogbookPage() {
       result = result.filter((f) => f.date === selectedDate)
     }
 
-    // Search filter based on active type
-    if (searchQuery && activeFilterType !== "none") {
-      const query = searchQuery.toLowerCase()
+    // Search filter with selected items
+    if (selectedFilters.length > 0 && activeFilterType !== "none") {
       result = result.filter((flight) => {
         switch (activeFilterType) {
           case "flight":
-            return flight.flightNumber?.toLowerCase().includes(query)
+            return selectedFilters.some((filter) => flight.flightNumber === filter)
           case "aircraft":
             const ac = aircraft.find((a) => a.id === flight.aircraftId)
-            return ac?.registration?.toLowerCase().includes(query) || ac?.type?.toLowerCase().includes(query)
+            const acLabel = ac ? `${ac.registration} (${ac.type})` : ""
+            return selectedFilters.includes(acLabel)
           case "airport":
-            return (
-              flight.departureIcao?.toLowerCase().includes(query) || flight.arrivalIcao?.toLowerCase().includes(query)
-            )
+            return selectedFilters.some((filter) => {
+              const icao = filter.split(" - ")[0]
+              return flight.departureIcao === icao || flight.arrivalIcao === icao
+            })
           case "crew":
-            const crewNames = flight.crewIds
-              ?.map((id) => {
-                const p = personnel.find((per) => per.id === id)
-                return p ? `${p.firstName} ${p.lastName}`.toLowerCase() : ""
-              })
-              .join(" ")
-            return crewNames?.includes(query)
+            return selectedFilters.some((filter) => {
+              const crewNames = flight.crewIds
+                ?.map((id) => {
+                  const p = personnel.find((per) => per.id === id)
+                  return p ? `${p.firstName} ${p.lastName}` : ""
+                })
+                .filter(Boolean)
+              return crewNames?.includes(filter)
+            })
           default:
             return true
         }
@@ -108,15 +155,20 @@ export default function LogbookPage() {
     }
 
     return result
-  }, [flights, selectedDate, searchQuery, activeFilterType, aircraft, personnel])
+  }, [flights, selectedDate, selectedFilters, activeFilterType, aircraft, personnel, airports])
 
   const clearAllFilters = () => {
     setSelectedDate(null)
     setActiveFilterType("none")
     setSearchQuery("")
+    setSelectedFilters([])
   }
 
-  const hasActiveFilters = selectedDate || (searchQuery && activeFilterType !== "none")
+  const toggleFilterOption = (option: string) => {
+    setSelectedFilters((prev) => (prev.includes(option) ? prev.filter((f) => f !== option) : [...prev, option]))
+  }
+
+  const hasActiveFilters = selectedDate || selectedFilters.length > 0
 
   const isLoading = dbLoading || !dbReady
 
@@ -176,8 +228,54 @@ export default function LogbookPage() {
 
         <div className="container mx-auto px-4 mb-4">
           <div className="flex flex-col gap-3">
-            {/* Button group for filter type */}
-            <div className="flex items-center gap-1 p-1 bg-secondary/30 rounded-lg">
+            {activeFilterType !== "none" && (
+              <div className="relative border border-border rounded-lg p-1 bg-input">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+                <Input
+                  placeholder={`Search ${activeFilterType}...`}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => setShowSearchDropdown(true)}
+                  className="pl-9 pr-9 h-9 bg-transparent border-none"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 z-10"
+                  >
+                    <X className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                )}
+
+                {showSearchDropdown && filterOptions.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto z-50">
+                    {filterOptions.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => {
+                          toggleFilterOption(option)
+                          setSearchQuery("")
+                        }}
+                        className="w-full px-3 py-2 text-left text-sm hover:bg-secondary/50 flex items-center gap-2"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedFilters.includes(option)}
+                          onChange={() => {}}
+                          className="h-4 w-4"
+                        />
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Button group for filter type with border */}
+            <div className="flex items-center gap-1 p-1 bg-secondary/30 rounded-lg border border-border">
               {[
                 { id: "flight", label: "Flight" },
                 { id: "aircraft", label: "Aircraft" },
@@ -190,7 +288,11 @@ export default function LogbookPage() {
                   size="sm"
                   onClick={() => {
                     setActiveFilterType(activeFilterType === filter.id ? "none" : (filter.id as any))
-                    if (activeFilterType === filter.id) setSearchQuery("")
+                    if (activeFilterType === filter.id) {
+                      setSearchQuery("")
+                      setSelectedFilters([])
+                    }
+                    setShowSearchDropdown(false)
                   }}
                   className="flex-1 text-xs h-8"
                 >
@@ -199,25 +301,20 @@ export default function LogbookPage() {
               ))}
             </div>
 
-            {/* Search bar - visible when a filter type is selected */}
-            {activeFilterType !== "none" && (
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder={`Search by ${activeFilterType}...`}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 pr-9 h-9 bg-input"
-                />
-                {searchQuery && (
+            {/* Selected filters chips */}
+            {selectedFilters.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {selectedFilters.map((filter) => (
                   <button
+                    key={filter}
                     type="button"
-                    onClick={() => setSearchQuery("")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2"
+                    onClick={() => toggleFilterOption(filter)}
+                    className="px-2 py-1 bg-primary/20 text-primary text-xs rounded-md flex items-center gap-1"
                   >
-                    <X className="h-4 w-4 text-muted-foreground" />
+                    {filter}
+                    <X className="h-3 w-3" />
                   </button>
-                )}
+                ))}
               </div>
             )}
 
@@ -247,7 +344,7 @@ export default function LogbookPage() {
             airports={airports}
             personnel={personnel}
             onFlightVisible={handleFlightVisible}
-            showMonthHeaders={!selectedDate && !searchQuery}
+            showMonthHeaders={!selectedDate && selectedFilters.length === 0}
             hideFilters={true}
           />
         </div>

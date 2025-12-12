@@ -131,3 +131,28 @@ input[type="date"]::-webkit-date-and-time-value {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* Fix Android dropdown arrow on time inputs */
+input[type="time"]::-webkit-calendar-picker-indicator {
+  display: none;
+  -webkit-appearance: none;
+}
+
+input[type="time"] {
+  -webkit-appearance: none;
+  -moz-appearance: textfield;
+  appearance: none;
+}
+
+/* Prevent iOS first-tap swipe trigger - add touch delay */
+@supports (-webkit-touch-callout: none) {
+  [data-swipeable] {
+    touch-action: pan-y;
+  }
+
+  input:focus,
+  textarea:focus,
+  select:focus {
+    touch-action: manipulation;
+  }
+}

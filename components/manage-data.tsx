@@ -48,24 +48,42 @@ function SwipeableRow({
   showClear?: boolean
 }) {
   const [swiped, setSwiped] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
   const startX = useRef(0)
+  const startY = useRef(0)
   const currentX = useRef(0)
 
   const handleTouchStart = (e: React.TouchEvent) => {
     startX.current = e.touches[0].clientX
+    startY.current = e.touches[0].clientY
+    setIsDragging(false)
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    currentX.current = e.touches[0].clientX
+    const deltaX = startX.current - e.touches[0].clientX
+    const deltaY = Math.abs(startY.current - e.touches[0].clientY)
+
+    if (Math.abs(deltaX) > 10 && Math.abs(deltaX) > deltaY) {
+      setIsDragging(true)
+      currentX.current = e.touches[0].clientX
+    }
   }
 
   const handleTouchEnd = () => {
+    if (!isDragging) {
+      if (swiped) {
+        setSwiped(false)
+      }
+      return
+    }
+
     const diff = startX.current - currentX.current
     if (diff > 50) {
       setSwiped(true)
     } else if (diff < -50) {
       setSwiped(false)
     }
+    setIsDragging(false)
   }
 
   return (
@@ -73,26 +91,26 @@ function SwipeableRow({
       {showClear && onClear && (
         <button
           type="button"
-          onClick={() => {
+          onClick={(e) => {
+            e.stopPropagation()
             onClear()
             setSwiped(false)
           }}
-          className="absolute right-0 top-0 bottom-0 w-16 bg-destructive text-destructive-foreground flex items-center justify-center z-0"
+          className="absolute right-0 top-0 bottom-0 w-20 bg-destructive hover:bg-destructive/90 text-destructive-foreground flex items-center justify-center z-0 rounded-lg"
         >
           <Trash2 className="h-4 w-4" />
         </button>
       )}
       <div
         className={cn(
-          "flex items-center gap-3 py-2 px-1 transition-transform duration-200 bg-card relative z-10",
-          swiped && "-translate-x-16",
+          "flex items-center gap-2 py-1.5 px-1 transition-transform duration-200 bg-card relative z-10",
+          swiped && "-translate-x-20",
         )}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        onClick={() => swiped && setSwiped(false)}
       >
-        <span className="text-sm text-muted-foreground w-24 flex-shrink-0">{label}</span>
+        <span className="text-sm text-muted-foreground w-20 flex-shrink-0 text-left">{label}</span>
         <div className="flex-1 flex justify-end">{children}</div>
       </div>
     </div>
@@ -232,7 +250,7 @@ export function ManageData() {
     role: "FO",
   })
 
-  const inputClassName = "bg-input h-9 text-sm text-right w-full"
+  const inputClassName = "bg-input h-10 text-base text-right w-full"
 
   const resetAircraftForm = () => {
     setAircraftForm({ registration: "", type: "", typeDesignator: "", category: "ASEL", engineType: "JET" })
