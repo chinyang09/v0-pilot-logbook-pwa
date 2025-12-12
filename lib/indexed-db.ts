@@ -44,11 +44,13 @@ export interface FlightLog {
 
   // Crew
   crewIds: string[] // Personnel IDs
-  pilotRole: "PIC" | "FO" | "STUDENT" | "INSTRUCTOR"
+  pilotRole: "PIC" | "FO" | "STUDENT" | "INSTRUCTOR" | "P1US"
 
   // Additional
   flightNumber: string
   remarks: string
+
+  isLocked?: boolean
 
   // Metadata
   createdAt: number
@@ -108,6 +110,23 @@ export interface Personnel {
   mongoId?: string
 }
 
+export interface UserPreferences {
+  id: string
+  fieldOrder: {
+    flight: string[]
+    time: string[]
+    crew: string[]
+    landings: string[]
+    approaches: string[]
+    notes: string[]
+  }
+  visibleFields: {
+    [key: string]: boolean
+  }
+  createdAt: number
+  updatedAt: number
+}
+
 interface LogbookDB extends DBSchema {
   flights: {
     key: string
@@ -146,6 +165,10 @@ interface LogbookDB extends DBSchema {
       "by-mongoId": string
     }
   }
+  preferences: {
+    key: string
+    value: UserPreferences
+  }
   syncQueue: {
     key: string
     value: {
@@ -166,14 +189,12 @@ interface LogbookDB extends DBSchema {
 }
 
 let dbInstance: IDBPDatabase<LogbookDB> | null = null
-let dbInitPromise: Promise<IDBPDatabase<LogbookDB>> | null = null
+let isInitialized = false
 
 export async function getDB(): Promise<IDBPDatabase<LogbookDB>> {
-  if (dbInstance) return dbInstance
+  if (dbInstance && isInitialized) return dbInstance
 
-  if (dbInitPromise) return dbInitPromise
-
-  dbInitPromise = openDB<LogbookDB>("skylog-db", 3, {
+  dbInstance = await openDB<LogbookDB>("pilot-logbook", 3, {
     upgrade(db, oldVersion) {
       // Flights store
       if (!db.objectStoreNames.contains("flights")) {
@@ -225,13 +246,15 @@ export async function getDB(): Promise<IDBPDatabase<LogbookDB>> {
       if (!db.objectStoreNames.contains("syncMeta")) {
         db.createObjectStore("syncMeta", { keyPath: "key" })
       }
+
+      if (!db.objectStoreNames.contains("preferences")) {
+        db.createObjectStore("preferences", { keyPath: "id" })
+      }
     },
-  }).then((db) => {
-    dbInstance = db
-    return db
   })
 
-  return dbInitPromise
+  isInitialized = true
+  return dbInstance
 }
 
 export async function initializeDB(): Promise<boolean> {
@@ -354,6 +377,7 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     updatedAt: serverFlight.updatedAt || Date.now(),
     syncStatus: "synced",
     mongoId: serverFlight.mongoId,
+    isLocked: serverFlight.isLocked,
   }
 
   // Check if we have this flight by mongoId first
@@ -773,5 +797,45 @@ export async function getFlightStats() {
     totalNightLandings,
     uniqueAircraft,
     uniqueAirports,
+  }
+}
+
+// Preference management functions
+export async function getUserPreferences(): Promise<UserPreferences | null> {
+  const db = await getDB()
+  return db.get("preferences", "user-prefs")
+}
+
+export async function saveUserPreferences(prefs: Partial<UserPreferences>): Promise<void> {
+  const db = await getDB()
+  const existing = await getUserPreferences()
+
+  const preferences: UserPreferences = {
+    id: "user-prefs",
+    fieldOrder: existing?.fieldOrder || {
+      flight: ["date", "flightNumber", "aircraft", "from", "to", "out", "off", "on", "in"],
+      time: ["total", "night", "p1us", "sic", "xc", "ifr", "actualInst", "simInst"],
+      crew: ["pf", "pic", "sic", "observer"],
+      landings: ["dayTO", "dayLdg", "nightTO", "nightLdg", "autolands"],
+      approaches: ["app1", "app2", "holds"],
+      notes: ["remarks", "ipcIcc"],
+    },
+    visibleFields: existing?.visibleFields || {},
+    createdAt: existing?.createdAt || Date.now(),
+    updatedAt: Date.now(),
+    ...prefs,
+  }
+
+  await db.put("preferences", preferences)
+}
+
+export async function getDefaultFieldOrder() {
+  return {
+    flight: ["date", "flightNumber", "aircraft", "from", "to", "out", "off", "on", "in"],
+    time: ["total", "night", "p1us", "sic", "xc", "ifr", "actualInst", "simInst"],
+    crew: ["pf", "pic", "sic", "observer"],
+    landings: ["dayTO", "dayLdg", "nightTO", "nightLdg", "autolands"],
+    approaches: ["app1", "app2", "holds"],
+    notes: ["remarks", "ipcIcc"],
   }
 }

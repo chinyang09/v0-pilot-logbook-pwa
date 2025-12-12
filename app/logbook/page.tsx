@@ -7,12 +7,14 @@ import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { BottomNavbar } from "@/components/bottom-navbar"
 import { LogbookCalendar } from "@/components/logbook-calendar"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import type { FlightLog } from "@/lib/indexed-db"
 import { syncService } from "@/lib/sync-service"
 import { useFlights, refreshAllData, useDBReady, useAircraft, useAirports, usePersonnel } from "@/hooks/use-indexed-db"
-import { Calendar, Upload, Plus } from "lucide-react"
+import { Calendar, Upload, Plus, Search, X } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { cn } from "@/lib/utils"
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 export default function LogbookPage() {
   const router = useRouter()
@@ -27,13 +29,15 @@ export default function LogbookPage() {
     const now = new Date()
     return { year: now.getFullYear(), month: now.getMonth() }
   })
-  const [isToolbarVisible, setIsToolbarVisible] = useState(true)
-  const [lastScrollY, setLastScrollY] = useState(0)
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
 
-  const flightListRef = useRef<HTMLDivElement>(null)
+  const [activeFilterType, setActiveFilterType] = useState<"none" | "flight" | "aircraft" | "airport" | "crew">("none")
+  const [searchQuery, setSearchQuery] = useState("")
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false)
+  const [selectedFilters, setSelectedFilters] = useState<string[]>([])
+
   const calendarRef = useRef<{ scrollToMonth: (year: number, month: number) => void } | null>(null)
-  const isScrollingFromCalendar = useRef(false)
-  const isScrollingFromList = useRef(false)
+  const flightListRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const unsubscribe = syncService.onDataChanged(() => {
@@ -42,87 +46,24 @@ export default function LogbookPage() {
     return unsubscribe
   }, [])
 
-  // Handle toolbar visibility on scroll
-  useEffect(() => {
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY
-
-      if (currentScrollY < lastScrollY || currentScrollY < 50) {
-        setIsToolbarVisible(true)
-      } else if (currentScrollY > lastScrollY && currentScrollY > 100) {
-        setIsToolbarVisible(false)
-      }
-
-      setLastScrollY(currentScrollY)
-    }
-
-    window.addEventListener("scroll", handleScroll, { passive: true })
-    return () => window.removeEventListener("scroll", handleScroll)
-  }, [lastScrollY])
-
-  // Group flights by month for syncing
-  const flightsByMonth = useMemo(() => {
-    const grouped: Record<string, FlightLog[]> = {}
-    flights.forEach((flight) => {
-      const date = new Date(flight.date)
-      const key = `${date.getFullYear()}-${date.getMonth()}`
-      if (!grouped[key]) grouped[key] = []
-      grouped[key].push(flight)
-    })
-    return grouped
-  }, [flights])
-
-  // Handle calendar month change - sync flight list
-  const handleCalendarMonthChange = useCallback(
-    (year: number, month: number) => {
-      if (isScrollingFromList.current) return
-
-      isScrollingFromCalendar.current = true
-      setSelectedMonth({ year, month })
-
-      // Find flights for this month and scroll to them
-      const monthKey = `${year}-${month}`
-      const monthFlights = flightsByMonth[monthKey]
-
-      if (monthFlights && monthFlights.length > 0 && flightListRef.current) {
-        const firstFlightId = monthFlights[0].id
-        const flightElement = document.getElementById(`flight-${firstFlightId}`)
-        if (flightElement) {
-          flightElement.scrollIntoView({ behavior: "smooth", block: "start" })
-        }
-      }
-
-      setTimeout(() => {
-        isScrollingFromCalendar.current = false
-      }, 500)
-    },
-    [flightsByMonth],
-  )
-
-  // Handle flight list scroll - sync calendar
   const handleFlightVisible = useCallback(
     (flight: FlightLog) => {
-      if (isScrollingFromCalendar.current) return
+      if (!showCalendar) return
 
       const flightDate = new Date(flight.date)
       const year = flightDate.getFullYear()
       const month = flightDate.getMonth()
 
       if (year !== selectedMonth.year || month !== selectedMonth.month) {
-        isScrollingFromList.current = true
         setSelectedMonth({ year, month })
-
-        if (calendarRef.current) {
-          calendarRef.current.scrollToMonth(year, month)
-        }
-
-        setTimeout(() => {
-          isScrollingFromList.current = false
-        }, 500)
       }
     },
-    [selectedMonth],
+    [selectedMonth, showCalendar],
   )
+
+  const handleDateSelect = useCallback((date: string) => {
+    setSelectedDate((prev) => (prev === date ? null : date))
+  }, [])
 
   const handleEditFlight = (flight: FlightLog) => {
     router.push(`/new-flight?edit=${flight.id}`)
@@ -132,60 +73,270 @@ export default function LogbookPage() {
     await refreshFlights()
   }
 
+  const filterOptions = useMemo(() => {
+    const options = new Set<string>()
+    const query = searchQuery.toLowerCase()
+
+    switch (activeFilterType) {
+      case "flight":
+        flights.forEach((f) => {
+          if (f.flightNumber && f.flightNumber.toLowerCase().includes(query)) {
+            options.add(f.flightNumber)
+          }
+        })
+        break
+      case "aircraft":
+        aircraft.forEach((a) => {
+          if (
+            (a.registration && a.registration.toLowerCase().includes(query)) ||
+            (a.type && a.type.toLowerCase().includes(query))
+          ) {
+            options.add(`${a.registration} (${a.type})`)
+          }
+        })
+        break
+      case "airport":
+        airports.forEach((a) => {
+          if ((a.icao && a.icao.toLowerCase().includes(query)) || (a.name && a.name.toLowerCase().includes(query))) {
+            options.add(`${a.icao} - ${a.name}`)
+          }
+        })
+        break
+      case "crew":
+        personnel.forEach((p) => {
+          const name = `${p.firstName} ${p.lastName}`
+          if (name.toLowerCase().includes(query)) {
+            options.add(name)
+          }
+        })
+        break
+    }
+
+    return Array.from(options).slice(0, 10) // Limit to 10 options
+  }, [activeFilterType, searchQuery, flights, aircraft, airports, personnel])
+
+  const filteredFlights = useMemo(() => {
+    let result = flights
+
+    // Date filter from calendar
+    if (selectedDate) {
+      result = result.filter((f) => f.date === selectedDate)
+    }
+
+    // Search filter with selected items
+    if (selectedFilters.length > 0 && activeFilterType !== "none") {
+      result = result.filter((flight) => {
+        switch (activeFilterType) {
+          case "flight":
+            return selectedFilters.some((filter) => flight.flightNumber === filter)
+          case "aircraft":
+            const ac = aircraft.find((a) => a.id === flight.aircraftId)
+            const acLabel = ac ? `${ac.registration} (${ac.type})` : ""
+            return selectedFilters.includes(acLabel)
+          case "airport":
+            return selectedFilters.some((filter) => {
+              const icao = filter.split(" - ")[0]
+              return flight.departureIcao === icao || flight.arrivalIcao === icao
+            })
+          case "crew":
+            return selectedFilters.some((filter) => {
+              const crewNames = flight.crewIds
+                ?.map((id) => {
+                  const p = personnel.find((per) => per.id === id)
+                  return p ? `${p.firstName} ${p.lastName}` : ""
+                })
+                .filter(Boolean)
+              return crewNames?.includes(filter)
+            })
+          default:
+            return true
+        }
+      })
+    }
+
+    return result
+  }, [flights, selectedDate, selectedFilters, activeFilterType, aircraft, personnel, airports])
+
+  const clearAllFilters = () => {
+    setSelectedDate(null)
+    setActiveFilterType("none")
+    setSearchQuery("")
+    setSelectedFilters([])
+  }
+
+  const toggleFilterOption = (option: string) => {
+    setSelectedFilters((prev) => (prev.includes(option) ? prev.filter((f) => f !== option) : [...prev, option]))
+  }
+
+  const hasActiveFilters = selectedDate || selectedFilters.length > 0
+
   const isLoading = dbLoading || !dbReady
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       <Header />
 
-      {/* Disappearing Toolbar */}
-      <div
-        className={cn(
-          "fixed top-14 left-0 right-0 z-40 bg-background/95 backdrop-blur-lg border-b border-border transition-transform duration-300",
-          !isToolbarVisible && "-translate-y-full",
-        )}
-      >
+      <div className="fixed top-14 left-0 right-0 z-40 bg-background/95 backdrop-blur-lg border-b border-border">
         <div className="container mx-auto px-4">
           <div className="flex items-center justify-between h-12">
-            <h1 className="text-lg font-semibold text-foreground">Logbook</h1>
+            <h1 className="text-lg font-semibold text-foreground">{showCalendar ? "" : "Logbook"}</h1>
+
+            {showCalendar && (
+              <div className="absolute left-1/2 -translate-x-1/2 text-sm font-semibold text-foreground">
+                {MONTHS[selectedMonth.month]} {selectedMonth.year}
+              </div>
+            )}
+
             <div className="flex items-center gap-2">
               <Button
                 variant={showCalendar ? "secondary" : "ghost"}
                 size="sm"
-                onClick={() => setShowCalendar(!showCalendar)}
+                onClick={() => {
+                  setShowCalendar(!showCalendar)
+                  if (showCalendar) setSelectedDate(null)
+                }}
                 className="gap-2"
               >
                 <Calendar className="h-4 w-4" />
-                <span className="hidden sm:inline">Calendar</span>
               </Button>
               <Button variant="ghost" size="sm" className="gap-2" disabled>
                 <Upload className="h-4 w-4" />
-                <span className="hidden sm:inline">Import</span>
               </Button>
               <Button size="sm" onClick={() => router.push("/new-flight")} className="gap-2">
                 <Plus className="h-4 w-4" />
-                <span className="hidden sm:inline">New</span>
               </Button>
             </div>
           </div>
         </div>
       </div>
 
-      <main className="container mx-auto px-4 pt-28 pb-24 space-y-4">
-        {/* Calendar View */}
+      <main className="flex-1 flex flex-col pt-28 pb-24">
         {showCalendar && (
-          <LogbookCalendar
-            ref={calendarRef}
-            flights={flights}
-            selectedMonth={selectedMonth}
-            onMonthChange={handleCalendarMonthChange}
-          />
+          <div className="container mx-auto px-4 mb-4">
+            <div className="bg-card rounded-lg border border-border p-3">
+              <LogbookCalendar
+                ref={calendarRef}
+                flights={flights}
+                selectedMonth={selectedMonth}
+                onMonthChange={setSelectedMonth}
+                onDateSelect={handleDateSelect}
+                selectedDate={selectedDate}
+              />
+            </div>
+          </div>
         )}
 
-        {/* Flight List */}
-        <section ref={flightListRef}>
+        <div className="container mx-auto px-4 mb-4">
+          <div className="flex flex-col gap-3">
+            {activeFilterType !== "none" && (
+              <div className="relative border border-border rounded-lg p-1 bg-input">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+                <Input
+                  placeholder={`Search ${activeFilterType}...`}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => setShowSearchDropdown(true)}
+                  className="pl-9 pr-9 h-9 bg-transparent border-none"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 z-10"
+                  >
+                    <X className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                )}
+
+                {showSearchDropdown && filterOptions.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto z-50">
+                    {filterOptions.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => {
+                          toggleFilterOption(option)
+                          setSearchQuery("")
+                        }}
+                        className="w-full px-3 py-2 text-left text-sm hover:bg-secondary/50 flex items-center gap-2"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedFilters.includes(option)}
+                          onChange={() => {}}
+                          className="h-4 w-4"
+                        />
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Button group for filter type with border */}
+            <div className="flex items-center gap-1 p-1 bg-secondary/30 rounded-lg border border-border">
+              {[
+                { id: "flight", label: "Flight" },
+                { id: "aircraft", label: "Aircraft" },
+                { id: "airport", label: "Airport" },
+                { id: "crew", label: "Crew" },
+              ].map((filter) => (
+                <Button
+                  key={filter.id}
+                  variant={activeFilterType === filter.id ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => {
+                    setActiveFilterType(activeFilterType === filter.id ? "none" : (filter.id as any))
+                    if (activeFilterType === filter.id) {
+                      setSearchQuery("")
+                      setSelectedFilters([])
+                    }
+                    setShowSearchDropdown(false)
+                  }}
+                  className="flex-1 text-xs h-8"
+                >
+                  {filter.label}
+                </Button>
+              ))}
+            </div>
+
+            {/* Selected filters chips */}
+            {selectedFilters.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {selectedFilters.map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => toggleFilterOption(filter)}
+                    className="px-2 py-1 bg-primary/20 text-primary text-xs rounded-md flex items-center gap-1"
+                  >
+                    {filter}
+                    <X className="h-3 w-3" />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Active filters summary and clear */}
+            {hasActiveFilters && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">
+                  {filteredFlights.length} flight{filteredFlights.length !== 1 ? "s" : ""}
+                  {selectedDate && ` on ${selectedDate}`}
+                </span>
+                <Button variant="ghost" size="sm" onClick={clearAllFilters} className="text-xs">
+                  <X className="h-3 w-3 mr-1" />
+                  Clear filters
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-1 container mx-auto px-4" ref={flightListRef}>
           <FlightList
-            flights={flights}
+            flights={filteredFlights}
             isLoading={flightsLoading || isLoading}
             onEdit={handleEditFlight}
             onDeleted={handleFlightDeleted}
@@ -193,13 +344,13 @@ export default function LogbookPage() {
             airports={airports}
             personnel={personnel}
             onFlightVisible={handleFlightVisible}
-            showMonthHeaders
+            showMonthHeaders={!selectedDate && selectedFilters.length === 0}
+            hideFilters={true}
           />
-        </section>
+        </div>
       </main>
 
       <BottomNavbar />
-
       <PWAInstallPrompt />
     </div>
   )
