@@ -19,6 +19,8 @@ import {
   getAllAircraft,
   getAllAirports,
   getAllPersonnel,
+  getUserPreferences, // Import getUserPreferences
+  saveUserPreferences, // Import saveUserPreferences
 } from "@/lib/indexed-db"
 import { calculateTimesFromOOOI, calculateNightTime } from "@/lib/night-time-calculator"
 import { formatHHMMDisplay } from "@/lib/time-utils"
@@ -476,62 +478,182 @@ export function FlightForm({
     "onTime",
     "inTime",
   ])
-  const [draggedField, setDraggedField] = useState<string | null>(null)
-  const [dragOverField, setDragOverField] = useState<string | null>(null)
+
+  const [timeFieldOrder, setTimeFieldOrder] = useState<string[]>([
+    "blockTime",
+    "flightTime",
+    "nightTime",
+    "p1Time",
+    "p2Time",
+    "p1usTime",
+    "crossCountryTime",
+    "ifrTime",
+    "actualInstrumentTime",
+    "simulatedInstrumentTime",
+  ])
+
+  const [crewFieldOrder, setCrewFieldOrder] = useState<string[]>([
+    "isPilotFlying",
+    "picCrewId",
+    "sicCrewId",
+    "observerCrewId",
+  ])
+
+  const [landingsFieldOrder, setLandingsFieldOrder] = useState<string[]>([
+    "dayTakeoffs",
+    "dayLandings",
+    "nightTakeoffs",
+    "nightLandings",
+    "autolands",
+  ])
+
+  const [approachesFieldOrder, setApproachesFieldOrder] = useState<string[]>(["approach1", "approach2", "holds"])
+
+  const [notesFieldOrder, setNotesFieldOrder] = useState<string[]>(["remarks", "ipcIcc"])
 
   useEffect(() => {
-    const saved = localStorage.getItem("flightFieldOrder")
-    if (saved) {
-      try {
-        setFieldOrder(JSON.parse(saved))
-      } catch (e) {
-        console.error("Failed to load field order:", e)
+    const loadPreferences = async () => {
+      const prefs = await getUserPreferences()
+      if (prefs?.fieldOrder) {
+        if (prefs.fieldOrder.flight) setFieldOrder(prefs.fieldOrder.flight)
+        if (prefs.fieldOrder.time) setTimeFieldOrder(prefs.fieldOrder.time)
+        if (prefs.fieldOrder.crew) setCrewFieldOrder(prefs.fieldOrder.crew)
+        if (prefs.fieldOrder.landings) setLandingsFieldOrder(prefs.fieldOrder.landings)
+        if (prefs.fieldOrder.approaches) setApproachesFieldOrder(prefs.fieldOrder.approaches)
+        if (prefs.fieldOrder.notes) setNotesFieldOrder(prefs.fieldOrder.notes)
       }
     }
+    loadPreferences()
   }, [])
 
-  const saveFieldOrder = (newOrder: string[]) => {
-    setFieldOrder(newOrder)
-    localStorage.setItem("flightFieldOrder", JSON.stringify(newOrder))
+  const saveFieldOrder = async (section: string, newOrder: string[]) => {
+    const prefs = await getUserPreferences()
+    const fieldOrder = prefs?.fieldOrder || {
+      flight: [],
+      time: [],
+      crew: [],
+      landings: [],
+      approaches: [],
+      notes: [],
+    }
+
+    fieldOrder[section as keyof typeof fieldOrder] = newOrder
+
+    await saveUserPreferences({ fieldOrder })
+
+    switch (section) {
+      case "flight":
+        setFieldOrder(newOrder)
+        break
+      case "time":
+        setTimeFieldOrder(newOrder)
+        break
+      case "crew":
+        setCrewFieldOrder(newOrder)
+        break
+      case "landings":
+        setLandingsFieldOrder(newOrder)
+        break
+      case "approaches":
+        setApproachesFieldOrder(newOrder)
+        break
+      case "notes":
+        setNotesFieldOrder(newOrder)
+        break
+    }
   }
 
-  const handleDragStart = (e: React.DragEvent, field: string) => {
+  const [draggedField, setDraggedField] = useState<{ section: string; field: string } | null>(null)
+
+  const handleDragStart = (e: React.DragEvent, section: string, field: string) => {
     e.dataTransfer.effectAllowed = "move"
-    setDraggedField(field)
+    setDraggedField({ section, field })
   }
 
-  const handleDragOver = (e: React.DragEvent, targetField: string) => {
+  const handleDragOver = (e: React.DragEvent, section: string, targetField: string) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = "move"
 
-    if (!draggedField || draggedField === targetField) return
-    setDragOverField(targetField)
+    if (!draggedField || draggedField.section !== section || draggedField.field === targetField) return
 
-    const newOrder = [...fieldOrder]
-    const draggedIndex = newOrder.indexOf(draggedField)
+    const getOrderForSection = (sec: string) => {
+      switch (sec) {
+        case "flight":
+          return fieldOrder
+        case "time":
+          return timeFieldOrder
+        case "crew":
+          return crewFieldOrder
+        case "landings":
+          return landingsFieldOrder
+        case "approaches":
+          return approachesFieldOrder
+        case "notes":
+          return notesFieldOrder
+        default:
+          return []
+      }
+    }
+
+    const currentOrder = getOrderForSection(section)
+    const newOrder = [...currentOrder]
+    const draggedIndex = newOrder.indexOf(draggedField.field)
     const targetIndex = newOrder.indexOf(targetField)
 
     if (draggedIndex !== -1 && targetIndex !== -1) {
       newOrder.splice(draggedIndex, 1)
-      newOrder.splice(targetIndex, 0, draggedField)
-      setFieldOrder(newOrder)
+      newOrder.splice(targetIndex, 0, draggedField.field)
+
+      switch (section) {
+        case "flight":
+          setFieldOrder(newOrder)
+          break
+        case "time":
+          setTimeFieldOrder(newOrder)
+          break
+        case "crew":
+          setCrewFieldOrder(newOrder)
+          break
+        case "landings":
+          setLandingsFieldOrder(newOrder)
+          break
+        case "approaches":
+          setApproachesFieldOrder(newOrder)
+          break
+        case "notes":
+          setNotesFieldOrder(newOrder)
+          break
+      }
     }
   }
 
-  const handleDragEnd = () => {
+  const handleDragEnd = (section: string) => {
     if (draggedField) {
-      saveFieldOrder(fieldOrder)
+      const getOrderForSection = (sec: string) => {
+        switch (sec) {
+          case "flight":
+            return fieldOrder
+          case "time":
+            return timeFieldOrder
+          case "crew":
+            return crewFieldOrder
+          case "landings":
+            return landingsFieldOrder
+          case "approaches":
+            return approachesFieldOrder
+          case "notes":
+            return notesFieldOrder
+          default:
+            return []
+        }
+      }
+      saveFieldOrder(section, getOrderForSection(section))
       setDraggedField(null)
-      setDragOverField(null)
     }
   }
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOverField(null)
-  }
-
-  const fieldComponents: Record<string, React.ReactNode> = {
+  const allFieldComponents: Record<string, React.ReactNode> = {
+    // Flight section
     date: (
       <SwipeableRow label="Date" onClear={() => clearField("date", new Date().toISOString().split("T")[0])}>
         <Input
@@ -539,6 +661,7 @@ export function FlightForm({
           value={formData.date}
           onChange={(e) => updateField("date", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -549,13 +672,14 @@ export function FlightForm({
           value={formData.flightNumber}
           onChange={(e) => updateField("flightNumber", e.target.value)}
           className={cn(inputClassName, "uppercase")}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
     aircraftId: (
       <SwipeableRow label="Aircraft" onClear={() => clearField("aircraftId")}>
         <Select value={formData.aircraftId} onValueChange={(v) => updateField("aircraftId", v)}>
-          <SelectTrigger className={inputClassName}>
+          <SelectTrigger className={inputClassName} disabled={!isConfigMode}>
             <SelectValue placeholder="Select" />
           </SelectTrigger>
           <SelectContent>
@@ -576,6 +700,7 @@ export function FlightForm({
           onChange={(e) => updateField("departureIcao", e.target.value)}
           className={cn(inputClassName, "uppercase")}
           list="dep-airports"
+          disabled={!isConfigMode}
         />
         <datalist id="dep-airports">
           {airports.map((a) => (
@@ -594,6 +719,7 @@ export function FlightForm({
           onChange={(e) => updateField("arrivalIcao", e.target.value)}
           className={cn(inputClassName, "uppercase")}
           list="arr-airports"
+          disabled={!isConfigMode}
         />
         <datalist id="arr-airports">
           {airports.map((a) => (
@@ -611,6 +737,7 @@ export function FlightForm({
           value={formData.outTime}
           onChange={(e) => updateField("outTime", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -621,6 +748,7 @@ export function FlightForm({
           value={formData.offTime}
           onChange={(e) => updateField("offTime", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -631,6 +759,7 @@ export function FlightForm({
           value={formData.onTime}
           onChange={(e) => updateField("onTime", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -641,24 +770,56 @@ export function FlightForm({
           value={formData.inTime}
           onChange={(e) => updateField("inTime", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
+    // Time section - make all time fields swipeable with inputs
+    blockTime: (
+      <SwipeableRow label="Total" showClear={false}>
+        <Input value={formatHHMMDisplay(calculatedTimes.blockTime)} className={inputClassName} disabled />
+      </SwipeableRow>
+    ),
+    flightTime: (
+      <SwipeableRow label="Flight" showClear={false}>
+        <Input value={formatHHMMDisplay(calculatedTimes.flightTime)} className={inputClassName} disabled />
+      </SwipeableRow>
+    ),
+    nightTime: (
+      <SwipeableRow label="Night" showClear={false}>
+        <Input value={formatHHMMDisplay(calculatedTimes.nightTime)} className={inputClassName} disabled />
+      </SwipeableRow>
+    ),
+    p1Time: (
+      <SwipeableRow label="P1" showClear={false}>
+        <Input value={formatHHMMDisplay(calculatedTimes.p1Time)} className={inputClassName} disabled />
+      </SwipeableRow>
+    ),
+    p2Time: (
+      <SwipeableRow label="SIC" showClear={false}>
+        <Input value={formatHHMMDisplay(calculatedTimes.p2Time)} className={inputClassName} disabled />
+      </SwipeableRow>
+    ),
+    p1usTime: (
+      <SwipeableRow label="P1 U/S" showClear={false}>
+        <Input value={formatHHMMDisplay(calculatedTimes.p1usTime)} className={inputClassName} disabled />
+      </SwipeableRow>
+    ),
     crossCountryTime: (
-      <SwipeableRow label="XC" onClear={() => clearField("crossCountryTime")}>
-        <div className="relative w-full">
+      <SwipeableRow label="XC" onClear={() => clearField("crossCountryTime", "00:00")}>
+        <div className="relative flex-1">
           <Input
             type="time"
             value={formData.crossCountryTime}
             onChange={(e) => updateField("crossCountryTime", e.target.value)}
-            className={cn(inputClassName, "pr-24")}
-            style={{ WebkitAppearance: "none" }}
+            className={inputClassName}
+            disabled={!isConfigMode}
           />
-          {!formData.crossCountryTime && (
+          {!formData.crossCountryTime && calculatedTimes.flightTime !== "00:00" && (
             <button
               type="button"
               onClick={() => copyFlightTime("crossCountryTime")}
-              className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-primary hover:underline"
             >
               Use {formatHHMMDisplay(calculatedTimes.flightTime)}
             </button>
@@ -667,20 +828,20 @@ export function FlightForm({
       </SwipeableRow>
     ),
     ifrTime: (
-      <SwipeableRow label="IFR" onClear={() => clearField("ifrTime")}>
-        <div className="relative w-full">
+      <SwipeableRow label="IFR" onClear={() => clearField("ifrTime", "00:00")}>
+        <div className="relative flex-1">
           <Input
             type="time"
             value={formData.ifrTime}
             onChange={(e) => updateField("ifrTime", e.target.value)}
-            className={cn(inputClassName, "pr-24")}
-            style={{ WebkitAppearance: "none" }}
+            className={inputClassName}
+            disabled={!isConfigMode}
           />
-          {!formData.ifrTime && (
+          {!formData.ifrTime && calculatedTimes.flightTime !== "00:00" && (
             <button
               type="button"
               onClick={() => copyFlightTime("ifrTime")}
-              className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-primary hover:underline"
             >
               Use {formatHHMMDisplay(calculatedTimes.flightTime)}
             </button>
@@ -689,20 +850,20 @@ export function FlightForm({
       </SwipeableRow>
     ),
     actualInstrumentTime: (
-      <SwipeableRow label="Actual Inst" onClear={() => clearField("actualInstrumentTime")}>
-        <div className="relative w-full">
+      <SwipeableRow label="Actual Inst" onClear={() => clearField("actualInstrumentTime", "00:00")}>
+        <div className="relative flex-1">
           <Input
             type="time"
             value={formData.actualInstrumentTime}
             onChange={(e) => updateField("actualInstrumentTime", e.target.value)}
-            className={cn(inputClassName, "pr-24")}
-            style={{ WebkitAppearance: "none" }}
+            className={inputClassName}
+            disabled={!isConfigMode}
           />
-          {!formData.actualInstrumentTime && (
+          {!formData.actualInstrumentTime && calculatedTimes.flightTime !== "00:00" && (
             <button
               type="button"
               onClick={() => copyFlightTime("actualInstrumentTime")}
-              className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-primary hover:underline"
             >
               Use {formatHHMMDisplay(calculatedTimes.flightTime)}
             </button>
@@ -711,20 +872,20 @@ export function FlightForm({
       </SwipeableRow>
     ),
     simulatedInstrumentTime: (
-      <SwipeableRow label="Sim Inst" onClear={() => clearField("simulatedInstrumentTime")}>
-        <div className="relative w-full">
+      <SwipeableRow label="Sim Inst" onClear={() => clearField("simulatedInstrumentTime", "00:00")}>
+        <div className="relative flex-1">
           <Input
             type="time"
             value={formData.simulatedInstrumentTime}
             onChange={(e) => updateField("simulatedInstrumentTime", e.target.value)}
-            className={cn(inputClassName, "pr-24")}
-            style={{ WebkitAppearance: "none" }}
+            className={inputClassName}
+            disabled={!isConfigMode}
           />
-          {!formData.simulatedInstrumentTime && (
+          {!formData.simulatedInstrumentTime && calculatedTimes.flightTime !== "00:00" && (
             <button
               type="button"
               onClick={() => copyFlightTime("simulatedInstrumentTime")}
-              className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-primary hover:underline"
             >
               Use {formatHHMMDisplay(calculatedTimes.flightTime)}
             </button>
@@ -732,10 +893,21 @@ export function FlightForm({
         </div>
       </SwipeableRow>
     ),
+
+    // Crew section
+    isPilotFlying: (
+      <SwipeableRow label="PF" showClear={false}>
+        <Switch
+          checked={formData.isPilotFlying}
+          onCheckedChange={(v) => updateField("isPilotFlying", v)}
+          disabled={pfDisabled || !isConfigMode}
+        />
+      </SwipeableRow>
+    ),
     picCrewId: (
       <SwipeableRow label="PIC/P1" onClear={() => clearField("picCrewId")}>
         <Select value={formData.picCrewId} onValueChange={(v) => updateField("picCrewId", v)}>
-          <SelectTrigger className={inputClassName}>
+          <SelectTrigger className={inputClassName} disabled={!isConfigMode}>
             <SelectValue placeholder="Select" />
           </SelectTrigger>
           <SelectContent>
@@ -751,7 +923,7 @@ export function FlightForm({
     sicCrewId: (
       <SwipeableRow label="SIC/P2" onClear={() => clearField("sicCrewId")}>
         <Select value={formData.sicCrewId} onValueChange={(v) => updateField("sicCrewId", v)}>
-          <SelectTrigger className={inputClassName}>
+          <SelectTrigger className={inputClassName} disabled={!isConfigMode}>
             <SelectValue placeholder="Select" />
           </SelectTrigger>
           <SelectContent>
@@ -767,7 +939,7 @@ export function FlightForm({
     observerCrewId: (
       <SwipeableRow label="Observer" onClear={() => clearField("observerCrewId")}>
         <Select value={formData.observerCrewId} onValueChange={(v) => updateField("observerCrewId", v)}>
-          <SelectTrigger className={inputClassName}>
+          <SelectTrigger className={inputClassName} disabled={!isConfigMode}>
             <SelectValue placeholder="Select" />
           </SelectTrigger>
           <SelectContent>
@@ -780,6 +952,8 @@ export function FlightForm({
         </Select>
       </SwipeableRow>
     ),
+
+    // Landings section
     dayTakeoffs: (
       <SwipeableRow label="Day T/O" onClear={() => clearField("dayTakeoffs", "0")}>
         <Input
@@ -788,6 +962,7 @@ export function FlightForm({
           value={formData.dayTakeoffs}
           onChange={(e) => updateField("dayTakeoffs", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -799,6 +974,7 @@ export function FlightForm({
           value={formData.dayLandings}
           onChange={(e) => updateField("dayLandings", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -810,6 +986,7 @@ export function FlightForm({
           value={formData.nightTakeoffs}
           onChange={(e) => updateField("nightTakeoffs", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -821,6 +998,7 @@ export function FlightForm({
           value={formData.nightLandings}
           onChange={(e) => updateField("nightLandings", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -832,9 +1010,12 @@ export function FlightForm({
           value={formData.autolands}
           onChange={(e) => updateField("autolands", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
+
+    // Approaches section
     approach1: (
       <SwipeableRow label="App 1" onClear={() => clearField("approach1")}>
         <Input
@@ -842,6 +1023,7 @@ export function FlightForm({
           value={formData.approach1}
           onChange={(e) => updateField("approach1", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -852,6 +1034,7 @@ export function FlightForm({
           value={formData.approach2}
           onChange={(e) => updateField("approach2", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -863,9 +1046,12 @@ export function FlightForm({
           value={formData.holds}
           onChange={(e) => updateField("holds", e.target.value)}
           className={inputClassName}
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
+
+    // Notes section
     remarks: (
       <SwipeableRow label="Remarks" onClear={() => clearField("remarks")}>
         <Textarea
@@ -873,6 +1059,7 @@ export function FlightForm({
           onChange={(e) => updateField("remarks", e.target.value)}
           className={cn(inputClassName, "min-h-20 resize-none")}
           placeholder="Additional notes..."
+          disabled={!isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -880,75 +1067,74 @@ export function FlightForm({
       <SwipeableRow label="IPC/ICC" showClear={false}>
         <div className="flex items-center gap-2 justify-end">
           <span className="text-sm text-muted-foreground">{formData.ipcIcc ? "Yes" : "No"}</span>
-          <Switch checked={formData.ipcIcc} onCheckedChange={(checked) => updateField("ipcIcc", checked)} />
+          <Switch
+            checked={formData.ipcIcc}
+            onCheckedChange={(checked) => updateField("ipcIcc", checked)}
+            disabled={!isConfigMode}
+          />
         </div>
-      </SwipeableRow>
-    ),
-    blockTime: (
-      <SwipeableRow
-        label="Total"
-        onClear={() => {
-          setCalculatedTimes((prev) => ({ ...prev, blockTime: "00:00" }))
-        }}
-      >
-        <Input
-          type="time"
-          value={calculatedTimes.blockTime}
-          onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, blockTime: e.target.value }))}
-          className={cn(inputClassName, "font-mono font-semibold")}
-        />
-      </SwipeableRow>
-    ),
-    nightTime: (
-      <SwipeableRow
-        label="Night"
-        onClear={() => {
-          setCalculatedTimes((prev) => ({ ...prev, nightTime: "00:00" }))
-        }}
-      >
-        <Input
-          type="time"
-          value={calculatedTimes.nightTime}
-          onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, nightTime: e.target.value }))}
-          className={cn(inputClassName, "font-mono")}
-        />
-      </SwipeableRow>
-    ),
-    p1usTime: (
-      <SwipeableRow
-        label="P1 U/S"
-        onClear={() => {
-          setCalculatedTimes((prev) => ({ ...prev, p1usTime: "00:00" }))
-        }}
-      >
-        <Input
-          type="time"
-          value={calculatedTimes.p1usTime}
-          onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, p1usTime: e.target.value }))}
-          className={cn(inputClassName, "font-mono")}
-        />
-      </SwipeableRow>
-    ),
-    p2Time: (
-      <SwipeableRow
-        label="SIC"
-        onClear={() => {
-          setCalculatedTimes((prev) => ({ ...prev, p2Time: "00:00" }))
-        }}
-      >
-        <Input
-          type="time"
-          value={calculatedTimes.p2Time}
-          onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, p2Time: e.target.value }))}
-          className={cn(inputClassName, "font-mono")}
-        />
       </SwipeableRow>
     ),
   }
 
+  const wrapFieldWithDrag = (section: string, fieldKey: string, component: React.ReactNode) => {
+    if (!isConfigMode) return component
+
+    return (
+      <div
+        draggable={isConfigMode}
+        onDragStart={(e) => handleDragStart(e, section, fieldKey)}
+        onDragOver={(e) => handleDragOver(e, section, fieldKey)}
+        onDragEnd={() => handleDragEnd(section)}
+        onDrop={(e) => e.preventDefault()}
+        className={cn("flex items-center gap-2", draggedField?.field === fieldKey && "opacity-50")}
+      >
+        {isConfigMode && <GripVertical className="h-4 w-4 text-muted-foreground flex-shrink-0 cursor-move" />}
+        <div className="flex-1">{component}</div>
+      </div>
+    )
+  }
+
   return (
-    <form onSubmit={handleSubmit} className="bg-card rounded-lg border border-border">
-      <div className="flex items-center justify-between p-3 border-b border-border">
+    <form onSubmit={handleSubmit} className="space-y-1 px-3 pb-6">
+      <SectionHeader title="A) Flight">
+        {fieldOrder.map((fieldKey) => wrapFieldWithDrag("flight", fieldKey, allFieldComponents[fieldKey]))}
+      </SectionHeader>
+
+      <SectionHeader title="B) Time">
+        {timeFieldOrder.map((fieldKey) => wrapFieldWithDrag("time", fieldKey, allFieldComponents[fieldKey]))}
+      </SectionHeader>
+
+      <SectionHeader title="C) Crew">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={swapCrew}
+          className="gap-1 text-xs h-7"
+          disabled={isConfigMode}
+        >
+          <ArrowLeftRight className="h-3 w-3" />
+          Swap PIC/SIC
+        </Button>
+        {crewFieldOrder.map((fieldKey) => wrapFieldWithDrag("crew", fieldKey, allFieldComponents[fieldKey]))}
+      </SectionHeader>
+
+      <SectionHeader title="D) Landings">
+        {landingsFieldOrder.map((fieldKey) => wrapFieldWithDrag("landings", fieldKey, allFieldComponents[fieldKey]))}
+      </SectionHeader>
+
+      <SectionHeader title="E) App and Hold">
+        {approachesFieldOrder.map((fieldKey) =>
+          wrapFieldWithDrag("approaches", fieldKey, allFieldComponents[fieldKey]),
+        )}
+      </SectionHeader>
+
+      <SectionHeader title="F) Notes">
+        {notesFieldOrder.map((fieldKey) => wrapFieldWithDrag("notes", fieldKey, allFieldComponents[fieldKey]))}
+      </SectionHeader>
+
+      <div className="flex items-center justify-between p-3 border-t border-border">
         <h2 className="font-semibold text-foreground">{editingFlight ? "Edit Flight" : "New Entry"}</h2>
         <div className="flex items-center gap-2">
           {onClose && (
@@ -978,94 +1164,6 @@ export function FlightForm({
               </>
             )}
           </Button>
-        </div>
-      </div>
-
-      <div className="px-2 pb-2 divide-y divide-border">
-        <div>
-          <SectionHeader title="Flight" />
-
-          {fieldOrder.map((fieldKey) => (
-            <div
-              key={fieldKey}
-              draggable={isConfigMode}
-              onDragStart={(e) => handleDragStart(e, fieldKey)}
-              onDragOver={(e) => handleDragOver(e, fieldKey)}
-              onDragEnd={handleDragEnd}
-              onDrop={handleDrop}
-              className={cn("relative", isConfigMode && "cursor-move", dragOverField === fieldKey && "bg-accent/20")}
-            >
-              {isConfigMode && (
-                <div className="absolute right-0 top-0 bottom-0 flex items-center justify-center w-12 bg-secondary/50 rounded-r-lg z-20 pointer-events-none">
-                  <GripVertical className="h-4 w-4 text-muted-foreground" />
-                </div>
-              )}
-              {fieldComponents[fieldKey]}
-            </div>
-          ))}
-        </div>
-
-        {/* B) Time Section with all fields */}
-        <div>
-          <SectionHeader title="Time" />
-          {fieldComponents.blockTime}
-          {fieldComponents.nightTime}
-          {fieldComponents.p1usTime}
-          {fieldComponents.p2Time}
-          {fieldComponents.crossCountryTime}
-          {fieldComponents.ifrTime}
-          {fieldComponents.actualInstrumentTime}
-          {fieldComponents.simulatedInstrumentTime}
-        </div>
-
-        {/* C) Crew Section */}
-        <div>
-          <SectionHeader title="Crew">
-            <Button type="button" variant="ghost" size="sm" onClick={swapCrew} className="h-7 text-xs">
-              <ArrowLeftRight className="h-3 w-3 mr-1" />
-              Swap PIC/SIC
-            </Button>
-          </SectionHeader>
-
-          <SwipeableRow label="PF" showClear={false}>
-            <div className="flex items-center gap-2 justify-end">
-              <span className="text-sm text-muted-foreground">{formData.isPilotFlying ? "Yes" : "No"}</span>
-              <Switch
-                checked={formData.isPilotFlying}
-                onCheckedChange={(checked) => updateField("isPilotFlying", checked)}
-                disabled={pfDisabled}
-              />
-            </div>
-          </SwipeableRow>
-
-          {fieldComponents.picCrewId}
-          {fieldComponents.sicCrewId}
-          {fieldComponents.observerCrewId}
-        </div>
-
-        {/* D) Landings Section */}
-        <div>
-          <SectionHeader title="Landings" />
-          {fieldComponents.dayTakeoffs}
-          {fieldComponents.dayLandings}
-          {fieldComponents.nightTakeoffs}
-          {fieldComponents.nightLandings}
-          {fieldComponents.autolands}
-        </div>
-
-        {/* E) App and Hold Section */}
-        <div>
-          <SectionHeader title="App and Hold" />
-          {fieldComponents.approach1}
-          {fieldComponents.approach2}
-          {fieldComponents.holds}
-        </div>
-
-        {/* F) Notes Section */}
-        <div>
-          <SectionHeader title="Notes" />
-          {fieldComponents.remarks}
-          {fieldComponents.ipcIcc}
         </div>
       </div>
     </form>

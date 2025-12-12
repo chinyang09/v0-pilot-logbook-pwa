@@ -186,7 +186,7 @@ export default function LogbookPage() {
   }, [filteredFlights, showCalendar, selectedMonth])
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
       <Header />
 
       <div className="fixed top-14 left-0 right-0 z-40 bg-background/95 backdrop-blur-lg border-b border-border">
@@ -223,23 +223,21 @@ export default function LogbookPage() {
         </div>
       </div>
 
-      <main className="flex-1 flex flex-col pt-28 pb-24">
+      <main className="flex-1 flex flex-col pt-26 pb-16 overflow-hidden">
         {showCalendar && (
-          <div className="container mx-auto px-4 mb-4">
-            <div className="bg-card rounded-lg border border-border p-3">
-              <LogbookCalendar
-                ref={calendarRef}
-                flights={flights}
-                selectedMonth={selectedMonth}
-                onMonthChange={handleMonthChange}
-                onDateSelect={handleDateSelect}
-                selectedDate={selectedDate}
-              />
-            </div>
+          <div className="flex-shrink-0 bg-card border-b border-border">
+            <LogbookCalendar
+              ref={calendarRef}
+              flights={flights}
+              selectedMonth={selectedMonth}
+              onMonthChange={handleMonthChange}
+              onDateSelect={handleDateSelect}
+              selectedDate={selectedDate}
+            />
           </div>
         )}
 
-        <div className="container mx-auto px-4 mb-4">
+        <div className="container mx-auto px-4 py-3 flex-shrink-0">
           <div className="flex flex-col gap-3">
             {activeFilterType !== "none" && (
               <div className="relative border border-border rounded-lg p-1 bg-input">
@@ -347,7 +345,7 @@ export default function LogbookPage() {
           </div>
         </div>
 
-        <div className="flex-1 container mx-auto px-4" ref={flightListRef}>
+        <div className="flex-1 container mx-auto px-4 overflow-y-auto" ref={flightListRef}>
           <FlightList
             flights={monthFilteredFlights}
             isLoading={flightsLoading || isLoading}

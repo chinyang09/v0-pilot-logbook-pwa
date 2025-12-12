@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb"
+import { sumHHMM } from "./time-utils"
 
 export interface FlightLog {
   id: string
@@ -765,8 +766,8 @@ export async function setLastSyncTime(timestamp: number): Promise<void> {
 }
 
 export async function getFlightStats() {
-  const { sumHHMM } = await import("./time-utils")
-  const flights = await getAllFlights()
+  const db = await getDB()
+  const flights = await db.getAll("flights")
 
   const totalFlights = flights.length
   const blockTime = sumHHMM(flights.map((f) => f.blockTime))
