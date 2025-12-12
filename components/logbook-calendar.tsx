@@ -1,6 +1,8 @@
 "use client"
 
-import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useMemo } from "react"
+import type React from "react"
+
+import { useRef, useCallback, forwardRef, useImperativeHandle, useMemo, useState } from "react"
 import type { FlightLog } from "@/lib/indexed-db"
 import { cn } from "@/lib/utils"
 
@@ -23,57 +25,11 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
   { flights, selectedMonth, onMonthChange, onDateSelect, selectedDate },
   ref,
 ) {
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const isScrolling = useRef(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [swipeStartX, setSwipeStartX] = useState(0)
+  const [swipeStartY, setSwipeStartY] = useState(0)
+  const [isSwiping, setIsSwiping] = useState(false)
 
-  const calendarData = useMemo(() => {
-    const now = new Date()
-    const startDate = new Date(now.getFullYear() - 5, 0, 1) // 5 years ago, January 1st
-    const endDate = new Date(now.getFullYear() + 5, 11, 31) // 5 years future, December 31st
-
-    const weeks: {
-      days: { date: Date; monthYear: { year: number; month: number } }[]
-      monthStart?: { year: number; month: number }
-    }[] = []
-    const current = new Date(startDate)
-
-    // Adjust to start on Sunday
-    current.setDate(current.getDate() - current.getDay())
-
-    let currentWeek: { date: Date; monthYear: { year: number; month: number } }[] = []
-
-    while (current <= endDate || currentWeek.length > 0) {
-      const monthYear = { year: current.getFullYear(), month: current.getMonth() }
-
-      currentWeek.push({
-        date: new Date(current),
-        monthYear,
-      })
-
-      if (currentWeek.length === 7) {
-        // Check if this week starts a new month
-        let monthStart: { year: number; month: number } | undefined
-
-        for (const day of currentWeek) {
-          if (day.date.getDate() === 1 && day.date >= startDate && day.date <= endDate) {
-            monthStart = { year: day.date.getFullYear(), month: day.date.getMonth() }
-            break
-          }
-        }
-
-        weeks.push({ days: currentWeek, monthStart })
-        currentWeek = []
-      }
-
-      current.setDate(current.getDate() + 1)
-
-      if (current > endDate && currentWeek.length === 0) break
-    }
-
-    return weeks
-  }, [])
-
-  // Get all dates with flights
   const flightDates = useMemo(() => {
     const dates = new Map<string, { count: number; hasNight: boolean }>()
     flights.forEach((flight) => {
@@ -86,67 +42,86 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     return dates
   }, [flights])
 
-  const scrollToMonth = useCallback((year: number, month: number) => {
-    const container = scrollContainerRef.current
-    if (!container) return
+  const calendarDays = useMemo(() => {
+    const firstDay = new Date(selectedMonth.year, selectedMonth.month, 1)
+    const lastDay = new Date(selectedMonth.year, selectedMonth.month + 1, 0)
+    const startDay = firstDay.getDay() // Day of week (0-6)
+    const daysInMonth = lastDay.getDate()
 
-    isScrolling.current = true
+    const days: { date: Date | null; dateStr: string | null }[] = []
 
-    const weekElement = container.querySelector(`[data-month-start="${year}-${month}"]`)
-
-    if (weekElement) {
-      weekElement.scrollIntoView({ behavior: "smooth", block: "start" })
+    // Add previous month days
+    for (let i = 0; i < startDay; i++) {
+      const prevDate = new Date(selectedMonth.year, selectedMonth.month, -(startDay - i - 1))
+      days.push({ date: prevDate, dateStr: prevDate.toISOString().split("T")[0] })
     }
 
-    setTimeout(() => {
-      isScrolling.current = false
-    }, 500)
-  }, [])
+    // Add current month days
+    for (let i = 1; i <= daysInMonth; i++) {
+      const date = new Date(selectedMonth.year, selectedMonth.month, i)
+      days.push({ date, dateStr: date.toISOString().split("T")[0] })
+    }
 
-  useImperativeHandle(ref, () => ({ scrollToMonth }), [scrollToMonth])
-
-  // Handle scroll to detect current visible month (month in focus)
-  useEffect(() => {
-    const container = scrollContainerRef.current
-    if (!container) return
-
-    const handleScroll = () => {
-      if (isScrolling.current) return
-
-      const containerRect = container.getBoundingClientRect()
-      const centerY = containerRect.top + 100
-
-      const monthMarkers = container.querySelectorAll("[data-month-start]")
-      let closestMonth: { year: number; month: number } | null = null
-      let closestDistance = Number.POSITIVE_INFINITY
-
-      monthMarkers.forEach((marker) => {
-        const rect = marker.getBoundingClientRect()
-        const distance = Math.abs(rect.top - centerY)
-
-        if (distance < closestDistance && rect.top <= centerY + 100) {
-          closestDistance = distance
-          const [year, month] = (marker as HTMLElement).dataset.monthStart!.split("-").map(Number)
-          closestMonth = { year, month }
-        }
-      })
-
-      if (closestMonth && (closestMonth.year !== selectedMonth.year || closestMonth.month !== selectedMonth.month)) {
-        onMonthChange(closestMonth.year, closestMonth.month)
+    // Add next month days to fill grid
+    const remainingDays = 7 - (days.length % 7)
+    if (remainingDays < 7) {
+      for (let i = 1; i <= remainingDays; i++) {
+        const nextDate = new Date(selectedMonth.year, selectedMonth.month + 1, i)
+        days.push({ date: nextDate, dateStr: nextDate.toISOString().split("T")[0] })
       }
     }
 
-    container.addEventListener("scroll", handleScroll, { passive: true })
-    return () => container.removeEventListener("scroll", handleScroll)
-  }, [selectedMonth, onMonthChange])
+    return days
+  }, [selectedMonth])
 
-  // Scroll to current month on mount
-  useEffect(() => {
-    setTimeout(() => {
-      const now = new Date()
-      scrollToMonth(now.getFullYear(), now.getMonth())
-    }, 100)
-  }, [scrollToMonth])
+  const scrollToMonth = useCallback(
+    (year: number, month: number) => {
+      onMonthChange(year, month)
+    },
+    [onMonthChange],
+  )
+
+  useImperativeHandle(ref, () => ({ scrollToMonth }), [scrollToMonth])
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setSwipeStartX(e.touches[0].clientX)
+    setSwipeStartY(e.touches[0].clientY)
+    setIsSwiping(true)
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isSwiping) return
+    const diffY = Math.abs(e.touches[0].clientY - swipeStartY)
+    const diffX = Math.abs(e.touches[0].clientX - swipeStartX)
+
+    // Detect if it's a horizontal swipe (month navigation) vs vertical scroll
+    if (diffX > diffY && diffX > 20) {
+      e.preventDefault() // Prevent vertical scroll when swiping horizontally
+    }
+  }
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!isSwiping) return
+    setIsSwiping(false)
+
+    const diffX = swipeStartX - e.changedTouches[0].clientX
+    const diffY = Math.abs(swipeStartY - e.changedTouches[0].clientY)
+
+    // Only change month if horizontal swipe is dominant
+    if (Math.abs(diffX) > 50 && Math.abs(diffX) > diffY) {
+      if (diffX > 0) {
+        // Swipe left = next month
+        const nextMonth = selectedMonth.month === 11 ? 0 : selectedMonth.month + 1
+        const nextYear = selectedMonth.month === 11 ? selectedMonth.year + 1 : selectedMonth.year
+        onMonthChange(nextYear, nextMonth)
+      } else {
+        // Swipe right = previous month
+        const prevMonth = selectedMonth.month === 0 ? 11 : selectedMonth.month - 1
+        const prevYear = selectedMonth.month === 0 ? selectedMonth.year - 1 : selectedMonth.year
+        onMonthChange(prevYear, prevMonth)
+      }
+    }
+  }
 
   const handleDateClick = (dateStr: string, hasFlights: boolean) => {
     if (hasFlights) {
@@ -166,49 +141,53 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         ))}
       </div>
 
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-2 pt-2 scrollbar-hide">
-        {calendarData.map((week, weekIndex) => (
-          <div
-            key={weekIndex}
-            className="grid grid-cols-7 gap-1 mb-1"
-            {...(week.monthStart ? { "data-month-start": `${week.monthStart.year}-${week.monthStart.month}` } : {})}
-          >
-            {week.days.map((dayInfo, dayIndex) => {
-              const dateStr = dayInfo.date.toISOString().split("T")[0]
-              const flightInfo = flightDates.get(dateStr)
-              const hasFlights = !!flightInfo
-              const isToday = dateStr === today
-              const isSelected = dateStr === selectedDate
-              const isInFocusMonth =
-                dayInfo.monthYear.month === selectedMonth.month && dayInfo.monthYear.year === selectedMonth.year
+      <div
+        ref={containerRef}
+        className="flex-1 overflow-y-auto px-2 pt-2 scrollbar-hide"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        <div className="grid grid-cols-7 gap-1">
+          {calendarDays.map((dayInfo, dayIndex) => {
+            if (!dayInfo.date || !dayInfo.dateStr) {
+              return <div key={dayIndex} />
+            }
 
-              return (
-                <button
-                  key={dayIndex}
-                  type="button"
-                  onClick={() => handleDateClick(dateStr, hasFlights)}
-                  disabled={!hasFlights}
-                  className={cn(
-                    "aspect-square flex items-center justify-center text-xs rounded-md relative transition-colors",
-                    isInFocusMonth ? "text-foreground font-medium" : "text-muted-foreground/30",
-                    hasFlights && isInFocusMonth && "bg-primary/20 text-primary font-semibold",
-                    hasFlights && !isInFocusMonth && "bg-primary/5 text-primary/40",
-                    flightInfo?.hasNight && "bg-indigo-500/20 text-indigo-400",
-                    isToday && "ring-1 ring-primary",
-                    isSelected && "ring-2 ring-primary bg-primary/30",
-                  )}
-                >
-                  {dayInfo.date.getDate()}
-                  {flightInfo && flightInfo.count > 1 && (
-                    <span className="absolute -top-0.5 -right-0.5 bg-primary text-primary-foreground text-[8px] rounded-full w-3 h-3 flex items-center justify-center">
-                      {flightInfo.count}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-        ))}
+            const dateStr = dayInfo.dateStr
+            const flightInfo = flightDates.get(dateStr)
+            const hasFlights = !!flightInfo
+            const isToday = dateStr === today
+            const isSelected = dateStr === selectedDate
+            const isInFocusMonth =
+              dayInfo.date.getMonth() === selectedMonth.month && dayInfo.date.getFullYear() === selectedMonth.year
+
+            return (
+              <button
+                key={dayIndex}
+                type="button"
+                onClick={() => handleDateClick(dateStr, hasFlights)}
+                disabled={!hasFlights}
+                className={cn(
+                  "aspect-square flex items-center justify-center text-xs rounded-md relative transition-colors",
+                  isInFocusMonth ? "text-foreground font-medium" : "text-muted-foreground/30",
+                  hasFlights && isInFocusMonth && "bg-primary/20 text-primary font-semibold",
+                  hasFlights && !isInFocusMonth && "bg-primary/5 text-primary/40",
+                  flightInfo?.hasNight && "bg-indigo-500/20 text-indigo-400",
+                  isToday && "ring-1 ring-primary",
+                  isSelected && "ring-2 ring-primary bg-primary/30",
+                )}
+              >
+                {dayInfo.date.getDate()}
+                {flightInfo && flightInfo.count > 1 && (
+                  <span className="absolute -top-0.5 -right-0.5 bg-primary text-primary-foreground text-[8px] rounded-full w-3 h-3 flex items-center justify-center">
+                    {flightInfo.count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

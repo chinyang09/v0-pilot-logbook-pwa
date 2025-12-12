@@ -172,6 +172,19 @@ export default function LogbookPage() {
 
   const isLoading = dbLoading || !dbReady
 
+  const handleMonthChange = useCallback((year: number, month: number) => {
+    setSelectedMonth({ year, month })
+  }, [])
+
+  const monthFilteredFlights = useMemo(() => {
+    if (!showCalendar) return filteredFlights
+
+    return filteredFlights.filter((f) => {
+      const date = new Date(f.date)
+      return date.getFullYear() === selectedMonth.year && date.getMonth() === selectedMonth.month
+    })
+  }, [filteredFlights, showCalendar, selectedMonth])
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
@@ -218,7 +231,7 @@ export default function LogbookPage() {
                 ref={calendarRef}
                 flights={flights}
                 selectedMonth={selectedMonth}
-                onMonthChange={setSelectedMonth}
+                onMonthChange={handleMonthChange}
                 onDateSelect={handleDateSelect}
                 selectedDate={selectedDate}
               />
@@ -336,7 +349,7 @@ export default function LogbookPage() {
 
         <div className="flex-1 container mx-auto px-4" ref={flightListRef}>
           <FlightList
-            flights={filteredFlights}
+            flights={monthFilteredFlights}
             isLoading={flightsLoading || isLoading}
             onEdit={handleEditFlight}
             onDeleted={handleFlightDeleted}
@@ -344,7 +357,7 @@ export default function LogbookPage() {
             airports={airports}
             personnel={personnel}
             onFlightVisible={handleFlightVisible}
-            showMonthHeaders={!selectedDate && selectedFilters.length === 0}
+            showMonthHeaders={!selectedDate && selectedFilters.length === 0 && !showCalendar}
             hideFilters={true}
           />
         </div>

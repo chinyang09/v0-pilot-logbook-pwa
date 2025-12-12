@@ -28,6 +28,7 @@ interface FlightFormProps {
   onFlightAdded: (flight: FlightLog) => void
   onClose?: () => void
   editingFlight?: FlightLog | null
+  isConfigMode?: boolean // Add config mode prop
 }
 
 type PilotRole = "PIC" | "FO" | "P1US" | "STUDENT" | "INSTRUCTOR"
@@ -121,7 +122,7 @@ function SectionHeader({ title, children }: { title: string; children?: React.Re
   )
 }
 
-export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightFormProps) {
+export function FlightForm({ onFlightAdded, onClose, editingFlight, isConfigMode = false }: FlightFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [aircraft, setAircraft] = useState<Aircraft[]>([])
   const [airports, setAirports] = useState<Airport[]>([])
@@ -455,6 +456,415 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
     formData.picCrewId === selfId || formData.sicCrewId === selfId || formData.observerCrewId === selfId
   const pfDisabled = !selfInCrew || formData.sicCrewId !== selfId
 
+  const [fieldOrder, setFieldOrder] = useState<string[]>([
+    "date",
+    "flightNumber",
+    "aircraftId",
+    "departureIcao",
+    "arrivalIcao",
+    "outTime",
+    "offTime",
+    "onTime",
+    "inTime",
+  ])
+  const [draggedField, setDraggedField] = useState<string | null>(null)
+
+  useEffect(() => {
+    const saved = localStorage.getItem("flightFieldOrder")
+    if (saved) {
+      try {
+        setFieldOrder(JSON.parse(saved))
+      } catch (e) {
+        console.error("Failed to load field order:", e)
+      }
+    }
+  }, [])
+
+  const saveFieldOrder = (newOrder: string[]) => {
+    setFieldOrder(newOrder)
+    localStorage.setItem("flightFieldOrder", JSON.stringify(newOrder))
+  }
+
+  const handleDragStart = (field: string) => {
+    setDraggedField(field)
+  }
+
+  const handleDragOver = (e: React.DragEvent, targetField: string) => {
+    e.preventDefault()
+    if (!draggedField || draggedField === targetField) return
+
+    const newOrder = [...fieldOrder]
+    const draggedIndex = newOrder.indexOf(draggedField)
+    const targetIndex = newOrder.indexOf(targetField)
+
+    newOrder.splice(draggedIndex, 1)
+    newOrder.splice(targetIndex, 0, draggedField)
+
+    setFieldOrder(newOrder)
+  }
+
+  const handleDragEnd = () => {
+    if (draggedField) {
+      saveFieldOrder(fieldOrder)
+      setDraggedField(null)
+    }
+  }
+
+  const fieldComponents: Record<string, React.ReactNode> = {
+    date: (
+      <SwipeableRow label="Date" onClear={() => clearField("date", new Date().toISOString().split("T")[0])}>
+        <Input
+          type="date"
+          value={formData.date}
+          onChange={(e) => updateField("date", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    flightNumber: (
+      <SwipeableRow label="Flight No" onClear={() => clearField("flightNumber")}>
+        <Input
+          placeholder="SQ123"
+          value={formData.flightNumber}
+          onChange={(e) => updateField("flightNumber", e.target.value)}
+          className={cn(inputClassName, "uppercase")}
+        />
+      </SwipeableRow>
+    ),
+    aircraftId: (
+      <SwipeableRow label="Aircraft" onClear={() => clearField("aircraftId")}>
+        <Select value={formData.aircraftId} onValueChange={(v) => updateField("aircraftId", v)}>
+          <SelectTrigger className={inputClassName}>
+            <SelectValue placeholder="Select" />
+          </SelectTrigger>
+          <SelectContent>
+            {aircraft.map((a) => (
+              <SelectItem key={a.id} value={a.id}>
+                {a.registration} ({a.type})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SwipeableRow>
+    ),
+    departureIcao: (
+      <SwipeableRow label="From" onClear={() => clearField("departureIcao")}>
+        <Input
+          placeholder="WSSS"
+          value={formData.departureIcao}
+          onChange={(e) => updateField("departureIcao", e.target.value)}
+          className={cn(inputClassName, "uppercase")}
+          list="dep-airports"
+        />
+        <datalist id="dep-airports">
+          {airports.map((a) => (
+            <option key={a.id} value={a.icao}>
+              {a.name}
+            </option>
+          ))}
+        </datalist>
+      </SwipeableRow>
+    ),
+    arrivalIcao: (
+      <SwipeableRow label="To" onClear={() => clearField("arrivalIcao")}>
+        <Input
+          placeholder="VHHH"
+          value={formData.arrivalIcao}
+          onChange={(e) => updateField("arrivalIcao", e.target.value)}
+          className={cn(inputClassName, "uppercase")}
+          list="arr-airports"
+        />
+        <datalist id="arr-airports">
+          {airports.map((a) => (
+            <option key={a.id} value={a.icao}>
+              {a.name}
+            </option>
+          ))}
+        </datalist>
+      </SwipeableRow>
+    ),
+    outTime: (
+      <SwipeableRow label="Out" onClear={() => clearField("outTime")}>
+        <Input
+          type="time"
+          value={formData.outTime}
+          onChange={(e) => updateField("outTime", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    offTime: (
+      <SwipeableRow label="Off" onClear={() => clearField("offTime")}>
+        <Input
+          type="time"
+          value={formData.offTime}
+          onChange={(e) => updateField("offTime", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    onTime: (
+      <SwipeableRow label="On" onClear={() => clearField("onTime")}>
+        <Input
+          type="time"
+          value={formData.onTime}
+          onChange={(e) => updateField("onTime", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    inTime: (
+      <SwipeableRow label="In" onClear={() => clearField("inTime")}>
+        <Input
+          type="time"
+          value={formData.inTime}
+          onChange={(e) => updateField("inTime", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    crossCountryTime: (
+      <SwipeableRow label="XC" onClear={() => clearField("crossCountryTime")}>
+        <div className="relative w-full">
+          <Input
+            type="time"
+            value={formData.crossCountryTime}
+            onChange={(e) => updateField("crossCountryTime", e.target.value)}
+            className={cn(inputClassName, "pr-24")}
+            style={{ WebkitAppearance: "none" }}
+          />
+          {!formData.crossCountryTime && (
+            <button
+              type="button"
+              onClick={() => copyFlightTime("crossCountryTime")}
+              className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
+            >
+              Use {formatHHMMDisplay(calculatedTimes.flightTime)}
+            </button>
+          )}
+        </div>
+      </SwipeableRow>
+    ),
+    ifrTime: (
+      <SwipeableRow label="IFR" onClear={() => clearField("ifrTime")}>
+        <div className="relative w-full">
+          <Input
+            type="time"
+            value={formData.ifrTime}
+            onChange={(e) => updateField("ifrTime", e.target.value)}
+            className={cn(inputClassName, "pr-24")}
+            style={{ WebkitAppearance: "none" }}
+          />
+          {!formData.ifrTime && (
+            <button
+              type="button"
+              onClick={() => copyFlightTime("ifrTime")}
+              className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
+            >
+              Use {formatHHMMDisplay(calculatedTimes.flightTime)}
+            </button>
+          )}
+        </div>
+      </SwipeableRow>
+    ),
+    actualInstrumentTime: (
+      <SwipeableRow label="Actual Inst" onClear={() => clearField("actualInstrumentTime")}>
+        <div className="relative w-full">
+          <Input
+            type="time"
+            value={formData.actualInstrumentTime}
+            onChange={(e) => updateField("actualInstrumentTime", e.target.value)}
+            className={cn(inputClassName, "pr-24")}
+            style={{ WebkitAppearance: "none" }}
+          />
+          {!formData.actualInstrumentTime && (
+            <button
+              type="button"
+              onClick={() => copyFlightTime("actualInstrumentTime")}
+              className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
+            >
+              Use {formatHHMMDisplay(calculatedTimes.flightTime)}
+            </button>
+          )}
+        </div>
+      </SwipeableRow>
+    ),
+    simulatedInstrumentTime: (
+      <SwipeableRow label="Sim Inst" onClear={() => clearField("simulatedInstrumentTime")}>
+        <div className="relative w-full">
+          <Input
+            type="time"
+            value={formData.simulatedInstrumentTime}
+            onChange={(e) => updateField("simulatedInstrumentTime", e.target.value)}
+            className={cn(inputClassName, "pr-24")}
+            style={{ WebkitAppearance: "none" }}
+          />
+          {!formData.simulatedInstrumentTime && (
+            <button
+              type="button"
+              onClick={() => copyFlightTime("simulatedInstrumentTime")}
+              className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
+            >
+              Use {formatHHMMDisplay(calculatedTimes.flightTime)}
+            </button>
+          )}
+        </div>
+      </SwipeableRow>
+    ),
+    picCrewId: (
+      <SwipeableRow label="PIC/P1" onClear={() => clearField("picCrewId")}>
+        <Select value={formData.picCrewId} onValueChange={(v) => updateField("picCrewId", v)}>
+          <SelectTrigger className={inputClassName}>
+            <SelectValue placeholder="Select" />
+          </SelectTrigger>
+          <SelectContent>
+            {personnel.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.firstName} {p.lastName}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SwipeableRow>
+    ),
+    sicCrewId: (
+      <SwipeableRow label="SIC/P2" onClear={() => clearField("sicCrewId")}>
+        <Select value={formData.sicCrewId} onValueChange={(v) => updateField("sicCrewId", v)}>
+          <SelectTrigger className={inputClassName}>
+            <SelectValue placeholder="Select" />
+          </SelectTrigger>
+          <SelectContent>
+            {personnel.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.firstName} {p.lastName}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SwipeableRow>
+    ),
+    observerCrewId: (
+      <SwipeableRow label="Observer" onClear={() => clearField("observerCrewId")}>
+        <Select value={formData.observerCrewId} onValueChange={(v) => updateField("observerCrewId", v)}>
+          <SelectTrigger className={inputClassName}>
+            <SelectValue placeholder="Select" />
+          </SelectTrigger>
+          <SelectContent>
+            {personnel.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.firstName} {p.lastName}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SwipeableRow>
+    ),
+    dayTakeoffs: (
+      <SwipeableRow label="Day T/O" onClear={() => clearField("dayTakeoffs", "0")}>
+        <Input
+          type="number"
+          min="0"
+          value={formData.dayTakeoffs}
+          onChange={(e) => updateField("dayTakeoffs", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    dayLandings: (
+      <SwipeableRow label="Day Ldg" onClear={() => clearField("dayLandings", "0")}>
+        <Input
+          type="number"
+          min="0"
+          value={formData.dayLandings}
+          onChange={(e) => updateField("dayLandings", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    nightTakeoffs: (
+      <SwipeableRow label="Night T/O" onClear={() => clearField("nightTakeoffs", "0")}>
+        <Input
+          type="number"
+          min="0"
+          value={formData.nightTakeoffs}
+          onChange={(e) => updateField("nightTakeoffs", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    nightLandings: (
+      <SwipeableRow label="Night Ldg" onClear={() => clearField("nightLandings", "0")}>
+        <Input
+          type="number"
+          min="0"
+          value={formData.nightLandings}
+          onChange={(e) => updateField("nightLandings", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    autolands: (
+      <SwipeableRow label="Autolands" onClear={() => clearField("autolands", "0")}>
+        <Input
+          type="number"
+          min="0"
+          value={formData.autolands}
+          onChange={(e) => updateField("autolands", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    approach1: (
+      <SwipeableRow label="App 1" onClear={() => clearField("approach1")}>
+        <Input
+          placeholder="ILS 20C"
+          value={formData.approach1}
+          onChange={(e) => updateField("approach1", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    approach2: (
+      <SwipeableRow label="App 2" onClear={() => clearField("approach2")}>
+        <Input
+          placeholder="VOR 02L"
+          value={formData.approach2}
+          onChange={(e) => updateField("approach2", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    holds: (
+      <SwipeableRow label="Holds" onClear={() => clearField("holds", "0")}>
+        <Input
+          type="number"
+          min="0"
+          value={formData.holds}
+          onChange={(e) => updateField("holds", e.target.value)}
+          className={inputClassName}
+        />
+      </SwipeableRow>
+    ),
+    remarks: (
+      <SwipeableRow label="Remarks" onClear={() => clearField("remarks")}>
+        <Textarea
+          value={formData.remarks}
+          onChange={(e) => updateField("remarks", e.target.value)}
+          className={cn(inputClassName, "min-h-20 resize-none")}
+          placeholder="Additional notes..."
+        />
+      </SwipeableRow>
+    ),
+    ipcIcc: (
+      <SwipeableRow label="IPC/ICC" showClear={false}>
+        <div className="flex items-center gap-2 justify-end">
+          <span className="text-sm text-muted-foreground">{formData.ipcIcc ? "Yes" : "No"}</span>
+          <Switch checked={formData.ipcIcc} onCheckedChange={(checked) => updateField("ipcIcc", checked)} />
+        </div>
+      </SwipeableRow>
+    ),
+  }
+
   return (
     <form onSubmit={handleSubmit} className="bg-card rounded-lg border border-border">
       <div className="flex items-center justify-between p-3 border-b border-border">
@@ -473,112 +883,30 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
       </div>
 
       <div className="px-2 pb-2 divide-y divide-border">
-        {/* A) Flight Section */}
         <div>
           <SectionHeader title="Flight" />
 
-          <SwipeableRow label="Date" onClear={() => clearField("date", new Date().toISOString().split("T")[0])}>
-            <Input
-              type="date"
-              value={formData.date}
-              onChange={(e) => updateField("date", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow label="Flight No" onClear={() => clearField("flightNumber")}>
-            <Input
-              placeholder="SQ123"
-              value={formData.flightNumber}
-              onChange={(e) => updateField("flightNumber", e.target.value)}
-              className={cn(inputClassName, "uppercase")}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow label="Aircraft" onClear={() => clearField("aircraftId")}>
-            <Select value={formData.aircraftId} onValueChange={(v) => updateField("aircraftId", v)}>
-              <SelectTrigger className={inputClassName}>
-                <SelectValue placeholder="Select" />
-              </SelectTrigger>
-              <SelectContent>
-                {aircraft.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.registration} ({a.type})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </SwipeableRow>
-
-          <SwipeableRow label="From" onClear={() => clearField("departureIcao")}>
-            <Input
-              placeholder="WSSS"
-              value={formData.departureIcao}
-              onChange={(e) => updateField("departureIcao", e.target.value)}
-              className={cn(inputClassName, "uppercase")}
-              list="dep-airports"
-            />
-            <datalist id="dep-airports">
-              {airports.map((a) => (
-                <option key={a.id} value={a.icao}>
-                  {a.name}
-                </option>
-              ))}
-            </datalist>
-          </SwipeableRow>
-
-          <SwipeableRow label="To" onClear={() => clearField("arrivalIcao")}>
-            <Input
-              placeholder="VHHH"
-              value={formData.arrivalIcao}
-              onChange={(e) => updateField("arrivalIcao", e.target.value)}
-              className={cn(inputClassName, "uppercase")}
-              list="arr-airports"
-            />
-            <datalist id="arr-airports">
-              {airports.map((a) => (
-                <option key={a.id} value={a.icao}>
-                  {a.name}
-                </option>
-              ))}
-            </datalist>
-          </SwipeableRow>
-
-          <SwipeableRow label="Out" onClear={() => clearField("outTime")}>
-            <Input
-              type="time"
-              value={formData.outTime}
-              onChange={(e) => updateField("outTime", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow label="Off" onClear={() => clearField("offTime")}>
-            <Input
-              type="time"
-              value={formData.offTime}
-              onChange={(e) => updateField("offTime", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow label="On" onClear={() => clearField("onTime")}>
-            <Input
-              type="time"
-              value={formData.onTime}
-              onChange={(e) => updateField("onTime", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow label="In" onClear={() => clearField("inTime")}>
-            <Input
-              type="time"
-              value={formData.inTime}
-              onChange={(e) => updateField("inTime", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
+          {fieldOrder.map((fieldKey) => (
+            <div
+              key={fieldKey}
+              draggable={isConfigMode}
+              onDragStart={() => handleDragStart(fieldKey)}
+              onDragOver={(e) => handleDragOver(e, fieldKey)}
+              onDragEnd={handleDragEnd}
+              className={cn("relative", isConfigMode && "cursor-move")}
+            >
+              {isConfigMode && (
+                <div className="absolute right-0 top-0 bottom-0 flex items-center justify-center w-12 bg-secondary/50 rounded-r-lg z-20">
+                  <div className="flex flex-col gap-0.5">
+                    <div className="w-4 h-0.5 bg-muted-foreground" />
+                    <div className="w-4 h-0.5 bg-muted-foreground" />
+                    <div className="w-4 h-0.5 bg-muted-foreground" />
+                  </div>
+                </div>
+              )}
+              {fieldComponents[fieldKey]}
+            </div>
+          ))}
         </div>
 
         {/* B) Time Section */}
@@ -640,90 +968,6 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
               className={cn(inputClassName, "font-mono")}
             />
           </SwipeableRow>
-
-          <SwipeableRow label="XC" onClear={() => clearField("crossCountryTime")}>
-            <div className="relative w-full">
-              <Input
-                type="time"
-                value={formData.crossCountryTime}
-                onChange={(e) => updateField("crossCountryTime", e.target.value)}
-                className={cn(inputClassName, "pr-24")}
-                style={{ WebkitAppearance: "none" }}
-              />
-              {!formData.crossCountryTime && (
-                <button
-                  type="button"
-                  onClick={() => copyFlightTime("crossCountryTime")}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
-                >
-                  Use {formatHHMMDisplay(calculatedTimes.flightTime)}
-                </button>
-              )}
-            </div>
-          </SwipeableRow>
-
-          <SwipeableRow label="IFR" onClear={() => clearField("ifrTime")}>
-            <div className="relative w-full">
-              <Input
-                type="time"
-                value={formData.ifrTime}
-                onChange={(e) => updateField("ifrTime", e.target.value)}
-                className={cn(inputClassName, "pr-24")}
-                style={{ WebkitAppearance: "none" }}
-              />
-              {!formData.ifrTime && (
-                <button
-                  type="button"
-                  onClick={() => copyFlightTime("ifrTime")}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
-                >
-                  Use {formatHHMMDisplay(calculatedTimes.flightTime)}
-                </button>
-              )}
-            </div>
-          </SwipeableRow>
-
-          <SwipeableRow label="Actual Inst" onClear={() => clearField("actualInstrumentTime")}>
-            <div className="relative w-full">
-              <Input
-                type="time"
-                value={formData.actualInstrumentTime}
-                onChange={(e) => updateField("actualInstrumentTime", e.target.value)}
-                className={cn(inputClassName, "pr-24")}
-                style={{ WebkitAppearance: "none" }}
-              />
-              {!formData.actualInstrumentTime && (
-                <button
-                  type="button"
-                  onClick={() => copyFlightTime("actualInstrumentTime")}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
-                >
-                  Use {formatHHMMDisplay(calculatedTimes.flightTime)}
-                </button>
-              )}
-            </div>
-          </SwipeableRow>
-
-          <SwipeableRow label="Sim Inst" onClear={() => clearField("simulatedInstrumentTime")}>
-            <div className="relative w-full">
-              <Input
-                type="time"
-                value={formData.simulatedInstrumentTime}
-                onChange={(e) => updateField("simulatedInstrumentTime", e.target.value)}
-                className={cn(inputClassName, "pr-24")}
-                style={{ WebkitAppearance: "none" }}
-              />
-              {!formData.simulatedInstrumentTime && (
-                <button
-                  type="button"
-                  onClick={() => copyFlightTime("simulatedInstrumentTime")}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-primary px-2 py-1 rounded bg-primary/10"
-                >
-                  Use {formatHHMMDisplay(calculatedTimes.flightTime)}
-                </button>
-              )}
-            </div>
-          </SwipeableRow>
         </div>
 
         {/* C) Crew Section */}
@@ -745,160 +989,21 @@ export function FlightForm({ onFlightAdded, onClose, editingFlight }: FlightForm
               />
             </div>
           </SwipeableRow>
-
-          <SwipeableRow label="PIC/P1" onClear={() => clearField("picCrewId")}>
-            <Select value={formData.picCrewId} onValueChange={(v) => updateField("picCrewId", v)}>
-              <SelectTrigger className={inputClassName}>
-                <SelectValue placeholder="Select" />
-              </SelectTrigger>
-              <SelectContent>
-                {personnel.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.firstName} {p.lastName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </SwipeableRow>
-
-          <SwipeableRow label="SIC/P2" onClear={() => clearField("sicCrewId")}>
-            <Select value={formData.sicCrewId} onValueChange={(v) => updateField("sicCrewId", v)}>
-              <SelectTrigger className={inputClassName}>
-                <SelectValue placeholder="Select" />
-              </SelectTrigger>
-              <SelectContent>
-                {personnel.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.firstName} {p.lastName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </SwipeableRow>
-
-          <SwipeableRow label="Observer" onClear={() => clearField("observerCrewId")}>
-            <Select value={formData.observerCrewId} onValueChange={(v) => updateField("observerCrewId", v)}>
-              <SelectTrigger className={inputClassName}>
-                <SelectValue placeholder="Select" />
-              </SelectTrigger>
-              <SelectContent>
-                {personnel.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.firstName} {p.lastName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </SwipeableRow>
         </div>
 
         {/* D) Landings Section */}
         <div>
           <SectionHeader title="Landings" />
-
-          <SwipeableRow label="Day T/O" onClear={() => clearField("dayTakeoffs", "0")}>
-            <Input
-              type="number"
-              min="0"
-              value={formData.dayTakeoffs}
-              onChange={(e) => updateField("dayTakeoffs", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow label="Day Ldg" onClear={() => clearField("dayLandings", "0")}>
-            <Input
-              type="number"
-              min="0"
-              value={formData.dayLandings}
-              onChange={(e) => updateField("dayLandings", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow label="Night T/O" onClear={() => clearField("nightTakeoffs", "0")}>
-            <Input
-              type="number"
-              min="0"
-              value={formData.nightTakeoffs}
-              onChange={(e) => updateField("nightTakeoffs", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow label="Night Ldg" onClear={() => clearField("nightLandings", "0")}>
-            <Input
-              type="number"
-              min="0"
-              value={formData.nightLandings}
-              onChange={(e) => updateField("nightLandings", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow label="Autolands" onClear={() => clearField("autolands", "0")}>
-            <Input
-              type="number"
-              min="0"
-              value={formData.autolands}
-              onChange={(e) => updateField("autolands", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
         </div>
 
         {/* E) App and Hold Section */}
         <div>
           <SectionHeader title="App and Hold" />
-
-          <SwipeableRow label="App 1" onClear={() => clearField("approach1")}>
-            <Input
-              placeholder="ILS 20C"
-              value={formData.approach1}
-              onChange={(e) => updateField("approach1", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow label="App 2" onClear={() => clearField("approach2")}>
-            <Input
-              placeholder="VOR 02L"
-              value={formData.approach2}
-              onChange={(e) => updateField("approach2", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow label="Holds" onClear={() => clearField("holds", "0")}>
-            <Input
-              type="number"
-              min="0"
-              value={formData.holds}
-              onChange={(e) => updateField("holds", e.target.value)}
-              className={inputClassName}
-            />
-          </SwipeableRow>
         </div>
 
         {/* F) Notes Section */}
         <div>
           <SectionHeader title="Notes" />
-
-          <SwipeableRow label="Remarks" onClear={() => clearField("remarks")}>
-            <Textarea
-              value={formData.remarks}
-              onChange={(e) => updateField("remarks", e.target.value)}
-              className={cn(inputClassName, "min-h-20 resize-none")}
-              placeholder="Additional notes..."
-            />
-          </SwipeableRow>
-
-          <SwipeableRow label="IPC/ICC" showClear={false}>
-            <div className="flex items-center gap-2 justify-end">
-              <span className="text-sm text-muted-foreground">{formData.ipcIcc ? "Yes" : "No"}</span>
-              <Switch checked={formData.ipcIcc} onCheckedChange={(checked) => updateField("ipcIcc", checked)} />
-            </div>
-          </SwipeableRow>
         </div>
       </div>
     </form>
