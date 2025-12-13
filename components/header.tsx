@@ -1,15 +1,9 @@
 "use client"
 
-import type React from "react"
-
 import { SyncStatus } from "./sync-status"
 import { Plane } from "lucide-react"
 
-interface HeaderProps {
-  rightAction?: React.ReactNode
-}
-
-export function Header({ rightAction }: HeaderProps) {
+export function Header() {
   return (
     <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-lg border-b border-border">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -22,10 +16,7 @@ export function Header({ rightAction }: HeaderProps) {
             <p className="text-xs text-muted-foreground">Pilot Logbook</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {rightAction}
-          <SyncStatus />
-        </div>
+        <SyncStatus />
       </div>
     </header>
   )

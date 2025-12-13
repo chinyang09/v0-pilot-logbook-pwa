@@ -47,7 +47,7 @@ export function BottomNavbar() {
           <Link href="/">
             <Button
               variant="ghost"
-              className={cn("flex flex-col items-center gap-1 h-14 px-6", activeTab === "dashboard" && "text-primary")}
+              className={cn("flex flex-col items-center gap-1 h-14 px-4", activeTab === "dashboard" && "text-primary")}
             >
               <Home className="h-5 w-5" />
               <span className="text-xs">Home</span>
@@ -57,7 +57,7 @@ export function BottomNavbar() {
           <Link href="/logbook">
             <Button
               variant="ghost"
-              className={cn("flex flex-col items-center gap-1 h-14 px-6", activeTab === "logbook" && "text-primary")}
+              className={cn("flex flex-col items-center gap-1 h-14 px-4", activeTab === "logbook" && "text-primary")}
             >
               <Book className="h-5 w-5" />
               <span className="text-xs">Logbook</span>
@@ -73,7 +73,7 @@ export function BottomNavbar() {
           <Link href="/data">
             <Button
               variant="ghost"
-              className={cn("flex flex-col items-center gap-1 h-14 px-6", activeTab === "data" && "text-primary")}
+              className={cn("flex flex-col items-center gap-1 h-14 px-4", activeTab === "data" && "text-primary")}
             >
               <Database className="h-5 w-5" />
               <span className="text-xs">Data</span>

@@ -26,7 +26,6 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [swipeStartX, setSwipeStartX] = useState(0)
   const [swipeStartY, setSwipeStartY] = useState(0)
   const [isSwiping, setIsSwiping] = useState(false)
 
@@ -45,21 +44,24 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
   const calendarDays = useMemo(() => {
     const firstDay = new Date(selectedMonth.year, selectedMonth.month, 1)
     const lastDay = new Date(selectedMonth.year, selectedMonth.month + 1, 0)
-    const startDay = firstDay.getDay()
+    const startDay = firstDay.getDay() // Day of week (0-6)
     const daysInMonth = lastDay.getDate()
 
     const days: { date: Date | null; dateStr: string | null }[] = []
 
+    // Add previous month days
     for (let i = 0; i < startDay; i++) {
       const prevDate = new Date(selectedMonth.year, selectedMonth.month, -(startDay - i - 1))
       days.push({ date: prevDate, dateStr: prevDate.toISOString().split("T")[0] })
     }
 
+    // Add current month days
     for (let i = 1; i <= daysInMonth; i++) {
       const date = new Date(selectedMonth.year, selectedMonth.month, i)
       days.push({ date, dateStr: date.toISOString().split("T")[0] })
     }
 
+    // Add next month days to fill grid
     const remainingDays = 7 - (days.length % 7)
     if (remainingDays < 7) {
       for (let i = 1; i <= remainingDays; i++) {
@@ -81,19 +83,12 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
   useImperativeHandle(ref, () => ({ scrollToMonth }), [scrollToMonth])
 
   const handleTouchStart = (e: React.TouchEvent) => {
-    setSwipeStartX(e.touches[0].clientX)
     setSwipeStartY(e.touches[0].clientY)
     setIsSwiping(true)
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (!isSwiping) return
-    const diffY = Math.abs(e.touches[0].clientY - swipeStartY)
-    const diffX = Math.abs(e.touches[0].clientX - swipeStartX)
-
-    if (diffY > diffX && diffY > 20) {
-      e.preventDefault()
-    }
   }
 
   const handleTouchEnd = (e: React.TouchEvent) => {
@@ -101,9 +96,9 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     setIsSwiping(false)
 
     const diffY = swipeStartY - e.changedTouches[0].clientY
-    const diffX = Math.abs(swipeStartX - e.changedTouches[0].clientX)
 
-    if (Math.abs(diffY) > 50 && Math.abs(diffY) > diffX) {
+    // Only change month if vertical swipe is significant
+    if (Math.abs(diffY) > 50) {
       if (diffY > 0) {
         // Swipe up = next month
         const nextMonth = selectedMonth.month === 11 ? 0 : selectedMonth.month + 1
@@ -127,7 +122,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
   const today = new Date().toISOString().split("T")[0]
 
   return (
-    <div className="flex flex-col h-[300px]">
+    <div className="flex flex-col min-h-[280px] h-[300px] sm:h-[320px]">
       <div className="grid grid-cols-7 gap-1 px-2 pb-2 border-b border-border">
         {DAYS.map((day, i) => (
           <div key={i} className="text-center text-xs text-muted-foreground font-medium py-1">
@@ -143,7 +138,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        <div className="grid grid-cols-7 gap-1">
+        <div className="grid grid-cols-7 gap-0.5 sm:gap-1">
           {calendarDays.map((dayInfo, dayIndex) => {
             if (!dayInfo.date || !dayInfo.dateStr) {
               return <div key={dayIndex} />
