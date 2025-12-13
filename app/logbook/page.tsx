@@ -17,6 +17,16 @@ import { useRouter } from "next/navigation"
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 export default function LogbookPage() {
+  useEffect(() => {
+    const handleError = (e: ErrorEvent) => {
+      if (e.message.includes("ResizeObserver loop")) {
+        e.stopImmediatePropagation()
+      }
+    }
+    window.addEventListener("error", handleError)
+    return () => window.removeEventListener("error", handleError)
+  }, [])
+
   const router = useRouter()
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()

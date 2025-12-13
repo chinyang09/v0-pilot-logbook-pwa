@@ -35,11 +35,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         ? { $or: [{ updatedAt: { $gt: since } }, { createdAt: { $gt: since } }, { syncedAt: { $gt: since } }] }
         : {}
 
-    const records = await db
-      .collection(collection)
-      .find(query)
-      .sort({ date: -1, updatedAt: -1, createdAt: -1 })
-      .toArray()
+    const sortCriteria =
+      collection === "flights" ? { date: -1, updatedAt: -1, createdAt: -1 } : { updatedAt: -1, createdAt: -1 }
+
+    const records = await db.collection(collection).find(query).sort(sortCriteria).toArray()
 
     const transformedRecords = records.map((record) => {
       const { _id, syncedAt, ...rest } = record

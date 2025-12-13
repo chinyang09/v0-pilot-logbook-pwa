@@ -122,7 +122,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
   const today = new Date().toISOString().split("T")[0]
 
   return (
-    <div className="flex flex-col min-h-[280px] h-[300px] sm:h-[320px]">
+    <div className="flex flex-col min-h-[280px] h-[300px] sm:h-[320px] will-change-transform">
       <div className="grid grid-cols-7 gap-1 px-2 pb-2 border-b border-border">
         {DAYS.map((day, i) => (
           <div key={i} className="text-center text-xs text-muted-foreground font-medium py-1">
@@ -134,6 +134,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       <div
         ref={containerRef}
         className="flex-1 overflow-y-auto px-2 pt-2 scrollbar-hide"
+        style={{ contain: "layout" }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}

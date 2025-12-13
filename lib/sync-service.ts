@@ -68,7 +68,7 @@ class SyncService {
 
     const dbReady = await initializeDB()
     if (!dbReady) {
-      console.error("DB not ready for sync")
+      console.error("[v0] DB not ready for sync")
       return { pushed: 0, pulled: 0, failed: 0 }
     }
 
@@ -83,17 +83,17 @@ class SyncService {
       const pullResult = await this.pullFromServer()
       pulled = pullResult.count
 
-      // 2. Then push local changes (this ensures we don't overwrite newer server data)
+      await new Promise((resolve) => setTimeout(resolve, 100))
+
       const pushResult = await this.pushPendingChanges()
       pushed = pushResult.success
       failed = pushResult.failed
 
-      // 3. Update last sync time
       await setLastSyncTime(Date.now())
 
       this.notifyDataChanged()
     } catch (error) {
-      console.error("Full sync error:", error)
+      console.error("[v0] Full sync error:", error)
     } finally {
       this.syncInProgress = false
       this.setStatus(navigator.onLine ? "online" : "offline")
@@ -122,7 +122,6 @@ class SyncService {
         if (response.ok) {
           const result = await response.json()
 
-          // Update local record with MongoDB ID if created/updated
           if ((item.type === "create" || item.type === "update") && result.mongoId) {
             const data = item.data as { id: string }
             await markRecordSynced(item.collection, data.id, result.mongoId)
@@ -151,7 +150,6 @@ class SyncService {
     const lastSyncTime = await getLastSyncTime()
 
     try {
-      // Pull all collections
       const collections = ["flights", "aircraft", "airports", "personnel"] as const
 
       for (const collection of collections) {
@@ -197,7 +195,6 @@ class SyncService {
     return { count }
   }
 
-  // Legacy method for compatibility
   async syncPendingChanges(): Promise<{ success: number; failed: number }> {
     const result = await this.fullSync()
     return { success: result.pushed, failed: result.failed }

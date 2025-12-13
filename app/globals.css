@@ -156,3 +156,27 @@ input[type="time"] {
     touch-action: manipulation;
   }
 }
+
+/* Hide select dropdown arrows and improve touch dragging */
+select::-ms-expand {
+  display: none;
+}
+
+/* Remove default select styling */
+.select-trigger svg {
+  display: none !important;
+}
+
+/* Improve touch drag on iOS */
+[draggable="true"] {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Ensure inputs don't interfere with drag handles */
+input:focus-within,
+select:focus-within,
+textarea:focus-within {
+  z-index: 20;
+}

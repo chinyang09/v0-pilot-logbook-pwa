@@ -191,11 +191,27 @@ interface LogbookDB extends DBSchema {
 
 let dbInstance: IDBPDatabase<LogbookDB> | null = null
 let isInitialized = false
+let isConnecting = false
+let connectionPromise: Promise<IDBPDatabase<LogbookDB>> | null = null
 
 export async function getDB(): Promise<IDBPDatabase<LogbookDB>> {
-  if (dbInstance && isInitialized) return dbInstance
+  if (dbInstance && isInitialized) {
+    try {
+      await dbInstance.get("flights", "test-connection")
+      return dbInstance
+    } catch (error) {
+      console.warn("[v0] DB connection closed, reconnecting...")
+      dbInstance = null
+      isInitialized = false
+    }
+  }
 
-  dbInstance = await openDB<LogbookDB>("pilot-logbook", 3, {
+  if (isConnecting && connectionPromise) {
+    return connectionPromise
+  }
+
+  isConnecting = true
+  connectionPromise = openDB<LogbookDB>("pilot-logbook", 3, {
     upgrade(db, oldVersion) {
       // Flights store
       if (!db.objectStoreNames.contains("flights")) {
@@ -253,9 +269,20 @@ export async function getDB(): Promise<IDBPDatabase<LogbookDB>> {
       }
     },
   })
+    .then((db) => {
+      dbInstance = db
+      isInitialized = true
+      isConnecting = false
+      connectionPromise = null
+      return db
+    })
+    .catch((error) => {
+      isConnecting = false
+      connectionPromise = null
+      throw error
+    })
 
-  isInitialized = true
-  return dbInstance
+  return connectionPromise
 }
 
 export async function initializeDB(): Promise<boolean> {
@@ -342,7 +369,6 @@ export async function getPendingFlights(): Promise<FlightLog[]> {
 export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<void> {
   const db = await getDB()
 
-  // Ensure the record has all required fields with proper defaults
   const normalizedFlight: FlightLog = {
     id: serverFlight.id,
     date: serverFlight.date || new Date().toISOString().split("T")[0],
@@ -381,30 +407,25 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     isLocked: serverFlight.isLocked,
   }
 
-  // Check if we have this flight by mongoId first
   let existingFlight: FlightLog | undefined
   if (normalizedFlight.mongoId) {
     existingFlight = await db.getFromIndex("flights", "by-mongoId", normalizedFlight.mongoId)
   }
-
-  // Also check by local id
   if (!existingFlight && normalizedFlight.id) {
     existingFlight = await db.get("flights", normalizedFlight.id)
   }
 
   if (existingFlight) {
-    // Only update if server version is newer
     const serverTime = normalizedFlight.updatedAt || normalizedFlight.createdAt
     const localTime = existingFlight.updatedAt || existingFlight.createdAt
 
     if (serverTime >= localTime) {
       await db.put("flights", {
         ...normalizedFlight,
-        id: existingFlight.id, // Keep local ID
+        id: existingFlight.id,
       })
     }
   } else {
-    // New flight from server
     await db.put("flights", normalizedFlight)
   }
 }
