@@ -2,6 +2,7 @@ import type React from "react"
 import type { Metadata, Viewport } from "next"
 import { Inter, Geist_Mono } from "next/font/google"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
+import { SyncProvider } from "@/components/sync-provider"
 import "./globals.css"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -20,7 +21,7 @@ export const metadata: Metadata = {
     icon: "/icon-192.png",
     apple: "/icon-192.png",
   },
-    generator: 'v0.app'
+  generator: "v0.app",
 }
 
 export const viewport: Viewport = {
@@ -45,7 +46,7 @@ export default function RootLayout({
       </head>
       <body className={`font-sans antialiased`}>
         <ServiceWorkerRegister />
-        {children}
+        <SyncProvider>{children}</SyncProvider>
       </body>
     </html>
   )

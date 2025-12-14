@@ -26,11 +26,13 @@ class SyncService {
       this.status = navigator.onLine ? "online" : "offline"
 
       window.addEventListener("online", () => {
+        console.log("[v0] Network online - setting status and syncing")
         this.setStatus("online")
         this.fullSync()
       })
 
       window.addEventListener("offline", () => {
+        console.log("[v0] Network offline - setting status")
         this.setStatus("offline")
       })
     }
@@ -61,6 +63,7 @@ class SyncService {
 
   async fullSync(): Promise<{ pushed: number; pulled: number; failed: number }> {
     if (!navigator.onLine || this.syncInProgress) {
+      console.log("[v0] Skipping sync - offline or sync in progress")
       return { pushed: 0, pulled: 0, failed: 0 }
     }
 
@@ -73,23 +76,30 @@ class SyncService {
     this.syncInProgress = true
     this.setStatus("syncing")
 
+    console.log("[v0] Starting full sync...")
+
     let pushed = 0
     let pulled = 0
     let failed = 0
 
     try {
+      console.log("[v0] Pulling from server...")
       const pullResult = await this.pullFromServer()
       pulled = pullResult.count
+      console.log("[v0] Pulled", pulled, "records from server")
 
       await new Promise((resolve) => setTimeout(resolve, 100))
 
+      console.log("[v0] Pushing pending changes...")
       const pushResult = await this.pushPendingChanges()
       pushed = pushResult.success
       failed = pushResult.failed
+      console.log("[v0] Pushed", pushed, "records, failed", failed)
 
       await setLastSyncTime(Date.now())
 
       this.notifyDataChanged()
+      console.log("[v0] Full sync complete")
     } catch (error) {
       console.error("[v0] Full sync error:", error)
     } finally {
@@ -142,21 +152,28 @@ class SyncService {
   }
 
   async pullFromServer(): Promise<{ count: number }> {
-    if (!navigator.onLine) return { count: 0 }
+    if (!navigator.onLine) {
+      console.log("[v0] Offline - skipping pull")
+      return { count: 0 }
+    }
 
     let count = 0
     const lastSyncTime = await getLastSyncTime()
+    console.log("[v0] Last sync time:", lastSyncTime, new Date(lastSyncTime).toISOString())
 
     try {
       const collections = ["flights", "aircraft", "personnel"] as const
 
       for (const collection of collections) {
         try {
-          const response = await fetch(`/api/sync/${collection}?since=${lastSyncTime}`)
+          const url = `/api/sync/${collection}?since=${lastSyncTime}`
+          console.log("[v0] Fetching from:", url)
+          const response = await fetch(url)
 
           if (response.ok) {
             const data = await response.json()
             const records = data.records || []
+            console.log("[v0] Received", records.length, collection, "from server")
 
             for (const record of records) {
               try {
@@ -173,20 +190,21 @@ class SyncService {
                 }
                 count++
               } catch (upsertError) {
-                console.error(`Error upserting ${collection} record:`, upsertError, record)
+                console.error(`[v0] Error upserting ${collection} record:`, upsertError, record)
               }
             }
           } else {
-            console.error(`Failed to fetch ${collection}:`, response.status)
+            console.error(`[v0] Failed to fetch ${collection}:`, response.status, await response.text())
           }
         } catch (fetchError) {
-          console.error(`Error fetching ${collection}:`, fetchError)
+          console.error(`[v0] Error fetching ${collection}:`, fetchError)
         }
       }
     } catch (error) {
-      console.error("Pull sync error:", error)
+      console.error("[v0] Pull sync error:", error)
     }
 
+    console.log("[v0] Pull complete - total records:", count)
     return { count }
   }
 

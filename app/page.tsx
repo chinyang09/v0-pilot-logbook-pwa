@@ -29,28 +29,6 @@ export default function Dashboard() {
     return unsubscribe
   }, [])
 
-  useEffect(() => {
-    if (!dbReady) return
-
-    const doInitialSync = async () => {
-      if (navigator.onLine) {
-        setIsSyncing(true)
-        setSyncError(null)
-        try {
-          const result = await syncService.fullSync()
-          await refreshAllData()
-        } catch (error) {
-          console.error("Initial sync failed:", error)
-          setSyncError("Sync failed. Data may be outdated.")
-        } finally {
-          setIsSyncing(false)
-        }
-      }
-    }
-
-    doInitialSync()
-  }, [dbReady])
-
   const handleManualSync = async () => {
     if (!navigator.onLine) {
       setSyncError("You are offline. Sync will happen when connection is restored.")
