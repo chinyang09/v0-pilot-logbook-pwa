@@ -1,6 +1,6 @@
-import { openDB, type DBSchema, type IDBPDatabase } from "idb"
+import Dexie, { type Table } from "dexie"
 import { sumHHMM } from "./time-utils"
-import type { UserPreferences } from "./user-preferences" // Declare the UserPreferences variable
+import type { UserPreferences } from "./user-preferences"
 
 export interface FlightLog {
   id: string
@@ -39,14 +39,14 @@ export interface FlightLog {
   ifrTime: string
   actualInstrumentTime: string
   simulatedInstrumentTime: string
-  crossCountryTime: string // Added to schema
+  crossCountryTime: string
 
   // Landings
-  dayTakeoffs: number // Added to schema
+  dayTakeoffs: number
   dayLandings: number
-  nightTakeoffs: number // Added to schema
+  nightTakeoffs: number
   nightLandings: number
-  autolands: number // Added to schema
+  autolands: number
 
   // Crew
   personnelIds: string[] // Matches Personnel.id
@@ -62,7 +62,7 @@ export interface FlightLog {
   // Additional
   flightNumber: string
   remarks: string
-  ipcIcc: boolean // Added to schema
+  ipcIcc: boolean
 
   isLocked?: boolean
 
@@ -125,166 +125,52 @@ export interface Personnel {
   mongoId?: string
 }
 
-interface LogbookDB extends DBSchema {
-  flights: {
-    key: string
-    value: FlightLog
-    indexes: {
-      "by-date": string
-      "by-sync": string
-      "by-aircraft": string
-      "by-mongoId": string
-    }
-  }
-  aircraft: {
-    key: string
-    value: Aircraft
-    indexes: {
-      "by-registration": string
-      "by-type": string
-      "by-mongoId": string
-    }
-  }
-  airports: {
-    key: string
-    value: Airport
-    indexes: {
-      "by-icao": string
-      "by-iata": string
-      "by-mongoId": string
-    }
-  }
-  personnel: {
-    key: string
-    value: Personnel
-    indexes: {
-      "by-name": string
-      "by-role": string
-      "by-mongoId": string
-    }
-  }
-  preferences: {
-    key: string
-    value: UserPreferences
-  }
-  syncQueue: {
-    key: string
-    value: {
-      id: string
-      type: "create" | "update" | "delete"
-      collection: "flights" | "aircraft" | "airports" | "personnel"
-      data: FlightLog | Aircraft | Airport | Personnel | { id: string; mongoId?: string }
-      timestamp: number
-    }
-  }
-  syncMeta: {
-    key: string
-    value: {
-      key: string
-      lastSyncAt: number
-    }
+interface SyncQueueItem {
+  id: string
+  type: "create" | "update" | "delete"
+  collection: "flights" | "aircraft" | "airports" | "personnel"
+  data: FlightLog | Aircraft | Airport | Personnel | { id: string; mongoId?: string }
+  timestamp: number
+}
+
+interface SyncMeta {
+  key: string
+  lastSyncAt: number
+}
+
+class LogbookDatabase extends Dexie {
+  flights!: Table<FlightLog, string>
+  aircraft!: Table<Aircraft, string>
+  airports!: Table<Airport, string>
+  personnel!: Table<Personnel, string>
+  preferences!: Table<UserPreferences, string>
+  syncQueue!: Table<SyncQueueItem, string>
+  syncMeta!: Table<SyncMeta, string>
+
+  constructor() {
+    super("pilot-logbook")
+
+    this.version(3).stores({
+      flights: "id, date, syncStatus, aircraftId, mongoId",
+      aircraft: "id, registration, type, mongoId",
+      airports: "id, icao, iata, mongoId",
+      personnel: "id, lastName, role, mongoId",
+      preferences: "id",
+      syncQueue: "id, timestamp",
+      syncMeta: "key",
+    })
   }
 }
 
-let dbInstance: IDBPDatabase<LogbookDB> | null = null
-let isInitialized = false
-let isConnecting = false
-let connectionPromise: Promise<IDBPDatabase<LogbookDB>> | null = null
+const db = new LogbookDatabase()
 
-export async function getDB(): Promise<IDBPDatabase<LogbookDB>> {
-  if (dbInstance && isInitialized) {
-    try {
-      await dbInstance.get("flights", "test-connection")
-      return dbInstance
-    } catch (error) {
-      console.warn("[v0] DB connection closed, reconnecting...")
-      dbInstance = null
-      isInitialized = false
-    }
-  }
-
-  if (isConnecting && connectionPromise) {
-    return connectionPromise
-  }
-
-  isConnecting = true
-  connectionPromise = openDB<LogbookDB>("pilot-logbook", 3, {
-    upgrade(db, oldVersion) {
-      // Flights store
-      if (!db.objectStoreNames.contains("flights")) {
-        const flightStore = db.createObjectStore("flights", { keyPath: "id" })
-        flightStore.createIndex("by-date", "date")
-        flightStore.createIndex("by-sync", "syncStatus")
-        flightStore.createIndex("by-aircraft", "aircraftId")
-        flightStore.createIndex("by-mongoId", "mongoId")
-      } else if (oldVersion < 3) {
-        const tx = db.transaction as any
-        if (tx && tx.objectStore) {
-          const store = tx.objectStore("flights")
-          if (!store.indexNames.contains("by-mongoId")) {
-            store.createIndex("by-mongoId", "mongoId")
-          }
-        }
-      }
-
-      // Aircraft store
-      if (!db.objectStoreNames.contains("aircraft")) {
-        const aircraftStore = db.createObjectStore("aircraft", { keyPath: "id" })
-        aircraftStore.createIndex("by-registration", "registration")
-        aircraftStore.createIndex("by-type", "type")
-        aircraftStore.createIndex("by-mongoId", "mongoId")
-      }
-
-      // Airports store
-      if (!db.objectStoreNames.contains("airports")) {
-        const airportStore = db.createObjectStore("airports", { keyPath: "id" })
-        airportStore.createIndex("by-icao", "icao")
-        airportStore.createIndex("by-iata", "iata")
-        airportStore.createIndex("by-mongoId", "mongoId")
-      }
-
-      // Personnel store
-      if (!db.objectStoreNames.contains("personnel")) {
-        const personnelStore = db.createObjectStore("personnel", { keyPath: "id" })
-        personnelStore.createIndex("by-name", "lastName")
-        personnelStore.createIndex("by-role", "role")
-        personnelStore.createIndex("by-mongoId", "mongoId")
-      }
-
-      // Sync queue
-      if (!db.objectStoreNames.contains("syncQueue")) {
-        db.createObjectStore("syncQueue", { keyPath: "id" })
-      }
-
-      // Sync metadata
-      if (!db.objectStoreNames.contains("syncMeta")) {
-        db.createObjectStore("syncMeta", { keyPath: "key" })
-      }
-
-      if (!db.objectStoreNames.contains("preferences")) {
-        db.createObjectStore("preferences", { keyPath: "id" })
-      }
-    },
-  })
-    .then((db) => {
-      dbInstance = db
-      isInitialized = true
-      isConnecting = false
-      connectionPromise = null
-      return db
-    })
-    .catch((error) => {
-      isConnecting = false
-      connectionPromise = null
-      throw error
-    })
-
-  return connectionPromise
+export async function getDB(): Promise<LogbookDatabase> {
+  return db
 }
 
 export async function initializeDB(): Promise<boolean> {
   try {
-    await getDB()
+    await db.open()
     return true
   } catch (error) {
     console.error("Failed to initialize IndexedDB:", error)
@@ -292,10 +178,10 @@ export async function initializeDB(): Promise<boolean> {
   }
 }
 
+// Flight operations
 export async function addFlight(
   flight: Omit<FlightLog, "id" | "createdAt" | "updatedAt" | "syncStatus">,
 ): Promise<FlightLog> {
-  const db = await getDB()
   const now = Date.now()
   const newFlight: FlightLog = {
     ...flight,
@@ -305,15 +191,14 @@ export async function addFlight(
     syncStatus: "pending",
   }
 
-  await db.put("flights", newFlight)
+  await db.flights.put(newFlight)
   await addToSyncQueue("create", "flights", newFlight)
 
   return newFlight
 }
 
 export async function updateFlight(id: string, updates: Partial<FlightLog>): Promise<FlightLog | null> {
-  const db = await getDB()
-  const flight = await db.get("flights", id)
+  const flight = await db.flights.get(id)
 
   if (!flight) return null
 
@@ -324,48 +209,41 @@ export async function updateFlight(id: string, updates: Partial<FlightLog>): Pro
     syncStatus: "pending",
   }
 
-  await db.put("flights", updatedFlight)
+  await db.flights.put(updatedFlight)
   await addToSyncQueue("update", "flights", updatedFlight)
 
   return updatedFlight
 }
 
 export async function deleteFlight(id: string): Promise<boolean> {
-  const db = await getDB()
-  const flight = await db.get("flights", id)
+  const flight = await db.flights.get(id)
 
   if (!flight) return false
 
-  await db.delete("flights", id)
+  await db.flights.delete(id)
   await addToSyncQueue("delete", "flights", { id, mongoId: flight.mongoId })
 
   return true
 }
 
 export async function getAllFlights(): Promise<FlightLog[]> {
-  const db = await getDB()
-  const flights = await db.getAllFromIndex("flights", "by-date")
-  return flights.reverse()
+  const flights = await db.flights.orderBy("date").reverse().toArray()
+  return flights
 }
 
 export async function getFlightById(id: string): Promise<FlightLog | undefined> {
-  const db = await getDB()
-  return db.get("flights", id)
+  return db.flights.get(id)
 }
 
 export async function getFlightByMongoId(mongoId: string): Promise<FlightLog | undefined> {
-  const db = await getDB()
-  return db.getFromIndex("flights", "by-mongoId", mongoId)
+  return db.flights.where("mongoId").equals(mongoId).first()
 }
 
 export async function getPendingFlights(): Promise<FlightLog[]> {
-  const db = await getDB()
-  return db.getAllFromIndex("flights", "by-sync", "pending")
+  return db.flights.where("syncStatus").equals("pending").toArray()
 }
 
 export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<void> {
-  const db = await getDB()
-
   const normalizedFlight: FlightLog = {
     id: serverFlight.id,
     date: serverFlight.date || new Date().toISOString().split("T")[0],
@@ -416,10 +294,10 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
 
   let existingFlight: FlightLog | undefined
   if (normalizedFlight.mongoId) {
-    existingFlight = await db.getFromIndex("flights", "by-mongoId", normalizedFlight.mongoId)
+    existingFlight = await db.flights.where("mongoId").equals(normalizedFlight.mongoId).first()
   }
   if (!existingFlight && normalizedFlight.id) {
-    existingFlight = await db.get("flights", normalizedFlight.id)
+    existingFlight = await db.flights.get(normalizedFlight.id)
   }
 
   if (existingFlight) {
@@ -427,19 +305,18 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     const localTime = existingFlight.updatedAt || existingFlight.createdAt
 
     if (serverTime >= localTime) {
-      await db.put("flights", {
+      await db.flights.put({
         ...normalizedFlight,
         id: existingFlight.id,
       })
     }
   } else {
-    await db.put("flights", normalizedFlight)
+    await db.flights.put(normalizedFlight)
   }
 }
 
 // Aircraft operations
 export async function addAircraft(aircraft: Omit<Aircraft, "id" | "createdAt" | "syncStatus">): Promise<Aircraft> {
-  const db = await getDB()
   const newAircraft: Aircraft = {
     ...aircraft,
     id: crypto.randomUUID(),
@@ -447,15 +324,14 @@ export async function addAircraft(aircraft: Omit<Aircraft, "id" | "createdAt" | 
     syncStatus: "pending",
   }
 
-  await db.put("aircraft", newAircraft)
+  await db.aircraft.put(newAircraft)
   await addToSyncQueue("create", "aircraft", newAircraft)
 
   return newAircraft
 }
 
 export async function updateAircraft(id: string, updates: Partial<Aircraft>): Promise<Aircraft | null> {
-  const db = await getDB()
-  const aircraft = await db.get("aircraft", id)
+  const aircraft = await db.aircraft.get(id)
   if (!aircraft) return null
 
   const updatedAircraft: Aircraft = {
@@ -465,40 +341,34 @@ export async function updateAircraft(id: string, updates: Partial<Aircraft>): Pr
     syncStatus: "pending",
   }
 
-  await db.put("aircraft", updatedAircraft)
+  await db.aircraft.put(updatedAircraft)
   await addToSyncQueue("update", "aircraft", updatedAircraft)
 
   return updatedAircraft
 }
 
 export async function deleteAircraft(id: string): Promise<boolean> {
-  const db = await getDB()
-  const aircraft = await db.get("aircraft", id)
+  const aircraft = await db.aircraft.get(id)
   if (!aircraft) return false
 
-  await db.delete("aircraft", id)
+  await db.aircraft.delete(id)
   await addToSyncQueue("delete", "aircraft", { id, mongoId: aircraft.mongoId })
   return true
 }
 
 export async function getAllAircraft(): Promise<Aircraft[]> {
-  const db = await getDB()
-  return db.getAll("aircraft")
+  return db.aircraft.toArray()
 }
 
 export async function getAircraftById(id: string): Promise<Aircraft | undefined> {
-  const db = await getDB()
-  return db.get("aircraft", id)
+  return db.aircraft.get(id)
 }
 
 export async function getAircraftByRegistration(registration: string): Promise<Aircraft | undefined> {
-  const db = await getDB()
-  return db.getFromIndex("aircraft", "by-registration", registration.toUpperCase())
+  return db.aircraft.where("registration").equals(registration.toUpperCase()).first()
 }
 
 export async function upsertAircraftFromServer(serverAircraft: Aircraft): Promise<void> {
-  const db = await getDB()
-
   const normalized: Aircraft = {
     id: serverAircraft.id,
     registration: serverAircraft.registration || "",
@@ -517,26 +387,25 @@ export async function upsertAircraftFromServer(serverAircraft: Aircraft): Promis
 
   let existing: Aircraft | undefined
   if (normalized.mongoId) {
-    existing = await db.getFromIndex("aircraft", "by-mongoId", normalized.mongoId)
+    existing = await db.aircraft.where("mongoId").equals(normalized.mongoId).first()
   }
   if (!existing && normalized.id) {
-    existing = await db.get("aircraft", normalized.id)
+    existing = await db.aircraft.get(normalized.id)
   }
 
   if (existing) {
     const serverTime = normalized.updatedAt || normalized.createdAt
     const localTime = existing.updatedAt || existing.createdAt
     if (serverTime >= localTime) {
-      await db.put("aircraft", { ...normalized, id: existing.id })
+      await db.aircraft.put({ ...normalized, id: existing.id })
     }
   } else {
-    await db.put("aircraft", normalized)
+    await db.aircraft.put(normalized)
   }
 }
 
 // Airport operations
 export async function addAirport(airport: Omit<Airport, "id" | "createdAt" | "syncStatus">): Promise<Airport> {
-  const db = await getDB()
   const newAirport: Airport = {
     ...airport,
     id: crypto.randomUUID(),
@@ -544,15 +413,14 @@ export async function addAirport(airport: Omit<Airport, "id" | "createdAt" | "sy
     syncStatus: "pending",
   }
 
-  await db.put("airports", newAirport)
+  await db.airports.put(newAirport)
   await addToSyncQueue("create", "airports", newAirport)
 
   return newAirport
 }
 
 export async function updateAirport(id: string, updates: Partial<Airport>): Promise<Airport | null> {
-  const db = await getDB()
-  const airport = await db.get("airports", id)
+  const airport = await db.airports.get(id)
   if (!airport) return null
 
   const updatedAirport: Airport = {
@@ -562,45 +430,38 @@ export async function updateAirport(id: string, updates: Partial<Airport>): Prom
     syncStatus: "pending",
   }
 
-  await db.put("airports", updatedAirport)
+  await db.airports.put(updatedAirport)
   await addToSyncQueue("update", "airports", updatedAirport)
 
   return updatedAirport
 }
 
 export async function deleteAirport(id: string): Promise<boolean> {
-  const db = await getDB()
-  const airport = await db.get("airports", id)
+  const airport = await db.airports.get(id)
   if (!airport) return false
 
-  await db.delete("airports", id)
+  await db.airports.delete(id)
   await addToSyncQueue("delete", "airports", { id, mongoId: airport.mongoId })
   return true
 }
 
 export async function getAllAirports(): Promise<Airport[]> {
-  const db = await getDB()
-  return db.getAll("airports")
+  return db.airports.toArray()
 }
 
 export async function getAirportById(id: string): Promise<Airport | undefined> {
-  const db = await getDB()
-  return db.get("airports", id)
+  return db.airports.get(id)
 }
 
 export async function getAirportByIcao(icao: string): Promise<Airport | undefined> {
-  const db = await getDB()
-  return db.getFromIndex("airports", "by-icao", icao.toUpperCase())
+  return db.airports.where("icao").equals(icao.toUpperCase()).first()
 }
 
 export async function getAirportByIata(iata: string): Promise<Airport | undefined> {
-  const db = await getDB()
-  return db.getFromIndex("airports", "by-iata", iata.toUpperCase())
+  return db.airports.where("iata").equals(iata.toUpperCase()).first()
 }
 
 export async function upsertAirportFromServer(serverAirport: Airport): Promise<void> {
-  const db = await getDB()
-
   const normalized: Airport = {
     id: serverAirport.id,
     icao: serverAirport.icao || "",
@@ -622,20 +483,20 @@ export async function upsertAirportFromServer(serverAirport: Airport): Promise<v
 
   let existing: Airport | undefined
   if (normalized.mongoId) {
-    existing = await db.getFromIndex("airports", "by-mongoId", normalized.mongoId)
+    existing = await db.airports.where("mongoId").equals(normalized.mongoId).first()
   }
   if (!existing && normalized.id) {
-    existing = await db.get("airports", normalized.id)
+    existing = await db.airports.get(normalized.id)
   }
 
   if (existing) {
     const serverTime = normalized.updatedAt || normalized.createdAt
     const localTime = existing.updatedAt || existing.createdAt
     if (serverTime >= localTime) {
-      await db.put("airports", { ...normalized, id: existing.id })
+      await db.airports.put({ ...normalized, id: existing.id })
     }
   } else {
-    await db.put("airports", normalized)
+    await db.airports.put(normalized)
   }
 }
 
@@ -643,7 +504,6 @@ export async function upsertAirportFromServer(serverAirport: Airport): Promise<v
 export async function addPersonnel(
   personnel: Omit<Personnel, "id" | "createdAt" | "syncStatus" | "name">,
 ): Promise<Personnel> {
-  const db = await getDB()
   const newPersonnel: Personnel = {
     ...personnel,
     id: crypto.randomUUID(),
@@ -652,15 +512,14 @@ export async function addPersonnel(
     syncStatus: "pending",
   }
 
-  await db.put("personnel", newPersonnel)
+  await db.personnel.put(newPersonnel)
   await addToSyncQueue("create", "personnel", newPersonnel)
 
   return newPersonnel
 }
 
 export async function updatePersonnel(id: string, updates: Partial<Personnel>): Promise<Personnel | null> {
-  const db = await getDB()
-  const person = await db.get("personnel", id)
+  const person = await db.personnel.get(id)
   if (!person) return null
 
   const updatedPersonnel: Personnel = {
@@ -671,40 +530,34 @@ export async function updatePersonnel(id: string, updates: Partial<Personnel>): 
     syncStatus: "pending",
   }
 
-  await db.put("personnel", updatedPersonnel)
+  await db.personnel.put(updatedPersonnel)
   await addToSyncQueue("update", "personnel", updatedPersonnel)
 
   return updatedPersonnel
 }
 
 export async function deletePersonnel(id: string): Promise<boolean> {
-  const db = await getDB()
-  const person = await db.get("personnel", id)
+  const person = await db.personnel.get(id)
   if (!person) return false
 
-  await db.delete("personnel", id)
+  await db.personnel.delete(id)
   await addToSyncQueue("delete", "personnel", { id, mongoId: person.mongoId })
   return true
 }
 
 export async function getAllPersonnel(): Promise<Personnel[]> {
-  const db = await getDB()
-  return db.getAll("personnel")
+  return db.personnel.toArray()
 }
 
 export async function getPersonnelById(id: string): Promise<Personnel | undefined> {
-  const db = await getDB()
-  return db.get("personnel", id)
+  return db.personnel.get(id)
 }
 
 export async function getPersonnelByRole(role: Personnel["role"]): Promise<Personnel[]> {
-  const db = await getDB()
-  return db.getAllFromIndex("personnel", "by-role", role)
+  return db.personnel.where("role").equals(role).toArray()
 }
 
 export async function upsertPersonnelFromServer(serverPersonnel: Personnel): Promise<void> {
-  const db = await getDB()
-
   const normalized: Personnel = {
     id: serverPersonnel.id,
     firstName: serverPersonnel.firstName || "",
@@ -724,20 +577,20 @@ export async function upsertPersonnelFromServer(serverPersonnel: Personnel): Pro
 
   let existing: Personnel | undefined
   if (normalized.mongoId) {
-    existing = await db.getFromIndex("personnel", "by-mongoId", normalized.mongoId)
+    existing = await db.personnel.where("mongoId").equals(normalized.mongoId).first()
   }
   if (!existing && normalized.id) {
-    existing = await db.get("personnel", normalized.id)
+    existing = await db.personnel.get(normalized.id)
   }
 
   if (existing) {
     const serverTime = normalized.updatedAt || normalized.createdAt
     const localTime = existing.updatedAt || existing.createdAt
     if (serverTime >= localTime) {
-      await db.put("personnel", { ...normalized, id: existing.id })
+      await db.personnel.put({ ...normalized, id: existing.id })
     }
   } else {
-    await db.put("personnel", normalized)
+    await db.personnel.put(normalized)
   }
 }
 
@@ -747,8 +600,7 @@ async function addToSyncQueue(
   collection: "flights" | "aircraft" | "airports" | "personnel",
   data: FlightLog | Aircraft | Airport | Personnel | { id: string; mongoId?: string },
 ) {
-  const db = await getDB()
-  await db.put("syncQueue", {
+  await db.syncQueue.put({
     id: crypto.randomUUID(),
     type,
     collection,
@@ -758,20 +610,17 @@ async function addToSyncQueue(
 }
 
 export async function getSyncQueue() {
-  const db = await getDB()
-  return db.getAll("syncQueue")
+  return db.syncQueue.toArray()
 }
 
 export async function clearSyncQueueItem(id: string) {
-  const db = await getDB()
-  await db.delete("syncQueue", id)
+  await db.syncQueue.delete(id)
 }
 
 export async function markFlightSynced(id: string, mongoId: string) {
-  const db = await getDB()
-  const flight = await db.get("flights", id)
+  const flight = await db.flights.get(id)
   if (flight) {
-    await db.put("flights", { ...flight, syncStatus: "synced", mongoId })
+    await db.flights.put({ ...flight, syncStatus: "synced", mongoId })
   }
 }
 
@@ -780,27 +629,23 @@ export async function markRecordSynced(
   id: string,
   mongoId: string,
 ) {
-  const db = await getDB()
-  const record = await db.get(collection, id)
+  const record = await db[collection].get(id)
   if (record) {
-    await db.put(collection, { ...record, syncStatus: "synced", mongoId } as any)
+    await db[collection].put({ ...record, syncStatus: "synced", mongoId } as any)
   }
 }
 
 export async function getLastSyncTime(): Promise<number> {
-  const db = await getDB()
-  const meta = await db.get("syncMeta", "lastSync")
+  const meta = await db.syncMeta.get("lastSync")
   return meta?.lastSyncAt || 0
 }
 
 export async function setLastSyncTime(timestamp: number): Promise<void> {
-  const db = await getDB()
-  await db.put("syncMeta", { key: "lastSync", lastSyncAt: timestamp })
+  await db.syncMeta.put({ key: "lastSync", lastSyncAt: timestamp })
 }
 
 export async function getFlightStats() {
-  const db = await getDB()
-  const flights = await db.getAll("flights")
+  const flights = await db.flights.toArray()
 
   const totalFlights = flights.length
   const blockTime = sumHHMM(flights.map((f) => f.blockTime))
@@ -838,12 +683,10 @@ export async function getFlightStats() {
 
 // Preference management functions
 export async function getUserPreferences(): Promise<UserPreferences | null> {
-  const db = await getDB()
-  return db.get("preferences", "user-prefs")
+  return db.preferences.get("user-prefs")
 }
 
 export async function saveUserPreferences(prefs: Partial<UserPreferences>): Promise<void> {
-  const db = await getDB()
   const existing = await getUserPreferences()
 
   const preferences: UserPreferences = {
@@ -862,7 +705,7 @@ export async function saveUserPreferences(prefs: Partial<UserPreferences>): Prom
     ...prefs,
   }
 
-  await db.put("preferences", preferences)
+  await db.preferences.put(preferences)
 }
 
 export async function getDefaultFieldOrder() {
