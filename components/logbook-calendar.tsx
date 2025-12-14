@@ -18,7 +18,6 @@ interface CalendarHandle {
   scrollToMonth: (year: number, month: number) => void
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 const DAYS = ["S", "M", "T", "W", "T", "F", "S"]
 
 export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(function LogbookCalendar(
@@ -43,31 +42,40 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
   const calendarDays = useMemo(() => {
     const firstDay = new Date(selectedMonth.year, selectedMonth.month, 1)
-    const lastDay = new Date(selectedMonth.year, selectedMonth.month + 1, 0)
     const startDay = firstDay.getDay() // Day of week (0-6)
-    const daysInMonth = lastDay.getDate()
+    const daysInMonth = new Date(selectedMonth.year, selectedMonth.month + 1, 0).getDate()
 
-    const days: { date: Date | null; dateStr: string | null }[] = []
+    const days: { date: Date; dateStr: string; isCurrentMonth: boolean }[] = []
 
-    // Add previous month days
+    // Add previous month days to start on Sunday
     for (let i = 0; i < startDay; i++) {
       const prevDate = new Date(selectedMonth.year, selectedMonth.month, -(startDay - i - 1))
-      days.push({ date: prevDate, dateStr: prevDate.toISOString().split("T")[0] })
+      days.push({
+        date: prevDate,
+        dateStr: prevDate.toISOString().split("T")[0],
+        isCurrentMonth: false,
+      })
     }
 
     // Add current month days
     for (let i = 1; i <= daysInMonth; i++) {
       const date = new Date(selectedMonth.year, selectedMonth.month, i)
-      days.push({ date, dateStr: date.toISOString().split("T")[0] })
+      days.push({
+        date,
+        dateStr: date.toISOString().split("T")[0],
+        isCurrentMonth: true,
+      })
     }
 
-    // Add next month days to fill grid
-    const remainingDays = 7 - (days.length % 7)
-    if (remainingDays < 7) {
-      for (let i = 1; i <= remainingDays; i++) {
-        const nextDate = new Date(selectedMonth.year, selectedMonth.month + 1, i)
-        days.push({ date: nextDate, dateStr: nextDate.toISOString().split("T")[0] })
-      }
+    // Add next month days to complete 6 rows (42 days total)
+    const remainingDays = 42 - days.length
+    for (let i = 1; i <= remainingDays; i++) {
+      const nextDate = new Date(selectedMonth.year, selectedMonth.month + 1, i)
+      days.push({
+        date: nextDate,
+        dateStr: nextDate.toISOString().split("T")[0],
+        isCurrentMonth: false,
+      })
     }
 
     return days
@@ -122,10 +130,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
   const today = new Date().toISOString().split("T")[0]
 
   return (
-    <div className="flex flex-col min-h-[280px] h-[300px] sm:h-[320px] will-change-transform">
-      <div className="grid grid-cols-7 gap-1 px-2 pb-2 border-b border-border">
+    <div className="flex flex-col h-full bg-gradient-to-b from-background via-background to-muted/20">
+      <div className="grid grid-cols-7 gap-1 px-3 py-2 bg-muted/30 border-b border-border/50">
         {DAYS.map((day, i) => (
-          <div key={i} className="text-center text-xs text-muted-foreground font-medium py-1">
+          <div key={i} className="text-center text-xs font-semibold text-muted-foreground/80 uppercase tracking-wide">
             {day}
           </div>
         ))}
@@ -133,25 +141,20 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
       <div
         ref={containerRef}
-        className="flex-1 overflow-y-auto px-2 pt-2 scrollbar-hide"
+        className="flex-1 px-3 py-2 overflow-hidden"
         style={{ contain: "layout" }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        <div className="grid grid-cols-7 gap-0.5 sm:gap-1">
+        <div className="grid grid-cols-7 grid-rows-6 gap-1.5 h-full">
           {calendarDays.map((dayInfo, dayIndex) => {
-            if (!dayInfo.date || !dayInfo.dateStr) {
-              return <div key={dayIndex} />
-            }
-
             const dateStr = dayInfo.dateStr
             const flightInfo = flightDates.get(dateStr)
             const hasFlights = !!flightInfo
             const isToday = dateStr === today
             const isSelected = dateStr === selectedDate
-            const isInFocusMonth =
-              dayInfo.date.getMonth() === selectedMonth.month && dayInfo.date.getFullYear() === selectedMonth.year
+            const isCurrentMonth = dayInfo.isCurrentMonth
 
             return (
               <button
@@ -160,18 +163,25 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 onClick={() => handleDateClick(dateStr, hasFlights)}
                 disabled={!hasFlights}
                 className={cn(
-                  "aspect-square flex items-center justify-center text-xs rounded-md relative transition-colors",
-                  isInFocusMonth ? "text-foreground font-medium" : "text-muted-foreground/30",
-                  hasFlights && isInFocusMonth && "bg-primary/20 text-primary font-semibold",
-                  hasFlights && !isInFocusMonth && "bg-primary/5 text-primary/40",
-                  flightInfo?.hasNight && "bg-indigo-500/20 text-indigo-400",
-                  isToday && "ring-1 ring-primary",
-                  isSelected && "ring-2 ring-primary bg-primary/30",
+                  "flex items-center justify-center text-sm rounded-lg relative transition-all duration-200 ease-out",
+                  "transform-gpu will-change-transform",
+                  hasFlights && "hover:scale-105 active:scale-95",
+                  isCurrentMonth ? "text-foreground font-medium" : "text-muted-foreground/30 font-normal",
+                  hasFlights &&
+                    isCurrentMonth &&
+                    "bg-primary/20 text-primary shadow-sm hover:shadow-md hover:bg-primary/30",
+                  hasFlights && !isCurrentMonth && "bg-muted/30 text-muted-foreground/50",
+                  flightInfo?.hasNight &&
+                    isCurrentMonth &&
+                    "bg-violet-500/25 text-violet-200 ring-1 ring-violet-400/20",
+                  isToday && "ring-2 ring-primary ring-offset-1 ring-offset-background",
+                  isSelected && "!bg-primary !text-primary-foreground scale-105 shadow-lg",
+                  !hasFlights && "cursor-not-allowed opacity-30",
                 )}
               >
-                {dayInfo.date.getDate()}
+                <span className="relative z-10">{dayInfo.date.getDate()}</span>
                 {flightInfo && flightInfo.count > 1 && (
-                  <span className="absolute -top-0.5 -right-0.5 bg-primary text-primary-foreground text-[8px] rounded-full w-3 h-3 flex items-center justify-center">
+                  <span className="absolute -top-0.5 -right-0.5 bg-primary text-primary-foreground text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center shadow-md ring-1 ring-background">
                     {flightInfo.count}
                   </span>
                 )}

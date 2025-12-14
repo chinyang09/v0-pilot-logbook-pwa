@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
-import { Header } from "@/components/header"
 import { FlightList } from "@/components/flight-list"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { BottomNavbar } from "@/components/bottom-navbar"
@@ -13,6 +12,8 @@ import { syncService } from "@/lib/sync-service"
 import { useFlights, refreshAllData, useDBReady, useAircraft, useAirports, usePersonnel } from "@/hooks/use-indexed-db"
 import { Calendar, Upload, Plus, Search, X } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { SyncStatus } from "@/components/sync-status"
+import { cn } from "@/lib/utils"
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -40,10 +41,9 @@ export default function LogbookPage() {
     return { year: now.getFullYear(), month: now.getMonth() }
   })
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
-
   const [activeFilterType, setActiveFilterType] = useState<"none" | "flight" | "aircraft" | "airport" | "crew">("none")
   const [searchQuery, setSearchQuery] = useState("")
-  const [showSearchDropdown, setShowSearchDropdown] = useState(false)
+  const [searchFocused, setSearchFocused] = useState(false)
   const [selectedFilters, setSelectedFilters] = useState<string[]>([])
 
   const calendarRef = useRef<{ scrollToMonth: (year: number, month: number) => void } | null>(null)
@@ -55,6 +55,24 @@ export default function LogbookPage() {
     })
     return unsubscribe
   }, [])
+
+  useEffect(() => {
+    if (!showCalendar || !flightListRef.current) return
+
+    const monthFlights = flights.filter((f) => {
+      const date = new Date(f.date)
+      return date.getFullYear() === selectedMonth.year && date.getMonth() === selectedMonth.month
+    })
+
+    if (monthFlights.length > 0) {
+      const latestFlight = monthFlights.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
+
+      const flightElement = document.getElementById(`flight-${latestFlight.id}`)
+      if (flightElement) {
+        flightElement.scrollIntoView({ behavior: "smooth", block: "start" })
+      }
+    }
+  }, [selectedMonth, showCalendar, flights])
 
   const handleFlightVisible = useCallback(
     (flight: FlightLog) => {
@@ -122,18 +140,16 @@ export default function LogbookPage() {
         break
     }
 
-    return Array.from(options).slice(0, 10) // Limit to 10 options
+    return Array.from(options).slice(0, 10)
   }, [activeFilterType, searchQuery, flights, aircraft, airports, personnel])
 
   const filteredFlights = useMemo(() => {
     let result = flights
 
-    // Date filter from calendar
     if (selectedDate) {
       result = result.filter((f) => f.date === selectedDate)
     }
 
-    // Search filter with selected items
     if (selectedFilters.length > 0 && activeFilterType !== "none") {
       result = result.filter((flight) => {
         switch (activeFilterType) {
@@ -186,39 +202,38 @@ export default function LogbookPage() {
     setSelectedMonth({ year, month })
   }, [])
 
-  const monthFilteredFlights = useMemo(() => {
-    if (!showCalendar) return filteredFlights
-
-    return filteredFlights.filter((f) => {
-      const date = new Date(f.date)
-      return date.getFullYear() === selectedMonth.year && date.getMonth() === selectedMonth.month
-    })
-  }, [filteredFlights, showCalendar, selectedMonth])
+  const displayFlights = filteredFlights
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <Header />
-
-      <div className="fixed top-14 left-0 right-0 z-40 bg-background/95 backdrop-blur-lg border-b border-border">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-between h-12">
-            <h1 className="text-lg font-semibold text-foreground">{showCalendar ? "" : "Logbook"}</h1>
-
-            {showCalendar && (
-              <div className="absolute left-1/2 -translate-x-1/2 text-sm font-semibold text-foreground">
-                {MONTHS[selectedMonth.month]} {selectedMonth.year}
-              </div>
+      <div
+        className={cn(
+          "fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-lg border-b border-border transition-all duration-500 ease-out overflow-hidden",
+          showCalendar ? "h-12" : "h-24",
+        )}
+      >
+        <div className="container mx-auto px-4 h-full relative">
+          <div
+            className={cn(
+              "absolute top-0 left-0 right-0 px-4 h-12 flex items-center justify-between transition-all duration-300 ease-out",
+              searchFocused ? "opacity-0 -translate-y-2 pointer-events-none" : "opacity-100 translate-y-0",
             )}
+          >
+            <h1 className="text-lg font-semibold text-foreground">
+              {showCalendar ? `${MONTHS[selectedMonth.month]} ${selectedMonth.year}` : "Logbook"}
+            </h1>
 
             <div className="flex items-center gap-2">
+              <SyncStatus />
               <Button
-                variant={showCalendar ? "secondary" : "ghost"}
+                variant={showCalendar ? "default" : "ghost"}
                 size="sm"
                 onClick={() => {
                   setShowCalendar(!showCalendar)
-                  if (showCalendar) setSelectedDate(null)
+                  setSelectedDate(null)
+                  setSearchFocused(false)
                 }}
-                className="gap-2"
+                className="gap-2 transition-all duration-300"
               >
                 <Calendar className="h-4 w-4" />
               </Button>
@@ -230,109 +245,115 @@ export default function LogbookPage() {
               </Button>
             </div>
           </div>
-        </div>
-      </div>
 
-      <main className="fixed top-28 bottom-24 left-0 right-0 flex flex-col overflow-hidden">
-        {showCalendar && (
-          <div className="flex-shrink-0 container mx-auto px-4 mb-4">
-            <div className="bg-card rounded-lg border border-border p-3">
-              <LogbookCalendar
-                ref={calendarRef}
-                flights={flights}
-                selectedMonth={selectedMonth}
-                onMonthChange={handleMonthChange}
-                onDateSelect={handleDateSelect}
-                selectedDate={selectedDate}
+          <div
+            className={cn(
+              "absolute left-0 right-0 px-4 space-y-2 transition-all duration-500 ease-out",
+              searchFocused
+                ? "top-0 opacity-100"
+                : showCalendar
+                  ? "top-12 opacity-0 pointer-events-none h-0"
+                  : "top-12 mt-2 opacity-100",
+            )}
+          >
+            <div className="relative border border-border rounded-lg p-1 bg-input/50 backdrop-blur-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+              <Input
+                placeholder="Search flights..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => {
+                  setSearchFocused(true)
+                  setShowCalendar(false)
+                }}
+                className="pl-9 pr-20 h-9 bg-transparent border-none"
               />
+              {searchFocused && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchFocused(false)
+                    setSearchQuery("")
+                    setActiveFilterType("none")
+                    setSelectedFilters([])
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 z-10 px-3 py-1 text-sm text-primary font-medium hover:bg-primary/10 rounded transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+              {searchQuery && !searchFocused && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 z-10 hover:bg-secondary/50 rounded-full p-1 transition-colors"
+                >
+                  <X className="h-4 w-4 text-muted-foreground" />
+                </button>
+              )}
+
+              {searchFocused && activeFilterType !== "none" && filterOptions.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                  {filterOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        toggleFilterOption(option)
+                        setSearchQuery("")
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm hover:bg-secondary/50 flex items-center gap-2 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedFilters.includes(option)}
+                        onChange={() => {}}
+                        className="h-4 w-4"
+                      />
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-        )}
 
-        <div className="flex-shrink-0 container mx-auto px-4 mb-4">
-          <div className="flex flex-col gap-3">
-            {activeFilterType !== "none" && (
-              <div className="relative border border-border rounded-lg p-1 bg-input">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
-                <Input
-                  placeholder={`Search ${activeFilterType}...`}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onFocus={() => setShowSearchDropdown(true)}
-                  className="pl-9 pr-9 h-9 bg-transparent border-none"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery("")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 z-10"
+            {searchFocused && (
+              <div className="flex items-center gap-1.5 p-1 bg-secondary/30 rounded-lg border border-border animate-in fade-in slide-in-from-top-1 duration-200">
+                {[
+                  { id: "flight", label: "Flight" },
+                  { id: "aircraft", label: "Aircraft" },
+                  { id: "airport", label: "Airport" },
+                  { id: "crew", label: "Crew" },
+                ].map((filter) => (
+                  <Button
+                    key={filter.id}
+                    variant={activeFilterType === filter.id ? "secondary" : "ghost"}
+                    size="sm"
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      setActiveFilterType(activeFilterType === filter.id ? "none" : (filter.id as any))
+                      if (activeFilterType === filter.id) {
+                        setSearchQuery("")
+                        setSelectedFilters([])
+                      }
+                    }}
+                    className="flex-1 text-xs h-8 font-medium transition-all duration-200"
                   >
-                    <X className="h-4 w-4 text-muted-foreground" />
-                  </button>
-                )}
-
-                {showSearchDropdown && filterOptions.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto z-50">
-                    {filterOptions.map((option) => (
-                      <button
-                        key={option}
-                        type="button"
-                        onClick={() => {
-                          toggleFilterOption(option)
-                          setSearchQuery("")
-                        }}
-                        className="w-full px-3 py-2 text-left text-sm hover:bg-secondary/50 flex items-center gap-2"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedFilters.includes(option)}
-                          onChange={() => {}}
-                          className="h-4 w-4"
-                        />
-                        {option}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                    {filter.label}
+                  </Button>
+                ))}
               </div>
             )}
 
-            {/* Button group for filter type with border */}
-            <div className="flex items-center gap-1 p-1 bg-secondary/30 rounded-lg border border-border">
-              {[
-                { id: "flight", label: "Flight" },
-                { id: "aircraft", label: "Aircraft" },
-                { id: "airport", label: "Airport" },
-                { id: "crew", label: "Crew" },
-              ].map((filter) => (
-                <Button
-                  key={filter.id}
-                  variant={activeFilterType === filter.id ? "secondary" : "ghost"}
-                  size="sm"
-                  onClick={() => {
-                    setActiveFilterType(activeFilterType === filter.id ? "none" : (filter.id as any))
-                    if (activeFilterType === filter.id) {
-                      setSearchQuery("")
-                      setSelectedFilters([])
-                    }
-                    setShowSearchDropdown(false)
-                  }}
-                  className="flex-1 text-xs h-8"
-                >
-                  {filter.label}
-                </Button>
-              ))}
-            </div>
-
-            {/* Selected filters chips */}
             {selectedFilters.length > 0 && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5 animate-in fade-in duration-200">
                 {selectedFilters.map((filter) => (
                   <button
                     key={filter}
                     type="button"
                     onClick={() => toggleFilterOption(filter)}
-                    className="px-2 py-1 bg-primary/20 text-primary text-xs rounded-md flex items-center gap-1"
+                    className="px-2.5 py-1 bg-primary/20 text-primary text-xs rounded-full flex items-center gap-1 font-medium hover:bg-primary/30 transition-colors"
                   >
                     {filter}
                     <X className="h-3 w-3" />
@@ -341,14 +362,17 @@ export default function LogbookPage() {
               </div>
             )}
 
-            {/* Active filters summary and clear */}
-            {hasActiveFilters && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">
+            {hasActiveFilters && !searchFocused && (
+              <div className="flex items-center justify-between animate-in fade-in duration-200">
+                <span className="text-xs text-muted-foreground">
                   {filteredFlights.length} flight{filteredFlights.length !== 1 ? "s" : ""}
-                  {selectedDate && ` on ${selectedDate}`}
                 </span>
-                <Button variant="ghost" size="sm" onClick={clearAllFilters} className="text-xs">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearAllFilters}
+                  className="text-xs h-7 hover:bg-destructive/10 transition-colors"
+                >
                   <X className="h-3 w-3 mr-1" />
                   Clear filters
                 </Button>
@@ -356,10 +380,37 @@ export default function LogbookPage() {
             )}
           </div>
         </div>
+      </div>
 
+      <div
+        className={cn(
+          "fixed left-0 right-0 z-40 bg-card border-b border-border shadow-xl transition-all duration-500 ease-out",
+          showCalendar ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0 pointer-events-none",
+        )}
+        style={{
+          top: "3rem",
+          height: "35vh",
+        }}
+      >
+        <LogbookCalendar
+          ref={calendarRef}
+          flights={flights}
+          selectedMonth={selectedMonth}
+          onMonthChange={handleMonthChange}
+          onDateSelect={handleDateSelect}
+          selectedDate={selectedDate}
+        />
+      </div>
+
+      <main
+        className="fixed left-0 right-0 bottom-24 flex flex-col overflow-hidden transition-all duration-500 ease-out"
+        style={{
+          top: showCalendar ? "calc(3rem + 35vh)" : "6rem",
+        }}
+      >
         <div className="flex-1 overflow-y-auto container mx-auto px-4" ref={flightListRef}>
           <FlightList
-            flights={monthFilteredFlights}
+            flights={displayFlights}
             isLoading={flightsLoading || isLoading}
             onEdit={handleEditFlight}
             onDeleted={handleFlightDeleted}
@@ -367,7 +418,7 @@ export default function LogbookPage() {
             airports={airports}
             personnel={personnel}
             onFlightVisible={handleFlightVisible}
-            showMonthHeaders={!selectedDate && selectedFilters.length === 0 && !showCalendar}
+            showMonthHeaders={false}
             hideFilters={true}
           />
         </div>

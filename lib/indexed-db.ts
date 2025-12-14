@@ -1,5 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb"
 import { sumHHMM } from "./time-utils"
+import type { UserPreferences } from "./user-preferences" // Declare the UserPreferences variable
 
 export interface FlightLog {
   id: string
@@ -7,49 +8,61 @@ export interface FlightLog {
 
   // Aircraft reference
   aircraftId: string
-  aircraftType: string
-  aircraftReg: string
+  aircraftType: string // Matches Aircraft.type
+  aircraftReg: string // Matches Aircraft.registration
 
   // Route with airport references
   departureAirportId: string
   arrivalAirportId: string
-  departureIcao: string
-  arrivalIcao: string
+  departureIcao: string // Matches Airport.icao
+  arrivalIcao: string // Matches Airport.icao
 
   // OOOI Times (UTC) - HH:MM format
-  outTime: string // Out the gate (block off)
-  offTime: string // Off ground (takeoff)
-  onTime: string // On landing (touchdown)
-  inTime: string // In the gate (block on)
+  outTime: string
+  offTime: string
+  onTime: string
+  inTime: string
 
-  // Calculated Times - HH:MM format for accurate post-processing
-  blockTime: string // In - Out (total block time)
-  flightTime: string // On - Off (airborne time)
+  // Calculated Times - HH:MM format
+  blockTime: string
+  flightTime: string
 
   // CAAS Hours Categories - HH:MM format
-  p1Time: string // Pilot in Command
-  p1usTime: string // PIC Under Supervision
-  p2Time: string // Co-pilot / Second in Command
-  dualTime: string // Dual instruction received
-  instructorTime: string // Time as instructor
+  p1Time: string
+  p1usTime: string
+  p2Time: string
+  dualTime: string
+  instructorTime: string
 
   // Conditions - HH:MM format
-  nightTime: string // Auto-calculated from coordinates
+  nightTime: string
   ifrTime: string
   actualInstrumentTime: string
   simulatedInstrumentTime: string
+  crossCountryTime: string // Added to schema
 
   // Landings
+  dayTakeoffs: number // Added to schema
   dayLandings: number
+  nightTakeoffs: number // Added to schema
   nightLandings: number
+  autolands: number // Added to schema
 
   // Crew
-  crewIds: string[] // Personnel IDs
+  personnelIds: string[] // Matches Personnel.id
+  picId: string // Added explicit PIC reference
+  sicId: string // Added explicit SIC reference
   pilotRole: "PIC" | "FO" | "STUDENT" | "INSTRUCTOR" | "P1US"
+
+  // Approaches
+  approach1: string
+  approach2: string
+  holds: number
 
   // Additional
   flightNumber: string
   remarks: string
+  ipcIcc: boolean // Added to schema
 
   isLocked?: boolean
 
@@ -62,8 +75,8 @@ export interface FlightLog {
 
 export interface Aircraft {
   id: string
-  registration: string
-  type: string
+  registration: string // Matches FlightLog.aircraftReg
+  type: string // Matches FlightLog.aircraftType
   typeDesignator: string
   model: string
   category: string
@@ -78,7 +91,7 @@ export interface Aircraft {
 
 export interface Airport {
   id: string
-  icao: string
+  icao: string // Matches FlightLog.departureIcao / arrivalIcao
   iata: string
   name: string
   city: string
@@ -96,9 +109,10 @@ export interface Airport {
 }
 
 export interface Personnel {
-  id: string
+  id: string // Matches FlightLog.personnelIds
   firstName: string
   lastName: string
+  name: string // firstName + lastName combined
   employeeId?: string
   licenseNumber?: string
   role: "CAPT" | "FO" | "INSTRUCTOR" | "STUDENT" | "OTHER"
@@ -109,23 +123,6 @@ export interface Personnel {
   updatedAt?: number
   syncStatus: "synced" | "pending" | "error"
   mongoId?: string
-}
-
-export interface UserPreferences {
-  id: string
-  fieldOrder: {
-    flight: string[]
-    time: string[]
-    crew: string[]
-    landings: string[]
-    approaches: string[]
-    notes: string[]
-  }
-  visibleFields: {
-    [key: string]: boolean
-  }
-  createdAt: number
-  updatedAt: number
 }
 
 interface LogbookDB extends DBSchema {
@@ -394,12 +391,22 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     ifrTime: serverFlight.ifrTime || "00:00",
     actualInstrumentTime: serverFlight.actualInstrumentTime || "00:00",
     simulatedInstrumentTime: serverFlight.simulatedInstrumentTime || "00:00",
+    crossCountryTime: serverFlight.crossCountryTime || "00:00",
+    dayTakeoffs: serverFlight.dayTakeoffs || 0,
     dayLandings: serverFlight.dayLandings || 0,
+    nightTakeoffs: serverFlight.nightTakeoffs || 0,
     nightLandings: serverFlight.nightLandings || 0,
-    crewIds: serverFlight.crewIds || [],
+    autolands: serverFlight.autolands || 0,
+    personnelIds: serverFlight.personnelIds || (serverFlight as any).crewIds || [],
+    picId: serverFlight.picId || "",
+    sicId: serverFlight.sicId || "",
     pilotRole: serverFlight.pilotRole || "FO",
+    approach1: serverFlight.approach1 || "",
+    approach2: serverFlight.approach2 || "",
+    holds: serverFlight.holds || 0,
     flightNumber: serverFlight.flightNumber || "",
     remarks: serverFlight.remarks || "",
+    ipcIcc: serverFlight.ipcIcc || false,
     createdAt: serverFlight.createdAt || Date.now(),
     updatedAt: serverFlight.updatedAt || Date.now(),
     syncStatus: "synced",
@@ -633,11 +640,14 @@ export async function upsertAirportFromServer(serverAirport: Airport): Promise<v
 }
 
 // Personnel operations
-export async function addPersonnel(personnel: Omit<Personnel, "id" | "createdAt" | "syncStatus">): Promise<Personnel> {
+export async function addPersonnel(
+  personnel: Omit<Personnel, "id" | "createdAt" | "syncStatus" | "name">,
+): Promise<Personnel> {
   const db = await getDB()
   const newPersonnel: Personnel = {
     ...personnel,
     id: crypto.randomUUID(),
+    name: `${personnel.firstName} ${personnel.lastName}`.trim(),
     createdAt: Date.now(),
     syncStatus: "pending",
   }
@@ -656,6 +666,7 @@ export async function updatePersonnel(id: string, updates: Partial<Personnel>): 
   const updatedPersonnel: Personnel = {
     ...person,
     ...updates,
+    name: `${updates.firstName || person.firstName} ${updates.lastName || person.lastName}`.trim(),
     updatedAt: Date.now(),
     syncStatus: "pending",
   }
@@ -698,6 +709,7 @@ export async function upsertPersonnelFromServer(serverPersonnel: Personnel): Pro
     id: serverPersonnel.id,
     firstName: serverPersonnel.firstName || "",
     lastName: serverPersonnel.lastName || "",
+    name: `${serverPersonnel.firstName || ""} ${serverPersonnel.lastName || ""}`.trim(),
     employeeId: serverPersonnel.employeeId,
     licenseNumber: serverPersonnel.licenseNumber,
     role: serverPersonnel.role || "OTHER",
@@ -801,6 +813,7 @@ export async function getFlightStats() {
   const ifrTime = sumHHMM(flights.map((f) => f.ifrTime))
   const totalDayLandings = flights.reduce((sum, f) => sum + f.dayLandings, 0)
   const totalNightLandings = flights.reduce((sum, f) => sum + f.nightLandings, 0)
+  const totalAutolands = flights.reduce((sum, f) => sum + f.autolands, 0)
 
   const uniqueAircraft = new Set(flights.map((f) => f.aircraftReg)).size
   const uniqueAirports = new Set([...flights.map((f) => f.departureIcao), ...flights.map((f) => f.arrivalIcao)]).size
@@ -817,6 +830,7 @@ export async function getFlightStats() {
     ifrTime,
     totalDayLandings,
     totalNightLandings,
+    totalAutolands,
     uniqueAircraft,
     uniqueAirports,
   }

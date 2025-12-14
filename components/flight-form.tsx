@@ -106,7 +106,7 @@ function SwipeableRow({ label, children, onClear, showClear = true, disabled = f
       )}
       <div
         className={cn(
-          "flex items-center gap-2 py-1.5 px-1 transition-transform duration-200 bg-card relative z-10 min-h-[2.5rem]",
+          "flex items-center gap-1.5 py-1 px-1 transition-transform duration-200 bg-card relative z-10 min-h-[2.5rem]",
           swiped && "-translate-x-20",
         )}
         onTouchStart={handleTouchStart}
@@ -124,7 +124,7 @@ function SwipeableRow({ label, children, onClear, showClear = true, disabled = f
 
 function SectionHeader({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
-    <div className="bg-secondary/50 px-3 py-2 -mx-3 mt-4 first:mt-0 flex items-center justify-between min-h-[2.5rem]">
+    <div className="bg-secondary/50 px-2 py-1.5 -mx-2 mt-2 first:mt-0 flex items-center justify-between min-h-[2.5rem]">
       <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{title}</h3>
       {children}
     </div>
@@ -505,7 +505,7 @@ export function FlightForm({
     setIsSubmitting(true)
 
     try {
-      const crewIds = [formData.picCrewId, formData.sicCrewId, formData.observerCrewId].filter(Boolean)
+      const personnelIds = [formData.picCrewId, formData.sicCrewId, formData.observerCrewId].filter(Boolean)
 
       // Determine pilotRole based on isPilotFlying and crew position
       let pilotRole: PilotRole = "FO" // Default to FO
@@ -558,8 +558,10 @@ export function FlightForm({
         approach1: formData.approach1,
         approach2: formData.approach2,
         holds: Number.parseInt(formData.holds) || 0,
-        pilotRole: pilotRole, // Use the determined pilotRole
-        crewIds,
+        pilotRole: pilotRole,
+        personnelIds, // Updated to use aligned schema keys: personnelIds instead of crewIds
+        picId: formData.picCrewId, // Added explicit PIC ID
+        sicId: formData.sicCrewId, // Added explicit SIC ID
         remarks: formData.remarks,
         ipcIcc: formData.ipcIcc,
       }
@@ -1155,8 +1157,8 @@ export function FlightForm({
 
   return (
     <form onSubmit={handleSubmit} className="bg-card rounded-lg border border-border">
-      <div className="flex items-center justify-between p-3 border-b border-border">
-        <h2 className="font-semibold text-foreground">{editingFlight ? "Edit Flight" : "New Entry"}</h2>
+      <div className="border-b border-border p-3 flex items-center justify-between">
+        <h2 className="text-xl font-semibold">{editingFlight ? "Edit Flight" : "New Entry"}</h2>
         <div className="flex items-center gap-2">
           {!editingFlight && onConfigToggle && (
             <Button type="button" variant={isConfigMode ? "default" : "ghost"} size="sm" onClick={onConfigToggle}>
@@ -1177,24 +1179,24 @@ export function FlightForm({
         </div>
       </div>
 
-      <div className="px-2 pb-2 divide-y divide-border">
+      <div className="p-3 space-y-1">
         {/* A) Flight Section */}
         <div>
-          <SectionHeader title="Flight" />
+          <SectionHeader title="FLIGHT" />
           {fieldOrders.flight.map((fieldKey) => renderField("flight", fieldKey))}
         </div>
 
         {/* B) Time Section */}
         <div>
-          <SectionHeader title="Time" />
+          <SectionHeader title="TIME" />
           {fieldOrders.time.map((fieldKey) => renderField("time", fieldKey))}
         </div>
 
         {/* C) Crew Section */}
         <div>
-          <SectionHeader title="Crew">
-            <Button type="button" variant="ghost" size="sm" onClick={swapCrew} className="h-7 text-xs">
-              <ArrowLeftRight className="h-3 w-3 mr-1" />
+          <SectionHeader title="CREW">
+            <Button type="button" variant="ghost" size="sm" onClick={swapCrew} className="h-7 text-xs gap-1 px-2">
+              <ArrowLeftRight className="h-3 w-3" />
               Swap PIC/SIC
             </Button>
           </SectionHeader>
@@ -1203,19 +1205,19 @@ export function FlightForm({
 
         {/* D) Landings Section */}
         <div>
-          <SectionHeader title="Landings" />
+          <SectionHeader title="LANDINGS" />
           {fieldOrders.landings.map((fieldKey) => renderField("landings", fieldKey))}
         </div>
 
         {/* E) App and Hold Section */}
         <div>
-          <SectionHeader title="App and Hold" />
+          <SectionHeader title="APP AND HOLD" />
           {fieldOrders.approaches.map((fieldKey) => renderField("approaches", fieldKey))}
         </div>
 
         {/* F) Notes Section */}
         <div>
-          <SectionHeader title="Notes" />
+          <SectionHeader title="NOTES" />
           {fieldOrders.notes.map((fieldKey) => renderField("notes", fieldKey))}
         </div>
       </div>

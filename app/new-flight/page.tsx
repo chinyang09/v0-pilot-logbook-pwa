@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect, Suspense } from "react"
-import { Header } from "@/components/header"
 import { FlightForm } from "@/components/flight-form"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { BottomNavbar } from "@/components/bottom-navbar"
@@ -21,7 +20,6 @@ function NewFlightContent() {
   const { isReady: dbReady } = useDBReady()
   const [editingFlight, setEditingFlight] = useState<FlightLog | null>(null)
   const [isLoadingFlight, setIsLoadingFlight] = useState(!!editId)
-  const [isConfigMode, setIsConfigMode] = useState(false)
 
   useEffect(() => {
     const unsubscribe = syncService.onDataChanged(() => {
@@ -66,9 +64,7 @@ function NewFlightContent() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
-
-      <main className="container mx-auto px-4 py-6 pb-24">
+      <main className="container mx-auto px-3 py-3 pb-24">
         {isLoadingFlight ? (
           <Card className="bg-card border-border">
             <CardContent className="p-6 space-y-4">
@@ -91,13 +87,7 @@ function NewFlightContent() {
             </CardContent>
           </Card>
         ) : (
-          <FlightForm
-            onFlightAdded={handleFlightAdded}
-            onClose={handleClose}
-            editingFlight={editingFlight}
-            isConfigMode={isConfigMode}
-            onConfigToggle={() => setIsConfigMode(!isConfigMode)}
-          />
+          <FlightForm onFlightAdded={handleFlightAdded} onClose={handleClose} editingFlight={editingFlight} />
         )}
       </main>
 
@@ -112,8 +102,7 @@ export default function NewFlightPage() {
     <Suspense
       fallback={
         <div className="min-h-screen bg-background">
-          <Header />
-          <main className="container mx-auto px-4 py-6 pb-24">
+          <main className="container mx-auto px-3 py-3 pb-24">
             <Card className="bg-card border-border">
               <CardContent className="p-6">
                 <Skeleton className="h-8 w-48 mb-4" />

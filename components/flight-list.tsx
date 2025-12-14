@@ -8,7 +8,6 @@ import { deleteFlight } from "@/lib/indexed-db"
 import { formatHHMMDisplay } from "@/lib/time-utils"
 import { syncService } from "@/lib/sync-service"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -21,7 +20,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Plane, Cloud, CloudOff, Moon, ChevronDown, Trash2, Lock, Unlock } from "lucide-react"
+import { Plane, ChevronDown, Trash2, Lock, Unlock, Sun, Moon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface FlightListProps {
@@ -41,31 +40,20 @@ const INITIAL_LOAD = 10
 const LOAD_INCREMENT = 10
 const SWIPE_THRESHOLD = 80
 
-const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-]
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
 
 function SwipeableFlightCard({
   flight,
   onEdit,
   onDelete,
   onToggleLock,
+  personnel = [],
 }: {
   flight: FlightLog
   onEdit: () => void
   onDelete: () => void
   onToggleLock: () => void
+  personnel?: Personnel[]
 }) {
   const [swipeX, setSwipeX] = useState(0)
   const [isSwiping, setIsSwiping] = useState(false)
@@ -120,10 +108,28 @@ function SwipeableFlightCard({
     }
   }
 
-  const formatTime = (time: string) => time?.slice(0, 5) || "--:--"
+  // Date formatting
+  const flightDate = new Date(flight.date)
+  const day = flightDate.getDate().toString().padStart(2, "0")
+  const month = MONTHS[flightDate.getMonth()]
+  const year = flightDate.getFullYear().toString().slice(2)
+
+  // Landing indicators
+  const totalDayLandings = flight.dayLandings || 0
+  const totalNightLandings = flight.nightLandings || 0
+
+  // Get crew names excluding self
+  const crewNames = useMemo(() => {
+    if (!flight.crewIds || flight.crewIds.length === 0) return []
+    return flight.crewIds
+      .map((id) => personnel.find((p) => p.id === id))
+      .filter((p) => p && p.name !== "Self")
+      .map((p) => p!.name)
+  }, [flight.crewIds, personnel])
 
   return (
     <div className="relative overflow-hidden rounded-lg">
+      {/* Swipe action buttons */}
       <div
         className={cn(
           "absolute inset-y-0 right-0 flex items-center transition-opacity",
@@ -169,71 +175,74 @@ function SwipeableFlightCard({
         onTouchEnd={handleTouchEnd}
         onClick={handleClick}
       >
-        <CardContent className="p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1 text-sm text-muted-foreground">
-                {flight.flightNumber && <span className="font-medium text-foreground">{flight.flightNumber}</span>}
-                <span>{new Date(flight.date).toLocaleDateString()}</span>
-                {isLocked && <Lock className="h-3 w-3 text-muted-foreground" />}
-              </div>
-
-              <div className="flex items-center gap-2 mb-2">
-                <span className="font-semibold text-foreground">{flight.departureIcao}</span>
-                <div className="flex-1 h-px bg-border relative max-w-[120px]">
-                  <Plane className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-4 w-4 text-primary bg-card px-1" />
-                </div>
-                <span className="font-semibold text-foreground">{flight.arrivalIcao}</span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mb-2">
-                <span>OUT {formatTime(flight.outTime)}</span>
-                <span>OFF {formatTime(flight.offTime)}</span>
-                <span>ON {formatTime(flight.onTime)}</span>
-                <span>IN {formatTime(flight.inTime)}</span>
-              </div>
-
-              <div className="flex flex-wrap gap-2 mt-2">
-                {flight.p1Time && flight.p1Time !== "00:00" && (
-                  <Badge variant="secondary" className="text-xs font-mono">
-                    P1: {formatHHMMDisplay(flight.p1Time)}
-                  </Badge>
-                )}
-                {flight.p2Time && flight.p2Time !== "00:00" && (
-                  <Badge variant="secondary" className="text-xs font-mono">
-                    P2: {formatHHMMDisplay(flight.p2Time)}
-                  </Badge>
-                )}
-                {flight.p1usTime && flight.p1usTime !== "00:00" && (
-                  <Badge variant="secondary" className="text-xs font-mono">
-                    P1US: {formatHHMMDisplay(flight.p1usTime)}
-                  </Badge>
-                )}
-                {flight.nightTime && flight.nightTime !== "00:00" && (
-                  <Badge variant="secondary" className="text-xs flex items-center gap-1 font-mono">
-                    <Moon className="h-3 w-3" /> {formatHHMMDisplay(flight.nightTime)}
-                  </Badge>
-                )}
-                {(flight.dayLandings > 0 || flight.nightLandings > 0) && (
-                  <Badge variant="secondary" className="text-xs">
-                    {flight.dayLandings + flight.nightLandings} ldg
-                  </Badge>
-                )}
+        <CardContent className="p-1">
+          <div className="flex items-start gap-2">
+            {/* (1) Left: Even larger day number with MMM YY below */}
+            <div className="flex flex-col items-center justify-start shrink-0 w-16">
+              <div className="text-6xl font-bold leading-none tracking-tight">{day}</div>
+              <div className="text-base text-muted-foreground mt-0.5 tracking-wide">
+                {month} {year}
               </div>
             </div>
 
-            <div className="flex items-center shrink-0">
-              <div
-                className={cn(
-                  "p-2 rounded-full",
-                  flight.syncStatus === "synced" && "bg-[var(--status-synced)]/10",
-                  flight.syncStatus === "pending" && "bg-[var(--status-pending)]/10",
-                  flight.syncStatus === "error" && "bg-[var(--status-offline)]/10",
-                )}
-              >
-                {flight.syncStatus === "synced" && <Cloud className="h-4 w-4 text-[var(--status-synced)]" />}
-                {flight.syncStatus === "pending" && <CloudOff className="h-4 w-4 text-[var(--status-pending)]" />}
-                {flight.syncStatus === "error" && <CloudOff className="h-4 w-4 text-[var(--status-offline)]" />}
+            {/* Right side: All flight details */}
+            <div className="flex-1 min-w-0 flex flex-col justify-between">
+              {/* (2) + (3) Top section: Times and airports (height matches day number) */}
+              <div className="flex flex-col">
+                {/* (2) OUT time —— total time —— IN time */}
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-base font-semibold leading-tight">
+                    {flight.outTime?.slice(0, 5) || "--:--"}
+                  </span>
+                  <div className="flex items-center gap-1 flex-1 justify-center">
+                    <div className="h-px flex-1 bg-border max-w-[40px]" />
+                    <span className="text-base font-medium whitespace-nowrap px-1">
+                      {formatHHMMDisplay(flight.blockTime)} hrs
+                    </span>
+                    <div className="h-px flex-1 bg-border max-w-[40px]" />
+                  </div>
+                  <span className="text-base font-semibold leading-tight">{flight.inTime?.slice(0, 5) || "--:--"}</span>
+                </div>
+
+                {/* (3) FROM airport —— TO airport (half size of day number = text-2xl) */}
+                <div className="flex items-center justify-between mt-0">
+                  <span className="text-2xl font-bold leading-tight tracking-tight">{flight.departureIcao}</span>
+                  <span className="text-2xl font-bold leading-tight tracking-tight">{flight.arrivalIcao}</span>
+                </div>
+              </div>
+
+              {/* (4) Flight number, aircraft reg, aircraft type (inline with MMM YY) */}
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground leading-tight mt-0.5">
+                <span>{flight.flightNumber || "----"}</span>
+                <span>•</span>
+                <span>{flight.aircraftReg}</span>
+                <span>•</span>
+                <span>{flight.aircraftType}</span>
+              </div>
+
+              {/* (5) & (6) Crew names and day/night indicators (inline) */}
+              <div className="flex items-center justify-between mt-0.5">
+                {/* (5) Crew names other than self */}
+                <div className="text-xs text-muted-foreground truncate flex-1 leading-tight">
+                  {crewNames.length > 0 ? crewNames.join(", ") : ""}
+                </div>
+
+                {/* (6) Day/night indicator */}
+                <div className="flex items-center gap-1.5 text-xs font-medium shrink-0 ml-2">
+                  {totalDayLandings > 0 && (
+                    <div className="flex items-center gap-0.5">
+                      <Sun className="h-3 w-3" />
+                      <span>{totalDayLandings}D</span>
+                    </div>
+                  )}
+                  {totalNightLandings > 0 && (
+                    <div className="flex items-center gap-0.5">
+                      <Moon className="h-3 w-3" />
+                      <span>{totalNightLandings}N</span>
+                    </div>
+                  )}
+                  {isLocked && <Lock className="h-3 w-3 text-muted-foreground" />}
+                </div>
               </div>
             </div>
           </div>
@@ -417,6 +426,7 @@ export function FlightList({
         onEdit={() => onEdit?.(flight)}
         onDelete={() => setDeleteTarget(flight)}
         onToggleLock={() => handleToggleLock(flight)}
+        personnel={personnel}
       />
     </div>
   )

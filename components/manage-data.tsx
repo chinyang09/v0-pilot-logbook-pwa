@@ -246,8 +246,6 @@ export function ManageData() {
   const [personnelForm, setPersonnelForm] = useState({
     firstName: "",
     lastName: "",
-    employeeId: "",
-    role: "FO",
   })
 
   const inputClassName = "bg-input h-10 text-base text-right w-full"
@@ -263,7 +261,7 @@ export function ManageData() {
   }
 
   const resetPersonnelForm = () => {
-    setPersonnelForm({ firstName: "", lastName: "", employeeId: "", role: "FO" })
+    setPersonnelForm({ firstName: "", lastName: "" })
     setEditingPersonnel(null)
   }
 
@@ -297,8 +295,6 @@ export function ManageData() {
     setPersonnelForm({
       firstName: p.firstName,
       lastName: p.lastName,
-      employeeId: p.employeeId || "",
-      role: p.role,
     })
   }
 
@@ -650,29 +646,6 @@ export function ManageData() {
                 onChange={(e) => setPersonnelForm((p) => ({ ...p, lastName: e.target.value }))}
                 className={inputClassName}
               />
-            </SwipeableRow>
-            <SwipeableRow label="Employee ID" onClear={() => setPersonnelForm((p) => ({ ...p, employeeId: "" }))}>
-              <Input
-                placeholder="E12345"
-                value={personnelForm.employeeId}
-                onChange={(e) => setPersonnelForm((p) => ({ ...p, employeeId: e.target.value }))}
-                className={inputClassName}
-              />
-            </SwipeableRow>
-            <SwipeableRow label="Role" showClear={false}>
-              <Select value={personnelForm.role} onValueChange={(v) => setPersonnelForm((p) => ({ ...p, role: v }))}>
-                <SelectTrigger className={inputClassName}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CAPT">Captain</SelectItem>
-                  <SelectItem value="FO">First Officer</SelectItem>
-                  <SelectItem value="SO">Second Officer</SelectItem>
-                  <SelectItem value="FE">Flight Engineer</SelectItem>
-                  <SelectItem value="IP">Instructor Pilot</SelectItem>
-                  <SelectItem value="CP">Check Pilot</SelectItem>
-                </SelectContent>
-              </Select>
             </SwipeableRow>
           </div>
 

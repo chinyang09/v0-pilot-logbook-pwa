@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Header } from "@/components/header"
+import { SyncStatus } from "@/components/sync-status"
 import { StatsDashboard } from "@/components/stats-dashboard"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { BottomNavbar } from "@/components/bottom-navbar"
@@ -81,9 +81,27 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      <div className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-lg border-b border-border">
+        <div className="container mx-auto px-4">
+          <div className="flex items-center justify-between h-12">
+            <h1 className="text-lg font-semibold text-foreground">Dashboard</h1>
+            <div className="flex items-center gap-2">
+              <SyncStatus />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleManualSync}
+                disabled={isSyncing || isLoading}
+                className="gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
 
-      <main className="container mx-auto px-4 py-6 pb-24 space-y-6">
+      <main className="container mx-auto px-4 pt-16 pb-24 space-y-6">
         {syncError && (
           <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
             <AlertCircle className="h-4 w-4 flex-shrink-0" />

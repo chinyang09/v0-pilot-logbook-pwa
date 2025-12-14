@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { Header } from "@/components/header"
+import { SyncStatus } from "@/components/sync-status"
 import { ManageData } from "@/components/manage-data"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { BottomNavbar } from "@/components/bottom-navbar"
@@ -18,9 +18,16 @@ export default function DataPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      <div className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-lg border-b border-border">
+        <div className="container mx-auto px-4">
+          <div className="flex items-center justify-between h-12">
+            <h1 className="text-lg font-semibold text-foreground">Data Management</h1>
+            <SyncStatus />
+          </div>
+        </div>
+      </div>
 
-      <main className="container mx-auto px-4 py-6 pb-24">
+      <main className="container mx-auto px-3 pt-16 pb-24">
         <ManageData />
       </main>
 
