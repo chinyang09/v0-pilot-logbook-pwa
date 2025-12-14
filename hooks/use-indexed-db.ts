@@ -9,11 +9,13 @@ import {
   getAllAirports,
   getAllPersonnel,
   getFlightStats,
+  bulkLoadAirports,
   type FlightLog,
   type Aircraft,
   type Airport,
   type Personnel,
 } from "@/lib/indexed-db"
+import { getAirportDatabase, type AirportData } from "@/lib/airport-database"
 
 // Keys for SWR cache
 export const CACHE_KEYS = {
@@ -267,12 +269,66 @@ export function useFlightStats() {
   }
 }
 
+export function useAirportDatabase() {
+  const [airports, setAirports] = useState<AirportData[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+
+    async function loadAirports() {
+      try {
+        setIsLoading(true)
+        const data = await getAirportDatabase()
+
+        if (mounted) {
+          setAirports(data)
+
+          // Also load into IndexedDB for offline use (first 5000 airports)
+          const airportsForDB: Airport[] = data.slice(0, 5000).map((a) => ({
+            icao: a.icao,
+            iata: a.iata,
+            name: a.name,
+            city: a.city,
+            state: a.state,
+            country: a.country,
+            latitude: a.lat,
+            longitude: a.lon,
+            elevation: a.elevation,
+            timezone: a.tz,
+          }))
+
+          await bulkLoadAirports(airportsForDB)
+          console.log("[v0] Loaded", data.length, "airports from CDN")
+        }
+      } catch (err) {
+        if (mounted) {
+          setError(err as Error)
+          console.error("[v0] Failed to load airport database:", err)
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false)
+        }
+      }
+    }
+
+    loadAirports()
+
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  return { airports, isLoading, error }
+}
+
 export async function refreshAllData() {
   console.log("[v0] Refreshing all data from IndexedDB...")
   await Promise.all([
     mutate(CACHE_KEYS.flights, undefined, { revalidate: true }),
     mutate(CACHE_KEYS.aircraft, undefined, { revalidate: true }),
-    mutate(CACHE_KEYS.airports, undefined, { revalidate: true }),
     mutate(CACHE_KEYS.personnel, undefined, { revalidate: true }),
     mutate(CACHE_KEYS.stats, undefined, { revalidate: true }),
   ])

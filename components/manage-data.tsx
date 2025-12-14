@@ -17,24 +17,20 @@ import {
 } from "@/components/ui/alert-dialog"
 import {
   addAircraft,
-  addAirport,
   addPersonnel,
   updateAircraft,
-  updateAirport,
   updatePersonnel,
   deleteAircraft,
-  deleteAirport,
   deletePersonnel,
   type Aircraft,
-  type Airport,
   type Personnel,
 } from "@/lib/indexed-db"
-import { useAircraft, useAirports, usePersonnel } from "@/hooks/use-indexed-db"
+import { useAircraft, usePersonnel } from "@/hooks/use-indexed-db"
 import { syncService } from "@/lib/sync-service"
-import { Plane, MapPin, Users, Save, X, Trash2 } from "lucide-react"
+import { Plane, Users, Save, X, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-type TabType = "aircraft" | "airports" | "personnel"
+type TabType = "aircraft" | "personnel"
 
 function SwipeableRow({
   label,
@@ -209,16 +205,14 @@ function SwipeableItem({
 export function ManageData() {
   const [activeTab, setActiveTab] = useState<TabType>("aircraft")
   const { aircraft, refresh: refreshAircraft } = useAircraft()
-  const { airports, refresh: refreshAirports } = useAirports()
   const { personnel, refresh: refreshPersonnel } = usePersonnel()
 
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState<{ type: TabType; item: Aircraft | Airport | Personnel } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ type: TabType; item: Aircraft | Personnel } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
   // Edit state
   const [editingAircraft, setEditingAircraft] = useState<Aircraft | null>(null)
-  const [editingAirport, setEditingAirport] = useState<Airport | null>(null)
   const [editingPersonnel, setEditingPersonnel] = useState<Personnel | null>(null)
 
   // Aircraft form
@@ -228,18 +222,6 @@ export function ManageData() {
     typeDesignator: "",
     category: "ASEL",
     engineType: "JET",
-  })
-
-  // Airport form
-  const [airportForm, setAirportForm] = useState({
-    icao: "",
-    iata: "",
-    name: "",
-    city: "",
-    country: "",
-    latitude: "",
-    longitude: "",
-    timezone: "",
   })
 
   // Personnel form
@@ -255,11 +237,6 @@ export function ManageData() {
     setEditingAircraft(null)
   }
 
-  const resetAirportForm = () => {
-    setAirportForm({ icao: "", iata: "", name: "", city: "", country: "", latitude: "", longitude: "", timezone: "" })
-    setEditingAirport(null)
-  }
-
   const resetPersonnelForm = () => {
     setPersonnelForm({ firstName: "", lastName: "" })
     setEditingPersonnel(null)
@@ -273,20 +250,6 @@ export function ManageData() {
       typeDesignator: ac.typeDesignator || "",
       category: ac.category || "ASEL",
       engineType: ac.engineType || "JET",
-    })
-  }
-
-  const handleEditAirport = (ap: Airport) => {
-    setEditingAirport(ap)
-    setAirportForm({
-      icao: ap.icao,
-      iata: ap.iata || "",
-      name: ap.name,
-      city: ap.city || "",
-      country: ap.country || "",
-      latitude: String(ap.latitude),
-      longitude: String(ap.longitude),
-      timezone: ap.timezone || "",
     })
   }
 
@@ -309,28 +272,6 @@ export function ManageData() {
       }
       resetAircraftForm()
       await refreshAircraft()
-      if (navigator.onLine) syncService.fullSync()
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  const handleSaveAirport = async () => {
-    if (!airportForm.icao || !airportForm.name) return
-    setIsSubmitting(true)
-    try {
-      const data = {
-        ...airportForm,
-        latitude: Number.parseFloat(airportForm.latitude) || 0,
-        longitude: Number.parseFloat(airportForm.longitude) || 0,
-      }
-      if (editingAirport) {
-        await updateAirport(editingAirport.id, data)
-      } else {
-        await addAirport(data)
-      }
-      resetAirportForm()
-      await refreshAirports()
       if (navigator.onLine) syncService.fullSync()
     } finally {
       setIsSubmitting(false)
@@ -363,10 +304,6 @@ export function ManageData() {
           await deleteAircraft(deleteTarget.item.id)
           await refreshAircraft()
           break
-        case "airports":
-          await deleteAirport(deleteTarget.item.id)
-          await refreshAirports()
-          break
         case "personnel":
           await deletePersonnel(deleteTarget.item.id)
           await refreshPersonnel()
@@ -381,7 +318,6 @@ export function ManageData() {
 
   const tabs = [
     { id: "aircraft" as TabType, label: "Aircraft", icon: Plane },
-    { id: "airports" as TabType, label: "Airports", icon: MapPin },
     { id: "personnel" as TabType, label: "Personnel", icon: Users },
   ]
 
@@ -503,116 +439,6 @@ export function ManageData() {
         </div>
       )}
 
-      {/* Airports Tab */}
-      {activeTab === "airports" && (
-        <div className="bg-card rounded-lg border border-border">
-          <div className="flex items-center justify-between p-3 border-b border-border">
-            <h3 className="font-semibold">{editingAirport ? "Edit Airport" : "Add Airport"}</h3>
-            <div className="flex gap-2">
-              {editingAirport && (
-                <Button variant="ghost" size="sm" onClick={resetAirportForm}>
-                  <X className="h-4 w-4" />
-                </Button>
-              )}
-              <Button size="sm" onClick={handleSaveAirport} disabled={isSubmitting}>
-                <Save className="h-4 w-4 mr-1" />
-                {editingAirport ? "Update" : "Add"}
-              </Button>
-            </div>
-          </div>
-          <div className="px-3 pb-3">
-            <SwipeableRow label="ICAO" onClear={() => setAirportForm((p) => ({ ...p, icao: "" }))}>
-              <Input
-                placeholder="WSSS"
-                value={airportForm.icao}
-                onChange={(e) => setAirportForm((p) => ({ ...p, icao: e.target.value.toUpperCase() }))}
-                className={inputClassName}
-              />
-            </SwipeableRow>
-            <SwipeableRow label="IATA" onClear={() => setAirportForm((p) => ({ ...p, iata: "" }))}>
-              <Input
-                placeholder="SIN"
-                value={airportForm.iata}
-                onChange={(e) => setAirportForm((p) => ({ ...p, iata: e.target.value.toUpperCase() }))}
-                className={inputClassName}
-              />
-            </SwipeableRow>
-            <SwipeableRow label="Name" onClear={() => setAirportForm((p) => ({ ...p, name: "" }))}>
-              <Input
-                placeholder="Singapore Changi"
-                value={airportForm.name}
-                onChange={(e) => setAirportForm((p) => ({ ...p, name: e.target.value }))}
-                className={inputClassName}
-              />
-            </SwipeableRow>
-            <SwipeableRow label="City" onClear={() => setAirportForm((p) => ({ ...p, city: "" }))}>
-              <Input
-                placeholder="Singapore"
-                value={airportForm.city}
-                onChange={(e) => setAirportForm((p) => ({ ...p, city: e.target.value }))}
-                className={inputClassName}
-              />
-            </SwipeableRow>
-            <SwipeableRow label="Country" onClear={() => setAirportForm((p) => ({ ...p, country: "" }))}>
-              <Input
-                placeholder="Singapore"
-                value={airportForm.country}
-                onChange={(e) => setAirportForm((p) => ({ ...p, country: e.target.value }))}
-                className={inputClassName}
-              />
-            </SwipeableRow>
-            <SwipeableRow label="Latitude" onClear={() => setAirportForm((p) => ({ ...p, latitude: "" }))}>
-              <Input
-                type="number"
-                step="0.0001"
-                placeholder="1.3644"
-                value={airportForm.latitude}
-                onChange={(e) => setAirportForm((p) => ({ ...p, latitude: e.target.value }))}
-                className={inputClassName}
-              />
-            </SwipeableRow>
-            <SwipeableRow label="Longitude" onClear={() => setAirportForm((p) => ({ ...p, longitude: "" }))}>
-              <Input
-                type="number"
-                step="0.0001"
-                placeholder="103.9915"
-                value={airportForm.longitude}
-                onChange={(e) => setAirportForm((p) => ({ ...p, longitude: e.target.value }))}
-                className={inputClassName}
-              />
-            </SwipeableRow>
-            <SwipeableRow label="Timezone" onClear={() => setAirportForm((p) => ({ ...p, timezone: "" }))}>
-              <Input
-                placeholder="Asia/Singapore"
-                value={airportForm.timezone}
-                onChange={(e) => setAirportForm((p) => ({ ...p, timezone: e.target.value }))}
-                className={inputClassName}
-              />
-            </SwipeableRow>
-          </div>
-
-          {/* Airports List */}
-          <div className="border-t border-border p-3 space-y-2 max-h-64 overflow-y-auto">
-            {airports.map((ap) => (
-              <SwipeableItem
-                key={ap.id}
-                onEdit={() => handleEditAirport(ap)}
-                onDelete={() => setDeleteTarget({ type: "airports", item: ap })}
-                isActive={editingAirport?.id === ap.id}
-              >
-                <div className="flex justify-between items-center">
-                  <span className="font-medium">{ap.icao}</span>
-                  <span className="text-sm text-muted-foreground truncate ml-2">{ap.name}</span>
-                </div>
-              </SwipeableItem>
-            ))}
-            {airports.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">No airports added yet</p>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* Personnel Tab */}
       {activeTab === "personnel" && (
         <div className="bg-card rounded-lg border border-border">
@@ -673,8 +499,8 @@ export function ManageData() {
         </div>
       )}
 
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {deleteTarget?.type.slice(0, -1)}</AlertDialogTitle>

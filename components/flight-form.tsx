@@ -10,16 +10,16 @@ import { Switch } from "@/components/ui/switch"
 import {
   addFlight,
   updateFlight,
+  getAllAircraft,
+  getAllPersonnel,
   type FlightLog,
   type Aircraft,
-  type Airport,
   type Personnel,
-  getAllAircraft,
-  getAllAirports,
-  getAllPersonnel,
   getUserPreferences,
   saveUserPreferences,
 } from "@/lib/indexed-db"
+import { useAirportDatabase } from "@/hooks/use-indexed-db"
+import { searchAirports, getAirportByICAO, type AirportData } from "@/lib/airport-database"
 import { calculateTimesFromOOOI, calculateNightTime } from "@/lib/night-time-calculator"
 import { formatHHMMDisplay } from "@/lib/time-utils"
 import { syncService } from "@/lib/sync-service"
@@ -32,6 +32,9 @@ interface FlightFormProps {
   editingFlight?: FlightLog | null
   isConfigMode?: boolean
   onConfigToggle?: () => void // Add callback for config toggle
+  // Update prop types
+  onSave?: (flight: FlightLog) => void
+  onCancel?: () => void
 }
 
 type PilotRole = "PIC" | "FO" | "P1US" | "STUDENT" | "INSTRUCTOR"
@@ -137,11 +140,20 @@ export function FlightForm({
   editingFlight,
   isConfigMode = false,
   onConfigToggle,
+  onSave, // Use onSave prop
+  onCancel, // Use onCancel prop
 }: FlightFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const { airports: airportDatabase, isLoading: airportsLoading } = useAirportDatabase()
   const [aircraft, setAircraft] = useState<Aircraft[]>([])
-  const [airports, setAirports] = useState<Airport[]>([])
   const [personnel, setPersonnel] = useState<Personnel[]>([])
+
+  const [depAirportSearch, setDepAirportSearch] = useState("")
+  const [arrAirportSearch, setArrAirportSearch] = useState("")
+  const [depAirportResults, setDepAirportResults] = useState<AirportData[]>([])
+  const [arrAirportResults, setArrAirportResults] = useState<AirportData[]>([])
+  const [showDepResults, setShowDepResults] = useState(false)
+  const [showArrResults, setShowArrResults] = useState(false)
 
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split("T")[0],
@@ -325,18 +337,36 @@ export function FlightForm({
 
   // Load reference data
   useEffect(() => {
-    const loadData = async () => {
-      const [aircraftData, airportData, personnelData] = await Promise.all([
-        getAllAircraft(),
-        getAllAirports(),
-        getAllPersonnel(),
-      ])
-      setAircraft(aircraftData)
-      setAirports(airportData)
-      setPersonnel(personnelData)
+    async function loadData() {
+      // Use async function
+      try {
+        const [aircraftData, personnelData] = await Promise.all([getAllAircraft(), getAllPersonnel()])
+        setAircraft(aircraftData)
+        setPersonnel(personnelData)
+      } catch (error) {
+        console.error("Failed to load data:", error)
+      }
     }
     loadData()
   }, [])
+
+  useEffect(() => {
+    if (depAirportSearch.length >= 2) {
+      const results = searchAirports(airportDatabase, depAirportSearch, 10)
+      setDepAirportResults(results)
+    } else {
+      setDepAirportResults([])
+    }
+  }, [depAirportSearch, airportDatabase])
+
+  useEffect(() => {
+    if (arrAirportSearch.length >= 2) {
+      const results = searchAirports(airportDatabase, arrAirportSearch, 10)
+      setArrAirportResults(results)
+    } else {
+      setArrAirportResults([])
+    }
+  }, [arrAirportSearch, airportDatabase])
 
   useEffect(() => {
     if (editingFlight) {
@@ -391,113 +421,55 @@ export function FlightForm({
     [aircraft, formData.aircraftId],
   )
   const departureAirport = useMemo(
-    () => airports.find((a) => a.icao === formData.departureIcao.toUpperCase()),
-    [airports, formData.departureIcao],
+    () => getAirportByICAO(airportDatabase, formData.departureIcao),
+    [airportDatabase, formData.departureIcao],
   )
   const arrivalAirport = useMemo(
-    () => airports.find((a) => a.icao === formData.arrivalIcao.toUpperCase()),
-    [airports, formData.arrivalIcao],
+    () => getAirportByICAO(airportDatabase, formData.arrivalIcao),
+    [airportDatabase, formData.arrivalIcao],
   )
 
   useEffect(() => {
+    let nightTime = "00:00"
+
     if (formData.outTime && formData.inTime) {
-      const { blockTime, flightTime } = calculateTimesFromOOOI(
+      const times = calculateTimesFromOOOI(
         formData.outTime,
-        formData.offTime || formData.outTime,
-        formData.onTime || formData.inTime,
+        formData.offTime,
+        formData.onTime,
         formData.inTime,
         formData.date,
       )
+      setCalculatedTimes((prev) => ({ ...prev, blockTime: times.blockTime, flightTime: times.flightTime }))
+    }
 
-      let nightTime = "00:00"
-      if (departureAirport && arrivalAirport && formData.offTime && formData.onTime) {
-        const offDateTime = new Date(`${formData.date}T${formData.offTime}:00Z`)
-        const onDateTime = new Date(`${formData.date}T${formData.onTime}:00Z`)
-        if (onDateTime < offDateTime) {
-          onDateTime.setUTCDate(onDateTime.getUTCDate() + 1)
-        }
-        nightTime = calculateNightTime(
-          offDateTime,
-          onDateTime,
-          departureAirport.latitude,
-          departureAirport.longitude,
-          arrivalAirport.latitude,
-          arrivalAirport.longitude,
-        )
+    if (departureAirport && arrivalAirport && formData.offTime && formData.onTime) {
+      const offDateTime = new Date(`${formData.date}T${formData.offTime}:00Z`)
+      const onDateTime = new Date(`${formData.date}T${formData.onTime}:00Z`)
+
+      if (onDateTime < offDateTime) {
+        onDateTime.setDate(onDateTime.getDate() + 1)
       }
 
-      // Auto-populate landings based on PF status and timing
-      if (formData.isPilotFlying && !editingFlight) {
-        let takeoffIsNight = false
-        let landingIsNight = false
+      nightTime = calculateNightTime(
+        offDateTime,
+        onDateTime,
+        departureAirport.lat,
+        departureAirport.lon,
+        arrivalAirport.lat,
+        arrivalAirport.lon,
+      )
 
-        if (departureAirport && formData.offTime) {
-          const offDateTime = new Date(`${formData.date}T${formData.offTime}:00Z`)
-          const hour = offDateTime.getUTCHours()
-          takeoffIsNight = hour >= 18 || hour < 6
-        }
-
-        if (arrivalAirport && formData.onTime) {
-          const onDateTime = new Date(`${formData.date}T${formData.onTime}:00Z`)
-          const hour = onDateTime.getUTCHours()
-          landingIsNight = hour >= 18 || hour < 6
-        }
-
-        setFormData((prev) => ({
-          ...prev,
-          dayTakeoffs: takeoffIsNight ? "0" : "1",
-          nightTakeoffs: takeoffIsNight ? "1" : "0",
-          dayLandings: landingIsNight ? "0" : "1",
-          nightLandings: landingIsNight ? "1" : "0",
-        }))
-      }
-
-      // Calculate hours based on crew position and PF toggle
-      let p1Time = "00:00",
-        p2Time = "00:00",
-        p1usTime = "00:00"
-
-      // Find "self" in crew
-      const selfId = personnel.find(
-        (p) => p.firstName.toLowerCase() === "self" || p.lastName.toLowerCase() === "self",
-      )?.id
-      const isInPIC = formData.picCrewId === selfId
-      const isInSIC = formData.sicCrewId === selfId
-
-      if (isInPIC) {
-        p1Time = flightTime
-      } else if (isInSIC) {
-        if (formData.isPilotFlying) {
-          p1usTime = flightTime // PF as SIC = P1 U/S
-        } else {
-          p2Time = flightTime // Not PF as SIC = SIC
-        }
-      }
-
-      setCalculatedTimes({
-        blockTime,
-        flightTime,
-        nightTime,
-        p1Time,
-        p2Time,
-        p1usTime,
-        dualTime: "00:00",
-        instructorTime: "00:00",
-      })
+      setCalculatedTimes((prev) => ({ ...prev, nightTime }))
     }
   }, [
+    formData.date,
     formData.outTime,
     formData.offTime,
     formData.onTime,
     formData.inTime,
-    formData.date,
-    formData.isPilotFlying,
-    formData.picCrewId,
-    formData.sicCrewId,
     departureAirport,
     arrivalAirport,
-    personnel,
-    editingFlight,
   ])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -575,8 +547,9 @@ export function FlightForm({
 
       if (flight) {
         if (navigator.onLine) syncService.fullSync()
-        onFlightAdded(flight)
-        onClose?.()
+        onFlightAdded?.(flight) // Use optional chaining for callbacks
+        onSave?.(flight) // Call onSave prop
+        onClose?.() // Use optional chaining for callbacks
       }
     } catch (error) {
       console.error("Failed to save flight:", error)
@@ -657,40 +630,89 @@ export function FlightForm({
     ),
     departureIcao: (
       <SwipeableRow label="From" onClear={() => clearField("departureIcao")} disabled={isConfigMode}>
-        <Input
-          placeholder="WSSS"
-          value={formData.departureIcao}
-          onChange={(e) => updateField("departureIcao", e.target.value)}
-          className={cn(inputClassName, "text-right uppercase")}
-          list="dep-airports"
-          disabled={isConfigMode}
-        />
-        <datalist id="dep-airports">
-          {airports.map((a) => (
-            <option key={a.id} value={a.icao}>
-              {a.name}
-            </option>
-          ))}
-        </datalist>
+        <div className="relative flex-1">
+          <Input
+            placeholder="WSSS"
+            value={depAirportSearch || formData.departureIcao}
+            onChange={(e) => {
+              setDepAirportSearch(e.target.value)
+              updateField("departureIcao", e.target.value.toUpperCase())
+              setShowDepResults(true)
+            }}
+            onFocus={() => setShowDepResults(true)}
+            onBlur={() => setTimeout(() => setShowDepResults(false), 200)}
+            className={cn(inputClassName, "text-right uppercase")}
+            disabled={isConfigMode}
+          />
+          {showDepResults && depAirportResults.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-60 overflow-y-auto">
+              {depAirportResults.map((airport) => (
+                <button
+                  key={airport.icao}
+                  type="button"
+                  className="w-full text-left px-3 py-2 hover:bg-accent text-sm"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    updateField("departureIcao", airport.icao)
+                    setDepAirportSearch("")
+                    setShowDepResults(false)
+                  }}
+                >
+                  <div className="font-medium">
+                    {airport.icao} {airport.iata && `(${airport.iata})`}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {airport.name} - {airport.city}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </SwipeableRow>
     ),
+
     arrivalIcao: (
       <SwipeableRow label="To" onClear={() => clearField("arrivalIcao")} disabled={isConfigMode}>
-        <Input
-          placeholder="VHHH"
-          value={formData.arrivalIcao}
-          onChange={(e) => updateField("arrivalIcao", e.target.value)}
-          className={cn(inputClassName, "text-right uppercase")}
-          list="arr-airports"
-          disabled={isConfigMode}
-        />
-        <datalist id="arr-airports">
-          {airports.map((a) => (
-            <option key={a.id} value={a.icao}>
-              {a.name}
-            </option>
-          ))}
-        </datalist>
+        <div className="relative flex-1">
+          <Input
+            placeholder="VHHH"
+            value={arrAirportSearch || formData.arrivalIcao}
+            onChange={(e) => {
+              setArrAirportSearch(e.target.value)
+              updateField("arrivalIcao", e.target.value.toUpperCase())
+              setShowArrResults(true)
+            }}
+            onFocus={() => setShowArrResults(true)}
+            onBlur={() => setTimeout(() => setShowArrResults(false), 200)}
+            className={cn(inputClassName, "text-right uppercase")}
+            disabled={isConfigMode}
+          />
+          {showArrResults && arrAirportResults.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-60 overflow-y-auto">
+              {arrAirportResults.map((airport) => (
+                <button
+                  key={airport.icao}
+                  type="button"
+                  className="w-full text-left px-3 py-2 hover:bg-accent text-sm"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    updateField("arrivalIcao", airport.icao)
+                    setArrAirportSearch("")
+                    setShowArrResults(false)
+                  }}
+                >
+                  <div className="font-medium">
+                    {airport.icao} {airport.iata && `(${airport.iata})`}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {airport.name} - {airport.city}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </SwipeableRow>
     ),
     outTime: (

@@ -22,7 +22,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { searchParams } = new URL(request.url)
     const since = Number.parseInt(searchParams.get("since") || "0")
 
-    const validCollections = ["flights", "aircraft", "airports", "personnel"]
+    const validCollections = ["flights", "aircraft", "personnel"]
     if (!validCollections.includes(collection)) {
       return NextResponse.json({ error: "Invalid collection" }, { status: 400 })
     }

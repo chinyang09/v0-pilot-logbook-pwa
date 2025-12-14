@@ -4,14 +4,12 @@ import {
   markRecordSynced,
   upsertFlightFromServer,
   upsertAircraftFromServer,
-  upsertAirportFromServer,
   upsertPersonnelFromServer,
   getLastSyncTime,
   setLastSyncTime,
   initializeDB,
   type FlightLog,
   type Aircraft,
-  type Airport,
   type Personnel,
 } from "./indexed-db"
 
@@ -150,7 +148,7 @@ class SyncService {
     const lastSyncTime = await getLastSyncTime()
 
     try {
-      const collections = ["flights", "aircraft", "airports", "personnel"] as const
+      const collections = ["flights", "aircraft", "personnel"] as const
 
       for (const collection of collections) {
         try {
@@ -168,9 +166,6 @@ class SyncService {
                     break
                   case "aircraft":
                     await upsertAircraftFromServer(record as Aircraft)
-                    break
-                  case "airports":
-                    await upsertAirportFromServer(record as Airport)
                     break
                   case "personnel":
                     await upsertPersonnelFromServer(record as Personnel)

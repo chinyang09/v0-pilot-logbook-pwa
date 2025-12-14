@@ -5,68 +5,43 @@ import type { UserPreferences } from "./user-preferences"
 export interface FlightLog {
   id: string
   date: string
-
-  // Aircraft reference
+  flightNumber: string
   aircraftId: string
-  aircraftType: string // Matches Aircraft.type
-  aircraftReg: string // Matches Aircraft.registration
-
-  // Route with airport references
-  departureAirportId: string
-  arrivalAirportId: string
-  departureIcao: string // Matches Airport.icao
-  arrivalIcao: string // Matches Airport.icao
-
-  // OOOI Times (UTC) - HH:MM format
+  aircraftReg: string
+  aircraftType: string
+  departureIcao: string
+  arrivalIcao: string
   outTime: string
   offTime: string
   onTime: string
   inTime: string
-
-  // Calculated Times - HH:MM format
   blockTime: string
   flightTime: string
-
-  // CAAS Hours Categories - HH:MM format
   p1Time: string
   p1usTime: string
   p2Time: string
   dualTime: string
   instructorTime: string
-
-  // Conditions - HH:MM format
   nightTime: string
   ifrTime: string
   actualInstrumentTime: string
   simulatedInstrumentTime: string
   crossCountryTime: string
-
-  // Landings
   dayTakeoffs: number
   dayLandings: number
   nightTakeoffs: number
   nightLandings: number
   autolands: number
-
-  // Crew
   personnelIds: string[] // Matches Personnel.id
   picId: string // Added explicit PIC reference
   sicId: string // Added explicit SIC reference
   pilotRole: "PIC" | "FO" | "STUDENT" | "INSTRUCTOR" | "P1US"
-
-  // Approaches
   approach1: string
   approach2: string
   holds: number
-
-  // Additional
-  flightNumber: string
   remarks: string
   ipcIcc: boolean
-
   isLocked?: boolean
-
-  // Metadata
   createdAt: number
   updatedAt: number
   syncStatus: "synced" | "pending" | "error"
@@ -90,22 +65,16 @@ export interface Aircraft {
 }
 
 export interface Airport {
-  id: string
-  icao: string // Matches FlightLog.departureIcao / arrivalIcao
+  icao: string // Primary key now
   iata: string
   name: string
   city: string
+  state: string
   country: string
   latitude: number
   longitude: number
   elevation: number
   timezone: string
-  utcOffset: number
-  dstObserved: boolean
-  createdAt: number
-  updatedAt?: number
-  syncStatus: "synced" | "pending" | "error"
-  mongoId?: string
 }
 
 export interface Personnel {
@@ -128,9 +97,9 @@ export interface Personnel {
 interface SyncQueueItem {
   id: string
   type: "create" | "update" | "delete"
-  collection: "flights" | "aircraft" | "airports" | "personnel"
-  data: FlightLog | Aircraft | Airport | Personnel | { id: string; mongoId?: string }
   timestamp: number
+  collection: "flights" | "aircraft" | "personnel"
+  data: FlightLog | Aircraft | Personnel | { id: string; mongoId?: string }
 }
 
 interface SyncMeta {
@@ -138,7 +107,7 @@ interface SyncMeta {
   lastSyncAt: number
 }
 
-class LogbookDatabase extends Dexie {
+class PilotLogbookDB extends Dexie {
   flights!: Table<FlightLog, string>
   aircraft!: Table<Aircraft, string>
   airports!: Table<Airport, string>
@@ -150,21 +119,21 @@ class LogbookDatabase extends Dexie {
   constructor() {
     super("pilot-logbook")
 
-    this.version(3).stores({
+    this.version(4).stores({
       flights: "id, date, syncStatus, aircraftId, mongoId",
       aircraft: "id, registration, type, mongoId",
-      airports: "id, icao, iata, mongoId",
-      personnel: "id, lastName, role, mongoId",
-      preferences: "id",
-      syncQueue: "id, timestamp",
+      airports: "icao, iata, name", // No sync fields needed
+      personnel: "id, name, mongoId",
+      preferences: "key",
+      syncQueue: "id, collection, timestamp",
       syncMeta: "key",
     })
   }
 }
 
-const db = new LogbookDatabase()
+export const db = new PilotLogbookDB()
 
-export async function getDB(): Promise<LogbookDatabase> {
+export async function getDB(): Promise<PilotLogbookDB> {
   return db
 }
 
@@ -244,14 +213,13 @@ export async function getPendingFlights(): Promise<FlightLog[]> {
 }
 
 export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<void> {
-  const normalizedFlight: FlightLog = {
+  const normalized: FlightLog = {
     id: serverFlight.id,
-    date: serverFlight.date || new Date().toISOString().split("T")[0],
+    date: serverFlight.date,
+    flightNumber: serverFlight.flightNumber || "",
     aircraftId: serverFlight.aircraftId || "",
-    aircraftType: serverFlight.aircraftType || "",
     aircraftReg: serverFlight.aircraftReg || "",
-    departureAirportId: serverFlight.departureAirportId || "",
-    arrivalAirportId: serverFlight.arrivalAirportId || "",
+    aircraftType: serverFlight.aircraftType || "",
     departureIcao: serverFlight.departureIcao || "",
     arrivalIcao: serverFlight.arrivalIcao || "",
     outTime: serverFlight.outTime || "",
@@ -282,7 +250,6 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     approach1: serverFlight.approach1 || "",
     approach2: serverFlight.approach2 || "",
     holds: serverFlight.holds || 0,
-    flightNumber: serverFlight.flightNumber || "",
     remarks: serverFlight.remarks || "",
     ipcIcc: serverFlight.ipcIcc || false,
     createdAt: serverFlight.createdAt || Date.now(),
@@ -293,25 +260,25 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
   }
 
   let existingFlight: FlightLog | undefined
-  if (normalizedFlight.mongoId) {
-    existingFlight = await db.flights.where("mongoId").equals(normalizedFlight.mongoId).first()
+  if (normalized.mongoId) {
+    existingFlight = await db.flights.where("mongoId").equals(normalized.mongoId).first()
   }
-  if (!existingFlight && normalizedFlight.id) {
-    existingFlight = await db.flights.get(normalizedFlight.id)
+  if (!existingFlight && normalized.id) {
+    existingFlight = await db.flights.get(normalized.id)
   }
 
   if (existingFlight) {
-    const serverTime = normalizedFlight.updatedAt || normalizedFlight.createdAt
+    const serverTime = normalized.updatedAt || normalized.createdAt
     const localTime = existingFlight.updatedAt || existingFlight.createdAt
 
     if (serverTime >= localTime) {
       await db.flights.put({
-        ...normalizedFlight,
+        ...normalized,
         id: existingFlight.id,
       })
     }
   } else {
-    await db.flights.put(normalizedFlight)
+    await db.flights.put(normalized)
   }
 }
 
@@ -405,99 +372,24 @@ export async function upsertAircraftFromServer(serverAircraft: Aircraft): Promis
 }
 
 // Airport operations
-export async function addAirport(airport: Omit<Airport, "id" | "createdAt" | "syncStatus">): Promise<Airport> {
-  const newAirport: Airport = {
-    ...airport,
-    id: crypto.randomUUID(),
-    createdAt: Date.now(),
-    syncStatus: "pending",
-  }
-
-  await db.airports.put(newAirport)
-  await addToSyncQueue("create", "airports", newAirport)
-
-  return newAirport
-}
-
-export async function updateAirport(id: string, updates: Partial<Airport>): Promise<Airport | null> {
-  const airport = await db.airports.get(id)
-  if (!airport) return null
-
-  const updatedAirport: Airport = {
-    ...airport,
-    ...updates,
-    updatedAt: Date.now(),
-    syncStatus: "pending",
-  }
-
-  await db.airports.put(updatedAirport)
-  await addToSyncQueue("update", "airports", updatedAirport)
-
-  return updatedAirport
-}
-
-export async function deleteAirport(id: string): Promise<boolean> {
-  const airport = await db.airports.get(id)
-  if (!airport) return false
-
-  await db.airports.delete(id)
-  await addToSyncQueue("delete", "airports", { id, mongoId: airport.mongoId })
-  return true
-}
-
 export async function getAllAirports(): Promise<Airport[]> {
   return db.airports.toArray()
 }
 
-export async function getAirportById(id: string): Promise<Airport | undefined> {
-  return db.airports.get(id)
-}
-
 export async function getAirportByIcao(icao: string): Promise<Airport | undefined> {
-  return db.airports.where("icao").equals(icao.toUpperCase()).first()
+  return db.airports.get(icao.toUpperCase())
 }
 
 export async function getAirportByIata(iata: string): Promise<Airport | undefined> {
   return db.airports.where("iata").equals(iata.toUpperCase()).first()
 }
 
-export async function upsertAirportFromServer(serverAirport: Airport): Promise<void> {
-  const normalized: Airport = {
-    id: serverAirport.id,
-    icao: serverAirport.icao || "",
-    iata: serverAirport.iata || "",
-    name: serverAirport.name || "",
-    city: serverAirport.city || "",
-    country: serverAirport.country || "",
-    latitude: serverAirport.latitude || 0,
-    longitude: serverAirport.longitude || 0,
-    elevation: serverAirport.elevation || 0,
-    timezone: serverAirport.timezone || "UTC",
-    utcOffset: serverAirport.utcOffset || 0,
-    dstObserved: serverAirport.dstObserved || false,
-    createdAt: serverAirport.createdAt || Date.now(),
-    updatedAt: serverAirport.updatedAt,
-    syncStatus: "synced",
-    mongoId: serverAirport.mongoId,
-  }
+export async function bulkLoadAirports(airports: Airport[]): Promise<void> {
+  await db.airports.bulkPut(airports)
+}
 
-  let existing: Airport | undefined
-  if (normalized.mongoId) {
-    existing = await db.airports.where("mongoId").equals(normalized.mongoId).first()
-  }
-  if (!existing && normalized.id) {
-    existing = await db.airports.get(normalized.id)
-  }
-
-  if (existing) {
-    const serverTime = normalized.updatedAt || normalized.createdAt
-    const localTime = existing.updatedAt || existing.createdAt
-    if (serverTime >= localTime) {
-      await db.airports.put({ ...normalized, id: existing.id })
-    }
-  } else {
-    await db.airports.put(normalized)
-  }
+export async function addCustomAirport(airport: Omit<Airport, "icao"> & { icao: string }): Promise<void> {
+  await db.airports.put(airport)
 }
 
 // Personnel operations
@@ -597,8 +489,8 @@ export async function upsertPersonnelFromServer(serverPersonnel: Personnel): Pro
 // Sync queue operations
 async function addToSyncQueue(
   type: "create" | "update" | "delete",
-  collection: "flights" | "aircraft" | "airports" | "personnel",
-  data: FlightLog | Aircraft | Airport | Personnel | { id: string; mongoId?: string },
+  collection: "flights" | "aircraft" | "personnel",
+  data: FlightLog | Aircraft | Personnel | { id: string; mongoId?: string },
 ) {
   await db.syncQueue.put({
     id: crypto.randomUUID(),
@@ -624,11 +516,7 @@ export async function markFlightSynced(id: string, mongoId: string) {
   }
 }
 
-export async function markRecordSynced(
-  collection: "flights" | "aircraft" | "airports" | "personnel",
-  id: string,
-  mongoId: string,
-) {
+export async function markRecordSynced(collection: "flights" | "aircraft" | "personnel", id: string, mongoId: string) {
   const record = await db[collection].get(id)
   if (record) {
     await db[collection].put({ ...record, syncStatus: "synced", mongoId } as any)
