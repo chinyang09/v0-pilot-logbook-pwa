@@ -16,6 +16,8 @@ function NewFlightContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const editId = searchParams.get("edit")
+  const selectedField = searchParams.get("field")
+  const selectedAirport = searchParams.get("airport")
 
   const { isReady: dbReady } = useDBReady()
   const [editingFlight, setEditingFlight] = useState<FlightLog | null>(null)
@@ -87,7 +89,13 @@ function NewFlightContent() {
             </CardContent>
           </Card>
         ) : (
-          <FlightForm onFlightAdded={handleFlightAdded} onClose={handleClose} editingFlight={editingFlight} />
+          <FlightForm
+            onFlightAdded={handleFlightAdded}
+            onClose={handleClose}
+            editingFlight={editingFlight}
+            selectedAirportField={selectedField}
+            selectedAirportCode={selectedAirport}
+          />
         )}
       </main>
 

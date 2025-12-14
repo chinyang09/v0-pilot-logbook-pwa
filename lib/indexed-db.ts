@@ -119,7 +119,7 @@ class PilotLogbookDB extends Dexie {
   constructor() {
     super("pilot-logbook")
 
-    this.version(4).stores({
+    this.version(5).stores({
       flights: "id, date, syncStatus, aircraftId, mongoId",
       aircraft: "id, registration, type, mongoId",
       airports: "icao, iata, name", // No sync fields needed
@@ -331,15 +331,11 @@ export async function getAircraftById(id: string): Promise<Aircraft | undefined>
   return db.aircraft.get(id)
 }
 
-export async function getAircraftByRegistration(registration: string): Promise<Aircraft | undefined> {
-  return db.aircraft.where("registration").equals(registration.toUpperCase()).first()
-}
-
 export async function upsertAircraftFromServer(serverAircraft: Aircraft): Promise<void> {
   const normalized: Aircraft = {
     id: serverAircraft.id,
-    registration: serverAircraft.registration || "",
-    type: serverAircraft.type || "",
+    registration: serverAircraft.registration,
+    type: serverAircraft.type,
     typeDesignator: serverAircraft.typeDesignator || "",
     model: serverAircraft.model || "",
     category: serverAircraft.category || "",
@@ -578,16 +574,27 @@ export async function saveUserPreferences(prefs: Partial<UserPreferences>): Prom
   const existing = await getUserPreferences()
 
   const preferences: UserPreferences = {
-    id: "user-prefs",
+    key: "user-prefs",
     fieldOrder: existing?.fieldOrder || {
-      flight: ["date", "flightNumber", "aircraft", "from", "to", "out", "off", "on", "in"],
-      time: ["total", "night", "p1us", "sic", "xc", "ifr", "actualInst", "simInst"],
-      crew: ["pf", "pic", "sic", "observer"],
+      flight: [
+        "date",
+        "flightNumber",
+        "aircraftId",
+        "departureIcao",
+        "arrivalIcao",
+        "outTime",
+        "offTime",
+        "onTime",
+        "inTime",
+      ],
+      time: ["total", "night", "p1us", "sicTime", "xc", "ifr", "actualInst", "simInst"],
+      crew: ["pf", "picCrew", "sicCrew", "observer"],
       landings: ["dayTO", "dayLdg", "nightTO", "nightLdg", "autolands"],
       approaches: ["app1", "app2", "holds"],
       notes: ["remarks", "ipcIcc"],
     },
     visibleFields: existing?.visibleFields || {},
+    recentlyUsedAirports: existing?.recentlyUsedAirports || [],
     createdAt: existing?.createdAt || Date.now(),
     updatedAt: Date.now(),
     ...prefs,
@@ -598,11 +605,38 @@ export async function saveUserPreferences(prefs: Partial<UserPreferences>): Prom
 
 export async function getDefaultFieldOrder() {
   return {
-    flight: ["date", "flightNumber", "aircraft", "from", "to", "out", "off", "on", "in"],
-    time: ["total", "night", "p1us", "sic", "xc", "ifr", "actualInst", "simInst"],
-    crew: ["pf", "pic", "sic", "observer"],
+    flight: [
+      "date",
+      "flightNumber",
+      "aircraftId",
+      "departureIcao",
+      "arrivalIcao",
+      "outTime",
+      "offTime",
+      "onTime",
+      "inTime",
+    ],
+    time: ["total", "night", "p1us", "sicTime", "xc", "ifr", "actualInst", "simInst"],
+    crew: ["pf", "picCrew", "sicCrew", "observer"],
     landings: ["dayTO", "dayLdg", "nightTO", "nightLdg", "autolands"],
     approaches: ["app1", "app2", "holds"],
     notes: ["remarks", "ipcIcc"],
   }
+}
+
+// Functions to track recently used airports
+export async function addRecentlyUsedAirport(icao: string): Promise<void> {
+  const prefs = await getUserPreferences()
+  const recentlyUsed = prefs?.recentlyUsedAirports || []
+
+  // Remove if already exists, then add to front
+  const filtered = recentlyUsed.filter((code) => code !== icao)
+  const updated = [icao, ...filtered].slice(0, 10) // Keep only last 10
+
+  await saveUserPreferences({ recentlyUsedAirports: updated })
+}
+
+export async function getRecentlyUsedAirports(): Promise<string[]> {
+  const prefs = await getUserPreferences()
+  return prefs?.recentlyUsedAirports || []
 }

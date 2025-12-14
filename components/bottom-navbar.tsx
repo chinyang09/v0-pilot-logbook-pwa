@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Home, Book, Database, Plus } from "lucide-react"
+import { Home, Book, Database, Plus, Plane } from "lucide-react"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -16,11 +16,9 @@ export function BottomNavbar() {
     const handleScroll = () => {
       const currentScrollY = window.scrollY
 
-      // Show navbar when scrolling up or at top
       if (currentScrollY < lastScrollY || currentScrollY < 50) {
         setIsVisible(true)
       } else if (currentScrollY > lastScrollY && currentScrollY > 100) {
-        // Hide navbar when scrolling down past 100px
         setIsVisible(false)
       }
 
@@ -31,9 +29,16 @@ export function BottomNavbar() {
     return () => window.removeEventListener("scroll", handleScroll)
   }, [lastScrollY])
 
-  // Determine active tab from pathname
   const activeTab =
-    pathname === "/" ? "dashboard" : pathname === "/logbook" ? "logbook" : pathname === "/data" ? "data" : null
+    pathname === "/"
+      ? "dashboard"
+      : pathname === "/logbook"
+        ? "logbook"
+        : pathname === "/data"
+          ? "data"
+          : pathname === "/airports" || pathname?.startsWith("/airports/")
+            ? "airports"
+            : null
 
   return (
     <nav
@@ -42,12 +47,15 @@ export function BottomNavbar() {
         !isVisible && "translate-y-full",
       )}
     >
-      <div className="container mx-auto px-4">
+      <div className="container mx-auto px-2">
         <div className="flex items-center justify-around h-16">
           <Link href="/">
             <Button
               variant="ghost"
-              className={cn("flex flex-col items-center gap-1 h-14 px-4", activeTab === "dashboard" && "text-primary")}
+              className={cn(
+                "flex flex-col items-center gap-0.5 h-14 px-3",
+                activeTab === "dashboard" && "text-primary",
+              )}
             >
               <Home className="h-5 w-5" />
               <span className="text-xs">Home</span>
@@ -57,7 +65,7 @@ export function BottomNavbar() {
           <Link href="/logbook">
             <Button
               variant="ghost"
-              className={cn("flex flex-col items-center gap-1 h-14 px-4", activeTab === "logbook" && "text-primary")}
+              className={cn("flex flex-col items-center gap-0.5 h-14 px-3", activeTab === "logbook" && "text-primary")}
             >
               <Book className="h-5 w-5" />
               <span className="text-xs">Logbook</span>
@@ -70,10 +78,20 @@ export function BottomNavbar() {
             </Button>
           </Link>
 
+          <Link href="/airports">
+            <Button
+              variant="ghost"
+              className={cn("flex flex-col items-center gap-0.5 h-14 px-3", activeTab === "airports" && "text-primary")}
+            >
+              <Plane className="h-5 w-5" />
+              <span className="text-xs">Airports</span>
+            </Button>
+          </Link>
+
           <Link href="/data">
             <Button
               variant="ghost"
-              className={cn("flex flex-col items-center gap-1 h-14 px-4", activeTab === "data" && "text-primary")}
+              className={cn("flex flex-col items-center gap-0.5 h-14 px-3", activeTab === "data" && "text-primary")}
             >
               <Database className="h-5 w-5" />
               <span className="text-xs">Data</span>

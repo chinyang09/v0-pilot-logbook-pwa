@@ -14,7 +14,8 @@ export interface AirportData {
   elevation: number
   lat: number
   lon: number
-  tz: string
+  tz: string // e.g., "America/Los_Angeles"
+  timezone: string // e.g., "UTC-8" - actual UTC offset for calculations
 }
 
 const AIRPORT_CDN_URL = "https://cdn.jsdelivr.net/npm/@nwpr/airport-codes@3.0.3/dist/airports.json"
@@ -44,6 +45,7 @@ async function loadAirportsFromCDN(): Promise<AirportData[]> {
         lat: airport.lat || 0,
         lon: airport.lon || 0,
         tz: airport.tz || "UTC",
+        timezone: airport.timezone || "UTC+0", // Actual UTC offset
       }))
       .filter((a: AirportData) => a.icao) // Only keep airports with ICAO codes
   } catch (error) {

@@ -10,10 +10,8 @@ import { Switch } from "@/components/ui/switch"
 import {
   addFlight,
   updateFlight,
-  getAllAircraft,
   getAllPersonnel,
   type FlightLog,
-  type Aircraft,
   type Personnel,
   getUserPreferences,
   saveUserPreferences,
@@ -23,18 +21,16 @@ import { searchAirports, getAirportByICAO, type AirportData } from "@/lib/airpor
 import { calculateTimesFromOOOI, calculateNightTime } from "@/lib/night-time-calculator"
 import { formatHHMMDisplay } from "@/lib/time-utils"
 import { syncService } from "@/lib/sync-service"
-import { Save, X, ArrowLeftRight, Trash2, Check, Settings } from "lucide-react"
+import { Save, X, ArrowLeftRight, Trash2, MapPin } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useRouter } from "next/navigation"
 
 interface FlightFormProps {
   onFlightAdded: (flight: FlightLog) => void
-  onClose?: () => void
+  onClose: () => void
   editingFlight?: FlightLog | null
-  isConfigMode?: boolean
-  onConfigToggle?: () => void // Add callback for config toggle
-  // Update prop types
-  onSave?: (flight: FlightLog) => void
-  onCancel?: () => void
+  selectedAirportField?: string | null
+  selectedAirportCode?: string | null
 }
 
 type PilotRole = "PIC" | "FO" | "P1US" | "STUDENT" | "INSTRUCTOR"
@@ -138,14 +134,13 @@ export function FlightForm({
   onFlightAdded,
   onClose,
   editingFlight,
-  isConfigMode = false,
-  onConfigToggle,
-  onSave, // Use onSave prop
-  onCancel, // Use onCancel prop
+  selectedAirportField,
+  selectedAirportCode,
 }: FlightFormProps) {
+  const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { airports: airportDatabase, isLoading: airportsLoading } = useAirportDatabase()
-  const [aircraft, setAircraft] = useState<Aircraft[]>([])
+  const [aircraft, setAircraft] = useState([])
   const [personnel, setPersonnel] = useState<Personnel[]>([])
 
   const [depAirportSearch, setDepAirportSearch] = useState("")
@@ -208,8 +203,8 @@ export function FlightForm({
       "onTime",
       "inTime",
     ],
-    time: ["total", "night", "p1us", "sic", "xc", "ifr", "actualInst", "simInst"],
-    crew: ["pf", "pic", "sic", "observer"],
+    time: ["total", "night", "p1us", "sicTime", "xc", "ifr", "actualInst", "simInst"],
+    crew: ["pf", "picCrew", "sicCrew", "observer"],
     landings: ["dayTO", "dayLdg", "nightTO", "nightLdg", "autolands"],
     approaches: ["app1", "app2", "holds"],
     notes: ["remarks", "ipcIcc"],
@@ -232,7 +227,13 @@ export function FlightForm({
     const loadPreferences = async () => {
       const prefs = await getUserPreferences()
       if (prefs?.fieldOrder) {
-        setFieldOrders(prefs.fieldOrder)
+        const migratedOrders = migrateFieldKeys(prefs.fieldOrder)
+        setFieldOrders(migratedOrders)
+
+        // Save migrated orders back to preferences
+        if (JSON.stringify(prefs.fieldOrder) !== JSON.stringify(migratedOrders)) {
+          await saveUserPreferences({ fieldOrder: migratedOrders })
+        }
       }
     }
     loadPreferences()
@@ -275,7 +276,7 @@ export function FlightForm({
   }
 
   const handleTouchStartConfig = (e: React.TouchEvent, section: string, field: string) => {
-    if (!isConfigMode) return
+    if (!editingFlight) return
 
     const touch = e.touches[0]
     setTouchStartY(touch.clientY)
@@ -340,8 +341,7 @@ export function FlightForm({
     async function loadData() {
       // Use async function
       try {
-        const [aircraftData, personnelData] = await Promise.all([getAllAircraft(), getAllPersonnel()])
-        setAircraft(aircraftData)
+        const personnelData = await getAllPersonnel()
         setPersonnel(personnelData)
       } catch (error) {
         console.error("Failed to load data:", error)
@@ -367,6 +367,25 @@ export function FlightForm({
       setArrAirportResults([])
     }
   }, [arrAirportSearch, airportDatabase])
+
+  useEffect(() => {
+    console.log("[v0] Selected airport effect triggered", { selectedAirportField, selectedAirportCode })
+    if (selectedAirportField && selectedAirportCode) {
+      if (selectedAirportField === "from") {
+        setFormData((prev) => ({ ...prev, departureIcao: selectedAirportCode }))
+      } else if (selectedAirportField === "to") {
+        setFormData((prev) => ({ ...prev, arrivalIcao: selectedAirportCode }))
+      }
+
+      // Clear URL params after processing to prevent re-triggering
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href)
+        url.searchParams.delete("field")
+        url.searchParams.delete("airport")
+        window.history.replaceState({}, "", url.toString())
+      }
+    }
+  }, [selectedAirportField, selectedAirportCode])
 
   useEffect(() => {
     if (editingFlight) {
@@ -548,7 +567,6 @@ export function FlightForm({
       if (flight) {
         if (navigator.onLine) syncService.fullSync()
         onFlightAdded?.(flight) // Use optional chaining for callbacks
-        onSave?.(flight) // Call onSave prop
         onClose?.() // Use optional chaining for callbacks
       }
     } catch (error) {
@@ -587,180 +605,108 @@ export function FlightForm({
 
   const fieldComponents: Record<string, React.ReactNode> = {
     date: (
-      <SwipeableRow
-        label="Date"
-        onClear={() => clearField("date", new Date().toISOString().split("T")[0])}
-        disabled={isConfigMode}
-      >
+      <SwipeableRow label="Date" onClear={() => clearField("date", new Date().toISOString().split("T")[0])}>
         <Input
           type="date"
           value={formData.date}
           onChange={(e) => updateField("date", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     flightNumber: (
-      <SwipeableRow label="Flight No" onClear={() => clearField("flightNumber")} disabled={isConfigMode}>
+      <SwipeableRow label="Flight No" onClear={() => clearField("flightNumber")}>
         <Input
           placeholder="SQ123"
           value={formData.flightNumber}
           onChange={(e) => updateField("flightNumber", e.target.value)}
           className={cn(inputClassName, "uppercase")}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     aircraftId: (
-      <SwipeableRow label="Aircraft" onClear={() => clearField("aircraftId")} disabled={isConfigMode}>
-        <Select value={formData.aircraftId} onValueChange={(v) => updateField("aircraftId", v)}>
-          <SelectTrigger className={cn(inputClassName, "[&>span]:text-right [&>svg]:hidden")}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {aircraft.map((a) => (
-              <SelectItem key={a.id} value={a.id}>
-                {a.registration} ({a.type})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <SwipeableRow label="Aircraft" onClear={() => clearField("aircraftId")}>
+        <Input
+          placeholder="Aircraft ID"
+          value={formData.aircraftId}
+          onChange={(e) => updateField("aircraftId", e.target.value)}
+          className={inputClassName}
+        />
       </SwipeableRow>
     ),
     departureIcao: (
-      <SwipeableRow label="From" onClear={() => clearField("departureIcao")} disabled={isConfigMode}>
-        <div className="relative flex-1">
-          <Input
-            placeholder="WSSS"
-            value={depAirportSearch || formData.departureIcao}
-            onChange={(e) => {
-              setDepAirportSearch(e.target.value)
-              updateField("departureIcao", e.target.value.toUpperCase())
-              setShowDepResults(true)
-            }}
-            onFocus={() => setShowDepResults(true)}
-            onBlur={() => setTimeout(() => setShowDepResults(false), 200)}
-            className={cn(inputClassName, "text-right uppercase")}
-            disabled={isConfigMode}
-          />
-          {showDepResults && depAirportResults.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-60 overflow-y-auto">
-              {depAirportResults.map((airport) => (
-                <button
-                  key={airport.icao}
-                  type="button"
-                  className="w-full text-left px-3 py-2 hover:bg-accent text-sm"
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    updateField("departureIcao", airport.icao)
-                    setDepAirportSearch("")
-                    setShowDepResults(false)
-                  }}
-                >
-                  <div className="font-medium">
-                    {airport.icao} {airport.iata && `(${airport.iata})`}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {airport.name} - {airport.city}
-                  </div>
-                </button>
-              ))}
-            </div>
+      <SwipeableRow label="From" onClear={() => clearField("departureIcao")}>
+        <button
+          type="button"
+          onClick={() => router.push("/airports?field=from&return=/new-flight")}
+          className={cn(
+            inputClassName,
+            "text-right uppercase flex items-center justify-end gap-2 cursor-pointer hover:bg-accent/50 transition-colors",
           )}
-        </div>
+        >
+          {formData.departureIcao || <span className="text-muted-foreground">Select</span>}
+          <MapPin className="h-4 w-4 text-muted-foreground" />
+        </button>
       </SwipeableRow>
     ),
 
     arrivalIcao: (
-      <SwipeableRow label="To" onClear={() => clearField("arrivalIcao")} disabled={isConfigMode}>
-        <div className="relative flex-1">
-          <Input
-            placeholder="VHHH"
-            value={arrAirportSearch || formData.arrivalIcao}
-            onChange={(e) => {
-              setArrAirportSearch(e.target.value)
-              updateField("arrivalIcao", e.target.value.toUpperCase())
-              setShowArrResults(true)
-            }}
-            onFocus={() => setShowArrResults(true)}
-            onBlur={() => setTimeout(() => setShowArrResults(false), 200)}
-            className={cn(inputClassName, "text-right uppercase")}
-            disabled={isConfigMode}
-          />
-          {showArrResults && arrAirportResults.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-60 overflow-y-auto">
-              {arrAirportResults.map((airport) => (
-                <button
-                  key={airport.icao}
-                  type="button"
-                  className="w-full text-left px-3 py-2 hover:bg-accent text-sm"
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    updateField("arrivalIcao", airport.icao)
-                    setArrAirportSearch("")
-                    setShowArrResults(false)
-                  }}
-                >
-                  <div className="font-medium">
-                    {airport.icao} {airport.iata && `(${airport.iata})`}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {airport.name} - {airport.city}
-                  </div>
-                </button>
-              ))}
-            </div>
+      <SwipeableRow label="To" onClear={() => clearField("arrivalIcao")}>
+        <button
+          type="button"
+          onClick={() => router.push("/airports?field=to&return=/new-flight")}
+          className={cn(
+            inputClassName,
+            "text-right uppercase flex items-center justify-end gap-2 cursor-pointer hover:bg-accent/50 transition-colors",
           )}
-        </div>
+        >
+          {formData.arrivalIcao || <span className="text-muted-foreground">Select</span>}
+          <MapPin className="h-4 w-4 text-muted-foreground" />
+        </button>
       </SwipeableRow>
     ),
     outTime: (
-      <SwipeableRow label="Out" onClear={() => clearField("outTime")} disabled={isConfigMode}>
+      <SwipeableRow label="Out" onClear={() => clearField("outTime")}>
         <Input
           type="time"
           value={formData.outTime}
           onChange={(e) => updateField("outTime", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     offTime: (
-      <SwipeableRow label="Off" onClear={() => clearField("offTime")} disabled={isConfigMode}>
+      <SwipeableRow label="Off" onClear={() => clearField("offTime")}>
         <Input
           type="time"
           value={formData.offTime}
           onChange={(e) => updateField("offTime", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     onTime: (
-      <SwipeableRow label="On" onClear={() => clearField("onTime")} disabled={isConfigMode}>
+      <SwipeableRow label="On" onClear={() => clearField("onTime")}>
         <Input
           type="time"
           value={formData.onTime}
           onChange={(e) => updateField("onTime", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     inTime: (
-      <SwipeableRow label="In" onClear={() => clearField("inTime")} disabled={isConfigMode}>
+      <SwipeableRow label="In" onClear={() => clearField("inTime")}>
         <Input
           type="time"
           value={formData.inTime}
           onChange={(e) => updateField("inTime", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     crossCountryTime: (
-      <SwipeableRow label="XC" onClear={() => clearField("crossCountryTime")} disabled={isConfigMode}>
+      <SwipeableRow label="XC" onClear={() => clearField("crossCountryTime")}>
         <div className="relative w-full">
           <Input
             type="time"
@@ -768,7 +714,6 @@ export function FlightForm({
             onChange={(e) => updateField("crossCountryTime", e.target.value)}
             className={cn(inputClassName, "pr-24")}
             style={{ WebkitAppearance: "none" }}
-            disabled={isConfigMode}
           />
           {!formData.crossCountryTime && (
             <button
@@ -783,7 +728,7 @@ export function FlightForm({
       </SwipeableRow>
     ),
     ifrTime: (
-      <SwipeableRow label="IFR" onClear={() => clearField("ifrTime")} disabled={isConfigMode}>
+      <SwipeableRow label="IFR" onClear={() => clearField("ifrTime")}>
         <div className="relative w-full">
           <Input
             type="time"
@@ -791,7 +736,6 @@ export function FlightForm({
             onChange={(e) => updateField("ifrTime", e.target.value)}
             className={cn(inputClassName, "pr-24")}
             style={{ WebkitAppearance: "none" }}
-            disabled={isConfigMode}
           />
           {!formData.ifrTime && (
             <button
@@ -806,7 +750,7 @@ export function FlightForm({
       </SwipeableRow>
     ),
     actualInstrumentTime: (
-      <SwipeableRow label="Actual Inst" onClear={() => clearField("actualInstrumentTime")} disabled={isConfigMode}>
+      <SwipeableRow label="Actual Inst" onClear={() => clearField("actualInstrumentTime")}>
         <div className="relative w-full">
           <Input
             type="time"
@@ -814,7 +758,6 @@ export function FlightForm({
             onChange={(e) => updateField("actualInstrumentTime", e.target.value)}
             className={cn(inputClassName, "pr-24")}
             style={{ WebkitAppearance: "none" }}
-            disabled={isConfigMode}
           />
           {!formData.actualInstrumentTime && (
             <button
@@ -829,7 +772,7 @@ export function FlightForm({
       </SwipeableRow>
     ),
     simulatedInstrumentTime: (
-      <SwipeableRow label="Sim Inst" onClear={() => clearField("simulatedInstrumentTime")} disabled={isConfigMode}>
+      <SwipeableRow label="Sim Inst" onClear={() => clearField("simulatedInstrumentTime")}>
         <div className="relative w-full">
           <Input
             type="time"
@@ -837,7 +780,6 @@ export function FlightForm({
             onChange={(e) => updateField("simulatedInstrumentTime", e.target.value)}
             className={cn(inputClassName, "pr-24")}
             style={{ WebkitAppearance: "none" }}
-            disabled={isConfigMode}
           />
           {!formData.simulatedInstrumentTime && (
             <button
@@ -852,7 +794,7 @@ export function FlightForm({
       </SwipeableRow>
     ),
     picCrewId: (
-      <SwipeableRow label="PIC/P1" onClear={() => clearField("picCrewId")} disabled={isConfigMode}>
+      <SwipeableRow label="PIC/P1" onClear={() => clearField("picCrewId")}>
         <Select value={formData.picCrewId} onValueChange={(v) => updateField("picCrewId", v)}>
           <SelectTrigger className={cn(inputClassName, "[&>span]:text-right [&>svg]:hidden")}>
             <SelectValue />
@@ -868,7 +810,7 @@ export function FlightForm({
       </SwipeableRow>
     ),
     sicCrewId: (
-      <SwipeableRow label="SIC/P2" onClear={() => clearField("sicCrewId")} disabled={isConfigMode}>
+      <SwipeableRow label="SIC/P2" onClear={() => clearField("sicCrewId")}>
         <Select value={formData.sicCrewId} onValueChange={(v) => updateField("sicCrewId", v)}>
           <SelectTrigger className={cn(inputClassName, "[&>span]:text-right [&>svg]:hidden")}>
             <SelectValue />
@@ -884,7 +826,7 @@ export function FlightForm({
       </SwipeableRow>
     ),
     observerCrewId: (
-      <SwipeableRow label="Observer" onClear={() => clearField("observerCrewId")} disabled={isConfigMode}>
+      <SwipeableRow label="Observer" onClear={() => clearField("observerCrewId")}>
         <Select value={formData.observerCrewId} onValueChange={(v) => updateField("observerCrewId", v)}>
           <SelectTrigger className={cn(inputClassName, "[&>span]:text-right [&>svg]:hidden")}>
             <SelectValue />
@@ -900,119 +842,106 @@ export function FlightForm({
       </SwipeableRow>
     ),
     dayTakeoffs: (
-      <SwipeableRow label="Day T/O" onClear={() => clearField("dayTakeoffs", "0")} disabled={isConfigMode}>
+      <SwipeableRow label="Day T/O" onClear={() => clearField("dayTakeoffs", "0")}>
         <Input
           type="number"
           min="0"
           value={formData.dayTakeoffs}
           onChange={(e) => updateField("dayTakeoffs", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     dayLandings: (
-      <SwipeableRow label="Day Ldg" onClear={() => clearField("dayLandings", "0")} disabled={isConfigMode}>
+      <SwipeableRow label="Day Ldg" onClear={() => clearField("dayLandings", "0")}>
         <Input
           type="number"
           min="0"
           value={formData.dayLandings}
           onChange={(e) => updateField("dayLandings", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     nightTakeoffs: (
-      <SwipeableRow label="Night T/O" onClear={() => clearField("nightTakeoffs", "0")} disabled={isConfigMode}>
+      <SwipeableRow label="Night T/O" onClear={() => clearField("nightTakeoffs", "0")}>
         <Input
           type="number"
           min="0"
           value={formData.nightTakeoffs}
           onChange={(e) => updateField("nightTakeoffs", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     nightLandings: (
-      <SwipeableRow label="Night Ldg" onClear={() => clearField("nightLandings", "0")} disabled={isConfigMode}>
+      <SwipeableRow label="Night Ldg" onClear={() => clearField("nightLandings", "0")}>
         <Input
           type="number"
           min="0"
           value={formData.nightLandings}
           onChange={(e) => updateField("nightLandings", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     autolands: (
-      <SwipeableRow label="Autolands" onClear={() => clearField("autolands", "0")} disabled={isConfigMode}>
+      <SwipeableRow label="Autolands" onClear={() => clearField("autolands", "0")}>
         <Input
           type="number"
           min="0"
           value={formData.autolands}
           onChange={(e) => updateField("autolands", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     approach1: (
-      <SwipeableRow label="App 1" onClear={() => clearField("approach1")} disabled={isConfigMode}>
+      <SwipeableRow label="App 1" onClear={() => clearField("approach1")}>
         <Input
           placeholder="ILS 20C"
           value={formData.approach1}
           onChange={(e) => updateField("approach1", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     approach2: (
-      <SwipeableRow label="App 2" onClear={() => clearField("approach2")} disabled={isConfigMode}>
+      <SwipeableRow label="App 2" onClear={() => clearField("approach2")}>
         <Input
           placeholder="VOR 02L"
           value={formData.approach2}
           onChange={(e) => updateField("approach2", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     holds: (
-      <SwipeableRow label="Holds" onClear={() => clearField("holds", "0")} disabled={isConfigMode}>
+      <SwipeableRow label="Holds" onClear={() => clearField("holds", "0")}>
         <Input
           type="number"
           min="0"
           value={formData.holds}
           onChange={(e) => updateField("holds", e.target.value)}
           className={inputClassName}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     remarks: (
-      <SwipeableRow label="Remarks" onClear={() => clearField("remarks")} disabled={isConfigMode}>
+      <SwipeableRow label="Remarks" onClear={() => clearField("remarks")}>
         <Textarea
           value={formData.remarks}
           onChange={(e) => updateField("remarks", e.target.value)}
           className={cn(inputClassName, "min-h-20 resize-none")}
           placeholder="Additional notes..."
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
     ipcIcc: (
-      <SwipeableRow label="IPC/ICC" showClear={false} disabled={isConfigMode}>
+      <SwipeableRow label="IPC/ICC" showClear={false}>
         <div className="flex items-center gap-2 justify-end">
           <span className="text-sm text-muted-foreground">{formData.ipcIcc ? "Yes" : "No"}</span>
-          <Switch
-            checked={formData.ipcIcc}
-            onCheckedChange={(checked) => updateField("ipcIcc", checked)}
-            disabled={isConfigMode}
-          />
+          <Switch checked={formData.ipcIcc} onCheckedChange={(checked) => updateField("ipcIcc", checked)} />
         </div>
       </SwipeableRow>
     ),
@@ -1037,7 +966,6 @@ export function FlightForm({
         onClear={() => {
           setCalculatedTimes((prev) => ({ ...prev, blockTime: "00:00" }))
         }}
-        disabled={isConfigMode}
       >
         <Input
           type="time"
@@ -1045,7 +973,6 @@ export function FlightForm({
           onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, blockTime: e.target.value }))}
           className={cn(inputClassName, "font-mono font-semibold")}
           style={{ WebkitAppearance: "none" }}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -1055,7 +982,6 @@ export function FlightForm({
         onClear={() => {
           setCalculatedTimes((prev) => ({ ...prev, nightTime: "00:00" }))
         }}
-        disabled={isConfigMode}
       >
         <Input
           type="time"
@@ -1063,7 +989,6 @@ export function FlightForm({
           onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, nightTime: e.target.value }))}
           className={cn(inputClassName, "font-mono")}
           style={{ WebkitAppearance: "none" }}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -1073,7 +998,6 @@ export function FlightForm({
         onClear={() => {
           setCalculatedTimes((prev) => ({ ...prev, p1usTime: "00:00" }))
         }}
-        disabled={isConfigMode}
       >
         <Input
           type="time"
@@ -1081,17 +1005,15 @@ export function FlightForm({
           onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, p1usTime: e.target.value }))}
           className={cn(inputClassName, "font-mono")}
           style={{ WebkitAppearance: "none" }}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
-    sic: (
+    sicTime: (
       <SwipeableRow
         label="SIC"
         onClear={() => {
           setCalculatedTimes((prev) => ({ ...prev, p2Time: "00:00" }))
         }}
-        disabled={isConfigMode}
       >
         <Input
           type="time"
@@ -1099,7 +1021,6 @@ export function FlightForm({
           onChange={(e) => setCalculatedTimes((prev) => ({ ...prev, p2Time: e.target.value }))}
           className={cn(inputClassName, "font-mono")}
           style={{ WebkitAppearance: "none" }}
-          disabled={isConfigMode}
         />
       </SwipeableRow>
     ),
@@ -1110,19 +1031,19 @@ export function FlightForm({
 
     // Section C - Crew
     pf: (
-      <SwipeableRow label="PF" showClear={false} disabled={isConfigMode}>
+      <SwipeableRow label="PF" showClear={false}>
         <div className="flex items-center gap-2 justify-end">
           <span className="text-sm text-muted-foreground">{formData.isPilotFlying ? "Yes" : "No"}</span>
           <Switch
             checked={formData.isPilotFlying}
             onCheckedChange={(checked) => updateField("isPilotFlying", checked)}
-            disabled={pfDisabled || isConfigMode}
+            disabled={pfDisabled}
           />
         </div>
       </SwipeableRow>
     ),
-    pic: fieldComponents.picCrewId,
-    sic: fieldComponents.sicCrewId,
+    picCrew: fieldComponents.picCrewId,
+    sicCrew: fieldComponents.sicCrewId,
     observer: fieldComponents.observerCrewId,
 
     // Section D - Landings
@@ -1145,7 +1066,7 @@ export function FlightForm({
   const renderField = (section: string, fieldKey: string) => (
     <div
       key={fieldKey}
-      draggable={isConfigMode}
+      draggable={editingFlight}
       onDragStart={() => handleDragStart(section, fieldKey)}
       onDragOver={(e) => handleDragOver(e, section, fieldKey)}
       onDragEnd={handleDragEnd}
@@ -1154,17 +1075,17 @@ export function FlightForm({
       onTouchEnd={handleTouchEndConfig}
       className={cn(
         "relative transition-all duration-150",
-        isConfigMode && "cursor-grab active:cursor-grabbing",
+        editingFlight && "cursor-grab active:cursor-grabbing",
         touchDragState?.field === fieldKey && isDraggingTouch && "opacity-60 scale-[0.98]",
         draggedField?.field === fieldKey && "opacity-60 scale-[0.98]",
       )}
       style={{
-        touchAction: isConfigMode ? "none" : "auto",
-        userSelect: isConfigMode ? "none" : "auto",
-        WebkitUserSelect: isConfigMode ? "none" : "auto",
+        touchAction: editingFlight ? "none" : "auto",
+        userSelect: editingFlight ? "none" : "auto",
+        WebkitUserSelect: editingFlight ? "none" : "auto",
       }}
     >
-      {isConfigMode && (
+      {editingFlight && (
         <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center justify-center w-10 h-full z-30 pointer-events-none">
           <div className="flex flex-col gap-1 bg-secondary/95 rounded-md p-2 shadow-sm border border-border">
             <div className="w-5 h-0.5 bg-foreground/50 rounded-full" />
@@ -1173,19 +1094,53 @@ export function FlightForm({
           </div>
         </div>
       )}
-      <div className={cn(isConfigMode && "pr-12")}>{allFieldComponents[fieldKey]}</div>
+      <div className={cn(editingFlight && "pr-12")}>{allFieldComponents[fieldKey]}</div>
     </div>
   )
+
+  const migrateFieldKeys = (oldOrders: typeof fieldOrders): typeof fieldOrders => {
+    const keyMap: Record<string, string> = {
+      // Flight section
+      aircraft: "aircraftId",
+      from: "departureIcao",
+      to: "arrivalIcao",
+      out: "outTime",
+      off: "offTime",
+      on: "onTime",
+      in: "inTime",
+      // Time section
+      sic: "sicTime",
+      // Crew section
+      pic: "picCrew",
+      sic: "sicCrew",
+      // Landings section (already correct)
+      // Approaches section (already correct)
+      // Notes section (already correct)
+    }
+
+    const migrateArray = (arr: string[]): string[] => {
+      return arr.map((key) => keyMap[key] || key).filter((key) => allFieldComponents[key] !== undefined)
+    }
+
+    return {
+      flight: migrateArray(oldOrders.flight || []),
+      time: migrateArray(oldOrders.time || []),
+      crew: migrateArray(oldOrders.crew || []),
+      landings: migrateArray(oldOrders.landings || []),
+      approaches: migrateArray(oldOrders.approaches || []),
+      notes: migrateArray(oldOrders.notes || []),
+    }
+  }
 
   return (
     <form onSubmit={handleSubmit} className="bg-card rounded-lg border border-border">
       <div className="border-b border-border p-3 flex items-center justify-between">
         <h2 className="text-xl font-semibold">{editingFlight ? "Edit Flight" : "New Entry"}</h2>
         <div className="flex items-center gap-2">
-          {!editingFlight && onConfigToggle && (
-            <Button type="button" variant={isConfigMode ? "default" : "ghost"} size="sm" onClick={onConfigToggle}>
-              {isConfigMode ? <Check className="h-4 w-4 mr-1" /> : <Settings className="h-4 w-4 mr-1" />}
-              {isConfigMode ? "Done" : "Config"}
+          {editingFlight && (
+            <Button type="button" variant="ghost" size="sm" onClick={swapCrew} className="h-7 text-xs gap-1 px-2">
+              <ArrowLeftRight className="h-3 w-3" />
+              Swap PIC/SIC
             </Button>
           )}
           {onClose && (
@@ -1216,12 +1171,7 @@ export function FlightForm({
 
         {/* C) Crew Section */}
         <div>
-          <SectionHeader title="CREW">
-            <Button type="button" variant="ghost" size="sm" onClick={swapCrew} className="h-7 text-xs gap-1 px-2">
-              <ArrowLeftRight className="h-3 w-3" />
-              Swap PIC/SIC
-            </Button>
-          </SectionHeader>
+          <SectionHeader title="CREW" />
           {fieldOrders.crew.map((fieldKey) => renderField("crew", fieldKey))}
         </div>
 
