@@ -115,11 +115,12 @@ class PilotLogbookDB extends Dexie {
   preferences!: Table<UserPreferences, string>
   syncQueue!: Table<SyncQueueItem, string>
   syncMeta!: Table<SyncMeta, string>
+  aircraftDatabase!: Table<{ registration: string; data: string }, string> // CDN aircraft cache
 
   constructor() {
     super("pilot-logbook")
 
-    this.version(6).stores({
+    this.version(7).stores({
       flights: "id, date, syncStatus, aircraftId, mongoId",
       aircraft: "id, registration, type, mongoId",
       airports: "icao, iata, name", // No sync fields needed
@@ -127,6 +128,7 @@ class PilotLogbookDB extends Dexie {
       preferences: "key",
       syncQueue: "id, collection, timestamp",
       syncMeta: "key",
+      aircraftDatabase: "registration", // CDN aircraft cache
     })
   }
 }
@@ -663,4 +665,27 @@ export async function addRecentlyUsedAircraft(registration: string): Promise<voi
 export async function getRecentlyUsedAircraft(): Promise<string[]> {
   const prefs = await getUserPreferences()
   return prefs?.recentlyUsedAircraft || []
+}
+
+// CDN aircraft caching functions
+export async function addAircraftToDatabase(registration: string, data: string): Promise<void> {
+  await db.aircraftDatabase.put({ registration, data })
+}
+
+export async function getAircraftFromDatabase(
+  registration: string,
+): Promise<{ registration: string; data: string } | undefined> {
+  return db.aircraftDatabase.get(registration.toUpperCase())
+}
+
+export async function deleteAircraftFromDatabase(registration: string): Promise<boolean> {
+  const aircraft = await db.aircraftDatabase.get(registration)
+  if (!aircraft) return false
+
+  await db.aircraftDatabase.delete(registration)
+  return true
+}
+
+export async function getAllAircraftFromDatabase(): Promise<{ registration: string; data: string }[]> {
+  return db.aircraftDatabase.toArray()
 }
