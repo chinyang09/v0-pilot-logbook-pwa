@@ -16,8 +16,11 @@ function NewFlightContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const editId = searchParams.get("edit")
+
   const selectedField = searchParams.get("field")
   const selectedAirport = searchParams.get("airport")
+  const selectedAircraftReg = searchParams.get("aircraftReg")
+  const selectedAircraftType = searchParams.get("aircraftType")
 
   const { isReady: dbReady } = useDBReady()
   const [editingFlight, setEditingFlight] = useState<FlightLog | null>(null)
@@ -95,6 +98,8 @@ function NewFlightContent() {
             editingFlight={editingFlight}
             selectedAirportField={selectedField}
             selectedAirportCode={selectedAirport}
+            selectedAircraftReg={selectedAircraftReg}
+            selectedAircraftType={selectedAircraftType}
           />
         )}
       </main>

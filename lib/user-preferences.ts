@@ -10,6 +10,7 @@ export interface UserPreferences {
   }
   visibleFields: Record<string, boolean>
   recentlyUsedAirports?: string[]
+  recentlyUsedAircraft?: string[]
   createdAt: number
   updatedAt: number
 }

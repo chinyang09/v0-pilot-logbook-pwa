@@ -119,7 +119,7 @@ class PilotLogbookDB extends Dexie {
   constructor() {
     super("pilot-logbook")
 
-    this.version(5).stores({
+    this.version(6).stores({
       flights: "id, date, syncStatus, aircraftId, mongoId",
       aircraft: "id, registration, type, mongoId",
       airports: "icao, iata, name", // No sync fields needed
@@ -601,6 +601,7 @@ export async function saveUserPreferences(prefs: Partial<UserPreferences>): Prom
     },
     visibleFields: existing?.visibleFields || {},
     recentlyUsedAirports: existing?.recentlyUsedAirports || [],
+    recentlyUsedAircraft: existing?.recentlyUsedAircraft || [],
     createdAt: existing?.createdAt || Date.now(),
     updatedAt: Date.now(),
     ...prefs,
@@ -645,4 +646,21 @@ export async function addRecentlyUsedAirport(icao: string): Promise<void> {
 export async function getRecentlyUsedAirports(): Promise<string[]> {
   const prefs = await getUserPreferences()
   return prefs?.recentlyUsedAirports || []
+}
+
+// Functions to track recently used aircraft
+export async function addRecentlyUsedAircraft(registration: string): Promise<void> {
+  const prefs = await getUserPreferences()
+  const recentlyUsed = prefs?.recentlyUsedAircraft || []
+
+  // Remove if already exists, then add to front
+  const filtered = recentlyUsed.filter((reg) => reg !== registration)
+  const updated = [registration, ...filtered].slice(0, 10) // Keep only last 10
+
+  await saveUserPreferences({ recentlyUsedAircraft: updated })
+}
+
+export async function getRecentlyUsedAircraft(): Promise<string[]> {
+  const prefs = await getUserPreferences()
+  return prefs?.recentlyUsedAircraft || []
 }

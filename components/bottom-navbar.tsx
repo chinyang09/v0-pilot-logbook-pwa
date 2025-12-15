@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Home, Book, Database, Plus, Plane } from "lucide-react"
+import { Home, Book, Plus, MapPin, Plane } from "lucide-react"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -38,7 +38,9 @@ export function BottomNavbar() {
           ? "data"
           : pathname === "/airports" || pathname?.startsWith("/airports/")
             ? "airports"
-            : null
+            : pathname === "/aircraft" || pathname?.startsWith("/aircraft/")
+              ? "aircraft"
+              : null
 
   return (
     <nav
@@ -53,22 +55,22 @@ export function BottomNavbar() {
             <Button
               variant="ghost"
               className={cn(
-                "flex flex-col items-center gap-0.5 h-14 px-3",
+                "flex flex-col items-center gap-0.5 h-14 px-2",
                 activeTab === "dashboard" && "text-primary",
               )}
             >
               <Home className="h-5 w-5" />
-              <span className="text-xs">Home</span>
+              <span className="text-[10px]">Home</span>
             </Button>
           </Link>
 
           <Link href="/logbook">
             <Button
               variant="ghost"
-              className={cn("flex flex-col items-center gap-0.5 h-14 px-3", activeTab === "logbook" && "text-primary")}
+              className={cn("flex flex-col items-center gap-0.5 h-14 px-2", activeTab === "logbook" && "text-primary")}
             >
               <Book className="h-5 w-5" />
-              <span className="text-xs">Logbook</span>
+              <span className="text-[10px]">Logbook</span>
             </Button>
           </Link>
 
@@ -81,20 +83,20 @@ export function BottomNavbar() {
           <Link href="/airports">
             <Button
               variant="ghost"
-              className={cn("flex flex-col items-center gap-0.5 h-14 px-3", activeTab === "airports" && "text-primary")}
+              className={cn("flex flex-col items-center gap-0.5 h-14 px-2", activeTab === "airports" && "text-primary")}
             >
-              <Plane className="h-5 w-5" />
-              <span className="text-xs">Airports</span>
+              <MapPin className="h-5 w-5" />
+              <span className="text-[10px]">Airports</span>
             </Button>
           </Link>
 
-          <Link href="/data">
+          <Link href="/aircraft">
             <Button
               variant="ghost"
-              className={cn("flex flex-col items-center gap-0.5 h-14 px-3", activeTab === "data" && "text-primary")}
+              className={cn("flex flex-col items-center gap-0.5 h-14 px-2", activeTab === "aircraft" && "text-primary")}
             >
-              <Database className="h-5 w-5" />
-              <span className="text-xs">Data</span>
+              <Plane className="h-5 w-5" />
+              <span className="text-[10px]">Aircraft</span>
             </Button>
           </Link>
         </div>
