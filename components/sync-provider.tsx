@@ -1,38 +1,42 @@
 "use client"
 
 import type React from "react"
-
-import { useEffect, useState } from "react"
+import { useEffect, useRef } from "react"
 import { syncService } from "@/lib/sync-service"
 import { refreshAllData } from "@/hooks/use-indexed-db"
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
-  const [initialized, setInitialized] = useState(false)
+  const syncInitiated = useRef(false)
 
   useEffect(() => {
     const doInitialSync = async () => {
       // Only sync once per session
-      if (initialized) return
+      if (syncInitiated.current) return
+      syncInitiated.current = true
 
-      console.log("[v0] Running initial sync...")
+      console.log("[v0] Starting background sync...")
 
       if (navigator.onLine) {
         try {
-          const result = await syncService.fullSync()
-          console.log("[v0] Initial sync complete:", result)
+          // Set a timeout to prevent indefinite hangs
+          const syncPromise = syncService.fullSync()
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Sync timeout after 30s")), 30000),
+          )
+
+          const result = await Promise.race([syncPromise, timeoutPromise])
+          console.log("[v0] Background sync complete:", result)
           await refreshAllData()
-          setInitialized(true)
         } catch (error) {
-          console.error("[v0] Initial sync failed:", error)
-          // Mark as initialized even if sync fails to prevent infinite retries
-          setInitialized(true)
+          console.error("[v0] Background sync failed:", error)
+          // Continue regardless - offline mode still works
         }
       } else {
-        console.log("[v0] Offline - skipping initial sync")
-        setInitialized(true)
+        console.log("[v0] Offline - skipping sync")
       }
     }
 
+    // Start sync immediately but don't wait for it
     doInitialSync()
 
     const unsubscribe = syncService.onDataChanged(() => {
@@ -41,7 +45,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     })
 
     return unsubscribe
-  }, [initialized])
+  }, [])
 
   return <>{children}</>
 }

@@ -139,10 +139,16 @@ export async function getDB(): Promise<PilotLogbookDB> {
 
 export async function initializeDB(): Promise<boolean> {
   try {
-    await db.open()
+    const openPromise = db.open()
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("IndexedDB open timeout")), 10000),
+    )
+
+    await Promise.race([openPromise, timeoutPromise])
+    console.log("[v0] IndexedDB initialized successfully")
     return true
   } catch (error) {
-    console.error("Failed to initialize IndexedDB:", error)
+    console.error("[v0] Failed to initialize IndexedDB:", error)
     return false
   }
 }
