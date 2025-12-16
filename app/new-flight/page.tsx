@@ -19,12 +19,8 @@ function NewFlightContent() {
 
   const selectedField = searchParams.get("field")
   const selectedAirport = searchParams.get("airport")
-
   const selectedAircraftReg = searchParams.get("aircraftReg")
   const selectedAircraftType = searchParams.get("aircraftType")
-
-  const selectedCrewId = searchParams.get("crewId")
-  const selectedCrewName = searchParams.get("crewName")
 
   const { isReady: dbReady } = useDBReady()
   const [editingFlight, setEditingFlight] = useState<FlightLog | null>(null)
@@ -71,10 +67,6 @@ function NewFlightContent() {
     router.back()
   }
 
-  const isAirportField = selectedField === "departureIcao" || selectedField === "arrivalIcao"
-  const isAircraftField = selectedField === "aircraftReg"
-  const isCrewField = selectedField === "picId" || selectedField === "sicId"
-
   return (
     <div className="min-h-screen bg-background">
       <main className="container mx-auto px-3 py-3 pb-24">
@@ -104,13 +96,10 @@ function NewFlightContent() {
             onFlightAdded={handleFlightAdded}
             onClose={handleClose}
             editingFlight={editingFlight}
-            selectedAirportField={isAirportField ? selectedField : null}
-            selectedAirportCode={isAirportField ? selectedAirport : null}
-            selectedAircraftReg={isAircraftField ? selectedAircraftReg : null}
-            selectedAircraftType={isAircraftField ? selectedAircraftType : null}
-            selectedCrewField={isCrewField ? selectedField : null}
-            selectedCrewId={isCrewField ? selectedCrewId : null}
-            selectedCrewName={isCrewField ? selectedCrewName : null}
+            selectedAirportField={selectedField}
+            selectedAirportCode={selectedAirport}
+            selectedAircraftReg={selectedAircraftReg}
+            selectedAircraftType={selectedAircraftType}
           />
         )}
       </main>
