@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Home, Book, Plus, MapPin, Plane } from "lucide-react"
+import { Home, Book, Plus, MapPin, Plane, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -34,12 +34,12 @@ export function BottomNavbar() {
       ? "dashboard"
       : pathname === "/logbook"
         ? "logbook"
-        : pathname === "/data"
-          ? "data"
-          : pathname === "/airports" || pathname?.startsWith("/airports/")
-            ? "airports"
-            : pathname === "/aircraft" || pathname?.startsWith("/aircraft/")
-              ? "aircraft"
+        : pathname === "/airports" || pathname?.startsWith("/airports/")
+          ? "airports"
+          : pathname === "/aircraft" || pathname?.startsWith("/aircraft/")
+            ? "aircraft"
+            : pathname === "/crew" || pathname?.startsWith("/crew/")
+              ? "crew"
               : null
 
   return (
@@ -49,7 +49,7 @@ export function BottomNavbar() {
         !isVisible && "translate-y-full",
       )}
     >
-      <div className="container mx-auto px-2">
+      <div className="container mx-auto px-1">
         <div className="flex items-center justify-around h-16">
           <Link href="/">
             <Button
@@ -60,7 +60,7 @@ export function BottomNavbar() {
               )}
             >
               <Home className="h-5 w-5" />
-              <span className="text-[10px]">Home</span>
+              <span className="text-[9px]">Home</span>
             </Button>
           </Link>
 
@@ -70,7 +70,7 @@ export function BottomNavbar() {
               className={cn("flex flex-col items-center gap-0.5 h-14 px-2", activeTab === "logbook" && "text-primary")}
             >
               <Book className="h-5 w-5" />
-              <span className="text-[10px]">Logbook</span>
+              <span className="text-[9px]">Logbook</span>
             </Button>
           </Link>
 
@@ -86,7 +86,7 @@ export function BottomNavbar() {
               className={cn("flex flex-col items-center gap-0.5 h-14 px-2", activeTab === "airports" && "text-primary")}
             >
               <MapPin className="h-5 w-5" />
-              <span className="text-[10px]">Airports</span>
+              <span className="text-[9px]">Airports</span>
             </Button>
           </Link>
 
@@ -96,7 +96,17 @@ export function BottomNavbar() {
               className={cn("flex flex-col items-center gap-0.5 h-14 px-2", activeTab === "aircraft" && "text-primary")}
             >
               <Plane className="h-5 w-5" />
-              <span className="text-[10px]">Aircraft</span>
+              <span className="text-[9px]">Aircraft</span>
+            </Button>
+          </Link>
+
+          <Link href="/crew">
+            <Button
+              variant="ghost"
+              className={cn("flex flex-col items-center gap-0.5 h-14 px-2", activeTab === "crew" && "text-primary")}
+            >
+              <Users className="h-5 w-5" />
+              <span className="text-[9px]">Crew</span>
             </Button>
           </Link>
         </div>

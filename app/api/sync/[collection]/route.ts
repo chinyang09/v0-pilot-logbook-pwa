@@ -46,27 +46,26 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       // Create base record with proper ID mapping
       const transformed: Record<string, unknown> = {
         ...rest,
-        // Use localId if exists (was created from this app), otherwise generate from mongoId
         id: rest.localId || `mongo_${_id.toString()}`,
         mongoId: _id.toString(),
         syncStatus: "synced",
       }
 
-      // Ensure all required fields exist for flights collection
       if (collection === "flights") {
         // Ensure HH:MM time fields default to "00:00" if missing
         const timeFields = [
           "blockTime",
           "flightTime",
+          "nightTime",
           "p1Time",
-          "p1usTime",
           "p2Time",
+          "puTime",
           "dualTime",
           "instructorTime",
-          "nightTime",
           "ifrTime",
           "actualInstrumentTime",
           "simulatedInstrumentTime",
+          "crossCountryTime",
         ]
         for (const field of timeFields) {
           if (!transformed[field]) {
@@ -75,22 +74,61 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         }
 
         // Ensure number fields default to 0
-        if (typeof transformed.dayLandings !== "number") {
-          transformed.dayLandings = Number(transformed.dayLandings) || 0
-        }
-        if (typeof transformed.nightLandings !== "number") {
-          transformed.nightLandings = Number(transformed.nightLandings) || 0
-        }
-
-        // Ensure arrays exist
-        if (!Array.isArray(transformed.crewIds)) {
-          transformed.crewIds = []
+        const numberFields = ["dayTakeoffs", "dayLandings", "nightTakeoffs", "nightLandings", "autolands", "holds"]
+        for (const field of numberFields) {
+          if (typeof transformed[field] !== "number") {
+            transformed[field] = Number(transformed[field]) || 0
+          }
         }
 
         // Ensure string fields exist
-        if (!transformed.remarks) transformed.remarks = ""
-        if (!transformed.flightNumber) transformed.flightNumber = ""
-        if (!transformed.pilotRole) transformed.pilotRole = "FO"
+        const stringFields = [
+          "flightNumber",
+          "aircraftReg",
+          "aircraftType",
+          "departureIcao",
+          "departureIata",
+          "arrivalIcao",
+          "arrivalIata",
+          "scheduledOut",
+          "scheduledIn",
+          "outTime",
+          "offTime",
+          "onTime",
+          "inTime",
+          "picId",
+          "picName",
+          "sicId",
+          "sicName",
+          "otherCrew",
+          "remarks",
+          "endorsements",
+          "approach1",
+          "approach2",
+        ]
+        for (const field of stringFields) {
+          if (!transformed[field]) {
+            transformed[field] = ""
+          }
+        }
+
+        // Ensure pilotRole has valid default
+        if (!transformed.pilotRole) {
+          transformed.pilotRole = "SIC"
+        }
+
+        // Ensure manualOverrides object exists
+        if (!transformed.manualOverrides) {
+          transformed.manualOverrides = {}
+        }
+
+        // Ensure boolean fields
+        if (typeof transformed.ipcIcc !== "boolean") {
+          transformed.ipcIcc = false
+        }
+        if (typeof transformed.isLocked !== "boolean") {
+          transformed.isLocked = false
+        }
       }
 
       return transformed

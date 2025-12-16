@@ -26,17 +26,21 @@ export async function GET(request: NextRequest) {
       id: flight.localId || flight._id.toString(),
       mongoId: flight._id.toString(),
       date: flight.date || "",
+      flightNumber: flight.flightNumber || "",
 
-      // Aircraft reference
-      aircraftId: flight.aircraftId || "",
-      aircraftType: flight.aircraftType || "",
+      // Aircraft
       aircraftReg: flight.aircraftReg || "",
+      aircraftType: flight.aircraftType || "",
 
-      // Route with airport references
-      departureAirportId: flight.departureAirportId || "",
-      arrivalAirportId: flight.arrivalAirportId || "",
+      // Route
       departureIcao: flight.departureIcao || "",
+      departureIata: flight.departureIata || "",
       arrivalIcao: flight.arrivalIcao || "",
+      arrivalIata: flight.arrivalIata || "",
+
+      // Scheduled times
+      scheduledOut: flight.scheduledOut || "",
+      scheduledIn: flight.scheduledIn || "",
 
       // OOOI Times (UTC) - HH:MM format
       outTime: flight.outTime || "",
@@ -47,31 +51,49 @@ export async function GET(request: NextRequest) {
       // Calculated Times - HH:MM format
       blockTime: flight.blockTime || "00:00",
       flightTime: flight.flightTime || "00:00",
+      nightTime: flight.nightTime || "00:00",
 
-      // CAAS Hours Categories - HH:MM format
+      // Crew
+      picId: flight.picId || "",
+      picName: flight.picName || "",
+      sicId: flight.sicId || "",
+      sicName: flight.sicName || "",
+      otherCrew: flight.otherCrew || "",
+      pilotRole: flight.pilotRole || "SIC",
+
+      // Role times
       p1Time: flight.p1Time || "00:00",
-      p1usTime: flight.p1usTime || "00:00",
       p2Time: flight.p2Time || "00:00",
+      puTime: flight.puTime || "00:00",
       dualTime: flight.dualTime || "00:00",
       instructorTime: flight.instructorTime || "00:00",
 
-      // Conditions - HH:MM format
-      nightTime: flight.nightTime || "00:00",
+      // Takeoffs/Landings
+      dayTakeoffs: flight.dayTakeoffs || 0,
+      dayLandings: flight.dayLandings || 0,
+      nightTakeoffs: flight.nightTakeoffs || 0,
+      nightLandings: flight.nightLandings || 0,
+      autolands: flight.autolands || 0,
+
+      // Remarks
+      remarks: flight.remarks || "",
+      endorsements: flight.endorsements || "",
+
+      // Manual overrides
+      manualOverrides: flight.manualOverrides || {},
+
+      // Instrument
       ifrTime: flight.ifrTime || "00:00",
       actualInstrumentTime: flight.actualInstrumentTime || "00:00",
       simulatedInstrumentTime: flight.simulatedInstrumentTime || "00:00",
+      crossCountryTime: flight.crossCountryTime || "00:00",
+      approach1: flight.approach1 || "",
+      approach2: flight.approach2 || "",
+      holds: flight.holds || 0,
+      ipcIcc: flight.ipcIcc || false,
 
-      // Landings
-      dayLandings: flight.dayLandings || 0,
-      nightLandings: flight.nightLandings || 0,
-
-      // Crew
-      crewIds: flight.crewIds || [],
-      pilotRole: flight.pilotRole || "FO",
-
-      // Additional
-      flightNumber: flight.flightNumber || "",
-      remarks: flight.remarks || "",
+      // Lock status
+      isLocked: flight.isLocked || false,
 
       // Metadata
       createdAt: flight.createdAt || Date.now(),

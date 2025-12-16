@@ -22,7 +22,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { useAirportDatabase } from "@/hooks/use-indexed-db"
 import { getAirportByICAO } from "@/lib/airport-database"
 import { calculateTimesFromOOOI, isNight } from "@/lib/night-time-calculator"
-import { Plane, Save, X, MapPin, ChevronDown, ChevronUp, Edit3 } from "lucide-react"
+import { Plane, Save, X, MapPin, ChevronDown, ChevronUp, Edit3, Users } from "lucide-react"
 
 const FORM_STORAGE_KEY = "flight-form-draft"
 
@@ -34,6 +34,9 @@ interface FlightFormProps {
   selectedAirportCode?: string | null
   selectedAircraftReg?: string | null
   selectedAircraftType?: string | null
+  selectedCrewField?: string | null
+  selectedCrewId?: string | null
+  selectedCrewName?: string | null
 }
 
 interface FormData {
@@ -64,13 +67,11 @@ interface FormData {
   autolands: number
   remarks: string
   endorsements: string
-  // Manual overrides
   manualNightTime: string
   manualIfrTime: string
   manualActualInstrumentTime: string
   manualCrossCountryTime: string
   useManualOverrides: boolean
-  // Additional fields
   ifrTime: string
   actualInstrumentTime: string
   simulatedInstrumentTime: string
@@ -132,6 +133,9 @@ export function FlightForm({
   selectedAirportCode,
   selectedAircraftReg,
   selectedAircraftType,
+  selectedCrewField,
+  selectedCrewId,
+  selectedCrewName,
 }: FlightFormProps) {
   const router = useRouter()
   const { airports } = useAirportDatabase()
@@ -231,10 +235,8 @@ export function FlightForm({
         return updated
       })
 
-      // Save to recently used
       addRecentlyUsedAirport(selectedAirportCode)
 
-      // Clear URL params
       const url = new URL(window.location.href)
       url.searchParams.delete("field")
       url.searchParams.delete("airport")
@@ -242,6 +244,7 @@ export function FlightForm({
     }
   }, [selectedAirportField, selectedAirportCode, airports])
 
+  // Handle aircraft selection from picker
   useEffect(() => {
     if (selectedAircraftReg) {
       setFormData((prev) => ({
@@ -250,10 +253,8 @@ export function FlightForm({
         aircraftType: selectedAircraftType || prev.aircraftType,
       }))
 
-      // Save to recently used
       addRecentlyUsedAircraft(selectedAircraftReg)
 
-      // Clear URL params
       const url = new URL(window.location.href)
       url.searchParams.delete("field")
       url.searchParams.delete("aircraftReg")
@@ -261,6 +262,28 @@ export function FlightForm({
       window.history.replaceState({}, "", url.toString())
     }
   }, [selectedAircraftReg, selectedAircraftType])
+
+  useEffect(() => {
+    if (selectedCrewField && selectedCrewId) {
+      setFormData((prev) => {
+        const updated = { ...prev }
+        if (selectedCrewField === "picId") {
+          updated.picId = selectedCrewId
+          updated.picName = selectedCrewName || ""
+        } else if (selectedCrewField === "sicId") {
+          updated.sicId = selectedCrewId
+          updated.sicName = selectedCrewName || ""
+        }
+        return updated
+      })
+
+      const url = new URL(window.location.href)
+      url.searchParams.delete("field")
+      url.searchParams.delete("crewId")
+      url.searchParams.delete("crewName")
+      window.history.replaceState({}, "", url.toString())
+    }
+  }, [selectedCrewField, selectedCrewId, selectedCrewName])
 
   // Save form data to sessionStorage whenever it changes
   useEffect(() => {
@@ -327,17 +350,14 @@ export function FlightForm({
     router.push(`/aircraft?select=true&returnTo=/new-flight&field=aircraftReg`)
   }
 
-  // Navigate to airport picker
   const openAirportPicker = (field: "departureIcao" | "arrivalIcao") => {
     sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData))
     router.push(`/airports?select=true&returnTo=/new-flight&field=${field}`)
   }
 
-  // Get personnel name by ID
-  const getPersonnelName = (id: string): string => {
-    if (id === "self") return "Self"
-    const person = personnel.find((p) => p.id === id)
-    return person?.name || ""
+  const openCrewPicker = (field: "picId" | "sicId") => {
+    sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData))
+    router.push(`/crew?select=true&return=/new-flight&field=${field}`)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -345,7 +365,6 @@ export function FlightForm({
     setIsSubmitting(true)
 
     try {
-      // Build manual overrides object
       const manualOverrides: FlightLog["manualOverrides"] = {}
       if (formData.useManualOverrides) {
         if (formData.manualNightTime) manualOverrides.nightTime = formData.manualNightTime
@@ -355,7 +374,6 @@ export function FlightForm({
         if (formData.manualCrossCountryTime) manualOverrides.crossCountryTime = formData.manualCrossCountryTime
       }
 
-      // Use manual override values if set, otherwise use calculated
       const nightTime =
         formData.useManualOverrides && formData.manualNightTime ? formData.manualNightTime : calculatedTimes.nightTime
 
@@ -378,12 +396,11 @@ export function FlightForm({
         flightTime: calculatedTimes.flightTime || "00:00",
         nightTime: nightTime || "00:00",
         picId: formData.picId,
-        picName: formData.picId === "self" ? "Self" : getPersonnelName(formData.picId),
+        picName: formData.picName,
         sicId: formData.sicId,
-        sicName: formData.sicId === "self" ? "Self" : getPersonnelName(formData.sicId),
+        sicName: formData.sicName,
         otherCrew: formData.otherCrew,
         pilotRole: formData.pilotRole,
-        // Calculate role times based on pilotRole
         p1Time: ["PIC", "P1", "PF"].includes(formData.pilotRole) ? calculatedTimes.flightTime || "00:00" : "00:00",
         p2Time: ["SIC", "P2", "PM"].includes(formData.pilotRole) ? calculatedTimes.flightTime || "00:00" : "00:00",
         puTime: formData.pilotRole === "PU" ? calculatedTimes.flightTime || "00:00" : "00:00",
@@ -420,10 +437,8 @@ export function FlightForm({
         savedFlight = await addFlight(flightData)
       }
 
-      // Clear form storage
       sessionStorage.removeItem(FORM_STORAGE_KEY)
 
-      // Save airports to recently used
       if (formData.departureIcao) await addRecentlyUsedAirport(formData.departureIcao)
       if (formData.arrivalIcao) await addRecentlyUsedAirport(formData.arrivalIcao)
       if (formData.aircraftReg) await addRecentlyUsedAircraft(formData.aircraftReg)
@@ -631,49 +646,38 @@ export function FlightForm({
             </div>
           </div>
 
-          {/* Crew Selection */}
           <div className="grid grid-cols-2 gap-2">
             <div>
               <Label className="text-xs text-muted-foreground">PIC/P1</Label>
-              <Select
-                value={formData.picId}
-                onValueChange={(value) =>
-                  setFormData((prev) => ({ ...prev, picId: value, picName: getPersonnelName(value) }))
-                }
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full h-9 justify-start font-normal bg-transparent"
+                onClick={() => openCrewPicker("picId")}
               >
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Select PIC" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="self">Self</SelectItem>
-                  {personnel.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                {formData.picName ? (
+                  <span className="truncate">{formData.picName}</span>
+                ) : (
+                  <span className="text-muted-foreground">Select PIC</span>
+                )}
+              </Button>
             </div>
             <div>
               <Label className="text-xs text-muted-foreground">SIC/P2</Label>
-              <Select
-                value={formData.sicId}
-                onValueChange={(value) =>
-                  setFormData((prev) => ({ ...prev, sicId: value, sicName: getPersonnelName(value) }))
-                }
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full h-9 justify-start font-normal bg-transparent"
+                onClick={() => openCrewPicker("sicId")}
               >
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Select SIC" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="self">Self</SelectItem>
-                  {personnel.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                {formData.sicName ? (
+                  <span className="truncate">{formData.sicName}</span>
+                ) : (
+                  <span className="text-muted-foreground">Select SIC</span>
+                )}
+              </Button>
             </div>
           </div>
 

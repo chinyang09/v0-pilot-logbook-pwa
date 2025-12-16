@@ -91,16 +91,21 @@ export interface Airport {
 }
 
 export interface Personnel {
-  id: string // Matches FlightLog.personnelIds
-  firstName: string
-  lastName: string
-  name: string // firstName + lastName combined
-  employeeId?: string
-  licenseNumber?: string
-  role: "CAPT" | "FO" | "INSTRUCTOR" | "STUDENT" | "OTHER"
-  company?: string
-  email?: string
-  notes?: string
+  id: string
+  name: string
+  crewId?: string
+  organization?: string
+  roles?: ("PIC" | "SIC" | "Instructor" | "Examiner")[]
+  licenceNumber?: string
+  contact?: {
+    email?: string
+    phone?: string
+  }
+  comment?: string
+  isMe?: boolean
+  favorite?: boolean
+  defaultPIC?: boolean
+  defaultSIC?: boolean
   createdAt: number
   updatedAt?: number
   syncStatus: "synced" | "pending" | "error"
@@ -418,13 +423,10 @@ export async function addCustomAirport(airport: Omit<Airport, "icao"> & { icao: 
 }
 
 // Personnel operations
-export async function addPersonnel(
-  personnel: Omit<Personnel, "id" | "createdAt" | "syncStatus" | "name">,
-): Promise<Personnel> {
+export async function addPersonnel(personnel: Omit<Personnel, "id" | "createdAt" | "syncStatus">): Promise<Personnel> {
   const newPersonnel: Personnel = {
     ...personnel,
     id: crypto.randomUUID(),
-    name: `${personnel.firstName} ${personnel.lastName}`.trim(),
     createdAt: Date.now(),
     syncStatus: "pending",
   }
@@ -442,7 +444,6 @@ export async function updatePersonnel(id: string, updates: Partial<Personnel>): 
   const updatedPersonnel: Personnel = {
     ...person,
     ...updates,
-    name: `${updates.firstName || person.firstName} ${updates.lastName || person.lastName}`.trim(),
     updatedAt: Date.now(),
     syncStatus: "pending",
   }
@@ -470,22 +471,24 @@ export async function getPersonnelById(id: string): Promise<Personnel | undefine
   return db.personnel.get(id)
 }
 
-export async function getPersonnelByRole(role: Personnel["role"]): Promise<Personnel[]> {
-  return db.personnel.where("role").equals(role).toArray()
+export async function getPersonnelByRole(role: Personnel["roles"][number]): Promise<Personnel[]> {
+  return db.personnel.where("roles").equals(role).toArray()
 }
 
 export async function upsertPersonnelFromServer(serverPersonnel: Personnel): Promise<void> {
   const normalized: Personnel = {
     id: serverPersonnel.id,
-    firstName: serverPersonnel.firstName || "",
-    lastName: serverPersonnel.lastName || "",
-    name: `${serverPersonnel.firstName || ""} ${serverPersonnel.lastName || ""}`.trim(),
-    employeeId: serverPersonnel.employeeId,
-    licenseNumber: serverPersonnel.licenseNumber,
-    role: serverPersonnel.role || "OTHER",
-    company: serverPersonnel.company,
-    email: serverPersonnel.email,
-    notes: serverPersonnel.notes,
+    name: serverPersonnel.name || "",
+    crewId: serverPersonnel.crewId,
+    organization: serverPersonnel.organization,
+    roles: serverPersonnel.roles || [],
+    licenceNumber: serverPersonnel.licenceNumber,
+    contact: serverPersonnel.contact || {},
+    comment: serverPersonnel.comment,
+    isMe: serverPersonnel.isMe,
+    favorite: serverPersonnel.favorite,
+    defaultPIC: serverPersonnel.defaultPIC,
+    defaultSIC: serverPersonnel.defaultSIC,
     createdAt: serverPersonnel.createdAt || Date.now(),
     updatedAt: serverPersonnel.updatedAt,
     syncStatus: "synced",

@@ -61,7 +61,7 @@ function SwipeableFlightCard({
   const startY = useRef(0)
   const isHorizontalSwipe = useRef<boolean | null>(null)
 
-  const isLocked = (flight as any).isLocked || false
+  const isLocked = flight.isLocked || false
 
   const handleTouchStart = (e: React.TouchEvent) => {
     startX.current = e.touches[0].clientX
@@ -118,9 +118,7 @@ function SwipeableFlightCard({
   const totalDayLandings = flight.dayLandings || 0
   const totalNightLandings = flight.nightLandings || 0
 
-  // Get crew names excluding self
   const crewNames = useMemo(() => {
-    // Use picName/sicName if available, otherwise lookup from personnelIds
     const names: string[] = []
 
     if (flight.picName && flight.picName !== "Self") {
@@ -133,18 +131,8 @@ function SwipeableFlightCard({
       names.push(flight.otherCrew)
     }
 
-    // Fallback to personnelIds lookup if names not stored
-    if (names.length === 0 && flight.personnelIds && flight.personnelIds.length > 0) {
-      flight.personnelIds.forEach((id) => {
-        const person = personnel.find((p) => p.id === id)
-        if (person && person.name !== "Self") {
-          names.push(person.name)
-        }
-      })
-    }
-
     return names
-  }, [flight.picName, flight.sicName, flight.otherCrew, flight.personnelIds, personnel])
+  }, [flight.picName, flight.sicName, flight.otherCrew])
 
   return (
     <div className="relative overflow-hidden rounded-lg">
@@ -196,7 +184,7 @@ function SwipeableFlightCard({
       >
         <CardContent className="p-1">
           <div className="flex items-start gap-2">
-            {/* (1) Left: Even larger day number with MMM YY below */}
+            {/* Left: Day number with MMM YY below */}
             <div className="flex flex-col items-center justify-start shrink-0 w-16">
               <div className="text-6xl font-bold leading-none tracking-tight">{day}</div>
               <div className="text-base text-muted-foreground mt-0.5 tracking-wide">
@@ -206,9 +194,9 @@ function SwipeableFlightCard({
 
             {/* Right side: All flight details */}
             <div className="flex-1 min-w-0 flex flex-col justify-between">
-              {/* (2) + (3) Top section: Times and airports (height matches day number) */}
+              {/* Top section: Times and airports */}
               <div className="flex flex-col">
-                {/* (2) OUT time —— total time —— IN time */}
+                {/* OUT time — total time — IN time */}
                 <div className="flex items-center justify-between gap-1">
                   <span className="text-base font-semibold leading-tight">
                     {flight.outTime?.slice(0, 5) || "--:--"}
@@ -223,14 +211,14 @@ function SwipeableFlightCard({
                   <span className="text-base font-semibold leading-tight">{flight.inTime?.slice(0, 5) || "--:--"}</span>
                 </div>
 
-                {/* (3) FROM airport —— TO airport (half size of day number = text-2xl) */}
+                {/* FROM airport — TO airport */}
                 <div className="flex items-center justify-between mt-0">
                   <span className="text-2xl font-bold leading-tight tracking-tight">{flight.departureIcao}</span>
                   <span className="text-2xl font-bold leading-tight tracking-tight">{flight.arrivalIcao}</span>
                 </div>
               </div>
 
-              {/* (4) Flight number, aircraft reg, aircraft type (inline with MMM YY) */}
+              {/* Flight number, aircraft reg, aircraft type */}
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground leading-tight mt-0.5">
                 <span>{flight.flightNumber || "----"}</span>
                 <span>•</span>
@@ -239,14 +227,14 @@ function SwipeableFlightCard({
                 <span>{flight.aircraftType}</span>
               </div>
 
-              {/* (5) & (6) Crew names and day/night indicators (inline) */}
+              {/* Crew names and day/night indicators */}
               <div className="flex items-center justify-between mt-0.5">
-                {/* (5) Crew names other than self */}
+                {/* Crew names other than self */}
                 <div className="text-xs text-muted-foreground truncate flex-1 leading-tight">
                   {crewNames.length > 0 ? crewNames.join(", ") : ""}
                 </div>
 
-                {/* (6) Day/night indicator */}
+                {/* Day/night indicator */}
                 <div className="flex items-center gap-1.5 text-xs font-medium shrink-0 ml-2">
                   {totalDayLandings > 0 && (
                     <div className="flex items-center gap-0.5">
@@ -296,7 +284,6 @@ export function FlightList({
 
     observerRef.current = new IntersectionObserver(
       (entries) => {
-        // Find the topmost visible flight
         let topmostFlight: FlightLog | null = null
         let topmostY = Number.POSITIVE_INFINITY
 
@@ -383,7 +370,7 @@ export function FlightList({
 
   const handleToggleLock = async (flight: FlightLog) => {
     const { updateFlight } = await import("@/lib/indexed-db")
-    await updateFlight(flight.id, { isLocked: !(flight as any).isLocked })
+    await updateFlight(flight.id, { isLocked: !flight.isLocked })
     onDeleted?.() // Refresh list
   }
 
