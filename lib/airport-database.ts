@@ -5,22 +5,25 @@
  */
 
 export interface AirportData {
+  id: number
   icao: string
   iata: string
   name: string
   city: string
-  state: string
   country: string
-  elevation: number
-  lat: number
-  lon: number
-  tz: string // e.g., "America/Los_Angeles"
-  timezone: string // e.g., "UTC-8" - actual UTC offset for calculations
+  latitude: number
+  longitude: number
+  altitude: number
+  timezone: number // UTC offset as number
+  dst: string
+  tz: string // Timezone name e.g., "America/Los_Angeles"
+  type: string
+  source: string
 }
 
 const AIRPORT_CDN_URL = "https://cdn.jsdelivr.net/npm/@nwpr/airport-codes@3.0.3/dist/airports.json"
 const CACHE_KEY = "airport-database-cache"
-const CACHE_VERSION = "1.0"
+const CACHE_VERSION = "2.0"
 
 /**
  * Load airports from CDN and normalize to our format
@@ -32,24 +35,26 @@ async function loadAirportsFromCDN(): Promise<AirportData[]> {
 
     const data = await response.json()
 
-    // Normalize the airport data
     return data
       .map((airport: any) => ({
+        id: airport.id || 0,
         icao: airport.icao || "",
         iata: airport.iata || "",
         name: airport.name || "",
         city: airport.city || "",
-        state: airport.state || "",
         country: airport.country || "",
-        elevation: airport.elevation || 0,
-        lat: airport.lat || 0,
-        lon: airport.lon || 0,
+        latitude: airport.latitude || 0,
+        longitude: airport.longitude || 0,
+        altitude: airport.altitude || 0,
+        timezone: airport.timezone || 0,
+        dst: airport.dst || "",
         tz: airport.tz || "UTC",
-        timezone: airport.timezone || "UTC+0", // Actual UTC offset
+        type: airport.type || "",
+        source: airport.source || "",
       }))
       .filter((a: AirportData) => a.icao) // Only keep airports with ICAO codes
   } catch (error) {
-    console.error("[v0] Failed to load airports from CDN:", error)
+    console.error("[Airport DB] Failed to load airports from CDN:", error)
     return []
   }
 }
@@ -66,7 +71,7 @@ export async function getAirportDatabase(): Promise<AirportData[]> {
     try {
       return JSON.parse(cached)
     } catch (error) {
-      console.error("[v0] Failed to parse cached airports:", error)
+      console.error("[Airport DB] Failed to parse cached airports:", error)
     }
   }
 
@@ -78,7 +83,7 @@ export async function getAirportDatabase(): Promise<AirportData[]> {
     localStorage.setItem(CACHE_KEY, JSON.stringify(airports))
     localStorage.setItem(`${CACHE_KEY}-version`, CACHE_VERSION)
   } catch (error) {
-    console.error("[v0] Failed to cache airports:", error)
+    console.error("[Airport DB] Failed to cache airports:", error)
   }
 
   return airports

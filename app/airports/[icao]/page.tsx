@@ -82,8 +82,7 @@ export default function AirportDetailPage() {
             <div className="flex items-center gap-1 text-sm text-muted-foreground">
               <MapPin className="h-4 w-4" />
               <span>
-                {airport.city}
-                {airport.state && `, ${airport.state}`} - {airport.country}
+                {airport.city} - {airport.country}
               </span>
             </div>
           </div>
@@ -97,7 +96,7 @@ export default function AirportDetailPage() {
               <div className="flex-1">
                 <div className="text-sm font-medium text-foreground">Coordinates</div>
                 <div className="text-sm text-muted-foreground">
-                  {airport.lat.toFixed(6)}°, {airport.lon.toFixed(6)}°
+                  {airport.latitude.toFixed(6)}°, {airport.longitude.toFixed(6)}°
                 </div>
               </div>
             </div>
@@ -106,7 +105,7 @@ export default function AirportDetailPage() {
               <Mountain className="h-4 w-4 text-muted-foreground mt-0.5" />
               <div className="flex-1">
                 <div className="text-sm font-medium text-foreground">Elevation</div>
-                <div className="text-sm text-muted-foreground">{airport.elevation} ft</div>
+                <div className="text-sm text-muted-foreground">{airport.altitude} ft</div>
               </div>
             </div>
 
@@ -116,10 +115,20 @@ export default function AirportDetailPage() {
                 <div className="text-sm font-medium text-foreground">Timezone</div>
                 <div className="text-sm text-muted-foreground">
                   {airport.tz}
-                  {airport.timezone && ` (${airport.timezone})`}
+                  {airport.timezone !== undefined && ` (UTC${airport.timezone >= 0 ? "+" : ""}${airport.timezone})`}
                 </div>
               </div>
             </div>
+
+            {airport.dst && (
+              <div className="flex items-start gap-2">
+                <Clock className="h-4 w-4 text-muted-foreground mt-0.5" />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-foreground">DST</div>
+                  <div className="text-sm text-muted-foreground">{airport.dst}</div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </main>

@@ -1,239 +1,242 @@
-/**
- * Aircraft Database Loader
- * Loads aircraft data from CDN gzip file and caches in IndexedDB via Dexie
- * Provides search and lookup functionality
- */
+// and fixing registration key issue for aircraft with null registrations
 
-import pako from "pako"
 import { db } from "./indexed-db"
 
 export interface AircraftData {
-  icao24: string // Unique transponder code
-  registration: string
-  manufacturericao: string
-  manufacturername: string
-  model: string
-  typecode: string
-  serialnumber: string
-  linenumber: string
-  icaoaircrafttype: string
-  operator: string
-  operatorcallsign: string
-  operatoricao: string
-  operatoriata: string
-  owner: string
-  testreg: string
-  registered: string
-  reguntil: string
-  status: string
-  built: string
-  firstflightdate: string
-  seatconfiguration: string
-  engines: string
-  modes: string
-  adsb: string
-  acars: string
-  notes: string
-  categoryDescription: string
+  icao24: string
+  reg: string | null
+  icaotype: string | null
+  short_type: string | null
 }
 
-// Normalized aircraft for display and search
 export interface NormalizedAircraft {
   registration: string
   icao24: string
-  manufacturer: string
-  model: string
   typecode: string
-  operator: string
-  owner: string
-  serial: string
-  built: string
-  status: string
-  category: string
+  shortType: string
 }
 
-const AIRCRAFT_CDN_URL = "https://cdn.jsdelivr.net/gh/chinyang09/Aircraft-Database@master/basic-ac-db.json.gz"
+const AIRCRAFT_CDN_URL =
+  "https://cdn.jsdelivr.net/gh/chinyang09/Aircraft-Database@v2025.12.02/data/aircraft-slim.json.gz"
+const METADATA_URL = "https://cdn.jsdelivr.net/gh/chinyang09/Aircraft-Database@v2025.12.02/data/metadata.json"
 const CACHE_VERSION_KEY = "aircraft-database-version"
-const CACHE_VERSION = "1.4"
+const CACHE_VERSION = "2025.12.02-slim-v4"
 
-/**
- * Decompress gzip data using pako library
- */
-function decompressGzip(compressedData: ArrayBuffer): string {
-  const uint8Array = new Uint8Array(compressedData)
+interface AircraftMetadata {
+  dataset: string
+  version: string
+  generatedAt: string
+  source: string
+  format: string
+  records: number
+  file: string
+  sha256: string
+}
 
-  console.log("[Aircraft DB] Compressed data size:", uint8Array.length, "bytes")
-  console.log("[Aircraft DB] Magic bytes:", uint8Array[0]?.toString(16), uint8Array[1]?.toString(16))
+let metadata: AircraftMetadata | null = null
 
-  try {
-    const decompressed = pako.ungzip(uint8Array)
-    console.log("[Aircraft DB] Decompressed size:", decompressed.length, "bytes")
+type ProgressCallback = (progress: { stage: string; percent: number; count?: number }) => void
+let progressCallback: ProgressCallback | null = null
 
-    // Use TextDecoder for proper UTF-8 decoding
-    const decoder = new TextDecoder("utf-8")
-    const text = decoder.decode(decompressed)
+export function setProgressCallback(cb: ProgressCallback | null): void {
+  progressCallback = cb
+}
 
-    console.log("[Aircraft DB] Decoded text length:", text.length)
-    return text
-  } catch (e) {
-    console.error("[Aircraft DB] Pako ungzip failed:", e)
-    throw e
+function reportProgress(stage: string, percent: number, count?: number): void {
+  if (progressCallback) {
+    progressCallback({ stage, percent, count })
   }
 }
 
-/**
- * Load aircraft from CDN gzip file
- */
-async function loadAircraftFromCDN(): Promise<AircraftData[]> {
-  console.log("[Aircraft DB] Loading from CDN...")
+async function loadMetadata(): Promise<AircraftMetadata | null> {
+  try {
+    const response = await fetch(METADATA_URL, { cache: "default" })
+    if (!response.ok) return null
+    return await response.json()
+  } catch {
+    return null
+  }
+}
 
-  const response = await fetch(AIRCRAFT_CDN_URL, {
-    cache: "no-cache",
-  })
+async function decompressGzip(compressedData: ArrayBuffer): Promise<string> {
+  const uint8Array = new Uint8Array(compressedData)
 
+  // Verify gzip magic bytes (0x1f 0x8b)
+  if (uint8Array[0] !== 0x1f || uint8Array[1] !== 0x8b) {
+    const decoder = new TextDecoder("utf-8")
+    return decoder.decode(uint8Array)
+  }
+
+  // Dynamic import pako
+  const pako = await import("pako")
+  const decompressed = pako.ungzip(uint8Array)
+  const decoder = new TextDecoder("utf-8")
+  return decoder.decode(decompressed)
+}
+
+function* parseNDJSONChunked(text: string, chunkSize = 10000): Generator<AircraftData[]> {
+  const lines = text.split("\n")
+  let batch: AircraftData[] = []
+  let totalParsed = 0
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (!line) continue
+
+    try {
+      const obj = JSON.parse(line) as AircraftData
+      if (obj && obj.icao24) {
+        batch.push(obj)
+        totalParsed++
+      }
+    } catch {
+      // Skip invalid lines
+    }
+
+    if (batch.length >= chunkSize) {
+      yield batch
+      reportProgress("Parsing", Math.round((i / lines.length) * 100), totalParsed)
+      batch = []
+    }
+  }
+
+  if (batch.length > 0) {
+    yield batch
+  }
+}
+
+async function loadAndStoreAircraftFromCDN(): Promise<number> {
+  reportProgress("Checking metadata", 0)
+  metadata = await loadMetadata()
+
+  reportProgress("Downloading", 5)
+  const response = await fetch(AIRCRAFT_CDN_URL, { cache: "default" })
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${response.statusText}`)
   }
 
-  // Get raw bytes
+  reportProgress("Downloading", 20)
   const arrayBuffer = await response.arrayBuffer()
-  console.log("[Aircraft DB] Downloaded", (arrayBuffer.byteLength / 1024 / 1024).toFixed(2), "MB")
 
-  // Check if data is gzipped by looking at magic bytes (1f 8b)
-  const uint8 = new Uint8Array(arrayBuffer)
-  const isGzipped = uint8[0] === 0x1f && uint8[1] === 0x8b
+  reportProgress("Decompressing", 30)
+  const ndjsonText = await decompressGzip(arrayBuffer)
 
-  let jsonText: string
-
-  if (isGzipped) {
-    console.log("[Aircraft DB] Data is gzipped, decompressing...")
-    jsonText = decompressGzip(arrayBuffer)
-  } else {
-    console.log("[Aircraft DB] Data is not gzipped, parsing directly...")
-    const decoder = new TextDecoder("utf-8")
-    jsonText = decoder.decode(arrayBuffer)
-  }
-
-  // Clean up JSON text
-  jsonText = jsonText.trim()
-  // Remove BOM if present
-  if (jsonText.charCodeAt(0) === 0xfeff) {
-    jsonText = jsonText.slice(1)
-  }
-
-  console.log("[Aircraft DB] Parsing JSON...")
-  const data = JSON.parse(jsonText)
-
-  // Handle both array and object formats
-  const aircraftArray = Array.isArray(data) ? data : Object.values(data)
-
-  console.log("[Aircraft DB] Loaded", aircraftArray.length, "aircraft records")
-  return aircraftArray as AircraftData[]
-}
-
-/**
- * Store aircraft data in Dexie IndexedDB
- */
-async function storeInDexie(aircraft: AircraftData[]): Promise<void> {
-  console.log("[Aircraft DB] Storing in Dexie...")
-
-  // Clear existing data
   await db.aircraftDatabase.clear()
 
-  // Store each aircraft as JSON string (to handle large dataset efficiently)
-  const batchSize = 1000
-  let stored = 0
+  reportProgress("Parsing", 40)
+  let totalStored = 0
 
-  for (let i = 0; i < aircraft.length; i += batchSize) {
-    const batch = aircraft.slice(i, i + batchSize)
+  for (const batch of parseNDJSONChunked(ndjsonText, 10000)) {
     const records = batch
-      .filter((ac) => ac.registration) // Only store aircraft with registration
+      .filter((ac) => ac.icao24)
       .map((ac) => ({
-        registration: ac.registration.toUpperCase(),
+        registration: ac.icao24.toUpperCase(), // Use icao24 as the key
         data: JSON.stringify(ac),
       }))
 
     await db.aircraftDatabase.bulkPut(records)
-    stored += records.length
+    totalStored += records.length
+
+    reportProgress("Storing", 40 + Math.round((totalStored / 615656) * 55), totalStored)
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
   }
 
   localStorage.setItem(CACHE_VERSION_KEY, CACHE_VERSION)
-  console.log("[Aircraft DB] Stored", stored, "aircraft in Dexie")
+  reportProgress("Complete", 100, totalStored)
+
+  return totalStored
 }
 
-/**
- * Load aircraft data from Dexie IndexedDB
- */
-async function loadFromDexie(): Promise<AircraftData[]> {
-  console.log("[Aircraft DB] Loading from Dexie cache...")
-
-  const records = await db.aircraftDatabase.toArray()
-  const aircraft = records.map((r) => JSON.parse(r.data) as AircraftData)
-
-  console.log("[Aircraft DB] Loaded", aircraft.length, "aircraft from Dexie")
-  return aircraft
+async function getCachedCount(): Promise<number> {
+  try {
+    return await db.aircraftDatabase.count()
+  } catch {
+    return 0
+  }
 }
 
-/**
- * Check if we have cached aircraft data
- */
 function hasCachedData(): boolean {
   return localStorage.getItem(CACHE_VERSION_KEY) === CACHE_VERSION
 }
 
-// In-memory cache for fast searching
 let aircraftCache: AircraftData[] | null = null
 let loadingPromise: Promise<AircraftData[]> | null = null
+let isInitializing = false
 
-/**
- * Initialize and get aircraft database
- */
+export async function quickInit(): Promise<boolean> {
+  if (aircraftCache && aircraftCache.length > 0) return true
+
+  if (hasCachedData()) {
+    const count = await getCachedCount()
+    if (count > 500000) {
+      return true
+    }
+  }
+  return false
+}
+
+export async function loadIntoMemory(): Promise<number> {
+  if (aircraftCache && aircraftCache.length > 0) {
+    return aircraftCache.length
+  }
+
+  reportProgress("Loading from cache", 0)
+  const records = await db.aircraftDatabase.toArray()
+
+  aircraftCache = records
+    .map((r) => {
+      try {
+        return JSON.parse(r.data) as AircraftData
+      } catch {
+        return null
+      }
+    })
+    .filter((a): a is AircraftData => a !== null)
+
+  reportProgress("Ready", 100, aircraftCache.length)
+  return aircraftCache.length
+}
+
 export async function getAircraftDatabase(): Promise<AircraftData[]> {
-  // Return from memory cache if available
   if (aircraftCache && aircraftCache.length > 0) {
     return aircraftCache
   }
 
-  // If already loading, wait for that promise
   if (loadingPromise) {
     return loadingPromise
   }
 
   loadingPromise = (async () => {
     try {
-      // Try loading from Dexie first
       if (hasCachedData()) {
-        const cached = await loadFromDexie()
-        if (cached.length > 0) {
-          aircraftCache = cached
-          return cached
+        const count = await getCachedCount()
+        if (count > 500000) {
+          await loadIntoMemory()
+          if (aircraftCache && aircraftCache.length > 0) {
+            return aircraftCache
+          }
         }
       }
 
-      // Load from CDN
-      console.log("[Aircraft DB] No valid cache, loading from CDN...")
-      const aircraft = await loadAircraftFromCDN()
+      if (!isInitializing) {
+        isInitializing = true
+        await loadAndStoreAircraftFromCDN()
+        await loadIntoMemory()
+        isInitializing = false
+      }
 
-      // Store in Dexie for offline use
-      await storeInDexie(aircraft)
-
-      aircraftCache = aircraft
-      return aircraft
+      return aircraftCache || []
     } catch (error) {
       console.error("[Aircraft DB] Failed to initialize:", error)
+      isInitializing = false
 
-      // Try loading from Dexie as fallback
       try {
-        const cached = await loadFromDexie()
-        if (cached.length > 0) {
-          aircraftCache = cached
-          return cached
-        }
+        await loadIntoMemory()
+        return aircraftCache || []
       } catch {
-        // Ignore fallback errors
+        return []
       }
-
-      return []
     } finally {
       loadingPromise = null
     }
@@ -242,140 +245,90 @@ export async function getAircraftDatabase(): Promise<AircraftData[]> {
   return loadingPromise
 }
 
-/**
- * Normalize aircraft data for display
- */
 export function normalizeAircraft(aircraft: AircraftData): NormalizedAircraft {
   return {
-    registration: aircraft.registration || "",
+    registration: aircraft.reg || "",
     icao24: aircraft.icao24 || "",
-    manufacturer: aircraft.manufacturername || aircraft.manufacturericao || "",
-    model: aircraft.model || "",
-    typecode: aircraft.typecode || "",
-    operator: aircraft.operator || "",
-    owner: aircraft.owner || "",
-    serial: aircraft.serialnumber || "",
-    built: aircraft.built || "",
-    status: aircraft.status || "",
-    category: aircraft.categoryDescription || aircraft.icaoaircrafttype || "",
+    typecode: aircraft.icaotype || "",
+    shortType: aircraft.short_type || "",
   }
 }
 
-/**
- * Search aircraft by registration, typecode, model, or manufacturer
- */
 export function searchAircraft(aircraft: AircraftData[], query: string, limit = 50): NormalizedAircraft[] {
   if (!query || query.length < 2) return []
 
-  const q = query.toLowerCase().trim()
+  const q = query.toUpperCase().trim()
   const matches: Array<{ aircraft: AircraftData; score: number }> = []
 
   for (const ac of aircraft) {
-    if (!ac.registration) continue
-
     let score = 0
-    const reg = (ac.registration || "").toLowerCase()
-    const typecode = (ac.typecode || "").toLowerCase()
-    const model = (ac.model || "").toLowerCase()
-    const manufacturer = (ac.manufacturername || "").toLowerCase()
-    const operator = (ac.operator || "").toLowerCase()
-    const icao24 = (ac.icao24 || "").toLowerCase()
+    const reg = (ac.reg || "").toUpperCase()
+    const icaotype = (ac.icaotype || "").toUpperCase()
+    const icao24 = (ac.icao24 || "").toUpperCase()
+    const shortType = (ac.short_type || "").toUpperCase()
 
-    // Exact registration match (highest priority)
-    if (reg === q) {
+    if (reg && reg === q) {
       score = 1000
-    }
-    // Registration starts with query
-    else if (reg.startsWith(q)) {
+    } else if (reg && reg.startsWith(q)) {
       score = 900
-    }
-    // Registration contains query
-    else if (reg.includes(q)) {
+    } else if (reg && reg.includes(q)) {
       score = 800
-    }
-    // Exact typecode match
-    else if (typecode === q) {
+    } else if (icaotype === q) {
       score = 700
-    }
-    // Typecode starts with query
-    else if (typecode.startsWith(q)) {
+    } else if (icaotype && icaotype.startsWith(q)) {
       score = 600
-    }
-    // ICAO24 match
-    else if (icao24 === q || icao24.startsWith(q)) {
+    } else if (icao24 === q) {
       score = 550
-    }
-    // Model contains query
-    else if (model.includes(q)) {
+    } else if (icao24 && icao24.startsWith(q)) {
       score = 500
-    }
-    // Manufacturer contains query
-    else if (manufacturer.includes(q)) {
+    } else if (shortType === q || (shortType && shortType.includes(q))) {
       score = 400
-    }
-    // Operator contains query
-    else if (operator.includes(q)) {
-      score = 300
     }
 
     if (score > 0) {
       matches.push({ aircraft: ac, score })
     }
 
-    // Early exit for performance
-    if (matches.length > limit * 2) {
+    if (matches.length > limit * 3) {
       break
     }
   }
 
-  // Sort by score descending
   matches.sort((a, b) => b.score - a.score)
-
   return matches.slice(0, limit).map((m) => normalizeAircraft(m.aircraft))
 }
 
-/**
- * Get aircraft by registration
- */
 export function getAircraftByRegistration(
   aircraft: AircraftData[],
   registration: string,
 ): NormalizedAircraft | undefined {
-  const found = aircraft.find((ac) => ac.registration?.toUpperCase() === registration.toUpperCase())
+  const reg = registration.toUpperCase()
+  const found = aircraft.find((ac) => ac.reg?.toUpperCase() === reg)
   return found ? normalizeAircraft(found) : undefined
 }
 
-/**
- * Get aircraft by ICAO24 transponder code
- */
 export function getAircraftByIcao24(aircraft: AircraftData[], icao24: string): NormalizedAircraft | undefined {
-  const found = aircraft.find((ac) => ac.icao24?.toLowerCase() === icao24.toLowerCase())
+  const found = aircraft.find((ac) => ac.icao24?.toUpperCase() === icao24.toUpperCase())
   return found ? normalizeAircraft(found) : undefined
 }
 
-/**
- * Format aircraft for display
- */
 export function formatAircraft(aircraft: NormalizedAircraft): string {
   const parts = [aircraft.registration]
   if (aircraft.typecode) parts.push(`(${aircraft.typecode})`)
-  if (aircraft.model) parts.push(`- ${aircraft.model}`)
-  if (aircraft.manufacturer) parts.push(`by ${aircraft.manufacturer}`)
   return parts.join(" ")
 }
 
-/**
- * Get database loading status
- */
 export function isAircraftDatabaseLoaded(): boolean {
   return aircraftCache !== null && aircraftCache.length > 0
 }
 
-/**
- * Clear aircraft cache (useful for forcing reload)
- */
+export function getAircraftMetadata(): AircraftMetadata | null {
+  return metadata
+}
+
 export async function clearAircraftCache(): Promise<void> {
   aircraftCache = null
+  metadata = null
   localStorage.removeItem(CACHE_VERSION_KEY)
   await db.aircraftDatabase.clear()
 }

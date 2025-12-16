@@ -120,12 +120,31 @@ function SwipeableFlightCard({
 
   // Get crew names excluding self
   const crewNames = useMemo(() => {
-    if (!flight.crewIds || flight.crewIds.length === 0) return []
-    return flight.crewIds
-      .map((id) => personnel.find((p) => p.id === id))
-      .filter((p) => p && p.name !== "Self")
-      .map((p) => p!.name)
-  }, [flight.crewIds, personnel])
+    // Use picName/sicName if available, otherwise lookup from personnelIds
+    const names: string[] = []
+
+    if (flight.picName && flight.picName !== "Self") {
+      names.push(flight.picName)
+    }
+    if (flight.sicName && flight.sicName !== "Self") {
+      names.push(flight.sicName)
+    }
+    if (flight.otherCrew) {
+      names.push(flight.otherCrew)
+    }
+
+    // Fallback to personnelIds lookup if names not stored
+    if (names.length === 0 && flight.personnelIds && flight.personnelIds.length > 0) {
+      flight.personnelIds.forEach((id) => {
+        const person = personnel.find((p) => p.id === id)
+        if (person && person.name !== "Self") {
+          names.push(person.name)
+        }
+      })
+    }
+
+    return names
+  }, [flight.picName, flight.sicName, flight.otherCrew, flight.personnelIds, personnel])
 
   return (
     <div className="relative overflow-hidden rounded-lg">

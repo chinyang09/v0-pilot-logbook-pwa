@@ -69,11 +69,15 @@ export default function AirportsPage() {
   }, [searchQuery])
 
   const handleAirportSelect = async (icao: string) => {
-    await addRecentlyUsedAirport(icao)
-    const params = new URLSearchParams()
-    if (fieldType) params.set("field", fieldType)
-    params.set("airport", icao)
-    router.push(`${returnUrl}?${params.toString()}`)
+    if (fieldType) {
+      await addRecentlyUsedAirport(icao)
+      const params = new URLSearchParams()
+      params.set("field", fieldType)
+      params.set("airport", icao)
+      router.push(`${returnUrl}?${params.toString()}`)
+    } else {
+      router.push(`/airports/${icao}`)
+    }
   }
 
   const renderAirportCard = (airport: (typeof airports)[0], isRecent = false) => (

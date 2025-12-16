@@ -61,10 +61,14 @@ export function calculateDuration(startTime: string, endTime: string, date: stri
 /**
  * Format HH:MM for display (e.g., "2:30" or "12:45")
  */
-export function formatHHMMDisplay(hhmm: string): string {
-  if (!hhmm || hhmm === "00:00") return "0:00"
-  const [hours, minutes] = hhmm.split(":")
-  return `${Number.parseInt(hours)}:${minutes}`
+export function formatHHMMDisplay(hhmm: string | undefined | null): string {
+  if (!hhmm || typeof hhmm !== "string") return "0:00"
+  const parts = hhmm.split(":")
+  if (parts.length !== 2) return "0:00"
+  const hours = Number.parseInt(parts[0], 10)
+  const minutes = parts[1]
+  if (Number.isNaN(hours)) return "0:00"
+  return `${hours}:${minutes}`
 }
 
 /**

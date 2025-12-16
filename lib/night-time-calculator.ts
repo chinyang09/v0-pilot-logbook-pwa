@@ -116,8 +116,47 @@ export function getSunTimes(date: Date, latitude: number, longitude: number): Su
 
 /**
  * Check if a given time is during night (after civil dusk or before civil dawn)
+ * Added overload to accept date string and time string separately
  */
-export function isNight(dateTime: Date, latitude: number, longitude: number): boolean {
+export function isNight(dateTime: Date, latitude: number, longitude: number): boolean
+export function isNight(dateStr: string, timeStr: string, latitude: number, longitude: number): boolean
+export function isNight(
+  dateOrDateTime: Date | string,
+  latOrTime: number | string,
+  lonOrLat: number,
+  maybeLon?: number,
+): boolean {
+  let dateTime: Date
+  let latitude: number
+  let longitude: number
+
+  if (typeof dateOrDateTime === "string" && typeof latOrTime === "string") {
+    // Called with (dateStr, timeStr, lat, lon)
+    const [hours, minutes] = latOrTime.split(":").map(Number)
+    dateTime = new Date(dateOrDateTime)
+    dateTime.setUTCHours(hours || 0, minutes || 0, 0, 0)
+    latitude = lonOrLat
+    longitude = maybeLon!
+  } else if (dateOrDateTime instanceof Date) {
+    // Called with (Date, lat, lon)
+    dateTime = dateOrDateTime
+    latitude = latOrTime as number
+    longitude = lonOrLat
+  } else {
+    // Fallback - try to parse as date string
+    dateTime = new Date(dateOrDateTime)
+    if (isNaN(dateTime.getTime())) {
+      return false // Invalid date, assume not night
+    }
+    latitude = latOrTime as number
+    longitude = lonOrLat
+  }
+
+  // Validate inputs
+  if (isNaN(dateTime.getTime()) || isNaN(latitude) || isNaN(longitude)) {
+    return false
+  }
+
   const sunTimes = getSunTimes(dateTime, latitude, longitude)
   return dateTime < sunTimes.civilDawn || dateTime > sunTimes.civilDusk
 }

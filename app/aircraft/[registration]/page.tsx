@@ -2,9 +2,14 @@
 
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { ChevronLeft, Plane, Loader2, Calendar, Building2, Hash, Tag } from "lucide-react"
+import { ChevronLeft, Plane, Loader2, Hash, Tag } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { getAircraftDatabase, getAircraftByRegistration, type NormalizedAircraft } from "@/lib/aircraft-database"
+import {
+  getAircraftDatabase,
+  getAircraftByRegistration,
+  getAircraftByIcao24,
+  type NormalizedAircraft,
+} from "@/lib/aircraft-database"
 
 export default function AircraftDetailPage() {
   const params = useParams()
@@ -19,7 +24,10 @@ export default function AircraftDetailPage() {
       setIsLoading(true)
       try {
         const database = await getAircraftDatabase()
-        const found = getAircraftByRegistration(database, registration)
+        let found = getAircraftByRegistration(database, registration)
+        if (!found) {
+          found = getAircraftByIcao24(database, registration)
+        }
         setAircraft(found || null)
       } catch (error) {
         console.error("[Aircraft Detail] Failed to load:", error)
@@ -53,7 +61,7 @@ export default function AircraftDetailPage() {
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center p-4">
-          <p className="text-muted-foreground">Could not find aircraft with registration: {registration}</p>
+          <p className="text-muted-foreground">Could not find aircraft: {registration}</p>
         </div>
       </div>
     )
@@ -68,7 +76,7 @@ export default function AircraftDetailPage() {
             <ChevronLeft className="h-5 w-5" />
           </Button>
           <div>
-            <h1 className="text-lg font-bold">{aircraft.registration}</h1>
+            <h1 className="text-lg font-bold">{aircraft.registration || aircraft.icao24}</h1>
             {aircraft.typecode && <p className="text-sm text-muted-foreground">{aircraft.typecode}</p>}
           </div>
         </div>
@@ -83,7 +91,7 @@ export default function AircraftDetailPage() {
               <Plane className="h-6 w-6 text-primary" />
             </div>
             <div>
-              <h2 className="text-xl font-bold">{aircraft.registration}</h2>
+              <h2 className="text-xl font-bold">{aircraft.registration || "No Registration"}</h2>
               {aircraft.typecode && (
                 <span className="text-sm font-medium text-primary bg-primary/10 px-2 py-0.5 rounded">
                   {aircraft.typecode}
@@ -92,46 +100,6 @@ export default function AircraftDetailPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <InfoItem label="Model" value={aircraft.model} />
-            <InfoItem label="Manufacturer" value={aircraft.manufacturer} />
-            <InfoItem label="Category" value={aircraft.category} />
-            <InfoItem label="Serial Number" value={aircraft.serial} />
-          </div>
-        </div>
-
-        {/* Operator Info */}
-        {(aircraft.operator || aircraft.owner) && (
-          <div className="bg-card border border-border rounded-xl p-4">
-            <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide mb-3">
-              Operator Information
-            </h3>
-            <div className="space-y-3">
-              {aircraft.operator && (
-                <div className="flex items-start gap-3">
-                  <Building2 className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm text-muted-foreground">Operator</p>
-                    <p className="font-medium">{aircraft.operator}</p>
-                  </div>
-                </div>
-              )}
-              {aircraft.owner && (
-                <div className="flex items-start gap-3">
-                  <Tag className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm text-muted-foreground">Owner</p>
-                    <p className="font-medium">{aircraft.owner}</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Technical Info */}
-        <div className="bg-card border border-border rounded-xl p-4">
-          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide mb-3">Technical Details</h3>
           <div className="space-y-3">
             {aircraft.icao24 && (
               <div className="flex items-start gap-3">
@@ -142,37 +110,27 @@ export default function AircraftDetailPage() {
                 </div>
               </div>
             )}
-            {aircraft.built && (
-              <div className="flex items-start gap-3">
-                <Calendar className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Year Built</p>
-                  <p className="font-medium">{aircraft.built}</p>
-                </div>
-              </div>
-            )}
-            {aircraft.status && (
+            {aircraft.typecode && (
               <div className="flex items-start gap-3">
                 <Tag className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm text-muted-foreground">Status</p>
-                  <p className="font-medium">{aircraft.status}</p>
+                  <p className="text-sm text-muted-foreground">ICAO Type Designator</p>
+                  <p className="font-medium">{aircraft.typecode}</p>
+                </div>
+              </div>
+            )}
+            {aircraft.shortType && (
+              <div className="flex items-start gap-3">
+                <Tag className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm text-muted-foreground">Type Category (ICAO Doc 8643)</p>
+                  <p className="font-medium">{aircraft.shortType}</p>
                 </div>
               </div>
             )}
           </div>
         </div>
       </div>
-    </div>
-  )
-}
-
-function InfoItem({ label, value }: { label: string; value?: string }) {
-  if (!value) return null
-  return (
-    <div>
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-medium text-sm">{value}</p>
     </div>
   )
 }

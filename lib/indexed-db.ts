@@ -6,46 +6,59 @@ export interface FlightLog {
   id: string
   date: string
   flightNumber: string
-  aircraftId: string
   aircraftReg: string
   aircraftType: string
   departureIcao: string
+  departureIata: string
   arrivalIcao: string
+  arrivalIata: string
+  scheduledOut: string
+  scheduledIn: string
   outTime: string
   offTime: string
   onTime: string
   inTime: string
   blockTime: string
   flightTime: string
+  nightTime: string
+  picId: string
+  picName: string
+  sicId: string
+  sicName: string
+  otherCrew: string
+  pilotRole: "PIC" | "SIC" | "P1" | "P2" | "PU" | "PF" | "PM" | "STUDENT" | "INSTRUCTOR"
   p1Time: string
-  p1usTime: string
   p2Time: string
+  puTime: string // P1 U/S time
   dualTime: string
   instructorTime: string
-  nightTime: string
-  ifrTime: string
-  actualInstrumentTime: string
-  simulatedInstrumentTime: string
-  crossCountryTime: string
   dayTakeoffs: number
   dayLandings: number
   nightTakeoffs: number
   nightLandings: number
   autolands: number
-  personnelIds: string[] // Matches Personnel.id
-  picId: string // Added explicit PIC reference
-  sicId: string // Added explicit SIC reference
-  pilotRole: "PIC" | "FO" | "STUDENT" | "INSTRUCTOR" | "P1US"
+  remarks: string
+  endorsements: string
+  manualOverrides: {
+    nightTime?: string
+    ifrTime?: string
+    actualInstrumentTime?: string
+    crossCountryTime?: string
+  }
+  ifrTime: string
+  actualInstrumentTime: string
+  simulatedInstrumentTime: string
+  crossCountryTime: string
   approach1: string
   approach2: string
   holds: number
-  remarks: string
   ipcIcc: boolean
   isLocked?: boolean
   createdAt: number
   updatedAt: number
   syncStatus: "synced" | "pending" | "error"
   mongoId?: string
+  lastSyncedAt?: number
 }
 
 export interface Aircraft {
@@ -120,8 +133,8 @@ class PilotLogbookDB extends Dexie {
   constructor() {
     super("pilot-logbook")
 
-    this.version(7).stores({
-      flights: "id, date, syncStatus, aircraftId, mongoId",
+    this.version(8).stores({
+      flights: "id, date, syncStatus, aircraftReg, mongoId",
       aircraft: "id, registration, type, mongoId",
       airports: "icao, iata, name", // No sync fields needed
       personnel: "id, name, mongoId",
@@ -225,46 +238,54 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     id: serverFlight.id,
     date: serverFlight.date,
     flightNumber: serverFlight.flightNumber || "",
-    aircraftId: serverFlight.aircraftId || "",
     aircraftReg: serverFlight.aircraftReg || "",
     aircraftType: serverFlight.aircraftType || "",
     departureIcao: serverFlight.departureIcao || "",
+    departureIata: serverFlight.departureIata || "",
     arrivalIcao: serverFlight.arrivalIcao || "",
+    arrivalIata: serverFlight.arrivalIata || "",
+    scheduledOut: serverFlight.scheduledOut || "",
+    scheduledIn: serverFlight.scheduledIn || "",
     outTime: serverFlight.outTime || "",
     offTime: serverFlight.offTime || "",
     onTime: serverFlight.onTime || "",
     inTime: serverFlight.inTime || "",
     blockTime: serverFlight.blockTime || "00:00",
     flightTime: serverFlight.flightTime || "00:00",
+    nightTime: serverFlight.nightTime || "00:00",
+    picId: serverFlight.picId || "",
+    picName: serverFlight.picName || "",
+    sicId: serverFlight.sicId || "",
+    sicName: serverFlight.sicName || "",
+    otherCrew: serverFlight.otherCrew || "",
+    pilotRole: serverFlight.pilotRole || "PIC",
     p1Time: serverFlight.p1Time || "00:00",
-    p1usTime: serverFlight.p1usTime || "00:00",
     p2Time: serverFlight.p2Time || "00:00",
+    puTime: serverFlight.puTime || "00:00",
     dualTime: serverFlight.dualTime || "00:00",
     instructorTime: serverFlight.instructorTime || "00:00",
-    nightTime: serverFlight.nightTime || "00:00",
-    ifrTime: serverFlight.ifrTime || "00:00",
-    actualInstrumentTime: serverFlight.actualInstrumentTime || "00:00",
-    simulatedInstrumentTime: serverFlight.simulatedInstrumentTime || "00:00",
-    crossCountryTime: serverFlight.crossCountryTime || "00:00",
     dayTakeoffs: serverFlight.dayTakeoffs || 0,
     dayLandings: serverFlight.dayLandings || 0,
     nightTakeoffs: serverFlight.nightTakeoffs || 0,
     nightLandings: serverFlight.nightLandings || 0,
     autolands: serverFlight.autolands || 0,
-    personnelIds: serverFlight.personnelIds || (serverFlight as any).crewIds || [],
-    picId: serverFlight.picId || "",
-    sicId: serverFlight.sicId || "",
-    pilotRole: serverFlight.pilotRole || "FO",
+    remarks: serverFlight.remarks || "",
+    endorsements: serverFlight.endorsements || "",
+    manualOverrides: serverFlight.manualOverrides || {},
+    ifrTime: serverFlight.ifrTime || "00:00",
+    actualInstrumentTime: serverFlight.actualInstrumentTime || "00:00",
+    simulatedInstrumentTime: serverFlight.simulatedInstrumentTime || "00:00",
+    crossCountryTime: serverFlight.crossCountryTime || "00:00",
     approach1: serverFlight.approach1 || "",
     approach2: serverFlight.approach2 || "",
     holds: serverFlight.holds || 0,
-    remarks: serverFlight.remarks || "",
     ipcIcc: serverFlight.ipcIcc || false,
     createdAt: serverFlight.createdAt || Date.now(),
     updatedAt: serverFlight.updatedAt || Date.now(),
     syncStatus: "synced",
     mongoId: serverFlight.mongoId,
     isLocked: serverFlight.isLocked,
+    lastSyncedAt: serverFlight.lastSyncedAt,
   }
 
   let existingFlight: FlightLog | undefined
@@ -544,8 +565,9 @@ export async function getFlightStats() {
   const flightTime = sumHHMM(flights.map((f) => f.flightTime))
   const p1Time = sumHHMM(flights.map((f) => f.p1Time))
   const p2Time = sumHHMM(flights.map((f) => f.p2Time))
-  const p1usTime = sumHHMM(flights.map((f) => f.p1usTime))
+  const puTime = sumHHMM(flights.map((f) => f.puTime))
   const dualTime = sumHHMM(flights.map((f) => f.dualTime))
+  const instructorTime = sumHHMM(flights.map((f) => f.instructorTime))
   const nightTime = sumHHMM(flights.map((f) => f.nightTime))
   const ifrTime = sumHHMM(flights.map((f) => f.ifrTime))
   const totalDayLandings = flights.reduce((sum, f) => sum + f.dayLandings, 0)
@@ -561,8 +583,9 @@ export async function getFlightStats() {
     flightTime,
     p1Time,
     p2Time,
-    p1usTime,
+    puTime,
     dualTime,
+    instructorTime,
     nightTime,
     ifrTime,
     totalDayLandings,
@@ -587,9 +610,13 @@ export async function saveUserPreferences(prefs: Partial<UserPreferences>): Prom
       flight: [
         "date",
         "flightNumber",
-        "aircraftId",
+        "aircraftReg",
         "departureIcao",
+        "departureIata",
         "arrivalIcao",
+        "arrivalIata",
+        "scheduledOut",
+        "scheduledIn",
         "outTime",
         "offTime",
         "onTime",
@@ -617,9 +644,13 @@ export async function getDefaultFieldOrder() {
     flight: [
       "date",
       "flightNumber",
-      "aircraftId",
+      "aircraftReg",
       "departureIcao",
+      "departureIata",
       "arrivalIcao",
+      "arrivalIata",
+      "scheduledOut",
+      "scheduledIn",
       "outTime",
       "offTime",
       "onTime",

@@ -1,13 +1,11 @@
 "use client"
 
 import type React from "react"
-
-import type { FlightLog, Aircraft, Personnel } from "@/lib/indexed-db"
+import type { FlightLog, Personnel } from "@/lib/indexed-db"
 import { useState, useEffect, useMemo } from "react"
 import {
   addFlight,
   updateFlight,
-  getAllAircraft,
   getAllPersonnel,
   addRecentlyUsedAirport,
   addRecentlyUsedAircraft,
@@ -20,10 +18,11 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useAirportDatabase } from "@/hooks/use-indexed-db"
 import { getAirportByICAO } from "@/lib/airport-database"
 import { calculateTimesFromOOOI, isNight } from "@/lib/night-time-calculator"
-import { Plane, Save, X, MapPin } from "lucide-react"
+import { Plane, Save, X, MapPin, ChevronDown, ChevronUp, Edit3 } from "lucide-react"
 
 const FORM_STORAGE_KEY = "flight-form-draft"
 
@@ -40,25 +39,38 @@ interface FlightFormProps {
 interface FormData {
   date: string
   flightNumber: string
-  aircraftId: string
   aircraftReg: string
   aircraftType: string
   departureIcao: string
+  departureIata: string
   arrivalIcao: string
+  arrivalIata: string
+  scheduledOut: string
+  scheduledIn: string
   outTime: string
   offTime: string
   onTime: string
   inTime: string
-  isPilotFlying: boolean
-  picCrewId: string
-  sicCrewId: string
-  pilotRole: "PIC" | "FO" | "STUDENT" | "INSTRUCTOR" | "P1US"
-  p1usTime: string
+  picId: string
+  picName: string
+  sicId: string
+  sicName: string
+  otherCrew: string
+  pilotRole: "PIC" | "SIC" | "P1" | "P2" | "PU" | "PF" | "PM" | "STUDENT" | "INSTRUCTOR"
   dayTakeoffs: number
   dayLandings: number
   nightTakeoffs: number
   nightLandings: number
   autolands: number
+  remarks: string
+  endorsements: string
+  // Manual overrides
+  manualNightTime: string
+  manualIfrTime: string
+  manualActualInstrumentTime: string
+  manualCrossCountryTime: string
+  useManualOverrides: boolean
+  // Additional fields
   ifrTime: string
   actualInstrumentTime: string
   simulatedInstrumentTime: string
@@ -66,32 +78,42 @@ interface FormData {
   approach1: string
   approach2: string
   holds: number
-  remarks: string
   ipcIcc: boolean
 }
 
 const defaultFormData: FormData = {
   date: new Date().toISOString().split("T")[0],
   flightNumber: "",
-  aircraftId: "",
   aircraftReg: "",
   aircraftType: "",
   departureIcao: "",
+  departureIata: "",
   arrivalIcao: "",
+  arrivalIata: "",
+  scheduledOut: "",
+  scheduledIn: "",
   outTime: "",
   offTime: "",
   onTime: "",
   inTime: "",
-  isPilotFlying: false,
-  picCrewId: "",
-  sicCrewId: "",
-  pilotRole: "FO",
-  p1usTime: "00:00",
+  picId: "",
+  picName: "",
+  sicId: "",
+  sicName: "",
+  otherCrew: "",
+  pilotRole: "SIC",
   dayTakeoffs: 0,
   dayLandings: 1,
   nightTakeoffs: 0,
   nightLandings: 0,
   autolands: 0,
+  remarks: "",
+  endorsements: "",
+  manualNightTime: "",
+  manualIfrTime: "",
+  manualActualInstrumentTime: "",
+  manualCrossCountryTime: "",
+  useManualOverrides: false,
   ifrTime: "00:00",
   actualInstrumentTime: "00:00",
   simulatedInstrumentTime: "00:00",
@@ -99,7 +121,6 @@ const defaultFormData: FormData = {
   approach1: "",
   approach2: "",
   holds: 0,
-  remarks: "",
   ipcIcc: false,
 }
 
@@ -114,9 +135,10 @@ export function FlightForm({
 }: FlightFormProps) {
   const router = useRouter()
   const { airports } = useAirportDatabase()
-  const [aircraft, setAircraft] = useState<Aircraft[]>([])
   const [personnel, setPersonnel] = useState<Personnel[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showOverrides, setShowOverrides] = useState(false)
 
   // Initialize form data from sessionStorage or defaults
   const [formData, setFormData] = useState<FormData>(() => {
@@ -133,11 +155,10 @@ export function FlightForm({
     return defaultFormData
   })
 
-  // Load aircraft and personnel
+  // Load personnel
   useEffect(() => {
     const loadData = async () => {
-      const [ac, pers] = await Promise.all([getAllAircraft(), getAllPersonnel()])
-      setAircraft(ac)
+      const pers = await getAllPersonnel()
       setPersonnel(pers)
     }
     loadData()
@@ -149,25 +170,36 @@ export function FlightForm({
       setFormData({
         date: editingFlight.date,
         flightNumber: editingFlight.flightNumber,
-        aircraftId: editingFlight.aircraftId,
         aircraftReg: editingFlight.aircraftReg || "",
         aircraftType: editingFlight.aircraftType || "",
         departureIcao: editingFlight.departureIcao,
+        departureIata: editingFlight.departureIata || "",
         arrivalIcao: editingFlight.arrivalIcao,
+        arrivalIata: editingFlight.arrivalIata || "",
+        scheduledOut: editingFlight.scheduledOut || "",
+        scheduledIn: editingFlight.scheduledIn || "",
         outTime: editingFlight.outTime,
         offTime: editingFlight.offTime,
         onTime: editingFlight.onTime,
         inTime: editingFlight.inTime,
-        isPilotFlying: editingFlight.pilotRole === "PIC" || editingFlight.pilotRole === "P1US",
-        picCrewId: editingFlight.picId || "",
-        sicCrewId: editingFlight.sicId || "",
+        picId: editingFlight.picId || "",
+        picName: editingFlight.picName || "",
+        sicId: editingFlight.sicId || "",
+        sicName: editingFlight.sicName || "",
+        otherCrew: editingFlight.otherCrew || "",
         pilotRole: editingFlight.pilotRole,
-        p1usTime: editingFlight.p1usTime || "00:00",
         dayTakeoffs: editingFlight.dayTakeoffs,
         dayLandings: editingFlight.dayLandings,
         nightTakeoffs: editingFlight.nightTakeoffs,
         nightLandings: editingFlight.nightLandings,
         autolands: editingFlight.autolands,
+        remarks: editingFlight.remarks || "",
+        endorsements: editingFlight.endorsements || "",
+        manualNightTime: editingFlight.manualOverrides?.nightTime || "",
+        manualIfrTime: editingFlight.manualOverrides?.ifrTime || "",
+        manualActualInstrumentTime: editingFlight.manualOverrides?.actualInstrumentTime || "",
+        manualCrossCountryTime: editingFlight.manualOverrides?.crossCountryTime || "",
+        useManualOverrides: !!editingFlight.manualOverrides && Object.keys(editingFlight.manualOverrides).length > 0,
         ifrTime: editingFlight.ifrTime || "00:00",
         actualInstrumentTime: editingFlight.actualInstrumentTime || "00:00",
         simulatedInstrumentTime: editingFlight.simulatedInstrumentTime || "00:00",
@@ -175,21 +207,26 @@ export function FlightForm({
         approach1: editingFlight.approach1 || "",
         approach2: editingFlight.approach2 || "",
         holds: editingFlight.holds || 0,
-        remarks: editingFlight.remarks || "",
         ipcIcc: editingFlight.ipcIcc || false,
       })
+      if (editingFlight.manualOverrides && Object.keys(editingFlight.manualOverrides).length > 0) {
+        setShowOverrides(true)
+      }
     }
   }, [editingFlight])
 
   // Handle airport selection from picker
   useEffect(() => {
     if (selectedAirportField && selectedAirportCode) {
+      const airport = getAirportByICAO(airports, selectedAirportCode)
       setFormData((prev) => {
         const updated = { ...prev }
         if (selectedAirportField === "departureIcao") {
           updated.departureIcao = selectedAirportCode
+          updated.departureIata = airport?.iata || ""
         } else if (selectedAirportField === "arrivalIcao") {
           updated.arrivalIcao = selectedAirportCode
+          updated.arrivalIata = airport?.iata || ""
         }
         return updated
       })
@@ -203,7 +240,7 @@ export function FlightForm({
       url.searchParams.delete("airport")
       window.history.replaceState({}, "", url.toString())
     }
-  }, [selectedAirportField, selectedAirportCode])
+  }, [selectedAirportField, selectedAirportCode, airports])
 
   useEffect(() => {
     if (selectedAircraftReg) {
@@ -243,10 +280,10 @@ export function FlightForm({
       formData.offTime,
       formData.onTime,
       formData.inTime,
-      depAirport?.lat,
-      depAirport?.lon,
-      arrAirport?.lat,
-      arrAirport?.lon,
+      depAirport?.latitude,
+      depAirport?.longitude,
+      arrAirport?.latitude,
+      arrAirport?.longitude,
     )
   }, [
     formData.date,
@@ -266,8 +303,8 @@ export function FlightForm({
     const depAirport = getAirportByICAO(airports, formData.departureIcao)
     const arrAirport = getAirportByICAO(airports, formData.arrivalIcao)
 
-    if (depAirport && formData.offTime) {
-      const isNightTO = isNight(formData.date, formData.offTime, depAirport.lat, depAirport.lon)
+    if (depAirport && depAirport.latitude && depAirport.longitude && formData.offTime) {
+      const isNightTO = isNight(formData.date, formData.offTime, depAirport.latitude, depAirport.longitude)
       setFormData((prev) => ({
         ...prev,
         nightTakeoffs: isNightTO ? 1 : 0,
@@ -275,8 +312,8 @@ export function FlightForm({
       }))
     }
 
-    if (arrAirport && formData.onTime) {
-      const isNightLdg = isNight(formData.date, formData.onTime, arrAirport.lat, arrAirport.lon)
+    if (arrAirport && arrAirport.latitude && arrAirport.longitude && formData.onTime) {
+      const isNightLdg = isNight(formData.date, formData.onTime, arrAirport.latitude, arrAirport.longitude)
       setFormData((prev) => ({
         ...prev,
         nightLandings: isNightLdg ? 1 : 0,
@@ -296,51 +333,83 @@ export function FlightForm({
     router.push(`/airports?select=true&returnTo=/new-flight&field=${field}`)
   }
 
+  // Get personnel name by ID
+  const getPersonnelName = (id: string): string => {
+    if (id === "self") return "Self"
+    const person = personnel.find((p) => p.id === id)
+    return person?.name || ""
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
 
     try {
-      const depAirport = getAirportByICAO(airports, formData.departureIcao)
-      const arrAirport = getAirportByICAO(airports, formData.arrivalIcao)
+      // Build manual overrides object
+      const manualOverrides: FlightLog["manualOverrides"] = {}
+      if (formData.useManualOverrides) {
+        if (formData.manualNightTime) manualOverrides.nightTime = formData.manualNightTime
+        if (formData.manualIfrTime) manualOverrides.ifrTime = formData.manualIfrTime
+        if (formData.manualActualInstrumentTime)
+          manualOverrides.actualInstrumentTime = formData.manualActualInstrumentTime
+        if (formData.manualCrossCountryTime) manualOverrides.crossCountryTime = formData.manualCrossCountryTime
+      }
 
-      const flightData = {
+      // Use manual override values if set, otherwise use calculated
+      const nightTime =
+        formData.useManualOverrides && formData.manualNightTime ? formData.manualNightTime : calculatedTimes.nightTime
+
+      const flightData: Omit<FlightLog, "id" | "createdAt" | "updatedAt" | "syncStatus"> = {
         date: formData.date,
         flightNumber: formData.flightNumber,
-        aircraftId: formData.aircraftId || formData.aircraftReg, // Use reg as ID if no ID
         aircraftReg: formData.aircraftReg,
         aircraftType: formData.aircraftType,
         departureIcao: formData.departureIcao,
+        departureIata: formData.departureIata,
         arrivalIcao: formData.arrivalIcao,
+        arrivalIata: formData.arrivalIata,
+        scheduledOut: formData.scheduledOut,
+        scheduledIn: formData.scheduledIn,
         outTime: formData.outTime,
         offTime: formData.offTime,
         onTime: formData.onTime,
         inTime: formData.inTime,
-        blockTime: calculatedTimes.blockTime,
-        flightTime: calculatedTimes.flightTime,
-        p1Time: formData.pilotRole === "PIC" ? calculatedTimes.flightTime : "00:00",
-        p1usTime: formData.pilotRole === "P1US" ? formData.p1usTime : "00:00",
-        p2Time: formData.pilotRole === "FO" ? calculatedTimes.flightTime : "00:00",
-        dualTime: formData.pilotRole === "STUDENT" ? calculatedTimes.flightTime : "00:00",
-        instructorTime: formData.pilotRole === "INSTRUCTOR" ? calculatedTimes.flightTime : "00:00",
-        nightTime: calculatedTimes.nightTime,
-        ifrTime: formData.ifrTime,
-        actualInstrumentTime: formData.actualInstrumentTime,
-        simulatedInstrumentTime: formData.simulatedInstrumentTime,
-        crossCountryTime: formData.crossCountryTime,
+        blockTime: calculatedTimes.blockTime || "00:00",
+        flightTime: calculatedTimes.flightTime || "00:00",
+        nightTime: nightTime || "00:00",
+        picId: formData.picId,
+        picName: formData.picId === "self" ? "Self" : getPersonnelName(formData.picId),
+        sicId: formData.sicId,
+        sicName: formData.sicId === "self" ? "Self" : getPersonnelName(formData.sicId),
+        otherCrew: formData.otherCrew,
+        pilotRole: formData.pilotRole,
+        // Calculate role times based on pilotRole
+        p1Time: ["PIC", "P1", "PF"].includes(formData.pilotRole) ? calculatedTimes.flightTime || "00:00" : "00:00",
+        p2Time: ["SIC", "P2", "PM"].includes(formData.pilotRole) ? calculatedTimes.flightTime || "00:00" : "00:00",
+        puTime: formData.pilotRole === "PU" ? calculatedTimes.flightTime || "00:00" : "00:00",
+        dualTime: formData.pilotRole === "STUDENT" ? calculatedTimes.flightTime || "00:00" : "00:00",
+        instructorTime: formData.pilotRole === "INSTRUCTOR" ? calculatedTimes.flightTime || "00:00" : "00:00",
         dayTakeoffs: formData.dayTakeoffs,
         dayLandings: formData.dayLandings,
         nightTakeoffs: formData.nightTakeoffs,
         nightLandings: formData.nightLandings,
         autolands: formData.autolands,
-        personnelIds: [formData.picCrewId, formData.sicCrewId].filter(Boolean),
-        picId: formData.picCrewId,
-        sicId: formData.sicCrewId,
-        pilotRole: formData.pilotRole,
+        remarks: formData.remarks,
+        endorsements: formData.endorsements,
+        manualOverrides: Object.keys(manualOverrides).length > 0 ? manualOverrides : {},
+        ifrTime: formData.useManualOverrides && formData.manualIfrTime ? formData.manualIfrTime : formData.ifrTime,
+        actualInstrumentTime:
+          formData.useManualOverrides && formData.manualActualInstrumentTime
+            ? formData.manualActualInstrumentTime
+            : formData.actualInstrumentTime,
+        simulatedInstrumentTime: formData.simulatedInstrumentTime,
+        crossCountryTime:
+          formData.useManualOverrides && formData.manualCrossCountryTime
+            ? formData.manualCrossCountryTime
+            : formData.crossCountryTime,
         approach1: formData.approach1,
         approach2: formData.approach2,
         holds: formData.holds,
-        remarks: formData.remarks,
         ipcIcc: formData.ipcIcc,
       }
 
@@ -357,7 +426,6 @@ export function FlightForm({
       // Save airports to recently used
       if (formData.departureIcao) await addRecentlyUsedAirport(formData.departureIcao)
       if (formData.arrivalIcao) await addRecentlyUsedAirport(formData.arrivalIcao)
-
       if (formData.aircraftReg) await addRecentlyUsedAircraft(formData.aircraftReg)
 
       onFlightAdded(savedFlight)
@@ -375,7 +443,7 @@ export function FlightForm({
 
   return (
     <Card className="bg-card border-border">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg flex items-center gap-2">
             <Plane className="h-5 w-5" />
@@ -387,10 +455,10 @@ export function FlightForm({
         </div>
       </CardHeader>
 
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <CardContent className="space-y-3">
+        <form onSubmit={handleSubmit} className="space-y-3">
           {/* Date and Flight Number */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2">
             <div>
               <Label className="text-xs text-muted-foreground">Date</Label>
               <Input
@@ -405,13 +473,14 @@ export function FlightForm({
               <Label className="text-xs text-muted-foreground">Flight #</Label>
               <Input
                 value={formData.flightNumber}
-                onChange={(e) => setFormData((prev) => ({ ...prev, flightNumber: e.target.value }))}
+                onChange={(e) => setFormData((prev) => ({ ...prev, flightNumber: e.target.value.toUpperCase() }))}
                 placeholder="SQ123"
                 className="h-9"
               />
             </div>
           </div>
 
+          {/* Aircraft Selection */}
           <div>
             <Label className="text-xs text-muted-foreground">Aircraft</Label>
             <Button
@@ -434,8 +503,8 @@ export function FlightForm({
             </Button>
           </div>
 
-          {/* From/To Airports - Tap to open picker */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* From/To Airports */}
+          <div className="grid grid-cols-2 gap-2">
             <div>
               <Label className="text-xs text-muted-foreground">From</Label>
               <Button
@@ -445,7 +514,16 @@ export function FlightForm({
                 onClick={() => openAirportPicker("departureIcao")}
               >
                 <MapPin className="h-4 w-4 mr-2 text-muted-foreground" />
-                {formData.departureIcao || <span className="text-muted-foreground">Select</span>}
+                {formData.departureIcao ? (
+                  <span>
+                    {formData.departureIcao}
+                    {formData.departureIata && (
+                      <span className="text-muted-foreground ml-1">/{formData.departureIata}</span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">Select</span>
+                )}
               </Button>
             </div>
             <div>
@@ -457,20 +535,51 @@ export function FlightForm({
                 onClick={() => openAirportPicker("arrivalIcao")}
               >
                 <MapPin className="h-4 w-4 mr-2 text-muted-foreground" />
-                {formData.arrivalIcao || <span className="text-muted-foreground">Select</span>}
+                {formData.arrivalIcao ? (
+                  <span>
+                    {formData.arrivalIcao}
+                    {formData.arrivalIata && (
+                      <span className="text-muted-foreground ml-1">/{formData.arrivalIata}</span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">Select</span>
+                )}
               </Button>
             </div>
           </div>
 
+          {/* Scheduled Times */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-xs text-muted-foreground">Sched Out</Label>
+              <Input
+                type="time"
+                value={formData.scheduledOut}
+                onChange={(e) => setFormData((prev) => ({ ...prev, scheduledOut: e.target.value }))}
+                className="h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Sched In</Label>
+              <Input
+                type="time"
+                value={formData.scheduledIn}
+                onChange={(e) => setFormData((prev) => ({ ...prev, scheduledIn: e.target.value }))}
+                className="h-9 text-sm"
+              />
+            </div>
+          </div>
+
           {/* OOOI Times */}
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-4 gap-1">
             <div>
               <Label className="text-xs text-muted-foreground">Out</Label>
               <Input
                 type="time"
                 value={formData.outTime}
                 onChange={(e) => setFormData((prev) => ({ ...prev, outTime: e.target.value }))}
-                className="h-9 text-sm"
+                className="h-9 text-sm px-2"
               />
             </div>
             <div>
@@ -479,7 +588,7 @@ export function FlightForm({
                 type="time"
                 value={formData.offTime}
                 onChange={(e) => setFormData((prev) => ({ ...prev, offTime: e.target.value }))}
-                className="h-9 text-sm"
+                className="h-9 text-sm px-2"
               />
             </div>
             <div>
@@ -488,7 +597,7 @@ export function FlightForm({
                 type="time"
                 value={formData.onTime}
                 onChange={(e) => setFormData((prev) => ({ ...prev, onTime: e.target.value }))}
-                className="h-9 text-sm"
+                className="h-9 text-sm px-2"
               />
             </div>
             <div>
@@ -497,7 +606,7 @@ export function FlightForm({
                 type="time"
                 value={formData.inTime}
                 onChange={(e) => setFormData((prev) => ({ ...prev, inTime: e.target.value }))}
-                className="h-9 text-sm"
+                className="h-9 text-sm px-2"
               />
             </div>
           </div>
@@ -506,45 +615,31 @@ export function FlightForm({
           <div className="grid grid-cols-3 gap-2 p-2 bg-muted/50 rounded-lg">
             <div className="text-center">
               <p className="text-xs text-muted-foreground">Block</p>
-              <p className="font-mono font-medium">{calculatedTimes.blockTime}</p>
+              <p className="font-mono font-medium">{calculatedTimes.blockTime || "0:00"}</p>
             </div>
             <div className="text-center">
               <p className="text-xs text-muted-foreground">Flight</p>
-              <p className="font-mono font-medium">{calculatedTimes.flightTime}</p>
+              <p className="font-mono font-medium">{calculatedTimes.flightTime || "0:00"}</p>
             </div>
             <div className="text-center">
               <p className="text-xs text-muted-foreground">Night</p>
-              <p className="font-mono font-medium">{calculatedTimes.nightTime}</p>
+              <p className="font-mono font-medium">
+                {formData.useManualOverrides && formData.manualNightTime
+                  ? formData.manualNightTime
+                  : calculatedTimes.nightTime || "0:00"}
+              </p>
             </div>
           </div>
 
-          {/* Pilot Role */}
-          <div>
-            <Label className="text-xs text-muted-foreground">Pilot Role</Label>
-            <Select
-              value={formData.pilotRole}
-              onValueChange={(value) => setFormData((prev) => ({ ...prev, pilotRole: value as FormData["pilotRole"] }))}
-            >
-              <SelectTrigger className="h-9">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="PIC">PIC</SelectItem>
-                <SelectItem value="FO">First Officer</SelectItem>
-                <SelectItem value="P1US">P1 U/S</SelectItem>
-                <SelectItem value="STUDENT">Student</SelectItem>
-                <SelectItem value="INSTRUCTOR">Instructor</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
           {/* Crew Selection */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2">
             <div>
-              <Label className="text-xs text-muted-foreground">PIC</Label>
+              <Label className="text-xs text-muted-foreground">PIC/P1</Label>
               <Select
-                value={formData.picCrewId}
-                onValueChange={(value) => setFormData((prev) => ({ ...prev, picCrewId: value }))}
+                value={formData.picId}
+                onValueChange={(value) =>
+                  setFormData((prev) => ({ ...prev, picId: value, picName: getPersonnelName(value) }))
+                }
               >
                 <SelectTrigger className="h-9">
                   <SelectValue placeholder="Select PIC" />
@@ -560,10 +655,12 @@ export function FlightForm({
               </Select>
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">SIC</Label>
+              <Label className="text-xs text-muted-foreground">SIC/P2</Label>
               <Select
-                value={formData.sicCrewId}
-                onValueChange={(value) => setFormData((prev) => ({ ...prev, sicCrewId: value }))}
+                value={formData.sicId}
+                onValueChange={(value) =>
+                  setFormData((prev) => ({ ...prev, sicId: value, sicName: getPersonnelName(value) }))
+                }
               >
                 <SelectTrigger className="h-9">
                   <SelectValue placeholder="Select SIC" />
@@ -580,8 +677,43 @@ export function FlightForm({
             </div>
           </div>
 
-          {/* Landings */}
-          <div className="grid grid-cols-5 gap-2">
+          {/* Other Crew */}
+          <div>
+            <Label className="text-xs text-muted-foreground">Other Crew</Label>
+            <Input
+              value={formData.otherCrew}
+              onChange={(e) => setFormData((prev) => ({ ...prev, otherCrew: e.target.value }))}
+              placeholder="Additional crew members"
+              className="h-9"
+            />
+          </div>
+
+          {/* Pilot Role */}
+          <div>
+            <Label className="text-xs text-muted-foreground">Pilot Role (Logging As)</Label>
+            <Select
+              value={formData.pilotRole}
+              onValueChange={(value) => setFormData((prev) => ({ ...prev, pilotRole: value as FormData["pilotRole"] }))}
+            >
+              <SelectTrigger className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="PIC">PIC</SelectItem>
+                <SelectItem value="SIC">SIC</SelectItem>
+                <SelectItem value="P1">P1</SelectItem>
+                <SelectItem value="P2">P2</SelectItem>
+                <SelectItem value="PU">P1 U/S</SelectItem>
+                <SelectItem value="PF">Pilot Flying</SelectItem>
+                <SelectItem value="PM">Pilot Monitoring</SelectItem>
+                <SelectItem value="STUDENT">Student</SelectItem>
+                <SelectItem value="INSTRUCTOR">Instructor</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Takeoffs/Landings */}
+          <div className="grid grid-cols-5 gap-1">
             <div>
               <Label className="text-xs text-muted-foreground">Day TO</Label>
               <Input
@@ -591,7 +723,7 @@ export function FlightForm({
                 onChange={(e) =>
                   setFormData((prev) => ({ ...prev, dayTakeoffs: Number.parseInt(e.target.value) || 0 }))
                 }
-                className="h-9"
+                className="h-9 px-2"
               />
             </div>
             <div>
@@ -603,11 +735,11 @@ export function FlightForm({
                 onChange={(e) =>
                   setFormData((prev) => ({ ...prev, dayLandings: Number.parseInt(e.target.value) || 0 }))
                 }
-                className="h-9"
+                className="h-9 px-2"
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Night TO</Label>
+              <Label className="text-xs text-muted-foreground">Ngt TO</Label>
               <Input
                 type="number"
                 min={0}
@@ -615,11 +747,11 @@ export function FlightForm({
                 onChange={(e) =>
                   setFormData((prev) => ({ ...prev, nightTakeoffs: Number.parseInt(e.target.value) || 0 }))
                 }
-                className="h-9"
+                className="h-9 px-2"
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Night Ldg</Label>
+              <Label className="text-xs text-muted-foreground">Ngt Ldg</Label>
               <Input
                 type="number"
                 min={0}
@@ -627,7 +759,7 @@ export function FlightForm({
                 onChange={(e) =>
                   setFormData((prev) => ({ ...prev, nightLandings: Number.parseInt(e.target.value) || 0 }))
                 }
-                className="h-9"
+                className="h-9 px-2"
               />
             </div>
             <div>
@@ -637,39 +769,7 @@ export function FlightForm({
                 min={0}
                 value={formData.autolands}
                 onChange={(e) => setFormData((prev) => ({ ...prev, autolands: Number.parseInt(e.target.value) || 0 }))}
-                className="h-9"
-              />
-            </div>
-          </div>
-
-          {/* Approaches */}
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <Label className="text-xs text-muted-foreground">Approach 1</Label>
-              <Input
-                value={formData.approach1}
-                onChange={(e) => setFormData((prev) => ({ ...prev, approach1: e.target.value }))}
-                placeholder="ILS 28L"
-                className="h-9"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Approach 2</Label>
-              <Input
-                value={formData.approach2}
-                onChange={(e) => setFormData((prev) => ({ ...prev, approach2: e.target.value }))}
-                placeholder="VOR 10"
-                className="h-9"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Holds</Label>
-              <Input
-                type="number"
-                min={0}
-                value={formData.holds}
-                onChange={(e) => setFormData((prev) => ({ ...prev, holds: Number.parseInt(e.target.value) || 0 }))}
-                className="h-9"
+                className="h-9 px-2"
               />
             </div>
           </div>
@@ -681,18 +781,138 @@ export function FlightForm({
               value={formData.remarks}
               onChange={(e) => setFormData((prev) => ({ ...prev, remarks: e.target.value }))}
               placeholder="Additional notes..."
-              className="h-20 resize-none"
+              className="h-16 resize-none"
             />
           </div>
 
-          {/* IPC/ICC Toggle */}
-          <div className="flex items-center justify-between">
-            <Label className="text-sm">IPC/ICC Check</Label>
-            <Switch
-              checked={formData.ipcIcc}
-              onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, ipcIcc: checked }))}
+          {/* Endorsements */}
+          <div>
+            <Label className="text-xs text-muted-foreground">Endorsements</Label>
+            <Textarea
+              value={formData.endorsements}
+              onChange={(e) => setFormData((prev) => ({ ...prev, endorsements: e.target.value }))}
+              placeholder="Route checks, line checks, etc..."
+              className="h-16 resize-none"
             />
           </div>
+
+          {/* Manual Overrides Section */}
+          <Collapsible open={showOverrides} onOpenChange={setShowOverrides}>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="ghost" className="w-full justify-between h-9 px-2">
+                <span className="flex items-center gap-2 text-sm">
+                  <Edit3 className="h-4 w-4" />
+                  Manual Overrides
+                </span>
+                {showOverrides ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-2 pt-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">Enable Manual Overrides</Label>
+                <Switch
+                  checked={formData.useManualOverrides}
+                  onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, useManualOverrides: checked }))}
+                />
+              </div>
+              {formData.useManualOverrides && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Night Time</Label>
+                    <Input
+                      type="time"
+                      value={formData.manualNightTime}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, manualNightTime: e.target.value }))}
+                      className="h-9"
+                      placeholder="HH:MM"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">IFR Time</Label>
+                    <Input
+                      type="time"
+                      value={formData.manualIfrTime}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, manualIfrTime: e.target.value }))}
+                      className="h-9"
+                      placeholder="HH:MM"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Actual Instrument</Label>
+                    <Input
+                      type="time"
+                      value={formData.manualActualInstrumentTime}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, manualActualInstrumentTime: e.target.value }))}
+                      className="h-9"
+                      placeholder="HH:MM"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Cross Country</Label>
+                    <Input
+                      type="time"
+                      value={formData.manualCrossCountryTime}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, manualCrossCountryTime: e.target.value }))}
+                      className="h-9"
+                      placeholder="HH:MM"
+                    />
+                  </div>
+                </div>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
+
+          {/* Advanced Section */}
+          <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="ghost" className="w-full justify-between h-9 px-2">
+                <span className="text-sm">Advanced Options</span>
+                {showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-2 pt-2">
+              {/* Approaches */}
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <Label className="text-xs text-muted-foreground">Approach 1</Label>
+                  <Input
+                    value={formData.approach1}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, approach1: e.target.value }))}
+                    placeholder="ILS 28L"
+                    className="h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Approach 2</Label>
+                  <Input
+                    value={formData.approach2}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, approach2: e.target.value }))}
+                    placeholder="VOR 10"
+                    className="h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Holds</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={formData.holds}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, holds: Number.parseInt(e.target.value) || 0 }))}
+                    className="h-9"
+                  />
+                </div>
+              </div>
+
+              {/* IPC/ICC Toggle */}
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">IPC/ICC Check</Label>
+                <Switch
+                  checked={formData.ipcIcc}
+                  onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, ipcIcc: checked }))}
+                />
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
 
           {/* Submit Button */}
           <Button type="submit" className="w-full" disabled={isSubmitting}>
