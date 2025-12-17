@@ -58,7 +58,7 @@ interface FormData {
   picName: string
   sicId: string
   sicName: string
-  otherCrew: []
+  otherCrew: string
   pilotRole: "PF" | "PM" | "STUDENT" | "INSTRUCTOR"
   dayTakeoffs: number
   dayLandings: number
@@ -104,7 +104,7 @@ const defaultFormData: FormData = {
   otherCrew: "",
   pilotRole: "PM",
   dayTakeoffs: 0,
-  dayLandings: 0,
+  dayLandings: 1,
   nightTakeoffs: 0,
   nightLandings: 0,
   autolands: 0,
