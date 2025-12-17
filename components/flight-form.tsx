@@ -1,28 +1,17 @@
 "use client"
 
 import type React from "react"
-import type { FlightLog, Personnel } from "@/lib/indexed-db"
-import { useState, useEffect, useMemo } from "react"
-import {
-  addFlight,
-  updateFlight,
-  getAllPersonnel,
-  addRecentlyUsedAirport,
-  addRecentlyUsedAircraft,
-} from "@/lib/indexed-db"
+import type { FlightLog } from "@/lib/indexed-db"
+import { useState, useEffect, useMemo, useCallback } from "react"
+import { addFlight, updateFlight, addRecentlyUsedAirport, addRecentlyUsedAircraft } from "@/lib/indexed-db"
 import { useRouter } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
-import { Textarea } from "@/components/ui/textarea"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useAirportDatabase } from "@/hooks/use-indexed-db"
 import { getAirportByICAO } from "@/lib/airport-database"
 import { calculateTimesFromOOOI, isNight } from "@/lib/night-time-calculator"
-import { Plane, Save, X, MapPin, ChevronDown, ChevronUp, Edit3, Users } from "lucide-react"
+import { Plane, ArrowLeft, Loader2, ChevronRight, Info } from "lucide-react"
 
 const FORM_STORAGE_KEY = "flight-form-draft"
 
@@ -80,6 +69,7 @@ interface FormData {
   approach2: string
   holds: number
   ipcIcc: boolean
+  pilotFlying: boolean
 }
 
 const defaultFormData: FormData = {
@@ -123,6 +113,163 @@ const defaultFormData: FormData = {
   approach2: "",
   holds: 0,
   ipcIcc: false,
+  pilotFlying: true,
+}
+
+function SettingsRow({
+  label,
+  value,
+  secondaryValue,
+  secondaryLabel,
+  onChange,
+  onSecondaryChange,
+  placeholder,
+  type = "text",
+  readOnly = false,
+  onClick,
+  showChevron = false,
+  showInfo = false,
+  icon,
+  highlight = false,
+}: {
+  label: string
+  value: string
+  secondaryValue?: string
+  secondaryLabel?: string
+  onChange?: (value: string) => void
+  onSecondaryChange?: (value: string) => void
+  placeholder?: string
+  type?: string
+  readOnly?: boolean
+  onClick?: () => void
+  showChevron?: boolean
+  showInfo?: boolean
+  icon?: React.ReactNode
+  highlight?: boolean
+}) {
+  const content = (
+    <div
+      className={`flex items-center justify-between py-3 border-b border-border last:border-b-0 ${onClick ? "cursor-pointer active:bg-muted/50" : ""}`}
+    >
+      <div className="flex items-center gap-2">
+        {icon && <span className="text-primary">{icon}</span>}
+        <span className="text-foreground">{label}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        {secondaryValue !== undefined ? (
+          // Dual time display (UTC + Local)
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <Input
+                type={type}
+                value={value}
+                onChange={(e) => onChange?.(e.target.value)}
+                placeholder={placeholder || "UTC"}
+                className="text-right border-0 bg-transparent h-auto p-0 w-16 text-foreground font-medium focus-visible:ring-0"
+                readOnly={readOnly}
+              />
+              <span className="text-xs text-muted-foreground">UTC</span>
+            </div>
+            <div className="text-right">
+              <span className="text-foreground font-medium">{secondaryValue || "--:--"}</span>
+              <span className="text-xs text-muted-foreground block">{secondaryLabel || "Local"}</span>
+            </div>
+          </div>
+        ) : readOnly || onClick ? (
+          <span className={`${highlight ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+            {value || placeholder || "-"}
+          </span>
+        ) : (
+          <Input
+            type={type}
+            value={value}
+            onChange={(e) => onChange?.(e.target.value)}
+            placeholder={placeholder}
+            className="text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0"
+          />
+        )}
+        {showInfo && <Info className="h-4 w-4 text-primary" />}
+        {showChevron && <ChevronRight className="h-5 w-5 text-muted-foreground/50" />}
+      </div>
+    </div>
+  )
+
+  return onClick ? <div onClick={onClick}>{content}</div> : content
+}
+
+function TimeRow({
+  label,
+  value,
+  onUseTime,
+  useLabel,
+  secondaryValue,
+  secondaryLabel,
+}: {
+  label: string
+  value: string
+  onUseTime?: () => void
+  useLabel?: string
+  secondaryValue?: string
+  secondaryLabel?: string
+}) {
+  return (
+    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
+      <span className="text-foreground">{label}</span>
+      <div className="flex items-center gap-3">
+        {secondaryValue !== undefined ? (
+          <>
+            <span className="text-foreground font-medium">{value || "0:00"}</span>
+            <span className="text-muted-foreground">
+              {secondaryLabel} {secondaryValue || "0:00"}
+            </span>
+          </>
+        ) : onUseTime ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onUseTime}
+            className="h-7 px-2 text-xs border-primary text-primary hover:bg-primary/10 bg-transparent"
+          >
+            {useLabel || `USE ${value}`}
+          </Button>
+        ) : (
+          <span className="text-foreground font-medium">{value || "0:00"}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ToggleRow({
+  label,
+  checked,
+  onCheckedChange,
+}: {
+  label: string
+  checked: boolean
+  onCheckedChange?: (checked: boolean) => void
+}) {
+  return (
+    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
+      <span className="text-foreground">{label}</span>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  )
+}
+
+function NowButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={onClick}
+      className="h-7 px-2 text-xs border-primary text-primary hover:bg-primary/10 bg-transparent"
+    >
+      NOW
+    </Button>
+  )
 }
 
 export function FlightForm({
@@ -139,12 +286,8 @@ export function FlightForm({
 }: FlightFormProps) {
   const router = useRouter()
   const { airports } = useAirportDatabase()
-  const [personnel, setPersonnel] = useState<Personnel[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [showAdvanced, setShowAdvanced] = useState(false)
-  const [showOverrides, setShowOverrides] = useState(false)
 
-  // Initialize form data from sessionStorage or defaults
   const [formData, setFormData] = useState<FormData>(() => {
     if (typeof window !== "undefined" && !editingFlight) {
       const saved = sessionStorage.getItem(FORM_STORAGE_KEY)
@@ -158,15 +301,6 @@ export function FlightForm({
     }
     return defaultFormData
   })
-
-  // Load personnel
-  useEffect(() => {
-    const loadData = async () => {
-      const pers = await getAllPersonnel()
-      setPersonnel(pers)
-    }
-    loadData()
-  }, [])
 
   // Handle editing flight
   useEffect(() => {
@@ -212,10 +346,8 @@ export function FlightForm({
         approach2: editingFlight.approach2 || "",
         holds: editingFlight.holds || 0,
         ipcIcc: editingFlight.ipcIcc || false,
+        pilotFlying: editingFlight.pilotRole === "PF",
       })
-      if (editingFlight.manualOverrides && Object.keys(editingFlight.manualOverrides).length > 0) {
-        setShowOverrides(true)
-      }
     }
   }, [editingFlight])
 
@@ -234,9 +366,7 @@ export function FlightForm({
         }
         return updated
       })
-
       addRecentlyUsedAirport(selectedAirportCode)
-
       const url = new URL(window.location.href)
       url.searchParams.delete("field")
       url.searchParams.delete("airport")
@@ -252,9 +382,7 @@ export function FlightForm({
         aircraftReg: selectedAircraftReg,
         aircraftType: selectedAircraftType || prev.aircraftType,
       }))
-
       addRecentlyUsedAircraft(selectedAircraftReg)
-
       const url = new URL(window.location.href)
       url.searchParams.delete("field")
       url.searchParams.delete("aircraftReg")
@@ -263,6 +391,7 @@ export function FlightForm({
     }
   }, [selectedAircraftReg, selectedAircraftType])
 
+  // Handle crew selection from picker
   useEffect(() => {
     if (selectedCrewField && selectedCrewId) {
       setFormData((prev) => {
@@ -276,7 +405,6 @@ export function FlightForm({
         }
         return updated
       })
-
       const url = new URL(window.location.href)
       url.searchParams.delete("field")
       url.searchParams.delete("crewId")
@@ -296,7 +424,6 @@ export function FlightForm({
   const calculatedTimes = useMemo(() => {
     const depAirport = getAirportByICAO(airports, formData.departureIcao)
     const arrAirport = getAirportByICAO(airports, formData.arrivalIcao)
-
     return calculateTimesFromOOOI(
       formData.date,
       formData.outTime,
@@ -322,11 +449,10 @@ export function FlightForm({
   // Auto-detect night takeoff/landing
   useEffect(() => {
     if (!formData.offTime || !formData.onTime || !formData.date) return
-
     const depAirport = getAirportByICAO(airports, formData.departureIcao)
     const arrAirport = getAirportByICAO(airports, formData.arrivalIcao)
 
-    if (depAirport && depAirport.latitude && depAirport.longitude && formData.offTime) {
+    if (depAirport?.latitude && depAirport?.longitude) {
       const isNightTO = isNight(formData.date, formData.offTime, depAirport.latitude, depAirport.longitude)
       setFormData((prev) => ({
         ...prev,
@@ -335,7 +461,7 @@ export function FlightForm({
       }))
     }
 
-    if (arrAirport && arrAirport.latitude && arrAirport.longitude && formData.onTime) {
+    if (arrAirport?.latitude && arrAirport?.longitude) {
       const isNightLdg = isNight(formData.date, formData.onTime, arrAirport.latitude, arrAirport.longitude)
       setFormData((prev) => ({
         ...prev,
@@ -344,6 +470,10 @@ export function FlightForm({
       }))
     }
   }, [formData.date, formData.offTime, formData.onTime, formData.departureIcao, formData.arrivalIcao, airports])
+
+  const updateField = useCallback((field: keyof FormData, value: string | number | boolean) => {
+    setFormData((prev) => ({ ...prev, [field]: value }))
+  }, [])
 
   const openAircraftPicker = () => {
     sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData))
@@ -358,6 +488,30 @@ export function FlightForm({
   const openCrewPicker = (field: "picId" | "sicId") => {
     sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData))
     router.push(`/crew?select=true&return=/new-flight&field=${field}`)
+  }
+
+  const setNowTime = (field: "scheduledOut" | "scheduledIn" | "outTime" | "offTime" | "onTime" | "inTime") => {
+    const now = new Date()
+    const utcTime = `${String(now.getUTCHours()).padStart(2, "0")}${String(now.getUTCMinutes()).padStart(2, "0")}`
+    updateField(field, utcTime)
+  }
+
+  // Format date for display
+  const formatDateDisplay = (dateStr: string) => {
+    if (!dateStr) return ""
+    const date = new Date(dateStr)
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    return `${days[date.getDay()]} ${date.getDate()}-${months[date.getMonth()]}-${String(date.getFullYear()).slice(-2)}`
+  }
+
+  // Convert UTC time to local display
+  const getLocalTime = (utcTime: string, tzOffset = 8) => {
+    if (!utcTime || utcTime.length < 4) return "--:--"
+    const hours = Number.parseInt(utcTime.slice(0, 2), 10)
+    const mins = utcTime.slice(2, 4)
+    const localHours = (hours + tzOffset + 24) % 24
+    return `${String(localHours).padStart(2, "0")}${mins}`
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -376,6 +530,7 @@ export function FlightForm({
 
       const nightTime =
         formData.useManualOverrides && formData.manualNightTime ? formData.manualNightTime : calculatedTimes.nightTime
+      const pilotRole = formData.pilotFlying ? "PF" : "PM"
 
       const flightData: Omit<FlightLog, "id" | "createdAt" | "updatedAt" | "syncStatus"> = {
         date: formData.date,
@@ -400,10 +555,10 @@ export function FlightForm({
         sicId: formData.sicId,
         sicName: formData.sicName,
         otherCrew: formData.otherCrew,
-        pilotRole: formData.pilotRole,
-        picTime: ["PIC", "P1", "PF"].includes(formData.pilotRole) ? calculatedTimes.flightTime || "00:00" : "00:00",
-        sicTime: ["SIC", "P2", "PM"].includes(formData.pilotRole) ? calculatedTimes.flightTime || "00:00" : "00:00",
-        picusTime: formData.pilotRole === "PU" ? calculatedTimes.flightTime || "00:00" : "00:00",
+        pilotRole: pilotRole,
+        picTime: pilotRole === "PF" ? calculatedTimes.flightTime || "00:00" : "00:00",
+        sicTime: pilotRole === "PM" ? calculatedTimes.flightTime || "00:00" : "00:00",
+        picusTime: formData.pilotRole === "STUDENT" ? calculatedTimes.flightTime || "00:00" : "00:00",
         dualTime: formData.pilotRole === "STUDENT" ? calculatedTimes.flightTime || "00:00" : "00:00",
         instructorTime: formData.pilotRole === "INSTRUCTOR" ? calculatedTimes.flightTime || "00:00" : "00:00",
         dayTakeoffs: formData.dayTakeoffs,
@@ -438,7 +593,6 @@ export function FlightForm({
       }
 
       sessionStorage.removeItem(FORM_STORAGE_KEY)
-
       if (formData.departureIcao) await addRecentlyUsedAirport(formData.departureIcao)
       if (formData.arrivalIcao) await addRecentlyUsedAirport(formData.arrivalIcao)
       if (formData.aircraftReg) await addRecentlyUsedAircraft(formData.aircraftReg)
@@ -456,475 +610,436 @@ export function FlightForm({
     onClose()
   }
 
+  // Calculate day/night time display
+  const dayTime = useMemo(() => {
+    if (!calculatedTimes.flightTime || !calculatedTimes.nightTime) return "0:00"
+    const flightMins = parseTimeToMinutes(calculatedTimes.flightTime)
+    const nightMins = parseTimeToMinutes(calculatedTimes.nightTime)
+    const dayMins = Math.max(0, flightMins - nightMins)
+    return formatMinutesToTime(dayMins)
+  }, [calculatedTimes.flightTime, calculatedTimes.nightTime])
+
   return (
-    <Card className="bg-card border-border">
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Plane className="h-5 w-5" />
-            {editingFlight ? "Edit Flight" : "New Flight"}
-          </CardTitle>
-          <Button variant="ghost" size="icon" onClick={handleCancel}>
-            <X className="h-5 w-5" />
-          </Button>
-        </div>
-      </CardHeader>
-
-      <CardContent className="space-y-3">
-        <form onSubmit={handleSubmit} className="space-y-3">
-          {/* Date and Flight Number */}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label className="text-xs text-muted-foreground">Date</Label>
-              <Input
-                type="date"
-                value={formData.date}
-                onChange={(e) => setFormData((prev) => ({ ...prev, date: e.target.value }))}
-                className="h-9"
-                required
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Flight #</Label>
-              <Input
-                value={formData.flightNumber}
-                onChange={(e) => setFormData((prev) => ({ ...prev, flightNumber: e.target.value.toUpperCase() }))}
-                placeholder="SQ123"
-                className="h-9"
-              />
-            </div>
-          </div>
-
-          {/* Aircraft Selection */}
-          <div>
-            <Label className="text-xs text-muted-foreground">Aircraft</Label>
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <div className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-lg border-b border-border">
+        <div className="container mx-auto px-3">
+          <div className="flex items-center justify-between h-12">
+            <Button variant="ghost" size="sm" onClick={handleCancel} className="text-primary h-8 px-2">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <h1 className="text-lg font-semibold">{editingFlight ? "Edit Flight" : "New Flight"}</h1>
             <Button
-              type="button"
-              variant="outline"
-              className="w-full h-9 justify-start font-normal bg-transparent"
-              onClick={openAircraftPicker}
+              variant="ghost"
+              size="sm"
+              onClick={handleSubmit}
+              disabled={isSubmitting}
+              className="text-primary h-8 px-2 font-semibold"
             >
-              <Plane className="h-4 w-4 mr-2 text-muted-foreground" />
-              {formData.aircraftReg ? (
-                <span>
-                  {formData.aircraftReg}
-                  {formData.aircraftType && (
-                    <span className="text-muted-foreground ml-1">({formData.aircraftType})</span>
-                  )}
-                </span>
-              ) : (
-                <span className="text-muted-foreground">Select aircraft</span>
-              )}
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
             </Button>
           </div>
+        </div>
+      </div>
 
-          {/* From/To Airports */}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label className="text-xs text-muted-foreground">From</Label>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full h-9 justify-start font-normal bg-transparent"
+      <main className="container mx-auto px-3 pt-16 pb-20">
+        <form onSubmit={handleSubmit}>
+          {/* FLIGHT Section */}
+          <div className="mb-2">
+            <span className="text-xs text-muted-foreground uppercase tracking-wider px-4">Flight</span>
+          </div>
+          <div className="bg-card rounded-xl overflow-hidden mb-6">
+            <div className="px-4">
+              {/* Flight row with icon */}
+              <SettingsRow
+                label="Flight"
+                value=""
+                icon={<Plane className="h-4 w-4 rotate-45" />}
+                showChevron
+                readOnly
+              />
+
+              {/* Date */}
+              <div className="flex items-center justify-between py-3 border-b border-border">
+                <span className="text-foreground">Date</span>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="date"
+                    value={formData.date}
+                    onChange={(e) => updateField("date", e.target.value)}
+                    className="text-right border-0 bg-transparent h-auto p-0 w-auto text-foreground font-medium focus-visible:ring-0"
+                  />
+                  <span className="text-xs text-muted-foreground">UTC</span>
+                </div>
+              </div>
+
+              {/* Flight # */}
+              <SettingsRow
+                label="Flight #"
+                value={formData.flightNumber}
+                onChange={(v) => updateField("flightNumber", v.toUpperCase())}
+                placeholder="SQ123"
+              />
+
+              {/* Aircraft ID */}
+              <SettingsRow
+                label="Aircraft ID"
+                value={formData.aircraftReg}
+                onClick={openAircraftPicker}
+                showInfo
+                showChevron
+                readOnly
+                highlight={!!formData.aircraftReg}
+              />
+
+              {/* Aircraft Type */}
+              <SettingsRow
+                label="Aircraft Type"
+                value={formData.aircraftType}
+                onClick={openAircraftPicker}
+                showInfo
+                showChevron
+                readOnly
+                highlight={!!formData.aircraftType}
+              />
+
+              {/* From */}
+              <SettingsRow
+                label="From"
+                value={formData.departureIcao}
                 onClick={() => openAirportPicker("departureIcao")}
-              >
-                <MapPin className="h-4 w-4 mr-2 text-muted-foreground" />
-                {formData.departureIcao ? (
-                  <span>
-                    {formData.departureIcao}
-                    {formData.departureIata && (
-                      <span className="text-muted-foreground ml-1">/{formData.departureIata}</span>
-                    )}
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">Select</span>
-                )}
-              </Button>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">To</Label>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full h-9 justify-start font-normal bg-transparent"
+                showInfo
+                showChevron
+                readOnly
+                highlight={!!formData.departureIcao}
+              />
+
+              {/* To */}
+              <SettingsRow
+                label="To"
+                value={formData.arrivalIcao}
                 onClick={() => openAirportPicker("arrivalIcao")}
-              >
-                <MapPin className="h-4 w-4 mr-2 text-muted-foreground" />
-                {formData.arrivalIcao ? (
-                  <span>
-                    {formData.arrivalIcao}
-                    {formData.arrivalIata && (
-                      <span className="text-muted-foreground ml-1">/{formData.arrivalIata}</span>
-                    )}
+                showInfo
+                showChevron
+                readOnly
+                highlight={!!formData.arrivalIcao}
+              />
+
+              {/* Scheduled Out */}
+              <div className="flex items-center justify-between py-3 border-b border-border">
+                <span className="text-foreground">Scheduled Out</span>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="text"
+                    value={formData.scheduledOut}
+                    onChange={(e) => updateField("scheduledOut", e.target.value)}
+                    placeholder="HHMM"
+                    maxLength={4}
+                    className="text-right border-0 bg-transparent h-auto p-0 w-14 text-foreground focus-visible:ring-0"
+                  />
+                  <span className="text-xs text-muted-foreground">UTC</span>
+                  <NowButton onClick={() => setNowTime("scheduledOut")} />
+                  <span className="text-xs text-muted-foreground">
+                    {getLocalTime(formData.scheduledOut)}
+                    <br />
+                    SGT
                   </span>
-                ) : (
-                  <span className="text-muted-foreground">Select</span>
-                )}
-              </Button>
+                </div>
+              </div>
+
+              {/* Scheduled In */}
+              <div className="flex items-center justify-between py-3 border-b border-border">
+                <span className="text-foreground">Scheduled In</span>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="text"
+                    value={formData.scheduledIn}
+                    onChange={(e) => updateField("scheduledIn", e.target.value)}
+                    placeholder="HHMM"
+                    maxLength={4}
+                    className="text-right border-0 bg-transparent h-auto p-0 w-14 text-foreground focus-visible:ring-0"
+                  />
+                  <span className="text-xs text-muted-foreground">UTC</span>
+                  <NowButton onClick={() => setNowTime("scheduledIn")} />
+                  <span className="text-xs text-muted-foreground">
+                    {getLocalTime(formData.scheduledIn)}
+                    <br />
+                    SGT
+                  </span>
+                </div>
+              </div>
+
+              {/* Out */}
+              <div className="flex items-center justify-between py-3 border-b border-border">
+                <span className="text-foreground">Out</span>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <Input
+                      type="text"
+                      value={formData.outTime}
+                      onChange={(e) => updateField("outTime", e.target.value)}
+                      placeholder="HHMM"
+                      maxLength={4}
+                      className="text-right border-0 bg-transparent h-auto p-0 w-14 text-foreground font-medium focus-visible:ring-0"
+                    />
+                    <span className="text-xs text-muted-foreground">UTC</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-foreground font-medium">{getLocalTime(formData.outTime)}</span>
+                    <span className="text-xs text-muted-foreground block">SGT</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Off */}
+              <div className="flex items-center justify-between py-3 border-b border-border">
+                <span className="text-foreground">Off</span>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <Input
+                      type="text"
+                      value={formData.offTime}
+                      onChange={(e) => updateField("offTime", e.target.value)}
+                      placeholder="HHMM"
+                      maxLength={4}
+                      className="text-right border-0 bg-transparent h-auto p-0 w-14 text-foreground font-medium focus-visible:ring-0"
+                    />
+                    <span className="text-xs text-muted-foreground">UTC</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-foreground font-medium">{getLocalTime(formData.offTime)}</span>
+                    <span className="text-xs text-muted-foreground block">SGT</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* On */}
+              <div className="flex items-center justify-between py-3 border-b border-border">
+                <span className="text-foreground">On</span>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <Input
+                      type="text"
+                      value={formData.onTime}
+                      onChange={(e) => updateField("onTime", e.target.value)}
+                      placeholder="HHMM"
+                      maxLength={4}
+                      className="text-right border-0 bg-transparent h-auto p-0 w-14 text-foreground font-medium focus-visible:ring-0"
+                    />
+                    <span className="text-xs text-muted-foreground">UTC</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-foreground font-medium">{getLocalTime(formData.onTime)}</span>
+                    <span className="text-xs text-muted-foreground block">SGT</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* In */}
+              <div className="flex items-center justify-between py-3">
+                <span className="text-foreground">In</span>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <Input
+                      type="text"
+                      value={formData.inTime}
+                      onChange={(e) => updateField("inTime", e.target.value)}
+                      placeholder="HHMM"
+                      maxLength={4}
+                      className="text-right border-0 bg-transparent h-auto p-0 w-14 text-foreground font-medium focus-visible:ring-0"
+                    />
+                    <span className="text-xs text-muted-foreground">UTC</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-foreground font-medium">{getLocalTime(formData.inTime)}</span>
+                    <span className="text-xs text-muted-foreground block">SGT</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Scheduled Times */}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label className="text-xs text-muted-foreground">Sched Out</Label>
-              <Input
-                type="time"
-                value={formData.scheduledOut}
-                onChange={(e) => setFormData((prev) => ({ ...prev, scheduledOut: e.target.value }))}
-                className="h-9 text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Sched In</Label>
-              <Input
-                type="time"
-                value={formData.scheduledIn}
-                onChange={(e) => setFormData((prev) => ({ ...prev, scheduledIn: e.target.value }))}
-                className="h-9 text-sm"
-              />
-            </div>
+          {/* CREW Section */}
+          <div className="mb-2">
+            <span className="text-xs text-muted-foreground uppercase tracking-wider px-4">Crew</span>
           </div>
-
-          {/* OOOI Times */}
-          <div className="grid grid-cols-4 gap-1">
-            <div>
-              <Label className="text-xs text-muted-foreground">Out</Label>
-              <Input
-                type="time"
-                value={formData.outTime}
-                onChange={(e) => setFormData((prev) => ({ ...prev, outTime: e.target.value }))}
-                className="h-9 text-sm px-2"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Off</Label>
-              <Input
-                type="time"
-                value={formData.offTime}
-                onChange={(e) => setFormData((prev) => ({ ...prev, offTime: e.target.value }))}
-                className="h-9 text-sm px-2"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">On</Label>
-              <Input
-                type="time"
-                value={formData.onTime}
-                onChange={(e) => setFormData((prev) => ({ ...prev, onTime: e.target.value }))}
-                className="h-9 text-sm px-2"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">In</Label>
-              <Input
-                type="time"
-                value={formData.inTime}
-                onChange={(e) => setFormData((prev) => ({ ...prev, inTime: e.target.value }))}
-                className="h-9 text-sm px-2"
-              />
-            </div>
-          </div>
-
-          {/* Calculated Times Display */}
-          <div className="grid grid-cols-3 gap-2 p-2 bg-muted/50 rounded-lg">
-            <div className="text-center">
-              <p className="text-xs text-muted-foreground">Block</p>
-              <p className="font-mono font-medium">{calculatedTimes.blockTime || "0:00"}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-muted-foreground">Flight</p>
-              <p className="font-mono font-medium">{calculatedTimes.flightTime || "0:00"}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-muted-foreground">Night</p>
-              <p className="font-mono font-medium">
-                {formData.useManualOverrides && formData.manualNightTime
-                  ? formData.manualNightTime
-                  : calculatedTimes.nightTime || "0:00"}
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label className="text-xs text-muted-foreground">PIC/P1</Label>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full h-9 justify-start font-normal bg-transparent"
+          <div className="bg-card rounded-xl overflow-hidden mb-6">
+            <div className="px-4">
+              <SettingsRow
+                label="PIC / P1"
+                value={formData.picName || "Select"}
                 onClick={() => openCrewPicker("picId")}
-              >
-                <Users className="h-4 w-4 mr-2 text-muted-foreground" />
-                {formData.picName ? (
-                  <span className="truncate">{formData.picName}</span>
-                ) : (
-                  <span className="text-muted-foreground">Select PIC</span>
-                )}
-              </Button>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">SIC/P2</Label>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full h-9 justify-start font-normal bg-transparent"
+                showChevron
+                readOnly
+                highlight={!!formData.picName}
+              />
+              <SettingsRow
+                label="SIC / P2"
+                value={formData.sicName || "Select"}
                 onClick={() => openCrewPicker("sicId")}
-              >
-                <Users className="h-4 w-4 mr-2 text-muted-foreground" />
-                {formData.sicName ? (
-                  <span className="truncate">{formData.sicName}</span>
-                ) : (
-                  <span className="text-muted-foreground">Select SIC</span>
-                )}
-              </Button>
-            </div>
-          </div>
-
-          {/* Other Crew */}
-          <div>
-            <Label className="text-xs text-muted-foreground">Other Crew</Label>
-            <Input
-              value={formData.otherCrew}
-              onChange={(e) => setFormData((prev) => ({ ...prev, otherCrew: e.target.value }))}
-              placeholder="Additional crew members"
-              className="h-9"
-            />
-          </div>
-
-          {/* Pilot Role */}
-          <div>
-            <Label className="text-xs text-muted-foreground">Pilot Role (Logging As)</Label>
-            <Select
-              value={formData.pilotRole}
-              onValueChange={(value) => setFormData((prev) => ({ ...prev, pilotRole: value as FormData["pilotRole"] }))}
-            >
-              <SelectTrigger className="h-9">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="PIC">PIC</SelectItem>
-                <SelectItem value="SIC">SIC</SelectItem>
-                <SelectItem value="P1">P1</SelectItem>
-                <SelectItem value="P2">P2</SelectItem>
-                <SelectItem value="PU">P1 U/S</SelectItem>
-                <SelectItem value="PF">Pilot Flying</SelectItem>
-                <SelectItem value="PM">Pilot Monitoring</SelectItem>
-                <SelectItem value="STUDENT">Student</SelectItem>
-                <SelectItem value="INSTRUCTOR">Instructor</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Takeoffs/Landings */}
-          <div className="grid grid-cols-5 gap-1">
-            <div>
-              <Label className="text-xs text-muted-foreground">Day TO</Label>
-              <Input
-                type="number"
-                min={0}
-                value={formData.dayTakeoffs}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, dayTakeoffs: Number.parseInt(e.target.value) || 0 }))
-                }
-                className="h-9 px-2"
+                showChevron
+                readOnly
+                highlight={!!formData.sicName}
               />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Day Ldg</Label>
-              <Input
-                type="number"
-                min={0}
-                value={formData.dayLandings}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, dayLandings: Number.parseInt(e.target.value) || 0 }))
-                }
-                className="h-9 px-2"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Ngt TO</Label>
-              <Input
-                type="number"
-                min={0}
-                value={formData.nightTakeoffs}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, nightTakeoffs: Number.parseInt(e.target.value) || 0 }))
-                }
-                className="h-9 px-2"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Ngt Ldg</Label>
-              <Input
-                type="number"
-                min={0}
-                value={formData.nightLandings}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, nightLandings: Number.parseInt(e.target.value) || 0 }))
-                }
-                className="h-9 px-2"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Auto</Label>
-              <Input
-                type="number"
-                min={0}
-                value={formData.autolands}
-                onChange={(e) => setFormData((prev) => ({ ...prev, autolands: Number.parseInt(e.target.value) || 0 }))}
-                className="h-9 px-2"
+              <SettingsRow
+                label="Other Crew"
+                value={formData.otherCrew}
+                onChange={(v) => updateField("otherCrew", v)}
+                placeholder="Additional crew"
               />
             </div>
           </div>
 
-          {/* Remarks */}
-          <div>
-            <Label className="text-xs text-muted-foreground">Remarks</Label>
-            <Textarea
-              value={formData.remarks}
-              onChange={(e) => setFormData((prev) => ({ ...prev, remarks: e.target.value }))}
-              placeholder="Additional notes..."
-              className="h-16 resize-none"
-            />
+          {/* TIME Section */}
+          <div className="mb-2">
+            <span className="text-xs text-muted-foreground uppercase tracking-wider px-4">Time</span>
+          </div>
+          <div className="bg-card rounded-xl overflow-hidden mb-6">
+            <div className="px-4">
+              <TimeRow label="Total Time" value={formatTime(calculatedTimes.flightTime)} />
+              <TimeRow
+                label="Night"
+                value={formatTime(calculatedTimes.nightTime)}
+                secondaryValue={dayTime}
+                secondaryLabel="Day"
+              />
+              <TimeRow
+                label="P1u/s"
+                value={formatTime(calculatedTimes.flightTime)}
+                onUseTime={() => updateField("manualNightTime", calculatedTimes.flightTime || "00:00")}
+                useLabel={`USE ${formatTime(calculatedTimes.flightTime)}`}
+              />
+              <TimeRow label="SIC" value={formData.pilotFlying ? "0:00" : formatTime(calculatedTimes.flightTime)} />
+              <TimeRow label="XC" value={formatTime(formData.crossCountryTime)} />
+              <TimeRow
+                label="Actual Inst"
+                value={formatTime(formData.actualInstrumentTime)}
+                onUseTime={() => updateField("actualInstrumentTime", calculatedTimes.flightTime || "00:00")}
+                useLabel={`USE ${formatTime(calculatedTimes.flightTime)}`}
+              />
+              <TimeRow label="IFR" value={formatTime(formData.ifrTime)} />
+              <TimeRow
+                label="Simulator"
+                value={formatTime(formData.simulatedInstrumentTime)}
+                onUseTime={() => updateField("simulatedInstrumentTime", calculatedTimes.flightTime || "00:00")}
+                useLabel={`USE ${formatTime(calculatedTimes.flightTime)}`}
+              />
+            </div>
           </div>
 
-          {/* Endorsements */}
-          <div>
-            <Label className="text-xs text-muted-foreground">Endorsements</Label>
-            <Textarea
-              value={formData.endorsements}
-              onChange={(e) => setFormData((prev) => ({ ...prev, endorsements: e.target.value }))}
-              placeholder="Route checks, line checks, etc..."
-              className="h-16 resize-none"
-            />
+          {/* DUTY Section */}
+          <div className="mb-2">
+            <span className="text-xs text-muted-foreground uppercase tracking-wider px-4">Duty</span>
+          </div>
+          <div className="bg-card rounded-xl overflow-hidden mb-6">
+            <div className="px-4">
+              <ToggleRow
+                label="Pilot Flying"
+                checked={formData.pilotFlying}
+                onCheckedChange={(checked) => updateField("pilotFlying", checked)}
+              />
+            </div>
           </div>
 
-          {/* Manual Overrides Section */}
-          <Collapsible open={showOverrides} onOpenChange={setShowOverrides}>
-            <CollapsibleTrigger asChild>
-              <Button type="button" variant="ghost" className="w-full justify-between h-9 px-2">
-                <span className="flex items-center gap-2 text-sm">
-                  <Edit3 className="h-4 w-4" />
-                  Manual Overrides
-                </span>
-                {showOverrides ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-2 pt-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm">Enable Manual Overrides</Label>
-                <Switch
-                  checked={formData.useManualOverrides}
-                  onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, useManualOverrides: checked }))}
+          {/* LANDINGS Section */}
+          <div className="mb-2">
+            <span className="text-xs text-muted-foreground uppercase tracking-wider px-4">Landings</span>
+          </div>
+          <div className="bg-card rounded-xl overflow-hidden mb-6">
+            <div className="px-4">
+              <div className="flex items-center justify-between py-3 border-b border-border">
+                <span className="text-foreground">Day T/O</span>
+                <Input
+                  type="number"
+                  value={formData.dayTakeoffs}
+                  onChange={(e) => updateField("dayTakeoffs", Number.parseInt(e.target.value) || 0)}
+                  className="text-right border-0 bg-transparent h-auto p-0 w-16 text-foreground font-medium focus-visible:ring-0"
                 />
               </div>
-              {formData.useManualOverrides && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Night Time</Label>
-                    <Input
-                      type="time"
-                      value={formData.manualNightTime}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, manualNightTime: e.target.value }))}
-                      className="h-9"
-                      placeholder="HH:MM"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">IFR Time</Label>
-                    <Input
-                      type="time"
-                      value={formData.manualIfrTime}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, manualIfrTime: e.target.value }))}
-                      className="h-9"
-                      placeholder="HH:MM"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Actual Instrument</Label>
-                    <Input
-                      type="time"
-                      value={formData.manualActualInstrumentTime}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, manualActualInstrumentTime: e.target.value }))}
-                      className="h-9"
-                      placeholder="HH:MM"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Cross Country</Label>
-                    <Input
-                      type="time"
-                      value={formData.manualCrossCountryTime}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, manualCrossCountryTime: e.target.value }))}
-                      className="h-9"
-                      placeholder="HH:MM"
-                    />
-                  </div>
-                </div>
-              )}
-            </CollapsibleContent>
-          </Collapsible>
-
-          {/* Advanced Section */}
-          <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>
-            <CollapsibleTrigger asChild>
-              <Button type="button" variant="ghost" className="w-full justify-between h-9 px-2">
-                <span className="text-sm">Advanced Options</span>
-                {showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-2 pt-2">
-              {/* Approaches */}
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <Label className="text-xs text-muted-foreground">Approach 1</Label>
-                  <Input
-                    value={formData.approach1}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, approach1: e.target.value }))}
-                    placeholder="ILS 28L"
-                    className="h-9"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Approach 2</Label>
-                  <Input
-                    value={formData.approach2}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, approach2: e.target.value }))}
-                    placeholder="VOR 10"
-                    className="h-9"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Holds</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={formData.holds}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, holds: Number.parseInt(e.target.value) || 0 }))}
-                    className="h-9"
-                  />
-                </div>
-              </div>
-
-              {/* IPC/ICC Toggle */}
-              <div className="flex items-center justify-between">
-                <Label className="text-sm">IPC/ICC Check</Label>
-                <Switch
-                  checked={formData.ipcIcc}
-                  onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, ipcIcc: checked }))}
+              <div className="flex items-center justify-between py-3 border-b border-border">
+                <span className="text-foreground">Day Ldg</span>
+                <Input
+                  type="number"
+                  value={formData.dayLandings}
+                  onChange={(e) => updateField("dayLandings", Number.parseInt(e.target.value) || 0)}
+                  className="text-right border-0 bg-transparent h-auto p-0 w-16 text-foreground font-medium focus-visible:ring-0"
                 />
               </div>
-            </CollapsibleContent>
-          </Collapsible>
+              <div className="flex items-center justify-between py-3 border-b border-border">
+                <span className="text-foreground">Night T/O</span>
+                <Input
+                  type="number"
+                  value={formData.nightTakeoffs}
+                  onChange={(e) => updateField("nightTakeoffs", Number.parseInt(e.target.value) || 0)}
+                  className="text-right border-0 bg-transparent h-auto p-0 w-16 text-foreground font-medium focus-visible:ring-0"
+                />
+              </div>
+              <div className="flex items-center justify-between py-3 border-b border-border">
+                <span className="text-foreground">Night Ldg</span>
+                <Input
+                  type="number"
+                  value={formData.nightLandings}
+                  onChange={(e) => updateField("nightLandings", Number.parseInt(e.target.value) || 0)}
+                  className="text-right border-0 bg-transparent h-auto p-0 w-16 text-foreground font-medium focus-visible:ring-0"
+                />
+              </div>
+              <div className="flex items-center justify-between py-3">
+                <span className="text-foreground">Autolands</span>
+                <Input
+                  type="number"
+                  value={formData.autolands}
+                  onChange={(e) => updateField("autolands", Number.parseInt(e.target.value) || 0)}
+                  className="text-right border-0 bg-transparent h-auto p-0 w-16 text-foreground font-medium focus-visible:ring-0"
+                />
+              </div>
+            </div>
+          </div>
 
-          {/* Submit Button */}
-          <Button type="submit" className="w-full" disabled={isSubmitting}>
-            <Save className="h-4 w-4 mr-2" />
-            {isSubmitting ? "Saving..." : editingFlight ? "Update Flight" : "Save Flight"}
-          </Button>
+          {/* REMARKS Section */}
+          <div className="mb-2">
+            <span className="text-xs text-muted-foreground uppercase tracking-wider px-4">Remarks</span>
+          </div>
+          <div className="bg-card rounded-xl overflow-hidden mb-6">
+            <div className="px-4">
+              <SettingsRow
+                label="Remarks"
+                value={formData.remarks}
+                onChange={(v) => updateField("remarks", v)}
+                placeholder="Add remarks"
+              />
+              <SettingsRow
+                label="Endorsements"
+                value={formData.endorsements}
+                onChange={(v) => updateField("endorsements", v)}
+                placeholder="Add endorsements"
+              />
+            </div>
+          </div>
         </form>
-      </CardContent>
-    </Card>
+      </main>
+    </div>
   )
+}
+
+// Helper functions
+function parseTimeToMinutes(time: string): number {
+  if (!time) return 0
+  const parts = time.split(":")
+  if (parts.length !== 2) return 0
+  return Number.parseInt(parts[0], 10) * 60 + Number.parseInt(parts[1], 10)
+}
+
+function formatMinutesToTime(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return `${h}:${String(m).padStart(2, "0")}`
+}
+
+function formatTime(time: string | undefined): string {
+  if (!time) return "0:00"
+  if (time.includes(":")) {
+    const [h, m] = time.split(":")
+    return `${Number.parseInt(h, 10)}:${m}`
+  }
+  return time
 }
