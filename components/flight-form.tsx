@@ -102,7 +102,7 @@ const defaultFormData: FormData = {
   sicId: "",
   sicName: "",
   otherCrew: "",
-  pilotRole: "SIC",
+  pilotRole: "PM",
   dayTakeoffs: 0,
   dayLandings: 1,
   nightTakeoffs: 0,
