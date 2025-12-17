@@ -35,6 +35,7 @@ import {
   getApproachCategory, // Import getApproachCategory
 } from "@/lib/flight-calculations"
 import { formatTimeShort, utcToLocal, formatTimezoneOffset, getCurrentTimeUTC, isValidHHMM } from "@/lib/time-utils" // Import minutesToHHMM
+import { usePersonnel } from "@/hooks/use-indexed-db" // Add import for usePersonnel to get default roles
 
 const FORM_STORAGE_KEY = "flight-form-draft"
 
@@ -318,6 +319,7 @@ export function FlightForm({
 }: FlightFormProps) {
   const router = useRouter()
   const { airports } = useAirportDatabase()
+  const { personnel } = usePersonnel() // Get personnel to find default roles
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null)
 
@@ -534,6 +536,31 @@ export function FlightForm({
     url.searchParams.delete("crewName")
     window.history.replaceState({}, "", url.toString())
   }, [selectedCrewField, selectedCrewId, selectedCrewName])
+
+  useEffect(() => {
+    if (editingFlight || !personnel.length) return
+
+    // Find self crew member
+    const selfCrew = personnel.find((p) => p.isMe)
+    if (selfCrew) {
+      // Set pilot role based on default settings
+      if (selfCrew.defaultPIC) {
+        setFormData((prev) => ({
+          ...prev,
+          pilotRole: "PIC",
+          picId: selfCrew.id,
+          picName: "Self",
+        }))
+      } else if (selfCrew.defaultSIC) {
+        setFormData((prev) => ({
+          ...prev,
+          pilotRole: "SIC",
+          sicId: selfCrew.id,
+          sicName: "Self",
+        }))
+      }
+    }
+  }, [editingFlight, personnel])
 
   // Calculate derived fields
   const calculatedFields = useMemo(() => {

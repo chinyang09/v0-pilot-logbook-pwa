@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch"
 import { SyncStatus } from "@/components/sync-status"
 import { BottomNavbar } from "@/components/bottom-navbar"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
-import { getPersonnelById, updatePersonnel, addPersonnel, type Personnel } from "@/lib/indexed-db"
+import { getPersonnelById, updatePersonnel, addPersonnel, getAllPersonnel, type Personnel } from "@/lib/indexed-db"
 import { ArrowLeft, Loader2, ChevronRight } from "lucide-react"
 import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { mutate } from "swr"
@@ -53,16 +53,22 @@ function ToggleRow({
   checked,
   onCheckedChange,
   readOnly = false,
+  disabled = false,
 }: {
   label: string
   checked: boolean
   onCheckedChange?: (checked: boolean) => void
   readOnly?: boolean
+  disabled?: boolean
 }) {
   return (
     <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
-      <span className="text-foreground">{label}</span>
-      <Switch checked={checked} onCheckedChange={readOnly ? undefined : onCheckedChange} disabled={readOnly} />
+      <span className={disabled ? "text-muted-foreground" : "text-foreground"}>{label}</span>
+      <Switch
+        checked={checked}
+        onCheckedChange={readOnly ? undefined : onCheckedChange}
+        disabled={readOnly || disabled}
+      />
     </div>
   )
 }
@@ -80,6 +86,7 @@ export default function CrewDetailPage() {
   const [isLoading, setIsLoading] = useState(!isNew)
   const [isSaving, setIsSaving] = useState(false)
   const [isEditing, setIsEditing] = useState(isNew)
+  const [existingSelfId, setExistingSelfId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     crewId: "",
@@ -96,9 +103,16 @@ export default function CrewDetailPage() {
   })
 
   useEffect(() => {
-    if (isNew) return
+    const loadData = async () => {
+      const allPersonnel = await getAllPersonnel()
+      const selfCrew = allPersonnel.find((p) => p.isMe && p.id !== id)
+      setExistingSelfId(selfCrew?.id || null)
 
-    const loadCrew = async () => {
+      if (isNew) {
+        setIsLoading(false)
+        return
+      }
+
       try {
         const data = await getPersonnelById(id)
         if (data) {
@@ -125,18 +139,34 @@ export default function CrewDetailPage() {
         setIsLoading(false)
       }
     }
-    loadCrew()
+    loadData()
   }, [id, isNew])
 
   const updateField = useCallback((field: string, value: string | boolean | string[]) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
   }, [])
 
+  const handleIsMeChange = useCallback(
+    async (checked: boolean) => {
+      if (checked && existingSelfId) {
+        // Remove isMe from existing self crew
+        await updatePersonnel(existingSelfId, { isMe: false })
+        setExistingSelfId(null)
+      }
+      setFormData((prev) => ({ ...prev, isMe: checked }))
+    },
+    [existingSelfId],
+  )
+
   const handleSave = async () => {
     if (!formData.name.trim()) return
 
     setIsSaving(true)
     try {
+      if (formData.isMe && existingSelfId) {
+        await updatePersonnel(existingSelfId, { isMe: false })
+      }
+
       const personnelData = {
         name: formData.name.trim(),
         crewId: formData.crewId.trim() || undefined,
@@ -173,7 +203,7 @@ export default function CrewDetailPage() {
         const params = new URLSearchParams()
         params.set("field", fieldType)
         params.set("crewId", savedCrew.id)
-        params.set("crewName", savedCrew.name)
+        params.set("crewName", savedCrew.isMe ? "Self" : savedCrew.name)
         router.push(`${returnUrl}?${params.toString()}`)
       } else if (isNew) {
         router.push("/crew")
@@ -191,7 +221,6 @@ export default function CrewDetailPage() {
     if (isNew) {
       router.back()
     } else if (isEditing && crew) {
-      // Reset form data to original crew data
       setFormData({
         name: crew.name || "",
         crewId: crew.crewId || "",
@@ -260,7 +289,9 @@ export default function CrewDetailPage() {
             <Button variant="ghost" size="sm" onClick={handleCancel} className="text-primary h-8 px-2">
               {isEditing ? "Cancel" : <ArrowLeft className="h-4 w-4" />}
             </Button>
-            <h1 className="text-lg font-semibold">{isNew ? "New Crew" : formData.name || "Crew Info"}</h1>
+            <h1 className="text-lg font-semibold">
+              {isNew ? "New Crew" : formData.isMe ? "Self" : formData.name || "Crew Info"}
+            </h1>
             {isEditing ? (
               <Button
                 variant="ghost"
@@ -346,9 +377,14 @@ export default function CrewDetailPage() {
             <ToggleRow
               label="This is Me"
               checked={formData.isMe}
-              onCheckedChange={(checked) => updateField("isMe", checked)}
+              onCheckedChange={handleIsMeChange}
               readOnly={!isEditing}
             />
+            {isEditing && existingSelfId && !formData.isMe && (
+              <p className="text-xs text-muted-foreground -mt-2 mb-2 px-1">
+                Another crew member is already marked as "Self". Enabling this will remove that designation.
+              </p>
+            )}
 
             <SettingsRow
               label="Email"

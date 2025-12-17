@@ -45,6 +45,7 @@ export default function LogbookPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchFocused, setSearchFocused] = useState(false)
   const [selectedFilters, setSelectedFilters] = useState<string[]>([])
+  const [isCalendarActive, setIsCalendarActive] = useState(false)
 
   const calendarRef = useRef<{ scrollToMonth: (year: number, month: number) => void } | null>(null)
   const flightListRef = useRef<HTMLDivElement>(null)
@@ -76,7 +77,7 @@ export default function LogbookPage() {
 
   const handleFlightVisible = useCallback(
     (flight: FlightLog) => {
-      if (!showCalendar) return
+      if (!showCalendar || isCalendarActive) return
 
       const flightDate = new Date(flight.date)
       const year = flightDate.getFullYear()
@@ -86,7 +87,7 @@ export default function LogbookPage() {
         setSelectedMonth({ year, month })
       }
     },
-    [selectedMonth, showCalendar],
+    [selectedMonth, showCalendar, isCalendarActive],
   )
 
   const handleDateSelect = useCallback((date: string) => {
@@ -132,7 +133,7 @@ export default function LogbookPage() {
         break
       case "crew":
         personnel.forEach((p) => {
-          const name = `${p.firstName} ${p.lastName}`
+          const name = p.name || ""
           if (name.toLowerCase().includes(query)) {
             options.add(name)
           }
@@ -166,13 +167,9 @@ export default function LogbookPage() {
             })
           case "crew":
             return selectedFilters.some((filter) => {
-              const crewNames = flight.crewIds
-                ?.map((id) => {
-                  const p = personnel.find((per) => per.id === id)
-                  return p ? `${p.firstName} ${p.lastName}` : ""
-                })
-                .filter(Boolean)
-              return crewNames?.includes(filter)
+              if (flight.picName === filter || flight.sicName === filter) return true
+              if (flight.additionalCrew?.some((c) => c.name === filter)) return true
+              return false
             })
           default:
             return true
@@ -202,13 +199,22 @@ export default function LogbookPage() {
     setSelectedMonth({ year, month })
   }, [])
 
+  const handleCalendarInteractionStart = useCallback(() => {
+    setIsCalendarActive(true)
+  }, [])
+
+  const handleCalendarInteractionEnd = useCallback(() => {
+    // Delay resetting to allow month change to complete
+    setTimeout(() => setIsCalendarActive(false), 500)
+  }, [])
+
   const displayFlights = filteredFlights
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col overflow-hidden">
       <div
         className={cn(
-          "fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-lg border-b border-border transition-all duration-500 ease-out overflow-hidden",
+          "fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-lg border-b border-border transition-all duration-500 ease-out",
           showCalendar ? "h-12" : "h-24",
         )}
       >
@@ -293,7 +299,7 @@ export default function LogbookPage() {
               )}
 
               {searchFocused && activeFilterType !== "none" && filterOptions.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto z-[100] animate-in fade-in slide-in-from-top-2 duration-200">
                   {filterOptions.map((option) => (
                     <button
                       key={option}
@@ -399,6 +405,8 @@ export default function LogbookPage() {
           onMonthChange={handleMonthChange}
           onDateSelect={handleDateSelect}
           selectedDate={selectedDate}
+          onInteractionStart={handleCalendarInteractionStart}
+          onInteractionEnd={handleCalendarInteractionEnd}
         />
       </div>
 
@@ -424,7 +432,7 @@ export default function LogbookPage() {
         </div>
       </main>
 
-      <BottomNavbar />
+      {!isCalendarActive && <BottomNavbar />}
       <PWAInstallPrompt />
     </div>
   )
