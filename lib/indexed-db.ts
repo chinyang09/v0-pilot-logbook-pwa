@@ -2,8 +2,22 @@ import Dexie, { type Table } from "dexie"
 import { sumHHMM } from "./time-utils"
 import type { UserPreferences } from "./user-preferences"
 
+export interface Approach {
+  type: "ILS" | "VOR" | "NDB" | "RNAV" | "LOC" | "LDA" | "SDF" | "GPS" | "VISUAL" | "OTHER"
+  category: "precision" | "non-precision"
+  runway?: string
+  airport?: string
+}
+
+export interface AdditionalCrew {
+  id?: string
+  name: string
+  role: "Observer" | "Check Airman" | "Instructor" | "Examiner" | "Other"
+}
+
 export interface FlightLog {
   id: string
+  isDraft: boolean // New: true if user hasn't saved yet
   date: string
   flightNumber: string
   aircraftReg: string
@@ -12,45 +26,65 @@ export interface FlightLog {
   departureIata: string
   arrivalIcao: string
   arrivalIata: string
-  scheduledOut: string
-  scheduledIn: string
-  outTime: string
-  offTime: string
-  onTime: string
-  inTime: string
-  blockTime: string
-  flightTime: string
-  nightTime: string
+  // Departure airport timezone offset in hours (e.g., 8 for UTC+8)
+  departureTimezone: number
+  // Arrival airport timezone offset in hours
+  arrivalTimezone: number
+  scheduledOut: string // HH:MM UTC
+  scheduledIn: string // HH:MM UTC
+  outTime: string // HH:MM UTC
+  offTime: string // HH:MM UTC
+  onTime: string // HH:MM UTC
+  inTime: string // HH:MM UTC
+  blockTime: string // HH:MM calculated from out/in
+  flightTime: string // HH:MM calculated from off/on
+  nightTime: string // HH:MM calculated from civil twilight
+  dayTime: string // HH:MM calculated (flightTime - nightTime)
+  // Crew
   picId: string
   picName: string
   sicId: string
   sicName: string
-  otherCrew: string
-  pilotRole: "PF" | "PM" | "STUDENT" | "INSTRUCTOR"
+  additionalCrew: AdditionalCrew[] // New: replaces otherCrew
+  // Flying duties
+  pilotFlying: boolean // New: determines if T/O and landings count
+  pilotRole: "PIC" | "SIC" | "PICUS" | "Dual" | "Instructor"
+  // Time logging - all in HH:MM format (stored as minutes internally)
   picTime: string
   sicTime: string
   picusTime: string // P1 U/S time
   dualTime: string
   instructorTime: string
+  // Takeoffs and Landings
   dayTakeoffs: number
   dayLandings: number
   nightTakeoffs: number
   nightLandings: number
   autolands: number
+  // Remarks
   remarks: string
   endorsements: string
+  // Manual overrides - values user has manually changed (not from "USE" button)
   manualOverrides: {
-    nightTime?: string
-    ifrTime?: string
-    actualInstrumentTime?: string
-    crossCountryTime?: string
+    nightTime?: boolean
+    ifrTime?: boolean
+    actualInstrumentTime?: boolean
+    crossCountryTime?: boolean
+    picTime?: boolean
+    sicTime?: boolean
+    picusTime?: boolean
+    dayTakeoffs?: boolean
+    dayLandings?: boolean
+    nightTakeoffs?: boolean
+    nightLandings?: boolean
   }
+  // Instrument
   ifrTime: string
   actualInstrumentTime: string
   simulatedInstrumentTime: string
   crossCountryTime: string
-  approach1: string
-  approach2: string
+  // Approaches - now an array
+  approaches: Approach[]
   holds: number
   ipcIcc: boolean
   isLocked?: boolean
@@ -241,6 +275,7 @@ export async function getPendingFlights(): Promise<FlightLog[]> {
 export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<void> {
   const normalized: FlightLog = {
     id: serverFlight.id,
+    isDraft: serverFlight.isDraft || false,
     date: serverFlight.date,
     flightNumber: serverFlight.flightNumber || "",
     aircraftReg: serverFlight.aircraftReg || "",
@@ -249,6 +284,8 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     departureIata: serverFlight.departureIata || "",
     arrivalIcao: serverFlight.arrivalIcao || "",
     arrivalIata: serverFlight.arrivalIata || "",
+    departureTimezone: serverFlight.departureTimezone || 0,
+    arrivalTimezone: serverFlight.arrivalTimezone || 0,
     scheduledOut: serverFlight.scheduledOut || "",
     scheduledIn: serverFlight.scheduledIn || "",
     outTime: serverFlight.outTime || "",
@@ -258,15 +295,17 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     blockTime: serverFlight.blockTime || "00:00",
     flightTime: serverFlight.flightTime || "00:00",
     nightTime: serverFlight.nightTime || "00:00",
+    dayTime: serverFlight.dayTime || "00:00",
     picId: serverFlight.picId || "",
     picName: serverFlight.picName || "",
     sicId: serverFlight.sicId || "",
     sicName: serverFlight.sicName || "",
-    otherCrew: serverFlight.otherCrew || "",
+    additionalCrew: serverFlight.additionalCrew || [],
+    pilotFlying: serverFlight.pilotFlying ?? true,
     pilotRole: serverFlight.pilotRole || "PIC",
-    p1Time: serverFlight.p1Time || "00:00",
-    p2Time: serverFlight.p2Time || "00:00",
-    puTime: serverFlight.puTime || "00:00",
+    picTime: serverFlight.picTime || "00:00",
+    sicTime: serverFlight.sicTime || "00:00",
+    picusTime: serverFlight.picusTime || "00:00",
     dualTime: serverFlight.dualTime || "00:00",
     instructorTime: serverFlight.instructorTime || "00:00",
     dayTakeoffs: serverFlight.dayTakeoffs || 0,
@@ -281,8 +320,7 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     actualInstrumentTime: serverFlight.actualInstrumentTime || "00:00",
     simulatedInstrumentTime: serverFlight.simulatedInstrumentTime || "00:00",
     crossCountryTime: serverFlight.crossCountryTime || "00:00",
-    approach1: serverFlight.approach1 || "",
-    approach2: serverFlight.approach2 || "",
+    approaches: serverFlight.approaches || [],
     holds: serverFlight.holds || 0,
     ipcIcc: serverFlight.ipcIcc || false,
     createdAt: serverFlight.createdAt || Date.now(),
@@ -566,9 +604,9 @@ export async function getFlightStats() {
   const totalFlights = flights.length
   const blockTime = sumHHMM(flights.map((f) => f.blockTime))
   const flightTime = sumHHMM(flights.map((f) => f.flightTime))
-  const p1Time = sumHHMM(flights.map((f) => f.p1Time))
-  const p2Time = sumHHMM(flights.map((f) => f.p2Time))
-  const puTime = sumHHMM(flights.map((f) => f.puTime))
+  const picTime = sumHHMM(flights.map((f) => f.picTime))
+  const sicTime = sumHHMM(flights.map((f) => f.sicTime))
+  const picusTime = sumHHMM(flights.map((f) => f.picusTime))
   const dualTime = sumHHMM(flights.map((f) => f.dualTime))
   const instructorTime = sumHHMM(flights.map((f) => f.instructorTime))
   const nightTime = sumHHMM(flights.map((f) => f.nightTime))
@@ -584,9 +622,9 @@ export async function getFlightStats() {
     totalFlights,
     blockTime,
     flightTime,
-    p1Time,
-    p2Time,
-    puTime,
+    picTime,
+    sicTime,
+    picusTime,
     dualTime,
     instructorTime,
     nightTime,

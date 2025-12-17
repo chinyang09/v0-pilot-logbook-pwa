@@ -133,8 +133,16 @@ export function isNight(
   if (typeof dateOrDateTime === "string" && typeof latOrTime === "string") {
     // Called with (dateStr, timeStr, lat, lon)
     const [hours, minutes] = latOrTime.split(":").map(Number)
-    dateTime = new Date(dateOrDateTime)
-    dateTime.setUTCHours(hours || 0, minutes || 0, 0, 0)
+    const dateParts = dateOrDateTime.split("-")
+    if (dateParts.length === 3) {
+      const year = Number.parseInt(dateParts[0], 10)
+      const month = Number.parseInt(dateParts[1], 10) - 1
+      const day = Number.parseInt(dateParts[2], 10)
+      dateTime = new Date(Date.UTC(year, month, day, hours || 0, minutes || 0, 0, 0))
+    } else {
+      dateTime = new Date(dateOrDateTime)
+      dateTime.setUTCHours(hours || 0, minutes || 0, 0, 0)
+    }
     latitude = lonOrLat
     longitude = maybeLon!
   } else if (dateOrDateTime instanceof Date) {
@@ -158,7 +166,12 @@ export function isNight(
   }
 
   const sunTimes = getSunTimes(dateTime, latitude, longitude)
-  return dateTime < sunTimes.civilDawn || dateTime > sunTimes.civilDusk
+
+  // Civil dusk = end of civil twilight (getting dark)
+  // Civil dawn = start of civil twilight (getting light)
+  const isNightTime = dateTime < sunTimes.civilDawn || dateTime > sunTimes.civilDusk
+
+  return isNightTime
 }
 
 /**

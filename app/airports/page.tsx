@@ -17,8 +17,8 @@ const ITEMS_PER_PAGE = 50
 export default function AirportsPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const fieldType = searchParams.get("field") // 'from' or 'to'
-  const returnUrl = searchParams.get("return") || "/new-flight"
+  const fieldType = searchParams.get("field") // 'departureIcao'/'arrivalIcao' or 'from'/'to'
+  const returnUrl = searchParams.get("return") || searchParams.get("returnTo") || "/new-flight"
 
   const { airports, isLoading } = useAirportDatabase()
   const [searchQuery, setSearchQuery] = useState("")
@@ -117,6 +117,13 @@ export default function AirportsPage() {
     </button>
   )
 
+  const getTitle = () => {
+    if (!fieldType) return "Airports"
+    if (fieldType === "departureIcao" || fieldType === "from") return "Select Departure Airport"
+    if (fieldType === "arrivalIcao" || fieldType === "to") return "Select Arrival Airport"
+    return "Select Airport"
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <div className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-lg border-b border-border">
@@ -128,9 +135,7 @@ export default function AirportsPage() {
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
               )}
-              <h1 className="text-lg font-semibold text-foreground">
-                {fieldType ? `Select ${fieldType === "from" ? "Departure" : "Arrival"} Airport` : "Airports"}
-              </h1>
+              <h1 className="text-lg font-semibold text-foreground">{getTitle()}</h1>
             </div>
             <SyncStatus />
           </div>

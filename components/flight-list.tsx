@@ -20,7 +20,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Plane, ChevronDown, Trash2, Lock, Unlock, Sun, Moon } from "lucide-react"
+import { Plane, ChevronDown, Trash2, Lock, Unlock, Sun, Moon, FileEdit } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface FlightListProps {
@@ -62,6 +62,7 @@ function SwipeableFlightCard({
   const isHorizontalSwipe = useRef<boolean | null>(null)
 
   const isLocked = flight.isLocked || false
+  const isDraft = flight.isDraft || false
 
   const handleTouchStart = (e: React.TouchEvent) => {
     startX.current = e.touches[0].clientX
@@ -108,13 +109,11 @@ function SwipeableFlightCard({
     }
   }
 
-  // Date formatting
   const flightDate = new Date(flight.date)
   const day = flightDate.getDate().toString().padStart(2, "0")
   const month = MONTHS[flightDate.getMonth()]
   const year = flightDate.getFullYear().toString().slice(2)
 
-  // Landing indicators
   const totalDayLandings = flight.dayLandings || 0
   const totalNightLandings = flight.nightLandings || 0
 
@@ -127,16 +126,17 @@ function SwipeableFlightCard({
     if (flight.sicName && flight.sicName !== "Self") {
       names.push(flight.sicName)
     }
-    if (flight.otherCrew) {
-      names.push(flight.otherCrew)
+    if (flight.additionalCrew && Array.isArray(flight.additionalCrew)) {
+      flight.additionalCrew.forEach((crew) => {
+        if (crew.name) names.push(crew.name)
+      })
     }
 
     return names
-  }, [flight.picName, flight.sicName, flight.otherCrew])
+  }, [flight.picName, flight.sicName, flight.additionalCrew])
 
   return (
     <div className="relative overflow-hidden rounded-lg">
-      {/* Swipe action buttons */}
       <div
         className={cn(
           "absolute inset-y-0 right-0 flex items-center transition-opacity",
@@ -175,6 +175,7 @@ function SwipeableFlightCard({
           "bg-card border-border cursor-pointer relative",
           !isSwiping && "transition-transform duration-200",
           isLocked && "opacity-75",
+          isDraft && "border-dashed border-primary/50",
         )}
         style={{ transform: `translateX(${swipeX}px)` }}
         onTouchStart={handleTouchStart}
@@ -184,7 +185,6 @@ function SwipeableFlightCard({
       >
         <CardContent className="p-1">
           <div className="flex items-start gap-2">
-            {/* Left: Day number with MMM YY below */}
             <div className="flex flex-col items-center justify-start shrink-0 w-16">
               <div className="text-6xl font-bold leading-none tracking-tight">{day}</div>
               <div className="text-base text-muted-foreground mt-0.5 tracking-wide">
@@ -192,11 +192,8 @@ function SwipeableFlightCard({
               </div>
             </div>
 
-            {/* Right side: All flight details */}
             <div className="flex-1 min-w-0 flex flex-col justify-between">
-              {/* Top section: Times and airports */}
               <div className="flex flex-col">
-                {/* OUT time — total time — IN time */}
                 <div className="flex items-center justify-between gap-1">
                   <span className="text-base font-semibold leading-tight">
                     {flight.outTime?.slice(0, 5) || "--:--"}
@@ -211,30 +208,29 @@ function SwipeableFlightCard({
                   <span className="text-base font-semibold leading-tight">{flight.inTime?.slice(0, 5) || "--:--"}</span>
                 </div>
 
-                {/* FROM airport — TO airport */}
                 <div className="flex items-center justify-between mt-0">
-                  <span className="text-2xl font-bold leading-tight tracking-tight">{flight.departureIcao}</span>
-                  <span className="text-2xl font-bold leading-tight tracking-tight">{flight.arrivalIcao}</span>
+                  <span className="text-2xl font-bold leading-tight tracking-tight">
+                    {flight.departureIcao || "----"}
+                  </span>
+                  <span className="text-2xl font-bold leading-tight tracking-tight">
+                    {flight.arrivalIcao || "----"}
+                  </span>
                 </div>
               </div>
 
-              {/* Flight number, aircraft reg, aircraft type */}
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground leading-tight mt-0.5">
                 <span>{flight.flightNumber || "----"}</span>
                 <span>•</span>
-                <span>{flight.aircraftReg}</span>
+                <span>{flight.aircraftReg || "----"}</span>
                 <span>•</span>
-                <span>{flight.aircraftType}</span>
+                <span>{flight.aircraftType || "----"}</span>
               </div>
 
-              {/* Crew names and day/night indicators */}
               <div className="flex items-center justify-between mt-0.5">
-                {/* Crew names other than self */}
                 <div className="text-xs text-muted-foreground truncate flex-1 leading-tight">
                   {crewNames.length > 0 ? crewNames.join(", ") : ""}
                 </div>
 
-                {/* Day/night indicator */}
                 <div className="flex items-center gap-1.5 text-xs font-medium shrink-0 ml-2">
                   {totalDayLandings > 0 && (
                     <div className="flex items-center gap-0.5">
@@ -248,6 +244,7 @@ function SwipeableFlightCard({
                       <span>{totalNightLandings}N</span>
                     </div>
                   )}
+                  {isDraft && <FileEdit className="h-3 w-3 text-primary" />}
                   {isLocked && <Lock className="h-3 w-3 text-muted-foreground" />}
                 </div>
               </div>
@@ -278,7 +275,6 @@ export function FlightList({
   const observerRef = useRef<IntersectionObserver | null>(null)
   const flightRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
-  // Set up intersection observer for flight visibility tracking
   useEffect(() => {
     if (!onFlightVisible) return
 
@@ -314,7 +310,6 @@ export function FlightList({
     }
   }, [flights, onFlightVisible])
 
-  // Group flights by month
   const flightsByMonth = useMemo(() => {
     if (!showMonthHeaders) return null
 
@@ -371,7 +366,7 @@ export function FlightList({
   const handleToggleLock = async (flight: FlightLog) => {
     const { updateFlight } = await import("@/lib/indexed-db")
     await updateFlight(flight.id, { isLocked: !flight.isLocked })
-    onDeleted?.() // Refresh list
+    onDeleted?.()
   }
 
   const registerFlightRef = (id: string, element: HTMLDivElement | null) => {
