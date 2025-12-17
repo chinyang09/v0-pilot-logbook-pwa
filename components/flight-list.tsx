@@ -274,31 +274,55 @@ export function FlightList({
 
   const observerRef = useRef<IntersectionObserver | null>(null)
   const flightRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const lastReportedMonthRef = useRef<string>("")
 
   useEffect(() => {
     if (!onFlightVisible) return
 
     observerRef.current = new IntersectionObserver(
       (entries) => {
-        let topmostFlight: FlightLog | null = null
-        let topmostY = Number.POSITIVE_INFINITY
+        const intersecting: { flight: FlightLog; top: number }[] = []
 
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
-            const rect = entry.boundingClientRect
-            if (rect.top < topmostY && rect.top >= 0) {
-              topmostY = rect.top
-              const flightId = entry.target.id.replace("flight-", "")
-              topmostFlight = flights.find((f) => f.id === flightId) || null
+            const flightId = entry.target.id.replace("flight-", "")
+            const flight = flights.find((f) => f.id === flightId)
+            if (flight) {
+              intersecting.push({
+                flight,
+                top: entry.boundingClientRect.top,
+              })
             }
           }
         })
 
-        if (topmostFlight) {
-          onFlightVisible(topmostFlight)
+        flightRefs.current.forEach((element, id) => {
+          const rect = element.getBoundingClientRect()
+          if (rect.top >= -50 && rect.top < window.innerHeight * 0.5) {
+            const flight = flights.find((f) => f.id === id)
+            if (flight && !intersecting.find((i) => i.flight.id === id)) {
+              intersecting.push({ flight, top: rect.top })
+            }
+          }
+        })
+
+        if (intersecting.length > 0) {
+          intersecting.sort((a, b) => a.top - b.top)
+          const topmostFlight = intersecting[0].flight
+
+          const flightDate = new Date(topmostFlight.date)
+          const monthKey = `${flightDate.getFullYear()}-${flightDate.getMonth()}`
+
+          if (monthKey !== lastReportedMonthRef.current) {
+            lastReportedMonthRef.current = monthKey
+            onFlightVisible(topmostFlight)
+          }
         }
       },
-      { threshold: 0.1, rootMargin: "0px 0px -80% 0px" },
+      {
+        threshold: [0, 0.1, 0.5, 1],
+        rootMargin: "-100px 0px -50% 0px",
+      },
     )
 
     flightRefs.current.forEach((element) => {
@@ -307,6 +331,51 @@ export function FlightList({
 
     return () => {
       observerRef.current?.disconnect()
+    }
+  }, [flights, onFlightVisible])
+
+  useEffect(() => {
+    if (!onFlightVisible) return
+
+    const handleScroll = () => {
+      let topmostFlight: FlightLog | null = null
+      let topmostY = Number.POSITIVE_INFINITY
+
+      flightRefs.current.forEach((element, id) => {
+        const rect = element.getBoundingClientRect()
+        if (rect.top >= -50 && rect.top < topmostY && rect.top < window.innerHeight * 0.4) {
+          topmostY = rect.top
+          topmostFlight = flights.find((f) => f.id === id) || null
+        }
+      })
+
+      if (topmostFlight) {
+        const flightDate = new Date(topmostFlight.date)
+        const monthKey = `${flightDate.getFullYear()}-${flightDate.getMonth()}`
+
+        if (monthKey !== lastReportedMonthRef.current) {
+          lastReportedMonthRef.current = monthKey
+          onFlightVisible(topmostFlight)
+        }
+      }
+    }
+
+    let ticking = false
+    const throttledScroll = () => {
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          handleScroll()
+          ticking = false
+        })
+        ticking = true
+      }
+    }
+
+    const scrollContainer = document.querySelector("main .overflow-y-auto")
+    scrollContainer?.addEventListener("scroll", throttledScroll, { passive: true })
+
+    return () => {
+      scrollContainer?.removeEventListener("scroll", throttledScroll)
     }
   }, [flights, onFlightVisible])
 

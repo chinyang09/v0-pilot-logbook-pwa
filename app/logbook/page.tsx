@@ -46,6 +46,7 @@ export default function LogbookPage() {
   const [searchFocused, setSearchFocused] = useState(false)
   const [selectedFilters, setSelectedFilters] = useState<string[]>([])
   const [isCalendarActive, setIsCalendarActive] = useState(false)
+  const isScrollingFlightListRef = useRef(false)
 
   const calendarRef = useRef<{ scrollToMonth: (year: number, month: number) => void } | null>(null)
   const flightListRef = useRef<HTMLDivElement>(null)
@@ -58,7 +59,8 @@ export default function LogbookPage() {
   }, [])
 
   useEffect(() => {
-    if (!showCalendar || !flightListRef.current) return
+    // Only scroll flight list if calendar is active (user swiped calendar)
+    if (!showCalendar || !flightListRef.current || !isCalendarActive) return
 
     const monthFlights = flights.filter((f) => {
       const date = new Date(f.date)
@@ -73,10 +75,11 @@ export default function LogbookPage() {
         flightElement.scrollIntoView({ behavior: "smooth", block: "start" })
       }
     }
-  }, [selectedMonth, showCalendar, flights])
+  }, [selectedMonth, showCalendar, flights, isCalendarActive])
 
   const handleFlightVisible = useCallback(
     (flight: FlightLog) => {
+      // Don't update calendar if calendar is being actively swiped
       if (!showCalendar || isCalendarActive) return
 
       const flightDate = new Date(flight.date)
@@ -204,8 +207,7 @@ export default function LogbookPage() {
   }, [])
 
   const handleCalendarInteractionEnd = useCallback(() => {
-    // Delay resetting to allow month change to complete
-    setTimeout(() => setIsCalendarActive(false), 500)
+    setTimeout(() => setIsCalendarActive(false), 800)
   }, [])
 
   const displayFlights = filteredFlights
