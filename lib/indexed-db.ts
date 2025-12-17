@@ -26,7 +26,7 @@ export interface FlightLog {
   sicId: string
   sicName: string
   otherCrew: string
-  pilotRole: "PIC" | "SIC" | "P1" | "P2" | "PU" | "PF" | "PM" | "STUDENT" | "INSTRUCTOR"
+  pilotRole: "PF" | "PM" | "STUDENT" | "INSTRUCTOR"
   p1Time: string
   p2Time: string
   puTime: string // P1 U/S time
