@@ -58,7 +58,7 @@ interface FormData {
   picName: string
   sicId: string
   sicName: string
-  otherCrew: string
+  otherCrew: []
   pilotRole: "PF" | "PM" | "STUDENT" | "INSTRUCTOR"
   dayTakeoffs: number
   dayLandings: number
