@@ -18,6 +18,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { TimePicker } from "@/components/time-picker"
+import { DatePicker } from "@/components/date-picker"
 import type { FlightLog, AdditionalCrew, Approach } from "@/lib/indexed-db"
 import { updateFlight } from "@/lib/indexed-db"
 import { useAirportDatabase } from "@/hooks/use-indexed-db"
@@ -319,6 +320,8 @@ export function FlightForm({
   const { airports } = useAirportDatabase()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null)
+
+  const [datePickerOpen, setDatePickerOpen] = useState(false)
 
   const editingFlightInitializedRef = useRef<string | null>(null)
 
@@ -920,13 +923,7 @@ export function FlightForm({
                     })
                   : undefined
               }
-              onClick={() => {
-                const input = document.createElement("input")
-                input.type = "date"
-                input.value = formData.date || ""
-                input.onchange = (e) => updateField("date", (e.target as HTMLInputElement).value)
-                input.showPicker?.()
-              }}
+              onClick={() => setDatePickerOpen(true)}
             />
           </SwipeableRow>
 
@@ -1400,6 +1397,18 @@ export function FlightForm({
           onSelect={handleTimeSelect}
           onClose={() => setActiveTimePicker(null)}
           timezoneOffset={getTimePickerTimezone()}
+        />
+      )}
+
+      {datePickerOpen && (
+        <DatePicker
+          isOpen={datePickerOpen}
+          initialDate={formData.date}
+          onSelect={(value) => {
+            updateField("date", value)
+          }}
+          onClose={() => setDatePickerOpen(false)}
+          label="Select Date"
         />
       )}
     </div>
