@@ -104,7 +104,7 @@ const defaultFormData: FormData = {
   otherCrew: "",
   pilotRole: "PM",
   dayTakeoffs: 0,
-  dayLandings: 1,
+  dayLandings: 0,
   nightTakeoffs: 0,
   nightLandings: 0,
   autolands: 0,
