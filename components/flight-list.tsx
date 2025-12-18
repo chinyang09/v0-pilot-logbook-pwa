@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useMemo, useRef, useEffect } from "react"
+import { useState, useMemo, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from "react"
 import type { FlightLog, Aircraft, Airport, Personnel } from "@/lib/indexed-db"
 import { deleteFlight } from "@/lib/indexed-db"
 import { formatHHMMDisplay } from "@/lib/time-utils"
@@ -23,6 +23,10 @@ import {
 import { Plane, ChevronDown, Trash2, Lock, Unlock, Sun, Moon, FileEdit } from "lucide-react"
 import { cn } from "@/lib/utils"
 
+export interface FlightListRef {
+  scrollToFlight: (flightId: string) => void
+}
+
 interface FlightListProps {
   flights: FlightLog[]
   isLoading?: boolean
@@ -31,7 +35,8 @@ interface FlightListProps {
   aircraft?: Aircraft[]
   airports?: Airport[]
   personnel?: Personnel[]
-  onFlightVisible?: (flight: FlightLog) => void
+  onTopFlightChange?: (flight: FlightLog | null) => void
+  onScrollStart?: () => void
   showMonthHeaders?: boolean
   hideFilters?: boolean
 }
@@ -256,128 +261,101 @@ function SwipeableFlightCard({
   )
 }
 
-export function FlightList({
-  flights,
-  isLoading,
-  onEdit,
-  onDeleted,
-  aircraft = [],
-  airports = [],
-  personnel = [],
-  onFlightVisible,
-  showMonthHeaders = false,
-  hideFilters = false,
-}: FlightListProps) {
+export const FlightList = forwardRef<FlightListRef, FlightListProps>(function FlightList(
+  {
+    flights,
+    isLoading,
+    onEdit,
+    onDeleted,
+    aircraft = [],
+    airports = [],
+    personnel = [],
+    onTopFlightChange,
+    onScrollStart,
+    showMonthHeaders = false,
+    hideFilters = false,
+  },
+  ref,
+) {
   const [visibleCount, setVisibleCount] = useState(INITIAL_LOAD)
   const [deleteTarget, setDeleteTarget] = useState<FlightLog | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  const observerRef = useRef<IntersectionObserver | null>(null)
-  const flightRefs = useRef<Map<string, HTMLDivElement>>(new Map())
-  const lastReportedMonthRef = useRef<string>("")
+  const scrollContainerRef = useRef<HTMLElement | null>(null)
+  const isExternalScrollRef = useRef(false)
+  const lastDetectedFlightRef = useRef<string | null>(null)
 
-  useEffect(() => {
-    if (!onFlightVisible) return
+  useImperativeHandle(ref, () => ({
+    scrollToFlight: (flightId: string) => {
+      const container = scrollContainerRef.current
+      if (!container) return
 
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        const intersecting: { flight: FlightLog; top: number }[] = []
+      isExternalScrollRef.current = true
 
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            const flightId = entry.target.id.replace("flight-", "")
-            const flight = flights.find((f) => f.id === flightId)
-            if (flight) {
-              intersecting.push({
-                flight,
-                top: entry.boundingClientRect.top,
-              })
-            }
-          }
+      const flightElement = document.getElementById(`flight-${flightId}`)
+      if (flightElement) {
+        const containerRect = container.getBoundingClientRect()
+        const elementRect = flightElement.getBoundingClientRect()
+        const offsetTop = elementRect.top - containerRect.top + container.scrollTop
+
+        container.scrollTo({
+          top: offsetTop,
+          behavior: "smooth",
         })
+      }
 
-        flightRefs.current.forEach((element, id) => {
-          const rect = element.getBoundingClientRect()
-          if (rect.top >= -50 && rect.top < window.innerHeight * 0.5) {
-            const flight = flights.find((f) => f.id === id)
-            if (flight && !intersecting.find((i) => i.flight.id === id)) {
-              intersecting.push({ flight, top: rect.top })
-            }
-          }
-        })
+      setTimeout(() => {
+        isExternalScrollRef.current = false
+      }, 300)
+    },
+  }))
 
-        if (intersecting.length > 0) {
-          intersecting.sort((a, b) => a.top - b.top)
-          const topmostFlight = intersecting[0].flight
-
-          const flightDate = new Date(topmostFlight.date)
-          const monthKey = `${flightDate.getFullYear()}-${flightDate.getMonth()}`
-
-          if (monthKey !== lastReportedMonthRef.current) {
-            lastReportedMonthRef.current = monthKey
-            onFlightVisible(topmostFlight)
-          }
-        }
-      },
-      {
-        threshold: [0, 0.1, 0.5, 1],
-        rootMargin: "-100px 0px -50% 0px",
-      },
-    )
-
-    flightRefs.current.forEach((element) => {
-      observerRef.current?.observe(element)
-    })
-
-    return () => {
-      observerRef.current?.disconnect()
+  const handleScroll = useCallback(() => {
+    if (!isExternalScrollRef.current) {
+      onScrollStart?.()
     }
-  }, [flights, onFlightVisible])
 
-  useEffect(() => {
-    if (!onFlightVisible) return
+    if (!onTopFlightChange || flights.length === 0) return
 
-    const handleScroll = () => {
-      let topmostFlight: FlightLog | null = null
-      let topmostY = Number.POSITIVE_INFINITY
+    const container = scrollContainerRef.current
+    if (!container) return
 
-      flightRefs.current.forEach((element, id) => {
+    const containerTop = container.getBoundingClientRect().top
+    let topFlight: FlightLog | null = null
+
+    for (const flight of flights) {
+      const element = document.getElementById(`flight-${flight.id}`)
+      if (element) {
         const rect = element.getBoundingClientRect()
-        if (rect.top >= -50 && rect.top < topmostY && rect.top < window.innerHeight * 0.4) {
-          topmostY = rect.top
-          topmostFlight = flights.find((f) => f.id === id) || null
-        }
-      })
-
-      if (topmostFlight) {
-        const flightDate = new Date(topmostFlight.date)
-        const monthKey = `${flightDate.getFullYear()}-${flightDate.getMonth()}`
-
-        if (monthKey !== lastReportedMonthRef.current) {
-          lastReportedMonthRef.current = monthKey
-          onFlightVisible(topmostFlight)
+        if (rect.top >= containerTop - 50 && rect.bottom > containerTop) {
+          topFlight = flight
+          break
         }
       }
     }
 
-    let ticking = false
-    const throttledScroll = () => {
-      if (!ticking) {
-        requestAnimationFrame(() => {
-          handleScroll()
-          ticking = false
-        })
-        ticking = true
-      }
+    if (topFlight && topFlight.id !== lastDetectedFlightRef.current && !isExternalScrollRef.current) {
+      lastDetectedFlightRef.current = topFlight.id
+      onTopFlightChange(topFlight)
     }
+  }, [flights, onTopFlightChange, onScrollStart])
 
+  useEffect(() => {
     const scrollContainer = document.querySelector("main .overflow-y-auto")
-    scrollContainer?.addEventListener("scroll", throttledScroll, { passive: true })
+    if (!scrollContainer) return
+
+    scrollContainerRef.current = scrollContainer as HTMLElement
+
+    const onScroll = () => {
+      requestAnimationFrame(handleScroll)
+    }
+
+    scrollContainer.addEventListener("scroll", onScroll, { passive: true })
 
     return () => {
-      scrollContainer?.removeEventListener("scroll", throttledScroll)
+      scrollContainer.removeEventListener("scroll", onScroll)
     }
-  }, [flights, onFlightVisible])
+  }, [handleScroll])
 
   const flightsByMonth = useMemo(() => {
     if (!showMonthHeaders) return null
@@ -438,19 +416,6 @@ export function FlightList({
     onDeleted?.()
   }
 
-  const registerFlightRef = (id: string, element: HTMLDivElement | null) => {
-    if (element) {
-      flightRefs.current.set(id, element)
-      observerRef.current?.observe(element)
-    } else {
-      const existing = flightRefs.current.get(id)
-      if (existing) {
-        observerRef.current?.unobserve(existing)
-        flightRefs.current.delete(id)
-      }
-    }
-  }
-
   if (isLoading) {
     return (
       <div className="space-y-3">
@@ -490,7 +455,7 @@ export function FlightList({
   }
 
   const renderFlightCard = (flight: FlightLog) => (
-    <div key={flight.id} id={`flight-${flight.id}`} ref={(el) => registerFlightRef(flight.id, el)}>
+    <div key={flight.id} id={`flight-${flight.id}`}>
       <SwipeableFlightCard
         flight={flight}
         onEdit={() => onEdit?.(flight)}
@@ -549,4 +514,4 @@ export function FlightList({
       </AlertDialog>
     </>
   )
-}
+})

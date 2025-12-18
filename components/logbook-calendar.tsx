@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useRef, useCallback, forwardRef, useImperativeHandle, useMemo, useState } from "react"
+import { useRef, forwardRef, useImperativeHandle, useMemo, useState } from "react"
 import type { FlightLog } from "@/lib/indexed-db"
 import { cn } from "@/lib/utils"
 
@@ -12,23 +12,25 @@ interface LogbookCalendarProps {
   onMonthChange: (year: number, month: number) => void
   onDateSelect?: (date: string) => void
   selectedDate?: string | null
-  onInteractionStart?: () => void
+  onScrollStart?: () => void
   onInteractionEnd?: () => void
 }
 
-interface CalendarHandle {
+export interface CalendarHandle {
   scrollToMonth: (year: number, month: number) => void
 }
 
 const DAYS = ["S", "M", "T", "W", "T", "F", "S"]
 
 export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(function LogbookCalendar(
-  { flights, selectedMonth, onMonthChange, onDateSelect, selectedDate, onInteractionStart, onInteractionEnd },
+  { flights, selectedMonth, onMonthChange, onDateSelect, selectedDate, onScrollStart, onInteractionEnd },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [swipeStartY, setSwipeStartY] = useState(0)
   const [isSwiping, setIsSwiping] = useState(false)
+  const isExternalScrollRef = useRef(false)
+  const lastDetectedMonthRef = useRef<string | null>(null)
 
   const flightDates = useMemo(() => {
     const dates = new Map<string, { count: number; hasNight: boolean }>()
@@ -44,12 +46,11 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
   const calendarDays = useMemo(() => {
     const firstDay = new Date(selectedMonth.year, selectedMonth.month, 1)
-    const startDay = firstDay.getDay() // Day of week (0-6)
+    const startDay = firstDay.getDay()
     const daysInMonth = new Date(selectedMonth.year, selectedMonth.month + 1, 0).getDate()
 
     const days: { date: Date; dateStr: string; isCurrentMonth: boolean }[] = []
 
-    // Add previous month days to start on Sunday
     for (let i = 0; i < startDay; i++) {
       const prevDate = new Date(selectedMonth.year, selectedMonth.month, -(startDay - i - 1))
       days.push({
@@ -59,7 +60,6 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       })
     }
 
-    // Add current month days
     for (let i = 1; i <= daysInMonth; i++) {
       const date = new Date(selectedMonth.year, selectedMonth.month, i)
       days.push({
@@ -69,7 +69,6 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       })
     }
 
-    // Add next month days to complete 6 rows (42 days total)
     const remainingDays = 42 - days.length
     for (let i = 1; i <= remainingDays; i++) {
       const nextDate = new Date(selectedMonth.year, selectedMonth.month + 1, i)
@@ -83,26 +82,34 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     return days
   }, [selectedMonth])
 
-  const scrollToMonth = useCallback(
-    (year: number, month: number) => {
-      onMonthChange(year, month)
-    },
+  useImperativeHandle(
+    ref,
+    () => ({
+      scrollToMonth: (year: number, month: number) => {
+        // Set external flag BEFORE changing month
+        isExternalScrollRef.current = true
+        onMonthChange(year, month)
+
+        // Reset external flag after animation
+        setTimeout(() => {
+          isExternalScrollRef.current = false
+        }, 300)
+      },
+    }),
     [onMonthChange],
   )
-
-  useImperativeHandle(ref, () => ({ scrollToMonth }), [scrollToMonth])
 
   const handleTouchStart = (e: React.TouchEvent) => {
     setSwipeStartY(e.touches[0].clientY)
     setIsSwiping(true)
-    onInteractionStart?.()
-    // Prevent pull-to-refresh
+    if (!isExternalScrollRef.current) {
+      onScrollStart?.()
+    }
     e.stopPropagation()
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (!isSwiping) return
-    // Prevent page scroll while swiping calendar
     e.stopPropagation()
   }
 
@@ -112,18 +119,24 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
     const diffY = swipeStartY - e.changedTouches[0].clientY
 
-    // Only change month if vertical swipe is significant
     if (Math.abs(diffY) > 50) {
+      let newYear = selectedMonth.year
+      let newMonth = selectedMonth.month
+
       if (diffY > 0) {
-        // Swipe up = next month
-        const nextMonth = selectedMonth.month === 11 ? 0 : selectedMonth.month + 1
-        const nextYear = selectedMonth.month === 11 ? selectedMonth.year + 1 : selectedMonth.year
-        onMonthChange(nextYear, nextMonth)
+        // Swipe up - next month
+        newMonth = selectedMonth.month === 11 ? 0 : selectedMonth.month + 1
+        newYear = selectedMonth.month === 11 ? selectedMonth.year + 1 : selectedMonth.year
       } else {
-        // Swipe down = previous month
-        const prevMonth = selectedMonth.month === 0 ? 11 : selectedMonth.month - 1
-        const prevYear = selectedMonth.month === 0 ? selectedMonth.year - 1 : selectedMonth.year
-        onMonthChange(prevYear, prevMonth)
+        // Swipe down - previous month
+        newMonth = selectedMonth.month === 0 ? 11 : selectedMonth.month - 1
+        newYear = selectedMonth.month === 0 ? selectedMonth.year - 1 : selectedMonth.year
+      }
+
+      const monthKey = `${newYear}-${newMonth}`
+      if (monthKey !== lastDetectedMonthRef.current && !isExternalScrollRef.current) {
+        lastDetectedMonthRef.current = monthKey
+        onMonthChange(newYear, newMonth)
       }
     }
 

@@ -1,10 +1,10 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
-import { FlightList } from "@/components/flight-list"
+import { FlightList, type FlightListRef } from "@/components/flight-list"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { BottomNavbar } from "@/components/bottom-navbar"
-import { LogbookCalendar } from "@/components/logbook-calendar"
+import { LogbookCalendar, type CalendarHandle } from "@/components/logbook-calendar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { FlightLog } from "@/lib/indexed-db"
@@ -45,11 +45,12 @@ export default function LogbookPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchFocused, setSearchFocused] = useState(false)
   const [selectedFilters, setSelectedFilters] = useState<string[]>([])
-  const [isCalendarActive, setIsCalendarActive] = useState(false)
-  const isScrollingFlightListRef = useRef(false)
+  const [hideNavbar, setHideNavbar] = useState(false)
 
-  const calendarRef = useRef<{ scrollToMonth: (year: number, month: number) => void } | null>(null)
-  const flightListRef = useRef<HTMLDivElement>(null)
+  const calendarRef = useRef<CalendarHandle>(null)
+  const flightListRef = useRef<FlightListRef>(null)
+  const lastScrollSourceRef = useRef<{ source: "calendar" | "flights"; timestamp: number } | null>(null)
+  const syncLockRef = useRef(false)
 
   useEffect(() => {
     const unsubscribe = syncService.onDataChanged(() => {
@@ -58,40 +59,83 @@ export default function LogbookPage() {
     return unsubscribe
   }, [])
 
-  useEffect(() => {
-    // Only scroll flight list if calendar is active (user swiped calendar)
-    if (!showCalendar || !flightListRef.current || !isCalendarActive) return
+  const handleCalendarMonthChange = useCallback(
+    (year: number, month: number) => {
+      setSelectedMonth({ year, month })
 
-    const monthFlights = flights.filter((f) => {
-      const date = new Date(f.date)
-      return date.getFullYear() === selectedMonth.year && date.getMonth() === selectedMonth.month
-    })
+      const now = Date.now()
+      // Only sync flights if calendar was last scrolled (within 300ms)
+      if (
+        lastScrollSourceRef.current?.source === "calendar" &&
+        now - lastScrollSourceRef.current.timestamp < 300 &&
+        !syncLockRef.current
+      ) {
+        syncLockRef.current = true
 
-    if (monthFlights.length > 0) {
-      const latestFlight = monthFlights.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
+        const monthFlights = flights.filter((f) => {
+          const date = new Date(f.date)
+          return date.getFullYear() === year && date.getMonth() === month
+        })
 
-      const flightElement = document.getElementById(`flight-${latestFlight.id}`)
-      if (flightElement) {
-        flightElement.scrollIntoView({ behavior: "smooth", block: "start" })
-      }
-    }
-  }, [selectedMonth, showCalendar, flights, isCalendarActive])
+        if (monthFlights.length > 0) {
+          const sortedFlights = [...monthFlights].sort(
+            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+          )
+          flightListRef.current?.scrollToFlight(sortedFlights[0].id)
+        }
 
-  const handleFlightVisible = useCallback(
-    (flight: FlightLog) => {
-      // Don't update calendar if calendar is being actively swiped
-      if (!showCalendar || isCalendarActive) return
-
-      const flightDate = new Date(flight.date)
-      const year = flightDate.getFullYear()
-      const month = flightDate.getMonth()
-
-      if (year !== selectedMonth.year || month !== selectedMonth.month) {
-        setSelectedMonth({ year, month })
+        // Release lock after animation completes
+        setTimeout(() => {
+          syncLockRef.current = false
+        }, 350)
       }
     },
-    [selectedMonth, showCalendar, isCalendarActive],
+    [flights],
   )
+
+  const handleFlightScroll = useCallback(
+    (topFlight: FlightLog | null) => {
+      if (!showCalendar || !topFlight) return
+
+      const now = Date.now()
+      // Only sync calendar if flights was last scrolled (within 300ms)
+      if (
+        lastScrollSourceRef.current?.source === "flights" &&
+        now - lastScrollSourceRef.current.timestamp < 300 &&
+        !syncLockRef.current
+      ) {
+        const flightDate = new Date(topFlight.date)
+        const newYear = flightDate.getFullYear()
+        const newMonth = flightDate.getMonth()
+
+        if (newYear !== selectedMonth.year || newMonth !== selectedMonth.month) {
+          syncLockRef.current = true
+          setSelectedMonth({ year: newYear, month: newMonth })
+          calendarRef.current?.scrollToMonth(newYear, newMonth)
+
+          setTimeout(() => {
+            syncLockRef.current = false
+          }, 350)
+        }
+      }
+    },
+    [selectedMonth, showCalendar],
+  )
+
+  const handleCalendarScrollStart = useCallback(() => {
+    lastScrollSourceRef.current = { source: "calendar", timestamp: Date.now() }
+    setHideNavbar(true)
+  }, [])
+
+  const handleFlightScrollStart = useCallback(() => {
+    lastScrollSourceRef.current = { source: "flights", timestamp: Date.now() }
+  }, [])
+
+  const handleCalendarInteractionEnd = useCallback(() => {
+    setTimeout(() => {
+      setHideNavbar(false)
+    }, 600)
+  }, [])
 
   const handleDateSelect = useCallback((date: string) => {
     setSelectedDate((prev) => (prev === date ? null : date))
@@ -197,18 +241,6 @@ export default function LogbookPage() {
   const hasActiveFilters = selectedDate || selectedFilters.length > 0
 
   const isLoading = dbLoading || !dbReady
-
-  const handleMonthChange = useCallback((year: number, month: number) => {
-    setSelectedMonth({ year, month })
-  }, [])
-
-  const handleCalendarInteractionStart = useCallback(() => {
-    setIsCalendarActive(true)
-  }, [])
-
-  const handleCalendarInteractionEnd = useCallback(() => {
-    setTimeout(() => setIsCalendarActive(false), 800)
-  }, [])
 
   const displayFlights = filteredFlights
 
@@ -404,10 +436,10 @@ export default function LogbookPage() {
           ref={calendarRef}
           flights={flights}
           selectedMonth={selectedMonth}
-          onMonthChange={handleMonthChange}
+          onMonthChange={handleCalendarMonthChange}
           onDateSelect={handleDateSelect}
           selectedDate={selectedDate}
-          onInteractionStart={handleCalendarInteractionStart}
+          onScrollStart={handleCalendarScrollStart}
           onInteractionEnd={handleCalendarInteractionEnd}
         />
       </div>
@@ -418,8 +450,9 @@ export default function LogbookPage() {
           top: showCalendar ? "calc(3rem + 35vh)" : "6rem",
         }}
       >
-        <div className="flex-1 overflow-y-auto container mx-auto px-4" ref={flightListRef}>
+        <div className="flex-1 overflow-y-auto container mx-auto px-4">
           <FlightList
+            ref={flightListRef}
             flights={displayFlights}
             isLoading={flightsLoading || isLoading}
             onEdit={handleEditFlight}
@@ -427,14 +460,15 @@ export default function LogbookPage() {
             aircraft={aircraft}
             airports={airports}
             personnel={personnel}
-            onFlightVisible={handleFlightVisible}
+            onTopFlightChange={handleFlightScroll}
+            onScrollStart={handleFlightScrollStart}
             showMonthHeaders={false}
             hideFilters={true}
           />
         </div>
       </main>
 
-      {!isCalendarActive && <BottomNavbar />}
+      {!hideNavbar && <BottomNavbar />}
       <PWAInstallPrompt />
     </div>
   )
