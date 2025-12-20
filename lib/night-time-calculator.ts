@@ -327,14 +327,19 @@ function calculateInFlightNightTime(
   // Sample every minute along the great circle
   for (let i = 0; i < durationMinutes; i++) {
     const fraction = durationMinutes > 1 ? i / (durationMinutes - 1) : 0;
-    const sampleTime = new Date(offTime.getTime() + i * 60 * 1000)```
-  // Interpolate position along great circle
-  const [lat, lon] = interpolateGreatCircle(depLat, depLon, arrLat, arrLon, fraction)
-  
-  if (isNight(sampleTime, lat, lon)) {
-    nightMinutes += 1
-  }
-  ```;
+    const sampleTime = new Date(offTime.getTime() + i * 60 * 1000);
+    // Interpolate position along great circle
+    const [lat, lon] = interpolateGreatCircle(
+      depLat,
+      depLon,
+      arrLat,
+      arrLon,
+      fraction
+    );
+
+    if (isNight(sampleTime, lat, lon)) {
+      nightMinutes += 1;
+    }
   }
 
   return nightMinutes;
