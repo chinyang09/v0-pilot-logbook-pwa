@@ -225,7 +225,7 @@ function SwipeableFlightCard({
         onTouchEnd={handleTouchEnd}
         onClick={handleClick}
       >
-        <CardContent className="p-1">
+        <CardContent className="px-3 py-1">
           <div className="flex items-start gap-2">
             <div className="flex flex-col items-center justify-start shrink-0 w-16">
               <div className="text-6xl font-bold leading-none tracking-tight">
@@ -531,7 +531,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
     return (
       <>
-        <div className="space-y-3">
+        <div className="space-y-2 scroll-smooth">
           {showMonthHeaders && flightsByMonth
             ? flightsByMonth.map(({ month, year, flights: monthFlights }) => (
                 <div key={`${year}-${month}`} className="space-y-3">
