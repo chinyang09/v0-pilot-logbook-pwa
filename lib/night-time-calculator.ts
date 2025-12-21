@@ -106,7 +106,7 @@ export function interpolateGreatCircle(
 }
 
 // ============================================
-// NOAA Solar Position Calculator (IMPROVED)
+// NOAA Solar Position Calculator
 // ============================================
 
 /**
@@ -160,7 +160,7 @@ function calculateSolarElevation(date: Date, lat: number, lon: number): number {
         1.25 * e * e * Math.sin(2 * toRadians(M))
     );
 
-  // Hour angle - FIXED: removed problematic modulo operation
+  // Hour angle
   const timeOffset = eqTime + 4 * lon;
   const trueSolarTime =
     date.getUTCHours() * 60 +
@@ -324,17 +324,22 @@ function calculateInFlightNightTime(
 
   let nightMinutes = 0;
 
-  // Sample every minute along the great circle (FIXED: removed <= to avoid +1 minute)
+  // Sample every minute along the great circle
   for (let i = 0; i < durationMinutes; i++) {
     const fraction = durationMinutes > 1 ? i / (durationMinutes - 1) : 0;
-    const sampleTime = new Date(offTime.getTime() + i * 60 * 1000)```
-  // Interpolate position along great circle
-  const [lat, lon] = interpolateGreatCircle(depLat, depLon, arrLat, arrLon, fraction)
-  
-  if (isNight(sampleTime, lat, lon)) {
-    nightMinutes += 1
-  }
-  ```;
+    const sampleTime = new Date(offTime.getTime() + i * 60 * 1000);
+    // Interpolate position along great circle
+    const [lat, lon] = interpolateGreatCircle(
+      depLat,
+      depLon,
+      arrLat,
+      arrLon,
+      fraction
+    );
+
+    if (isNight(sampleTime, lat, lon)) {
+      nightMinutes += 1;
+    }
   }
 
   return nightMinutes;
@@ -375,12 +380,12 @@ function parseTimeToUTC(
 
 /**
   
-  - Format minutes to HH:MM string (FIXED: using Math.floor instead of Math.round)
+  - Format minutes to HH:MM string
     */
 function minutesToHHMM(minutes: number): string {
   if (isNaN(minutes) || minutes < 0) return "00:00";
   const hours = Math.floor(minutes / 60);
-  const mins = Math.floor(minutes % 60); // Changed from Math.round to Math.floor
+  const mins = Math.floor(minutes % 60);
   return `${hours.toString().padStart(2, "0")}:${mins
     .toString()
     .padStart(2, "0")}`;
@@ -465,7 +470,7 @@ export function calculateNightTimeComplete(
     (inUTC.getTime() - outUTC.getTime()) / (1000 * 60)
   );
 
-  // Phase 1: OUT to OFF (on ground at departure) - FIXED: samples every minute
+  // Phase 1: OUT to OFF (on ground at departure)
   const phase1NightMinutes = calculatePhaseNightTime(
     outUTC,
     offUTC,
@@ -473,7 +478,7 @@ export function calculateNightTimeComplete(
     depLon
   );
 
-  // Phase 2: OFF to ON (in flight along great circle) - FIXED: proper loop bounds
+  // Phase 2: OFF to ON (in flight along great circle)
   const phase2NightMinutes = calculateInFlightNightTime(
     offUTC,
     onUTC,
@@ -483,7 +488,7 @@ export function calculateNightTimeComplete(
     arrLon
   );
 
-  // Phase 3: ON to IN (on ground at arrival) - FIXED: samples every minute
+  // Phase 3: ON to IN (on ground at arrival)
   const phase3NightMinutes = calculatePhaseNightTime(
     onUTC,
     inUTC,
@@ -497,22 +502,6 @@ export function calculateNightTimeComplete(
 
   // Day time = block time - night time
   const dayMinutes = Math.max(0, totalBlockMinutes - totalNightMinutes);
-
-  console.log("[v0] Night calculation:", {
-    date,
-    outTime,
-    offTime,
-    onTime,
-    inTime,
-    depCoords: { lat: depLat, lon: depLon },
-    arrCoords: { lat: arrLat, lon: arrLon },
-    phase1: phase1NightMinutes,
-    phase2: phase2NightMinutes,
-    phase3: phase3NightMinutes,
-    totalNight: totalNightMinutes,
-    totalBlock: totalBlockMinutes,
-    day: dayMinutes,
-  });
 
   return {
     phase1NightMinutes,
@@ -586,40 +575,5 @@ export function calculateTimesFromOOOI(
   return {
     blockTime: minutesToHHMM(Math.max(0, blockMinutes)),
     flightTime: minutesToHHMM(Math.max(0, flightMinutes)),
-  };
-}
-
-// ============================================
-// Legacy Sun Times Interface (kept for compatibility)
-// ============================================
-
-interface SunTimes {
-  sunrise: Date;
-  sunset: Date;
-  civilDawn: Date;
-  civilDusk: Date;
-  isAlwaysDay: boolean;
-  isAlwaysNight: boolean;
-}
-
-/**
-  
-  - Legacy getSunTimes function - kept for backward compatibility
-  - Note: For actual night calculations, the improved isNight() function is used
-    */
-export function getSunTimes(
-  date: Date,
-  latitude: number,
-  longitude: number
-): SunTimes {
-  // This is kept for backward compatibility but the main calculation
-  // now uses the improved calculateSolarElevation function
-  return {
-    sunrise: new Date(Number.NaN),
-    sunset: new Date(Number.NaN),
-    civilDawn: new Date(Number.NaN),
-    civilDusk: new Date(Number.NaN),
-    isAlwaysDay: false,
-    isAlwaysNight: false,
   };
 }
