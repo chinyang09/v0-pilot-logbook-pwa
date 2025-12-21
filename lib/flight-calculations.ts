@@ -14,30 +14,26 @@ import type { AirportData } from "./airport-database";
 import type { FlightLog, Approach } from "./indexed-db";
 
 /**
- * Calculate block time from OUT and IN times
+ * CONSTANTS & HELPERS
  */
 export function calculateBlockTime(outTime: string, inTime: string): string {
   return calculateDuration(outTime, inTime);
 }
 
 /**
- * Calculate flight time from OFF and ON times
+ * CORE CALCULATION UTILITIES
  */
 export function calculateFlightTime(offTime: string, onTime: string): string {
   return calculateDuration(offTime, onTime);
 }
 
 /**
- * Calculate night time based on OUT/IN times and airport coordinates
- * Uses civil twilight (sun 6 degrees below horizon) per aviation standards
- * Night time = time between civil twilight END (dusk) and civil twilight START (dawn)
- *
- * Now uses OUT and IN times (block time) instead of OFF and ON times (flight time)
+ * Calculate night time based on OUT/IN times using linear interpolation of flight path
  */
 export function calculateNightTimeFromFlight(
   date: string,
-  outTime: string, // renamed from offTime
-  inTime: string, // renamed from onTime
+  outTime: string,
+  inTime: string,
   depAirport: AirportData | null,
   arrAirport: AirportData | null
 ): string {
@@ -81,14 +77,11 @@ export function calculateNightTimeFromFlight(
   });
 
   if (
-    typeof depLat !== "number" ||
-    typeof depLon !== "number" ||
-    typeof arrLat !== "number" ||
-    typeof arrLon !== "number" ||
-    isNaN(depLat) ||
-    isNaN(depLon) ||
-    isNaN(arrLat) ||
-    isNaN(arrLon)
+    !date ||
+    !isValidHHMM(outTime) ||
+    !isValidHHMM(inTime) ||
+    !depCoords ||
+    !arrCoords
   ) {
     console.log("[v0] Night calc - invalid coordinates");
     return "00:00";
@@ -172,7 +165,7 @@ export function calculateDayTime(
 }
 
 /**
- * Determine if takeoff was during night
+ * Event-based Night Checks (Takeoff/Landing)
  */
 export function isTakeoffAtNight(
   date: string,
@@ -234,8 +227,9 @@ export function isLandingAtNight(
 }
 
 /**
- * Calculate takeoffs and landings based on off/on times and pilot flying status
+ * LOGIC HANDLERS
  */
+
 export function calculateTakeoffsLandings(
   date: string,
   offTime: string,
@@ -280,9 +274,6 @@ export function calculateTakeoffsLandings(
   return result;
 }
 
-/**
- * Calculate PIC/SIC time based on pilot role and block time
- */
 export function calculateRoleTimes(
   blockTime: string,
   pilotRole: FlightLog["pilotRole"]
@@ -345,7 +336,7 @@ export function createEmptyFlightLog(): Omit<
   const now = new Date();
   return {
     isDraft: true,
-    date: now.toISOString().split("T")[0],
+    date: new Date().toISOString().split("T")[0],
     flightNumber: "",
     aircraftReg: "",
     aircraftType: "",
