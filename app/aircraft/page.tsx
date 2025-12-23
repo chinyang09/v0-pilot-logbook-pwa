@@ -1,61 +1,44 @@
-"use client";
+"use client"
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useEffect, useRef, useCallback } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Search, Plane, ChevronLeft, Loader2, ChevronRight } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import {
-  Search,
-  Plane,
-  ChevronLeft,
-  Loader2,
-  ChevronRight,
-} from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import {
+  getAircraftDatabase,
   searchAircraft,
-  initializeDatabase,
+  type AircraftData,
   type NormalizedAircraft,
   isAircraftDatabaseLoaded,
   normalizeAircraft,
   setProgressCallback,
-  getAircraftByRegistration,
-} from "@/lib/aircraft-database";
-import { getUserPreferences, saveUserPreferences } from "@/lib/indexed-db";
-import { useDebounce } from "@/hooks/use-debounce";
+} from "@/lib/aircraft-database"
+import { getUserPreferences, saveUserPreferences } from "@/lib/indexed-db"
 
-const ITEMS_PER_PAGE = 30;
+const ITEMS_PER_PAGE = 30
 
 export default function AircraftPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const selectMode = searchParams.get("select") === "true";
-  const returnTo = searchParams.get("returnTo") || "/new-flight";
-  const fieldName = searchParams.get("field") || "aircraftReg";
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const selectMode = searchParams.get("select") === "true"
+  const returnTo = searchParams.get("returnTo") || "/new-flight"
+  const fieldName = searchParams.get("field") || "aircraftReg"
 
-  const [searchQuery, setSearchQuery] = useState("");
-  // Debounce logic
-  const debouncedQuery = useDebounce(searchQuery, 300);
+  const [searchQuery, setSearchQuery] = useState("")
+  const [allAircraft, setAllAircraft] = useState<AircraftData[]>([])
+  const [filteredAircraft, setFilteredAircraft] = useState<NormalizedAircraft[]>([])
+  const [recentlyUsed, setRecentlyUsed] = useState<NormalizedAircraft[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadingProgress, setLoadingProgress] = useState({ stage: "", percent: 0, count: 0 })
+  const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE)
 
-  const [filteredAircraft, setFilteredAircraft] = useState<
-    NormalizedAircraft[]
-  >([]);
-  const [recentlyUsed, setRecentlyUsed] = useState<NormalizedAircraft[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSearching, setIsSearching] = useState(false);
-  const [loadingProgress, setLoadingProgress] = useState({
-    stage: "",
-    percent: 0,
-    count: 0,
-  });
-  const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
+  const listRef = useRef<HTMLDivElement>(null)
+  const observerRef = useRef<IntersectionObserver | null>(null)
+  const loadMoreRef = useRef<HTMLDivElement>(null)
 
-  const listRef = useRef<HTMLDivElement>(null);
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const loadMoreRef = useRef<HTMLDivElement>(null);
-
-  // Initialization Effect
   useEffect(() => {
-    let mounted = true;
+    let mounted = true
 
     setProgressCallback((progress) => {
       if (mounted) {
@@ -63,151 +46,115 @@ export default function AircraftPage() {
           stage: progress.stage,
           percent: progress.percent,
           count: progress.count || 0,
-        });
+        })
       }
-    });
+    })
 
     async function loadDatabase() {
-      setIsLoading(true);
+      setIsLoading(true)
 
-      // Only check existence, do not load to memory
       if (isAircraftDatabaseLoaded()) {
-        setLoadingProgress({ stage: "Ready", percent: 100, count: 0 });
+        setLoadingProgress({ stage: "Loading from cache...", percent: 0, count: 0 })
       } else {
-        setLoadingProgress({ stage: "Initializing...", percent: 0, count: 0 });
+        setLoadingProgress({ stage: "Initializing...", percent: 0, count: 0 })
       }
 
       try {
-        // Initialize DB if needed
-        const success = await initializeDatabase();
+        const aircraft = await getAircraftDatabase()
+        if (mounted) {
+          setAllAircraft(aircraft)
+          setLoadingProgress({ stage: "", percent: 100, count: aircraft.length })
 
-        if (mounted && success) {
-          setLoadingProgress({ stage: "Ready", percent: 100, count: 0 });
+          const prefs = await getUserPreferences()
+          const recentRegs = prefs?.recentlyUsedAircraft || []
+          const recentAc: NormalizedAircraft[] = []
 
-          // Load Recently Used from IDB
-          const prefs = await getUserPreferences();
-          const recentRegs = prefs?.recentlyUsedAircraft || [];
-          const recentAc: NormalizedAircraft[] = [];
-
-          // Fetch recent aircraft details individually (async)
           for (const reg of recentRegs) {
-            const found = await getAircraftByRegistration(reg);
+            const found = aircraft.find((ac) => ac.reg?.toUpperCase() === reg.toUpperCase())
             if (found) {
-              recentAc.push(found);
+              recentAc.push(normalizeAircraft(found))
             }
           }
-          setRecentlyUsed(recentAc);
+          setRecentlyUsed(recentAc)
         }
       } catch (error) {
-        console.error("[Aircraft Page] Failed to load database:", error);
-        setLoadingProgress({ stage: "Failed to load", percent: 0, count: 0 });
+        console.error("[Aircraft Page] Failed to load database:", error)
+        setLoadingProgress({ stage: "Failed to load", percent: 0, count: 0 })
       } finally {
-        if (mounted) setIsLoading(false);
-        setProgressCallback(null);
+        if (mounted) setIsLoading(false)
+        setProgressCallback(null)
       }
     }
 
-    loadDatabase();
+    loadDatabase()
     return () => {
-      mounted = false;
-      setProgressCallback(null);
-    };
-  }, []);
+      mounted = false
+      setProgressCallback(null)
+    }
+  }, [])
 
-  // Search Effect
   useEffect(() => {
-    let active = true;
-
-    async function doSearch() {
-      if (debouncedQuery.length >= 2) {
-        setIsSearching(true);
-        try {
-          // Async DB Search
-          const results = await searchAircraft(debouncedQuery, 100);
-          if (active) {
-            setFilteredAircraft(results);
-            setDisplayCount(ITEMS_PER_PAGE);
-          }
-        } catch (err) {
-          console.error("Search failed", err);
-        } finally {
-          if (active) setIsSearching(false);
-        }
-      } else {
-        if (active) setFilteredAircraft([]);
-      }
+    if (searchQuery.length >= 2) {
+      const results = searchAircraft(allAircraft, searchQuery, 200)
+      setFilteredAircraft(results)
+      setDisplayCount(ITEMS_PER_PAGE)
+    } else {
+      setFilteredAircraft([])
     }
+  }, [searchQuery, allAircraft])
 
-    doSearch();
-    return () => {
-      active = false;
-    };
-  }, [debouncedQuery]);
-
-  // Infinite Scroll Observer
   useEffect(() => {
     if (observerRef.current) {
-      observerRef.current.disconnect();
+      observerRef.current.disconnect()
     }
 
     observerRef.current = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
-          setDisplayCount((prev) => prev + ITEMS_PER_PAGE);
+          setDisplayCount((prev) => prev + ITEMS_PER_PAGE)
         }
       },
-      { threshold: 0.1 }
-    );
+      { threshold: 0.1 },
+    )
 
     if (loadMoreRef.current) {
-      observerRef.current.observe(loadMoreRef.current);
+      observerRef.current.observe(loadMoreRef.current)
     }
 
-    return () => observerRef.current?.disconnect();
-  }, [filteredAircraft]);
+    return () => observerRef.current?.disconnect()
+  }, [filteredAircraft])
 
   const handleSelectAircraft = useCallback(
     async (aircraft: NormalizedAircraft) => {
       if (aircraft.registration) {
-        const prefs = await getUserPreferences();
-        const recentRegs = prefs?.recentlyUsedAircraft || [];
-        const filtered = recentRegs.filter(
-          (r) => r.toUpperCase() !== aircraft.registration.toUpperCase()
-        );
-        const updated = [aircraft.registration, ...filtered].slice(0, 10);
-        await saveUserPreferences({ recentlyUsedAircraft: updated });
+        const prefs = await getUserPreferences()
+        const recentRegs = prefs?.recentlyUsedAircraft || []
+        const filtered = recentRegs.filter((r) => r.toUpperCase() !== aircraft.registration.toUpperCase())
+        const updated = [aircraft.registration, ...filtered].slice(0, 10)
+        await saveUserPreferences({ recentlyUsedAircraft: updated })
       }
 
       if (selectMode) {
-        const params = new URLSearchParams();
-        params.set("field", fieldName);
-        params.set("aircraftReg", aircraft.registration);
-        params.set("aircraftType", aircraft.typecode);
-        router.push(`${returnTo}?${params.toString()}`);
+        const params = new URLSearchParams()
+        params.set("field", fieldName)
+        params.set("aircraftReg", aircraft.registration)
+        params.set("aircraftType", aircraft.typecode)
+        router.push(`${returnTo}?${params.toString()}`)
       } else {
-        router.push(
-          `/aircraft/${encodeURIComponent(
-            aircraft.registration || aircraft.icao24
-          )}`
-        );
+        router.push(`/aircraft/${encodeURIComponent(aircraft.registration || aircraft.icao24)}`)
       }
     },
-    [selectMode, returnTo, fieldName, router]
-  );
+    [selectMode, returnTo, fieldName, router],
+  )
 
-  const displayedAircraft = filteredAircraft.slice(0, displayCount);
-  const showRecentlyUsed = !searchQuery && recentlyUsed.length > 0;
+  const displayedAircraft = filteredAircraft.slice(0, displayCount)
+  const showRecentlyUsed = !searchQuery && recentlyUsed.length > 0
 
   return (
     <div className="flex flex-col h-[100dvh] bg-background">
       <div className="flex-shrink-0 bg-card border-b border-border px-3 py-2">
         <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9"
-            onClick={() => router.back()}
-          >
+          <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => router.back()}>
             <ChevronLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1 relative">
@@ -220,15 +167,8 @@ export default function AircraftPage() {
               className="pl-9 h-10"
               autoFocus
             />
-            {isSearching && (
-              <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-              </div>
-            )}
           </div>
         </div>
-
-        {/* Progress Bar (Only during initial import) */}
         {loadingProgress.stage && isLoading && (
           <div className="mt-2">
             <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
@@ -244,6 +184,11 @@ export default function AircraftPage() {
                 style={{ width: `${loadingProgress.percent}%` }}
               />
             </div>
+            {loadingProgress.count > 0 && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {loadingProgress.count.toLocaleString()} aircraft loaded
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -255,6 +200,9 @@ export default function AircraftPage() {
             <p className="text-muted-foreground text-sm text-center">
               {loadingProgress.stage || "Loading aircraft database..."}
             </p>
+            {loadingProgress.count > 0 && (
+              <p className="text-xs text-muted-foreground">{loadingProgress.count.toLocaleString()} aircraft</p>
+            )}
           </div>
         ) : (
           <div className="p-2 space-y-2">
@@ -279,16 +227,12 @@ export default function AircraftPage() {
             {searchQuery.length >= 2 && (
               <>
                 <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide px-2">
-                  {filteredAircraft.length > 0
-                    ? `${filteredAircraft.length} results`
-                    : "No results found"}
+                  {filteredAircraft.length > 0 ? `${filteredAircraft.length} results` : "No results found"}
                 </h3>
                 <div className="space-y-1">
                   {displayedAircraft.map((aircraft, index) => (
                     <AircraftCard
-                      key={`${
-                        aircraft.registration || aircraft.icao24
-                      }-${index}`}
+                      key={`${aircraft.registration || aircraft.icao24}-${index}`}
                       aircraft={aircraft}
                       onSelect={handleSelectAircraft}
                     />
@@ -306,8 +250,9 @@ export default function AircraftPage() {
             {!searchQuery && !showRecentlyUsed && (
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <Plane className="h-12 w-12 text-muted-foreground/50 mb-3" />
-                <p className="text-muted-foreground">
-                  Search for aircraft by registration or type code
+                <p className="text-muted-foreground">Search for aircraft by registration or type code</p>
+                <p className="text-sm text-muted-foreground/70 mt-1">
+                  Database contains {allAircraft.length.toLocaleString()} aircraft
                 </p>
               </div>
             )}
@@ -315,7 +260,7 @@ export default function AircraftPage() {
         )}
       </div>
     </div>
-  );
+  )
 }
 
 function AircraftCard({
@@ -323,9 +268,9 @@ function AircraftCard({
   onSelect,
   isRecent = false,
 }: {
-  aircraft: NormalizedAircraft;
-  onSelect: (aircraft: NormalizedAircraft) => void;
-  isRecent?: boolean;
+  aircraft: NormalizedAircraft
+  onSelect: (aircraft: NormalizedAircraft) => void
+  isRecent?: boolean
 }) {
   return (
     <button
@@ -339,9 +284,7 @@ function AircraftCard({
       <div className="flex items-center justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-lg font-bold text-foreground">
-              {aircraft.registration || aircraft.icao24}
-            </span>
+            <span className="text-lg font-bold text-foreground">{aircraft.registration || aircraft.icao24}</span>
             {aircraft.typecode && (
               <span className="text-sm font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded">
                 {aircraft.typecode}
@@ -350,9 +293,7 @@ function AircraftCard({
           </div>
 
           <div className="text-sm text-muted-foreground mt-0.5">
-            {aircraft.icao24 && (
-              <span className="font-mono">{aircraft.icao24}</span>
-            )}
+            {aircraft.icao24 && <span className="font-mono">{aircraft.icao24}</span>}
             {aircraft.icao24 && aircraft.shortType && <span> • </span>}
             {aircraft.shortType && <span>Cat: {aircraft.shortType}</span>}
           </div>
@@ -361,5 +302,5 @@ function AircraftCard({
         <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
       </div>
     </button>
-  );
+  )
 }
