@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next"
 import { Inter, Geist_Mono } from "next/font/google"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
 import { SyncProvider } from "@/components/sync-provider"
+import { OfflineIndicator } from "@/components/offline-indicator"
 import "./globals.css"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -39,13 +40,14 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className="bg-background">
       <head>
         <link rel="manifest" href="/manifest.json" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
       </head>
       <body className={`font-sans antialiased`}>
         <ServiceWorkerRegister />
+        <OfflineIndicator />
         <SyncProvider>{children}</SyncProvider>
       </body>
     </html>
