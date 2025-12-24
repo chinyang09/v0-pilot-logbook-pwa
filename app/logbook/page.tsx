@@ -20,10 +20,12 @@ import {
   useAirports,
   usePersonnel,
 } from "@/hooks/use-indexed-db";
-import { Calendar, Upload, Plus, Search, X } from "lucide-react";
+import { Calendar, Plus, Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { SyncStatus } from "@/components/sync-status";
 import { cn } from "@/lib/utils";
+// New Import
+import { CSVImportButton } from "@/components/csv-import-button";
 
 const MONTHS = [
   "Jan",
@@ -41,6 +43,10 @@ const MONTHS = [
 ];
 
 export default function LogbookPage() {
+  // TODO: Replace with your actual user context/auth
+  const currentUserId = "user_12345";
+  const currentUserName = "Lim Chin Yang";
+
   useEffect(() => {
     const handleError = (e: ErrorEvent) => {
       if (e.message.includes("ResizeObserver loop")) {
@@ -96,7 +102,6 @@ export default function LogbookPage() {
       setSelectedMonth({ year, month });
 
       const now = Date.now();
-      // Only sync flights if calendar was last scrolled (within 300ms)
       if (
         lastScrollSourceRef.current?.source === "calendar" &&
         now - lastScrollSourceRef.current.timestamp < 300 &&
@@ -116,7 +121,6 @@ export default function LogbookPage() {
           flightListRef.current?.scrollToFlight(sortedFlights[0].id);
         }
 
-        // Release lock after animation completes
         setTimeout(() => {
           syncLockRef.current = false;
         }, 350);
@@ -130,7 +134,6 @@ export default function LogbookPage() {
       if (!showCalendar || !topFlight) return;
 
       const now = Date.now();
-      // Only sync calendar if flights was last scrolled (within 300ms)
       if (
         lastScrollSourceRef.current?.source === "flights" &&
         now - lastScrollSourceRef.current.timestamp < 300 &&
@@ -244,10 +247,9 @@ export default function LogbookPage() {
               (filter) => flight.flightNumber === filter
             );
           case "aircraft":
-            const ac = aircraft.find(
-              (a) => a.registration === flight.aircraftReg
-            );
-            const acLabel = ac ? `${ac.registration} (${ac.type})` : "";
+            const acLabel = flight.aircraftReg
+              ? `${flight.aircraftReg} (${flight.aircraftType})`
+              : "";
             return selectedFilters.includes(acLabel);
           case "airport":
             return selectedFilters.some((filter) => {
@@ -271,15 +273,7 @@ export default function LogbookPage() {
     }
 
     return result;
-  }, [
-    flights,
-    selectedDate,
-    selectedFilters,
-    activeFilterType,
-    aircraft,
-    personnel,
-    airports,
-  ]);
+  }, [flights, selectedDate, selectedFilters, activeFilterType]);
 
   const clearAllFilters = () => {
     setSelectedDate(null);
@@ -297,10 +291,7 @@ export default function LogbookPage() {
   };
 
   const hasActiveFilters = selectedDate || selectedFilters.length > 0;
-
   const isLoading = dbLoading || !dbReady;
-
-  const displayFlights = filteredFlights;
 
   return (
     <div className="min-h-screen bg-background flex flex-col overflow-hidden">
@@ -339,9 +330,14 @@ export default function LogbookPage() {
               >
                 <Calendar className="h-4 w-4" />
               </Button>
-              <Button variant="ghost" size="sm" className="gap-2" disabled>
-                <Upload className="h-4 w-4" />
-              </Button>
+
+              {/* INTEGRATED IMPORT BUTTON */}
+              <CSVImportButton
+                userId={currentUserId}
+                userName={currentUserName}
+                onComplete={() => refreshAllData()}
+              />
+
               <Button
                 size="sm"
                 onClick={() => router.push("/new-flight")}
@@ -387,7 +383,7 @@ export default function LogbookPage() {
           )}
 
           {selectedFilters.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 animate-in fade-in duration-500">
+            <div className="flex flex-wrap gap-1.5 animate-in fade-in duration-500 mt-2">
               {selectedFilters.map((filter) => (
                 <button
                   key={filter}
@@ -403,7 +399,7 @@ export default function LogbookPage() {
           )}
 
           {hasActiveFilters && !searchFocused && (
-            <div className="flex items-center justify-between animate-in fade-in duration-500">
+            <div className="flex items-center justify-between animate-in fade-in duration-500 mt-1">
               <span className="text-xs text-muted-foreground">
                 {filteredFlights.length} flight
                 {filteredFlights.length !== 1 ? "s" : ""}
@@ -455,42 +451,6 @@ export default function LogbookPage() {
                   Cancel
                 </button>
               )}
-              {searchQuery && !searchFocused && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 z-10 hover:bg-secondary/50 rounded-full p-1 transition-colors"
-                >
-                  <X className="h-4 w-4 text-muted-foreground" />
-                </button>
-              )}
-
-              {searchFocused &&
-                activeFilterType !== "none" &&
-                filterOptions.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto z-[100] animate-in fade-in slide-in-from-top-2 duration-200">
-                    {filterOptions.map((option) => (
-                      <button
-                        key={option}
-                        type="button"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          toggleFilterOption(option);
-                          setSearchQuery("");
-                        }}
-                        className="w-full px-3 py-2 text-left text-sm hover:bg-secondary/50 flex items-center gap-2 transition-colors"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedFilters.includes(option)}
-                          onChange={() => {}}
-                          className="h-4 w-4"
-                        />
-                        {option}
-                      </button>
-                    ))}
-                  </div>
-                )}
             </div>
           </div>
         </div>
@@ -529,7 +489,7 @@ export default function LogbookPage() {
         <div className="flex-1 overflow-y-auto container mx-auto px-1">
           <FlightList
             ref={flightListRef}
-            flights={displayFlights}
+            flights={filteredFlights}
             isLoading={flightsLoading || isLoading}
             onEdit={handleEditFlight}
             onDeleted={handleFlightDeleted}

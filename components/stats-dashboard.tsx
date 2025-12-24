@@ -1,27 +1,36 @@
-"use client"
+"use client";
 
-import { Card, CardContent } from "@/components/ui/card"
-import { formatHHMMDisplay } from "@/lib/time-utils"
-import { Clock, Plane, MapPin, Moon, Navigation, LandPlot, Users, Timer } from "lucide-react"
+import { Card, CardContent } from "@/components/ui/card";
+import { formatHHMMDisplay } from "@/lib/time-utils";
+import {
+  Clock,
+  Plane,
+  MapPin,
+  Moon,
+  Navigation,
+  LandPlot,
+  Users,
+  Timer,
+} from "lucide-react";
 
 interface Stats {
-  totalFlights: number
-  blockTime: string
-  flightTime: string
-  p1Time: string
-  p2Time: string
-  p1usTime: string
-  dualTime: string
-  nightTime: string
-  ifrTime: string
-  totalDayLandings: number
-  totalNightLandings: number
-  uniqueAircraft: number
-  uniqueAirports: number
+  totalFlights: number;
+  blockTime: string;
+  flightTime: string;
+  p1Time: string;
+  p2Time: string;
+  p1usTime: string;
+  dualTime: string;
+  nightTime: string;
+  ifrTime: string;
+  totalDayLandings: number;
+  totalNightLandings: number;
+  uniqueAircraft: number;
+  uniqueAirports: number;
 }
 
 interface StatsDashboardProps {
-  stats: Stats
+  stats: Stats;
 }
 
 export function StatsDashboard({ stats }: StatsDashboardProps) {
@@ -65,7 +74,10 @@ export function StatsDashboard({ stats }: StatsDashboardProps) {
     {
       label: "Landings",
       value: `${stats.totalDayLandings + stats.totalNightLandings}`,
-      subValue: stats.totalNightLandings > 0 ? `(${stats.totalNightLandings} night)` : undefined,
+      subValue:
+        stats.totalNightLandings > 0
+          ? `(${stats.totalNightLandings} night)`
+          : undefined,
       icon: LandPlot,
       color: "text-muted-foreground",
     },
@@ -87,7 +99,7 @@ export function StatsDashboard({ stats }: StatsDashboardProps) {
       icon: MapPin,
       color: "text-muted-foreground",
     },
-  ]
+  ];
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -95,14 +107,16 @@ export function StatsDashboard({ stats }: StatsDashboardProps) {
         <Card key={stat.label} className="bg-card border-border">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-lg bg-secondary ${stat.color}`}>
+              <div className={`p-1 rounded-lg bg-secondary ${stat.color}`}>
                 <stat.icon className="h-4 w-4" />
               </div>
               <div>
                 <p className="text-xl font-bold text-foreground font-mono">
                   {stat.value}
                   {stat.subValue && (
-                    <span className="text-xs font-normal text-muted-foreground ml-1 font-sans">{stat.subValue}</span>
+                    <span className="text-xs font-normal text-muted-foreground ml-1 font-sans">
+                      {stat.subValue}
+                    </span>
                   )}
                 </p>
                 <p className="text-xs text-muted-foreground">{stat.label}</p>
@@ -112,5 +126,5 @@ export function StatsDashboard({ stats }: StatsDashboardProps) {
         </Card>
       ))}
     </div>
-  )
+  );
 }
