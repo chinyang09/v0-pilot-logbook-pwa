@@ -1,9 +1,9 @@
-"use client"
+"use client";
 
-import type React from "react"
+import type React from "react";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import {
   ChevronLeft,
   ChevronRight,
@@ -14,16 +14,19 @@ import {
   ArrowLeftRight,
   Plus,
   Trash2,
-} from "lucide-react"
-import { Switch } from "@/components/ui/switch"
-import { Button } from "@/components/ui/button"
-import { TimePicker } from "@/components/time-picker"
-import { DatePicker } from "@/components/date-picker"
-import type { FlightLog, AdditionalCrew, Approach } from "@/lib/indexed-db"
-import { updateFlight } from "@/lib/indexed-db"
-import { useAirportDatabase } from "@/hooks/use-indexed-db"
-import { getAirportByICAO } from "@/lib/airport-database"
-import { addRecentlyUsedAirport, addRecentlyUsedAircraft } from "@/lib/user-preferences"
+} from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
+import { TimePicker } from "@/components/time-picker";
+import { DatePicker } from "@/components/date-picker";
+import type { FlightLog, AdditionalCrew, Approach } from "@/lib/indexed-db";
+import { updateFlight } from "@/lib/indexed-db";
+import { useAirportDatabase } from "@/hooks/use-indexed-db";
+import { getAirportByICAO } from "@/lib/airport-database";
+import {
+  addRecentlyUsedAirport,
+  addRecentlyUsedAircraft,
+} from "@/lib/user-preferences";
 import {
   createEmptyFlightLog,
   calculateBlockTime,
@@ -32,58 +35,66 @@ import {
   calculateTakeoffsLandings,
   calculateRoleTimes,
   getApproachCategory,
-} from "@/lib/flight-calculations"
-import { calculateNightTimeComplete } from "@/lib/night-time-calculator"
-import { formatTimeShort, utcToLocal, formatTimezoneOffset, getCurrentTimeUTC, isValidHHMM } from "@/lib/time-utils" // Import minutesToHHMM
-import { usePersonnel } from "@/hooks/use-indexed-db" // Add import for usePersonnel to get default roles
+} from "@/lib/flight-calculations";
+import { calculateNightTimeComplete } from "@/lib/night-time-calculator";
+import {
+  formatTimeShort,
+  utcToLocal,
+  formatTimezoneOffset,
+  getCurrentTimeUTC,
+  isValidHHMM,
+} from "@/lib/time-utils";
+import { usePersonnel } from "@/hooks/use-indexed-db";
 
-const FORM_STORAGE_KEY = "flight-form-draft"
+const FORM_STORAGE_KEY = "flight-form-draft";
 
 // Swipeable row component
 function SwipeableRow({
   children,
   onClear,
 }: {
-  children: React.ReactNode
-  onClear: () => void
+  children: React.ReactNode;
+  onClear: () => void;
 }) {
-  const [offset, setOffset] = useState(0)
-  const [isDragging, setIsDragging] = useState(false)
-  const startX = useRef(0)
-  const currentOffset = useRef(0)
+  const [offset, setOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const startX = useRef(0);
+  const currentOffset = useRef(0);
 
   const handleTouchStart = (e: React.TouchEvent) => {
-    startX.current = e.touches[0].clientX
-    currentOffset.current = offset
-    setIsDragging(true)
-  }
+    startX.current = e.touches[0].clientX;
+    currentOffset.current = offset;
+    setIsDragging(true);
+  };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isDragging) return
-    const diff = startX.current - e.touches[0].clientX
-    const newOffset = Math.max(0, Math.min(80, currentOffset.current + diff))
-    setOffset(newOffset)
-  }
+    if (!isDragging) return;
+    const diff = startX.current - e.touches[0].clientX;
+    const newOffset = Math.max(0, Math.min(80, currentOffset.current + diff));
+    setOffset(newOffset);
+  };
 
   const handleTouchEnd = () => {
-    setIsDragging(false)
+    setIsDragging(false);
     if (offset > 40) {
-      setOffset(80)
+      setOffset(80);
     } else {
-      setOffset(0)
+      setOffset(0);
     }
-  }
+  };
 
   return (
     <div className="relative overflow-hidden">
       <div
         className="absolute right-0 top-0 bottom-0 w-20 bg-destructive flex items-center justify-center"
         onClick={() => {
-          onClear()
-          setOffset(0)
+          onClear();
+          setOffset(0);
         }}
       >
-        <span className="text-destructive-foreground text-sm font-medium">Clear</span>
+        <span className="text-destructive-foreground text-sm font-medium">
+          Clear
+        </span>
       </div>
       <div
         className="relative bg-card transition-transform"
@@ -95,7 +106,7 @@ function SwipeableRow({
         {children}
       </div>
     </div>
-  )
+  );
 }
 
 function SettingsRow({
@@ -107,30 +118,35 @@ function SettingsRow({
   icon,
   children,
 }: {
-  label: string
-  value?: string
-  placeholder?: string
-  onClick?: () => void
-  showChevron?: boolean
-  icon?: React.ReactNode
-  children?: React.ReactNode
+  label: string;
+  value?: string;
+  placeholder?: string;
+  onClick?: () => void;
+  showChevron?: boolean;
+  icon?: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   return (
     <div
-      className={`flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0 ${onClick ? "cursor-pointer active:bg-muted/50" : ""}`}
+      className={`flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0 ${
+        onClick ? "cursor-pointer active:bg-muted/50" : ""
+      }`}
       onClick={onClick}
     >
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-2">
         {children || (
-          <span className={value ? "text-foreground" : "text-muted-foreground"}>{value || placeholder || "-"}</span>
+          <span className={value ? "text-foreground" : "text-muted-foreground"}>
+            {value || placeholder || "-"}
+          </span>
         )}
-        {/* Icon appears next to value, before chevron */}
         {icon && <span className="text-muted-foreground">{icon}</span>}
-        {showChevron && <ChevronRight className="h-5 w-5 text-muted-foreground/50" />}
+        {showChevron && (
+          <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
+        )}
       </div>
     </div>
-  )
+  );
 }
 
 // Time row with UTC and Local display
@@ -142,23 +158,27 @@ function TimeRow({
   onNow,
   showNow = true,
 }: {
-  label: string
-  utcValue: string
-  timezoneOffset: number
-  onTap: () => void
-  onNow?: () => void
-  showNow?: boolean
+  label: string;
+  utcValue: string;
+  timezoneOffset: number;
+  onTap: () => void;
+  onNow?: () => void;
+  showNow?: boolean;
 }) {
-  const localValue = utcToLocal(utcValue, timezoneOffset)
-  const tzLabel = formatTimezoneOffset(timezoneOffset)
-  const hasValue = isValidHHMM(utcValue)
+  const localValue = utcToLocal(utcValue, timezoneOffset);
+  const tzLabel = formatTimezoneOffset(timezoneOffset);
+  const hasValue = isValidHHMM(utcValue);
 
   return (
     <div className="flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0">
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-3">
         <div className="flex flex-col items-end cursor-pointer" onClick={onTap}>
-          <span className={`text-lg ${hasValue ? "text-foreground" : "text-muted-foreground"}`}>
+          <span
+            className={`text-lg ${
+              hasValue ? "text-foreground" : "text-muted-foreground"
+            }`}
+          >
             {hasValue ? utcValue : "--:--"}
           </span>
           <span className="text-xs text-muted-foreground">UTC</span>
@@ -170,15 +190,19 @@ function TimeRow({
               size="sm"
               className="h-7 px-2 text-xs border-primary text-primary bg-transparent"
               onClick={(e) => {
-                e.stopPropagation()
-                onNow?.()
+                e.stopPropagation();
+                onNow?.();
               }}
             >
               NOW
             </Button>
           ) : (
             <>
-              <span className={`text-lg ${hasValue ? "text-foreground" : "text-muted-foreground"}`}>
+              <span
+                className={`text-lg ${
+                  hasValue ? "text-foreground" : "text-muted-foreground"
+                }`}
+              >
                 {hasValue ? localValue : "--:--"}
               </span>
               <span className="text-xs text-muted-foreground">{tzLabel}</span>
@@ -187,7 +211,7 @@ function TimeRow({
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 // Time display row for calculated values
@@ -200,13 +224,13 @@ function TimeDisplayRow({
   useLabel,
   showUseButton = false,
 }: {
-  label: string
-  value: string
-  secondaryLabel?: string
-  secondaryValue?: string
-  onUse?: () => void
-  useLabel?: string
-  showUseButton?: boolean
+  label: string;
+  value: string;
+  secondaryLabel?: string;
+  secondaryValue?: string;
+  onUse?: () => void;
+  useLabel?: string;
+  showUseButton?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0">
@@ -217,8 +241,12 @@ function TimeDisplayRow({
             <span className="text-foreground">{formatTimeShort(value)}</span>
             <div className="h-4 w-px bg-border" />
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground text-sm">{secondaryLabel}</span>
-              <span className="text-foreground">{formatTimeShort(secondaryValue)}</span>
+              <span className="text-muted-foreground text-sm">
+                {secondaryLabel}
+              </span>
+              <span className="text-foreground">
+                {formatTimeShort(secondaryValue)}
+              </span>
             </div>
           </>
         ) : showUseButton && onUse ? (
@@ -235,7 +263,7 @@ function TimeDisplayRow({
         )}
       </div>
     </div>
-  )
+  );
 }
 
 // Number row for counts
@@ -244,9 +272,9 @@ function NumberRow({
   value,
   onChange,
 }: {
-  label: string
-  value: number
-  onChange: (value: number) => void
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
 }) {
   return (
     <div className="flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0">
@@ -271,7 +299,7 @@ function NumberRow({
         </Button>
       </div>
     </div>
-  )
+  );
 }
 
 // Toggle row
@@ -280,29 +308,29 @@ function ToggleRow({
   checked,
   onCheckedChange,
 }: {
-  label: string
-  checked: boolean
-  onCheckedChange: (checked: boolean) => void
+  label: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
 }) {
   return (
     <div className="flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0">
       <span className="text-foreground">{label}</span>
       <Switch checked={checked} onCheckedChange={onCheckedChange} />
     </div>
-  )
+  );
 }
 
 interface FlightFormProps {
-  onFlightAdded: (flight: FlightLog) => void
-  onClose: () => void
-  editingFlight?: FlightLog | null
-  selectedAirportField?: string | null
-  selectedAirportCode?: string | null
-  selectedAircraftReg?: string | null
-  selectedAircraftType?: string | null
-  selectedCrewField?: string | null
-  selectedCrewId?: string | null
-  selectedCrewName?: string | null
+  onFlightAdded: (flight: FlightLog) => void;
+  onClose: () => void;
+  editingFlight?: FlightLog | null;
+  selectedAirportField?: string | null;
+  selectedAirportCode?: string | null;
+  selectedAircraftReg?: string | null;
+  selectedAircraftType?: string | null;
+  selectedCrewField?: string | null;
+  selectedCrewId?: string | null;
+  selectedCrewName?: string | null;
 }
 
 export function FlightForm({
@@ -317,283 +345,290 @@ export function FlightForm({
   selectedCrewId,
   selectedCrewName,
 }: FlightFormProps) {
-  const router = useRouter()
-  const { airports } = useAirportDatabase()
-  const { personnel } = usePersonnel() // Get personnel to find default roles
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null)
+  const router = useRouter();
+  const { airports } = useAirportDatabase();
+  const { personnel } = usePersonnel();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
 
-  const [datePickerOpen, setDatePickerOpen] = useState(false)
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
 
-  const editingFlightInitializedRef = useRef<string | null>(null)
+  const editingFlightInitializedRef = useRef<string | null>(null);
 
   const selectionsProcessedRef = useRef<{
-    airport?: string
-    aircraft?: string
-    crew?: string
-  }>({})
+    airport?: string;
+    aircraft?: string;
+    crew?: string;
+  }>({});
 
   // Initialize form data
   const [formData, setFormData] = useState<Partial<FlightLog>>(() => {
     if (typeof window !== "undefined") {
-      const saved = sessionStorage.getItem(FORM_STORAGE_KEY)
+      const saved = sessionStorage.getItem(FORM_STORAGE_KEY);
       if (saved) {
         try {
-          const parsed = JSON.parse(saved)
-          // If we have editingFlight with same ID, merge saved data
+          const parsed = JSON.parse(saved);
           if (editingFlight && parsed.id === editingFlight.id) {
-            editingFlightInitializedRef.current = editingFlight.id
-            return { ...editingFlight, ...parsed }
+            editingFlightInitializedRef.current = editingFlight.id;
+            return { ...editingFlight, ...parsed };
           }
-          return { ...createEmptyFlightLog(), ...parsed }
+          return { ...createEmptyFlightLog(), ...parsed };
         } catch {
           // Ignore parse errors
         }
       }
     }
     if (editingFlight) {
-      editingFlightInitializedRef.current = editingFlight.id
+      editingFlightInitializedRef.current = editingFlight.id;
     }
-    return editingFlight || createEmptyFlightLog()
-  })
+    return editingFlight || createEmptyFlightLog();
+  });
 
   // Track manual overrides state
-  const [manualOverrides, setManualOverrides] = useState<FlightLog["manualOverrides"]>(
-    editingFlight?.manualOverrides || {},
-  )
+  const [manualOverrides, setManualOverrides] = useState<
+    FlightLog["manualOverrides"]
+  >(editingFlight?.manualOverrides || {});
 
-  // Get airport data for timezone calculations
+  // Get airport data
   const depAirport = useMemo(
-    () => (formData.departureIcao ? getAirportByICAO(airports, formData.departureIcao) : null),
-    [airports, formData.departureIcao],
-  )
+    () =>
+      formData.departureIcao
+        ? getAirportByICAO(airports, formData.departureIcao)
+        : null,
+    [airports, formData.departureIcao]
+  );
   const arrAirport = useMemo(
-    () => (formData.arrivalIcao ? getAirportByICAO(airports, formData.arrivalIcao) : null),
-    [airports, formData.arrivalIcao],
-  )
+    () =>
+      formData.arrivalIcao
+        ? getAirportByICAO(airports, formData.arrivalIcao)
+        : null,
+    [airports, formData.arrivalIcao]
+  );
 
-  // Get timezone offsets
-  const depTimezone = depAirport?.timezone || formData.departureTimezone || 0
-  const arrTimezone = arrAirport?.timezone || formData.arrivalTimezone || 0
+  const depTimezone = depAirport?.timezone || formData.departureTimezone || 0;
+  const arrTimezone = arrAirport?.timezone || formData.arrivalTimezone || 0;
 
   useEffect(() => {
-    if (!editingFlight) return
+    if (!editingFlight) return;
+    if (editingFlightInitializedRef.current === editingFlight.id) return;
 
-    // Only initialize if this is a new/different flight
-    if (editingFlightInitializedRef.current === editingFlight.id) {
-      return
-    }
+    editingFlightInitializedRef.current = editingFlight.id;
 
-    editingFlightInitializedRef.current = editingFlight.id
-
-    // Check sessionStorage for saved data
-    const saved = sessionStorage.getItem(FORM_STORAGE_KEY)
+    const saved = sessionStorage.getItem(FORM_STORAGE_KEY);
     if (saved) {
       try {
-        const parsed = JSON.parse(saved)
-        // If sessionStorage has data for this flight, merge it
+        const parsed = JSON.parse(saved);
         if (parsed.id === editingFlight.id) {
-          setFormData({ ...editingFlight, ...parsed })
-          setManualOverrides(parsed.manualOverrides || editingFlight.manualOverrides || {})
-          return
+          setFormData({ ...editingFlight, ...parsed });
+          setManualOverrides(
+            parsed.manualOverrides || editingFlight.manualOverrides || {}
+          );
+          return;
         }
       } catch {
         // Ignore parse errors
       }
     }
 
-    // Otherwise, use editingFlight data
-    setFormData(editingFlight)
-    setManualOverrides(editingFlight.manualOverrides || {})
-  }, [editingFlight])
+    setFormData(editingFlight);
+    setManualOverrides(editingFlight.manualOverrides || {});
+  }, [editingFlight]);
 
   useEffect(() => {
-    if (!selectedAirportField || !selectedAirportCode) return
+    if (!selectedAirportField || !selectedAirportCode) return;
 
-    const selectionKey = `${selectedAirportField}:${selectedAirportCode}`
-    if (selectionsProcessedRef.current.airport === selectionKey) return
+    const selectionKey = `${selectedAirportField}:${selectedAirportCode}`;
+    if (selectionsProcessedRef.current.airport === selectionKey) return;
 
-    console.log("[v0] Processing airport selection:", selectedAirportField, selectedAirportCode)
-    selectionsProcessedRef.current.airport = selectionKey
+    selectionsProcessedRef.current.airport = selectionKey;
 
     setFormData((prev) => {
-      const updated = { ...prev }
+      const updated = { ...prev };
       if (selectedAirportField === "departureIcao") {
-        updated.departureIcao = selectedAirportCode
-        updated.departureIata = "" // Will be filled when airports load
-        console.log("[v0] Set departureIcao to:", selectedAirportCode)
+        updated.departureIcao = selectedAirportCode;
+        updated.departureIata = "";
       } else if (selectedAirportField === "arrivalIcao") {
-        updated.arrivalIcao = selectedAirportCode
-        updated.arrivalIata = "" // Will be filled when airports load
-        console.log("[v0] Set arrivalIcao to:", selectedAirportCode)
+        updated.arrivalIcao = selectedAirportCode;
+        updated.arrivalIata = "";
       }
-      // Save to sessionStorage
-      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(updated))
-      return updated
-    })
+      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    });
 
-    addRecentlyUsedAirport(selectedAirportCode)
+    addRecentlyUsedAirport(selectedAirportCode);
 
-    // Clear URL params
-    const url = new URL(window.location.href)
-    url.searchParams.delete("field")
-    url.searchParams.delete("airport")
-    window.history.replaceState({}, "", url.toString())
-  }, [selectedAirportField, selectedAirportCode])
+    const url = new URL(window.location.href);
+    url.searchParams.delete("field");
+    url.searchParams.delete("airport");
+    window.history.replaceState({}, "", url.toString());
+  }, [selectedAirportField, selectedAirportCode]);
 
   useEffect(() => {
-    if (airports.length === 0) return
+    if (airports.length === 0) return;
 
     setFormData((prev) => {
-      const updated = { ...prev }
-      let changed = false
+      const updated = { ...prev };
+      let changed = false;
 
       if (prev.departureIcao) {
-        const airport = getAirportByICAO(airports, prev.departureIcao)
-        if (airport && (!prev.departureIata || prev.departureTimezone === undefined)) {
-          updated.departureIata = airport.iata || ""
-          updated.departureTimezone = airport.timezone || 0
-          changed = true
-          console.log("[v0] Updated departure airport details:", airport.iata, airport.timezone)
+        const airport = getAirportByICAO(airports, prev.departureIcao);
+        if (
+          airport &&
+          (!prev.departureIata || prev.departureTimezone === undefined)
+        ) {
+          updated.departureIata = airport.iata || "";
+          updated.departureTimezone = airport.timezone || 0;
+          changed = true;
         }
       }
 
       if (prev.arrivalIcao) {
-        const airport = getAirportByICAO(airports, prev.arrivalIcao)
-        if (airport && (!prev.arrivalIata || prev.arrivalTimezone === undefined)) {
-          updated.arrivalIata = airport.iata || ""
-          updated.arrivalTimezone = airport.timezone || 0
-          changed = true
-          console.log("[v0] Updated arrival airport details:", airport.iata, airport.timezone)
+        const airport = getAirportByICAO(airports, prev.arrivalIcao);
+        if (
+          airport &&
+          (!prev.arrivalIata || prev.arrivalTimezone === undefined)
+        ) {
+          updated.arrivalIata = airport.iata || "";
+          updated.arrivalTimezone = airport.timezone || 0;
+          changed = true;
         }
       }
 
       if (changed) {
-        sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(updated))
+        sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(updated));
       }
-      return changed ? updated : prev
-    })
-  }, [airports, formData.departureIcao, formData.arrivalIcao])
+      return changed ? updated : prev;
+    });
+  }, [airports, formData.departureIcao, formData.arrivalIcao]);
 
   useEffect(() => {
-    if (!selectedAircraftReg) return
+    if (!selectedAircraftReg) return;
 
-    const selectionKey = `${selectedAircraftReg}:${selectedAircraftType}`
-    if (selectionsProcessedRef.current.aircraft === selectionKey) return
+    const selectionKey = `${selectedAircraftReg}:${selectedAircraftType}`;
+    if (selectionsProcessedRef.current.aircraft === selectionKey) return;
 
-    console.log("[v0] Processing aircraft selection:", selectedAircraftReg, selectedAircraftType)
-    selectionsProcessedRef.current.aircraft = selectionKey
+    selectionsProcessedRef.current.aircraft = selectionKey;
 
     setFormData((prev) => {
       const updated = {
         ...prev,
         aircraftReg: selectedAircraftReg,
         aircraftType: selectedAircraftType || prev.aircraftType,
-      }
-      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(updated))
-      console.log("[v0] Set aircraftReg to:", selectedAircraftReg)
-      return updated
-    })
+      };
+      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    });
 
-    addRecentlyUsedAircraft(selectedAircraftReg)
+    addRecentlyUsedAircraft(selectedAircraftReg);
 
-    // Clear URL params
-    const url = new URL(window.location.href)
-    url.searchParams.delete("field")
-    url.searchParams.delete("aircraftReg")
-    url.searchParams.delete("aircraftType")
-    window.history.replaceState({}, "", url.toString())
-  }, [selectedAircraftReg, selectedAircraftType])
+    const url = new URL(window.location.href);
+    url.searchParams.delete("field");
+    url.searchParams.delete("aircraftReg");
+    url.searchParams.delete("aircraftType");
+    window.history.replaceState({}, "", url.toString());
+  }, [selectedAircraftReg, selectedAircraftType]);
 
   useEffect(() => {
-    if (!selectedCrewField || !selectedCrewId) return
+    if (!selectedCrewField || !selectedCrewId) return;
 
-    const selectionKey = `${selectedCrewField}:${selectedCrewId}`
-    if (selectionsProcessedRef.current.crew === selectionKey) return
+    const selectionKey = `${selectedCrewField}:${selectedCrewId}`;
+    if (selectionsProcessedRef.current.crew === selectionKey) return;
 
-    console.log("[v0] Processing crew selection:", selectedCrewField, selectedCrewId, selectedCrewName)
-    selectionsProcessedRef.current.crew = selectionKey
+    selectionsProcessedRef.current.crew = selectionKey;
 
     setFormData((prev) => {
-      const updated = { ...prev }
+      const updated = { ...prev };
       if (selectedCrewField === "picId") {
-        updated.picId = selectedCrewId
-        updated.picName = selectedCrewName || ""
-        console.log("[v0] Set picId to:", selectedCrewId)
+        updated.picId = selectedCrewId;
+        updated.picName = selectedCrewName || "";
       } else if (selectedCrewField === "sicId") {
-        updated.sicId = selectedCrewId
-        updated.sicName = selectedCrewName || ""
-        console.log("[v0] Set sicId to:", selectedCrewId)
+        updated.sicId = selectedCrewId;
+        updated.sicName = selectedCrewName || "";
       }
-      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(updated))
-      return updated
-    })
+      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    });
 
-    // Clear URL params
-    const url = new URL(window.location.href)
-    url.searchParams.delete("field")
-    url.searchParams.delete("crewId")
-    url.searchParams.delete("crewName")
-    window.history.replaceState({}, "", url.toString())
-  }, [selectedCrewField, selectedCrewId, selectedCrewName])
+    const url = new URL(window.location.href);
+    url.searchParams.delete("field");
+    url.searchParams.delete("crewId");
+    url.searchParams.delete("crewName");
+    window.history.replaceState({}, "", url.toString());
+  }, [selectedCrewField, selectedCrewId, selectedCrewName]);
 
   useEffect(() => {
-    if (editingFlight || !personnel.length) return
+    if (editingFlight || !personnel.length) return;
 
-    // Find self crew member
-    const selfCrew = personnel.find((p) => p.isMe)
+    const selfCrew = personnel.find((p) => p.isMe);
     if (selfCrew) {
-      // Set pilot role based on default settings
       if (selfCrew.defaultPIC) {
         setFormData((prev) => ({
           ...prev,
           pilotRole: "PIC",
           picId: selfCrew.id,
           picName: "Self",
-        }))
+        }));
       } else if (selfCrew.defaultSIC) {
         setFormData((prev) => ({
           ...prev,
           pilotRole: "SIC",
           sicId: selfCrew.id,
           sicName: "Self",
-        }))
+        }));
       }
     }
-  }, [editingFlight, personnel])
+  }, [editingFlight, personnel]);
 
   // Calculate derived fields
   const calculatedFields = useMemo(() => {
     const blockTime =
-      formData.outTime && formData.inTime && isValidHHMM(formData.outTime) && isValidHHMM(formData.inTime)
+      formData.outTime &&
+      formData.inTime &&
+      isValidHHMM(formData.outTime) &&
+      isValidHHMM(formData.inTime)
         ? calculateBlockTime(formData.outTime, formData.inTime)
-        : "00:00"
+        : "00:00";
 
     const flightTime =
-      formData.offTime && formData.onTime && isValidHHMM(formData.offTime) && isValidHHMM(formData.onTime)
+      formData.offTime &&
+      formData.onTime &&
+      isValidHHMM(formData.offTime) &&
+      isValidHHMM(formData.onTime)
         ? calculateFlightTime(formData.offTime, formData.onTime)
-        : "00:00"
+        : "00:00";
 
-    let nightTime = "00:00"
-    let dayTime = "00:00"
+    let nightTime = "00:00";
+    let dayTime = "00:00";
+
+    // FALLBACK LOGIC: Create effective times for calculation
+    // If OFF/ON are missing or invalid, fallback to OUT/IN to ensure we have a valid timeline
+    const calcOffTime =
+      formData.offTime &&
+      isValidHHMM(formData.offTime) &&
+      formData.offTime !== "00:00"
+        ? formData.offTime
+        : formData.outTime;
+
+    const calcOnTime =
+      formData.onTime &&
+      isValidHHMM(formData.onTime) &&
+      formData.onTime !== "00:00"
+        ? formData.onTime
+        : formData.inTime;
 
     if (
       formData.date &&
       formData.outTime &&
-      formData.offTime &&
-      formData.onTime &&
-      formData.inTime &&
+      formData.inTime && // We only STRICTLY need Out and In for the calculation to proceed
       depAirport &&
       arrAirport &&
       isValidHHMM(formData.outTime) &&
-      isValidHHMM(formData.offTime) &&
-      isValidHHMM(formData.onTime) &&
       isValidHHMM(formData.inTime)
     ) {
-      const depLat = depAirport.latitude ?? (depAirport as any).lat
-      const depLon = depAirport.longitude ?? (depAirport as any).lon
-      const arrLat = arrAirport.latitude ?? (arrAirport as any).lat
-      const arrLon = arrAirport.longitude ?? (arrAirport as any).lon
+      const depLat = depAirport.latitude ?? (depAirport as any).lat;
+      const depLon = depAirport.longitude ?? (depAirport as any).lon;
+      const arrLat = arrAirport.latitude ?? (arrAirport as any).lat;
+      const arrLon = arrAirport.longitude ?? (arrAirport as any).lon;
 
       if (
         typeof depLat === "number" &&
@@ -605,45 +640,56 @@ export function FlightForm({
         typeof arrLon === "number" &&
         !isNaN(arrLon)
       ) {
+        // Pass the EFFECTIVE times to the calculator
         const nightResult = calculateNightTimeComplete(
           formData.date,
           formData.outTime,
-          formData.offTime,
+          formData.offTime, // Pass raw values, helper handles the fallback
           formData.onTime,
           formData.inTime,
-          depLat,
-          depLon,
-          arrLat,
-          arrLon,
-        )
-        nightTime = nightResult.nightTimeHHMM
-        dayTime = nightResult.dayTimeHHMM
+          { lat: depLat, lon: depLon }, // Pass as object
+          { lat: arrLat, lon: arrLon } // Pass as object
+        );
+        nightTime = nightResult.nightTimeHHMM;
+        dayTime = nightResult.dayTimeHHMM;
 
-        console.log("[v0] Night calculation result:", {
+        console.log("[v0] Night calc result:", {
           date: formData.date,
-          times: { out: formData.outTime, off: formData.offTime, on: formData.onTime, in: formData.inTime },
-          coords: { depLat, depLon, arrLat, arrLon },
+          using: {
+            out: formData.outTime,
+            off: calcOffTime,
+            on: calcOnTime,
+            in: formData.inTime,
+          },
           result: nightResult,
-        })
+        });
       }
     } else {
       // Fallback: calculate day as block - night
-      dayTime = calculateDayTime(blockTime, nightTime)
+      dayTime = calculateDayTime(blockTime, nightTime);
     }
 
     const toLdg =
-      formData.date && formData.offTime && formData.onTime && depAirport && arrAirport
+      formData.date && calcOffTime && calcOnTime && depAirport && arrAirport
         ? calculateTakeoffsLandings(
             formData.date,
-            formData.offTime,
-            formData.onTime,
+            calcOffTime,
+            calcOnTime,
             depAirport,
             arrAirport,
-            formData.pilotFlying ?? true,
+            formData.pilotFlying ?? true
           )
-        : { dayTakeoffs: 0, dayLandings: 0, nightTakeoffs: 0, nightLandings: 0 }
+        : {
+            dayTakeoffs: 0,
+            dayLandings: 0,
+            nightTakeoffs: 0,
+            nightLandings: 0,
+          };
 
-    const roleTimes = calculateRoleTimes(blockTime, formData.pilotRole || "PIC")
+    const roleTimes = calculateRoleTimes(
+      blockTime,
+      formData.pilotRole || "PIC"
+    );
 
     return {
       blockTime,
@@ -652,7 +698,7 @@ export function FlightForm({
       dayTime,
       ...toLdg,
       ...roleTimes,
-    }
+    };
   }, [
     formData.date,
     formData.outTime,
@@ -663,7 +709,7 @@ export function FlightForm({
     formData.pilotRole,
     depAirport,
     arrAirport,
-  ])
+  ]);
 
   // Update form with calculated values (respecting manual overrides)
   useEffect(() => {
@@ -671,60 +717,64 @@ export function FlightForm({
       const updates: Partial<FlightLog> = {
         blockTime: calculatedFields.blockTime,
         flightTime: calculatedFields.flightTime,
-      }
+      };
 
-      // Only update night/day if not manually overridden
       if (!manualOverrides.nightTime) {
-        updates.nightTime = calculatedFields.nightTime
-        updates.dayTime = calculatedFields.dayTime
+        updates.nightTime = calculatedFields.nightTime;
+        updates.dayTime = calculatedFields.dayTime;
       }
 
-      // Only update T/O and landings if not manually overridden
       if (!manualOverrides.dayTakeoffs && !manualOverrides.nightTakeoffs) {
-        updates.dayTakeoffs = calculatedFields.dayTakeoffs
-        updates.nightTakeoffs = calculatedFields.nightTakeoffs
+        updates.dayTakeoffs = calculatedFields.dayTakeoffs;
+        updates.nightTakeoffs = calculatedFields.nightTakeoffs;
       }
       if (!manualOverrides.dayLandings && !manualOverrides.nightLandings) {
-        updates.dayLandings = calculatedFields.dayLandings
-        updates.nightLandings = calculatedFields.nightLandings
+        updates.dayLandings = calculatedFields.dayLandings;
+        updates.nightLandings = calculatedFields.nightLandings;
       }
 
       if (!manualOverrides.picTime) {
-        updates.picTime = calculatedFields.picTime
+        updates.picTime = calculatedFields.picTime;
       }
       if (!manualOverrides.sicTime) {
-        updates.sicTime = calculatedFields.sicTime
+        updates.sicTime = calculatedFields.sicTime;
       }
       if (!manualOverrides.picusTime) {
-        updates.picusTime = calculatedFields.picusTime
+        updates.picusTime = calculatedFields.picusTime;
       }
       if (!manualOverrides.dualTime) {
-        updates.dualTime = calculatedFields.dualTime
+        updates.dualTime = calculatedFields.dualTime;
       }
       if (!manualOverrides.instructorTime) {
-        updates.instructorTime = calculatedFields.instructorTime
+        updates.instructorTime = calculatedFields.instructorTime;
       }
 
-      return { ...prev, ...updates }
-    })
-  }, [calculatedFields, manualOverrides])
+      return { ...prev, ...updates };
+    });
+  }, [calculatedFields, manualOverrides]);
 
   // Save to session storage on form data change
   useEffect(() => {
     if (formData && typeof window !== "undefined") {
-      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData))
+      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData));
     }
-  }, [formData])
+  }, [formData]);
 
   // Update field helper
-  const updateField = useCallback(<K extends keyof FlightLog>(field: K, value: FlightLog[K]) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
-  }, [])
+  const updateField = useCallback(
+    <K extends keyof FlightLog>(field: K, value: FlightLog[K]) => {
+      setFormData((prev) => ({ ...prev, [field]: value }));
+    },
+    []
+  );
 
   // Mark manual override
-  const markManualOverride = useCallback((field: keyof FlightLog["manualOverrides"], value: boolean) => {
-    setManualOverrides((prev) => ({ ...prev, [field]: value }))
-  }, [])
+  const markManualOverride = useCallback(
+    (field: keyof FlightLog["manualOverrides"], value: boolean) => {
+      setManualOverrides((prev) => ({ ...prev, [field]: value }));
+    },
+    []
+  );
 
   // Clear a field
   const clearField = useCallback(
@@ -737,34 +787,33 @@ export function FlightForm({
         field === "autolands" ||
         field === "holds"
       ) {
-        updateField(field, 0)
+        updateField(field, 0);
       } else {
-        updateField(field, "" as any)
+        updateField(field, "" as any);
       }
-      // Clear manual override when clearing field
       if (field in (manualOverrides || {})) {
-        markManualOverride(field as keyof FlightLog["manualOverrides"], false)
+        markManualOverride(field as keyof FlightLog["manualOverrides"], false);
       }
     },
-    [updateField, markManualOverride, manualOverrides],
-  )
+    [updateField, markManualOverride, manualOverrides]
+  );
 
   // Open pickers
   const openAirportPicker = (field: "departureIcao" | "arrivalIcao") => {
-    sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData))
-    router.push(`/airports?select=true&returnTo=/new-flight&field=${field}`)
-  }
+    sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData));
+    router.push(`/airports?select=true&returnTo=/new-flight&field=${field}`);
+  };
 
   const openAircraftPicker = () => {
-    sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData))
-    router.push(`/aircraft?select=true&returnTo=/new-flight&field=aircraftReg`)
-  }
+    sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData));
+    router.push(`/aircraft?select=true&returnTo=/new-flight&field=aircraftReg`);
+  };
 
   const openCrewPicker = (field: "picId" | "sicId") => {
-    sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData))
-    const crewField = field === "picId" ? "pic" : "sic"
-    router.push(`/crew?select=true&return=/new-flight&field=${crewField}`)
-  }
+    sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData));
+    const crewField = field === "picId" ? "pic" : "sic";
+    router.push(`/crew?select=true&return=/new-flight&field=${crewField}`);
+  };
 
   const swapCrew = useCallback(() => {
     setFormData((prev) => ({
@@ -773,38 +822,36 @@ export function FlightForm({
       picName: prev.sicName,
       sicId: prev.picId,
       sicName: prev.picName,
-    }))
-  }, [])
+    }));
+  }, []);
 
   // Handle time picker
   const handleTimeSelect = useCallback(
     (time: string) => {
       if (activeTimePicker) {
-        updateField(activeTimePicker as keyof FlightLog, time)
-        setActiveTimePicker(null)
+        updateField(activeTimePicker as keyof FlightLog, time);
+        setActiveTimePicker(null);
       }
     },
-    [activeTimePicker, updateField],
-  )
+    [activeTimePicker, updateField]
+  );
 
-  // Set NOW time
   const setNowTime = useCallback(
     (field: keyof FlightLog) => {
-      const now = getCurrentTimeUTC()
-      updateField(field, now)
+      const now = getCurrentTimeUTC();
+      updateField(field, now);
     },
-    [updateField],
-  )
+    [updateField]
+  );
 
-  // Handle submit
   const handleSubmit = async () => {
-    if (isSubmitting) return
-    setIsSubmitting(true)
+    if (isSubmitting) return;
+    setIsSubmitting(true);
 
     try {
       const flightData: FlightLog = {
         id: formData.id || editingFlight?.id || crypto.randomUUID(),
-        isDraft: false, // No longer a draft when saved
+        isDraft: false,
         createdAt: editingFlight?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         syncStatus: "pending",
@@ -855,17 +902,17 @@ export function FlightForm({
         approaches: formData.approaches || [],
         holds: formData.holds || 0,
         ipcIcc: formData.ipcIcc || false,
-      }
+      };
 
-      await updateFlight(flightData.id, flightData)
-      sessionStorage.removeItem(FORM_STORAGE_KEY)
-      onFlightAdded(flightData)
+      await updateFlight(flightData.id, flightData);
+      sessionStorage.removeItem(FORM_STORAGE_KEY);
+      onFlightAdded(flightData);
     } catch (error) {
-      console.error("Failed to save flight:", error)
+      console.error("Failed to save flight:", error);
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  }
+  };
 
   // Additional crew management
   const addAdditionalCrew = useCallback(() => {
@@ -873,75 +920,85 @@ export function FlightForm({
       id: crypto.randomUUID(),
       name: "",
       role: "Observer",
-    }
+    };
     setFormData((prev) => ({
       ...prev,
       additionalCrew: [...(prev.additionalCrew || []), newCrew],
-    }))
-  }, [])
+    }));
+  }, []);
 
-  const updateAdditionalCrew = useCallback((id: string, updates: Partial<AdditionalCrew>) => {
-    setFormData((prev) => ({
-      ...prev,
-      additionalCrew: (prev.additionalCrew || []).map((c) => (c.id === id ? { ...c, ...updates } : c)),
-    }))
-  }, [])
+  const updateAdditionalCrew = useCallback(
+    (id: string, updates: Partial<AdditionalCrew>) => {
+      setFormData((prev) => ({
+        ...prev,
+        additionalCrew: (prev.additionalCrew || []).map((c) =>
+          c.id === id ? { ...c, ...updates } : c
+        ),
+      }));
+    },
+    []
+  );
 
   const removeAdditionalCrew = useCallback((id: string) => {
     setFormData((prev) => ({
       ...prev,
       additionalCrew: (prev.additionalCrew || []).filter((c) => c.id !== id),
-    }))
-  }, [])
+    }));
+  }, []);
 
   // Approaches management
   const addApproach = useCallback(() => {
     const newApproach: Approach = {
       id: `approach-${Date.now()}`,
       type: "ILS",
-      category: "precision", // ILS is precision by default
+      category: "precision",
       runway: "",
       airport: formData.arrivalIcao || "",
-    }
+    };
     setFormData((prev) => ({
       ...prev,
       approaches: [...(prev.approaches || []), newApproach],
-    }))
-  }, [formData.arrivalIcao])
+    }));
+  }, [formData.arrivalIcao]);
 
-  const updateApproach = useCallback((id: string, updates: Partial<Approach>) => {
-    setFormData((prev) => ({
-      ...prev,
-      approaches: (prev.approaches || []).map((a) => {
-        if (a.id === id) {
-          const updated = { ...a, ...updates }
-          // Auto-set category when type changes
-          if (updates.type && !updates.category) {
-            updated.category = getApproachCategory(updates.type)
+  const updateApproach = useCallback(
+    (id: string, updates: Partial<Approach>) => {
+      setFormData((prev) => ({
+        ...prev,
+        approaches: (prev.approaches || []).map((a) => {
+          if (a.id === id) {
+            const updated = { ...a, ...updates };
+            if (updates.type && !updates.category) {
+              updated.category = getApproachCategory(updates.type);
+            }
+            return updated;
           }
-          return updated
-        }
-        return a
-      }),
-    }))
-  }, [])
+          return a;
+        }),
+      }));
+    },
+    []
+  );
 
   const removeApproach = useCallback((id: string) => {
     setFormData((prev) => ({
       ...prev,
       approaches: (prev.approaches || []).filter((a) => a.id !== id),
-    }))
-  }, [])
+    }));
+  }, []);
 
   // Get active time picker timezone
   const getTimePickerTimezone = useCallback(() => {
-    if (!activeTimePicker) return 0
-    // Out and Off use departure timezone, On and In use arrival timezone
-    if (activeTimePicker === "outTime" || activeTimePicker === "offTime" || activeTimePicker === "scheduledOut") {
-      return depTimezone
+    if (!activeTimePicker) return 0;
+    if (
+      activeTimePicker === "outTime" ||
+      activeTimePicker === "offTime" ||
+      activeTimePicker === "scheduledOut"
+    ) {
+      return depTimezone;
     }
-    return arrTimezone
-  }, [activeTimePicker, depTimezone, arrTimezone])
+    return arrTimezone;
+  }, [activeTimePicker, depTimezone, arrTimezone]);
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -951,8 +1008,15 @@ export function FlightForm({
           <Button variant="ghost" size="icon" onClick={onClose}>
             <ChevronLeft className="h-5 w-5" />
           </Button>
-          <h1 className="text-lg font-semibold">{editingFlight && !formData.isDraft ? "Edit Flight" : "New Flight"}</h1>
-          <Button onClick={handleSubmit} disabled={isSubmitting} size="sm" className="px-4">
+          <h1 className="text-lg font-semibold">
+            {editingFlight && !formData.isDraft ? "Edit Flight" : "New Flight"}
+          </h1>
+          <Button
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+            size="sm"
+            className="px-4"
+          >
             {isSubmitting ? "Saving..." : "Save"}
           </Button>
         </div>
@@ -963,7 +1027,9 @@ export function FlightForm({
         {/* FLIGHT Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
           <div className="px-4 py-2 bg-muted/30">
-            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">FLIGHT</h2>
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              FLIGHT
+            </h2>
           </div>
 
           <SwipeableRow onClear={() => clearField("date")}>
@@ -971,12 +1037,15 @@ export function FlightForm({
               label="Date"
               value={
                 formData.date
-                  ? new Date(formData.date + "T00:00:00").toLocaleDateString("en-GB", {
-                      weekday: "short",
-                      day: "2-digit",
-                      month: "short",
-                      year: "2-digit",
-                    })
+                  ? new Date(formData.date + "T00:00:00").toLocaleDateString(
+                      "en-GB",
+                      {
+                        weekday: "short",
+                        day: "2-digit",
+                        month: "short",
+                        year: "2-digit",
+                      }
+                    )
                   : undefined
               }
               onClick={() => setDatePickerOpen(true)}
@@ -988,16 +1057,16 @@ export function FlightForm({
               label="Flight #"
               value={formData.flightNumber}
               onClick={() => {
-                const num = prompt("Flight Number:", formData.flightNumber)
-                if (num !== null) updateField("flightNumber", num)
+                const num = prompt("Flight Number:", formData.flightNumber);
+                if (num !== null) updateField("flightNumber", num);
               }}
             />
           </SwipeableRow>
 
           <SwipeableRow
             onClear={() => {
-              updateField("aircraftReg", "")
-              updateField("aircraftType", "")
+              updateField("aircraftReg", "");
+              updateField("aircraftType", "");
             }}
           >
             <SettingsRow
@@ -1018,8 +1087,8 @@ export function FlightForm({
 
           <SwipeableRow
             onClear={() => {
-              updateField("departureIcao", "")
-              updateField("departureIata", "")
+              updateField("departureIcao", "");
+              updateField("departureIata", "");
             }}
           >
             <SettingsRow
@@ -1034,8 +1103,8 @@ export function FlightForm({
 
           <SwipeableRow
             onClear={() => {
-              updateField("arrivalIcao", "")
-              updateField("arrivalIata", "")
+              updateField("arrivalIcao", "");
+              updateField("arrivalIata", "");
             }}
           >
             <SettingsRow
@@ -1112,13 +1181,15 @@ export function FlightForm({
         {/* CREW Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
           <div className="px-4 py-2 bg-muted/30">
-            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">CREW</h2>
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              CREW
+            </h2>
           </div>
 
           <SwipeableRow
             onClear={() => {
-              updateField("picId", "")
-              updateField("picName", "")
+              updateField("picId", "");
+              updateField("picName", "");
             }}
           >
             <SettingsRow
@@ -1131,7 +1202,6 @@ export function FlightForm({
             />
           </SwipeableRow>
 
-          {/* Swap Button Row */}
           <div className="flex items-center justify-center py-2 border-b border-border">
             <Button
               variant="ghost"
@@ -1146,8 +1216,8 @@ export function FlightForm({
 
           <SwipeableRow
             onClear={() => {
-              updateField("sicId", "")
-              updateField("sicName", "")
+              updateField("sicId", "");
+              updateField("sicName", "");
             }}
           >
             <SettingsRow
@@ -1160,9 +1230,12 @@ export function FlightForm({
             />
           </SwipeableRow>
 
-          {/* Additional Crew - placeholder for now */}
           <div className="flex items-center justify-center py-3 border-b border-border last:border-b-0">
-            <Button variant="ghost" size="sm" className="h-8 px-3 text-xs text-primary">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-3 text-xs text-primary"
+            >
               <Plus className="h-3.5 w-3.5 mr-1" />
               Add Crew
             </Button>
@@ -1172,40 +1245,48 @@ export function FlightForm({
         {/* TIME Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
           <div className="px-4 py-2 bg-muted/30">
-            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">TIME</h2>
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              TIME
+            </h2>
           </div>
 
-          <TimeDisplayRow label="Total Time" value={formData.blockTime || "00:00"} />
+          <TimeDisplayRow
+            label="Total Time"
+            value={formData.blockTime || "00:00"}
+          />
 
           <TimeDisplayRow
             label="Night"
             value={formData.nightTime || calculatedFields.nightTime || "00:00"}
             secondaryLabel="Day"
-            secondaryValue={formData.dayTime || calculatedFields.dayTime || "00:00"}
+            secondaryValue={
+              formData.dayTime || calculatedFields.dayTime || "00:00"
+            }
           />
 
           <SwipeableRow
             onClear={() => {
-              updateField("picusTime", "00:00")
-              markManualOverride("picusTime", false)
+              updateField("picusTime", "00:00");
+              markManualOverride("picusTime", false);
             }}
           >
             <TimeDisplayRow
               label="P1u/s"
               value={formData.picusTime || "00:00"}
-              showUseButton={formData.picusTime === "00:00" || !formData.picusTime}
+              showUseButton={
+                formData.picusTime === "00:00" || !formData.picusTime
+              }
               useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
               onUse={() => {
-                // Don't mark as manual override - this allows recalculation
-                updateField("picusTime", formData.blockTime || "00:00")
+                updateField("picusTime", formData.blockTime || "00:00");
               }}
             />
           </SwipeableRow>
 
           <SwipeableRow
             onClear={() => {
-              updateField("sicTime", "00:00")
-              markManualOverride("sicTime", false)
+              updateField("sicTime", "00:00");
+              markManualOverride("sicTime", false);
             }}
           >
             <TimeDisplayRow
@@ -1214,49 +1295,58 @@ export function FlightForm({
               showUseButton={formData.sicTime === "00:00" || !formData.sicTime}
               useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
               onUse={() => {
-                updateField("sicTime", formData.blockTime || "00:00")
+                updateField("sicTime", formData.blockTime || "00:00");
               }}
             />
           </SwipeableRow>
 
           <SwipeableRow
             onClear={() => {
-              updateField("crossCountryTime", "00:00")
-              markManualOverride("crossCountryTime", false)
+              updateField("crossCountryTime", "00:00");
+              markManualOverride("crossCountryTime", false);
             }}
           >
             <TimeDisplayRow
               label="XC"
               value={formData.crossCountryTime || "00:00"}
-              showUseButton={formData.crossCountryTime === "00:00" || !formData.crossCountryTime}
+              showUseButton={
+                formData.crossCountryTime === "00:00" ||
+                !formData.crossCountryTime
+              }
               useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
               onUse={() => {
-                updateField("crossCountryTime", formData.blockTime || "00:00")
+                updateField("crossCountryTime", formData.blockTime || "00:00");
               }}
             />
           </SwipeableRow>
 
           <SwipeableRow
             onClear={() => {
-              updateField("actualInstrumentTime", "00:00")
-              markManualOverride("actualInstrumentTime", false)
+              updateField("actualInstrumentTime", "00:00");
+              markManualOverride("actualInstrumentTime", false);
             }}
           >
             <TimeDisplayRow
               label="Actual Inst"
               value={formData.actualInstrumentTime || "00:00"}
-              showUseButton={formData.actualInstrumentTime === "00:00" || !formData.actualInstrumentTime}
+              showUseButton={
+                formData.actualInstrumentTime === "00:00" ||
+                !formData.actualInstrumentTime
+              }
               useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
               onUse={() => {
-                updateField("actualInstrumentTime", formData.blockTime || "00:00")
+                updateField(
+                  "actualInstrumentTime",
+                  formData.blockTime || "00:00"
+                );
               }}
             />
           </SwipeableRow>
 
           <SwipeableRow
             onClear={() => {
-              updateField("ifrTime", "00:00")
-              markManualOverride("ifrTime", false)
+              updateField("ifrTime", "00:00");
+              markManualOverride("ifrTime", false);
             }}
           >
             <TimeDisplayRow
@@ -1265,24 +1355,30 @@ export function FlightForm({
               showUseButton={formData.ifrTime === "00:00" || !formData.ifrTime}
               useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
               onUse={() => {
-                updateField("ifrTime", formData.blockTime || "00:00")
+                updateField("ifrTime", formData.blockTime || "00:00");
               }}
             />
           </SwipeableRow>
 
           <SwipeableRow
             onClear={() => {
-              updateField("simulatedInstrumentTime", "00:00")
-              markManualOverride("simulatedInstrumentTime", false)
+              updateField("simulatedInstrumentTime", "00:00");
+              markManualOverride("simulatedInstrumentTime", false);
             }}
           >
             <TimeDisplayRow
               label="Simulator"
               value={formData.simulatedInstrumentTime || "00:00"}
-              showUseButton={formData.simulatedInstrumentTime === "00:00" || !formData.simulatedInstrumentTime}
+              showUseButton={
+                formData.simulatedInstrumentTime === "00:00" ||
+                !formData.simulatedInstrumentTime
+              }
               useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
               onUse={() => {
-                updateField("simulatedInstrumentTime", formData.blockTime || "00:00")
+                updateField(
+                  "simulatedInstrumentTime",
+                  formData.blockTime || "00:00"
+                );
               }}
             />
           </SwipeableRow>
@@ -1291,7 +1387,9 @@ export function FlightForm({
         {/* DUTY Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
           <div className="px-4 py-2 bg-muted/30">
-            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">DUTY</h2>
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              DUTY
+            </h2>
           </div>
 
           <ToggleRow
@@ -1303,7 +1401,12 @@ export function FlightForm({
           <SettingsRow label="Pilot Role">
             <select
               value={formData.pilotRole || "PIC"}
-              onChange={(e) => updateField("pilotRole", e.target.value as FlightLog["pilotRole"])}
+              onChange={(e) =>
+                updateField(
+                  "pilotRole",
+                  e.target.value as FlightLog["pilotRole"]
+                )
+              }
               className="bg-transparent text-foreground outline-none"
             >
               <option value="PIC">PIC</option>
@@ -1319,15 +1422,17 @@ export function FlightForm({
         {/* LANDINGS Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
           <div className="px-4 py-2 bg-muted/30">
-            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">LANDINGS</h2>
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              LANDINGS
+            </h2>
           </div>
 
           <NumberRow
             label="Day Takeoffs"
             value={formData.dayTakeoffs || 0}
             onChange={(val) => {
-              updateField("dayTakeoffs", val)
-              markManualOverride("dayTakeoffs", true)
+              updateField("dayTakeoffs", val);
+              markManualOverride("dayTakeoffs", true);
             }}
           />
 
@@ -1335,8 +1440,8 @@ export function FlightForm({
             label="Day Landings"
             value={formData.dayLandings || 0}
             onChange={(val) => {
-              updateField("dayLandings", val)
-              markManualOverride("dayLandings", true)
+              updateField("dayLandings", val);
+              markManualOverride("dayLandings", true);
             }}
           />
 
@@ -1344,8 +1449,8 @@ export function FlightForm({
             label="Night Takeoffs"
             value={formData.nightTakeoffs || 0}
             onChange={(val) => {
-              updateField("nightTakeoffs", val)
-              markManualOverride("nightTakeoffs", true)
+              updateField("nightTakeoffs", val);
+              markManualOverride("nightTakeoffs", true);
             }}
           />
 
@@ -1353,8 +1458,8 @@ export function FlightForm({
             label="Night Landings"
             value={formData.nightLandings || 0}
             onChange={(val) => {
-              updateField("nightLandings", val)
-              markManualOverride("nightLandings", true)
+              updateField("nightLandings", val);
+              markManualOverride("nightLandings", true);
             }}
           />
 
@@ -1368,15 +1473,22 @@ export function FlightForm({
         {/* APPROACHES Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
           <div className="px-4 py-2 bg-muted/30">
-            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">APPROACHES</h2>
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              APPROACHES
+            </h2>
           </div>
 
           {(formData.approaches || []).map((approach, index) => (
-            <div key={approach.id} className="flex items-center justify-between py-3 px-4 border-b border-border">
+            <div
+              key={approach.id}
+              className="flex items-center justify-between py-3 px-4 border-b border-border"
+            >
               <div className="flex items-center gap-2 flex-1">
                 <select
                   value={approach.type}
-                  onChange={(e) => updateApproach(approach.id, { type: e.target.value })}
+                  onChange={(e) =>
+                    updateApproach(approach.id, { type: e.target.value })
+                  }
                   className="bg-transparent text-foreground outline-none text-sm"
                 >
                   <option value="ILS">ILS</option>
@@ -1390,18 +1502,27 @@ export function FlightForm({
                   <option value="Circling">Circling</option>
                 </select>
                 <span className="text-xs text-muted-foreground px-2 py-0.5 rounded bg-muted/50">
-                  {approach.category === "precision" ? "Precision" : "Non-Precision"}
+                  {approach.category === "precision"
+                    ? "Precision"
+                    : "Non-Precision"}
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   value={approach.runway || ""}
-                  onChange={(e) => updateApproach(approach.id, { runway: e.target.value.toUpperCase() })}
+                  onChange={(e) =>
+                    updateApproach(approach.id, {
+                      runway: e.target.value.toUpperCase(),
+                    })
+                  }
                   placeholder="RWY"
                   className="bg-transparent text-foreground text-right outline-none w-16"
                 />
-                <button onClick={() => removeApproach(approach.id)} className="text-destructive">
+                <button
+                  onClick={() => removeApproach(approach.id)}
+                  className="text-destructive"
+                >
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
@@ -1416,7 +1537,11 @@ export function FlightForm({
             <span>Add Approach</span>
           </button>
 
-          <NumberRow label="Holds" value={formData.holds || 0} onChange={(v) => updateField("holds", v)} />
+          <NumberRow
+            label="Holds"
+            value={formData.holds || 0}
+            onChange={(v) => updateField("holds", v)}
+          />
 
           <ToggleRow
             label="IPC / ICC"
@@ -1428,7 +1553,9 @@ export function FlightForm({
         {/* REMARKS Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
           <div className="px-4 py-2 bg-muted/30">
-            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">REMARKS</h2>
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              REMARKS
+            </h2>
           </div>
 
           <SwipeableRow onClear={() => clearField("remarks")}>
@@ -1436,8 +1563,8 @@ export function FlightForm({
               label="Comment"
               value={formData.remarks}
               onClick={() => {
-                const comment = prompt("Remarks:", formData.remarks)
-                if (comment !== null) updateField("remarks", comment)
+                const comment = prompt("Remarks:", formData.remarks);
+                if (comment !== null) updateField("remarks", comment);
               }}
               showChevron
             />
@@ -1461,12 +1588,12 @@ export function FlightForm({
           isOpen={datePickerOpen}
           initialDate={formData.date}
           onSelect={(value) => {
-            updateField("date", value)
+            updateField("date", value);
           }}
           onClose={() => setDatePickerOpen(false)}
           label="Select Date"
         />
       )}
     </div>
-  )
+  );
 }
