@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { PageContainer } from "@/components/page-container";
 import { SyncStatus } from "@/components/sync-status";
 import { StatsDashboard } from "@/components/stats-dashboard";
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
@@ -76,36 +77,36 @@ export default function Dashboard() {
   const thisMonthFlights = flights.filter((f) => f.date.startsWith(thisMonth));
 
   return (
-    /* 1. Viewport Lock: flex-col + h-[100dvh] */
-    <div className="relative h-[100dvh] w-full flex flex-col bg-background overflow-hidden">
-      {/* 2. Header: Static flex-none */}
-      <header className="flex-none bg-background/95 backdrop-blur-lg border-b border-border z-50">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-between h-12">
-            <h1 className="text-lg font-semibold text-foreground">Dashboard</h1>
-            <div className="flex items-center gap-2">
-              <SyncStatus />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleManualSync}
-                disabled={isSyncing || isLoading}
-                className="h-8 w-8 p-0"
-              >
-                <RefreshCw
-                  className={cn("h-4 w-4", isSyncing && "animate-spin")}
-                />
-              </Button>
+    <PageContainer
+      header={
+        <header className="flex-none bg-background/95 backdrop-blur-lg border-b border-border z-50">
+          <div className="container mx-auto px-4">
+            <div className="flex items-center justify-between h-12">
+              <h1 className="text-lg font-semibold text-foreground">
+                Dashboard
+              </h1>
+              <div className="flex items-center gap-2">
+                <SyncStatus />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleManualSync}
+                  disabled={isSyncing || isLoading}
+                  className="h-8 w-8 p-0"
+                >
+                  <RefreshCw
+                    className={cn("h-4 w-4", isSyncing && "animate-spin")}
+                  />
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      </header>
-
-      {/* 3. SCROLLABLE CONTENT: Main fills space and scrolls internally */}
-      <main onScroll={handleScroll} className="flex-1 overflow-y-auto">
-        <div className="container mx-auto px-4 pt-4 pb-24 space-y-6">
+        </header>
+      }
+    >
+      {
+        <div className="container mx-auto px-4 pt-4 pb-safe space-y-6">
           {" "}
-          {/* pb-24 buffer for the floating navbar */}
           {syncError && (
             <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
               <AlertCircle className="h-4 w-4 flex-shrink-0" />
@@ -273,19 +274,7 @@ export default function Dashboard() {
             )}
           </section>
         </div>
-      </main>
-
-      {/* 4. FIXED NAVBAR: Floating and slides down on scroll */}
-      <div
-        className={cn(
-          "fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out",
-          hideNavbar ? "translate-y-full" : "translate-y-0"
-        )}
-      >
-        <BottomNavbar />
-      </div>
-
-      <PWAInstallPrompt />
-    </div>
+      }
+    </PageContainer>
   );
 }

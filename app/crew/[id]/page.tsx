@@ -5,9 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { PageContainer } from "@/components/page-container";
-import { SyncStatus } from "@/components/sync-status";
-import { BottomNavbar } from "@/components/bottom-navbar";
-import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
 import {
   getPersonnelById,
   updatePersonnel,
@@ -19,7 +16,6 @@ import { ArrowLeft, Loader2, ChevronRight } from "lucide-react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/use-indexed-db";
-import { cn } from "@/lib/utils";
 
 const ROLE_OPTIONS = ["PIC", "SIC", "Instructor", "Examiner"] as const;
 
@@ -325,9 +321,8 @@ export default function CrewDetailPage() {
       {/* 3. SCROLLABLE CONTENT: Main fills space and scrolls internally */}
 
       {
-        <div className="container mx-auto px-3 pt-4 pb-24">
+        <div className="container mx-auto px-3 pt-4 pb-safe">
           {" "}
-          {/* pb-24 safety buffer for navbar */}
           {!isNew && !crew ? (
             <p className="text-center text-muted-foreground py-12">
               Crew member not found

@@ -144,9 +144,8 @@ function NewFlightContent() {
     <PageContainer>
       {/* 2. Scrollable Content Area */}
       {
-        <div className="pb-24">
+        <div className="pb-safe">
           {" "}
-          {/* Buffer for the fixed navbar */}
           {isLoadingFlight ? (
             <div className="container mx-auto px-3 py-3">
               <Card className="bg-card border-border">

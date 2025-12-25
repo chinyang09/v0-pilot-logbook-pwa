@@ -61,9 +61,8 @@ export default function AirportDetailPage() {
       }
     >
       {/* 3. SCROLLABLE CONTENT: Main fills space and scrolls internally */}
-      <div className="container mx-auto px-3 pt-3 pb-24">
+      <div className="container mx-auto px-3 pt-3 pb-safe">
         {" "}
-        {/* pb-24 buffer for the floating navbar */}
         {!airport ? (
           <p className="text-center text-muted-foreground py-12">
             Airport {icao.toUpperCase()} not found

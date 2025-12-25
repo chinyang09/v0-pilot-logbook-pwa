@@ -193,9 +193,8 @@ export default function AircraftPage() {
           </p>
         </div>
       ) : (
-        <div className="p-2 pb-24 space-y-2">
+        <div className="p-2 pb-safe space-y-2">
           {" "}
-          {/* pb-24 ensures the last card isn't covered by nav */}
           {showRecentlyUsed && (
             <div className="mb-4">
               <h3 className="text-xs font-medium text-muted-foreground uppercase px-2 mb-2">

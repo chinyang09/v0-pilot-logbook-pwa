@@ -6,8 +6,6 @@ import { PageContainer } from "@/components/page-container";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SyncStatus } from "@/components/sync-status";
-import { BottomNavbar } from "@/components/bottom-navbar";
-import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
 import { usePersonnel } from "@/hooks/use-indexed-db";
 import { deletePersonnel } from "@/lib/indexed-db";
 import { Search, Loader2, User, Plus, ArrowLeft, Trash2 } from "lucide-react";
@@ -29,7 +27,7 @@ import {
 const ITEMS_PER_PAGE = 50;
 const SWIPE_THRESHOLD = 80;
 
-// --- SwipeableCrewCard Component (Kept as is, added for completeness) ---
+// --- SwipeableCrewCard Component---
 function SwipeableCrewCard({
   crew,
   onSelect,
@@ -308,9 +306,8 @@ export default function CrewPage() {
       }
     >
       {
-        <div className="container mx-auto px-3 pt-3 pb-24">
+        <div className="container mx-auto px-3 pt-3 pb-safe">
           {" "}
-          {/* pb-24 safety buffer for navbar */}
           <div className="sticky top-0 z-40 bg-background/95 pb-2">
             <div className="flex gap-2">
               <div className="relative flex-1">

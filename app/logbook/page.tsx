@@ -421,7 +421,7 @@ export default function LogbookPage() {
 
           <div
             className={cn(
-              "absolute left-0 right-0 px-4 space-y-2",
+              "absolute left-0 right-0 px-2 space-y-2",
               searchFocused
                 ? "top-10 opacity-100"
                 : showCalendar
@@ -455,42 +455,6 @@ export default function LogbookPage() {
                   Cancel
                 </button>
               )}
-              {searchQuery && !searchFocused && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 z-10 hover:bg-secondary/50 rounded-full p-1 transition-colors"
-                >
-                  <X className="h-4 w-4 text-muted-foreground" />
-                </button>
-              )}
-
-              {searchFocused &&
-                activeFilterType !== "none" &&
-                filterOptions.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                    {filterOptions.map((option) => (
-                      <button
-                        key={option}
-                        type="button"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          toggleFilterOption(option);
-                          setSearchQuery("");
-                        }}
-                        className="w-full px-3 py-2 text-left text-sm hover:bg-secondary/50 flex items-center gap-2 transition-colors"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedFilters.includes(option)}
-                          onChange={() => {}}
-                          className="h-4 w-4"
-                        />
-                        {option}
-                      </button>
-                    ))}
-                  </div>
-                )}
             </div>
           </div>
         </div>
@@ -511,7 +475,7 @@ export default function LogbookPage() {
           onDateSelect={handleDateSelect}
           selectedDate={selectedDate}
           onScrollStart={handleCalendarScrollStart}
-          onSwipeStart={handleCalendarSwipeStart}
+          //onSwipeStart={handleCalendarSwipeStart}
           onInteractionEnd={handleCalendarInteractionEnd}
         />
       </div>

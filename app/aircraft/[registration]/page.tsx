@@ -11,9 +11,6 @@ import {
   getAircraftByIcao24,
   type NormalizedAircraft,
 } from "@/lib/aircraft-database";
-import { BottomNavbar } from "@/components/bottom-navbar";
-import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
-import { cn } from "@/lib/utils";
 
 export default function AircraftDetailPage() {
   const params = useParams();
@@ -54,7 +51,6 @@ export default function AircraftDetailPage() {
   }
 
   return (
-    /* 1. Viewport Lock: flex-col + h-[100dvh] */
     <PageContainer
       header={
         <header className="flex-none bg-card border-b border-border px-3 py-2 z-50">
@@ -84,9 +80,8 @@ export default function AircraftDetailPage() {
       }
     >
       {
-        <div className="p-4 pb-24 space-y-4">
+        <div className="p-4 pb-safe space-y-4">
           {" "}
-          {/* pb-24 buffer for the floating navbar */}
           {!aircraft ? (
             <div className="flex items-center justify-center py-12">
               <p className="text-muted-foreground">
