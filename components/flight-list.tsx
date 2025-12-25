@@ -567,8 +567,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(function Fl
             </div>
           )}
 
-          {/* Bottom padding for navbar */}
-          <div className="h-4" />
+          <div className="h-8" />
         </div>
       </div>
 

@@ -1,33 +1,17 @@
 "use client"
 
-import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Home, Book, Plus, MapPin, Plane, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
-export function BottomNavbar() {
+interface BottomNavbarProps {
+  className?: string
+}
+
+export function BottomNavbar({ className }: BottomNavbarProps) {
   const pathname = usePathname()
-  const [isVisible, setIsVisible] = useState(true)
-  const [lastScrollY, setLastScrollY] = useState(0)
-
-  useEffect(() => {
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY
-
-      if (currentScrollY < lastScrollY || currentScrollY < 50) {
-        setIsVisible(true)
-      } else if (currentScrollY > lastScrollY && currentScrollY > 100) {
-        setIsVisible(false)
-      }
-
-      setLastScrollY(currentScrollY)
-    }
-
-    window.addEventListener("scroll", handleScroll, { passive: true })
-    return () => window.removeEventListener("scroll", handleScroll)
-  }, [lastScrollY])
 
   const activeTab =
     pathname === "/"
@@ -45,11 +29,11 @@ export function BottomNavbar() {
   return (
     <nav
       className={cn(
-        "fixed bottom-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-lg border-t border-border transition-transform duration-300",
-        !isVisible && "translate-y-full",
+        "flex-shrink-0 bg-background/95 backdrop-blur-lg border-t border-border pb-[env(safe-area-inset-bottom)]",
+        className,
       )}
     >
-      <div className="container mx-auto px-1">
+      <div className="px-1">
         <div className="flex items-center justify-around h-16">
           <Link href="/">
             <Button

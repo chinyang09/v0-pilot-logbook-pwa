@@ -69,27 +69,22 @@ export default function LogbookPage() {
     (year: number, month: number) => {
       setSelectedMonth({ year, month })
 
-      // Only sync if calendar initiated AND not locked
       if (syncSourceRef.current !== "calendar" || syncLockRef.current) {
         return
       }
 
       syncLockRef.current = true
 
-      // Find flights in the target month
       const monthFlights = flights.filter((f) => {
         const date = new Date(f.date)
         return date.getFullYear() === year && date.getMonth() === month
       })
 
       if (monthFlights.length > 0) {
-        // Sort by date descending to get latest flight first
         const sortedFlights = [...monthFlights].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        // Tell flight list to load and scroll to this flight
         flightListRef.current?.scrollToFlight(sortedFlights[0].id, sortedFlights[0].date)
       }
 
-      // Release lock after scroll animation completes
       setTimeout(() => {
         syncLockRef.current = false
         syncSourceRef.current = null
@@ -102,7 +97,6 @@ export default function LogbookPage() {
     (topFlight: FlightLog | null) => {
       if (!showCalendar || !topFlight) return
 
-      // Only sync if flight list initiated AND not locked
       if (syncSourceRef.current !== "flights" || syncLockRef.current) {
         return
       }
@@ -111,7 +105,6 @@ export default function LogbookPage() {
       const newYear = flightDate.getFullYear()
       const newMonth = flightDate.getMonth()
 
-      // Only update if month actually changed
       if (newYear !== selectedMonth.year || newMonth !== selectedMonth.month) {
         syncLockRef.current = true
         setSelectedMonth({ year: newYear, month: newMonth })
@@ -255,7 +248,7 @@ export default function LogbookPage() {
   const isLoading = dbLoading || !dbReady
 
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <div className="flex flex-col h-[100dvh] bg-background">
       {/* Header */}
       <header
         className={cn(
@@ -422,8 +415,7 @@ export default function LogbookPage() {
         />
       </div>
 
-      {/* Flight list - takes remaining space */}
-      <main className="flex-1 min-h-0 overflow-hidden">
+      <main className="flex-1 min-h-0 overflow-hidden pb-safe">
         <FlightList
           ref={flightListRef}
           flights={filteredFlights}
@@ -441,15 +433,7 @@ export default function LogbookPage() {
         />
       </main>
 
-      {/* Bottom navbar */}
-      <div
-        className={cn(
-          "flex-shrink-0 transition-all duration-200",
-          hideNavbar ? "opacity-0 translate-y-full h-0" : "opacity-100 translate-y-0",
-        )}
-      >
-        <BottomNavbar />
-      </div>
+      <BottomNavbar className={cn("transition-all duration-200", hideNavbar && "translate-y-full opacity-0")} />
 
       <PWAInstallPrompt />
     </div>
