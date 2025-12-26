@@ -10,14 +10,14 @@ const inter = Inter({ subsets: ["latin"] });
 const geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "SkyLog - Pilot Logbook",
+  title: "OOOI",
   description:
     "Professional pilot logbook with offline capability and cloud sync",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "SkyLog",
+    title: "OOOI",
   },
   icons: {
     icon: "/icon-192.png",
@@ -48,7 +48,7 @@ export default function RootLayout({
       </head>
       <body className={`font-sans antialiased`}>
         <ServiceWorkerRegister />
-        <OfflineIndicator />
+        {/*<OfflineIndicator />*/}
         <SyncProvider>{children}</SyncProvider>
       </body>
     </html>
