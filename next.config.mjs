@@ -6,7 +6,15 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
- 
-}
+  // This prevents the "Maximum call stack" error during the "Collecting build traces" phase
+  outputFileTracingExcludes: {
+    "*": [
+      "node_modules/@gutenye/ocr-browser/**/*",
+      "node_modules/sharp/**/*",
+      "**/*.onnx",
+      "**/*.wasm",
+    ],
+  },
+};
 
-export default nextConfig
+export default nextConfig;
