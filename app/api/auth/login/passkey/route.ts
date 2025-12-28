@@ -84,8 +84,9 @@ export async function POST(request: NextRequest) {
     const authData = base64URLDecode(authDataBase64)
     const newCounter = new DataView(authData.buffer, authData.byteOffset + 33, 4).getUint32(0, false)
 
-    // Check counter (prevent replay attacks)
-    if (newCounter <= passkey.counter) {
+    // Only reject if newCounter is strictly less than stored (not equal)
+    // Some authenticators don't increment counter on first use
+    if (newCounter < passkey.counter) {
       console.warn("Possible replay attack detected")
       return NextResponse.json({ error: "Invalid credential" }, { status: 401 })
     }
@@ -128,6 +129,10 @@ export async function POST(request: NextRequest) {
       user: {
         id: user._id,
         callsign: user.identity.callsign,
+      },
+      session: {
+        token: sessionId,
+        expiresAt: sessionExpiry,
       },
     })
   } catch (error) {

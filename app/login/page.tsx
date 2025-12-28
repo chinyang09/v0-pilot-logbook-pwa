@@ -68,11 +68,13 @@ export default function LoginPage() {
 
       const options = await optionsRes.json()
 
+      const rpId = window.location.hostname
+
       // Start WebAuthn authentication
       const credential = await navigator.credentials.get({
         publicKey: {
           challenge: base64URLDecode(options.challenge),
-          rpId: options.rpId,
+          rpId: rpId, // Use client rpId instead of server's
           timeout: options.timeout,
           userVerification: options.userVerification,
         },
@@ -110,14 +112,22 @@ export default function LoginPage() {
 
       const result = await verifyRes.json()
 
-      // Store user info in localStorage for IndexedDB
-      localStorage.setItem(
-        "skylog_user",
-        JSON.stringify({
-          id: result.user.id,
-          callsign: result.user.callsign,
-        }),
-      )
+      if (result.session) {
+        await login({
+          user: result.user,
+          token: result.session.token,
+          expiresAt: result.session.expiresAt,
+        })
+      } else {
+        // Fallback to localStorage if no session in response
+        localStorage.setItem(
+          "skylog_user",
+          JSON.stringify({
+            id: result.user.id,
+            callsign: result.user.callsign,
+          }),
+        )
+      }
 
       setStep("success")
       setTimeout(() => router.push("/"), 1500)
