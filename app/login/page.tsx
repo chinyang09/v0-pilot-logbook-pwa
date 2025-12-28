@@ -180,6 +180,8 @@ export default function LoginPage() {
     try {
       const options = registrationData.registrationOptions
 
+      const rpId = window.location.hostname
+
       // Start WebAuthn registration
       const credential = await navigator.credentials.create({
         publicKey: {
@@ -188,6 +190,10 @@ export default function LoginPage() {
           user: {
             ...options.user,
             id: base64URLDecode(options.user.id as unknown as string),
+          },
+          rp: {
+            name: "SkyLog Pilot Logbook",
+            id: rpId,
           },
         },
       })
