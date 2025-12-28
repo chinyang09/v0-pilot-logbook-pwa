@@ -4,6 +4,7 @@ import type React from "react"
 import { useEffect, useRef } from "react"
 import { syncService } from "@/lib/sync-service"
 import { refreshAllData } from "@/hooks/use-indexed-db"
+import { getUserSession } from "@/lib/indexed-db"
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const syncInitiated = useRef(false)
@@ -14,7 +15,14 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       if (syncInitiated.current) return
       syncInitiated.current = true
 
-      console.log("[v0] Starting background sync...")
+      // Check if user is authenticated before syncing
+      const session = await getUserSession()
+      if (!session) {
+        console.log("[v0] No session - skipping sync")
+        return
+      }
+
+      console.log("[v0] Starting background sync for user:", session.callsign)
 
       if (navigator.onLine) {
         try {

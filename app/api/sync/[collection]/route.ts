@@ -1,23 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { MongoClient } from "mongodb"
-
-const uri = process.env.MONGODB_URI || ""
-let client: MongoClient | null = null
-
-async function getClient() {
-  if (!uri) {
-    throw new Error("MONGODB_URI environment variable is not set")
-  }
-
-  if (!client) {
-    client = new MongoClient(uri)
-    await client.connect()
-  }
-  return client
-}
+import { getMongoClient } from "@/lib/mongodb"
+import { validateSessionFromHeader } from "@/lib/session"
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ collection: string }> }) {
   try {
+    const session = await validateSessionFromHeader(request)
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
     const { collection } = await params
     const { searchParams } = new URL(request.url)
     const since = Number.parseInt(searchParams.get("since") || "0")
@@ -27,13 +18,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "Invalid collection" }, { status: 400 })
     }
 
-    const mongoClient = await getClient()
+    const mongoClient = await getMongoClient()
     const db = mongoClient.db("skylog")
 
-    const query =
-      since > 0
-        ? { $or: [{ updatedAt: { $gt: since } }, { createdAt: { $gt: since } }, { syncedAt: { $gt: since } }] }
-        : {}
+    const query: Record<string, unknown> = { userId: session.userId }
+    if (since > 0) {
+      query.$or = [{ updatedAt: { $gt: since } }, { createdAt: { $gt: since } }, { syncedAt: { $gt: since } }]
+    }
 
     const sortCriteria =
       collection === "flights" ? { date: -1, updatedAt: -1, createdAt: -1 } : { updatedAt: -1, createdAt: -1 }
@@ -57,9 +48,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           "blockTime",
           "flightTime",
           "nightTime",
-          "p1Time",
-          "p2Time",
-          "puTime",
+          "dayTime",
+          "picTime",
+          "sicTime",
+          "picusTime",
           "dualTime",
           "instructorTime",
           "ifrTime",
@@ -100,11 +92,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           "picName",
           "sicId",
           "sicName",
-          "otherCrew",
           "remarks",
           "endorsements",
-          "approach1",
-          "approach2",
         ]
         for (const field of stringFields) {
           if (!transformed[field]) {
@@ -122,12 +111,26 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           transformed.manualOverrides = {}
         }
 
+        // Ensure array fields
+        if (!Array.isArray(transformed.approaches)) {
+          transformed.approaches = []
+        }
+        if (!Array.isArray(transformed.additionalCrew)) {
+          transformed.additionalCrew = []
+        }
+
         // Ensure boolean fields
         if (typeof transformed.ipcIcc !== "boolean") {
           transformed.ipcIcc = false
         }
         if (typeof transformed.isLocked !== "boolean") {
           transformed.isLocked = false
+        }
+        if (typeof transformed.isDraft !== "boolean") {
+          transformed.isDraft = false
+        }
+        if (typeof transformed.pilotFlying !== "boolean") {
+          transformed.pilotFlying = true
         }
       }
 

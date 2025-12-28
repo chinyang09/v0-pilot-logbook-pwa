@@ -8,6 +8,7 @@ import {
   getLastSyncTime,
   setLastSyncTime,
   initializeDB,
+  getUserSession,
   type FlightLog,
   type Aircraft,
   type Personnel,
@@ -61,9 +62,27 @@ class SyncService {
     this.onDataChangedCallbacks.forEach((cb) => cb())
   }
 
+  private async getAuthHeaders(): Promise<HeadersInit> {
+    const session = await getUserSession()
+    if (!session) {
+      return { "Content-Type": "application/json" }
+    }
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.sessionToken}`,
+      "X-User-Id": session.odidId,
+    }
+  }
+
   async fullSync(): Promise<{ pushed: number; pulled: number; failed: number }> {
     if (!navigator.onLine || this.syncInProgress) {
       console.log("[v0] Skipping sync - offline or sync in progress")
+      return { pushed: 0, pulled: 0, failed: 0 }
+    }
+
+    const session = await getUserSession()
+    if (!session) {
+      console.log("[v0] Skipping sync - no valid session")
       return { pushed: 0, pulled: 0, failed: 0 }
     }
 
@@ -76,7 +95,7 @@ class SyncService {
     this.syncInProgress = true
     this.setStatus("syncing")
 
-    console.log("[v0] Starting full sync...")
+    console.log("[v0] Starting full sync for user:", session.callsign)
 
     let pushed = 0
     let pulled = 0
@@ -119,11 +138,13 @@ class SyncService {
     let success = 0
     let failed = 0
 
+    const headers = await this.getAuthHeaders()
+
     for (const item of queue) {
       try {
         const response = await fetch("/api/sync", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify(item),
         })
 
@@ -161,6 +182,8 @@ class SyncService {
     const lastSyncTime = await getLastSyncTime()
     console.log("[v0] Last sync time:", lastSyncTime, new Date(lastSyncTime).toISOString())
 
+    const headers = await this.getAuthHeaders()
+
     try {
       const collections = ["flights", "aircraft", "personnel"] as const
 
@@ -168,7 +191,7 @@ class SyncService {
         try {
           const url = `/api/sync/${collection}?since=${lastSyncTime}`
           console.log("[v0] Fetching from:", url)
-          const response = await fetch(url)
+          const response = await fetch(url, { headers })
 
           if (response.ok) {
             const data = await response.json()
@@ -193,6 +216,9 @@ class SyncService {
                 console.error(`[v0] Error upserting ${collection} record:`, upsertError, record)
               }
             }
+          } else if (response.status === 401) {
+            console.error("[v0] Unauthorized - session may be invalid")
+            // Don't clear session here - let the auth provider handle it
           } else {
             console.error(`[v0] Failed to fetch ${collection}:`, response.status, await response.text())
           }
