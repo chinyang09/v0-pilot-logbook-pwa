@@ -24,6 +24,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Plane,
+  Copy,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { base64URLEncode, base64URLDecode } from "@/lib/webauthn";
@@ -53,6 +54,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [passkeySupported, setPasskeySupported] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // Check passkey support on mount
   useEffect(() => {
@@ -410,6 +412,13 @@ export default function LoginPage() {
     }
   };
 
+  //f Helpers for Copying
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(totpSecret);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 safe-area-inset">
       <div className="w-full max-w-md">
@@ -668,8 +677,16 @@ export default function LoginPage() {
                   <p className="text-xs text-muted-foreground mb-1">
                     Or enter manually:
                   </p>
-                  <code className="text-xs bg-muted px-2 py-1 rounded font-mono break-all">
+                  <code
+                    onClick={copyToClipboard}
+                    className="flex justify-center gap-2 max-w-full text-xs bg-muted px-3 py-2 rounded-md font-mono break-all hover:bg-muted/80 transition-colors"
+                  >
                     {totpSecret}
+                    {copied ? (
+                      <CheckCircle2 className="h-3 w-3 text-green-500" />
+                    ) : (
+                      <Copy className="h-3 w-3 text-muted-foreground" />
+                    )}
                   </code>
                 </div>
               </div>
