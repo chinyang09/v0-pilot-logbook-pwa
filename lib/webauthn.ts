@@ -79,9 +79,8 @@ export function generateRegistrationOptions(
     timeout: 60000,
     attestation: "none",
     authenticatorSelection: {
-      residentKey: "required", // Discoverable credentials for username-less login
-      userVerification: "required", // Biometric/PIN required
-      authenticatorAttachment: "platform", // Prefer built-in authenticators
+      residentKey: "preferred", // Discoverable credentials for username-less login
+      userVerification: "preferred", // Biometric/PIN required
     },
     excludeCredentials: existingCredentials.map((cred) => ({
       id: base64URLDecode(cred.id),

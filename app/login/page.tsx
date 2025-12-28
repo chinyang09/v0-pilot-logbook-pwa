@@ -194,19 +194,35 @@ export default function LoginPage() {
 
       const rpId = window.location.hostname
 
-      // Start WebAuthn registration
+      // to avoid passing incompatible authenticatorSelection settings
       const credential = await navigator.credentials.create({
         publicKey: {
-          ...options,
           challenge: base64URLDecode(options.challenge as unknown as string),
-          user: {
-            ...options.user,
-            id: base64URLDecode(options.user.id as unknown as string),
-          },
           rp: {
             name: "SkyLog Pilot Logbook",
             id: rpId,
           },
+          user: {
+            id: base64URLDecode(options.user.id as unknown as string),
+            name: options.user.name,
+            displayName: options.user.displayName,
+          },
+          pubKeyCredParams: options.pubKeyCredParams,
+          timeout: options.timeout,
+          attestation: options.attestation || "none",
+          authenticatorSelection: {
+            residentKey: "preferred",
+            userVerification: "preferred",
+            // No authenticatorAttachment - allows both platform and roaming
+          },
+          excludeCredentials:
+            options.excludeCredentials?.map(
+              (cred: { id: string; type: "public-key"; transports?: AuthenticatorTransport[] }) => ({
+                id: base64URLDecode(cred.id as unknown as string),
+                type: cred.type,
+                transports: cred.transports,
+              }),
+            ) || [],
         },
       })
 
