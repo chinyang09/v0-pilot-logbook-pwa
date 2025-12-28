@@ -1,6 +1,6 @@
 {
-  "name": "SkyLog - Pilot Logbook",
-  "short_name": "SkyLog",
+  "name": "OOOI",
+  "short_name": "OOOI",
   "description": "Professional pilot logbook with offline capability",
   "start_url": "/",
   "display": "standalone",

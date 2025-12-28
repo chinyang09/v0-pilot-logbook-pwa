@@ -25,6 +25,9 @@ export default function Dashboard() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
 
+  // --- Scroll & Navbar Logic ---
+  const { hideNavbar, handleScroll } = useScrollNavbar();
+
   useEffect(() => {
     const unsubscribe = syncService.onDataChanged(() => {
       refreshAllData()
@@ -244,5 +247,5 @@ export default function Dashboard() {
         </div>
       }
     </PageContainer>
-  )
+  );
 }

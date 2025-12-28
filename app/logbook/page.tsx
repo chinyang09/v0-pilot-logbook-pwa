@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { FlightList, type FlightListRef } from "@/components/flight-list";
+import { useScrollNavbar } from "@/hooks/use-scroll-navbar";
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
 import { BottomNavbar } from "@/components/bottom-navbar";
 import {
@@ -78,7 +79,7 @@ export default function LogbookPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
-  const [hideNavbar, setHideNavbar] = useState(false);
+  const { hideNavbar, handleScroll } = useScrollNavbar();
 
   const calendarRef = useRef<CalendarHandle>(null);
   const flightListRef = useRef<FlightListRef>(null);
@@ -165,7 +166,7 @@ export default function LogbookPage() {
     }
   }, []);
 
-  const handleCalendarSwipeStart = useCallback(() => {
+  /*const handleCalendarSwipeStart = useCallback(() => {
     if (hideNavbarTimeoutRef.current) {
       clearTimeout(hideNavbarTimeoutRef.current);
     }
@@ -176,7 +177,7 @@ export default function LogbookPage() {
     hideNavbarTimeoutRef.current = setTimeout(() => {
       setHideNavbar(false);
     }, 300);
-  }, []);
+  }, []);*/
 
   const handleDateSelect = useCallback((date: string) => {
     setSelectedDate((prev) => (prev === date ? null : date));
@@ -476,11 +477,11 @@ export default function LogbookPage() {
           selectedDate={selectedDate}
           onScrollStart={handleCalendarScrollStart}
           //onSwipeStart={handleCalendarSwipeStart}
-          onInteractionEnd={handleCalendarInteractionEnd}
+          //onInteractionEnd={handleCalendarInteractionEnd}
         />
       </div>
 
-      <main className="flex-1 min-h-0 overflow-hidden pb-safe">
+      <main className="flex-1 min-h-0 overflow-y-auto">
         <FlightList
           ref={flightListRef}
           flights={filteredFlights}
@@ -493,17 +494,20 @@ export default function LogbookPage() {
           personnel={personnel}
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
+          onScroll={handleScroll}
           showMonthHeaders={false}
           hideFilters={true}
         />
       </main>
 
-      <BottomNavbar
+      <div
         className={cn(
-          "transition-all duration-200",
-          hideNavbar && "translate-y-full opacity-0"
+          "fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out",
+          hideNavbar ? "translate-y-full" : "translate-y-0"
         )}
-      />
+      >
+        <BottomNavbar />
+      </div>
 
       <PWAInstallPrompt />
     </div>

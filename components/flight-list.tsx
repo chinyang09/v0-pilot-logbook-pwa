@@ -55,6 +55,7 @@ interface FlightListProps {
   personnel?: Personnel[];
   onTopFlightChange?: (flight: FlightLog | null) => void;
   onScrollStart?: () => void;
+  onScroll?: (e: React.UIEvent<HTMLElement>) => void;
   showMonthHeaders?: boolean;
   hideFilters?: boolean;
 }
@@ -313,6 +314,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       personnel = [],
       onTopFlightChange,
       onScrollStart,
+      onScroll,
       showMonthHeaders = false,
       hideFilters = false,
     },
@@ -619,6 +621,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
         <div
           ref={scrollContainerRef}
           className="h-full overflow-y-auto scroll-smooth"
+          onScroll={onScroll}
         >
           <div className="space-y-2 p-1">
             {showMonthHeaders && flightsByMonth
@@ -643,7 +646,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
               </div>
             )}
 
-            <div className="h-8" />
+            <div className="h-16" />
           </div>
         </div>
 
