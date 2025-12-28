@@ -9,6 +9,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp
 import { Fingerprint, Smartphone, Loader2, ArrowLeft, AlertCircle, CheckCircle2, Plane } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import { base64URLEncode, base64URLDecode } from "@/lib/webauthn"
+import { useAuth } from "@/components/auth-provider"
 
 type Step =
   | "initial" // Choose login or register
@@ -21,6 +22,7 @@ type Step =
 
 export default function LoginPage() {
   const router = useRouter()
+  const { login } = useAuth()
   const [step, setStep] = useState<Step>("initial")
   const [callsign, setCallsign] = useState("")
   const [totpCode, setTotpCode] = useState("")
@@ -279,6 +281,17 @@ export default function LoginPage() {
       if (!res.ok) {
         throw new Error("Invalid code. Make sure you scanned the QR code correctly.")
       }
+
+      const data = await res.json()
+
+      await login({
+        odidId: data.user.id,
+        callsign: data.user.callsign,
+        sessionToken: data.session?.token || "",
+        expiresAt: data.session?.expiresAt
+          ? new Date(data.session.expiresAt).getTime()
+          : Date.now() + 30 * 24 * 60 * 60 * 1000,
+      })
 
       setStep("success")
       setTimeout(() => router.push("/"), 1500)

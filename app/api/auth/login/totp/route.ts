@@ -63,6 +63,10 @@ export async function POST(request: NextRequest) {
         id: user._id,
         callsign: user.identity.callsign,
       },
+      session: {
+        token: sessionId,
+        expiresAt: sessionExpiry,
+      },
       // Flag to prompt passkey registration on new device
       shouldRegisterPasskey: true,
     })
