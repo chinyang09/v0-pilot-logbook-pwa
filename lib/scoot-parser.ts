@@ -118,7 +118,7 @@ export async function processScootCSV(
       date: flightDate,
       flightNumber: "", // Scoot CSV doesn't explicitly provide this in standard cols
       aircraftReg: matchedAc?.registration || rawReg,
-      aircraftType: matchedAc?.shortType || cols[5],
+      aircraftType: matchedAc?.typecode || cols[5],
       departureIata: depIata,
       departureIcao: depAp?.icao || "",
       arrivalIata: arrIata,
