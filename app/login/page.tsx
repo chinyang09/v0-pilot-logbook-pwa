@@ -213,7 +213,7 @@ export default function LoginPage() {
           authenticatorSelection: {
             residentKey: "preferred",
             userVerification: "preferred",
-            // No authenticatorAttachment - allows both platform and roaming
+            authenticatorAttachment: "platform", // Use platform authenticator (Google Password Manager, Face ID, etc.)
           },
           excludeCredentials:
             options.excludeCredentials?.map(

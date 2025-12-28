@@ -81,6 +81,7 @@ export function generateRegistrationOptions(
     authenticatorSelection: {
       residentKey: "preferred", // Discoverable credentials for username-less login
       userVerification: "preferred", // Biometric/PIN required
+      authenticatorAttachment: "platform", // Use platform authenticators (Google Password Manager, Face ID, Touch ID)
     },
     excludeCredentials: existingCredentials.map((cred) => ({
       id: base64URLDecode(cred.id),
