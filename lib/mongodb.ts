@@ -2,8 +2,8 @@ import { MongoClient, type Db } from "mongodb"
 
 const uri = process.env.MONGODB_URI || ""
 
-let client: MongoClient | null = null
-let clientPromise: Promise<MongoClient> | null = null
+let client: MongoClient | undefined = undefined
+let clientPromise: Promise<MongoClient> | undefined = undefined
 
 if (!uri) {
   console.warn("MONGODB_URI environment variable is not set")
@@ -33,8 +33,8 @@ export async function getMongoClient(): Promise<MongoClient> {
 }
 
 export async function getDB(): Promise<Db> {
-  const client = await getMongoClient()
-  return client.db("skylog")
+  const mongoClient = await getMongoClient()
+  return mongoClient.db("skylog")
 }
 
 export function getClientPromise(): Promise<MongoClient> {
@@ -43,5 +43,3 @@ export function getClientPromise(): Promise<MongoClient> {
   }
   return getMongoClient()
 }
-
-export default getClientPromise

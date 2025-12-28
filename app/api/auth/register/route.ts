@@ -1,8 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getDB } from "@/lib/mongodb"
-import { createId, normalizeCallsign } from "@/lib/cuid"
-import { generateTOTPSecret, generateTOTPUri } from "@/lib/totp"
-import { generateRegistrationOptions, base64URLEncode } from "@/lib/webauthn"
 import type { User, WebAuthnChallenge } from "@/lib/auth-types"
 
 // In-memory challenge store (use Redis in production)
@@ -11,6 +7,11 @@ const challenges = new Map<string, WebAuthnChallenge>()
 // POST /api/auth/register - Start registration
 export async function POST(request: NextRequest) {
   try {
+    const { getDB } = await import("@/lib/mongodb")
+    const { createId, normalizeCallsign } = await import("@/lib/cuid")
+    const { generateTOTPSecret, generateTOTPUri } = await import("@/lib/totp")
+    const { generateRegistrationOptions, base64URLEncode } = await import("@/lib/webauthn")
+
     const { callsign } = await request.json()
 
     if (!callsign || typeof callsign !== "string" || callsign.trim().length < 2) {
