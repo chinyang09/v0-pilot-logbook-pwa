@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next"
 import { Inter, Geist_Mono } from "next/font/google"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
 import { SyncProvider } from "@/components/sync-provider"
+import { AuthProvider } from "@/components/auth-provider"
 import { OfflineIndicator } from "@/components/offline-indicator"
 import "./globals.css"
 
@@ -48,7 +49,9 @@ export default function RootLayout({
       <body className={`font-sans antialiased`}>
         <ServiceWorkerRegister />
         <OfflineIndicator />
-        <SyncProvider>{children}</SyncProvider>
+        <AuthProvider>
+          <SyncProvider>{children}</SyncProvider>
+        </AuthProvider>
       </body>
     </html>
   )

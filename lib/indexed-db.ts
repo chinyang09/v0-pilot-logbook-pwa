@@ -2,6 +2,15 @@ import Dexie, { type Table } from "dexie"
 import { sumHHMM } from "./time-utils"
 import type { UserPreferences } from "./user-preferences"
 
+export interface UserSession {
+  id: string // Always "current"
+  odidId: string // The user's CUID from MongoDB
+  callsign: string
+  sessionToken: string
+  expiresAt: number
+  createdAt: number
+}
+
 export interface Approach {
   type: "ILS" | "VOR" | "NDB" | "RNAV" | "LOC" | "LDA" | "SDF" | "GPS" | "VISUAL" | "OTHER"
   category: "precision" | "non-precision"
@@ -17,6 +26,7 @@ export interface AdditionalCrew {
 
 export interface FlightLog {
   id: string
+  userId?: string // Add userId for user-specific filtering
   isDraft: boolean // New: true if user hasn't saved yet
   date: string
   flightNumber: string
@@ -97,6 +107,7 @@ export interface FlightLog {
 
 export interface Aircraft {
   id: string
+  userId?: string // Add userId for user-specific filtering
   registration: string // Matches FlightLog.aircraftReg
   type: string // Matches FlightLog.aircraftType
   typeDesignator: string
@@ -126,6 +137,7 @@ export interface Airport {
 
 export interface Personnel {
   id: string
+  userId?: string // Add userId for user-specific filtering
   name: string
   crewId?: string
   organization?: string
@@ -168,19 +180,21 @@ class PilotLogbookDB extends Dexie {
   syncQueue!: Table<SyncQueueItem, string>
   syncMeta!: Table<SyncMeta, string>
   aircraftDatabase!: Table<{ registration: string; data: string }, string> // CDN aircraft cache
+  userSession!: Table<UserSession, string> // Add userSession table
 
   constructor() {
     super("pilot-logbook")
 
-    this.version(8).stores({
-      flights: "id, date, syncStatus, aircraftReg, mongoId",
-      aircraft: "id, registration, type, mongoId",
+    this.version(9).stores({
+      flights: "id, date, syncStatus, aircraftReg, mongoId, userId",
+      aircraft: "id, registration, type, mongoId, userId",
       airports: "icao, iata, name", // No sync fields needed
-      personnel: "id, name, mongoId",
+      personnel: "id, name, mongoId, userId",
       preferences: "key",
       syncQueue: "id, collection, timestamp",
       syncMeta: "key",
       aircraftDatabase: "registration", // CDN aircraft cache
+      userSession: "id", // Single row table for current session
     })
   }
 }
@@ -275,6 +289,7 @@ export async function getPendingFlights(): Promise<FlightLog[]> {
 export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<void> {
   const normalized: FlightLog = {
     id: serverFlight.id,
+    userId: serverFlight.userId,
     isDraft: serverFlight.isDraft || false,
     date: serverFlight.date,
     flightNumber: serverFlight.flightNumber || "",
@@ -406,6 +421,7 @@ export async function getAircraftById(id: string): Promise<Aircraft | undefined>
 export async function upsertAircraftFromServer(serverAircraft: Aircraft): Promise<void> {
   const normalized: Aircraft = {
     id: serverAircraft.id,
+    userId: serverAircraft.userId,
     registration: serverAircraft.registration,
     type: serverAircraft.type,
     typeDesignator: serverAircraft.typeDesignator || "",
@@ -516,6 +532,7 @@ export async function getPersonnelByRole(role: Personnel["roles"][number]): Prom
 export async function upsertPersonnelFromServer(serverPersonnel: Personnel): Promise<void> {
   const normalized: Personnel = {
     id: serverPersonnel.id,
+    userId: serverPersonnel.userId,
     name: serverPersonnel.name || "",
     crewId: serverPersonnel.crewId,
     organization: serverPersonnel.organization,
@@ -760,4 +777,46 @@ export async function deleteAircraftFromDatabase(registration: string): Promise<
 
 export async function getAllAircraftFromDatabase(): Promise<{ registration: string; data: string }[]> {
   return db.aircraftDatabase.toArray()
+}
+
+// User session management functions
+export async function saveUserSession(session: Omit<UserSession, "id" | "createdAt">): Promise<void> {
+  await db.userSession.put({
+    id: "current",
+    ...session,
+    createdAt: Date.now(),
+  })
+}
+
+export async function getUserSession(): Promise<UserSession | undefined> {
+  const session = await db.userSession.get("current")
+  if (session && session.expiresAt > Date.now()) {
+    return session
+  }
+  // Session expired, clear it
+  if (session) {
+    await clearUserSession()
+  }
+  return undefined
+}
+
+export async function clearUserSession(): Promise<void> {
+  await db.userSession.delete("current")
+}
+
+// Function to clear all user data (for logout or user switch)
+export async function clearAllUserData(): Promise<void> {
+  await db.flights.clear()
+  await db.aircraft.clear()
+  await db.personnel.clear()
+  await db.syncQueue.clear()
+  await db.syncMeta.clear()
+  await db.preferences.clear()
+  await clearUserSession()
+}
+
+// Function to get current user ID from session
+export async function getCurrentUserId(): Promise<string | null> {
+  const session = await getUserSession()
+  return session?.odidId || null
 }

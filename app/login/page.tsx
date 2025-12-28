@@ -1,0 +1,623 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp"
+import { Fingerprint, Smartphone, Loader2, ArrowLeft, AlertCircle, CheckCircle2, Plane } from "lucide-react"
+import { QRCodeSVG } from "qrcode.react"
+import { base64URLEncode, base64URLDecode } from "@/lib/webauthn"
+
+type Step =
+  | "initial" // Choose login or register
+  | "passkey-login" // Attempting passkey login
+  | "recovery" // TOTP recovery flow
+  | "register-callsign" // Enter callsign for registration
+  | "register-setup" // Setup passkey + show TOTP QR
+  | "register-verify" // Verify TOTP works
+  | "success" // Login/register complete
+
+export default function LoginPage() {
+  const router = useRouter()
+  const [step, setStep] = useState<Step>("initial")
+  const [callsign, setCallsign] = useState("")
+  const [totpCode, setTotpCode] = useState("")
+  const [totpSecret, setTotpSecret] = useState("")
+  const [totpUri, setTotpUri] = useState("")
+  const [registrationData, setRegistrationData] = useState<{
+    userId: string
+    registrationOptions: PublicKeyCredentialCreationOptions
+  } | null>(null)
+  const [error, setError] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
+  const [passkeySupported, setPasskeySupported] = useState(false)
+
+  // Check passkey support on mount
+  useEffect(() => {
+    const checkPasskeySupport = async () => {
+      if (
+        typeof window !== "undefined" &&
+        window.PublicKeyCredential &&
+        PublicKeyCredential.isConditionalMediationAvailable
+      ) {
+        try {
+          const available = await PublicKeyCredential.isConditionalMediationAvailable()
+          setPasskeySupported(available)
+        } catch {
+          setPasskeySupported(false)
+        }
+      }
+    }
+    checkPasskeySupport()
+  }, [])
+
+  // Attempt passkey login (username-less)
+  const attemptPasskeyLogin = async () => {
+    setError("")
+    setIsLoading(true)
+    setStep("passkey-login")
+
+    try {
+      // Get authentication options
+      const optionsRes = await fetch("/api/auth/login/passkey")
+      if (!optionsRes.ok) throw new Error("Failed to get options")
+
+      const options = await optionsRes.json()
+
+      // Start WebAuthn authentication
+      const credential = await navigator.credentials.get({
+        publicKey: {
+          challenge: base64URLDecode(options.challenge),
+          rpId: options.rpId,
+          timeout: options.timeout,
+          userVerification: options.userVerification,
+        },
+      })
+
+      if (!credential) throw new Error("No credential returned")
+
+      const pubKeyCred = credential as PublicKeyCredential
+      const response = pubKeyCred.response as AuthenticatorAssertionResponse
+
+      // Send to server
+      const verifyRes = await fetch("/api/auth/login/passkey", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          credential: {
+            id: pubKeyCred.id,
+            rawId: base64URLEncode(pubKeyCred.rawId),
+            response: {
+              clientDataJSON: base64URLEncode(response.clientDataJSON),
+              authenticatorData: base64URLEncode(response.authenticatorData),
+              signature: base64URLEncode(response.signature),
+              userHandle: response.userHandle ? base64URLEncode(response.userHandle) : null,
+            },
+            type: pubKeyCred.type,
+          },
+          challenge: options.challenge,
+        }),
+      })
+
+      if (!verifyRes.ok) {
+        const err = await verifyRes.json()
+        throw new Error(err.error || "Login failed")
+      }
+
+      const result = await verifyRes.json()
+
+      // Store user info in localStorage for IndexedDB
+      localStorage.setItem(
+        "skylog_user",
+        JSON.stringify({
+          id: result.user.id,
+          callsign: result.user.callsign,
+        }),
+      )
+
+      setStep("success")
+      setTimeout(() => router.push("/"), 1500)
+    } catch (err) {
+      console.error("Passkey login error:", err)
+      setStep("initial")
+      if (err instanceof Error && err.name === "NotAllowedError") {
+        // User cancelled or no passkey found
+        setError("No passkey found on this device. Try recovery or register.")
+      } else {
+        setError(err instanceof Error ? err.message : "Login failed")
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Start registration flow
+  const startRegistration = async () => {
+    if (!callsign.trim() || callsign.trim().length < 2) {
+      setError("Callsign must be at least 2 characters")
+      return
+    }
+
+    setError("")
+    setIsLoading(true)
+
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callsign: callsign.trim() }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || "Registration failed")
+      }
+
+      const data = await res.json()
+      setTotpSecret(data.totpSecret)
+      setTotpUri(data.totpUri)
+      setRegistrationData({
+        userId: data.userId,
+        registrationOptions: data.registrationOptions,
+      })
+      setStep("register-setup")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Registration failed")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Complete passkey registration
+  const registerPasskey = async () => {
+    if (!registrationData) return
+
+    setError("")
+    setIsLoading(true)
+
+    try {
+      const options = registrationData.registrationOptions
+
+      // Start WebAuthn registration
+      const credential = await navigator.credentials.create({
+        publicKey: {
+          ...options,
+          challenge: base64URLDecode(options.challenge as unknown as string),
+          user: {
+            ...options.user,
+            id: base64URLDecode(options.user.id as unknown as string),
+          },
+        },
+      })
+
+      if (!credential) throw new Error("No credential created")
+
+      const pubKeyCred = credential as PublicKeyCredential
+      const response = pubKeyCred.response as AuthenticatorAttestationResponse
+
+      // Complete registration
+      const completeRes = await fetch("/api/auth/register/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: registrationData.userId,
+          callsign: callsign.trim(),
+          totpSecret,
+          credential: {
+            id: pubKeyCred.id,
+            rawId: base64URLEncode(pubKeyCred.rawId),
+            response: {
+              clientDataJSON: base64URLEncode(response.clientDataJSON),
+              attestationObject: base64URLEncode(response.attestationObject),
+              publicKey: response.getPublicKey ? base64URLEncode(response.getPublicKey()!) : "",
+              transports: response.getTransports?.() || [],
+            },
+            type: pubKeyCred.type,
+            authenticatorAttachment: (pubKeyCred as PublicKeyCredential & { authenticatorAttachment?: string })
+              .authenticatorAttachment,
+          },
+          challenge: options.challenge,
+        }),
+      })
+
+      if (!completeRes.ok) {
+        const err = await completeRes.json()
+        throw new Error(err.error || "Registration failed")
+      }
+
+      const result = await completeRes.json()
+
+      // Store user info
+      localStorage.setItem(
+        "skylog_user",
+        JSON.stringify({
+          id: result.user.id,
+          callsign: result.user.callsign,
+        }),
+      )
+
+      // Move to verify TOTP step
+      setStep("register-verify")
+    } catch (err) {
+      console.error("Passkey registration error:", err)
+      if (err instanceof Error && err.name === "NotAllowedError") {
+        setError("Passkey registration was cancelled. Please try again.")
+      } else {
+        setError(err instanceof Error ? err.message : "Registration failed")
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Verify TOTP works during registration
+  const verifyTotpSetup = async () => {
+    if (totpCode.length !== 6) {
+      setError("Enter the 6-digit code from your authenticator")
+      return
+    }
+
+    setError("")
+    setIsLoading(true)
+
+    try {
+      // Use the login endpoint to verify TOTP works
+      const res = await fetch("/api/auth/login/totp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callsign, code: totpCode }),
+      })
+
+      if (!res.ok) {
+        throw new Error("Invalid code. Make sure you scanned the QR code correctly.")
+      }
+
+      setStep("success")
+      setTimeout(() => router.push("/"), 1500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verification failed")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Recovery login with TOTP
+  const recoveryLogin = async () => {
+    if (!callsign.trim()) {
+      setError("Enter your callsign")
+      return
+    }
+    if (totpCode.length !== 6) {
+      setError("Enter the 6-digit code")
+      return
+    }
+
+    setError("")
+    setIsLoading(true)
+
+    try {
+      const res = await fetch("/api/auth/login/totp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callsign, code: totpCode }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || "Invalid callsign or code")
+      }
+
+      const result = await res.json()
+
+      // Store user info
+      localStorage.setItem(
+        "skylog_user",
+        JSON.stringify({
+          id: result.user.id,
+          callsign: result.user.callsign,
+        }),
+      )
+
+      setStep("success")
+      // Will prompt for passkey registration after redirect
+      setTimeout(() => router.push("/?addPasskey=true"), 1500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 safe-area-inset">
+      <div className="w-full max-w-md">
+        {/* Logo */}
+        <div className="flex flex-col items-center mb-8">
+          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+            <Plane className="w-8 h-8 text-primary" />
+          </div>
+          <h1 className="text-2xl font-bold text-foreground">SkyLog</h1>
+          <p className="text-muted-foreground text-sm">Pilot Logbook</p>
+        </div>
+
+        {/* Initial Step */}
+        {step === "initial" && (
+          <Card className="border-border">
+            <CardHeader className="text-center">
+              <CardTitle>Welcome</CardTitle>
+              <CardDescription>Sign in with your passkey or create an account</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {error && (
+                <div className="flex items-start gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {passkeySupported && (
+                <Button className="w-full h-12 text-base" onClick={attemptPasskeyLogin} disabled={isLoading}>
+                  <Fingerprint className="mr-2 h-5 w-5" />
+                  Sign in with Passkey
+                </Button>
+              )}
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">Or</span>
+                </div>
+              </div>
+
+              <Button
+                variant="outline"
+                className="w-full h-12 text-base bg-transparent"
+                onClick={() => {
+                  setError("")
+                  setStep("recovery")
+                }}
+              >
+                <Smartphone className="mr-2 h-5 w-5" />
+                Recovery (Authenticator)
+              </Button>
+
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={() => {
+                  setError("")
+                  setStep("register-callsign")
+                }}
+              >
+                Create new account
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Passkey Login Loading */}
+        {step === "passkey-login" && (
+          <Card className="border-border">
+            <CardContent className="py-12 text-center">
+              <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary mb-4" />
+              <p className="text-foreground font-medium">Waiting for passkey...</p>
+              <p className="text-muted-foreground text-sm mt-1">Use Face ID, Touch ID, or your device PIN</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Recovery Flow */}
+        {step === "recovery" && (
+          <Card className="border-border">
+            <CardHeader>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-fit -ml-2 mb-2"
+                onClick={() => {
+                  setStep("initial")
+                  setError("")
+                  setCallsign("")
+                  setTotpCode("")
+                }}
+              >
+                <ArrowLeft className="h-4 w-4 mr-1" />
+                Back
+              </Button>
+              <CardTitle>Account Recovery</CardTitle>
+              <CardDescription>Enter your callsign and authenticator code</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {error && (
+                <div className="flex items-start gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Callsign</label>
+                <Input
+                  placeholder="Your callsign (e.g., Maverick)"
+                  value={callsign}
+                  onChange={(e) => setCallsign(e.target.value)}
+                  className="h-12 text-base"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Check your authenticator app label: SkyLog:{"{callsign}"}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Authenticator Code</label>
+                <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center">
+                  <InputOTPGroup>
+                    <InputOTPSlot index={0} className="h-12 w-10 text-lg" />
+                    <InputOTPSlot index={1} className="h-12 w-10 text-lg" />
+                    <InputOTPSlot index={2} className="h-12 w-10 text-lg" />
+                    <InputOTPSlot index={3} className="h-12 w-10 text-lg" />
+                    <InputOTPSlot index={4} className="h-12 w-10 text-lg" />
+                    <InputOTPSlot index={5} className="h-12 w-10 text-lg" />
+                  </InputOTPGroup>
+                </InputOTP>
+              </div>
+
+              <Button className="w-full h-12" onClick={recoveryLogin} disabled={isLoading}>
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Sign In
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Register - Callsign */}
+        {step === "register-callsign" && (
+          <Card className="border-border">
+            <CardHeader>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-fit -ml-2 mb-2"
+                onClick={() => {
+                  setStep("initial")
+                  setError("")
+                  setCallsign("")
+                }}
+              >
+                <ArrowLeft className="h-4 w-4 mr-1" />
+                Back
+              </Button>
+              <CardTitle>Create Account</CardTitle>
+              <CardDescription>Choose a callsign for your pilot profile</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {error && (
+                <div className="flex items-start gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Callsign</label>
+                <Input
+                  placeholder="e.g., Maverick, Goose, Iceman"
+                  value={callsign}
+                  onChange={(e) => setCallsign(e.target.value)}
+                  className="h-12 text-base"
+                  autoFocus
+                />
+                <p className="text-xs text-muted-foreground">This will be your display name and recovery identifier</p>
+              </div>
+
+              <Button className="w-full h-12" onClick={startRegistration} disabled={isLoading || !callsign.trim()}>
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Continue
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Register - Setup */}
+        {step === "register-setup" && (
+          <Card className="border-border">
+            <CardHeader>
+              <CardTitle>Setup Authentication</CardTitle>
+              <CardDescription>First, save your recovery code. Then create a passkey.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {error && (
+                <div className="flex items-start gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {/* TOTP Setup */}
+              <div className="space-y-3">
+                <h3 className="font-medium text-sm">1. Save Recovery Code</h3>
+                <p className="text-xs text-muted-foreground">
+                  Scan this QR code with Google Authenticator, Authy, or similar app
+                </p>
+                <div className="flex justify-center p-4 bg-white rounded-lg">
+                  <QRCodeSVG value={totpUri} size={180} />
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Or enter manually:</p>
+                  <code className="text-xs bg-muted px-2 py-1 rounded font-mono break-all">{totpSecret}</code>
+                </div>
+              </div>
+
+              {/* Passkey Setup */}
+              <div className="space-y-3">
+                <h3 className="font-medium text-sm">2. Create Passkey</h3>
+                <p className="text-xs text-muted-foreground">
+                  This enables fast login with Face ID, Touch ID, or device PIN
+                </p>
+                <Button className="w-full h-12" onClick={registerPasskey} disabled={isLoading}>
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Fingerprint className="h-5 w-5 mr-2" />
+                  )}
+                  Create Passkey
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Register - Verify TOTP */}
+        {step === "register-verify" && (
+          <Card className="border-border">
+            <CardHeader>
+              <CardTitle>Verify Setup</CardTitle>
+              <CardDescription>Enter the code from your authenticator app to confirm setup</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {error && (
+                <div className="flex items-start gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center">
+                <InputOTPGroup>
+                  <InputOTPSlot index={0} className="h-12 w-10 text-lg" />
+                  <InputOTPSlot index={1} className="h-12 w-10 text-lg" />
+                  <InputOTPSlot index={2} className="h-12 w-10 text-lg" />
+                  <InputOTPSlot index={3} className="h-12 w-10 text-lg" />
+                  <InputOTPSlot index={4} className="h-12 w-10 text-lg" />
+                  <InputOTPSlot index={5} className="h-12 w-10 text-lg" />
+                </InputOTPGroup>
+              </InputOTP>
+
+              <Button className="w-full h-12" onClick={verifyTotpSetup} disabled={isLoading || totpCode.length !== 6}>
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Complete Setup
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Success */}
+        {step === "success" && (
+          <Card className="border-border">
+            <CardContent className="py-12 text-center">
+              <div className="w-16 h-16 rounded-full bg-chart-2/10 flex items-center justify-center mx-auto mb-4">
+                <CheckCircle2 className="h-8 w-8 text-chart-2" />
+              </div>
+              <p className="text-foreground font-medium text-lg">Welcome aboard!</p>
+              <p className="text-muted-foreground text-sm mt-1">Redirecting to your logbook...</p>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  )
+}

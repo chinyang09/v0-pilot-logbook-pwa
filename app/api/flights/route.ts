@@ -1,24 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { MongoClient } from "mongodb"
-
-const uri = process.env.MONGODB_URI || ""
-let client: MongoClient | null = null
-
-async function getClient() {
-  if (!uri) {
-    throw new Error("MONGODB_URI environment variable is not set")
-  }
-
-  if (!client) {
-    client = new MongoClient(uri)
-    await client.connect()
-  }
-  return client
-}
+import { getMongoClient } from "@/lib/mongodb"
 
 export async function GET(request: NextRequest) {
   try {
-    const mongoClient = await getClient()
+    const mongoClient = await getMongoClient()
     const db = mongoClient.db("skylog")
     const flights = await db.collection("flights").find({}).sort({ date: -1 }).toArray()
 
