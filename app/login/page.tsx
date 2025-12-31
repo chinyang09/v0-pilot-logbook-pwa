@@ -29,6 +29,7 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import { base64URLEncode, base64URLDecode } from "@/lib/webauthn";
 import { useAuth } from "@/components/auth-provider";
+import { getOrCreateDeviceId } from "@/lib/device";
 
 type Step =
   | "initial" // Choose login or register
@@ -111,6 +112,7 @@ export default function LoginPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          deviceid: getOrCreateDeviceId(),
           credential: {
             id: pubKeyCred.id,
             rawId: base64URLEncode(pubKeyCred.rawId),

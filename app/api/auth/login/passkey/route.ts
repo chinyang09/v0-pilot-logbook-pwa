@@ -9,9 +9,6 @@ import type { User } from "@/lib/auth-types";
 import { cookies } from "next/headers";
 import { createId } from "@/lib/cuid";
 
-// In-memory challenge store
-const challenges = new Map<string, { challenge: string; expiresAt: number }>();
-
 // GET /api/auth/login/passkey - Get authentication options
 export async function GET() {
   try {
@@ -20,18 +17,18 @@ export async function GET() {
     const options = generateAuthenticationOptions();
     const challengeBase64 = base64URLEncode(options.challenge as Uint8Array);
 
-    // Store challenge
-    challenges.set(challengeBase64, {
-      challenge: challengeBase64,
-      expiresAt: Date.now() + 60000,
-    });
-
-    // Clean up expired
-    for (const [key, value] of challenges) {
-      if (value.expiresAt < Date.now()) {
-        challenges.delete(key);
-      }
-    }
+    const db = await getDB();
+    // Store challenge in MongoDB instead of memory
+    await db.collection("challenges").updateOne(
+      { _id: challengeBase64 },
+      {
+        $set: {
+          challenge: challengeBase64,
+          expiresAt: Date.now() + 60000,
+        },
+      },
+      { upsert: true }
+    );
 
     return NextResponse.json({
       challenge: challengeBase64,
@@ -51,23 +48,19 @@ export async function GET() {
 // POST /api/auth/login/passkey - Verify passkey and login
 export async function POST(request: NextRequest) {
   try {
-    const { credential, challenge } = await request.json();
+    const { credential, challenge, deviceId } = await request.json();
+    const db = await getDB();
 
-    if (!credential || !challenge) {
+    const storedChallenge = await db.collection("challenges").findOneAndDelete({
+      _id: challenge,
+    });
+
+    if (!storedChallenge || storedChallenge.expiresAt < Date.now()) {
       return NextResponse.json(
-        { error: "Missing credential or challenge" },
+        { error: "Challenge expired or invalid" },
         { status: 400 }
       );
     }
-
-    // Verify challenge exists
-    const storedChallenge = challenges.get(challenge);
-    if (!storedChallenge || storedChallenge.expiresAt < Date.now()) {
-      return NextResponse.json({ error: "Challenge expired" }, { status: 400 });
-    }
-    challenges.delete(challenge);
-
-    const db = await getDB();
 
     // Find user by credential ID
     const credentialId = credential.id;
@@ -85,35 +78,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Passkey not found" }, { status: 401 });
     }
 
-    // Verify the signature (simplified - in production use full verification)
-    // For now, we trust the WebAuthn API on the client side
-    // The browser already verified the signature before sending
-
-    // Parse authenticator data to get new counter
-    const authDataBase64 = credential.response.authenticatorData;
-    const authData = base64URLDecode(authDataBase64);
+    const authData = base64URLDecode(credential.response.authenticatorData);
     const newCounter = new DataView(
       authData.buffer,
       authData.byteOffset + 33,
       4
     ).getUint32(0, false);
 
-    // Only reject if newCounter is strictly less than stored (not equal)
-    // Some authenticators don't increment counter on first use
-    if (newCounter < passkey.counter) {
-      console.warn("Possible replay attack detected");
-      return NextResponse.json(
-        { error: "Invalid credential" },
-        { status: 401 }
-      );
-    }
-
+    // If phone has a lower counter than iPad, we take the highest one to avoid blocking
+    const finalCounter = Math.max(newCounter, passkey.counter);
     // Update counter in database
     await db.collection<User>("users").updateOne(
       { _id: user._id, "auth.passkeys.id": credentialId },
       {
         $set: {
-          "auth.passkeys.$.counter": newCounter,
+          "auth.passkeys.$.counter": finalCounter,
           updatedAt: Date.now(),
         },
       }
@@ -124,13 +103,22 @@ export async function POST(request: NextRequest) {
     const now = Date.now();
     const sessionExpiry = now + 30 * 24 * 60 * 60 * 1000; // 30 days
 
-    await db.collection("sessions").insertOne({
-      _id: sessionId, // The primary key
-      sessionToken: sessionId, // Explicit field for easier querying
-      userId: user._id,
-      createdAt: now,
-      expiresAt: sessionExpiry,
-    });
+    await db.collection("sessions").updateOne(
+      {
+        userId: user._id,
+        deviceId: deviceId || "unknown_device",
+      },
+      {
+        $set: {
+          _id: sessionId, // The new token
+          sessionToken: sessionId,
+          callsign: user.identity.callsign, // Added at onset per your idea
+          expiresAt: sessionExpiry,
+          updatedAt: now,
+        },
+      },
+      { upsert: true }
+    );
 
     // Set session cookie
     const cookieStore = await cookies();

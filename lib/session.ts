@@ -55,36 +55,22 @@ export async function validateSessionFromHeader(
   request: Request
 ): Promise<SessionData | null> {
   const authHeader = request.headers.get("Authorization");
-
-  if (!authHeader?.startsWith("Bearer ")) {
-    return null;
-  }
+  if (!authHeader?.startsWith("Bearer ")) return null;
 
   const token = authHeader.slice(7);
   const client = await getMongoClient();
   const db = client.db("skylog");
 
-  // We search for the token in the _id field OR the sessionToken field
-  // and ensure the numeric expiresAt is in the future
   const session = await db.collection("sessions").findOne({
-    $or: [{ _id: token }, { sessionToken: token }],
-    expiresAt: { $gt: Date.now() },
+    _id: token,
+    expiresAt: { $gt: Date.now() }, // Numeric comparison
   });
 
-  if (!session) {
-    return null;
-  }
-
-  // IMPORTANT: Fetch the user to get the callsign (since it's not in the session doc)
-  const user = await db.collection("users").findOne({ _id: session.userId });
-
-  if (!user) {
-    return null;
-  }
+  if (!session) return null;
 
   return {
     userId: session.userId,
-    callsign: user.identity?.callsign || "Pilot", // Access the correct nested path
+    callsign: session.callsign || "Pilot", // No need to fetch user!
     expiresAt: new Date(session.expiresAt),
   };
 }
