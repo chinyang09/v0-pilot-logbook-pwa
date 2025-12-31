@@ -4,7 +4,7 @@ import type { UserPreferences } from "./user-preferences"
 
 export interface UserSession {
   id: string // Always "current"
-  odidId: string // The user's CUID from MongoDB
+  userId: string // The user's CUID from MongoDB
   callsign: string
   sessionToken: string
   expiresAt: number
@@ -818,5 +818,5 @@ export async function clearAllUserData(): Promise<void> {
 // Function to get current user ID from session
 export async function getCurrentUserId(): Promise<string | null> {
   const session = await getUserSession()
-  return session?.odidId || null
+  return session?.userId || null
 }

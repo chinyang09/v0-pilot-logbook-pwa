@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Save session locally
       await saveUserSession({
-        odidId: userData.id,
+        userId: userData.id,
         callsign: userData.callsign,
         sessionToken: session.token,
         expiresAt: new Date(session.expiresAt).getTime(),
