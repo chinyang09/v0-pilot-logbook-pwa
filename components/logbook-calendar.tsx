@@ -23,6 +23,17 @@ export interface CalendarHandle {
 
 const DAYS = ["S", "M", "T", "W", "T", "F", "S"]
 
+function formatDateLocal(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function getTodayLocal(): string {
+  return formatDateLocal(new Date())
+}
+
 export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(function LogbookCalendar(
   { flights, selectedMonth, onMonthChange, onDateSelect, selectedDate, onScrollStart, onSwipeStart, onInteractionEnd },
   ref,
@@ -56,7 +67,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       const prevDate = new Date(selectedMonth.year, selectedMonth.month, -(startDay - i - 1))
       days.push({
         date: prevDate,
-        dateStr: prevDate.toISOString().split("T")[0],
+        dateStr: formatDateLocal(prevDate),
         isCurrentMonth: false,
       })
     }
@@ -65,7 +76,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       const date = new Date(selectedMonth.year, selectedMonth.month, i)
       days.push({
         date,
-        dateStr: date.toISOString().split("T")[0],
+        dateStr: formatDateLocal(date),
         isCurrentMonth: true,
       })
     }
@@ -75,7 +86,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       const nextDate = new Date(selectedMonth.year, selectedMonth.month + 1, i)
       days.push({
         date: nextDate,
-        dateStr: nextDate.toISOString().split("T")[0],
+        dateStr: formatDateLocal(nextDate),
         isCurrentMonth: false,
       })
     }
@@ -150,7 +161,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     }
   }
 
-  const today = new Date().toISOString().split("T")[0]
+  const today = getTodayLocal()
 
   return (
     <div
