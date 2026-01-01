@@ -103,9 +103,11 @@ export async function POST(request: NextRequest) {
     const now = Date.now();
     const sessionExpiry = now + 30 * 24 * 60 * 60 * 1000; // 30 days
 
+    const userIdString = user._id.toString();
+
     await db.collection("sessions").updateOne(
       {
-        userId: user._id,
+        userId: userIdString, //match by string
         deviceId: deviceId || "unknown_device",
       },
       {
