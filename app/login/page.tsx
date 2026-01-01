@@ -112,7 +112,7 @@ export default function LoginPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          deviceid: getOrCreateDeviceId(),
+          deviceId: getOrCreateDeviceId(),
           credential: {
             id: pubKeyCred.id,
             rawId: base64URLEncode(pubKeyCred.rawId),
@@ -288,6 +288,7 @@ export default function LoginPage() {
             ).authenticatorAttachment,
           },
           challenge: options.challenge,
+          deviceId: getOrCreateDeviceId(),
         }),
       });
 
