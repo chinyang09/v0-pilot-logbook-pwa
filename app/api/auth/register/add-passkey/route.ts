@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
       expiresAt: { $gt: new Date() }, // ✅ FIX 4: Only valid if not expired
     });
 
-    if (!result.value)
+    if (!result || result.value === null)
       return NextResponse.json(
         { error: "Challenge invalid or expired" },
         { status: 400 }
