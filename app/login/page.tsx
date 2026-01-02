@@ -387,7 +387,11 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login/totp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ callsign, code: totpCode }),
+        body: JSON.stringify({
+          callsign,
+          code: totpCode,
+          deviceId: getOrCreateDeviceId(),
+        }),
       });
 
       const body = await res.json();
