@@ -85,9 +85,10 @@ export default function LoginPage() {
 
     try {
       // Get authentication options
-      const optionsRes = await fetch("/api/auth/login/passkey");
+      const optionsRes = await fetch("/api/auth/login/passkey", {
+        cache: "no-store",
+      });
       if (!optionsRes.ok) throw new Error("Failed to get options");
-
       const options = await optionsRes.json();
 
       const rpId = window.location.hostname;
