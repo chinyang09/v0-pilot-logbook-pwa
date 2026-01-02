@@ -4,7 +4,7 @@ import { getMongoClient } from "./mongodb";
 export interface SessionData {
   userId: string;
   callsign: string;
-  expiresAt: Date;
+  expiresAt: number;
 }
 
 export async function validateSession(): Promise<SessionData | null> {
@@ -20,8 +20,8 @@ export async function validateSession(): Promise<SessionData | null> {
     const db = client.db("skylog");
 
     const session = await db.collection("sessions").findOne({
-      token: sessionToken,
-      expiresAt: { $gt: new Date() },
+      sessionToken: sessionToken,
+      expiresAt: { $gt: Date.now() },
     });
 
     if (!session) {
@@ -35,8 +35,8 @@ export async function validateSession(): Promise<SessionData | null> {
       await db
         .collection("sessions")
         .updateOne(
-          { token: sessionToken },
-          { $set: { lastAccessedAt: new Date(), expiresAt: newExpiresAt } }
+          { sessionToken: sessionToken },
+          { $set: { lastAccessedAt: Date.now(), expiresAt: newExpiresAt } }
         );
     }
 
