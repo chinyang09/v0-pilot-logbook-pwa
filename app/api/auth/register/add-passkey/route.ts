@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
 
     // ✅ FIX 1: Use 'token' field and compare against new Date()
     const session = await db.collection("sessions").findOne({
-      _id: sessionId,
+      token: sessionId,
       expiresAt: { $gt: new Date() },
     });
 
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
 
     // ✅ FIX 3: Use 'token' and new Date() for session validation
     const session = await db.collection("sessions").findOne({
-      _id: sessionId,
+      token: sessionId,
       expiresAt: { $gt: new Date() },
     });
 
