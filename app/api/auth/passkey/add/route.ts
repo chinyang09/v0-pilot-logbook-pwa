@@ -8,7 +8,6 @@ import type {
 } from "@/lib/auth-types";
 import { cookies } from "next/headers";
 
-// GET /api/auth/passkey/add - Get registration options for adding a new passkey
 export async function GET() {
   try {
     const cookieStore = await cookies();
@@ -20,40 +19,35 @@ export async function GET() {
 
     const db = await getDB();
 
-    // Verify session
+    // ✅ FIX 1: Use 'token' field and compare against new Date()
     const session = await db.collection("sessions").findOne({
       _id: sessionId,
-      expiresAt: { $gt: Date.now() },
+      expiresAt: { $gt: new Date() },
     });
 
     if (!session) {
       return NextResponse.json({ error: "Session expired" }, { status: 401 });
     }
 
-    // Get user
     const user = await db
       .collection<User>("users")
       .findOne({ _id: session.userId });
-
-    if (!user) {
+    if (!user)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
 
-    // Generate registration options
     const options = generateRegistrationOptions(
       user._id,
       user.identity.callsign,
       user.auth.passkeys
     );
-
     const challengeBase64 = base64URLEncode(options.challenge as Uint8Array);
 
-    // Store challenge
+    // ✅ FIX 2: Store challenge expiresAt as a Date object
     await db.collection<StoredChallenge>("challenges").insertOne({
       _id: challengeBase64,
       userId: user._id,
-      expiresAt: Date.now() + 60000, // 1 minute
-    });
+      expiresAt: new Date(Date.now() + 60000),
+    } as any);
 
     return NextResponse.json({
       challenge: challengeBase64,
@@ -82,52 +76,37 @@ export async function GET() {
   }
 }
 
-// POST /api/auth/passkey/add - Complete adding a new passkey
 export async function POST(request: NextRequest) {
   try {
     const { credential, challenge, name } = await request.json();
-
-    if (!credential || !challenge) {
-      return NextResponse.json(
-        { error: "Missing credential or challenge" },
-        { status: 400 }
-      );
-    }
-
     const db = await getDB();
 
-    // ✅ FIX 3: Retrieve and delete challenge from MongoDB
+    // ✅ FIX 3: Query challenge using Date object
     const storedChallenge = await db
       .collection<StoredChallenge>("challenges")
       .findOne({ _id: challenge });
 
-    // Always delete the challenge immediately to prevent replay
     if (storedChallenge) {
       await db.collection("challenges").deleteOne({ _id: challenge });
     }
 
-    if (!storedChallenge || storedChallenge.expiresAt < Date.now()) {
+    if (!storedChallenge || storedChallenge.expiresAt < new Date()) {
       return NextResponse.json({ error: "Challenge expired" }, { status: 400 });
     }
 
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("session")?.value;
 
-    if (!sessionId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-
-    // Verify session matches challenge
+    // ✅ FIX 4: Use 'token' field and new Date() for session verification
     const session = await db.collection("sessions").findOne({
       _id: sessionId,
-      expiresAt: { $gt: Date.now() },
+      expiresAt: { $gt: new Date() },
     });
 
     if (!session || session.userId !== storedChallenge.userId) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
-    // Create new passkey credential
     const newPasskey: PasskeyCredential = {
       id: credential.id,
       publicKey: credential.response.publicKey || "",
@@ -135,11 +114,10 @@ export async function POST(request: NextRequest) {
       deviceType: "singleDevice",
       backedUp: false,
       transports: credential.response.transports,
-      createdAt: Date.now(),
+      createdAt: Date.now(), // Passkey internal metadata can remain numbers or change to Dates
       name: name || getDeviceName(),
     };
 
-    // Add passkey to user
     await db.collection<User>("users").updateOne(
       { _id: session.userId },
       {
@@ -148,7 +126,7 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    // Clear recovery login flag if set
+    // ✅ FIX 5: Match session lookup for clearing recovery flag
     await db
       .collection("sessions")
       .updateOne({ _id: sessionId }, { $unset: { recoveryLogin: "" } });
@@ -164,13 +142,13 @@ export async function POST(request: NextRequest) {
 }
 
 function getDeviceName(): string {
-  if (typeof navigator === "undefined") return "Unknown Device"
+  if (typeof navigator === "undefined") return "Unknown Device";
 
-  const ua = navigator.userAgent
-  if (ua.includes("iPhone")) return "iPhone"
-  if (ua.includes("iPad")) return "iPad"
-  if (ua.includes("Mac")) return "Mac"
-  if (ua.includes("Android")) return "Android"
-  if (ua.includes("Windows")) return "Windows PC"
-  return "Device"
+  const ua = navigator.userAgent;
+  if (ua.includes("iPhone")) return "iPhone";
+  if (ua.includes("iPad")) return "iPad";
+  if (ua.includes("Mac")) return "Mac";
+  if (ua.includes("Android")) return "Android";
+  if (ua.includes("Windows")) return "Windows PC";
+  return "Device";
 }

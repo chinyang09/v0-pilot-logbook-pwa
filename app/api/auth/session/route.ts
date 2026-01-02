@@ -15,10 +15,10 @@ export async function GET() {
 
     const db = await getDB();
 
-    // Find session
+    // ✅ FIX 1: Search by 'token' and compare using BSON Date
     const session = await db.collection("sessions").findOne({
-      _id: sessionId,
-      expiresAt: { $gt: Date.now() },
+      token: sessionId,
+      expiresAt: { $gt: new Date() },
     });
 
     if (!session) {
@@ -27,19 +27,28 @@ export async function GET() {
       return NextResponse.json({ authenticated: false });
     }
 
-    // Extend session if more than 1 day old
-    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    const lastUpdate = session.updatedAt || session.createdAt;
+    // ✅ FIX 2: Consistency in Session Extension
+    const now = new Date();
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    // Use lastAccessedAt to match your lib/session.ts logic
+    const lastUpdate =
+      session.lastAccessedAt || session.updatedAt || session.createdAt;
 
     if (lastUpdate < oneDayAgo) {
-      const newExpiry = Date.now() + 30 * 24 * 60 * 60 * 1000;
+      const newExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-      await db
-        .collection("sessions")
-        .updateOne(
-          { _id: sessionId },
-          { $set: { expiresAt: newExpiry, updatedAt: Date.now() } }
-        );
+      await db.collection("sessions").updateOne(
+        { _id: sessionId }, // ✅ FIX 3: Match by token
+        {
+          $set: {
+            expiresAt: newExpiry,
+            lastAccessedAt: now,
+            updatedAt: now,
+          },
+        }
+      );
+
       cookieStore.set("session", sessionId, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -53,7 +62,7 @@ export async function GET() {
       authenticated: true,
       user: {
         id: session.userId,
-        callsign: session.callsign, // Use the denormalized callsign
+        callsign: session.callsign,
       },
       recoveryLogin: session.recoveryLogin || false,
     });
@@ -71,7 +80,8 @@ export async function DELETE() {
 
     if (sessionId) {
       const db = await getDB();
-      await db.collection("sessions").deleteOne({ _id: sessionId });
+      // ✅ FIX 4: Delete by token
+      await db.collection("sessions").deleteOne({ token: sessionId });
       cookieStore.delete("session");
     }
 

@@ -24,8 +24,10 @@ export async function POST(request: NextRequest) {
     });
 
     if (!user) {
-      // Don't reveal whether user exists
-      return NextResponse.json({ error: "Invalid USER" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Invalid credentials" },
+        { status: 401 }
+      );
     }
 
     // Verify TOTP code
@@ -33,29 +35,31 @@ export async function POST(request: NextRequest) {
 
     if (!isValid) {
       return NextResponse.json(
-        { error: "Invalid verifyTOTP" }, //{ error: "Invalid callsign or code" },
+        { error: "Invalid verification code" },
         { status: 401 }
       );
     }
 
-    // Create session
+    // Create session identifiers and dates
     const sessionId = createId();
-    const now = Date.now();
-    const sessionExpiry = now + 30 * 24 * 60 * 60 * 1000; // 30 days
+    const now = new Date(); // Use Date Object
+    const sessionExpiry = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // Use Date Object
     const userIdString = user._id.toString();
 
+    // Store session in MongoDB
     await db.collection("sessions").updateOne(
       {
         userId: userIdString,
-        deviceId: deviceId || "unknown_recovery_device",
+        deviceId: deviceId || "unknown_device",
       },
       {
         $set: {
-          _id: sessionId,
-          sessionToken: sessionId,
+          // Use 'token' to match the lookup in lib/session.ts
+          token: sessionId, //_id
           userId: userIdString,
-          callsign: user.identity.callsign, // Denormalized for fast sync
-          expiresAt: sessionExpiry,
+          callsign: user.identity.callsign,
+          expiresAt: sessionExpiry, // Stored as BSON Date
+          lastAccessedAt: now, // Stored as BSON Date
           updatedAt: now,
           recoveryLogin: true,
         },
@@ -81,9 +85,8 @@ export async function POST(request: NextRequest) {
       },
       session: {
         token: sessionId,
-        expiresAt: sessionExpiry,
+        expiresAt: sessionExpiry.getTime(), // Send as number (timestamp) to frontend
       },
-      // Flag to prompt passkey registration on new device
       shouldRegisterPasskey: true,
     });
   } catch (error) {

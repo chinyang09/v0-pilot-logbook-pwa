@@ -22,15 +22,33 @@ export interface PasskeyCredential {
   deviceType: "singleDevice" | "multiDevice";
   backedUp: boolean;
   transports?: AuthenticatorTransport[];
-  createdAt: number;
+  createdAt: number; // Keep as number for easy client-side sorting
   name?: string; // User-friendly name (e.g., "iPhone", "MacBook")
 }
 
+/**
+ * Updated Session Interface for MongoDB
+ * ✅ Use BSON Date objects for server-side TTL and comparisons
+ * ✅ Use 'token' field for the CUID string
+ */
+export interface Session {
+  _id?: any; // MongoDB ObjectId
+  token: string; // The actual CUID session string
+  userId: string;
+  callsign: string;
+  expiresAt: Date; // ✅ BSON Date for { $gt: new Date() } queries
+  lastAccessedAt: Date; // ✅ BSON Date for extension logic
+  createdAt: Date;
+  recoveryLogin?: boolean; // Flag for "Nudge" UI
+}
+
 // Session stored in IndexedDB for silent persistence
+// ✅ Keep as number/string for compatibility with Dexie/IndexedDB
 export interface LocalSession {
   userId: string; // CUID reference
   callsign: string;
-  expiresAt: number;
+  sessionToken: string; // Matches 'token' in MongoDB
+  expiresAt: number; // Unix timestamp
   createdAt: number;
 }
 
@@ -42,17 +60,21 @@ export type AuthenticatorTransport =
   | "internal"
   | "hybrid";
 
-// Challenge stored temporarily during WebAuthn ceremonies
-export interface WebAuthnChallenge {
-  challenge: string;
-  expiresAt: number;
-  userId?: string; // For registration, the user ID being registered
-  type: "registration" | "authentication";
-}
-
-// To replace WebAuthnChallenge in future once stable
+/**
+ * Updated Challenge Interface for MongoDB
+ * ✅ Use BSON Date for automatic TTL indexing
+ */
 export interface StoredChallenge {
   _id: string; // The challenge string (base64url)
   userId: string;
-  expiresAt: number;
+  expiresAt: Date; // ✅ Changed to Date for TTL cleanup
+  type: "registration" | "authentication";
+}
+
+// Legacy/Ceremony type for API responses
+export interface WebAuthnChallenge {
+  challenge: string;
+  expiresAt: number; // Unix timestamp for frontend countdowns
+  userId?: string;
+  type: "registration" | "authentication";
 }

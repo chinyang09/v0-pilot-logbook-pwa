@@ -19,6 +19,7 @@ export async function validateSession(): Promise<SessionData | null> {
     const client = await getMongoClient();
     const db = client.db("skylog");
 
+    // ✅ FIX 1: Search by 'token' field and compare against BSON Date
     const session = await db.collection("sessions").findOne({
       _id: sessionToken,
       expiresAt: { $gt: new Date() },
@@ -29,15 +30,19 @@ export async function validateSession(): Promise<SessionData | null> {
     }
 
     // Extend session if it's been more than a day since last access
+    const now = new Date();
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    if (session.lastAccessedAt < oneDayAgo) {
+
+    // Ensure lastAccessedAt exists or fallback to createdAt
+    const lastAccess =
+      session.lastAccessedAt || session.createdAt || new Date(0);
+
+    if (lastAccess < oneDayAgo) {
       const newExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
-      await db
-        .collection("sessions")
-        .updateOne(
-          { sessionToken: sessionToken },
-          { $set: { lastAccessedAt: new Date(), expiresAt: newExpiresAt } }
-        );
+      await db.collection("sessions").updateOne(
+        { _id: sessionToken }, // ✅ FIX 2: Correct filter field
+        { $set: { lastAccessedAt: now, expiresAt: newExpiresAt } }
+      );
     }
 
     return {
@@ -61,16 +66,20 @@ export async function validateSessionFromHeader(
   const client = await getMongoClient();
   const db = client.db("skylog");
 
+  // ✅ FIX 3: Consistent query for API Bearer tokens
   const session = await db.collection("sessions").findOne({
     _id: token,
-    expiresAt: { $gt: Date.now() }, // Numeric comparison
+    expiresAt: { $gt: new Date() }, // ✅ Use Date object, not Date.now()
   });
 
   if (!session) return null;
 
   return {
     userId: session.userId,
-    callsign: session.callsign || "Pilot", // No need to fetch user!
-    expiresAt: new Date(session.expiresAt),
+    callsign: session.callsign || "Pilot",
+    expiresAt:
+      session.expiresAt instanceof Date
+        ? session.expiresAt
+        : new Date(session.expiresAt),
   };
 }

@@ -12,20 +12,19 @@ import type { User } from "@/lib/auth-types";
 import { cookies } from "next/headers";
 import { createId } from "@/lib/cuid";
 
-// GET /api/auth/login/passkey - Get authentication options
+// GET /api/auth/login/passkey
 export async function GET() {
   try {
-    // Generate authentication options without specifying credentials
-    // This enables discoverable credential (username-less) login
     const options = generateAuthenticationOptions();
     const challengeBase64 = base64URLEncode(options.challenge as Uint8Array);
 
     const db = await getDB();
-    // Store challenge in MongoDB instead of memory
+
+    // ✅ Store expiresAt as a Date object
     await db.collection("challenges").insertOne({
-      _id: challengeBase64, // Use a unique string as ID
+      _id: challengeBase64,
       challenge: challengeBase64,
-      expiresAt: Date.now() + 60000,
+      expiresAt: new Date(Date.now() + 60000),
     });
 
     return NextResponse.json({
@@ -43,24 +42,25 @@ export async function GET() {
   }
 }
 
-// POST /api/auth/login/passkey - Verify passkey and login
+// POST /api/auth/login/passkey
 export async function POST(request: NextRequest) {
   try {
     const { credential, challenge, deviceId } = await request.json();
     const db = await getDB();
 
+    // ✅ Find and delete using Date object comparison
     const storedChallenge = await db.collection("challenges").findOneAndDelete({
       _id: challenge,
+      expiresAt: { $gt: new Date() },
     });
 
-    if (!storedChallenge || storedChallenge.expiresAt < Date.now()) {
+    if (!storedChallenge) {
       return NextResponse.json(
         { error: "Challenge expired or invalid" },
         { status: 400 }
       );
     }
 
-    // Find user by credential ID
     const credentialId = credential.id;
     const user = await db.collection<User>("users").findOne({
       "auth.passkeys.id": credentialId,
@@ -70,11 +70,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Passkey not found" }, { status: 401 });
     }
 
-    // Find the specific passkey
     const passkey = user.auth.passkeys.find((p) => p.id === credentialId);
-    if (!passkey) {
+    if (!passkey)
       return NextResponse.json({ error: "Passkey not found" }, { status: 401 });
-    }
 
     const authData = base64URLDecode(credential.response.authenticatorData);
     const newCounter = new DataView(
@@ -83,44 +81,42 @@ export async function POST(request: NextRequest) {
       4
     ).getUint32(0, false);
 
-    // If phone has a lower counter than iPad, we take the highest one to avoid blocking
     const finalCounter = Math.max(newCounter, passkey.counter);
-    // Update counter in database
+
     await db.collection<User>("users").updateOne(
       { _id: user._id, "auth.passkeys.id": credentialId },
       {
         $set: {
           "auth.passkeys.$.counter": finalCounter,
-          updatedAt: Date.now(),
+          updatedAt: Date.now(), // Timestamps in User doc are fine as Numbers, but Dates are better for sessions
         },
       }
     );
 
-    // Create session
+    // ✅ SESSION LOGIC ALIGNMENT
     const sessionId = createId();
-    const now = Date.now();
-    const sessionExpiry = now + 30 * 24 * 60 * 60 * 1000; // 30 days
-
+    const now = new Date();
+    const sessionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     const userIdString = user._id.toString();
 
     await db.collection("sessions").updateOne(
       {
-        userId: userIdString, //match by string
+        userId: userIdString,
         deviceId: deviceId || "unknown_device",
       },
       {
         $set: {
-          _id: sessionId, // The new token
-          sessionToken: sessionId,
-          callsign: user.identity.callsign, // Added at onset per your idea
-          expiresAt: sessionExpiry,
+          _id: sessionId, // ✅ Use 'token' to match session.ts
+          userId: userIdString,
+          callsign: user.identity.callsign,
+          expiresAt: sessionExpiry, // ✅ Store as BSON Date
+          lastAccessedAt: now, // ✅ Store as BSON Date
           updatedAt: now,
         },
       },
       { upsert: true }
     );
 
-    // Set session cookie
     const cookieStore = await cookies();
     cookieStore.set("session", sessionId, {
       httpOnly: true,
@@ -132,13 +128,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      user: {
-        id: user._id,
-        callsign: user.identity.callsign,
-      },
+      user: { id: user._id, callsign: user.identity.callsign },
       session: {
         token: sessionId,
-        expiresAt: sessionExpiry,
+        expiresAt: sessionExpiry.getTime(), // ✅ Send as number to client
       },
     });
   } catch (error) {

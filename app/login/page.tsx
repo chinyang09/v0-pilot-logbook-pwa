@@ -86,6 +86,18 @@ export default function LoginPage() {
     setStep("passkey-login");
 
     try {
+      /* if (result.session) {
+      } else {
+        // Fallback to localStorage if no session in response
+        localStorage.setItem(
+          "skylog_user",
+          JSON.stringify({
+            id: result.user.id,
+            callsign: result.user.callsign,
+          })
+        );
+      }*/
+
       // Get authentication options
       const optionsRes = await fetch("/api/auth/login/passkey", {
         cache: "no-store",
@@ -133,11 +145,7 @@ export default function LoginPage() {
         }),
       });
 
-      if (!verifyRes.ok) {
-        const err = await verifyRes.json();
-        throw new Error(err.error || "Login failed");
-      }
-
+      if (!verifyRes.ok) throw new Error("Login failed");
       const result = await verifyRes.json();
 
       if (result.session) {
@@ -145,21 +153,15 @@ export default function LoginPage() {
           userId: result.user.id,
           callsign: result.user.callsign,
           sessionToken: result.session.token,
-          expiresAt: result.session.expiresAt,
+          expiresAt:
+            typeof result.session.expiresAt === "string"
+              ? new Date(result.session.expiresAt).getTime() // ✅ Ensure expiresAt is a Number for IndexedDB
+              : result.session.expiresAt,
         });
-      } else {
-        // Fallback to localStorage if no session in response
-        localStorage.setItem(
-          "skylog_user",
-          JSON.stringify({
-            id: result.user.id,
-            callsign: result.user.callsign,
-          })
-        );
       }
 
       setStep("success");
-      setTimeout(() => router.push("/"), 2000);
+      setTimeout(() => router.push("/"), 1500);
     } catch (err) {
       console.error("Passkey login error:", err);
       setStep("initial");
@@ -169,6 +171,51 @@ export default function LoginPage() {
       } else {
         setError(err instanceof Error ? err.message : "Login failed");
       }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Verify TOTP works during registration
+  const verifyTotpSetup = async () => {
+    if (totpCode.length !== 6) {
+      setError("Enter the 6-digit code");
+      return;
+    }
+
+    setError("");
+    setIsLoading(true);
+
+    try {
+      const res = await fetch("/api/auth/login/totp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          callsign,
+          code: totpCode,
+          deviceId: getOrCreateDeviceId(),
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(
+          "Invalid code. Make sure you scanned the QR code correctly."
+        );
+      }
+      const data = await res.json();
+
+      // ✅ Consistency: Ensure Numeric timestamp for local state
+      await login({
+        userId: data.user.id,
+        callsign: data.user.callsign,
+        sessionToken: data.session?.token || "",
+        expiresAt: new Date(data.session.expiresAt).getTime(),
+      });
+
+      setStep("success");
+      setTimeout(() => router.push("/"), 1500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verification failed");
     } finally {
       setIsLoading(false);
     }
@@ -325,50 +372,6 @@ export default function LoginPage() {
     }
   };
 
-  // Verify TOTP works during registration
-  const verifyTotpSetup = async () => {
-    if (totpCode.length !== 6) {
-      setError("Enter the 6-digit code from your authenticator");
-      return;
-    }
-
-    setError("");
-    setIsLoading(true);
-
-    try {
-      // Use the login endpoint to verify TOTP works
-      const res = await fetch("/api/auth/login/totp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ callsign, code: totpCode }),
-      });
-
-      if (!res.ok) {
-        throw new Error(
-          "Invalid code. Make sure you scanned the QR code correctly."
-        );
-      }
-
-      const data = await res.json();
-
-      await login({
-        userId: data.user.id,
-        callsign: data.user.callsign,
-        sessionToken: data.session?.token || "",
-        expiresAt: data.session?.expiresAt
-          ? new Date(data.session.expiresAt).getTime()
-          : Date.now() + 30 * 24 * 60 * 60 * 1000,
-      });
-
-      setStep("success");
-      setTimeout(() => router.push("/"), 2000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Verification failed");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // Recovery login with TOTP
   const recoveryLogin = async () => {
     if (!callsign.trim()) {
@@ -394,20 +397,16 @@ export default function LoginPage() {
         }),
       });
 
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error); //if (!res.ok) throw new Error("Invalid callsign or code");
+      const result = await res.json(); // ✅ Fixed: result was being declared twice in your snippet
+      if (!res.ok) throw new Error(result.error || "Invalid callsign or code");
 
-      const result = await res.json();
-
-      // Log them in first so the 'add-passkey' route is authorized
       await login({
         userId: result.user.id,
         callsign: result.user.callsign,
         sessionToken: result.session?.token || "",
-        expiresAt: result.session?.expiresAt,
+        expiresAt: new Date(result.session.expiresAt).getTime(),
       });
 
-      // Move to the Nudge Step instead of direct Success
       setStep("nudge-add-passkey");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
@@ -429,7 +428,6 @@ export default function LoginPage() {
       const options = await optionsRes.json();
 
       // 2. Browser Hardware Handshake
-      // ... inside registerAdditionalPasskey
       const credential = await navigator.credentials.create({
         publicKey: {
           ...options,

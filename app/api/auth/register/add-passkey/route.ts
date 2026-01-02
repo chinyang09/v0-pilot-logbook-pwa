@@ -7,7 +7,6 @@ import {
 } from "@/lib/webauthn";
 import type { User, PasskeyCredential } from "@/lib/auth-types";
 import { cookies } from "next/headers";
-import { ObjectId } from "mongodb";
 
 // GET: Generate options for an existing user to add a new device
 export async function GET(request: NextRequest) {
@@ -18,7 +17,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const db = await getDB();
-    const session = await db.collection("sessions").findOne({ _id: sessionId });
+
+    // ✅ FIX 1: Use 'token' field and compare against new Date()
+    const session = await db.collection("sessions").findOne({
+      token: sessionId,
+      expiresAt: { $gt: new Date() },
+    });
+
     if (!session)
       return NextResponse.json({ error: "Session expired" }, { status: 401 });
 
@@ -28,21 +33,19 @@ export async function GET(request: NextRequest) {
     if (!user)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-    // Reuse your library's generator
-    const existingPasskeyIds = user.auth.passkeys.map((p) => p.id);
     const options = generateRegistrationOptions(
       user._id.toString(),
       user.identity.callsign,
-      user.auth.passkeys //passing whole array instead of existingPassKeyIds
+      user.auth.passkeys
     );
 
     const challengeBase64 = base64URLEncode(options.challenge as Uint8Array);
 
-    // Save challenge to MongoDB for verification in POST
+    // ✅ FIX 2: Save challenge expiresAt as a Date object
     await db.collection("challenges").insertOne({
       _id: challengeBase64,
       challenge: challengeBase64,
-      expiresAt: Date.now() + 60000,
+      expiresAt: new Date(Date.now() + 60000), // 1 minute
       userId: user._id,
     });
 
@@ -55,6 +58,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    console.error("Add passkey GET error:", error);
     return NextResponse.json(
       { error: "Failed to start registration" },
       { status: 500 }
@@ -73,20 +77,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const db = await getDB();
-    const session = await db.collection("sessions").findOne({ _id: sessionId });
+
+    // ✅ FIX 3: Use 'token' and new Date() for session validation
+    const session = await db.collection("sessions").findOne({
+      token: sessionId,
+      expiresAt: { $gt: new Date() },
+    });
+
     if (!session)
       return NextResponse.json({ error: "Session expired" }, { status: 401 });
 
-    // 1. Consume Challenge
-    const stored = await db
-      .collection("challenges")
-      .findOneAndDelete({ _id: challenge });
-    if (!stored)
-      return NextResponse.json({ error: "Challenge invalid" }, { status: 400 });
+    // 1. Consume Challenge (Implicitly checks date if you use TTL index, but we check manually too)
+    const result = await db.collection("challenges").findOneAndDelete({
+      _id: challenge,
+      expiresAt: { $gt: new Date() }, // ✅ FIX 4: Only valid if not expired
+    });
 
-    // 2. Parse using YOUR existing logic from register/complete
+    if (!result.value)
+      return NextResponse.json(
+        { error: "Challenge invalid or expired" },
+        { status: 400 }
+      );
+
+    // 2. Parse using logic
     const credentialData = await parseClientCredential(credential);
-
     const userAgent = request.headers.get("user-agent") || "";
 
     const newPasskey: PasskeyCredential = {
@@ -96,7 +110,7 @@ export async function POST(request: NextRequest) {
       deviceType: credentialData.deviceType,
       backedUp: credentialData.backedUp,
       transports: credentialData.transports,
-      createdAt: Date.now(),
+      createdAt: Date.now(), // Internal metadata can remain as Number
       name: getDeviceName(userAgent),
     };
 
@@ -111,30 +125,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Add passkey error:", error);
+    console.error("Add passkey POST error:", error);
     return NextResponse.json(
       { error: "Failed to add passkey" },
       { status: 500 }
     );
   }
-}
-
-// Re-use your specific parsing logic
-async function parseClientCredential(credential: any) {
-  const attestationObject = base64URLDecode(
-    credential.response.attestationObject
-  );
-  const authData = parseAttestationObject(attestationObject);
-  return {
-    credentialId: credential.id,
-    publicKey: credential.response.publicKey || authData.publicKey,
-    counter: authData.counter,
-    deviceType: authData.flags.be
-      ? ("multiDevice" as const)
-      : ("singleDevice" as const),
-    backedUp: authData.flags.bs,
-    transports: credential.response.transports,
-  };
 }
 
 // Parse attestation object (CBOR)

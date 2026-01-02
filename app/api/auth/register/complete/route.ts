@@ -16,14 +16,10 @@ export async function POST(request: NextRequest) {
 
     const db = await getDB()
 
-    // Verify credential response
     // Parse the credential
     const credentialData = await parseClientCredential(credential)
-
-    // Get the User-Agent from headers
     const userAgent = request.headers.get("user-agent") || "";
 
-    // Create the passkey credential object
     const passkeyCredential: PasskeyCredential = {
       id: credentialData.credentialId,
       publicKey: credentialData.publicKey,
@@ -35,8 +31,7 @@ export async function POST(request: NextRequest) {
       name: getDeviceName(userAgent),
     }
 
-    // Create the user document
-    const now = Date.now()
+    const nowTimestamp = Date.now()
     const user: User = {
       _id: userId,
       identity: {
@@ -48,21 +43,25 @@ export async function POST(request: NextRequest) {
         totpEnabled: true,
         passkeys: [passkeyCredential],
       },
-      createdAt: now,
-      updatedAt: now,
+      createdAt: nowTimestamp,
+      updatedAt: nowTimestamp,
     }
 
     // Insert user into database
     await db.collection<User>("users").insertOne(user)
 
-    // Create a session
+    // --- SESSION CREATION (Updated for Consistency) ---
     const sessionId = createId()
-    const sessionExpiry = Date.now() + 30 * 24 * 60 * 60 * 1000 // 30 days
+    const now = new Date() // ✅ BSON Date
+    const sessionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // ✅ BSON Date
 
     await db.collection("sessions").insertOne({
-      _id: sessionId,
+      // We use 'token' for lookups, but keep _id as unique identifier
+      token: sessionId, 
       userId,
+      callsign: user.identity.callsign,
       createdAt: now,
+      lastAccessedAt: now,
       expiresAt: sessionExpiry,
     })
 
@@ -72,7 +71,7 @@ export async function POST(request: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 30 * 24 * 60 * 60, // 30 days
+      maxAge: 30 * 24 * 60 * 60,
       path: "/",
     })
 
@@ -82,6 +81,11 @@ export async function POST(request: NextRequest) {
         id: userId,
         callsign: user.identity.callsign,
       },
+      // Include session info for frontend sync
+      session: {
+        token: sessionId,
+        expiresAt: sessionExpiry.getTime()
+      }
     })
   } catch (error) {
     console.error("Registration complete error:", error)
@@ -91,29 +95,34 @@ export async function POST(request: NextRequest) {
 
 // Parse credential from client
 async function parseClientCredential(credential: {
-  id: string
-  rawId: string
+  id: string;
+  rawId: string;
   response: {
-    clientDataJSON: string
-    attestationObject: string
-    publicKey?: string
-    transports?: string[]
-  }
-  type: string
-  authenticatorAttachment?: string
+    clientDataJSON: string;
+    attestationObject: string;
+    publicKey?: string;
+    transports?: string[];
+  };
+  type: string;
+  authenticatorAttachment?: string;
 }) {
   // Decode attestationObject to get public key and other data
-  const attestationObject = base64URLDecode(credential.response.attestationObject)
-  const authData = parseAttestationObject(attestationObject)
+  const attestationObject = base64URLDecode(
+    credential.response.attestationObject
+  );
+  const authData = parseAttestationObject(attestationObject);
 
   return {
     credentialId: credential.id,
     publicKey: credential.response.publicKey || authData.publicKey,
     counter: authData.counter,
-    deviceType: authData.flags.be ? ("multiDevice" as const) : ("singleDevice" as const),
+    deviceType: authData.flags.be
+      ? ("multiDevice" as const)
+      : ("singleDevice" as const),
     backedUp: authData.flags.bs,
-    transports: credential.response.transports as PasskeyCredential["transports"],
-  }
+    transports: credential.response
+      .transports as PasskeyCredential["transports"],
+  };
 }
 
 // Parse attestation object (CBOR)
@@ -127,16 +136,19 @@ function parseAttestationObject(attestationObject: Uint8Array) {
   // Skip to authData (simplified - assumes "none" attestation format)
   // authData structure: rpIdHash (32) + flags (1) + signCount (4) + attestedCredentialData (variable)
 
-  let offset = 0
+  let offset = 0;
 
   // Skip CBOR header and find authData
   // This is a simplified parser - in production use cbor library
   while (offset < attestationObject.length) {
-    if (attestationObject[offset] === 0x68 && attestationObject[offset + 1] === 0x61) {
+    if (
+      attestationObject[offset] === 0x68 &&
+      attestationObject[offset + 1] === 0x61
+    ) {
       // "authData" key found
-      break
+      break;
     }
-    offset++
+    offset++;
   }
 
   // Find the byte string for authData
@@ -145,44 +157,49 @@ function parseAttestationObject(attestationObject: Uint8Array) {
     attestationObject[offset] !== 0x58 &&
     attestationObject[offset] !== 0x59
   ) {
-    offset++
+    offset++;
   }
 
-  let authDataLength = 0
+  let authDataLength = 0;
   if (attestationObject[offset] === 0x58) {
     // 1-byte length
-    authDataLength = attestationObject[offset + 1]
-    offset += 2
+    authDataLength = attestationObject[offset + 1];
+    offset += 2;
   } else if (attestationObject[offset] === 0x59) {
     // 2-byte length
-    authDataLength = (attestationObject[offset + 1] << 8) | attestationObject[offset + 2]
-    offset += 3
+    authDataLength =
+      (attestationObject[offset + 1] << 8) | attestationObject[offset + 2];
+    offset += 3;
   }
 
-  const authData = attestationObject.slice(offset, offset + authDataLength)
+  const authData = attestationObject.slice(offset, offset + authDataLength);
 
   // Parse authData
-  const rpIdHash = authData.slice(0, 32)
-  const flags = authData[32]
-  const signCount = new DataView(authData.buffer, authData.byteOffset + 33, 4).getUint32(0, false)
+  const rpIdHash = authData.slice(0, 32);
+  const flags = authData[32];
+  const signCount = new DataView(
+    authData.buffer,
+    authData.byteOffset + 33,
+    4
+  ).getUint32(0, false);
 
   // Flags
-  const up = (flags & 0x01) !== 0 // User Present
-  const uv = (flags & 0x04) !== 0 // User Verified
-  const be = (flags & 0x08) !== 0 // Backup Eligible
-  const bs = (flags & 0x10) !== 0 // Backup State
-  const at = (flags & 0x40) !== 0 // Attested Credential Data present
+  const up = (flags & 0x01) !== 0; // User Present
+  const uv = (flags & 0x04) !== 0; // User Verified
+  const be = (flags & 0x08) !== 0; // Backup Eligible
+  const bs = (flags & 0x10) !== 0; // Backup State
+  const at = (flags & 0x40) !== 0; // Attested Credential Data present
 
-  let publicKey = ""
+  let publicKey = "";
   if (at && authData.length > 37) {
     // Parse attested credential data
-    const aaguid = authData.slice(37, 53)
-    const credIdLength = (authData[53] << 8) | authData[54]
-    const credId = authData.slice(55, 55 + credIdLength)
-    const publicKeyBytes = authData.slice(55 + credIdLength)
+    const aaguid = authData.slice(37, 53);
+    const credIdLength = (authData[53] << 8) | authData[54];
+    const credId = authData.slice(55, 55 + credIdLength);
+    const publicKeyBytes = authData.slice(55 + credIdLength);
 
     // Convert COSE public key to SPKI format (simplified)
-    publicKey = base64URLEncode(publicKeyBytes)
+    publicKey = base64URLEncode(publicKeyBytes);
   }
 
   return {
@@ -190,7 +207,7 @@ function parseAttestationObject(attestationObject: Uint8Array) {
     flags: { up, uv, be, bs, at },
     counter: signCount,
     publicKey,
-  }
+  };
 }
 
 function getDeviceName(ua: string): string {
