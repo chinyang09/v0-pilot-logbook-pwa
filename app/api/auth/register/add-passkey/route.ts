@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
 
     // ✅ FIX 1: Use 'token' field and compare against new Date()
     const session = await db.collection("sessions").findOne({
-      token: sessionId,
+      _id: sessionId,
       expiresAt: { $gt: new Date() },
     });
 
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
 
     // ✅ FIX 3: Use 'token' and new Date() for session validation
     const session = await db.collection("sessions").findOne({
-      token: sessionId,
+      _id: sessionId,
       expiresAt: { $gt: new Date() },
     });
 
@@ -131,6 +131,23 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+async function parseClientCredential(credential: any) {
+  const attestationObject = base64URLDecode(
+    credential.response.attestationObject
+  );
+  const authData = parseAttestationObject(attestationObject);
+  return {
+    credentialId: credential.id,
+    publicKey: credential.response.publicKey || authData.publicKey,
+    counter: authData.counter,
+    deviceType: authData.flags.be
+      ? ("multiDevice" as const)
+      : ("singleDevice" as const),
+    backedUp: authData.flags.bs,
+    transports: credential.response.transports,
+  };
 }
 
 // Parse attestation object (CBOR)
