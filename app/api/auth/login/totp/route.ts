@@ -25,10 +25,7 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       // Don't reveal whether user exists
-      return NextResponse.json(
-        { error: "Invalid USER" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Invalid USER" }, { status: 401 });
     }
 
     // Verify TOTP code
@@ -36,7 +33,7 @@ export async function POST(request: NextRequest) {
 
     if (!isValid) {
       return NextResponse.json(
-        { error: "Invalid verifyTOTP" }//{ error: "Invalid callsign or code" },
+        { error: "Invalid verifyTOTP" }, //{ error: "Invalid callsign or code" },
         { status: 401 }
       );
     }
