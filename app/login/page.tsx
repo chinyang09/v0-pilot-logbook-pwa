@@ -424,6 +424,7 @@ export default function LoginPage() {
       const options = await optionsRes.json();
 
       // 2. Browser Hardware Handshake
+      // ... inside registerAdditionalPasskey
       const credential = await navigator.credentials.create({
         publicKey: {
           ...options,
@@ -432,19 +433,15 @@ export default function LoginPage() {
             ...options.user,
             id: base64URLDecode(options.user.id),
           },
-          // FIX STARTS HERE
           excludeCredentials:
-            options.excludeCredentials?.map((cred: any) => {
-              // Your backend returns an array of objects like { id: "...", type: "public-key" }
-              // We must pass ONLY the string 'id' to base64URLDecode
-              const idString = typeof cred === "string" ? cred : cred.id;
-
-              return {
-                id: base64URLDecode(idString),
-                type: cred.type || "public-key",
-                transports: cred.transports,
-              };
-            }) || [],
+            options.excludeCredentials?.map((cred: any) => ({
+              id:
+                typeof cred.id === "string"
+                  ? base64URLDecode(cred.id)
+                  : new Uint8Array(Object.values(cred.id)),
+              type: cred.type,
+              transports: cred.transports,
+            })) || [],
         },
       });
 
