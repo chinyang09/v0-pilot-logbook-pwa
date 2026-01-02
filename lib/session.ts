@@ -4,7 +4,7 @@ import { getMongoClient } from "./mongodb";
 export interface SessionData {
   userId: string;
   callsign: string;
-  expiresAt: number;
+  expiresAt: Date;
 }
 
 export async function validateSession(): Promise<SessionData | null> {
@@ -21,7 +21,7 @@ export async function validateSession(): Promise<SessionData | null> {
 
     const session = await db.collection("sessions").findOne({
       _id: sessionToken,
-      expiresAt: { $gt: Date.now() },
+      expiresAt: { $gt: new Date() },
     });
 
     if (!session) {
@@ -29,14 +29,14 @@ export async function validateSession(): Promise<SessionData | null> {
     }
 
     // Extend session if it's been more than a day since last access
-    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     if (session.lastAccessedAt < oneDayAgo) {
-      const newExpiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days
+      const newExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
       await db
         .collection("sessions")
         .updateOne(
           { sessionToken: sessionToken },
-          { $set: { lastAccessedAt: Date.now(), expiresAt: newExpiresAt } }
+          { $set: { lastAccessedAt: new Date(), expiresAt: newExpiresAt } }
         );
     }
 
@@ -71,6 +71,6 @@ export async function validateSessionFromHeader(
   return {
     userId: session.userId,
     callsign: session.callsign || "Pilot", // No need to fetch user!
-    expiresAt: session.expiresAt,
+    expiresAt: new Date(session.expiresAt),
   };
 }
