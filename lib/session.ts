@@ -20,7 +20,7 @@ export async function validateSession(): Promise<SessionData | null> {
     const db = client.db("skylog");
 
     const session = await db.collection("sessions").findOne({
-      sessionToken: sessionToken,
+      _id: sessionToken,
       expiresAt: { $gt: Date.now() },
     });
 
@@ -29,9 +29,9 @@ export async function validateSession(): Promise<SessionData | null> {
     }
 
     // Extend session if it's been more than a day since last access
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
     if (session.lastAccessedAt < oneDayAgo) {
-      const newExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+      const newExpiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days
       await db
         .collection("sessions")
         .updateOne(
@@ -71,6 +71,6 @@ export async function validateSessionFromHeader(
   return {
     userId: session.userId,
     callsign: session.callsign || "Pilot", // No need to fetch user!
-    expiresAt: new Date(session.expiresAt),
+    expiresAt: session.expiresAt,
   };
 }
