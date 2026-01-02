@@ -25,6 +25,7 @@ import {
   CheckCircle2,
   Plane,
   Copy,
+  ShieldCheck,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { base64URLEncode, base64URLDecode } from "@/lib/webauthn";
@@ -38,7 +39,8 @@ type Step =
   | "register-callsign" // Enter callsign for registration
   | "register-setup" // Setup passkey + show TOTP QR
   | "register-verify" // Verify TOTP works
-  | "success"; // Login/register complete
+  | "success" // Login/register complete
+  | "nudge-add-passkey"; //nudge to add additional passkey for another device
 
 export default function LoginPage() {
   const router = useRouter();
@@ -388,27 +390,97 @@ export default function LoginPage() {
         body: JSON.stringify({ callsign, code: totpCode }),
       });
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Invalid callsign or code");
-      }
+      if (!res.ok) throw new Error("Invalid callsign or code");
 
       const result = await res.json();
 
+      // Log them in first so the 'add-passkey' route is authorized
       await login({
         userId: result.user.id,
         callsign: result.user.callsign,
         sessionToken: result.session?.token || "",
-        expiresAt: result.session?.expiresAt
-          ? new Date(result.session.expiresAt).getTime()
-          : Date.now() + 30 * 24 * 60 * 60 * 1000,
+        expiresAt: result.session?.expiresAt,
       });
 
-      setStep("success");
-      // Will prompt for passkey registration after redirect
-      setTimeout(() => router.push("/?addPasskey=true"), 2000);
+      // Move to the Nudge Step instead of direct Success
+      setStep("nudge-add-passkey");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const registerAdditionalPasskey = async () => {
+    setIsLoading(true);
+    setError("");
+
+    try {
+      // 1. Get registration options (This route requires valid session)
+      const optionsRes = await fetch("/api/auth/register/add-passkey", {
+        cache: "no-store",
+      });
+      if (!optionsRes.ok) throw new Error("Failed to initialize setup");
+      const options = await optionsRes.json();
+
+      // 2. Browser Hardware Handshake
+      const credential = await navigator.credentials.create({
+        publicKey: {
+          ...options,
+          challenge: base64URLDecode(options.challenge),
+          user: {
+            ...options.user,
+            id: base64URLDecode(options.user.id),
+          },
+          // FIX STARTS HERE
+          excludeCredentials:
+            options.excludeCredentials?.map((cred: any) => {
+              // Your backend returns an array of objects like { id: "...", type: "public-key" }
+              // We must pass ONLY the string 'id' to base64URLDecode
+              const idString = typeof cred === "string" ? cred : cred.id;
+
+              return {
+                id: base64URLDecode(idString),
+                type: cred.type || "public-key",
+                transports: cred.transports,
+              };
+            }) || [],
+        },
+      });
+
+      if (!credential) throw new Error("Cancelled");
+
+      const pubKeyCred = credential as PublicKeyCredential;
+      const response = pubKeyCred.response as AuthenticatorAttestationResponse;
+
+      // 3. Save new passkey to DB
+      const completeRes = await fetch("/api/auth/register/add-passkey", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challenge: options.challenge,
+          credential: {
+            id: pubKeyCred.id,
+            response: {
+              clientDataJSON: base64URLEncode(response.clientDataJSON),
+              attestationObject: base64URLEncode(response.attestationObject),
+              publicKey: response.getPublicKey
+                ? base64URLEncode(response.getPublicKey()!)
+                : "",
+            },
+          },
+        }),
+      });
+
+      if (!completeRes.ok) throw new Error("Failed to save passkey");
+
+      // 4. Final Success
+      setStep("success");
+      setTimeout(() => router.push("/"), 1500);
+    } catch (err) {
+      console.error("Add passkey error:", err);
+      // If they cancel or it fails, just let them into the app anyway
+      router.push("/");
     } finally {
       setIsLoading(false);
     }
@@ -776,6 +848,43 @@ export default function LoginPage() {
               <p className="text-muted-foreground text-sm mt-1">
                 Redirecting to your logbook...
               </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {step === "nudge-add-passkey" && (
+          <Card className="border-primary/50 shadow-lg">
+            <CardHeader className="text-center">
+              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-2">
+                <ShieldCheck className="h-6 w-6 text-primary" />
+              </div>
+              <CardTitle>Secure this device?</CardTitle>
+              <CardDescription>
+                Would you like to use FaceID or TouchID to log in faster next
+                time on this device?
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button
+                className="w-full h-12"
+                onClick={registerAdditionalPasskey}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <Loader2 className="animate-spin mr-2" />
+                ) : (
+                  <Fingerprint className="mr-2" />
+                )}
+                Enable Passkey
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={() => router.push("/")}
+                disabled={isLoading}
+              >
+                Skip and go to Logbook
+              </Button>
             </CardContent>
           </Card>
         )}

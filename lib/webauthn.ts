@@ -56,17 +56,14 @@ export function getRP() {
 export function generateRegistrationOptions(
   userId: string,
   userName: string,
-  existingCredentials: PasskeyCredential[] = [],
+  existingCredentials: (PasskeyCredential | string)[] = [], // Accepts full objects or just IDs
 ): PublicKeyCredentialCreationOptions {
-  const rp = getRP()
-  const challenge = crypto.getRandomValues(new Uint8Array(32))
+  const rp = getRP();
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
 
   return {
     challenge,
-    rp: {
-      name: rp.name,
-      id: rp.id,
-    },
+    rp: { name: rp.name, id: rp.id },
     user: {
       id: new TextEncoder().encode(userId),
       name: userName,
@@ -79,15 +76,19 @@ export function generateRegistrationOptions(
     timeout: 60000,
     attestation: "none",
     authenticatorSelection: {
-      residentKey: "preferred", // Discoverable credentials for username-less login
-      userVerification: "preferred", // Biometric/PIN required
-      authenticatorAttachment: "platform", // Use platform authenticators (Google Password Manager, Face ID, Touch ID)
+      residentKey: "preferred",
+      userVerification: "preferred",
+      authenticatorAttachment: "platform", 
     },
-    excludeCredentials: existingCredentials.map((cred) => ({
-      id: base64URLDecode(cred.id),
-      type: "public-key" as const,
-      transports: cred.transports,
-    })),
+    excludeCredentials: existingCredentials.map((cred) => {
+      // Handle both string IDs and Passkey Objects
+      const id = typeof cred === "string" ? cred : cred.id;
+      return {
+        id: base64URLDecode(id),
+        type: "public-key" as const,
+        transports: typeof cred === "string" ? undefined : cred.transports,
+      };
+    }),
   }
 }
 
