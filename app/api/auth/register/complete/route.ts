@@ -20,8 +20,8 @@ export async function POST(request: NextRequest) {
     // Parse the credential
     const credentialData = await parseClientCredential(credential)
 
-// Get the User-Agent from headers
-const userAgent = request.headers.get("user-agent") || "";
+    // Get the User-Agent from headers
+    const userAgent = request.headers.get("user-agent") || "";
 
     // Create the passkey credential object
     const passkeyCredential: PasskeyCredential = {

@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     const options = generateRegistrationOptions(
       user._id.toString(),
       user.identity.callsign,
-      existingPasskeyIds
+      user.auth.passkeys //passing whole array instead of existingPassKeyIds
     );
 
     const challengeBase64 = base64URLEncode(options.challenge as Uint8Array);
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
     await db.collection("challenges").insertOne({
       _id: challengeBase64,
       challenge: challengeBase64,
-      expiresAt: new Date(Date.now() + 60000),
+      expiresAt: Date.now() + 60000,
       userId: user._id,
     });
 
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
       backedUp: credentialData.backedUp,
       transports: credentialData.transports,
       createdAt: Date.now(),
-      name: name || getDeviceName(userAgent),
+      name: getDeviceName(userAgent),
     };
 
     // 3. ATOMIC PUSH to the array
