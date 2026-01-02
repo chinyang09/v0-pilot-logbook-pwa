@@ -20,6 +20,9 @@ export async function POST(request: NextRequest) {
     // Parse the credential
     const credentialData = await parseClientCredential(credential)
 
+// Get the User-Agent from headers
+const userAgent = request.headers.get("user-agent") || "";
+
     // Create the passkey credential object
     const passkeyCredential: PasskeyCredential = {
       id: credentialData.credentialId,
@@ -29,7 +32,7 @@ export async function POST(request: NextRequest) {
       backedUp: credentialData.backedUp,
       transports: credentialData.transports,
       createdAt: Date.now(),
-      name: getDeviceName(),
+      name: getDeviceName(userAgent),
     }
 
     // Create the user document
@@ -190,14 +193,12 @@ function parseAttestationObject(attestationObject: Uint8Array) {
   }
 }
 
-function getDeviceName(): string {
-  if (typeof navigator === "undefined") return "Unknown Device"
-
-  const ua = navigator.userAgent
-  if (ua.includes("iPhone")) return "iPhone"
-  if (ua.includes("iPad")) return "iPad"
-  if (ua.includes("Mac")) return "Mac"
-  if (ua.includes("Android")) return "Android"
-  if (ua.includes("Windows")) return "Windows PC"
-  return "Device"
+function getDeviceName(ua: string): string {
+  if (ua.includes("iPhone")) return "iPhone";
+  if (ua.includes("iPad")) return "iPad";
+  if (ua.includes("Macintosh") || ua.includes("Mac OS X")) return "Mac";
+  if (ua.includes("Android")) return "Android Device";
+  if (ua.includes("Windows")) return "Windows PC";
+  if (ua.includes("Linux")) return "Linux Device";
+  return "New Device";
 }

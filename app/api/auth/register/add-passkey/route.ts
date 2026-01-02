@@ -87,6 +87,8 @@ export async function POST(request: NextRequest) {
     // 2. Parse using YOUR existing logic from register/complete
     const credentialData = await parseClientCredential(credential);
 
+    const userAgent = request.headers.get("user-agent") || "";
+
     const newPasskey: PasskeyCredential = {
       id: credentialData.credentialId,
       publicKey: credentialData.publicKey,
@@ -95,7 +97,7 @@ export async function POST(request: NextRequest) {
       backedUp: credentialData.backedUp,
       transports: credentialData.transports,
       createdAt: Date.now(),
-      name: getDeviceName(request.headers.get("user-agent") || ""),
+      name: name || getDeviceName(userAgent),
     };
 
     // 3. ATOMIC PUSH to the array
@@ -223,7 +225,9 @@ function parseAttestationObject(attestationObject: Uint8Array) {
 function getDeviceName(ua: string): string {
   if (ua.includes("iPhone")) return "iPhone";
   if (ua.includes("iPad")) return "iPad";
-  if (ua.includes("Mac")) return "Mac";
-  if (ua.includes("Android")) return "Android";
-  return "Device";
+  if (ua.includes("Macintosh") || ua.includes("Mac OS X")) return "Mac";
+  if (ua.includes("Android")) return "Android Device";
+  if (ua.includes("Windows")) return "Windows PC";
+  if (ua.includes("Linux")) return "Linux Device";
+  return "New Device";
 }
