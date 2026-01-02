@@ -8,7 +8,7 @@ import { cookies } from "next/headers";
 // POST /api/auth/login/totp - Recovery login with TOTP
 export async function POST(request: NextRequest) {
   try {
-    const { callsign, code, devicId } = await request.json();
+    const { callsign, code, deviceId } = await request.json();
 
     if (!callsign || !code) {
       return NextResponse.json(

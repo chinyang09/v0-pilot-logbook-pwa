@@ -156,7 +156,7 @@ export default function LoginPage() {
       }
 
       setStep("success");
-      setTimeout(() => router.push("/"), 1500);
+      setTimeout(() => router.push("/"), 2000);
     } catch (err) {
       console.error("Passkey login error:", err);
       setStep("initial");
@@ -358,7 +358,7 @@ export default function LoginPage() {
       });
 
       setStep("success");
-      setTimeout(() => router.push("/"), 1500);
+      setTimeout(() => router.push("/"), 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Verification failed");
     } finally {
@@ -405,7 +405,7 @@ export default function LoginPage() {
 
       setStep("success");
       // Will prompt for passkey registration after redirect
-      setTimeout(() => router.push("/?addPasskey=true"), 1500);
+      setTimeout(() => router.push("/?addPasskey=true"), 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
