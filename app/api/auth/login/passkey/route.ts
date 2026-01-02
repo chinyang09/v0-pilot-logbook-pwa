@@ -22,16 +22,11 @@ export async function GET() {
 
     const db = await getDB();
     // Store challenge in MongoDB instead of memory
-    await db.collection("challenges").updateOne(
-      { _id: challengeBase64 },
-      {
-        $set: {
-          challenge: challengeBase64,
-          expiresAt: Date.now() + 60000,
-        },
-      },
-      { upsert: true }
-    );
+    await db.collection("challenges").insertOne({
+      _id: challengeBase64, // Use a unique string as ID
+      challenge: challengeBase64,
+      expiresAt: Date.now() + 60000,
+    });
 
     return NextResponse.json({
       challenge: challengeBase64,
