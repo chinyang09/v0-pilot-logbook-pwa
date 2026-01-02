@@ -390,7 +390,8 @@ export default function LoginPage() {
         body: JSON.stringify({ callsign, code: totpCode }),
       });
 
-      if (!res.ok) throw new Error("Invalid callsign or code");
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error); //if (!res.ok) throw new Error("Invalid callsign or code");
 
       const result = await res.json();
 
