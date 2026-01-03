@@ -1,21 +1,11 @@
-"use client";
+"use client"
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-} from "@/components/ui/input-otp";
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp"
 import {
   Fingerprint,
   Smartphone,
@@ -26,11 +16,11 @@ import {
   Plane,
   Copy,
   ShieldCheck,
-} from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
-import { base64URLEncode, base64URLDecode } from "@/lib/webauthn";
-import { useAuth } from "@/components/auth-provider";
-import { getOrCreateDeviceId } from "@/lib/device";
+} from "lucide-react"
+import { QRCodeSVG } from "qrcode.react"
+import { base64URLEncode, base64URLDecode } from "@/lib/webauthn"
+import { useAuth } from "@/components/auth-provider"
+import { getOrCreateDeviceId } from "@/lib/device"
 
 type Step =
   | "initial" // Choose login or register
@@ -40,24 +30,24 @@ type Step =
   | "register-setup" // Setup passkey + show TOTP QR
   | "register-verify" // Verify TOTP works
   | "success" // Login/register complete
-  | "nudge-add-passkey"; //nudge to add additional passkey for another device
+  | "nudge-add-passkey" //nudge to add additional passkey for another device
 
 export default function LoginPage() {
-  const router = useRouter();
-  const { login } = useAuth();
-  const [step, setStep] = useState<Step>("initial");
-  const [callsign, setCallsign] = useState("");
-  const [totpCode, setTotpCode] = useState("");
-  const [totpSecret, setTotpSecret] = useState("");
-  const [totpUri, setTotpUri] = useState("");
+  const router = useRouter()
+  const { login } = useAuth()
+  const [step, setStep] = useState<Step>("initial")
+  const [callsign, setCallsign] = useState("")
+  const [totpCode, setTotpCode] = useState("")
+  const [totpSecret, setTotpSecret] = useState("")
+  const [totpUri, setTotpUri] = useState("")
   const [registrationData, setRegistrationData] = useState<{
-    userId: string;
-    registrationOptions: PublicKeyCredentialCreationOptions;
-  } | null>(null);
-  const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [passkeySupported, setPasskeySupported] = useState(false);
-  const [copied, setCopied] = useState(false);
+    userId: string
+    registrationOptions: PublicKeyCredentialCreationOptions
+  } | null>(null)
+  const [error, setError] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
+  const [passkeySupported, setPasskeySupported] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   // Check passkey support on mount
   useEffect(() => {
@@ -68,22 +58,21 @@ export default function LoginPage() {
         PublicKeyCredential.isConditionalMediationAvailable
       ) {
         try {
-          const available =
-            await PublicKeyCredential.isConditionalMediationAvailable();
-          setPasskeySupported(available);
+          const available = await PublicKeyCredential.isConditionalMediationAvailable()
+          setPasskeySupported(available)
         } catch {
-          setPasskeySupported(false);
+          setPasskeySupported(false)
         }
       }
-    };
-    checkPasskeySupport();
-  }, []);
+    }
+    checkPasskeySupport()
+  }, [])
 
   // Attempt passkey login (username-less)
   const attemptPasskeyLogin = async () => {
-    setError("");
-    setIsLoading(true);
-    setStep("passkey-login");
+    setError("")
+    setIsLoading(true)
+    setStep("passkey-login")
 
     try {
       /* if (result.session) {
@@ -101,11 +90,11 @@ export default function LoginPage() {
       // Get authentication options
       const optionsRes = await fetch("/api/auth/login/passkey", {
         cache: "no-store",
-      });
-      if (!optionsRes.ok) throw new Error("Failed to get options");
-      const options = await optionsRes.json();
+      })
+      if (!optionsRes.ok) throw new Error("Failed to get options")
+      const options = await optionsRes.json()
 
-      const rpId = window.location.hostname;
+      const rpId = window.location.hostname
 
       // Start WebAuthn authentication
       const credential = await navigator.credentials.get({
@@ -115,12 +104,12 @@ export default function LoginPage() {
           timeout: options.timeout,
           userVerification: options.userVerification,
         },
-      });
+      })
 
-      if (!credential) throw new Error("No credential returned");
+      if (!credential) throw new Error("No credential returned")
 
-      const pubKeyCred = credential as PublicKeyCredential;
-      const response = pubKeyCred.response as AuthenticatorAssertionResponse;
+      const pubKeyCred = credential as PublicKeyCredential
+      const response = pubKeyCred.response as AuthenticatorAssertionResponse
 
       // Send to server
       const verifyRes = await fetch("/api/auth/login/passkey", {
@@ -135,18 +124,16 @@ export default function LoginPage() {
               clientDataJSON: base64URLEncode(response.clientDataJSON),
               authenticatorData: base64URLEncode(response.authenticatorData),
               signature: base64URLEncode(response.signature),
-              userHandle: response.userHandle
-                ? base64URLEncode(response.userHandle)
-                : null,
+              userHandle: response.userHandle ? base64URLEncode(response.userHandle) : null,
             },
             type: pubKeyCred.type,
           },
           challenge: options.challenge,
         }),
-      });
+      })
 
-      if (!verifyRes.ok) throw new Error("Login failed");
-      const result = await verifyRes.json();
+      if (!verifyRes.ok) throw new Error("Login failed")
+      const result = await verifyRes.json()
 
       if (result.session) {
         await login({
@@ -157,34 +144,34 @@ export default function LoginPage() {
             typeof result.session.expiresAt === "string"
               ? new Date(result.session.expiresAt).getTime() // ✅ Ensure expiresAt is a Number for IndexedDB
               : result.session.expiresAt,
-        });
+        })
       }
 
-      setStep("success");
-      setTimeout(() => router.push("/"), 1500);
+      setStep("success")
+      setTimeout(() => router.push("/"), 1500)
     } catch (err) {
-      console.error("Passkey login error:", err);
-      setStep("initial");
+      console.error("Passkey login error:", err)
+      setStep("initial")
       if (err instanceof Error && err.name === "NotAllowedError") {
         // User cancelled or no passkey found
-        setError("No passkey found on this device. Try recovery or register.");
+        setError("No passkey found on this device. Try recovery or register.")
       } else {
-        setError(err instanceof Error ? err.message : "Login failed");
+        setError(err instanceof Error ? err.message : "Login failed")
       }
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   // Verify TOTP works during registration
   const verifyTotpSetup = async () => {
     if (totpCode.length !== 6) {
-      setError("Enter the 6-digit code");
-      return;
+      setError("Enter the 6-digit code")
+      return
     }
 
-    setError("");
-    setIsLoading(true);
+    setError("")
+    setIsLoading(true)
 
     try {
       const res = await fetch("/api/auth/login/totp", {
@@ -195,14 +182,12 @@ export default function LoginPage() {
           code: totpCode,
           deviceId: getOrCreateDeviceId(),
         }),
-      });
+      })
 
       if (!res.ok) {
-        throw new Error(
-          "Invalid code. Make sure you scanned the QR code correctly."
-        );
+        throw new Error("Invalid code. Make sure you scanned the QR code correctly.")
       }
-      const data = await res.json();
+      const data = await res.json()
 
       // ✅ Consistency: Ensure Numeric timestamp for local state
       await login({
@@ -210,65 +195,65 @@ export default function LoginPage() {
         callsign: data.user.callsign,
         sessionToken: data.session?.token || "",
         expiresAt: new Date(data.session.expiresAt).getTime(),
-      });
+      })
 
-      setStep("success");
-      setTimeout(() => router.push("/"), 1500);
+      setStep("success")
+      setTimeout(() => router.push("/"), 1500)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Verification failed");
+      setError(err instanceof Error ? err.message : "Verification failed")
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   // Start registration flow
   const startRegistration = async () => {
     if (!callsign.trim() || callsign.trim().length < 2) {
-      setError("Callsign must be at least 2 characters");
-      return;
+      setError("Callsign must be at least 2 characters")
+      return
     }
 
-    setError("");
-    setIsLoading(true);
+    setError("")
+    setIsLoading(true)
 
     try {
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ callsign: callsign.trim() }),
-      });
+      })
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Registration failed");
+        const err = await res.json()
+        throw new Error(err.error || "Registration failed")
       }
 
-      const data = await res.json();
-      setTotpSecret(data.totpSecret);
-      setTotpUri(data.totpUri);
+      const data = await res.json()
+      setTotpSecret(data.totpSecret)
+      setTotpUri(data.totpUri)
       setRegistrationData({
         userId: data.userId,
         registrationOptions: data.registrationOptions,
-      });
-      setStep("register-setup");
+      })
+      setStep("register-setup")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Registration failed");
+      setError(err instanceof Error ? err.message : "Registration failed")
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   // Complete passkey registration
   const registerPasskey = async () => {
-    if (!registrationData) return;
+    if (!registrationData) return
 
-    setError("");
-    setIsLoading(true);
+    setError("")
+    setIsLoading(true)
 
     try {
-      const options = registrationData.registrationOptions;
+      const options = registrationData.registrationOptions
 
-      const rpId = window.location.hostname;
+      const rpId = window.location.hostname
 
       // to avoid passing incompatible authenticatorSelection settings
       const credential = await navigator.credentials.create({
@@ -294,22 +279,22 @@ export default function LoginPage() {
           excludeCredentials:
             options.excludeCredentials?.map(
               (cred: {
-                id: string;
-                type: "public-key";
-                transports?: AuthenticatorTransport[];
+                id: string
+                type: "public-key"
+                transports?: AuthenticatorTransport[]
               }) => ({
                 id: base64URLDecode(cred.id as unknown as string),
                 type: cred.type,
                 transports: cred.transports,
-              })
+              }),
             ) || [],
         },
-      });
+      })
 
-      if (!credential) throw new Error("No credential created");
+      if (!credential) throw new Error("No credential created")
 
-      const pubKeyCred = credential as PublicKeyCredential;
-      const response = pubKeyCred.response as AuthenticatorAttestationResponse;
+      const pubKeyCred = credential as PublicKeyCredential
+      const response = pubKeyCred.response as AuthenticatorAttestationResponse
 
       // Complete registration
       const completeRes = await fetch("/api/auth/register/complete", {
@@ -325,29 +310,27 @@ export default function LoginPage() {
             response: {
               clientDataJSON: base64URLEncode(response.clientDataJSON),
               attestationObject: base64URLEncode(response.attestationObject),
-              publicKey: response.getPublicKey
-                ? base64URLEncode(response.getPublicKey()!)
-                : "",
+              publicKey: response.getPublicKey ? base64URLEncode(response.getPublicKey()!) : "",
               transports: response.getTransports?.() || [],
             },
             type: pubKeyCred.type,
             authenticatorAttachment: (
               pubKeyCred as PublicKeyCredential & {
-                authenticatorAttachment?: string;
+                authenticatorAttachment?: string
               }
             ).authenticatorAttachment,
           },
           challenge: options.challenge,
           deviceId: getOrCreateDeviceId(),
         }),
-      });
+      })
 
       if (!completeRes.ok) {
-        const err = await completeRes.json();
-        throw new Error(err.error || "Registration failed");
+        const err = await completeRes.json()
+        throw new Error(err.error || "Registration failed")
       }
 
-      const result = await completeRes.json();
+      const result = await completeRes.json()
 
       // Store user info
       localStorage.setItem(
@@ -355,36 +338,36 @@ export default function LoginPage() {
         JSON.stringify({
           id: result.user.id,
           callsign: result.user.callsign,
-        })
-      );
+        }),
+      )
 
       // Move to verify TOTP step
-      setStep("register-verify");
+      setStep("register-verify")
     } catch (err) {
-      console.error("Passkey registration error:", err);
+      console.error("Passkey registration error:", err)
       if (err instanceof Error && err.name === "NotAllowedError") {
-        setError("Passkey registration was cancelled. Please try again.");
+        setError("Passkey registration was cancelled. Please try again.")
       } else {
-        setError(err instanceof Error ? err.message : "Registration failed");
+        setError(err instanceof Error ? err.message : "Registration failed")
       }
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   // Recovery login with TOTP
   const recoveryLogin = async () => {
     if (!callsign.trim()) {
-      setError("Enter your callsign");
-      return;
+      setError("Enter your callsign")
+      return
     }
     if (totpCode.length !== 6) {
-      setError("Enter the 6-digit code");
-      return;
+      setError("Enter the 6-digit code")
+      return
     }
 
-    setError("");
-    setIsLoading(true);
+    setError("")
+    setIsLoading(true)
 
     try {
       const res = await fetch("/api/auth/login/totp", {
@@ -395,65 +378,102 @@ export default function LoginPage() {
           code: totpCode,
           deviceId: getOrCreateDeviceId(),
         }),
-      });
+      })
 
-      const result = await res.json(); // ✅ Fixed: result was being declared twice in your snippet
-      if (!res.ok) throw new Error(result.error || "Invalid callsign or code");
+      const result = await res.json() // ✅ Fixed: result was being declared twice in your snippet
+      if (!res.ok) throw new Error(result.error || "Invalid callsign or code")
 
       await login({
         userId: result.user.id,
         callsign: result.user.callsign,
         sessionToken: result.session?.token || "",
         expiresAt: new Date(result.session.expiresAt).getTime(),
-      });
+      })
 
-      setStep("nudge-add-passkey");
+      setStep("nudge-add-passkey")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : "Login failed")
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   const registerAdditionalPasskey = async () => {
-    setIsLoading(true);
-    setError("");
+    setIsLoading(true)
+    setError("")
 
     try {
       // 1. Get registration options (This route requires valid session)
+      console.log("[v0] Starting passkey registration...")
       const optionsRes = await fetch("/api/auth/register/add-passkey", {
         cache: "no-store",
-      });
-      if (!optionsRes.ok) throw new Error("Failed to initialize setup");
-      const options = await optionsRes.json();
+      })
+
+      if (!optionsRes.ok) {
+        const errData = await optionsRes.json().catch(() => ({}))
+        console.log("[v0] Failed to get options:", errData)
+        throw new Error(errData.error || "Failed to initialize setup")
+      }
+
+      const options = await optionsRes.json()
+      console.log("[v0] Received options:", JSON.stringify(options, null, 2))
+
+      if (!options.challenge || !options.user?.id || !options.user?.name) {
+        console.log("[v0] Missing required fields in options")
+        throw new Error("Invalid registration options from server")
+      }
+
+      const rpId = window.location.hostname
+      console.log("[v0] Using rpId:", rpId)
 
       // 2. Browser Hardware Handshake
-      const credential = await navigator.credentials.create({
-        publicKey: {
-          ...options,
-          challenge: base64URLDecode(options.challenge),
-          user: {
-            ...options.user,
-            id: base64URLDecode(options.user.id),
-          },
-          excludeCredentials:
-            options.excludeCredentials?.map((cred: any) => ({
-              id:
-                typeof cred.id === "string"
-                  ? base64URLDecode(cred.id)
-                  : new Uint8Array(Object.values(cred.id)),
-              type: cred.type,
-              transports: cred.transports,
-            })) || [],
+      const publicKeyOptions: PublicKeyCredentialCreationOptions = {
+        challenge: base64URLDecode(options.challenge),
+        rp: {
+          name: options.rp?.name || "SkyLog Pilot Logbook",
+          id: rpId,
         },
-      });
+        user: {
+          id: base64URLDecode(options.user.id),
+          name: options.user.name,
+          displayName: options.user.displayName || options.user.name,
+        },
+        pubKeyCredParams: options.pubKeyCredParams || [
+          { alg: -7, type: "public-key" },
+          { alg: -257, type: "public-key" },
+        ],
+        timeout: options.timeout || 60000,
+        attestation: "none",
+        authenticatorSelection: {
+          residentKey: "preferred",
+          userVerification: "preferred",
+          authenticatorAttachment: "platform",
+        },
+        excludeCredentials:
+          options.excludeCredentials?.map((cred: any) => ({
+            id: typeof cred.id === "string" ? base64URLDecode(cred.id) : new Uint8Array(Object.values(cred.id)),
+            type: "public-key" as const,
+            transports: cred.transports,
+          })) || [],
+      }
 
-      if (!credential) throw new Error("Cancelled");
+      console.log("[v0] Calling navigator.credentials.create...")
 
-      const pubKeyCred = credential as PublicKeyCredential;
-      const response = pubKeyCred.response as AuthenticatorAttestationResponse;
+      const credential = await navigator.credentials.create({
+        publicKey: publicKeyOptions,
+      })
+
+      if (!credential) {
+        console.log("[v0] No credential returned")
+        throw new Error("Cancelled")
+      }
+
+      console.log("[v0] Credential created:", credential.id)
+      const pubKeyCred = credential as PublicKeyCredential
+      const response = pubKeyCred.response as AuthenticatorAttestationResponse
 
       // 3. Save new passkey to DB
+      console.log("[v0] Saving passkey to server...")
       const completeRes = await fetch("/api/auth/register/add-passkey", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -464,34 +484,43 @@ export default function LoginPage() {
             response: {
               clientDataJSON: base64URLEncode(response.clientDataJSON),
               attestationObject: base64URLEncode(response.attestationObject),
-              publicKey: response.getPublicKey
-                ? base64URLEncode(response.getPublicKey()!)
-                : "",
+              publicKey: response.getPublicKey ? base64URLEncode(response.getPublicKey()!) : "",
             },
           },
         }),
-      });
+      })
 
-      if (!completeRes.ok) throw new Error("Failed to save passkey");
+      if (!completeRes.ok) {
+        const errData = await completeRes.json().catch(() => ({}))
+        console.log("[v0] Failed to save passkey:", errData)
+        throw new Error(errData.error || "Failed to save passkey")
+      }
 
+      console.log("[v0] Passkey saved successfully")
       // 4. Final Success
-      setStep("success");
-      setTimeout(() => router.push("/"), 1500);
+      setStep("success")
+      setTimeout(() => router.push("/"), 1500)
     } catch (err) {
-      console.error("Add passkey error:", err);
-      // If they cancel or it fails, just let them into the app anyway
-      router.push("/");
+      console.error("[v0] Add passkey error:", err)
+      if (err instanceof Error && err.name === "NotAllowedError") {
+        // User cancelled the prompt
+        setError("Passkey setup was cancelled. You can try again or skip.")
+      } else if (err instanceof Error && err.message === "Cancelled") {
+        setError("Passkey setup was cancelled. You can try again or skip.")
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to set up passkey. You can try again or skip.")
+      }
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   // Helpers for Copying
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(totpSecret);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+    navigator.clipboard.writeText(totpSecret)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 safe-area-inset">
@@ -510,9 +539,7 @@ export default function LoginPage() {
           <Card className="border-border">
             <CardHeader className="text-center">
               <CardTitle>Welcome</CardTitle>
-              <CardDescription>
-                Sign in with your passkey or create an account
-              </CardDescription>
+              <CardDescription>Sign in with your passkey or create an account</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {error && (
@@ -523,11 +550,7 @@ export default function LoginPage() {
               )}
 
               {passkeySupported && (
-                <Button
-                  className="w-full h-12 text-base"
-                  onClick={attemptPasskeyLogin}
-                  disabled={isLoading}
-                >
+                <Button className="w-full h-12 text-base" onClick={attemptPasskeyLogin} disabled={isLoading}>
                   <Fingerprint className="mr-2 h-5 w-5" />
                   Sign in with Passkey
                 </Button>
@@ -546,8 +569,8 @@ export default function LoginPage() {
                 variant="outline"
                 className="w-full h-12 text-base bg-transparent"
                 onClick={() => {
-                  setError("");
-                  setStep("recovery");
+                  setError("")
+                  setStep("recovery")
                 }}
               >
                 <Smartphone className="mr-2 h-5 w-5" />
@@ -558,8 +581,8 @@ export default function LoginPage() {
                 variant="ghost"
                 className="w-full"
                 onClick={() => {
-                  setError("");
-                  setStep("register-callsign");
+                  setError("")
+                  setStep("register-callsign")
                 }}
               >
                 Create new account
@@ -573,12 +596,8 @@ export default function LoginPage() {
           <Card className="border-border">
             <CardContent className="py-12 text-center">
               <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary mb-4" />
-              <p className="text-foreground font-medium">
-                Waiting for passkey...
-              </p>
-              <p className="text-muted-foreground text-sm mt-1">
-                Use Face ID, Touch ID, or your device PIN
-              </p>
+              <p className="text-foreground font-medium">Waiting for passkey...</p>
+              <p className="text-muted-foreground text-sm mt-1">Use Face ID, Touch ID, or your device PIN</p>
             </CardContent>
           </Card>
         )}
@@ -592,19 +611,17 @@ export default function LoginPage() {
                 size="sm"
                 className="w-fit -ml-2 mb-2"
                 onClick={() => {
-                  setStep("initial");
-                  setError("");
-                  setCallsign("");
-                  setTotpCode("");
+                  setStep("initial")
+                  setError("")
+                  setCallsign("")
+                  setTotpCode("")
                 }}
               >
                 <ArrowLeft className="h-4 w-4 mr-1" />
                 Back
               </Button>
               <CardTitle>Account Recovery</CardTitle>
-              <CardDescription>
-                Enter your callsign and authenticator code
-              </CardDescription>
+              <CardDescription>Enter your callsign and authenticator code</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {error && (
@@ -628,15 +645,8 @@ export default function LoginPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">
-                  Authenticator Code
-                </label>
-                <InputOTP
-                  maxLength={6}
-                  value={totpCode}
-                  onChange={setTotpCode}
-                  className="justify-center"
-                >
+                <label className="text-sm font-medium">Authenticator Code</label>
+                <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center">
                   <InputOTPGroup>
                     <InputOTPSlot index={0} className="h-12 w-10 text-lg" />
                     <InputOTPSlot index={1} className="h-12 w-10 text-lg" />
@@ -648,14 +658,8 @@ export default function LoginPage() {
                 </InputOTP>
               </div>
 
-              <Button
-                className="w-full h-12"
-                onClick={recoveryLogin}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : null}
+              <Button className="w-full h-12" onClick={recoveryLogin} disabled={isLoading}>
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 Sign In
               </Button>
             </CardContent>
@@ -671,18 +675,16 @@ export default function LoginPage() {
                 size="sm"
                 className="w-fit -ml-2 mb-2"
                 onClick={() => {
-                  setStep("initial");
-                  setError("");
-                  setCallsign("");
+                  setStep("initial")
+                  setError("")
+                  setCallsign("")
                 }}
               >
                 <ArrowLeft className="h-4 w-4 mr-1" />
                 Back
               </Button>
               <CardTitle>Create Account</CardTitle>
-              <CardDescription>
-                Choose a callsign for your pilot profile
-              </CardDescription>
+              <CardDescription>Choose a callsign for your pilot profile</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {error && (
@@ -701,19 +703,11 @@ export default function LoginPage() {
                   className="h-12 text-base"
                   autoFocus
                 />
-                <p className="text-xs text-muted-foreground">
-                  This will be your display name and recovery identifier
-                </p>
+                <p className="text-xs text-muted-foreground">This will be your display name and recovery identifier</p>
               </div>
 
-              <Button
-                className="w-full h-12"
-                onClick={startRegistration}
-                disabled={isLoading || !callsign.trim()}
-              >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : null}
+              <Button className="w-full h-12" onClick={startRegistration} disabled={isLoading || !callsign.trim()}>
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 Continue
               </Button>
             </CardContent>
@@ -725,9 +719,7 @@ export default function LoginPage() {
           <Card className="border-border">
             <CardHeader>
               <CardTitle>Setup Authentication</CardTitle>
-              <CardDescription>
-                First, save your recovery code. Then create a passkey.
-              </CardDescription>
+              <CardDescription>First, save your recovery code. Then create a passkey.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               {error && (
@@ -741,16 +733,13 @@ export default function LoginPage() {
               <div className="space-y-3">
                 <h3 className="font-medium text-sm">1. Save Recovery Code</h3>
                 <p className="text-xs text-muted-foreground">
-                  Scan this QR code with Google Authenticator, Authy, or similar
-                  app
+                  Scan this QR code with Google Authenticator, Authy, or similar app
                 </p>
                 <div className="flex justify-center p-4 bg-white rounded-lg">
                   <QRCodeSVG value={totpUri} size={180} />
                 </div>
                 <div className="text-center">
-                  <p className="text-xs text-muted-foreground mb-1">
-                    Or enter manually:
-                  </p>
+                  <p className="text-xs text-muted-foreground mb-1">Or enter manually:</p>
                   <code
                     onClick={copyToClipboard}
                     className="flex justify-center gap-2 max-w-full text-xs bg-muted px-3 py-2 rounded-md font-mono break-all hover:bg-muted/80 transition-colors"
@@ -771,11 +760,7 @@ export default function LoginPage() {
                 <p className="text-xs text-muted-foreground">
                   This enables fast login with Face ID, Touch ID, or device PIN
                 </p>
-                <Button
-                  className="w-full h-12"
-                  onClick={registerPasskey}
-                  disabled={isLoading}
-                >
+                <Button className="w-full h-12" onClick={registerPasskey} disabled={isLoading}>
                   {isLoading ? (
                     <Loader2 className="h-4 w-4 animate-spin mr-2" />
                   ) : (
@@ -793,9 +778,7 @@ export default function LoginPage() {
           <Card className="border-border">
             <CardHeader>
               <CardTitle>Verify Setup</CardTitle>
-              <CardDescription>
-                Enter the code from your authenticator app to confirm setup
-              </CardDescription>
+              <CardDescription>Enter the code from your authenticator app to confirm setup</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {error && (
@@ -805,12 +788,7 @@ export default function LoginPage() {
                 </div>
               )}
 
-              <InputOTP
-                maxLength={6}
-                value={totpCode}
-                onChange={setTotpCode}
-                className="justify-center"
-              >
+              <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center">
                 <InputOTPGroup>
                   <InputOTPSlot index={0} className="h-12 w-10 text-lg" />
                   <InputOTPSlot index={1} className="h-12 w-10 text-lg" />
@@ -821,14 +799,8 @@ export default function LoginPage() {
                 </InputOTPGroup>
               </InputOTP>
 
-              <Button
-                className="w-full h-12"
-                onClick={verifyTotpSetup}
-                disabled={isLoading || totpCode.length !== 6}
-              >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : null}
+              <Button className="w-full h-12" onClick={verifyTotpSetup} disabled={isLoading || totpCode.length !== 6}>
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 Complete Setup
               </Button>
             </CardContent>
@@ -842,12 +814,8 @@ export default function LoginPage() {
               <div className="w-16 h-16 rounded-full bg-chart-2/10 flex items-center justify-center mx-auto mb-4">
                 <CheckCircle2 className="h-8 w-8 text-chart-2" />
               </div>
-              <p className="text-foreground font-medium text-lg">
-                Welcome aboard!
-              </p>
-              <p className="text-muted-foreground text-sm mt-1">
-                Redirecting to your logbook...
-              </p>
+              <p className="text-foreground font-medium text-lg">Welcome aboard!</p>
+              <p className="text-muted-foreground text-sm mt-1">Redirecting to your logbook...</p>
             </CardContent>
           </Card>
         )}
@@ -860,29 +828,15 @@ export default function LoginPage() {
               </div>
               <CardTitle>Secure this device?</CardTitle>
               <CardDescription>
-                Would you like to use FaceID or TouchID to log in faster next
-                time on this device?
+                Would you like to use FaceID or TouchID to log in faster next time on this device?
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button
-                className="w-full h-12"
-                onClick={registerAdditionalPasskey}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <Loader2 className="animate-spin mr-2" />
-                ) : (
-                  <Fingerprint className="mr-2" />
-                )}
+              <Button className="w-full h-12" onClick={registerAdditionalPasskey} disabled={isLoading}>
+                {isLoading ? <Loader2 className="animate-spin mr-2" /> : <Fingerprint className="mr-2" />}
                 Enable Passkey
               </Button>
-              <Button
-                variant="ghost"
-                className="w-full"
-                onClick={() => router.push("/")}
-                disabled={isLoading}
-              >
+              <Button variant="ghost" className="w-full" onClick={() => router.push("/")} disabled={isLoading}>
                 Skip and go to Logbook
               </Button>
             </CardContent>
@@ -890,5 +844,5 @@ export default function LoginPage() {
         )}
       </div>
     </div>
-  );
+  )
 }

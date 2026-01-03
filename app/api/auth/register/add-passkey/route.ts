@@ -3,7 +3,6 @@ import { getDB } from "@/lib/mongodb"
 import { base64URLDecode, base64URLEncode, generateRegistrationOptions } from "@/lib/webauthn"
 import type { User, PasskeyCredential, StoredChallenge } from "@/lib/auth-types"
 import { cookies } from "next/headers"
-import { ObjectId } from "mongodb"
 
 // GET: Generate options for an existing user to add a new device
 export async function GET(request: NextRequest) {
@@ -31,60 +30,21 @@ export async function GET(request: NextRequest) {
     }
 
     const user = await db.collection<User>("users").findOne({
-      _id: session.userId,
+      _id: session.userId as any,
     })
 
     console.log("[v0] User lookup with session.userId:", session.userId, "- Found:", !!user)
 
     if (!user) {
-      const userByObjectId = await db.collection<User>("users").findOne({
-        _id: new ObjectId(session.userId) as any,
-      })
-      console.log("[v0] User lookup with ObjectId:", !!userByObjectId)
-
-      if (!userByObjectId) {
-        return NextResponse.json({ error: "User not found" }, { status: 404 })
-      }
-
-      const options = generateRegistrationOptions(
-        userByObjectId._id.toString(),
-        userByObjectId.identity.callsign,
-        userByObjectId.auth.passkeys,
-      )
-      const challengeBase64 = base64URLEncode(options.challenge as Uint8Array)
-
-      await db.collection<StoredChallenge>("challenges").insertOne({
-        _id: challengeBase64,
-        userId: userByObjectId._id.toString(),
-        expiresAt: new Date(Date.now() + 60000),
-      } as any)
-
-      return NextResponse.json({
-        challenge: challengeBase64,
-        rp: options.rp,
-        user: {
-          id: base64URLEncode(options.user.id as Uint8Array),
-          name: options.user.name,
-          displayName: options.user.displayName,
-        },
-        pubKeyCredParams: options.pubKeyCredParams,
-        timeout: options.timeout,
-        attestation: options.attestation,
-        authenticatorSelection: options.authenticatorSelection,
-        excludeCredentials: userByObjectId.auth.passkeys.map((p) => ({
-          id: p.id,
-          type: "public-key",
-          transports: p.transports,
-        })),
-      })
+      return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
-    const options = generateRegistrationOptions(user._id.toString(), user.identity.callsign, user.auth.passkeys)
+    const options = generateRegistrationOptions(user._id!.toString(), user.identity.callsign, user.auth.passkeys)
     const challengeBase64 = base64URLEncode(options.challenge as Uint8Array)
 
     await db.collection<StoredChallenge>("challenges").insertOne({
       _id: challengeBase64,
-      userId: user._id.toString(),
+      userId: user._id!.toString(),
       expiresAt: new Date(Date.now() + 60000),
     } as any)
 
@@ -169,10 +129,10 @@ export async function POST(request: NextRequest) {
       name: name || getDeviceName(userAgent),
     }
 
-    let updateResult = await db.collection("users").updateOne(
-      { _id: session.userId },
+    const updateResult = await db.collection("users").updateOne(
+      { _id: session.userId as any },
       {
-        $push: { "auth.passkeys": newPasskey },
+        $push: { "auth.passkeys": newPasskey } as any,
         $set: { updatedAt: Date.now() },
       },
     )
@@ -180,14 +140,7 @@ export async function POST(request: NextRequest) {
     console.log("[v0] Update by string userId matched:", updateResult.matchedCount)
 
     if (updateResult.matchedCount === 0) {
-      updateResult = await db.collection("users").updateOne(
-        { _id: new ObjectId(session.userId) as any },
-        {
-          $push: { "auth.passkeys": newPasskey },
-          $set: { updatedAt: Date.now() },
-        },
-      )
-      console.log("[v0] Update by ObjectId matched:", updateResult.matchedCount)
+      return NextResponse.json({ error: "User not found for update" }, { status: 404 })
     }
 
     // Clear recovery flag in session
