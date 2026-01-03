@@ -26,18 +26,14 @@ export interface PasskeyCredential {
   name?: string; // User-friendly name (e.g., "iPhone", "MacBook")
 }
 
-/**
- * Updated Session Interface for MongoDB
- * ✅ Use BSON Date objects for server-side TTL and comparisons
- * ✅ Use 'token' field for the CUID string
- */
+
 export interface Session {
   _id?: any; // MongoDB ObjectId
   token: string; // The actual CUID session string
   userId: string;
   callsign: string;
-  expiresAt: Date; // ✅ BSON Date for { $gt: new Date() } queries
-  lastAccessedAt: Date; // ✅ BSON Date for extension logic
+  expiresAt: Date; 
+  lastAccessedAt: Date; 
   createdAt: Date;
   recoveryLogin?: boolean; // Flag for "Nudge" UI
 }
@@ -61,13 +57,12 @@ export type AuthenticatorTransport =
   | "hybrid";
 
 /**
- * Updated Challenge Interface for MongoDB
- * ✅ Use BSON Date for automatic TTL indexing
+ * Use BSON Date for automatic TTL indexing
  */
 export interface StoredChallenge {
   _id: string; // The challenge string (base64url)
   userId: string;
-  expiresAt: Date; // ✅ Changed to Date for TTL cleanup
+  expiresAt: Date; // Date for TTL cleanup
   type: "registration" | "authentication";
 }
 

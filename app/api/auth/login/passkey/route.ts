@@ -78,7 +78,6 @@ export async function POST(request: NextRequest) {
       },
     )
 
-    // ✅ SESSION LOGIC ALIGNMENT
     const sessionId = createId()
     const now = new Date()
     const sessionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
@@ -91,12 +90,11 @@ export async function POST(request: NextRequest) {
       },
       {
         $set: {
-          _id: sessionId,
-          token: sessionId, // Add token field for session lookup
+          token: sessionId, // token field for session lookup
           userId: userIdString,
           callsign: user.identity.callsign,
-          expiresAt: sessionExpiry, // ✅ Store as BSON Date
-          lastAccessedAt: now, // ✅ Store as BSON Date
+          expiresAt: sessionExpiry, 
+          lastAccessedAt: now,
           updatedAt: now,
         },
       },
@@ -117,7 +115,7 @@ export async function POST(request: NextRequest) {
       user: { id: user._id, callsign: user.identity.callsign },
       session: {
         token: sessionId,
-        expiresAt: sessionExpiry.getTime(), // ✅ Send as number to client
+        expiresAt: sessionExpiry.getTime(), // Send as number (timestamp) to frontend
       },
     })
   } catch (error) {

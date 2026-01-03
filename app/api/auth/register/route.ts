@@ -51,8 +51,6 @@ export async function POST(request: NextRequest) {
       registrationOptions.challenge as Uint8Array
     );
 
-    // ✅ FIX 1: Store expiresAt as a BSON Date Object
-    // This allows the query { expiresAt: { $gt: new Date() } } to work.
     await db.collection("challenges").insertOne({
       _id: challengeBase64,
       challenge: challengeBase64,
@@ -92,7 +90,6 @@ export async function GET(request: NextRequest) {
   const { getDB } = await import("@/lib/mongodb");
   const db = await getDB();
 
-  // ✅ FIX 2: Query using new Date() for consistency
   const storedChallenge = await db.collection("challenges").findOne({
     _id: challengeId,
     expiresAt: { $gt: new Date() },

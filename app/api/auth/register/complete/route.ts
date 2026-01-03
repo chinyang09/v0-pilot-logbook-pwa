@@ -50,10 +50,9 @@ export async function POST(request: NextRequest) {
     // Insert user into database
     await db.collection<User>("users").insertOne(user)
 
-    // --- SESSION CREATION (Updated for Consistency) ---
     const sessionId = createId()
-    const now = new Date() // ✅ BSON Date
-    const sessionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // ✅ BSON Date
+    const now = new Date() 
+    const sessionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
 
     await db.collection("sessions").insertOne({
       // We use 'token' for lookups, but keep _id as unique identifier

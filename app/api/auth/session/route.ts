@@ -27,11 +27,9 @@ export async function GET() {
       return NextResponse.json({ authenticated: false });
     }
 
-    // ✅ FIX 2: Consistency in Session Extension
     const now = new Date();
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    // Use lastAccessedAt to match your lib/session.ts logic
     const lastUpdate =
       session.lastAccessedAt || session.updatedAt || session.createdAt;
 
@@ -39,7 +37,7 @@ export async function GET() {
       const newExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
       await db.collection("sessions").updateOne(
-        { _id: sessionId }, // ✅ FIX 3: Match by token
+        { token: sessionId }, 
         {
           $set: {
             expiresAt: newExpiry,
@@ -80,7 +78,6 @@ export async function DELETE() {
 
     if (sessionId) {
       const db = await getDB();
-      // ✅ FIX 4: Delete by token
       await db.collection("sessions").deleteOne({ token: sessionId });
       cookieStore.delete("session");
     }
