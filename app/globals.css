@@ -6,7 +6,7 @@
 /* Aviation-themed dark color palette */
 /* Updated background to use hex that matches theme-color exactly */
 :root {
-  --background: #14151a;
+  --background: #2554FF;
   --foreground: oklch(0.95 0.01 240);
   --card: oklch(0.17 0.01 240);
   --card-foreground: oklch(0.95 0.01 240);
@@ -93,7 +93,7 @@
   }
   /* Force background on html and body for Android nav bar area */
   html {
-    background-color: #14151a !important;
+    background-color: #2554FF !important;
     min-height: 100%;
     min-height: 100dvh;
     min-height: -webkit-fill-available;
@@ -102,21 +102,21 @@
     @apply bg-background text-foreground;
     min-height: 100dvh;
     min-height: -webkit-fill-available;
-    background-color: #14151a !important;
+    background-color: #2554FF !important;
   }
 }
 
 /* Android PWA - extend background behind system navigation */
 @media (display-mode: standalone) {
   html {
-    background-color: #14151a !important;
+    background-color: #2554FF !important;
     /* Extend content behind navigation bar */
     height: 100%;
     overflow: hidden;
   }
 
   body {
-    background-color: #14151a !important;
+    background-color: #2554FF !important;
     height: 100%;
     overflow: auto;
     -webkit-overflow-scrolling: touch;
@@ -125,7 +125,7 @@
   /* Ensure root element fills the space */
   #__next,
   main {
-    background-color: #14151a !important;
+    background-color: #2554FF !important;
     min-height: 100%;
   }
 }
@@ -140,7 +140,7 @@
     left: 0;
     right: 0;
     height: env(safe-area-inset-bottom);
-    background-color: #14151a;
+    background-color: #2554FF;
     z-index: 9999;
     pointer-events: none;
   }

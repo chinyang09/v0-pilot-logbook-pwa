@@ -31,8 +31,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#14151a" },
-    { media: "(prefers-color-scheme: light)", color: "#14151a" },
+    { media: "(prefers-color-scheme: dark)", color: "#2554FF" },
+    { media: "(prefers-color-scheme: light)", color: "#2554FF" },
   ],
   colorScheme: "dark",
   width: "device-width",
@@ -48,17 +48,17 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark bg-[#14151a]" style={{ backgroundColor: "#14151a" }}>
+    <html lang="en" className="dark bg-[#2554FF]" style={{ backgroundColor: "#2554FF" }}>
       <head>
-        <meta name="theme-color" content="#14151a" />
-        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14151a" />
-        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#14151a" />
+        <meta name="theme-color" content="#2554FF" />
+        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2554FF" />
+        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#2554FF" />
         {/* Windows tile color */}
-        <meta name="msapplication-TileColor" content="#14151a" />
+        <meta name="msapplication-TileColor" content="#2554FF" />
         {/* Android specific */}
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
-      <body className="bg-[#14151a] font-sans antialiased" style={{ backgroundColor: "#14151a", minHeight: "100dvh" }}>
+      <body className="bg-[#2554FF] font-sans antialiased" style={{ backgroundColor: "#2554FF", minHeight: "100dvh" }}>
         <ServiceWorkerRegister />
         <AuthProvider>
           <SyncProvider>{children}</SyncProvider>
