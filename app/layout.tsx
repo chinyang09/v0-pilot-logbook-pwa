@@ -31,8 +31,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#1a1b1f" },
-    { media: "(prefers-color-scheme: light)", color: "#1a1b1f" },
+    { media: "(prefers-color-scheme: dark)", color: "#14151a" },
+    { media: "(prefers-color-scheme: light)", color: "#14151a" },
   ],
   colorScheme: "dark",
   width: "device-width",
@@ -48,16 +48,16 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark" style={{ backgroundColor: "#1a1b1f" }}>
+    <html lang="en" className="dark" style={{ backgroundColor: "#14151a" }}>
       <head>
         {/* Android status bar color */}
-        <meta name="theme-color" content="#1a1b1f" />
+        <meta name="theme-color" content="#14151a" />
         {/* Windows tile color */}
-        <meta name="msapplication-TileColor" content="#1a1b1f" />
+        <meta name="msapplication-TileColor" content="#14151a" />
         {/* Android navbar color */}
-        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1a1b1f" />
+        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14151a" />
       </head>
-      <body className="bg-background font-sans antialiased" style={{ backgroundColor: "#1a1b1f" }}>
+      <body className="bg-background font-sans antialiased" style={{ backgroundColor: "#14151a" }}>
         <ServiceWorkerRegister />
         <AuthProvider>
           <SyncProvider>{children}</SyncProvider>
