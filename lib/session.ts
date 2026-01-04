@@ -19,7 +19,7 @@ export async function validateSession(): Promise<SessionData | null> {
     const client = await getMongoClient();
     const db = client.db("skylog");
 
-    // ✅ FIX 1: Search by 'token' field and compare against BSON Date
+    
     const session = await db.collection("sessions").findOne({
       token: sessionToken,
       expiresAt: { $gt: new Date() },
@@ -40,7 +40,7 @@ export async function validateSession(): Promise<SessionData | null> {
     if (lastAccess < oneDayAgo) {
       const newExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
       await db.collection("sessions").updateOne(
-        { token: sessionToken }, // ✅ FIX 2: Correct filter field
+        { token: sessionToken }, 
         { $set: { lastAccessedAt: now, expiresAt: newExpiresAt } }
       );
     }

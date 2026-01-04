@@ -380,7 +380,7 @@ export default function LoginPage() {
         }),
       })
 
-      const result = await res.json() // ✅ Fixed: result was being declared twice in your snippet
+      const result = await res.json()
       if (!res.ok) throw new Error(result.error || "Invalid callsign or code")
 
       await login({

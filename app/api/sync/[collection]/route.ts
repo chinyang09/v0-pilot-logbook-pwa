@@ -2,6 +2,8 @@ import { type NextRequest, NextResponse } from "next/server"
 import { getMongoClient } from "@/lib/mongodb"
 import { validateSessionFromHeader } from "@/lib/session"
 
+const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ collection: string }> }) {
   try {
     const session = await validateSessionFromHeader(request)
@@ -21,6 +23,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const mongoClient = await getMongoClient()
     const db = mongoClient.db("skylog")
 
+    const tombstoneRetentionCutoff = Date.now() - TOMBSTONE_RETENTION_MS
+    if (since > 0 && since < tombstoneRetentionCutoff) {
+      console.log("[v0] Client lastSyncTime is older than tombstone retention - requiring full resync")
+      return NextResponse.json({
+        requiresFullResync: true,
+        reason: "Your last sync was too long ago. A full re-sync is required.",
+        records: [],
+        deletions: [],
+        syncedAt: Date.now(),
+        count: 0,
+      })
+    }
+
     const query: Record<string, unknown> = { userId: session.userId }
     if (since > 0) {
       query.$or = [{ updatedAt: { $gt: since } }, { createdAt: { $gt: since } }, { syncedAt: { $gt: since } }]
@@ -30,6 +45,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       collection === "flights" ? { date: -1, updatedAt: -1, createdAt: -1 } : { updatedAt: -1, createdAt: -1 }
 
     const records = await db.collection(collection).find(query).sort(sortCriteria).toArray()
+
+    let deletions: string[] = []
+    if (since > 0) {
+      const tombstones = await db
+        .collection("deletions")
+        .find({
+          userId: session.userId,
+          collection,
+          deletedAt: { $gt: new Date(since) },
+        })
+        .toArray()
+
+      deletions = tombstones.map((t) => t.recordId)
+      console.log(`[v0] Found ${deletions.length} deletions for ${collection} since ${new Date(since).toISOString()}`)
+    }
 
     const transformedRecords = records.map((record) => {
       const { _id, syncedAt, ...rest } = record
@@ -139,6 +169,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     return NextResponse.json({
       records: transformedRecords,
+      deletions, // Include deletions array in response
       syncedAt: Date.now(),
       count: transformedRecords.length,
     })

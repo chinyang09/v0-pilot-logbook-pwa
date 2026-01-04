@@ -269,6 +269,21 @@ export async function deleteFlight(id: string): Promise<boolean> {
   return true
 }
 
+export async function silentDeleteFlight(id: string): Promise<boolean> {
+  const flight = await db.flights.get(id)
+  if (!flight) {
+    // Also try to find by mongoId pattern
+    const byMongoPattern = await db.flights.filter((f) => f.id === id || f.mongoId === id).first()
+    if (byMongoPattern) {
+      await db.flights.delete(byMongoPattern.id)
+      return true
+    }
+    return false
+  }
+  await db.flights.delete(id)
+  return true
+}
+
 export async function getAllFlights(): Promise<FlightLog[]> {
   const flights = await db.flights.orderBy("date").reverse().toArray()
   return flights
@@ -410,6 +425,20 @@ export async function deleteAircraft(id: string): Promise<boolean> {
   return true
 }
 
+export async function silentDeleteAircraft(id: string): Promise<boolean> {
+  const aircraft = await db.aircraft.get(id)
+  if (!aircraft) {
+    const byMongoPattern = await db.aircraft.filter((a) => a.id === id || a.mongoId === id).first()
+    if (byMongoPattern) {
+      await db.aircraft.delete(byMongoPattern.id)
+      return true
+    }
+    return false
+  }
+  await db.aircraft.delete(id)
+  return true
+}
+
 export async function getAllAircraft(): Promise<Aircraft[]> {
   return db.aircraft.toArray()
 }
@@ -514,6 +543,20 @@ export async function deletePersonnel(id: string): Promise<boolean> {
 
   await db.personnel.delete(id)
   await addToSyncQueue("delete", "personnel", { id, mongoId: person.mongoId })
+  return true
+}
+
+export async function silentDeletePersonnel(id: string): Promise<boolean> {
+  const person = await db.personnel.get(id)
+  if (!person) {
+    const byMongoPattern = await db.personnel.filter((p) => p.id === id || p.mongoId === id).first()
+    if (byMongoPattern) {
+      await db.personnel.delete(byMongoPattern.id)
+      return true
+    }
+    return false
+  }
+  await db.personnel.delete(id)
   return true
 }
 
@@ -806,13 +849,26 @@ export async function clearUserSession(): Promise<void> {
 
 // Function to clear all user data (for logout or user switch)
 export async function clearAllUserData(): Promise<void> {
-  await db.flights.clear()
-  await db.aircraft.clear()
-  await db.personnel.clear()
-  await db.syncQueue.clear()
-  await db.syncMeta.clear()
-  await db.preferences.clear()
+  await db.transaction("rw", [db.flights, db.aircraft, db.personnel, db.syncQueue, db.syncMeta], async () => {
+    await db.flights.clear()
+    await db.aircraft.clear()
+    await db.personnel.clear()
+    await db.syncQueue.clear()
+    await db.syncMeta.clear()
+  })
   await clearUserSession()
+}
+
+// Function to clear all local data for full resync
+export async function clearAllLocalData(): Promise<void> {
+  await db.transaction("rw", [db.flights, db.aircraft, db.personnel, db.syncQueue, db.syncMeta], async () => {
+    await db.flights.clear()
+    await db.aircraft.clear()
+    await db.personnel.clear()
+    await db.syncQueue.clear()
+    await db.syncMeta.clear()
+  })
+  console.log("[v0] Cleared all local data for full resync")
 }
 
 // Function to get current user ID from session
