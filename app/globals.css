@@ -4,8 +4,9 @@
 @custom-variant dark (&:is(.dark *));
 
 /* Aviation-themed dark color palette */
+/* Updated background to use hex that matches theme-color exactly */
 :root {
-  --background: oklch(0.13 0.01 240);
+  --background: #1a1b1f;
   --foreground: oklch(0.95 0.01 240);
   --card: oklch(0.17 0.01 240);
   --card-foreground: oklch(0.95 0.01 240);
@@ -90,15 +91,24 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Force background color on html for Android PWA */
   html {
-    background-color: var(--background);
+    background-color: #1a1b1f;
   }
   body {
     @apply bg-background text-foreground;
-    min-height: 100dvh; 
+    min-height: 100dvh;
+    background-color: #1a1b1f;
   }
 }
 
+/* Android PWA specific overrides */
+@media (display-mode: standalone) {
+  html,
+  body {
+    background-color: #1a1b1f !important;
+  }
+}
 
 /* PWA specific styles */
 @supports (padding-top: env(safe-area-inset-top)) {
