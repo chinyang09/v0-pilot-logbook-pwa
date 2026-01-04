@@ -4,7 +4,6 @@
   "description": "Professional pilot logbook with offline capability",
   "start_url": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#05080B",
   "theme_color": "#05080B",
   "orientation": "portrait-primary",

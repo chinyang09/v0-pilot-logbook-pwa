@@ -93,6 +93,7 @@
   }
   /* Force background on html and body for Android nav bar area */
   html {
+    canvas-color: #05080B;
     background-color: #05080B !important;
     min-height: 100%;
     min-height: 100dvh;
