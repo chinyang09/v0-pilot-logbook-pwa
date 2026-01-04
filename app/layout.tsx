@@ -12,28 +12,27 @@ const geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "OOOI",
-  description:
-    "Professional pilot logbook with offline capability and cloud sync",
+  description: "Professional pilot logbook with offline capability and cloud sync",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "black-translucent", // make iPad look seamless
     title: "OOOI",
   },
   icons: {
     icon: "/icon-192.png",
     apple: "/icon-192.png",
   },
-  generator: "v0.app",
+    generator: 'v0.app'
 };
 
 export const viewport: Viewport = {
-  themeColor: "#1a1d2e",
+  themeColor: "#14151a", 
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  viewportFit: "cover",
+  viewportFit: "cover", // "bleed" effect
 };
 
 export default function RootLayout({
@@ -42,14 +41,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="bg-background">
-      <head>
-        <link rel="manifest" href="/manifest.json" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-      </head>
-      <body className={`font-sans antialiased`}>
+    <html lang="en" className="dark"> {/* Add 'dark' class if using Tailwind dark mode */}
+      <body className="bg-background font-sans antialiased">
         <ServiceWorkerRegister />
-        {/*<OfflineIndicator />*/}
         <AuthProvider>
           <SyncProvider>{children}</SyncProvider>
         </AuthProvider>
