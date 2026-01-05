@@ -18,7 +18,7 @@ import {
   refreshAllData,
   useDBReady,
   useAircraft,
-  useAirports,
+  useAirportDatabase,
   usePersonnel,
 } from "@/hooks/use-indexed-db";
 import { ArrowLeft, Calendar, Plus, Search, X } from "lucide-react";
@@ -89,7 +89,7 @@ export default function LogbookPage() {
     refresh: refreshFlights,
   } = useFlights();
   const { aircraft } = useAircraft();
-  const { airports } = useAirports();
+  const { airports } = useAirportDatabase();
   const { personnel } = usePersonnel();
 
   const [showCalendar, setShowCalendar] = useState(false);
@@ -108,6 +108,26 @@ export default function LogbookPage() {
 
   const calendarRef = useRef<CalendarHandle>(null);
   const flightListRef = useRef<FlightListRef>(null);
+  const calendarContainerRef = useRef<HTMLDivElement>(null);
+
+  const HEADER_HEIGHT = 48;
+  const appleEasing = "cubic-bezier(0.4, 0, 0.2, 1)";
+
+  const [calendarHeight, setCalendarHeight] = useState(0);
+
+  // Use a ResizeObserver or useEffect to get the actual height of the calendar content
+  useEffect(() => {
+    if (calendarContainerRef.current) {
+      // We measure the height once.
+      // If your calendar height is constant, offsetHeight is fine.
+      setCalendarHeight(calendarContainerRef.current.offsetHeight);
+    }
+  }, []);
+
+  // Calculate the total offset dynamically based on visibility
+  const totalOffset = showCalendar
+    ? calendarHeight + HEADER_HEIGHT
+    : HEADER_HEIGHT;
 
   const syncSourceRef = useRef<"calendar" | "flights" | null>(null);
   const syncLockRef = useRef(false);
@@ -153,13 +173,11 @@ export default function LogbookPage() {
     [flights]
   );
 
+  // Tweaked handleFlightScroll: detect flights below the "frosted" area
   const handleFlightScroll = useCallback(
     (topFlight: FlightLog | null) => {
       if (!showCalendar || !topFlight) return;
-
-      if (syncSourceRef.current !== "flights" || syncLockRef.current) {
-        return;
-      }
+      if (syncSourceRef.current !== "flights" || syncLockRef.current) return;
 
       const flightDate = parseDateLocal(topFlight.date);
       const newYear = flightDate.getFullYear();
@@ -310,9 +328,10 @@ export default function LogbookPage() {
   const isLoading = dbLoading || !dbReady;
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-background">
-      <header className="flex-shrink-0 bg-background/30 backdrop-blur-xl border-b border-border/50 z-50">
-        <div className="flex items-center justify-between h-12 px-4">
+    <div className="relative h-[100dvh] bg-background overflow-hidden flex flex-col">
+      {/* HEADER: High z-index, frosted glass [cite: 234-235] */}
+      <header className="absolute top-0 w-full h-12 z-50 bg-background/40 backdrop-blur-xl border-b border-border/50">
+        <div className="flex items-center justify-between h-full px-4">
           {showCalendar ? (
             <Button
               variant="ghost"
@@ -367,16 +386,24 @@ export default function LogbookPage() {
         </div>
       </header>
 
+      {/* CALENDAR: Absolute position with frosted glass effect */}
       <div
+        ref={calendarContainerRef}
         className={cn(
-          "flex-shrink-0 bg-card border-b border-border overflow-hidden transition-all duration-300 ease-out origin-top",
+          "absolute top-12 left-0 right-0 z-40 border-b border-white/10 dark:border-white/5",
+          // Increased opacity for legibility (0.6 instead of 0.3)
+          "bg-white/60 dark:bg-background/60 backdrop-blur-2xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1)]",
+          "transition-all duration-500 will-change-transform",
+          "max-h-[40vh]",
           showCalendar
-            ? "max-h-[35vh] opacity-100 scale-y-100"
-            : "max-h-0 opacity-0 scale-y-0"
+            ? "translate-y-0 opacity-100"
+            : "-translate-y-full opacity-0"
         )}
+        style={{ transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)" }}
       >
         <LogbookCalendar
           ref={calendarRef}
+          className="bg-transparent shadow-none border-none"
           flights={flights}
           selectedMonth={selectedMonth}
           onMonthChange={handleCalendarMonthChange}
@@ -386,132 +413,8 @@ export default function LogbookPage() {
         />
       </div>
 
-      {!showCalendar && (
-        <div className="flex-shrink-0 sticky top-0 z-40 px-2 py-1">
-          <div className="relative">
-            <Input
-              placeholder="Search flights..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => setSearchFocused(true)}
-              className="pl-10 h-10 bg-background/30 backdrop-blur-xl border-border"
-            />
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
-            {searchFocused && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchFocused(false);
-                  setSearchQuery("");
-                  setActiveFilterType("none");
-                  setSelectedFilters([]);
-                }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-sm text-primary font-medium"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-
-          {/* Filter type buttons */}
-          {searchFocused && (
-            <div className="flex items-center gap-1.5 mt-3 animate-in fade-in slide-in-from-top-2 duration-200">
-              {[
-                { id: "flight", label: "Flight" },
-                { id: "aircraft", label: "Aircraft" },
-                { id: "airport", label: "Airport" },
-                { id: "crew", label: "Crew" },
-              ].map((filter) => (
-                <Button
-                  key={filter.id}
-                  variant={
-                    activeFilterType === filter.id ? "secondary" : "ghost"
-                  }
-                  size="sm"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    setActiveFilterType(
-                      activeFilterType === filter.id
-                        ? "none"
-                        : (filter.id as typeof activeFilterType)
-                    );
-                    if (activeFilterType === filter.id) {
-                      setSearchQuery("");
-                      setSelectedFilters([]);
-                    }
-                  }}
-                  className="flex-1 text-xs h-8 font-medium"
-                >
-                  {filter.label}
-                </Button>
-              ))}
-            </div>
-          )}
-
-          {/* Selected filter chips */}
-          {selectedFilters.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-3 animate-in fade-in duration-200">
-              {selectedFilters.map((filter) => (
-                <button
-                  key={filter}
-                  type="button"
-                  onClick={() => toggleFilterOption(filter)}
-                  className="px-2.5 py-1 bg-primary/20 text-primary text-xs rounded-full flex items-center gap-1 font-medium hover:bg-primary/30 transition-colors"
-                >
-                  {filter}
-                  <X className="h-3 w-3" />
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Filter results count */}
-          {hasActiveFilters && !searchFocused && (
-            <div className="flex items-center justify-between mt-2 animate-in fade-in duration-200">
-              <span className="text-xs text-muted-foreground">
-                {filteredFlights.length} flight
-                {filteredFlights.length !== 1 ? "s" : ""}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearAllFilters}
-                className="text-xs h-7 hover:bg-destructive/10"
-              >
-                <X className="h-3 w-3 mr-1" />
-                Clear filters
-              </Button>
-            </div>
-          )}
-
-          {/* Search suggestions dropdown */}
-          {searchFocused &&
-            activeFilterType !== "none" &&
-            filterOptions.length > 0 && (
-              <div className="mt-2 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
-                {filterOptions.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      toggleFilterOption(option);
-                    }}
-                    className={cn(
-                      "w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors",
-                      selectedFilters.includes(option) &&
-                        "bg-primary/10 text-primary"
-                    )}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-            )}
-        </div>
-      )}
-
-      <main className="flex-1 min-h-0 overflow-hidden">
+      {/* FLIGHT LIST: Takes full screen, scrolls behind the calendar */}
+      <main className="h-full">
         <FlightList
           ref={flightListRef}
           flights={filteredFlights}
@@ -519,14 +422,134 @@ export default function LogbookPage() {
           isLoading={flightsLoading || isLoading}
           onEdit={handleEditFlight}
           onDeleted={handleFlightDeleted}
-          aircraft={aircraft}
-          airports={airports}
-          personnel={personnel}
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          showMonthHeaders={false}
-          hideFilters={true}
+          topSpacerHeight={totalOffset} // New Prop
+          headerContent={
+            <div className="flex-shrink-0 top-0 z-40 px-2 py-1">
+              <div className="relative">
+                <Input
+                  placeholder="Search flights..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => setSearchFocused(true)}
+                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl border-border"
+                />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+                {searchFocused && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchFocused(false);
+                      setSearchQuery("");
+                      setActiveFilterType("none");
+                      setSelectedFilters([]);
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-sm text-primary font-medium"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+
+              {/* Filter type buttons */}
+              {searchFocused && (
+                <div className="flex items-center gap-1.5 mt-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                  {[
+                    { id: "flight", label: "Flight" },
+                    { id: "aircraft", label: "Aircraft" },
+                    { id: "airport", label: "Airport" },
+                    { id: "crew", label: "Crew" },
+                  ].map((filter) => (
+                    <Button
+                      key={filter.id}
+                      variant={
+                        activeFilterType === filter.id ? "secondary" : "ghost"
+                      }
+                      size="sm"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setActiveFilterType(
+                          activeFilterType === filter.id
+                            ? "none"
+                            : (filter.id as typeof activeFilterType)
+                        );
+                        if (activeFilterType === filter.id) {
+                          setSearchQuery("");
+                          setSelectedFilters([]);
+                        }
+                      }}
+                      className="flex-1 text-xs h-8 font-medium"
+                    >
+                      {filter.label}
+                    </Button>
+                  ))}
+                </div>
+              )}
+
+              {/* Selected filter chips */}
+              {selectedFilters.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-3 animate-in fade-in duration-200">
+                  {selectedFilters.map((filter) => (
+                    <button
+                      key={filter}
+                      type="button"
+                      onClick={() => toggleFilterOption(filter)}
+                      className="px-2.5 py-1 bg-primary/20 text-primary text-xs rounded-full flex items-center gap-1 font-medium hover:bg-primary/30 transition-colors"
+                    >
+                      {filter}
+                      <X className="h-3 w-3" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Filter results count */}
+              {hasActiveFilters && !searchFocused && (
+                <div className="flex items-center justify-between mt-2 animate-in fade-in duration-200">
+                  <span className="text-xs text-muted-foreground">
+                    {filteredFlights.length} flight
+                    {filteredFlights.length !== 1 ? "s" : ""}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearAllFilters}
+                    className="text-xs h-7 hover:bg-destructive/10"
+                  >
+                    <X className="h-3 w-3 mr-1" />
+                    Clear filters
+                  </Button>
+                </div>
+              )}
+
+              {/* Search suggestions dropdown */}
+              {searchFocused &&
+                activeFilterType !== "none" &&
+                filterOptions.length > 0 && (
+                  <div className="mt-2 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+                    {filterOptions.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          toggleFilterOption(option);
+                        }}
+                        className={cn(
+                          "w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors",
+                          selectedFilters.includes(option) &&
+                            "bg-primary/10 text-primary"
+                        )}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                )}
+            </div>
+          } // Height of the sticky header (12 * 4)
         />
       </main>
 
