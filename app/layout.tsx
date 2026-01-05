@@ -48,17 +48,16 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark bg-[#05080B]" style={{ backgroundColor: "#05080B" }}>
+    <html lang="en" className="dark" style={{ backgroundColor: "#05080B" }}>
       <head>
+        {/* Android status bar color */}
         <meta name="theme-color" content="#05080B" />
-        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05080B" />
-        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#05080B" />
         {/* Windows tile color */}
         <meta name="msapplication-TileColor" content="#05080B" />
-        {/* Android specific */}
-        <meta name="mobile-web-app-capable" content="yes" />
+        {/* Android navbar color */}
+        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05080B" />
       </head>
-      <body className="bg-[#05080B] font-sans antialiased" style={{ backgroundColor: "#05080B", minHeight: "100dvh" }}>
+      <body className="bg-background font-sans antialiased" style={{ backgroundColor: "#05080B" }}>
         <ServiceWorkerRegister />
         <AuthProvider>
           <SyncProvider>{children}</SyncProvider>
