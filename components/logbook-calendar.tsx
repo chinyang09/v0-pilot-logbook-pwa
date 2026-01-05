@@ -99,7 +99,6 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     () => ({
       scrollToMonth: (year: number, month: number) => {
         isExternalScrollRef.current = true
-        // Don't call onMonthChange here - parent already set the month
         setTimeout(() => {
           isExternalScrollRef.current = false
         }, 400)
@@ -140,11 +139,9 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       let newMonth = selectedMonth.month
 
       if (diffY > 0) {
-        // Swipe up = next month
         newMonth = selectedMonth.month === 11 ? 0 : selectedMonth.month + 1
         newYear = selectedMonth.month === 11 ? selectedMonth.year + 1 : selectedMonth.year
       } else {
-        // Swipe down = previous month
         newMonth = selectedMonth.month === 0 ? 11 : selectedMonth.month - 1
         newYear = selectedMonth.month === 0 ? selectedMonth.year - 1 : selectedMonth.year
       }
@@ -164,11 +161,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
   const today = getTodayLocal()
 
   return (
-    <div
-      className="flex flex-col h-full bg-gradient-to-b from-background via-background to-muted/20 touch-none"
-      style={{ touchAction: "none" }}
-    >
-      <div className="grid grid-cols-7 gap-1 px-3 py-2 bg-muted/30 border-b border-border/50">
+    <div className="flex flex-col h-full bg-card touch-none" style={{ touchAction: "none" }}>
+      <div className="grid grid-cols-7 gap-1 px-3 py-2 bg-background/50 backdrop-blur-sm border-b border-border/30">
         {DAYS.map((day, i) => (
           <div key={i} className="text-center text-xs font-semibold text-muted-foreground/80 uppercase tracking-wide">
             {day}

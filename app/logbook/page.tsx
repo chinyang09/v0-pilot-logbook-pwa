@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import type { FlightLog } from "@/lib/indexed-db"
 import { syncService } from "@/lib/sync-service"
 import { useFlights, refreshAllData, useDBReady, useAircraft, useAirports, usePersonnel } from "@/hooks/use-indexed-db"
-import { Calendar, Plus, Search, X } from "lucide-react"
+import { ArrowLeft, Calendar, Plus, Search, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { SyncStatus } from "@/components/sync-status"
 import { cn } from "@/lib/utils"
@@ -33,12 +33,10 @@ function parseDateLocal(dateStr: string): Date {
   const month = Number(parts[1])
   const day = Number(parts[2])
 
-  // Handle 2-digit year (YY format) - assume 2000s
   if (year < 100) {
     year = 2000 + year
   }
 
-  // Validate parsed values
   if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) {
     return new Date()
   }
@@ -84,7 +82,6 @@ export default function LogbookPage() {
 
   const syncSourceRef = useRef<"calendar" | "flights" | null>(null)
   const syncLockRef = useRef(false)
-  const hideNavbarTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     const unsubscribe = syncService.onDataChanged(() => {
@@ -160,19 +157,6 @@ export default function LogbookPage() {
       syncSourceRef.current = "flights"
     }
   }, [])
-
-  /*const handleCalendarSwipeStart = useCallback(() => {
-    if (hideNavbarTimeoutRef.current) {
-      clearTimeout(hideNavbarTimeoutRef.current);
-    }
-    setHideNavbar(true);
-  }, []);
-
-  const handleCalendarInteractionEnd = useCallback(() => {
-    hideNavbarTimeoutRef.current = setTimeout(() => {
-      setHideNavbar(false);
-    }, 300);
-  }, []);*/
 
   const handleDateSelect = useCallback((date: string) => {
     setSelectedDate((prev) => (prev === date ? null : date))
@@ -279,49 +263,101 @@ export default function LogbookPage() {
 
   return (
     <div className="flex flex-col h-[100dvh] bg-background">
-      {/* Header */}
-      <header
+      <header className="flex-shrink-0 bg-background/80 backdrop-blur-xl border-b border-border/50 z-50">
+        <div className="flex items-center justify-between h-12 px-4">
+          {showCalendar ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                setShowCalendar(false)
+                setSelectedDate(null)
+              }}
+              className="h-8 w-8 p-0"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+          ) : (
+            <h1 className="text-lg font-semibold text-foreground">Logbook</h1>
+          )}
+
+          {showCalendar && (
+            <h1 className="text-lg font-semibold text-foreground">
+              {MONTHS[selectedMonth.month]} {selectedMonth.year}
+            </h1>
+          )}
+
+          <div className="flex items-center gap-2">
+            <SyncStatus />
+            <Button
+              variant={showCalendar ? "default" : "ghost"}
+              size="icon"
+              onClick={() => {
+                setShowCalendar(!showCalendar)
+                setSelectedDate(null)
+                setSearchFocused(false)
+              }}
+              className="h-8 w-8"
+            >
+              <Calendar className="h-4 w-4" />
+            </Button>
+
+            <CSVImportButton userId={currentUserId} userName={currentUserName} onComplete={() => refreshAllData()} />
+
+            <Button size="icon" onClick={() => router.push("/new-flight")} className="h-8 w-8">
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <div
         className={cn(
-          "flex-shrink-0 bg-background/95 backdrop-blur-lg border-b border-border z-50 transition-all duration-300",
-          showCalendar ? "h-12" : "h-24",
+          "flex-shrink-0 bg-card border-b border-border overflow-hidden transition-all duration-300 ease-out origin-top",
+          showCalendar ? "max-h-[35vh] opacity-100 scale-y-100" : "max-h-0 opacity-0 scale-y-0",
         )}
       >
-        <div className="px-4 h-full relative">
-          <div
-            className={cn(
-              "absolute top-0 left-0 right-0 px-4 h-12 flex items-center justify-between transition-all duration-300",
-              searchFocused ? "opacity-0 -translate-y-2 pointer-events-none" : "opacity-100 translate-y-0",
-            )}
-          >
-            <h1 className="text-lg font-semibold text-foreground">
-              {showCalendar ? `${MONTHS[selectedMonth.month]} ${selectedMonth.year}` : "Logbook"}
-            </h1>
+        <LogbookCalendar
+          ref={calendarRef}
+          flights={flights}
+          selectedMonth={selectedMonth}
+          onMonthChange={handleCalendarMonthChange}
+          onDateSelect={handleDateSelect}
+          selectedDate={selectedDate}
+          onScrollStart={handleCalendarScrollStart}
+        />
+      </div>
 
-            <div className="flex items-center gap-2">
-              <SyncStatus />
-              <Button
-                variant={showCalendar ? "default" : "ghost"}
-                size="sm"
+      {!showCalendar && (
+        <div className="flex-shrink-0 sticky top-0 z-40 bg-background/80 backdrop-blur-xl px-4 py-3 border-b border-border/50">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+            <Input
+              placeholder="Search flights..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              className="pl-10 h-10 bg-secondary/50 border-border"
+            />
+            {searchFocused && (
+              <button
+                type="button"
                 onClick={() => {
-                  setShowCalendar(!showCalendar)
-                  setSelectedDate(null)
                   setSearchFocused(false)
+                  setSearchQuery("")
+                  setActiveFilterType("none")
+                  setSelectedFilters([])
                 }}
-                className="gap-2"
+                className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-sm text-primary font-medium"
               >
-                <Calendar className="h-4 w-4" />
-              </Button>
-
-              <CSVImportButton userId={currentUserId} userName={currentUserName} onComplete={() => refreshAllData()} />
-
-              <Button size="sm" onClick={() => router.push("/new-flight")} className="gap-2">
-                <Plus className="h-4 w-4" />
-              </Button>
-            </div>
+                Cancel
+              </button>
+            )}
           </div>
 
+          {/* Filter type buttons */}
           {searchFocused && (
-            <div className="flex items-center gap-1.5 mt-2 p-0 bg-secondary/30 rounded-lg border border-border animate-in fade-in slide-in-from-top-5 duration-300">
+            <div className="flex items-center gap-1.5 mt-3 animate-in fade-in slide-in-from-top-2 duration-200">
               {[
                 { id: "flight", label: "Flight" },
                 { id: "aircraft", label: "Aircraft" },
@@ -350,8 +386,9 @@ export default function LogbookPage() {
             </div>
           )}
 
+          {/* Selected filter chips */}
           {selectedFilters.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 animate-in fade-in duration-300 mt-2">
+            <div className="flex flex-wrap gap-1.5 mt-3 animate-in fade-in duration-200">
               {selectedFilters.map((filter) => (
                 <button
                   key={filter}
@@ -366,11 +403,11 @@ export default function LogbookPage() {
             </div>
           )}
 
+          {/* Filter results count */}
           {hasActiveFilters && !searchFocused && (
-            <div className="flex items-center justify-between animate-in fade-in duration-300 mt-1">
+            <div className="flex items-center justify-between mt-2 animate-in fade-in duration-200">
               <span className="text-xs text-muted-foreground">
-                {filteredFlights.length} flight
-                {filteredFlights.length !== 1 ? "s" : ""}
+                {filteredFlights.length} flight{filteredFlights.length !== 1 ? "s" : ""}
               </span>
               <Button
                 variant="ghost"
@@ -384,68 +421,31 @@ export default function LogbookPage() {
             </div>
           )}
 
-          <div
-            className={cn(
-              "absolute left-0 right-0 px-2 space-y-2",
-              searchFocused
-                ? "top-10 opacity-100"
-                : showCalendar
-                  ? "top-12 opacity-0 pointer-events-none h-0"
-                  : "top-12 opacity-100",
-            )}
-          >
-            <div className="relative border border-border rounded-lg p-0 bg-input/50 backdrop-blur-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
-              <Input
-                placeholder="Search flights..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onFocus={() => {
-                  setSearchFocused(true)
-                  setShowCalendar(false)
-                }}
-                className="pl-9 pr-20 h-9 bg-transparent border-none"
-              />
-              {searchFocused && (
+          {/* Search suggestions dropdown */}
+          {searchFocused && activeFilterType !== "none" && filterOptions.length > 0 && (
+            <div className="mt-2 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+              {filterOptions.map((option) => (
                 <button
+                  key={option}
                   type="button"
-                  onClick={() => {
-                    setSearchFocused(false)
-                    setSearchQuery("")
-                    setActiveFilterType("none")
-                    setSelectedFilters([])
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    toggleFilterOption(option)
                   }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 z-10 px-3 py-1 text-sm text-primary font-medium hover:bg-primary/10 rounded transition-colors"
+                  className={cn(
+                    "w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors",
+                    selectedFilters.includes(option) && "bg-primary/10 text-primary",
+                  )}
                 >
-                  Cancel
+                  {option}
                 </button>
-              )}
+              ))}
             </div>
-          </div>
+          )}
         </div>
-      </header>
+      )}
 
-      {/* Calendar drawer */}
-      <div
-        className={cn(
-          "flex-shrink-0 bg-card border-b border-border overflow-hidden transition-all duration-300",
-          showCalendar ? "h-[35vh]" : "h-0",
-        )}
-      >
-        <LogbookCalendar
-          ref={calendarRef}
-          flights={flights}
-          selectedMonth={selectedMonth}
-          onMonthChange={handleCalendarMonthChange}
-          onDateSelect={handleDateSelect}
-          selectedDate={selectedDate}
-          onScrollStart={handleCalendarScrollStart}
-          //onSwipeStart={handleCalendarSwipeStart}
-          //onInteractionEnd={handleCalendarInteractionEnd}
-        />
-      </div>
-
-      <main className="flex-1 min-h-0 overflow-y-auto">
+      <main className="flex-1 min-h-0 overflow-hidden">
         <FlightList
           ref={flightListRef}
           flights={filteredFlights}

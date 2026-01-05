@@ -76,7 +76,7 @@ export default function Dashboard() {
   return (
     <PageContainer
       header={
-        <header className="flex-none bg-background/95 backdrop-blur-lg border-b border-border z-50">
+        <header className="flex-none bg-background/80 backdrop-blur-xl border-b border-border/50 z-50">
           <div className="container mx-auto px-4">
             <div className="flex items-center justify-between h-12">
               <h1 className="text-lg font-semibold text-foreground">Dashboard</h1>
@@ -244,5 +244,5 @@ export default function Dashboard() {
         </div>
       }
     </PageContainer>
-  );
+  )
 }
