@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState, useRef } from "react";
+import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/page-container";
 import { SyncStatus } from "@/components/sync-status";
 import { useAirportDatabase } from "@/hooks/use-indexed-db";
-import { getAirportByICAO } from "@/lib/airport-database";
+// Added getAirportLocalTime from your new lib
+import { getAirportByICAO, getAirportLocalTime } from "@/lib/airport-database";
 import {
   ArrowLeft,
   MapPin,
@@ -13,6 +14,8 @@ import {
   Mountain,
   Clock,
   Loader2,
+  Star, // Added for Favorites
+  History, // Added for Recents
 } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
 
@@ -27,6 +30,12 @@ export default function AirportDetailPage() {
     return getAirportByICAO(airports, icao);
   }, [airports, icao]);
 
+  // Dynamic local time calculation
+  const timeInfo = useMemo(() => {
+    if (!airport) return null;
+    return getAirportLocalTime(airport.tz);
+  }, [airport]);
+
   if (isLoading) {
     return (
       <div className="h-[100dvh] bg-background flex items-center justify-center">
@@ -38,7 +47,7 @@ export default function AirportDetailPage() {
   return (
     <PageContainer
       header={
-        <header className="flex-none bg-background/95 backdrop-blur-lg border-b border-border z-50">
+        <header className="flex-none bg-background/30 backdrop-blur-lg border-b border-border z-50">
           <div className="container mx-auto px-3">
             <div className="flex items-center justify-between h-12">
               <div className="flex items-center gap-2">
@@ -50,19 +59,19 @@ export default function AirportDetailPage() {
                 >
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
-                <h1 className="text-lg font-semibold">
+                <h1 className="text-lg font-semibold uppercase">
                   {airport ? airport.icao : "Airport"}
                 </h1>
               </div>
-              <SyncStatus />
+              <div className="flex items-center gap-2">
+                <SyncStatus />
+              </div>
             </div>
           </div>
         </header>
       }
     >
-      {/* 3. SCROLLABLE CONTENT: Main fills space and scrolls internally */}
       <div className="container mx-auto px-3 pt-3 pb-safe">
-        {" "}
         {!airport ? (
           <p className="text-center text-muted-foreground py-12">
             Airport {icao.toUpperCase()} not found
@@ -70,88 +79,88 @@ export default function AirportDetailPage() {
         ) : (
           <div className="space-y-4">
             {/* Airport header */}
-            <div className="bg-card border border-border rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-2xl font-bold text-foreground">
-                  {airport.icao}
-                </span>
-                {airport.iata && (
-                  <span className="text-lg text-muted-foreground">
-                    ({airport.iata})
+            <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-3xl font-bold tracking-tighter text-foreground">
+                    {airport.icao}
                   </span>
-                )}
+                  {airport.iata && (
+                    <span className="text-xl font-medium text-muted-foreground">
+                      / {airport.iata}
+                    </span>
+                  )}
+                </div>
               </div>
-              <h2 className="text-xl font-semibold text-foreground mb-1">
+
+              <h2 className="text-xl font-semibold text-foreground mb-1 leading-tight">
                 {airport.name}
               </h2>
-              <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                <MapPin className="h-4 w-4" />
+
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <MapPin className="h-3.5 w-3.5" />
                 <span>
-                  {airport.city} - {airport.country}
+                  {airport.city}
+                  {airport.state ? `, ${airport.state}` : ""} —{" "}
+                  {airport.country}
                 </span>
               </div>
             </div>
 
-            {/* Location details */}
-            <div className="bg-card border border-border rounded-lg p-4 space-y-3">
-              <h3 className="font-semibold text-foreground mb-2">
-                Location Details
-              </h3>
-
-              <div className="flex items-start gap-2">
-                <Globe className="h-4 w-4 text-muted-foreground mt-0.5" />
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-foreground">
-                    Coordinates
+            {/* Information Grid */}
+            <div className="grid grid-cols-1 gap-4">
+              {/* Local Time Card */}
+              <div className="bg-card border border-border rounded-lg p-4 flex items-center gap-4">
+                <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center">
+                  <Clock className="h-5 w-5 text-secondary-foreground" />
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Current Local Time
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    {airport.latitude.toFixed(6)}°,{" "}
-                    {airport.longitude.toFixed(6)}°
+                  <div className="text-lg font-bold text-foreground">
+                    {timeInfo}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Timezone: {airport.tz}
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-start gap-2">
-                <Mountain className="h-4 w-4 text-muted-foreground mt-0.5" />
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-foreground">
-                    Elevation
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    {airport.altitude} ft
-                  </div>
-                </div>
-              </div>
+              {/* Location details */}
+              <div className="bg-card border border-border rounded-lg p-4 space-y-4">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-2">
+                  Technical Data
+                </h3>
 
-              <div className="flex items-start gap-2">
-                <Clock className="h-4 w-4 text-muted-foreground mt-0.5" />
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-foreground">
-                    Timezone
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    {airport.tz}
-                    {airport.timezone !== undefined &&
-                      ` (UTC${airport.timezone >= 0 ? "+" : ""}${
-                        airport.timezone
-                      })`}
-                  </div>
-                </div>
-              </div>
-
-              {airport.dst && (
-                <div className="flex items-start gap-2">
-                  <Clock className="h-4 w-4 text-muted-foreground mt-0.5" />
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-foreground">
-                      DST
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <Globe className="h-3 w-3" /> Coordinates
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      {airport.dst}
+                    <div className="text-sm font-mono bg-muted/50 p-1.5 rounded text-center">
+                      {airport.latitude.toFixed(4)},{" "}
+                      {airport.longitude.toFixed(4)}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <Mountain className="h-3 w-3" /> Elevation
+                    </div>
+                    <div className="text-sm font-mono bg-muted/50 p-1.5 rounded text-center">
+                      {airport.altitude} FT
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            </div>
+
+            {/* Action Bar (Optional) */}
+            <div className="pt-2 flex gap-2">
+              <Button className="flex-1 gap-2" variant="outline">
+                <Star className="h-4 w-4" /> Mark as Favourite
+              </Button>
             </div>
           </div>
         )}

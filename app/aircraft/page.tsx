@@ -134,7 +134,7 @@ export default function AircraftPage() {
   return (
     <PageContainer
       header={
-        <header className="flex-none bg-background/80 backdrop-blur-xl border-b border-border/50 z-50">
+        <header className="flex-none bg-background/30 backdrop-blur-xl border-b border-border/50 z-50">
           <div className="container mx-auto px-3">
             <div className="flex items-center justify-between h-12">
               <div className="flex items-center gap-2">
@@ -166,7 +166,7 @@ export default function AircraftPage() {
         </div>
       ) : (
         <div className="container mx-auto px-3 pt-3 pb-safe">
-          <div className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl pb-3">
+          <div className="sticky top-0 z-40 bg-background/30 backdrop-blur-xl pb-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input

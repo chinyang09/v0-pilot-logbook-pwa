@@ -1,12 +1,15 @@
 import { db, type FlightLog, type Personnel } from "./indexed-db"
 import { calculateNightTimeComplete } from "./night-time-calculator"
 import { hhmmToMinutes, minutesToHHMM } from "./time-utils"
-import { getAirportByIATA, type AirportData } from "./airport-database"
+import { getAirportByIATA } from "./airport-database"
+// Import the helper we created earlier to get numeric offsets
+import { getAirportTimeInfo } from "./airport-database" 
 import { getAircraftByRegistrationFromDB, type AircraftData } from "./aircraft-database"
+import type { Airport } from "./indexed-db" // Use your centralized interface
 
 export async function processScootCSV(
   csvContent: string,
-  airports: AirportData[],
+  airports: Airport[], // Updated type
   aircraftDb: AircraftData[],
   currentUserId: string,
   currentUserName: string,
@@ -19,7 +22,6 @@ export async function processScootCSV(
   const existingCrew = await db.personnel.toArray()
   existingCrew.forEach((p) => crewCache.set(p.name.toLowerCase(), p.id))
 
-  // Containers for bulk operations
   const flightsToSave: FlightLog[] = []
   const personnelToSave: Personnel[] = []
   const syncQueueEntries: any[] = []
@@ -40,7 +42,6 @@ export async function processScootCSV(
     const arrAp = getAirportByIATA(airports, arrIata)
     const rawReg = cols[6]?.replace(/"/g, "").trim()
 
-    // Aircraft lookup (Awaited per row, or pre-cache if aircraftDb is large)
     const matchedAc = await getAircraftByRegistrationFromDB(rawReg)
 
     const outT = cols[2]?.trim()
@@ -52,12 +53,9 @@ export async function processScootCSV(
     const year = dateParts[2].length === 2 ? `20${dateParts[2]}` : dateParts[2]
     const flightDate = `${year}-${dateParts[1].toString().padStart(2, "0")}-${dateParts[0].toString().padStart(2, "0")}`
 
-    // Crew Logic
+    // Crew Logic (remains largely the same)
     const rawPicName = cols[8]?.replace(/"/g, "").trim()
-    let picId = "",
-      picName = "",
-      sicId = "",
-      sicName = ""
+    let picId = "", picName = "", sicId = "", sicName = ""
     const isUserPic = rawPicName?.toLowerCase() === currentUserName.toLowerCase()
 
     if (isUserPic) {
@@ -78,21 +76,26 @@ export async function processScootCSV(
         }
         personnelToSave.push(newPerson)
         crewCache.set(picName.toLowerCase(), newPerson.id)
-
-        // Add to sync queue batch
-        syncQueueEntries.push({
-          id: crypto.randomUUID(),
-          type: "create",
-          collection: "personnel",
-          data: newPerson,
-          timestamp: Date.now(),
-        })
+        syncQueueEntries.push({ id: crypto.randomUUID(), type: "create", collection: "personnel", data: newPerson, timestamp: Date.now() })
       }
       picId = crewCache.get(picName.toLowerCase()) || ""
     }
 
-    const nightT =
-      !isSim && depAp && arrAp
+    // NEW: Dynamic Offset Calculation
+    // We convert "GMT+8" or "America/New_York" into the numeric offset hours your FlightLog expects
+    const getNumericOffset = (tz: string) => {
+      try {
+        const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' }).formatToParts(new Date());
+        const offsetPart = parts.find(p => p.type === 'timeZoneName')?.value || ""; // e.g. "GMT+08:00"
+        const match = offsetPart.match(/([+-]\d+)/);
+        return match ? parseInt(match[1]) : 0;
+      } catch { return 0; }
+    }
+
+    const depOffset = depAp ? getNumericOffset(depAp.tz) : 0;
+    const arrOffset = arrAp ? getNumericOffset(arrAp.tz) : 0;
+
+    const nightT = !isSim && depAp && arrAp
         ? calculateNightTimeComplete(
             flightDate,
             outT,
@@ -108,15 +111,16 @@ export async function processScootCSV(
       id: crypto.randomUUID(),
       isDraft: false,
       date: flightDate,
-      flightNumber: "", // Scoot CSV doesn't explicitly provide this in standard cols
+      flightNumber: "", 
       aircraftReg: matchedAc?.registration || rawReg,
-      aircraftType: matchedAc?.typecode || cols[5],
+      aircraftType: (matchedAc as any)?.typecode || cols[5],
       departureIata: depIata,
       departureIcao: depAp?.icao || "",
       arrivalIata: arrIata,
       arrivalIcao: arrAp?.icao || "",
-      departureTimezone: depAp?.timezone ? Number.parseFloat(depAp.timezone) : 0,
-      arrivalTimezone: arrAp?.timezone ? Number.parseFloat(arrAp.timezone) : 0,
+      // UPDATED FIELDS
+      departureTimezone: depOffset,
+      arrivalTimezone: arrOffset,
       outTime: outT,
       inTime: inT,
       blockTime: blockT,
@@ -156,28 +160,13 @@ export async function processScootCSV(
     } as any
 
     flightsToSave.push(flight)
-
-    // Add to sync queue batch
-    syncQueueEntries.push({
-      id: crypto.randomUUID(),
-      type: "create",
-      collection: "flights",
-      data: flight,
-      timestamp: Date.now(),
-    })
+    syncQueueEntries.push({ id: crypto.randomUUID(), type: "create", collection: "flights", data: flight, timestamp: Date.now() })
   }
 
-  // Final Bulk Database Operations
   await db.transaction("rw", [db.flights, db.personnel, db.syncQueue], async () => {
-    if (personnelToSave.length > 0) {
-      await db.personnel.bulkAdd(personnelToSave)
-    }
-    if (flightsToSave.length > 0) {
-      await db.flights.bulkAdd(flightsToSave)
-    }
-    if (syncQueueEntries.length > 0) {
-      await db.syncQueue.bulkAdd(syncQueueEntries)
-    }
+    if (personnelToSave.length > 0) await db.personnel.bulkAdd(personnelToSave)
+    if (flightsToSave.length > 0) await db.flights.bulkAdd(flightsToSave)
+    if (syncQueueEntries.length > 0) await db.syncQueue.bulkAdd(syncQueueEntries)
   })
 
   console.log(`Successfully processed ${flightsToSave.length} flights.`)

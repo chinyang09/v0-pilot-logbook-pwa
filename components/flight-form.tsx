@@ -389,6 +389,8 @@ export function FlightForm({
     FlightLog["manualOverrides"]
   >(editingFlight?.manualOverrides || {});
 
+  // Inside FlightForm component...
+
   // Get airport data
   const depAirport = useMemo(
     () =>
@@ -405,9 +407,32 @@ export function FlightForm({
     [airports, formData.arrivalIcao]
   );
 
-  const depTimezone = depAirport?.timezone || formData.departureTimezone || 0;
-  const arrTimezone = arrAirport?.timezone || formData.arrivalTimezone || 0;
+  // Helper to get numeric offset from IANA string
+  const getNumericOffset = (tzString?: string) => {
+    if (!tzString) return 0;
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: tzString,
+        timeZoneName: "longOffset",
+      }).formatToParts(new Date());
+      const offsetPart =
+        parts.find((p) => p.type === "timeZoneName")?.value || "";
+      const match = offsetPart.match(/([+-]\d+)/);
+      return match ? parseInt(match[1]) : 0;
+    } catch {
+      return 0;
+    }
+  };
 
+  // Replace your old timezone constants with these dynamic ones
+  const depTimezone = useMemo(
+    () => getNumericOffset(depAirport?.tz),
+    [depAirport]
+  );
+  const arrTimezone = useMemo(
+    () => getNumericOffset(arrAirport?.tz),
+    [arrAirport]
+  );
   useEffect(() => {
     if (!editingFlight) return;
     if (editingFlightInitializedRef.current === editingFlight.id) return;

@@ -10,8 +10,7 @@ import {
   isValidHHMM,
 } from "./time-utils";
 import { isNight } from "./night-time-calculator";
-import type { AirportData } from "./airport-database";
-import type { FlightLog, Approach } from "./indexed-db";
+import type { Airport, FlightLog, Approach } from "./indexed-db";
 
 /**
  * CONSTANTS & HELPERS
@@ -34,8 +33,8 @@ export function calculateNightTimeFromFlight(
   date: string,
   outTime: string,
   inTime: string,
-  depAirport: AirportData | null,
-  arrAirport: AirportData | null
+  depAirport: Airport | null,
+  arrAirport: Airport | null
 ): string {
   if (!date || !outTime || !inTime || !depAirport || !arrAirport) {
     return "00:00";
@@ -46,10 +45,10 @@ export function calculateNightTimeFromFlight(
   }
 
   // Get airport coordinates
-  const depLat = depAirport.latitude ?? (depAirport as any).lat;
-  const depLon = depAirport.longitude ?? (depAirport as any).lon;
-  const arrLat = arrAirport.latitude ?? (arrAirport as any).lat;
-  const arrLon = arrAirport.longitude ?? (arrAirport as any).lon;
+  const depLat = depAirport.latitude;
+  const depLon = depAirport.longitude;
+  const arrLat = arrAirport.latitude;
+  const arrLon = arrAirport.longitude;
 
   if (
     typeof depLat !== "number" ||
@@ -119,11 +118,11 @@ export function calculateDayTime(blockTime: string, nightTime: string): string {
 export function isTakeoffAtNight(
   date: string,
   offTime: string,
-  airport: AirportData | null
+  airport: Airport | null
 ): boolean {
   if (!date || !offTime || !airport || !isValidHHMM(offTime)) return false;
-  const lat = airport.latitude ?? airport.lat;
-  const lon = airport.longitude ?? airport.lon;
+  const lat = airport.latitude;
+  const lon = airport.longitude;
   if (typeof lat !== "number" || typeof lon !== "number") return false;
 
   const [hours, mins] = offTime.split(":").map(Number);
@@ -137,12 +136,12 @@ export function isLandingAtNight(
   date: string,
   offTime: string,
   onTime: string,
-  airport: AirportData | null
+  airport: Airport | null
 ): boolean {
   if (!date || !onTime || !offTime || !airport || !isValidHHMM(onTime))
     return false;
-  const lat = airport.latitude ?? airport.lat;
-  const lon = airport.longitude ?? airport.lon;
+  const lat = airport.latitude;
+  const lon = airport.longitude;
   if (typeof lat !== "number" || typeof lon !== "number") return false;
 
   const [y, m, d] = date.split("-").map(Number);
@@ -168,8 +167,8 @@ export function calculateTakeoffsLandings(
   date: string,
   offTime: string,
   onTime: string,
-  depAirport: AirportData | null,
-  arrAirport: AirportData | null,
+  depAirport: Airport | null,
+  arrAirport: Airport | null,
   pilotFlying: boolean
 ): {
   dayTakeoffs: number;
@@ -336,8 +335,8 @@ export function isManuallyOverridden(
  */
 export function recalculateFlightFields(
   flight: Partial<FlightLog>,
-  depAirport: AirportData | null,
-  arrAirport: AirportData | null
+  depAirport: Airport | null,
+  arrAirport: Airport | null
 ): Partial<FlightLog> {
   const updates: Partial<FlightLog> = {};
   const overrides = flight.manualOverrides || {};

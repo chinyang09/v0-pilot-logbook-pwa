@@ -1,176 +1,184 @@
+import Dexie, { type Table } from "dexie";
+
 /**
  * Airport Database Loader
- * Loads airport data from CDN and caches in IndexedDB
- * Provides search and lookup functionality
+ * Loads local minified JSON and caches in Dexie (IndexedDB)
  */
 
 export interface AirportData {
-  id: number
-  icao: string
-  iata: string
-  name: string
-  city: string
-  country: string
-  latitude: number
-  longitude: number
-  altitude: number
-  timezone: number // UTC offset as number
-  dst: string
-  tz: string // Timezone name e.g., "America/Los_Angeles"
-  type: string
-  source: string
+  id: number; // Required for favorites/recents logic
+  icao: string;
+  iata: string;
+  name: string;
+  city: string;
+  state: string;
+  country: string;
+  latitude: number;
+  longitude: number;
+  altitude: number;
+  tz: string; // Timezone name e.g., "America/Los_Angeles"
+  source: string;
 }
 
-const AIRPORT_CDN_URL = "https://cdn.jsdelivr.net/npm/@nwpr/airport-codes@3.0.3/dist/airports.json"
-const CACHE_KEY = "airport-database-cache"
-const CACHE_VERSION = "2.0"
+// Configuration
+const AIRPORT_SOURCE_URL = "/airports.min.json";
+const DB_NAME = "AirportDatabase";
+const DATA_VERSION = "2025.10.27-min"; // Change this to force cache refresh
 
 /**
- * Load airports from CDN and normalize to our format
+ * Dexie Database Definition
  */
-async function loadAirportsFromCDN(): Promise<AirportData[]> {
+class AirportCacheDB extends Dexie {
+  airports!: Table<AirportData, number>;
+  metadata!: Table<{ key: string; value: any }, string>;
+
+  constructor() {
+    super(DB_NAME);
+    this.version(1).stores({
+      airports: "id, icao, iata, name, city", // Indexed for performance
+      metadata: "key",
+    });
+  }
+}
+
+const db = new AirportCacheDB();
+
+/**
+ * Get airports from Dexie or load from local public folder
+ */
+export async function getAirportDatabase(): Promise<AirportData[]> {
   try {
-    const response = await fetch(AIRPORT_CDN_URL)
-    if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
+    const versionRecord = await db.metadata.get("data_version");
+    const count = await db.airports.count();
 
-    const data = await response.json()
+    // 1. Check if cache is valid
+    if (versionRecord?.value === DATA_VERSION && count > 0) {
+      return await db.airports.toArray();
+    }
 
-    return data
-      .map((airport: any) => ({
-        id: airport.id || 0,
+    // 2. Fetch from public/airports.min.json
+    console.log("[Airport DB] Cache miss or update. Loading local file...");
+    const response = await fetch(AIRPORT_SOURCE_URL);
+    if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
+
+    const rawData: Record<string, any> = await response.json();
+
+    // 3. Map Object to Array and normalize keys
+    const airports: AirportData[] = Object.values(rawData)
+      .map((airport: any, index: number) => ({
+        id: index + 1, // Synthetic ID for favorites/tracking
         icao: airport.icao || "",
         iata: airport.iata || "",
         name: airport.name || "",
         city: airport.city || "",
+        state: airport.state || "",
         country: airport.country || "",
-        latitude: airport.latitude || 0,
-        longitude: airport.longitude || 0,
-        altitude: airport.altitude || 0,
-        timezone: airport.timezone || 0,
-        dst: airport.dst || "",
+        latitude: airport.lat || 0,
+        longitude: airport.lon || 0,
+        altitude: airport.elevation || 0,
         tz: airport.tz || "UTC",
-        type: airport.type || "",
-        source: airport.source || "",
+        source: "local-min",
       }))
-      .filter((a: AirportData) => a.icao) // Only keep airports with ICAO codes
+      .filter((a) => a.icao);
+
+    // 4. Update Dexie
+    await db.transaction("rw", db.airports, db.metadata, async () => {
+      await db.airports.clear();
+      await db.airports.bulkPut(airports);
+      await db.metadata.put({ key: "data_version", value: DATA_VERSION });
+    });
+
+    return airports;
   } catch (error) {
-    console.error("[Airport DB] Failed to load airports from CDN:", error)
-    return []
+    console.error("[Airport DB] Critical failure:", error);
+    return [];
   }
 }
 
 /**
- * Get airports from cache or load from CDN
+ * Search airports with scoring
  */
-export async function getAirportDatabase(): Promise<AirportData[]> {
-  // Check localStorage cache first
-  const cached = localStorage.getItem(CACHE_KEY)
-  const cacheVersion = localStorage.getItem(`${CACHE_KEY}-version`)
+export function searchAirports(
+  airports: AirportData[],
+  query: string,
+  limit = 10
+): AirportData[] {
+  if (!query) return [];
 
-  if (cached && cacheVersion === CACHE_VERSION) {
-    try {
-      return JSON.parse(cached)
-    } catch (error) {
-      console.error("[Airport DB] Failed to parse cached airports:", error)
-    }
-  }
-
-  // Load from CDN
-  const airports = await loadAirportsFromCDN()
-
-  // Cache in localStorage
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(airports))
-    localStorage.setItem(`${CACHE_KEY}-version`, CACHE_VERSION)
-  } catch (error) {
-    console.error("[Airport DB] Failed to cache airports:", error)
-  }
-
-  return airports
-}
-
-/**
- * Search airports by ICAO, IATA, name, or city
- */
-export function searchAirports(airports: AirportData[], query: string, limit = 10): AirportData[] {
-  if (!query) return []
-
-  const q = query.toLowerCase().trim()
-
-  const matches: Array<{ airport: AirportData; score: number }> = []
+  const q = query.toLowerCase().trim();
+  const matches: Array<{ airport: AirportData; score: number }> = [];
 
   for (const airport of airports) {
-    let score = 0
+    let score = 0;
+    const icao = airport.icao.toLowerCase();
+    const iata = airport.iata ? airport.iata.toLowerCase() : "";
+    const name = airport.name.toLowerCase();
+    const city = airport.city.toLowerCase();
 
-    // Exact ICAO match (highest priority)
-    if (airport.icao.toLowerCase() === q) {
-      score = 1000
-    }
-    // ICAO starts with query
-    else if (airport.icao.toLowerCase().startsWith(q)) {
-      score = 900
-    }
-    // Exact IATA match
-    else if (airport.iata && airport.iata.toLowerCase() === q) {
-      score = 800
-    }
-    // IATA starts with query
-    else if (airport.iata && airport.iata.toLowerCase().startsWith(q)) {
-      score = 700
-    }
-    // Name starts with query
-    else if (airport.name.toLowerCase().startsWith(q)) {
-      score = 600
-    }
-    // City starts with query
-    else if (airport.city.toLowerCase().startsWith(q)) {
-      score = 500
-    }
-    // Name contains query
-    else if (airport.name.toLowerCase().includes(q)) {
-      score = 400
-    }
-    // City contains query
-    else if (airport.city.toLowerCase().includes(q)) {
-      score = 300
-    }
-    // Country contains query
-    else if (airport.country.toLowerCase().includes(q)) {
-      score = 200
-    }
+    if (icao === q) score = 1000;
+    else if (icao.startsWith(q)) score = 900;
+    else if (iata === q) score = 850;
+    else if (iata.startsWith(q)) score = 750;
+    else if (name.startsWith(q)) score = 600;
+    else if (city.startsWith(q)) score = 500;
+    else if (name.includes(q)) score = 300;
+    else if (city.includes(q)) score = 200;
 
-    if (score > 0) {
-      matches.push({ airport, score })
-    }
+    if (score > 0) matches.push({ airport, score });
   }
 
-  // Sort by score descending
-  matches.sort((a, b) => b.score - a.score)
-
-  return matches.slice(0, limit).map((m) => m.airport)
+  return matches
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((m) => m.airport);
 }
 
 /**
- * Get airport by ICAO code
+ * Helper: Get current local time and UTC offset for an airport
  */
-export function getAirportByICAO(airports: AirportData[], icao: string): AirportData | undefined {
-  return airports.find((a) => a.icao.toUpperCase() === icao.toUpperCase())
-}
+export function getAirportLocalTime(tz: string) {
+  try {
+    const now = new Date();
+    // Get offset string (e.g., "GMT-5")
+    const offsetStr =
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        timeZoneName: "shortOffset",
+      })
+        .formatToParts(now)
+        .find((p) => p.type === "timeZoneName")?.value || "UTC";
 
-/**
- * Get airport by IATA code
- */
-export function getAirportByIATA(airports: AirportData[], iata: string): AirportData | undefined {
-  return airports.find((a) => a.iata && a.iata.toUpperCase() === iata.toUpperCase())
+    // Get time string (e.g., "10:30 AM")
+    const timeStr = now.toLocaleTimeString("en-US", {
+      timeZone: tz,
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    return `${timeStr} (${offsetStr})`;
+  } catch {
+    return "Time Unavailable";
+  }
 }
 
 /**
  * Format airport for display
  */
 export function formatAirport(airport: AirportData): string {
-  const parts = [airport.icao]
-  if (airport.iata) parts.push(`(${airport.iata})`)
-  parts.push(`- ${airport.name}`)
-  if (airport.city) parts.push(`- ${airport.city}`)
-  return parts.join(" ")
+  const parts = [airport.icao];
+  if (airport.iata) parts.push(`(${airport.iata})`);
+  parts.push(`- ${airport.name}`);
+  if (airport.city) parts.push(`- ${airport.city}, ${airport.country}`);
+
+  const localTime = getAirportLocalTime(airport.tz);
+  return `${parts.join(" ")} [Local: ${localTime}]`;
 }
+
+/**
+ * Lookups
+ */
+export const getAirportByICAO = (airports: AirportData[], icao: string) =>
+  airports.find((a) => a.icao.toUpperCase() === icao.toUpperCase());
+
+export const getAirportByIATA = (airports: AirportData[], iata: string) =>
+  airports.find((a) => a.iata && a.iata.toUpperCase() === iata.toUpperCase());
