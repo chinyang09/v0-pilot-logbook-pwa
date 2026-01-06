@@ -393,8 +393,6 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       [topSpacerHeight]
     );
 
-    // flight-list.tsx
-
     const handleScroll = useCallback(() => {
       if (isExternalScrollRef.current) return;
       onScrollStart?.();
@@ -405,7 +403,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       if (!container) return;
 
       const containerRect = container.getBoundingClientRect();
-      // The line where the frosted glass ends
+
       const calendarBottomEdge = containerRect.top + (topSpacerHeight || 0);
 
       let topFlight: FlightLog | null = null;
@@ -560,17 +558,27 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
     if (flights.length === 0) {
       return (
-        <div className="h-full flex items-center justify-center">
-          <div className="text-center py-12">
-            <Plane className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-            <h3 className="text-lg font-medium text-foreground">
-              No flights logged
-            </h3>
-            <p className="text-muted-foreground mt-1">
-              Add your first flight to get started
-            </p>
+        <>
+          <div ref={scrollContainerRef} className="h-full overflow-y-auto">
+            <div
+              style={{
+                height: `${topSpacerHeight}px`,
+                transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+              }}
+              className="transition-[height] duration-500 will-change-[height]"
+            />
+            {headerContent}
+            <div className="text-center py-12">
+              <Plane className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+              <h3 className="text-lg font-medium text-foreground">
+                No flights logged
+              </h3>
+              <p className="text-muted-foreground mt-1">
+                Add your first flight to get started
+              </p>
+            </div>
           </div>
-        </div>
+        </>
       );
     }
 

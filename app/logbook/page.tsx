@@ -425,7 +425,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={totalOffset} // New Prop
+          topSpacerHeight={totalOffset}
           headerContent={
             <div className="flex-shrink-0 top-0 z-40 px-2 py-1">
               <div className="relative">
