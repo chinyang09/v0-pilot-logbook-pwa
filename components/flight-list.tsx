@@ -240,7 +240,7 @@ function SwipeableFlightCard({
 
       <Card
         className={cn(
-          "bg-card border-border cursor-pointer relative",
+          "bg-card border-border cursor-pointer relative py-0",
           !isSwiping && "transition-transform duration-200",
           isLocked && "opacity-75",
           isDraft && "border-dashed border-primary/50"
@@ -606,7 +606,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           />
           {headerContent}
           {/*Flight Cards*/}
-          <div className="space-y-2 p-1">
+          <div className="space-y-2">
             {showMonthHeaders && flightsByMonth
               ? flightsByMonth.map(({ month, year, flights: monthFlights }) => (
                   <div key={`${year}-${month}`} className="space-y-3">

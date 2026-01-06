@@ -219,7 +219,14 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         </div>
 
         {/* GRID: The actual month days */}
-        <div className="px-4 overflow-hidden">
+        <div
+          ref={containerRef}
+          className="flex-1 px-3 py-2 overflow-hidden touch-none"
+          style={{ contain: "layout", touchAction: "none" }}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
           <div className="grid grid-cols-7 gap-2">
             {calendarDays.map((dayInfo, dayIndex) => {
               const flightInfo = flightDates.get(dayInfo.dateStr);
