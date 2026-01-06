@@ -1,9 +1,7 @@
 import { db, type FlightLog, type Personnel } from "./indexed-db"
 import { calculateNightTimeComplete } from "./night-time-calculator"
 import { hhmmToMinutes, minutesToHHMM } from "./time-utils"
-import { getAirportByIATA } from "./airport-database"
-// Import the helper we created earlier to get numeric offsets
-import { getAirportTimeInfo } from "./airport-database" 
+import { getAirportByIATA, getAirportTimeInfo } from "./airport-database"
 import { getAircraftByRegistrationFromDB, type AircraftData } from "./aircraft-database"
 import type { Airport } from "./indexed-db" // Use your centralized interface
 
@@ -55,7 +53,10 @@ export async function processScootCSV(
 
     // Crew Logic (remains largely the same)
     const rawPicName = cols[8]?.replace(/"/g, "").trim()
-    let picId = "", picName = "", sicId = "", sicName = ""
+    let picId = "",
+      picName = "",
+      sicId = "",
+      sicName = ""
     const isUserPic = rawPicName?.toLowerCase() === currentUserName.toLowerCase()
 
     if (isUserPic) {
@@ -76,26 +77,22 @@ export async function processScootCSV(
         }
         personnelToSave.push(newPerson)
         crewCache.set(picName.toLowerCase(), newPerson.id)
-        syncQueueEntries.push({ id: crypto.randomUUID(), type: "create", collection: "personnel", data: newPerson, timestamp: Date.now() })
+        syncQueueEntries.push({
+          id: crypto.randomUUID(),
+          type: "create",
+          collection: "personnel",
+          data: newPerson,
+          timestamp: Date.now(),
+        })
       }
       picId = crewCache.get(picName.toLowerCase()) || ""
     }
 
-    // NEW: Dynamic Offset Calculation
-    // We convert "GMT+8" or "America/New_York" into the numeric offset hours your FlightLog expects
-    const getNumericOffset = (tz: string) => {
-      try {
-        const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' }).formatToParts(new Date());
-        const offsetPart = parts.find(p => p.type === 'timeZoneName')?.value || ""; // e.g. "GMT+08:00"
-        const match = offsetPart.match(/([+-]\d+)/);
-        return match ? parseInt(match[1]) : 0;
-      } catch { return 0; }
-    }
+    const depOffset = depAp ? getAirportTimeInfo(depAp.tz).offset : 0
+    const arrOffset = arrAp ? getAirportTimeInfo(arrAp.tz).offset : 0
 
-    const depOffset = depAp ? getNumericOffset(depAp.tz) : 0;
-    const arrOffset = arrAp ? getNumericOffset(arrAp.tz) : 0;
-
-    const nightT = !isSim && depAp && arrAp
+    const nightT =
+      !isSim && depAp && arrAp
         ? calculateNightTimeComplete(
             flightDate,
             outT,
@@ -111,7 +108,7 @@ export async function processScootCSV(
       id: crypto.randomUUID(),
       isDraft: false,
       date: flightDate,
-      flightNumber: "", 
+      flightNumber: "",
       aircraftReg: matchedAc?.registration || rawReg,
       aircraftType: (matchedAc as any)?.typecode || cols[5],
       departureIata: depIata,
@@ -160,7 +157,13 @@ export async function processScootCSV(
     } as any
 
     flightsToSave.push(flight)
-    syncQueueEntries.push({ id: crypto.randomUUID(), type: "create", collection: "flights", data: flight, timestamp: Date.now() })
+    syncQueueEntries.push({
+      id: crypto.randomUUID(),
+      type: "create",
+      collection: "flights",
+      data: flight,
+      timestamp: Date.now(),
+    })
   }
 
   await db.transaction("rw", [db.flights, db.personnel, db.syncQueue], async () => {
