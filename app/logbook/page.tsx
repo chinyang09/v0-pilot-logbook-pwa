@@ -1,18 +1,15 @@
-"use client";
+"use client"
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { FlightList, type FlightListRef } from "@/components/flight-list";
-import { useScrollNavbar } from "@/hooks/use-scroll-navbar";
-import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
-import { BottomNavbar } from "@/components/bottom-navbar";
-import {
-  LogbookCalendar,
-  type CalendarHandle,
-} from "@/components/logbook-calendar";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import type { FlightLog } from "@/lib/indexed-db";
-import { syncService } from "@/lib/sync-service";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import { FlightList, type FlightListRef } from "@/components/flight-list"
+import { useScrollNavbar } from "@/hooks/use-scroll-navbar"
+import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
+import { BottomNavbar } from "@/components/bottom-navbar"
+import { LogbookCalendar, type CalendarHandle } from "@/components/logbook-calendar"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import type { FlightLog } from "@/lib/indexed-db"
+import { syncService } from "@/lib/sync-service"
 import {
   useFlights,
   refreshAllData,
@@ -20,312 +17,274 @@ import {
   useAircraft,
   useAirportDatabase,
   usePersonnel,
-} from "@/hooks/use-indexed-db";
-import { ArrowLeft, Calendar, Plus, Search, X } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { SyncStatus } from "@/components/sync-status";
-import { cn } from "@/lib/utils";
-import { CSVImportButton } from "@/components/csv-import-button";
+} from "@/hooks/use-indexed-db"
+import { ArrowLeft, Calendar, Plus, Search, X } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { SyncStatus } from "@/components/sync-status"
+import { cn } from "@/lib/utils"
+import { CSVImportButton } from "@/components/csv-import-button"
 
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
+const FORM_STORAGE_KEY = "flight-form-draft"
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 function parseDateLocal(dateStr: string): Date {
   if (!dateStr || typeof dateStr !== "string") {
-    return new Date();
+    return new Date()
   }
 
-  const parts = dateStr.split("-");
+  const parts = dateStr.split("-")
   if (parts.length !== 3) {
-    return new Date();
+    return new Date()
   }
 
-  let year = Number(parts[0]);
-  const month = Number(parts[1]);
-  const day = Number(parts[2]);
+  let year = Number(parts[0])
+  const month = Number(parts[1])
+  const day = Number(parts[2])
 
   if (year < 100) {
-    year = 2000 + year;
+    year = 2000 + year
   }
 
   if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) {
-    return new Date();
+    return new Date()
   }
 
-  return new Date(year, month - 1, day);
+  return new Date(year, month - 1, day)
 }
 
 export default function LogbookPage() {
-  const currentUserId = "user_12345";
-  const currentUserName = "Lim Chin Yang";
+  const currentUserId = "user_12345"
+  const currentUserName = "Lim Chin Yang"
 
   useEffect(() => {
     const handleError = (e: ErrorEvent) => {
       if (e.message.includes("ResizeObserver loop")) {
-        e.stopImmediatePropagation();
+        e.stopImmediatePropagation()
       }
-    };
-    window.addEventListener("error", handleError);
-    return () => window.removeEventListener("error", handleError);
-  }, []);
+    }
+    window.addEventListener("error", handleError)
+    return () => window.removeEventListener("error", handleError)
+  }, [])
 
-  const router = useRouter();
-  const { isReady: dbReady, isLoading: dbLoading } = useDBReady();
-  const {
-    flights,
-    isLoading: flightsLoading,
-    refresh: refreshFlights,
-  } = useFlights();
-  const { aircraft } = useAircraft();
-  const { airports } = useAirportDatabase();
-  const { personnel } = usePersonnel();
+  const router = useRouter()
+  const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
+  const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
+  const { aircraft } = useAircraft()
+  const { airports } = useAirportDatabase()
+  const { personnel } = usePersonnel()
 
-  const [showCalendar, setShowCalendar] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false)
   const [selectedMonth, setSelectedMonth] = useState(() => {
-    const now = new Date();
-    return { year: now.getFullYear(), month: now.getMonth() };
-  });
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [activeFilterType, setActiveFilterType] = useState<
-    "none" | "flight" | "aircraft" | "airport" | "crew"
-  >("none");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchFocused, setSearchFocused] = useState(false);
-  const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
-  const { hideNavbar, handleScroll } = useScrollNavbar();
+    const now = new Date()
+    return { year: now.getFullYear(), month: now.getMonth() }
+  })
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [activeFilterType, setActiveFilterType] = useState<"none" | "flight" | "aircraft" | "airport" | "crew">("none")
+  const [searchQuery, setSearchQuery] = useState("")
+  const [searchFocused, setSearchFocused] = useState(false)
+  const [selectedFilters, setSelectedFilters] = useState<string[]>([])
+  const { hideNavbar, handleScroll } = useScrollNavbar()
 
-  const calendarRef = useRef<CalendarHandle>(null);
-  const flightListRef = useRef<FlightListRef>(null);
-  const calendarContainerRef = useRef<HTMLDivElement>(null);
+  const calendarRef = useRef<CalendarHandle>(null)
+  const flightListRef = useRef<FlightListRef>(null)
+  const calendarContainerRef = useRef<HTMLDivElement>(null)
 
-  const HEADER_HEIGHT = 48;
-  const appleEasing = "cubic-bezier(0.4, 0, 0.2, 1)";
+  const HEADER_HEIGHT = 48
+  const appleEasing = "cubic-bezier(0.4, 0, 0.2, 1)"
 
-  const [calendarHeight, setCalendarHeight] = useState(0);
+  const [calendarHeight, setCalendarHeight] = useState(0)
 
   // Use a ResizeObserver or useEffect to get the actual height of the calendar content
   useEffect(() => {
     if (calendarContainerRef.current) {
       // We measure the height once.
       // If your calendar height is constant, offsetHeight is fine.
-      setCalendarHeight(calendarContainerRef.current.offsetHeight);
+      setCalendarHeight(calendarContainerRef.current.offsetHeight)
     }
-  }, []);
+  }, [])
 
   // Calculate the total offset dynamically based on visibility
-  const totalOffset = showCalendar
-    ? calendarHeight + HEADER_HEIGHT
-    : HEADER_HEIGHT;
+  const totalOffset = showCalendar ? calendarHeight + HEADER_HEIGHT : HEADER_HEIGHT
 
-  const syncSourceRef = useRef<"calendar" | "flights" | null>(null);
-  const syncLockRef = useRef(false);
+  const syncSourceRef = useRef<"calendar" | "flights" | null>(null)
+  const syncLockRef = useRef(false)
 
   useEffect(() => {
     const unsubscribe = syncService.onDataChanged(() => {
-      refreshAllData();
-    });
-    return unsubscribe;
-  }, []);
+      refreshAllData()
+    })
+    return unsubscribe
+  }, [])
 
   const handleCalendarMonthChange = useCallback(
     (year: number, month: number) => {
-      setSelectedMonth({ year, month });
+      setSelectedMonth({ year, month })
 
       if (syncSourceRef.current !== "calendar" || syncLockRef.current) {
-        return;
+        return
       }
 
-      syncLockRef.current = true;
+      syncLockRef.current = true
 
       const monthFlights = flights.filter((f) => {
-        const date = parseDateLocal(f.date);
-        return date.getFullYear() === year && date.getMonth() === month;
-      });
+        const date = parseDateLocal(f.date)
+        return date.getFullYear() === year && date.getMonth() === month
+      })
 
       if (monthFlights.length > 0) {
         const sortedFlights = [...monthFlights].sort(
-          (a, b) =>
-            parseDateLocal(b.date).getTime() - parseDateLocal(a.date).getTime()
-        );
-        flightListRef.current?.scrollToFlight(
-          sortedFlights[0].id,
-          sortedFlights[0].date
-        );
+          (a, b) => parseDateLocal(b.date).getTime() - parseDateLocal(a.date).getTime(),
+        )
+        flightListRef.current?.scrollToFlight(sortedFlights[0].id, sortedFlights[0].date)
       }
 
       setTimeout(() => {
-        syncLockRef.current = false;
-        syncSourceRef.current = null;
-      }, 400);
+        syncLockRef.current = false
+        syncSourceRef.current = null
+      }, 400)
     },
-    [flights]
-  );
+    [flights],
+  )
 
   // Tweaked handleFlightScroll: detect flights below the "frosted" area
   const handleFlightScroll = useCallback(
     (topFlight: FlightLog | null) => {
-      if (!showCalendar || !topFlight) return;
-      if (syncSourceRef.current !== "flights" || syncLockRef.current) return;
+      if (!showCalendar || !topFlight) return
+      if (syncSourceRef.current !== "flights" || syncLockRef.current) return
 
-      const flightDate = parseDateLocal(topFlight.date);
-      const newYear = flightDate.getFullYear();
-      const newMonth = flightDate.getMonth();
+      const flightDate = parseDateLocal(topFlight.date)
+      const newYear = flightDate.getFullYear()
+      const newMonth = flightDate.getMonth()
 
       if (newYear !== selectedMonth.year || newMonth !== selectedMonth.month) {
-        syncLockRef.current = true;
-        setSelectedMonth({ year: newYear, month: newMonth });
-        calendarRef.current?.scrollToMonth(newYear, newMonth);
+        syncLockRef.current = true
+        setSelectedMonth({ year: newYear, month: newMonth })
+        calendarRef.current?.scrollToMonth(newYear, newMonth)
 
         setTimeout(() => {
-          syncLockRef.current = false;
-          syncSourceRef.current = null;
-        }, 400);
+          syncLockRef.current = false
+          syncSourceRef.current = null
+        }, 400)
       }
     },
-    [selectedMonth, showCalendar]
-  );
+    [selectedMonth, showCalendar],
+  )
 
   const handleCalendarScrollStart = useCallback(() => {
     if (!syncLockRef.current) {
-      syncSourceRef.current = "calendar";
+      syncSourceRef.current = "calendar"
     }
-  }, []);
+  }, [])
 
   const handleFlightScrollStart = useCallback(() => {
     if (!syncLockRef.current) {
-      syncSourceRef.current = "flights";
+      syncSourceRef.current = "flights"
     }
-  }, []);
+  }, [])
 
   const handleDateSelect = useCallback((date: string) => {
-    setSelectedDate((prev) => (prev === date ? null : date));
-  }, []);
+    setSelectedDate((prev) => (prev === date ? null : date))
+  }, [])
 
   const handleEditFlight = (flight: FlightLog) => {
-    router.push(`/new-flight?edit=${flight.id}`);
-  };
+    router.push(`/new-flight?edit=${flight.id}`)
+  }
 
   const handleFlightDeleted = async () => {
-    await refreshFlights();
-  };
+    await refreshFlights()
+  }
 
   const filterOptions = useMemo(() => {
-    const options = new Set<string>();
-    const query = searchQuery.toLowerCase();
+    const options = new Set<string>()
+    const query = searchQuery.toLowerCase()
 
     switch (activeFilterType) {
       case "flight":
         flights.forEach((f) => {
           if (f.flightNumber && f.flightNumber.toLowerCase().includes(query)) {
-            options.add(f.flightNumber);
+            options.add(f.flightNumber)
           }
-        });
-        break;
+        })
+        break
       case "aircraft":
         aircraft.forEach((a) => {
           if (
             (a.registration && a.registration.toLowerCase().includes(query)) ||
             (a.type && a.type.toLowerCase().includes(query))
           ) {
-            options.add(`${a.registration} (${a.type})`);
+            options.add(`${a.registration} (${a.type})`)
           }
-        });
-        break;
+        })
+        break
       case "airport":
         airports.forEach((a) => {
-          if (
-            (a.icao && a.icao.toLowerCase().includes(query)) ||
-            (a.name && a.name.toLowerCase().includes(query))
-          ) {
-            options.add(`${a.icao} - ${a.name}`);
+          if ((a.icao && a.icao.toLowerCase().includes(query)) || (a.name && a.name.toLowerCase().includes(query))) {
+            options.add(`${a.icao} - ${a.name}`)
           }
-        });
-        break;
+        })
+        break
       case "crew":
         personnel.forEach((p) => {
-          const name = p.name || "";
+          const name = p.name || ""
           if (name.toLowerCase().includes(query)) {
-            options.add(name);
+            options.add(name)
           }
-        });
-        break;
+        })
+        break
     }
 
-    return Array.from(options).slice(0, 10);
-  }, [activeFilterType, searchQuery, flights, aircraft, airports, personnel]);
+    return Array.from(options).slice(0, 10)
+  }, [activeFilterType, searchQuery, flights, aircraft, airports, personnel])
 
   const filteredFlights = useMemo(() => {
-    let result = flights;
+    let result = flights
 
     if (selectedDate) {
-      result = result.filter((f) => f.date === selectedDate);
+      result = result.filter((f) => f.date === selectedDate)
     }
 
     if (selectedFilters.length > 0 && activeFilterType !== "none") {
       result = result.filter((flight) => {
         switch (activeFilterType) {
           case "flight":
-            return selectedFilters.some(
-              (filter) => flight.flightNumber === filter
-            );
+            return selectedFilters.some((filter) => flight.flightNumber === filter)
           case "aircraft":
-            const acLabel = flight.aircraftReg
-              ? `${flight.aircraftReg} (${flight.aircraftType})`
-              : "";
-            return selectedFilters.includes(acLabel);
+            const acLabel = flight.aircraftReg ? `${flight.aircraftReg} (${flight.aircraftType})` : ""
+            return selectedFilters.includes(acLabel)
           case "airport":
             return selectedFilters.some((filter) => {
-              const icao = filter.split(" - ")[0];
-              return (
-                flight.departureIcao === icao || flight.arrivalIcao === icao
-              );
-            });
+              const icao = filter.split(" - ")[0]
+              return flight.departureIcao === icao || flight.arrivalIcao === icao
+            })
           case "crew":
             return selectedFilters.some((filter) => {
-              if (flight.picName === filter || flight.sicName === filter)
-                return true;
-              if (flight.additionalCrew?.some((c) => c.name === filter))
-                return true;
-              return false;
-            });
+              if (flight.picName === filter || flight.sicName === filter) return true
+              if (flight.additionalCrew?.some((c) => c.name === filter)) return true
+              return false
+            })
           default:
-            return true;
+            return true
         }
-      });
+      })
     }
 
-    return result;
-  }, [flights, selectedDate, selectedFilters, activeFilterType]);
+    return result
+  }, [flights, selectedDate, selectedFilters, activeFilterType])
 
   const clearAllFilters = () => {
-    setSelectedDate(null);
-    setActiveFilterType("none");
-    setSearchQuery("");
-    setSelectedFilters([]);
-  };
+    setSelectedDate(null)
+    setActiveFilterType("none")
+    setSearchQuery("")
+    setSelectedFilters([])
+  }
 
   const toggleFilterOption = (option: string) => {
-    setSelectedFilters((prev) =>
-      prev.includes(option)
-        ? prev.filter((f) => f !== option)
-        : [...prev, option]
-    );
-  };
+    setSelectedFilters((prev) => (prev.includes(option) ? prev.filter((f) => f !== option) : [...prev, option]))
+  }
 
-  const hasActiveFilters = selectedDate || selectedFilters.length > 0;
-  const isLoading = dbLoading || !dbReady;
+  const hasActiveFilters = selectedDate || selectedFilters.length > 0
+  const isLoading = dbLoading || !dbReady
 
   return (
     <div className="relative h-[100dvh] bg-background overflow-hidden flex flex-col">
@@ -337,8 +296,8 @@ export default function LogbookPage() {
               variant="ghost"
               size="icon"
               onClick={() => {
-                setShowCalendar(false);
-                setSelectedDate(null);
+                setShowCalendar(false)
+                setSelectedDate(null)
               }}
               className="h-8 w-8 p-0"
             >
@@ -360,9 +319,9 @@ export default function LogbookPage() {
               variant={showCalendar ? "default" : "ghost"}
               size="icon"
               onClick={() => {
-                setShowCalendar(!showCalendar);
-                setSelectedDate(null);
-                setSearchFocused(false);
+                setShowCalendar(!showCalendar)
+                setSelectedDate(null)
+                setSearchFocused(false)
               }}
               className="h-8 w-8"
             >
@@ -372,14 +331,13 @@ export default function LogbookPage() {
             <CSVImportButton
               userId={currentUserId}
               userName={currentUserName}
-              onComplete={() => refreshAllData()}
+              onComplete={() => {
+                sessionStorage.removeItem(FORM_STORAGE_KEY)
+                refreshAllData()
+              }}
             />
 
-            <Button
-              size="icon"
-              onClick={() => router.push("/new-flight")}
-              className="h-8 w-8"
-            >
+            <Button size="icon" onClick={() => router.push("/new-flight")} className="h-8 w-8">
               <Plus className="h-4 w-4" />
             </Button>
           </div>
@@ -395,9 +353,7 @@ export default function LogbookPage() {
           "bg-white/60 dark:bg-background/60 backdrop-blur-2xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1)]",
           "transition-all duration-500 will-change-transform",
           "max-h-[40vh]",
-          showCalendar
-            ? "translate-y-0 opacity-100"
-            : "-translate-y-full opacity-0"
+          showCalendar ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0",
         )}
         style={{ transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)" }}
       >
@@ -441,10 +397,10 @@ export default function LogbookPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setSearchFocused(false);
-                      setSearchQuery("");
-                      setActiveFilterType("none");
-                      setSelectedFilters([]);
+                      setSearchFocused(false)
+                      setSearchQuery("")
+                      setActiveFilterType("none")
+                      setSelectedFilters([])
                     }}
                     className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-sm text-primary font-medium"
                   >
@@ -464,20 +420,16 @@ export default function LogbookPage() {
                   ].map((filter) => (
                     <Button
                       key={filter.id}
-                      variant={
-                        activeFilterType === filter.id ? "secondary" : "ghost"
-                      }
+                      variant={activeFilterType === filter.id ? "secondary" : "ghost"}
                       size="sm"
                       onMouseDown={(e) => {
-                        e.preventDefault();
+                        e.preventDefault()
                         setActiveFilterType(
-                          activeFilterType === filter.id
-                            ? "none"
-                            : (filter.id as typeof activeFilterType)
-                        );
+                          activeFilterType === filter.id ? "none" : (filter.id as typeof activeFilterType),
+                        )
                         if (activeFilterType === filter.id) {
-                          setSearchQuery("");
-                          setSelectedFilters([]);
+                          setSearchQuery("")
+                          setSelectedFilters([])
                         }
                       }}
                       className="flex-1 text-xs h-8 font-medium"
@@ -525,29 +477,26 @@ export default function LogbookPage() {
               )}
 
               {/* Search suggestions dropdown */}
-              {searchFocused &&
-                activeFilterType !== "none" &&
-                filterOptions.length > 0 && (
-                  <div className="mt-2 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
-                    {filterOptions.map((option) => (
-                      <button
-                        key={option}
-                        type="button"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          toggleFilterOption(option);
-                        }}
-                        className={cn(
-                          "w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors",
-                          selectedFilters.includes(option) &&
-                            "bg-primary/10 text-primary"
-                        )}
-                      >
-                        {option}
-                      </button>
-                    ))}
-                  </div>
-                )}
+              {searchFocused && activeFilterType !== "none" && filterOptions.length > 0 && (
+                <div className="mt-2 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+                  {filterOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        toggleFilterOption(option)
+                      }}
+                      className={cn(
+                        "w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors",
+                        selectedFilters.includes(option) && "bg-primary/10 text-primary",
+                      )}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           } // Height of the sticky header (12 * 4)
         />
@@ -556,7 +505,7 @@ export default function LogbookPage() {
       <div
         className={cn(
           "fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out",
-          hideNavbar ? "translate-y-full" : "translate-y-0"
+          hideNavbar ? "translate-y-full" : "translate-y-0",
         )}
       >
         <BottomNavbar />
@@ -564,5 +513,5 @@ export default function LogbookPage() {
 
       <PWAInstallPrompt />
     </div>
-  );
+  )
 }

@@ -1,17 +1,18 @@
-import { db, type FlightLog, type Personnel } from "./indexed-db"
+import { db, type FlightLog, type Personnel, getCurrentUserPersonnel } from "./indexed-db"
 import { calculateNightTimeComplete } from "./night-time-calculator"
 import { hhmmToMinutes, minutesToHHMM } from "./time-utils"
 import { getAirportByIATA, getAirportTimeInfo } from "./airport-database"
 import { getAircraftByRegistrationFromDB, type AircraftData } from "./aircraft-database"
-import type { Airport } from "./indexed-db" // Use your centralized interface
+import type { Airport } from "./indexed-db"
 
-export async function processScootCSV(
-  csvContent: string,
-  airports: Airport[], // Updated type
-  aircraftDb: AircraftData[],
-  currentUserId: string,
-  currentUserName: string,
-) {
+export async function processScootCSV(csvContent: string, airports: Airport[], aircraftDb: AircraftData[]) {
+  const currentUser = await getCurrentUserPersonnel()
+  if (!currentUser) {
+    throw new Error("No user profile found. Please create a crew member with 'This is me' enabled in the Crew page.")
+  }
+  const currentUserId = currentUser.id
+  const currentUserName = currentUser.name
+
   const lines = csvContent.split(/\r?\n/)
   const dataStartIndex = lines.findIndex((l) => l.includes("Date,Airport,Time")) + 1
   if (dataStartIndex === 0) throw new Error("Invalid CSV Format")
@@ -51,7 +52,7 @@ export async function processScootCSV(
     const year = dateParts[2].length === 2 ? `20${dateParts[2]}` : dateParts[2]
     const flightDate = `${year}-${dateParts[1].toString().padStart(2, "0")}-${dateParts[0].toString().padStart(2, "0")}`
 
-    // Crew Logic (remains largely the same)
+    // Crew Logic
     const rawPicName = cols[8]?.replace(/"/g, "").trim()
     let picId = "",
       picName = "",
@@ -110,51 +111,56 @@ export async function processScootCSV(
       date: flightDate,
       flightNumber: "",
       aircraftReg: matchedAc?.registration || rawReg,
-      aircraftType: (matchedAc as any)?.typecode || cols[5],
+      aircraftType: (matchedAc as any)?.typecode || cols[5] || "",
       departureIata: depIata,
       departureIcao: depAp?.icao || "",
       arrivalIata: arrIata,
       arrivalIcao: arrAp?.icao || "",
-      // UPDATED FIELDS
       departureTimezone: depOffset,
       arrivalTimezone: arrOffset,
-      outTime: outT,
-      inTime: inT,
-      blockTime: blockT,
-      flightTime: isSim ? "00:00" : blockT,
+      // Add missing scheduled fields
+      scheduledOut: "",
+      scheduledIn: "",
+      outTime: outT || "",
+      // Add missing off/on times
+      offTime: "",
+      onTime: "",
+      inTime: inT || "",
+      blockTime: blockT || "00:00",
+      flightTime: isSim ? "00:00" : blockT || "00:00",
       nightTime: nightT,
-      dayTime: minutesToHHMM(Math.max(0, hhmmToMinutes(blockT) - hhmmToMinutes(nightT))),
+      dayTime: minutesToHHMM(Math.max(0, hhmmToMinutes(blockT || "00:00") - hhmmToMinutes(nightT))),
       picId: picId,
       picName: picName,
       sicId: sicId,
       sicName: sicName,
+      additionalCrew: [],
+      pilotFlying: true,
       pilotRole: isUserPic ? "PIC" : "SIC",
-      picTime: isUserPic ? blockT : "00:00",
-      sicTime: !isUserPic ? blockT : "00:00",
-      simulatedInstrumentTime: isSim ? blockT : "00:00",
+      picTime: isUserPic ? blockT || "00:00" : "00:00",
+      sicTime: !isUserPic ? blockT || "00:00" : "00:00",
+      picusTime: "00:00",
+      dualTime: "00:00",
+      instructorTime: "00:00",
       dayTakeoffs: Number.parseInt(cols[9]) || 0,
       nightTakeoffs: Number.parseInt(cols[10]) || 0,
       dayLandings: Number.parseInt(cols[11]) || 0,
       nightLandings: Number.parseInt(cols[12]) || 0,
+      autolands: 0,
       remarks: cols[17]?.trim() || "",
+      endorsements: "",
+      manualOverrides: {},
+      ifrTime: "00:00",
+      actualInstrumentTime: "00:00",
+      simulatedInstrumentTime: isSim ? blockT || "00:00" : "00:00",
+      crossCountryTime: "00:00",
+      approaches: [],
+      holds: 0,
+      ipcIcc: false,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       syncStatus: "pending",
-      additionalCrew: [],
-      approaches: [],
-      pilotFlying: true,
-      picusTime: "00:00",
-      dualTime: "00:00",
-      instructorTime: "00:00",
-      autolands: 0,
-      ifrTime: "00:00",
-      actualInstrumentTime: "00:00",
-      crossCountryTime: "00:00",
-      holds: 0,
-      ipcIcc: false,
-      manualOverrides: {},
-      endorsements: "",
-    } as any
+    }
 
     flightsToSave.push(flight)
     syncQueueEntries.push({
