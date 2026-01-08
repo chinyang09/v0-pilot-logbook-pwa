@@ -1,5 +1,7 @@
 "use client"
 
+import type React from "react"
+
 import { useRef, useState } from "react"
 import { Upload, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -19,12 +21,12 @@ export function CSVImportButton({ onComplete }: { onComplete: () => void }) {
     setLoading(true)
     try {
       const content = await file.text()
-      // Note: Replace these with your actual Auth state/User data
-      await processScootCSV(content, airports, aircraft, "user-id", "Lim Chin Yang")
+      await processScootCSV(content, airports, aircraft)
       onComplete()
     } catch (error) {
       console.error("Import failed", error)
-      alert("Failed to parse CSV. Please ensure it is a valid Scoot Crew Logbook.")
+      const errorMessage = error instanceof Error ? error.message : "Failed to parse CSV"
+      alert(errorMessage)
     } finally {
       setLoading(false)
       if (fileInputRef.current) fileInputRef.current.value = ""
@@ -33,13 +35,7 @@ export function CSVImportButton({ onComplete }: { onComplete: () => void }) {
 
   return (
     <>
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        className="hidden" 
-        accept=".csv" 
-        onChange={handleFileChange} 
-      />
+      <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleFileChange} />
       <Button
         variant="ghost"
         size="icon"

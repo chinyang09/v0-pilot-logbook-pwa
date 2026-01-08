@@ -54,19 +54,6 @@ function parseDateLocal(dateStr: string): Date {
 }
 
 export default function LogbookPage() {
-  const currentUserId = "user_12345"
-  const currentUserName = "Lim Chin Yang"
-
-  useEffect(() => {
-    const handleError = (e: ErrorEvent) => {
-      if (e.message.includes("ResizeObserver loop")) {
-        e.stopImmediatePropagation()
-      }
-    }
-    window.addEventListener("error", handleError)
-    return () => window.removeEventListener("error", handleError)
-  }, [])
-
   const router = useRouter()
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
@@ -95,16 +82,12 @@ export default function LogbookPage() {
 
   const [calendarHeight, setCalendarHeight] = useState(0)
 
-  // Use a ResizeObserver or useEffect to get the actual height of the calendar content
   useEffect(() => {
     if (calendarContainerRef.current) {
-      // We measure the height once.
-      // If your calendar height is constant, offsetHeight is fine.
       setCalendarHeight(calendarContainerRef.current.offsetHeight)
     }
   }, [])
 
-  // Calculate the total offset dynamically based on visibility
   const totalOffset = showCalendar ? calendarHeight + HEADER_HEIGHT : HEADER_HEIGHT
 
   const syncSourceRef = useRef<"calendar" | "flights" | null>(null)
@@ -147,7 +130,6 @@ export default function LogbookPage() {
     [flights],
   )
 
-  // Tweaked handleFlightScroll: detect flights below the "frosted" area
   const handleFlightScroll = useCallback(
     (topFlight: FlightLog | null) => {
       if (!showCalendar || !topFlight) return
@@ -288,7 +270,7 @@ export default function LogbookPage() {
 
   return (
     <div className="relative h-[100dvh] bg-background overflow-hidden flex flex-col">
-      {/* HEADER: High z-index, frosted glass [cite: 234-235] */}
+      {/* HEADER */}
       <header className="absolute top-0 w-full h-12 z-50 bg-background/40 backdrop-blur-xl border-b border-border/50">
         <div className="flex items-center justify-between h-full px-4">
           {showCalendar ? (
@@ -329,8 +311,6 @@ export default function LogbookPage() {
             </Button>
 
             <CSVImportButton
-              userId={currentUserId}
-              userName={currentUserName}
               onComplete={() => {
                 sessionStorage.removeItem(FORM_STORAGE_KEY)
                 refreshAllData()
@@ -344,12 +324,11 @@ export default function LogbookPage() {
         </div>
       </header>
 
-      {/* CALENDAR: Absolute position with frosted glass effect */}
+      {/* CALENDAR */}
       <div
         ref={calendarContainerRef}
         className={cn(
           "absolute top-12 left-0 right-0 z-40 border-b border-white/10 dark:border-white/5",
-          // Increased opacity for legibility (0.6 instead of 0.3)
           "bg-white/60 dark:bg-background/60 backdrop-blur-2xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1)]",
           "transition-all duration-500 will-change-transform",
           "max-h-[40vh]",
@@ -369,7 +348,7 @@ export default function LogbookPage() {
         />
       </div>
 
-      {/* FLIGHT LIST: Takes full screen, scrolls behind the calendar */}
+      {/* FLIGHT LIST */}
       <main className="h-full">
         <FlightList
           ref={flightListRef}
@@ -498,7 +477,7 @@ export default function LogbookPage() {
                 </div>
               )}
             </div>
-          } // Height of the sticky header (12 * 4)
+          }
         />
       </main>
 

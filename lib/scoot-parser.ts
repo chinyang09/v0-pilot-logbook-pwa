@@ -118,11 +118,9 @@ export async function processScootCSV(csvContent: string, airports: Airport[], a
       arrivalIcao: arrAp?.icao || "",
       departureTimezone: depOffset,
       arrivalTimezone: arrOffset,
-      // Add missing scheduled fields
       scheduledOut: "",
       scheduledIn: "",
       outTime: outT || "",
-      // Add missing off/on times
       offTime: "",
       onTime: "",
       inTime: inT || "",
