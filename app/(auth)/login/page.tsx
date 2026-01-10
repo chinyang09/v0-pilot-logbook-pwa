@@ -18,9 +18,9 @@ import {
   ShieldCheck,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
-import { base64URLEncode, base64URLDecode } from "@/lib/webauthn"
+import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
 import { useAuth } from "@/components/auth-provider"
-import { getOrCreateDeviceId } from "@/lib/device"
+import { getOrCreateDeviceId } from "@/lib/utils/device"
 
 type Step =
   | "initial" // Choose login or register

@@ -1,8 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getDB } from "@/lib/mongodb";
-import { verifyTOTP } from "@/lib/totp";
-import { normalizeCallsign, createId } from "@/lib/cuid";
-import type { User } from "@/lib/auth-types";
+import { verifyTOTP } from "@/lib/auth/server/totp";
+import { normalizeCallsign, createId } from "@/lib/auth/shared/cuid";
+import type { User } from "@/lib/auth/types";
 import { cookies } from "next/headers";
 
 // POST /api/auth/login/totp - Recovery login with TOTP

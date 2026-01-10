@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getMongoClient } from "@/lib/mongodb"
-import { validateSessionFromHeader } from "@/lib/session"
+import { validateSessionFromHeader } from "@/lib/auth/server/session"
 
 const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 

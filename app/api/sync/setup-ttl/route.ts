@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getMongoClient } from "@/lib/mongodb"
-import { validateSessionFromHeader } from "@/lib/session"
+import { validateSessionFromHeader } from "@/lib/auth/server/session"
 
 export async function POST(request: NextRequest) {
   try {
