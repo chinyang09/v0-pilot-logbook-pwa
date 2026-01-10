@@ -3,10 +3,10 @@ export const revalidate = 0
 
 import { type NextRequest, NextResponse } from "next/server"
 import { getDB } from "@/lib/mongodb"
-import { generateAuthenticationOptions, base64URLEncode, base64URLDecode } from "@/lib/webauthn"
-import type { User } from "@/lib/auth-types"
+import { generateAuthenticationOptions, base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
+import type { User } from "@/lib/auth/types"
 import { cookies } from "next/headers"
-import { createId } from "@/lib/cuid"
+import { createId } from "@/lib/auth/shared/cuid"
 
 // GET /api/auth/login/passkey
 export async function GET() {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDB } from "@/lib/mongodb";
 import { cookies } from "next/headers";
-import type { User } from "@/lib/auth-types";
+import type { User } from "@/lib/auth/types";
 
 // GET /api/auth/session - Get current session
 export async function GET() {

@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getDB } from "@/lib/mongodb"
-import { base64URLDecode, base64URLEncode, generateRegistrationOptions } from "@/lib/webauthn"
-import type { User, PasskeyCredential, StoredChallenge } from "@/lib/auth-types"
+import { base64URLDecode, base64URLEncode, generateRegistrationOptions } from "@/lib/auth/server/webauthn"
+import type { User, PasskeyCredential, StoredChallenge } from "@/lib/auth/types"
 import { cookies } from "next/headers"
 
 // GET: Generate options for an existing user to add a new device

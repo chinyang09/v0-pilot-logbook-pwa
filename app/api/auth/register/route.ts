@@ -1,14 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server";
-import type { User, WebAuthnChallenge } from "@/lib/auth-types";
+import type { User, WebAuthnChallenge } from "@/lib/auth/types";
 
 // POST /api/auth/register - Start registration
 export async function POST(request: NextRequest) {
   try {
     const { getDB } = await import("@/lib/mongodb");
-    const { createId, normalizeCallsign } = await import("@/lib/cuid");
-    const { generateTOTPSecret, generateTOTPUri } = await import("@/lib/totp");
+    const { createId, normalizeCallsign } = await import("@/lib/auth/shared/cuid");
+    const { generateTOTPSecret, generateTOTPUri } = await import("@/lib/auth/server/totp");
     const { generateRegistrationOptions, base64URLEncode } = await import(
-      "@/lib/webauthn"
+      "@/lib/auth/server/webauthn"
     );
 
     const { callsign } = await request.json();

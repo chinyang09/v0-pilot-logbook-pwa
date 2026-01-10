@@ -19,14 +19,14 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { TimePicker } from "@/components/time-picker";
 import { DatePicker } from "@/components/date-picker";
-import type { FlightLog, AdditionalCrew, Approach } from "@/lib/indexed-db";
-import { updateFlight } from "@/lib/indexed-db";
+import type { FlightLog, AdditionalCrew, Approach } from "@/lib/db";
+import { updateFlight } from "@/lib/db";
 import { useAirportDatabase } from "@/hooks/use-indexed-db";
-import { getAirportByICAO } from "@/lib/airport-database";
+import { getAirportByICAO } from "@/lib/db";
 import {
   addRecentlyUsedAirport,
   addRecentlyUsedAircraft,
-} from "@/lib/user-preferences";
+} from "@/lib/utils/preferences";
 import {
   createEmptyFlightLog,
   calculateBlockTime,
@@ -35,15 +35,15 @@ import {
   calculateTakeoffsLandings,
   calculateRoleTimes,
   getApproachCategory,
-} from "@/lib/flight-calculations";
-import { calculateNightTimeComplete } from "@/lib/night-time-calculator";
+} from "@/lib/utils/flight-calculations";
+import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
   formatTimeShort,
   utcToLocal,
   formatTimezoneOffset,
   getCurrentTimeUTC,
   isValidHHMM,
-} from "@/lib/time-utils";
+} from "@/lib/utils/time";
 import { usePersonnel } from "@/hooks/use-indexed-db";
 
 const FORM_STORAGE_KEY = "flight-form-draft";

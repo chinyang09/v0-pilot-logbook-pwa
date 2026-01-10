@@ -1,11 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getDB } from "@/lib/mongodb";
-import { generateRegistrationOptions, base64URLEncode } from "@/lib/webauthn";
+import { generateRegistrationOptions, base64URLEncode } from "@/lib/auth/server/webauthn";
 import type {
   User,
   PasskeyCredential,
   StoredChallenge,
-} from "@/lib/auth-types";
+} from "@/lib/auth/types";
 import { cookies } from "next/headers";
 
 export async function GET() {

@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getDB } from "@/lib/mongodb"
-import { base64URLDecode, base64URLEncode } from "@/lib/webauthn"
-import type { User, PasskeyCredential } from "@/lib/auth-types"
+import { base64URLDecode, base64URLEncode } from "@/lib/auth/server/webauthn"
+import type { User, PasskeyCredential } from "@/lib/auth/types"
 import { cookies } from "next/headers"
-import { createId } from "@/lib/cuid"
+import { createId } from "@/lib/auth/shared/cuid"
 
 // POST /api/auth/register/complete - Complete passkey registration
 export async function POST(request: NextRequest) {

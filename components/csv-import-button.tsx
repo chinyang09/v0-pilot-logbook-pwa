@@ -5,7 +5,7 @@ import type React from "react"
 import { useRef, useState } from "react"
 import { Upload, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { processScootCSV } from "@/lib/scoot-parser"
+import { processScootCSV } from "@/lib/utils/parsers/scoot-parser"
 import { useAirports, useAircraft } from "@/hooks/use-indexed-db"
 
 export function CSVImportButton({ onComplete }: { onComplete: () => void }) {

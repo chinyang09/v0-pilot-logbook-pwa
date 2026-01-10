@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { ObjectId } from "mongodb"
 import { getMongoClient } from "@/lib/mongodb"
-import { validateSessionFromHeader } from "@/lib/session"
+import { validateSessionFromHeader } from "@/lib/auth/server/session"
 
 async function checkTombstone(db: any, userId: string, collection: string, recordId: string): Promise<boolean> {
   const tombstone = await db.collection("deletions").findOne({

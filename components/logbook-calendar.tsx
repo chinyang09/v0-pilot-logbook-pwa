@@ -9,7 +9,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { FlightLog } from "@/lib/indexed-db";
+import type { FlightLog } from "@/lib/db";
 import { cn } from "@/lib/utils";
 
 interface LogbookCalendarProps {

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { syncService } from "@/lib/sync-service"
+import { syncService } from "@/lib/sync"
 import { Cloud, CloudOff, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -16,7 +16,7 @@ export function SyncStatus() {
 
     // Check pending count periodically
     const checkPending = async () => {
-      const { getSyncQueue } = await import("@/lib/indexed-db")
+      const { getSyncQueue } = await import("@/lib/db")
       const queue = await getSyncQueue()
       setPendingCount(queue.length)
     }

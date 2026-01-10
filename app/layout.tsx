@@ -1,14 +1,10 @@
 import type React from "react"
 import type { Metadata, Viewport } from "next"
-import { Inter, Geist_Mono } from "next/font/google"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
-import { SyncProvider } from "@/components/sync-provider"
-import { AuthProvider } from "@/components/auth-provider"
+import { SyncProvider } from "@/components/providers/sync-provider"
+import { AuthProvider } from "@/components/providers/auth-provider"
 import { AircraftPreloader } from "@/components/aircraft-preloader"
 import "./globals.css"
-
-const inter = Inter({ subsets: ["latin"] })
-const geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
   title: "OOOI",

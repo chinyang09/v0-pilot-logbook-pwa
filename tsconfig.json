@@ -25,6 +25,24 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@/types": [
+        "./types"
+      ],
+      "@/types/*": [
+        "./types/*"
+      ],
+      "@/lib/*": [
+        "./lib/*"
+      ],
+      "@/hooks/*": [
+        "./hooks/*"
+      ],
+      "@/components/*": [
+        "./components/*"
+      ],
+      "@/config/*": [
+        "./config/*"
       ]
     }
   },
