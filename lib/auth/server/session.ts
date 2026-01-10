@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { getMongoClient } from "./mongodb";
+import { getMongoClient } from "@/lib/mongodb";
 
 export interface SessionData {
   userId: string;

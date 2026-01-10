@@ -43,7 +43,7 @@ export function ServiceWorkerRegister() {
       // Listen for sync messages from service worker
       navigator.serviceWorker.addEventListener("message", async (event) => {
         if (event.data?.type === "SYNC_REQUIRED") {
-          const { syncService } = await import("@/lib/sync-service")
+          const { syncService } = await import("@/lib/sync")
           syncService.syncPendingChanges()
         }
       })
@@ -63,7 +63,7 @@ export function ServiceWorkerRegister() {
           await (reg as any).sync.register("sync-flights")
         } catch (e) {
           // Background sync not supported or permission denied
-          const { syncService } = await import("@/lib/sync-service")
+          const { syncService } = await import("@/lib/sync")
           syncService.syncPendingChanges()
         }
       }

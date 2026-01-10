@@ -5,12 +5,12 @@ import { FlightForm } from "@/components/flight-form";
 import { PageContainer } from "@/components/page-container";
 import type { FlightLog } from "@/lib/indexed-db";
 import { getFlightById, addFlight } from "@/lib/indexed-db";
-import { syncService } from "@/lib/sync-service";
+import { syncService } from "@/lib/sync";
 import { refreshAllData, useDBReady } from "@/hooks/use-indexed-db";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
-import { createEmptyFlightLog } from "@/lib/flight-calculations";
+import { createEmptyFlightLog } from "@/lib/utils/flight-calculations";
 
 const FORM_STORAGE_KEY = "flight-form-draft";
 

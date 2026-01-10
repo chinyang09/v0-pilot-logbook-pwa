@@ -1,6 +1,6 @@
 import { db, type FlightLog, type Personnel, getCurrentUserPersonnel } from "./indexed-db"
-import { calculateNightTimeComplete } from "./night-time-calculator"
-import { hhmmToMinutes, minutesToHHMM } from "./time-utils"
+import { calculateNightTimeComplete } from "./utils/night-time"
+import { hhmmToMinutes, minutesToHHMM } from "./utils/time"
 import { getAirportByIATA, getAirportTimeInfo } from "./airport-database"
 import { getAircraftByRegistrationFromDB, type AircraftData } from "./aircraft-database"
 import type { Airport } from "./indexed-db"

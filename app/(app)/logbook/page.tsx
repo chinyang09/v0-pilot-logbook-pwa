@@ -9,7 +9,7 @@ import { LogbookCalendar, type CalendarHandle } from "@/components/logbook-calen
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { FlightLog } from "@/lib/indexed-db"
-import { syncService } from "@/lib/sync-service"
+import { syncService } from "@/lib/sync"
 import {
   useFlights,
   refreshAllData,

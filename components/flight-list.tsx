@@ -13,8 +13,8 @@ import {
 } from "react";
 import type { FlightLog, Aircraft, Airport, Personnel } from "@/lib/indexed-db";
 import { deleteFlight } from "@/lib/indexed-db";
-import { formatHHMMDisplay } from "@/lib/time-utils";
-import { syncService } from "@/lib/sync-service";
+import { formatHHMMDisplay } from "@/lib/utils/time";
+import { syncService } from "@/lib/sync";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";

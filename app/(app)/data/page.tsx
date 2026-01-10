@@ -5,7 +5,7 @@ import { SyncStatus } from "@/components/sync-status"
 import { ManageData } from "@/components/manage-data"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { BottomNavbar } from "@/components/bottom-navbar"
-import { syncService } from "@/lib/sync-service"
+import { syncService } from "@/lib/sync"
 import { refreshAllData } from "@/hooks/use-indexed-db"
 
 export default function DataPage() {

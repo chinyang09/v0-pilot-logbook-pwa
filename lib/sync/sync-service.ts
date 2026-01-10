@@ -16,7 +16,7 @@ import {
   type FlightLog,
   type Aircraft,
   type Personnel,
-} from "./indexed-db"
+} from "@/lib/indexed-db"
 
 type SyncStatus = "online" | "offline" | "syncing"
 

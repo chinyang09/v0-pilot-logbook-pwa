@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useEffect, useRef } from "react"
-import { syncService } from "@/lib/sync-service"
+import { syncService } from "@/lib/sync"
 import { refreshAllData } from "@/hooks/use-indexed-db"
 import { getUserSession } from "@/lib/indexed-db"
 

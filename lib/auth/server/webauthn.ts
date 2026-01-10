@@ -1,4 +1,4 @@
-import type { PasskeyCredential, AuthenticatorTransport } from "./auth-types"
+import type { PasskeyCredential, AuthenticatorTransport } from "@/lib/auth-types"
 
 // Base64URL encoding/decoding utilities
 export function base64URLEncode(buffer: ArrayBuffer | Uint8Array): string {

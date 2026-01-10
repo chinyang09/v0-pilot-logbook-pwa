@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { syncService } from "@/lib/sync-service"
+import { syncService } from "@/lib/sync"
 import { Cloud, CloudOff, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 

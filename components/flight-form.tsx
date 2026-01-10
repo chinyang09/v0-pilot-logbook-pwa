@@ -35,15 +35,15 @@ import {
   calculateTakeoffsLandings,
   calculateRoleTimes,
   getApproachCategory,
-} from "@/lib/flight-calculations";
-import { calculateNightTimeComplete } from "@/lib/night-time-calculator";
+} from "@/lib/utils/flight-calculations";
+import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
   formatTimeShort,
   utcToLocal,
   formatTimezoneOffset,
   getCurrentTimeUTC,
   isValidHHMM,
-} from "@/lib/time-utils";
+} from "@/lib/utils/time";
 import { usePersonnel } from "@/hooks/use-indexed-db";
 
 const FORM_STORAGE_KEY = "flight-form-draft";

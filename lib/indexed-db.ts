@@ -1,5 +1,5 @@
 import Dexie, { type Table } from "dexie"
-import { sumHHMM } from "./time-utils"
+import { sumHHMM } from "./utils/time"
 import type { UserPreferences } from "./user-preferences"
 
 export interface UserSession {
