@@ -49,10 +49,14 @@ export function ScrollNavbarProvider({
   )
 }
 
+// Default no-op for when used outside provider
+const defaultValue: ScrollNavbarContextType = {
+  hideNavbar: false,
+  handleScroll: () => {}
+}
+
 export function useScrollNavbarContext() {
   const context = useContext(ScrollNavbarContext)
-  if (!context) {
-    throw new Error("useScrollNavbarContext must be used within a ScrollNavbarProvider")
-  }
-  return context
+  // Return default value when used outside provider (e.g., root page)
+  return context ?? defaultValue
 }
