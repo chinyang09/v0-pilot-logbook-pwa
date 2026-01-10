@@ -24,25 +24,25 @@
     ],
     "paths": {
       "@/*": [
-        "./src/*"
+        "./*"
       ],
       "@/types": [
-        "./src/types"
+        "./types"
       ],
       "@/types/*": [
-        "./src/types/*"
+        "./types/*"
       ],
       "@/lib/*": [
-        "./src/lib/*"
+        "./lib/*"
       ],
       "@/hooks/*": [
-        "./src/hooks/*"
+        "./hooks/*"
       ],
       "@/components/*": [
-        "./src/components/*"
+        "./components/*"
       ],
       "@/config/*": [
-        "./src/config/*"
+        "./config/*"
       ]
     }
   },
