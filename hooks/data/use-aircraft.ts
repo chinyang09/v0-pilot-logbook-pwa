@@ -2,18 +2,23 @@
 
 import { useCallback } from "react"
 import useSWR from "swr"
-import { useDBReady } from "./use-db-ready"
-import { getAllAircraft } from "@/lib/db/stores/user/aircraft.store"
-import type { Aircraft } from "@/types/entities/aircraft.types"
+import { getAllAircraft, type Aircraft } from "@/lib/db"
+import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
 
-export const AIRCRAFT_CACHE_KEY = "idb:aircraft"
-
+/**
+ * Fetch user aircraft from IndexedDB
+ */
 async function fetchAircraft(): Promise<Aircraft[]> {
+  const ready = await checkDBReady()
+  if (!ready) return []
   const aircraft = await getAllAircraft()
-  console.log("[v0] Fetched aircraft from IndexedDB:", aircraft.length)
+  console.log("[Aircraft] Fetched from IndexedDB:", aircraft.length)
   return aircraft
 }
 
+/**
+ * Hook for user aircraft data
+ */
 export function useAircraft() {
   const { isReady } = useDBReady()
 
@@ -23,14 +28,14 @@ export function useAircraft() {
     isLoading,
     isValidating,
     mutate: mutateAircraft,
-  } = useSWR(isReady ? AIRCRAFT_CACHE_KEY : null, fetchAircraft, {
+  } = useSWR(isReady ? CACHE_KEYS.aircraft : null, fetchAircraft, {
     revalidateOnFocus: false,
     revalidateOnMount: true,
     dedupingInterval: 0,
   })
 
   const refresh = useCallback(() => {
-    console.log("[v0] Refreshing aircraft...")
+    console.log("[Aircraft] Refreshing...")
     return mutateAircraft(undefined, { revalidate: true })
   }, [mutateAircraft])
 

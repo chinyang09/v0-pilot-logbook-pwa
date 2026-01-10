@@ -2,38 +2,43 @@
 
 import { useCallback, useEffect, useState } from "react"
 import useSWR from "swr"
-import { useDBReady } from "./use-db-ready"
-import { getAllAirports, bulkLoadAirports } from "@/lib/db/stores/reference/airports.store"
-import type { Airport } from "@/types/entities/airport.types"
+import {
+  getAllAirports,
+  bulkLoadAirports,
+  getAirportDatabase,
+  type Airport,
+} from "@/lib/db"
+import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
 
-export const AIRPORTS_CACHE_KEY = "idb:airports"
-
-async function getAirportDatabase(): Promise<Record<string, any>> {
-  const response = await fetch("/airports.min.json")
-  if (!response.ok) throw new Error("Failed to fetch airports data")
-  return response.json()
-}
-
+/**
+ * Fetch airports from IndexedDB (with auto-seed from JSON if empty)
+ */
 async function fetchAirports(): Promise<Airport[]> {
-  // Try to get data from IndexedDB first
+  const ready = await checkDBReady()
+  if (!ready) return []
+
+  // Try to get data from IndexedDB
   let airports = await getAllAirports()
 
   // If DB is empty, fetch the JSON and seed it
   if (airports.length === 0) {
-    console.log("[v0] DB empty, fetching airports.min.json...")
+    console.log("[Airports] DB empty, fetching airports.min.json...")
     const data = await getAirportDatabase()
 
-    // Save to IndexedDB
+    // Save to IndexedDB so next time it's instant
     await bulkLoadAirports(data)
 
     // Retrieve the newly saved records
     airports = await getAllAirports()
   }
 
-  console.log("[v0] Total airports loaded:", airports.length)
+  console.log("[Airports] Total loaded:", airports.length)
   return airports
 }
 
+/**
+ * Hook for airports data (with SWR caching)
+ */
 export function useAirports() {
   const { isReady } = useDBReady()
 
@@ -43,14 +48,14 @@ export function useAirports() {
     isLoading,
     isValidating,
     mutate: mutateAirports,
-  } = useSWR(isReady ? AIRPORTS_CACHE_KEY : null, fetchAirports, {
+  } = useSWR(isReady ? CACHE_KEYS.airports : null, fetchAirports, {
     revalidateOnFocus: false,
     revalidateOnMount: false,
     dedupingInterval: 10000,
   })
 
   const refresh = useCallback(() => {
-    console.log("[v0] Refreshing airports...")
+    console.log("[Airports] Refreshing...")
     return mutateAirports(undefined, { revalidate: true })
   }, [mutateAirports])
 
@@ -63,7 +68,8 @@ export function useAirports() {
 }
 
 /**
- * Hook for airport database with loading state
+ * Hook for airport database (direct load without SWR)
+ * Used for airport selection screens
  */
 export function useAirportDatabase() {
   const [airports, setAirports] = useState<Airport[]>([])
@@ -79,8 +85,8 @@ export function useAirportDatabase() {
         const data = await getAirportDatabase()
 
         if (mounted) {
-          setAirports(Object.values(data) as unknown as Airport[])
-          console.log("[Airport DB] Database ready with", Object.keys(data).length, "records")
+          setAirports(data as unknown as Airport[])
+          console.log("[Airport DB] Database ready with", data.length, "records")
         }
       } catch (err) {
         if (mounted) {
