@@ -6,13 +6,10 @@ import { useRef, useState } from "react"
 import { Upload, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { processScootCSV } from "@/lib/utils/parsers/scoot-parser"
-import { useAirports, useAircraft } from "@/hooks/use-indexed-db"
 
 export function CSVImportButton({ onComplete }: { onComplete: () => void }) {
   const [loading, setLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { airports } = useAirports()
-  const { aircraft } = useAircraft()
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -21,7 +18,7 @@ export function CSVImportButton({ onComplete }: { onComplete: () => void }) {
     setLoading(true)
     try {
       const content = await file.text()
-      await processScootCSV(content, airports, aircraft)
+      await processScootCSV(content)
       onComplete()
     } catch (error) {
       console.error("Import failed", error)

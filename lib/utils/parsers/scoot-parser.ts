@@ -3,16 +3,14 @@ import {
   type FlightLog,
   type Personnel,
   getCurrentUserPersonnel,
-  type Airport,
-  getAirportByIATA,
+  getAirportByIata,
   getAirportTimeInfo,
   getAircraftByRegistrationFromDB,
-  type AircraftData,
 } from "@/lib/db"
 import { calculateNightTimeComplete } from "@/lib/utils/night-time"
 import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time"
 
-export async function processScootCSV(csvContent: string, airports: Airport[], aircraftDb: AircraftData[]) {
+export async function processScootCSV(csvContent: string) {
   const currentUser = await getCurrentUserPersonnel()
   if (!currentUser) {
     throw new Error("No user profile found. Please create a crew member with 'This is me' enabled in the Crew page.")
@@ -44,8 +42,8 @@ export async function processScootCSV(csvContent: string, airports: Airport[], a
     if (!dateRegex.test(rawDate) || !depIata || depIata.length !== 3) continue
 
     const arrIata = cols[3]?.replace(/"/g, "").trim().toUpperCase()
-    const depAp = getAirportByIATA(airports, depIata)
-    const arrAp = getAirportByIATA(airports, arrIata)
+    const depAp = await getAirportByIata(depIata)
+    const arrAp = await getAirportByIata(arrIata)
     const rawReg = cols[6]?.replace(/"/g, "").trim()
 
     const matchedAc = await getAircraftByRegistrationFromDB(rawReg)
