@@ -2,9 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { FlightList, type FlightListRef } from "@/components/flight-list"
-import { useScrollNavbar } from "@/hooks/use-scroll-navbar"
-import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
-import { BottomNavbar } from "@/components/bottom-navbar"
+import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { LogbookCalendar, type CalendarHandle } from "@/components/logbook-calendar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -71,14 +69,13 @@ export default function LogbookPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchFocused, setSearchFocused] = useState(false)
   const [selectedFilters, setSelectedFilters] = useState<string[]>([])
-  const { hideNavbar, handleScroll } = useScrollNavbar()
+  const { handleScroll } = useScrollNavbarContext()
 
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)
   const calendarContainerRef = useRef<HTMLDivElement>(null)
 
   const HEADER_HEIGHT = 48
-  const appleEasing = "cubic-bezier(0.4, 0, 0.2, 1)"
 
   const [calendarHeight, setCalendarHeight] = useState(0)
 
@@ -269,9 +266,9 @@ export default function LogbookPage() {
   const isLoading = dbLoading || !dbReady
 
   return (
-    <div className="relative h-[100dvh] bg-background overflow-hidden flex flex-col">
+    <>
       {/* HEADER */}
-      <header className="absolute top-0 w-full h-12 z-50 bg-background/40 backdrop-blur-xl border-b border-border/50">
+      <header className="flex-none h-12 z-50 bg-background/40 backdrop-blur-xl border-b border-border/50">
         <div className="flex items-center justify-between h-full px-4">
           {showCalendar ? (
             <Button
@@ -328,11 +325,11 @@ export default function LogbookPage() {
       <div
         ref={calendarContainerRef}
         className={cn(
-          "absolute top-12 left-0 right-0 z-40 border-b border-white/10 dark:border-white/5",
+          "flex-none z-40 border-b border-white/10 dark:border-white/5",
           "bg-white/60 dark:bg-background/60 backdrop-blur-2xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1)]",
-          "transition-all duration-500 will-change-transform",
+          "transition-all duration-500 will-change-transform overflow-hidden",
           "max-h-[40vh]",
-          showCalendar ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0",
+          showCalendar ? "opacity-100" : "max-h-0 opacity-0",
         )}
         style={{ transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)" }}
       >
@@ -349,7 +346,7 @@ export default function LogbookPage() {
       </div>
 
       {/* FLIGHT LIST */}
-      <main className="h-full">
+      <main className="flex-1 overflow-hidden">
         <FlightList
           ref={flightListRef}
           flights={filteredFlights}
@@ -360,7 +357,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={totalOffset}
+          topSpacerHeight={0}
           headerContent={
             <div className="flex-shrink-0 top-0 z-40 px-2 py-1">
               <div className="relative">
@@ -480,17 +477,6 @@ export default function LogbookPage() {
           }
         />
       </main>
-
-      <div
-        className={cn(
-          "fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out",
-          hideNavbar ? "translate-y-full" : "translate-y-0",
-        )}
-      >
-        <BottomNavbar />
-      </div>
-
-      <PWAInstallPrompt />
-    </div>
+    </>
   )
 }
