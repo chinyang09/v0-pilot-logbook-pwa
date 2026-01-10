@@ -3,8 +3,8 @@
 import { useState, useEffect, Suspense, useRef } from "react";
 import { FlightForm } from "@/components/flight-form";
 import { PageContainer } from "@/components/page-container";
-import type { FlightLog } from "@/lib/indexed-db";
-import { getFlightById, addFlight } from "@/lib/indexed-db";
+import type { FlightLog } from "@/lib/db";
+import { getFlightById, addFlight } from "@/lib/db";
 import { syncService } from "@/lib/sync";
 import { refreshAllData, useDBReady } from "@/hooks/use-indexed-db";
 import { useRouter, useSearchParams } from "next/navigation";

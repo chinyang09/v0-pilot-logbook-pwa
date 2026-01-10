@@ -12,11 +12,16 @@ import {
   silentDeleteFlight,
   silentDeleteAircraft,
   silentDeletePersonnel,
-  clearAllLocalData,
+  userDb,
   type FlightLog,
   type Aircraft,
   type Personnel,
-} from "@/lib/indexed-db"
+} from "@/lib/db"
+
+// Wrapper for clearing all local data except preferences
+async function clearAllLocalData(): Promise<void> {
+  await userDb.clearLocalDataForResync()
+}
 
 type SyncStatus = "online" | "offline" | "syncing"
 

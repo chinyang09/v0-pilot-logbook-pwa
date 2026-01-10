@@ -11,7 +11,7 @@ import {
   getRecentlyUsedAirports,
   addRecentlyUsedAirport,
   getAirportByIcao,
-} from "@/lib/indexed-db";
+} from "@/lib/db";
 import { Star, Search, MapPin, ArrowLeft, ChevronRight } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";

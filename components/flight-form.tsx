@@ -19,8 +19,8 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { TimePicker } from "@/components/time-picker";
 import { DatePicker } from "@/components/date-picker";
-import type { FlightLog, AdditionalCrew, Approach } from "@/lib/indexed-db";
-import { updateFlight } from "@/lib/indexed-db";
+import type { FlightLog, AdditionalCrew, Approach } from "@/lib/db";
+import { updateFlight } from "@/lib/db";
 import { useAirportDatabase } from "@/hooks/use-indexed-db";
 import { getAirportByICAO } from "@/lib/reference/airport-database";
 import {

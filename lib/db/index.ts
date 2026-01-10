@@ -10,13 +10,104 @@ export { userDb, initializeUserDB } from "./user-db"
 export { referenceDb, initializeReferenceDB } from "./reference-db"
 
 // Re-export types
-export type { FlightLog, Approach, AdditionalCrew, SyncStatus } from "@/types/entities/flight.types"
-export type { Aircraft, AircraftReference } from "@/types/entities/aircraft.types"
+export type { FlightLog, FlightLogCreate, Approach, AdditionalCrew, SyncStatus } from "@/types/entities/flight.types"
+export type { Aircraft, AircraftCreate, AircraftReference } from "@/types/entities/aircraft.types"
 export type { Airport } from "@/types/entities/airport.types"
-export type { Personnel } from "@/types/entities/crew.types"
+export type { Personnel, PersonnelCreate } from "@/types/entities/crew.types"
 export type { UserSession } from "@/types/entities/user.types"
 export type { UserPreferences } from "@/types/db/stores.types"
 export type { SyncQueueItem, SyncMeta } from "@/types/sync/sync.types"
+
+// Re-export user stores
+export {
+  addFlight,
+  updateFlight,
+  deleteFlight,
+  silentDeleteFlight,
+  getAllFlights,
+  getFlightById,
+  getFlightByMongoId,
+  getPendingFlights,
+  upsertFlightFromServer,
+  markFlightSynced,
+} from "./stores/user/flights.store"
+
+export {
+  addAircraft,
+  updateAircraft,
+  deleteAircraft,
+  silentDeleteAircraft,
+  getAllAircraft,
+  getAircraftById,
+  upsertAircraftFromServer,
+} from "./stores/user/aircraft.store"
+
+export {
+  addPersonnel,
+  updatePersonnel,
+  deletePersonnel,
+  silentDeletePersonnel,
+  getAllPersonnel,
+  getPersonnelById,
+  getCurrentUserPersonnel,
+  getPersonnelByRole,
+  upsertPersonnelFromServer,
+} from "./stores/user/crew.store"
+
+export {
+  saveUserSession,
+  getUserSession,
+  clearUserSession,
+  getCurrentUserId,
+} from "./stores/user/sessions.store"
+
+export {
+  getUserPreferences,
+  saveUserPreferences,
+  getDefaultFieldOrder,
+  addRecentlyUsedAirport,
+  getRecentlyUsedAirports,
+  addRecentlyUsedAircraft,
+  getRecentlyUsedAircraft,
+} from "./stores/user/preferences.store"
+
+export {
+  addToSyncQueue,
+  getSyncQueue,
+  getSyncQueueByCollection,
+  clearSyncQueueItem,
+  clearSyncQueueByCollection,
+  incrementRetryCount,
+  getLastSyncTime,
+  setLastSyncTime,
+  markRecordSynced,
+} from "./stores/user/sync-queue.store"
+
+// Re-export reference stores
+export {
+  getAllAirports,
+  getAirportByIcao,
+  getAirportByIata,
+  getAirportById,
+  bulkLoadAirports,
+  addCustomAirport,
+  toggleAirportFavorite,
+  getFavoriteAirports,
+  getAirportLocalTime,
+} from "./stores/reference/airports.store"
+
+// Re-export metadata stores
+export { getFlightStats, type FlightStats } from "./stores/metadata/stats.store"
+
+// Import userDb for clearAllUserData
+import { userDb } from "./user-db"
+
+/**
+ * Clear all user data (called on logout)
+ */
+export async function clearAllUserData(): Promise<void> {
+  await userDb.clearAllUserData()
+}
 
 /**
  * Initialize both databases

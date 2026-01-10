@@ -4,7 +4,7 @@ import type React from "react"
 import { useEffect, useRef } from "react"
 import { syncService } from "@/lib/sync"
 import { refreshAllData } from "@/hooks/use-indexed-db"
-import { getUserSession } from "@/lib/indexed-db"
+import { getUserSession } from "@/lib/db"
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const syncInitiated = useRef(false)

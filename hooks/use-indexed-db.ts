@@ -14,7 +14,7 @@ import {
   type Aircraft,
   type Airport,
   type Personnel,
-} from "@/lib/indexed-db";
+} from "@/lib/db";
 import { getAirportDatabase } from "@/lib/reference/airport-database";
 
 // Keys for SWR cache

@@ -11,8 +11,8 @@ import {
   forwardRef,
   useImperativeHandle,
 } from "react";
-import type { FlightLog, Aircraft, Airport, Personnel } from "@/lib/indexed-db";
-import { deleteFlight } from "@/lib/indexed-db";
+import type { FlightLog, Aircraft, Airport, Personnel } from "@/lib/db";
+import { deleteFlight } from "@/lib/db";
 import { formatHHMMDisplay } from "@/lib/utils/time";
 import { syncService } from "@/lib/sync";
 import { Card, CardContent } from "@/components/ui/card";
@@ -523,7 +523,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     };
 
     const handleToggleLock = async (flight: FlightLog) => {
-      const { updateFlight } = await import("@/lib/indexed-db");
+      const { updateFlight } = await import("@/lib/db");
       await updateFlight(flight.id, { isLocked: !flight.isLocked });
       onDeleted?.();
     };

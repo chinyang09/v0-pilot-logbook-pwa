@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SyncStatus } from "@/components/sync-status";
 import { usePersonnel } from "@/hooks/use-indexed-db";
-import { deletePersonnel } from "@/lib/indexed-db";
+import { deletePersonnel } from "@/lib/db";
 import {
   Search,
   Loader2,

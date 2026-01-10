@@ -3,7 +3,7 @@
 import type React from "react"
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
 import { useRouter, usePathname } from "next/navigation"
-import { getUserSession, saveUserSession, clearAllUserData, type UserSession } from "@/lib/indexed-db"
+import { getUserSession, saveUserSession, clearAllUserData, type UserSession } from "@/lib/db"
 import { startAuthentication } from "@simplewebauthn/browser"
 
 interface AuthContextType {

@@ -16,7 +16,7 @@ export function SyncStatus() {
 
     // Check pending count periodically
     const checkPending = async () => {
-      const { getSyncQueue } = await import("@/lib/indexed-db")
+      const { getSyncQueue } = await import("@/lib/db")
       const queue = await getSyncQueue()
       setPendingCount(queue.length)
     }

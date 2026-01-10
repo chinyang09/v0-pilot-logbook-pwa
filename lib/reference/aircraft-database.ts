@@ -1,4 +1,4 @@
-import { db } from "@/lib/indexed-db"
+import { userDb as db } from "@/lib/db"
 
 export interface AircraftData {
   icao24: string

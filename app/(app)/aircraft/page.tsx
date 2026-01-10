@@ -13,7 +13,7 @@ import {
   normalizeAircraft,
   setProgressCallback,
 } from "@/lib/reference/aircraft-database"
-import { getUserPreferences, saveUserPreferences } from "@/lib/indexed-db"
+import { getUserPreferences, saveUserPreferences } from "@/lib/db"
 import { PageContainer } from "@/components/page-container"
 import { SyncStatus } from "@/components/sync-status"
 

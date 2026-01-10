@@ -11,7 +11,7 @@ import {
   addPersonnel,
   getAllPersonnel,
   type Personnel,
-} from "@/lib/indexed-db";
+} from "@/lib/db";
 import { ArrowLeft, Loader2, ChevronRight } from "lucide-react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { mutate } from "swr";
