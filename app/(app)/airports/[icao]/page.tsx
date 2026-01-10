@@ -6,7 +6,7 @@ import { PageContainer } from "@/components/page-container";
 import { SyncStatus } from "@/components/sync-status";
 import { useAirportDatabase } from "@/hooks/use-indexed-db";
 // Added getAirportLocalTime from your new lib
-import { getAirportByICAO, getAirportLocalTime } from "@/lib/airport-database";
+import { getAirportByICAO, getAirportLocalTime } from "@/lib/reference/airport-database";
 import {
   ArrowLeft,
   MapPin,

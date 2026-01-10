@@ -1,9 +1,9 @@
-import { db, type FlightLog, type Personnel, getCurrentUserPersonnel } from "./indexed-db"
-import { calculateNightTimeComplete } from "./utils/night-time"
-import { hhmmToMinutes, minutesToHHMM } from "./utils/time"
-import { getAirportByIATA, getAirportTimeInfo } from "./airport-database"
-import { getAircraftByRegistrationFromDB, type AircraftData } from "./aircraft-database"
-import type { Airport } from "./indexed-db"
+import { db, type FlightLog, type Personnel, getCurrentUserPersonnel } from "@/lib/indexed-db"
+import { calculateNightTimeComplete } from "@/lib/utils/night-time"
+import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time"
+import { getAirportByIATA, getAirportTimeInfo } from "@/lib/reference/airport-database"
+import { getAircraftByRegistrationFromDB, type AircraftData } from "@/lib/reference/aircraft-database"
+import type { Airport } from "@/lib/indexed-db"
 
 export async function processScootCSV(csvContent: string, airports: Airport[], aircraftDb: AircraftData[]) {
   const currentUser = await getCurrentUserPersonnel()

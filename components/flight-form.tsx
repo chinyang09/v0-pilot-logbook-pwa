@@ -22,11 +22,11 @@ import { DatePicker } from "@/components/date-picker";
 import type { FlightLog, AdditionalCrew, Approach } from "@/lib/indexed-db";
 import { updateFlight } from "@/lib/indexed-db";
 import { useAirportDatabase } from "@/hooks/use-indexed-db";
-import { getAirportByICAO } from "@/lib/airport-database";
+import { getAirportByICAO } from "@/lib/reference/airport-database";
 import {
   addRecentlyUsedAirport,
   addRecentlyUsedAircraft,
-} from "@/lib/user-preferences";
+} from "@/lib/utils/preferences";
 import {
   createEmptyFlightLog,
   calculateBlockTime,

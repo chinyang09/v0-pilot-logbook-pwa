@@ -1,8 +1,8 @@
 import type React from "react"
 import type { Metadata, Viewport } from "next"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
-import { SyncProvider } from "@/components/sync-provider"
-import { AuthProvider } from "@/components/auth-provider"
+import { SyncProvider } from "@/components/providers/sync-provider"
+import { AuthProvider } from "@/components/providers/auth-provider"
 import { AircraftPreloader } from "@/components/aircraft-preloader"
 import "./globals.css"
 

@@ -15,7 +15,7 @@ import {
   type Airport,
   type Personnel,
 } from "@/lib/indexed-db";
-import { getAirportDatabase } from "@/lib/airport-database";
+import { getAirportDatabase } from "@/lib/reference/airport-database";
 
 // Keys for SWR cache
 export const CACHE_KEYS = {
