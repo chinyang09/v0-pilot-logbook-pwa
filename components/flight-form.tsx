@@ -22,7 +22,7 @@ import { DatePicker } from "@/components/date-picker";
 import type { FlightLog, AdditionalCrew, Approach } from "@/lib/db";
 import { updateFlight } from "@/lib/db";
 import { useAirportDatabase } from "@/hooks/use-indexed-db";
-import { getAirportByICAO } from "@/lib/reference/airport-database";
+import { getAirportByICAO } from "@/lib/db";
 import {
   addRecentlyUsedAirport,
   addRecentlyUsedAircraft,

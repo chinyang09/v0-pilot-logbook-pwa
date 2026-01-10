@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { initializeAircraftDatabase, quickInit } from "@/lib/reference/aircraft-database"
+import { initializeAircraftDatabase, quickInit } from "@/lib/db"
 
 export function AircraftPreloader() {
   useEffect(() => {

@@ -10,7 +10,7 @@ import {
   getAircraftByRegistration,
   getAircraftByIcao24,
   type NormalizedAircraft,
-} from "@/lib/reference/aircraft-database";
+} from "@/lib/db";
 
 export default function AircraftDetailPage() {
   const params = useParams();

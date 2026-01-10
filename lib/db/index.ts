@@ -83,7 +83,7 @@ export {
   markRecordSynced,
 } from "./stores/user/sync-queue.store"
 
-// Re-export reference stores
+// Re-export reference stores - airports
 export {
   getAllAirports,
   getAirportByIcao,
@@ -94,7 +94,48 @@ export {
   toggleAirportFavorite,
   getFavoriteAirports,
   getAirportLocalTime,
+  getAirportDatabase,
+  searchAirports,
+  getAirportTimeInfo,
+  formatAirport,
+  getAirportByICAO,
+  getAirportByIATA,
+  type AirportData,
 } from "./stores/reference/airports.store"
+
+// Re-export reference stores - aircraft database
+export {
+  // Types
+  type AircraftData,
+  type NormalizedAircraft,
+  // Initialization
+  initializeAircraftDatabase,
+  quickInit,
+  isAircraftDatabaseReady,
+  isAircraftDatabaseLoaded,
+  getAircraftMetadata,
+  clearAircraftCache,
+  setProgressCallback,
+  // Search (DB-based - recommended)
+  searchAircraftFromDB,
+  getAircraftByRegistrationFromDB,
+  getAircraftByIcao24FromDB,
+  // Legacy search (in-memory)
+  getAircraftDatabase,
+  searchAircraft,
+  getAircraftByRegistration,
+  getAircraftByIcao24,
+  loadIntoMemory,
+  // Helpers
+  normalizeAircraft,
+  formatAircraft,
+  // CRUD
+  addAircraftToDatabase,
+  getAircraftFromDatabase,
+  deleteAircraftFromDatabase,
+  getAllAircraftFromDatabase,
+  hasAircraftInDatabase,
+} from "./stores/reference/aircraft.store"
 
 // Re-export metadata stores
 export { getFlightStats, type FlightStats } from "./stores/metadata/stats.store"

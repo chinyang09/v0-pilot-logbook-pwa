@@ -5,8 +5,8 @@ import { Input } from "@/components/ui/input";
 import { SyncStatus } from "@/components/sync-status";
 import { PageContainer } from "@/components/page-container";
 import { useAirportDatabase } from "@/hooks/use-indexed-db";
-import { searchAirports } from "@/lib/reference/airport-database";
 import {
+  searchAirports,
   toggleAirportFavorite,
   getRecentlyUsedAirports,
   addRecentlyUsedAirport,

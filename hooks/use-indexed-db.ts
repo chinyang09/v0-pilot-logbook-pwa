@@ -10,12 +10,12 @@ import {
   getAllPersonnel,
   getFlightStats,
   bulkLoadAirports,
+  getAirportDatabase,
   type FlightLog,
   type Aircraft,
   type Airport,
   type Personnel,
 } from "@/lib/db";
-import { getAirportDatabase } from "@/lib/reference/airport-database";
 
 // Keys for SWR cache
 export const CACHE_KEYS = {
