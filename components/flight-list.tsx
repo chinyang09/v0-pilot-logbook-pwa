@@ -442,7 +442,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       if (!container) return;
 
       let ticking = false;
-      const onScroll = () => {
+      const scrollHandler = (e: Event) => {
+        // Call external onScroll for navbar hiding (on every scroll event)
+        if (onScroll) {
+          onScroll(e as unknown as React.UIEvent<HTMLElement>);
+        }
+
+        // Throttle bidirectional sync logic with RAF
         if (!ticking) {
           requestAnimationFrame(() => {
             handleScroll();
@@ -452,12 +458,12 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
         }
       };
 
-      container.addEventListener("scroll", onScroll, { passive: true });
+      container.addEventListener("scroll", scrollHandler, { passive: true });
 
       return () => {
-        container.removeEventListener("scroll", onScroll);
+        container.removeEventListener("scroll", scrollHandler);
       };
-    }, [handleScroll]);
+    }, [handleScroll, onScroll]);
 
     const flightsByMonth = useMemo(() => {
       if (!showMonthHeaders) return null;
