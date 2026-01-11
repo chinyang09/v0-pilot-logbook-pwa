@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { SyncStatus } from "@/components/sync-status";
 import { PageContainer } from "@/components/page-container";
+import { useDebounce } from "@/hooks/use-debounce";
 import { useAirportDatabase } from "@/hooks/data";
 import {
   searchAirports,
@@ -28,6 +29,7 @@ export default function AirportsPage() {
 
   const { airports, isLoading } = useAirportDatabase();
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery, 150);
   const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
   const [recentAirports, setRecentAirports] = useState<typeof airports>([]);
 
@@ -48,8 +50,8 @@ export default function AirportsPage() {
     let baseList = airports;
 
     // If searching, use search utility
-    if (searchQuery.trim()) {
-      baseList = searchAirports(airports, searchQuery, airports.length);
+    if (debouncedSearchQuery.trim()) {
+      baseList = searchAirports(airports, debouncedSearchQuery, airports.length);
     }
 
     // Sort: Favorites first, then Alphabetical ICAO
@@ -60,7 +62,7 @@ export default function AirportsPage() {
         return a.icao.localeCompare(b.icao);
       })
       .slice(0, displayCount);
-  }, [airports, searchQuery, displayCount]);
+  }, [airports, debouncedSearchQuery, displayCount]);
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -216,7 +218,7 @@ export default function AirportsPage() {
         </div>
 
         <div className="space-y-3">
-          {!searchQuery && (
+          {!debouncedSearchQuery && (
             <>
               {/* Favorites Section */}
               {airports.some((a) => a.isFavorite) && (
@@ -248,7 +250,7 @@ export default function AirportsPage() {
             </>
           )}
 
-          {searchQuery && (
+          {debouncedSearchQuery && (
             <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
               {filteredAirports.length} results
             </h2>

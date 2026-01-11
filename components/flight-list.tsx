@@ -11,6 +11,7 @@ import {
   forwardRef,
   useImperativeHandle,
 } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { FlightLog, Aircraft, Airport, Personnel } from "@/lib/db";
 import { deleteFlight } from "@/lib/db";
 import { formatHHMMDisplay } from "@/lib/utils/time";
@@ -30,7 +31,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   Plane,
-  ChevronDown,
   Trash2,
   Lock,
   Unlock,
@@ -61,9 +61,6 @@ interface FlightListProps {
   topSpacerHeight?: number; // Height of the calendar
   headerContent?: React.ReactNode; // Height of the top bar (48px)
 }
-
-const INITIAL_LOAD = 20; // Increased initial load
-const LOAD_INCREMENT = 20;
 
 const SWIPE_THRESHOLD = 80;
 
@@ -351,7 +348,6 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     },
     ref
   ) {
-    const [visibleCount, setVisibleCount] = useState(INITIAL_LOAD);
     const [deleteTarget, setDeleteTarget] = useState<FlightLog | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
 
@@ -359,38 +355,32 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     const isExternalScrollRef = useRef(false);
     const lastDetectedFlightRef = useRef<string | null>(null);
 
+    // Create virtualizer instance
+    const rowVirtualizer = useVirtualizer({
+      count: flights.length,
+      getScrollElement: () => scrollContainerRef.current,
+      estimateSize: () => 100, // Estimated height of FlightCard in pixels
+      overscan: 5, // Render 5 extra items above/below viewport
+    });
+
+    // Get virtual items
+    const virtualItems = rowVirtualizer.getVirtualItems();
+
     useImperativeHandle(
       ref,
       () => ({
         scrollToFlight: (flightId: string) => {
-          const element = document.getElementById(`flight-${flightId}`);
-          const container = scrollContainerRef.current;
-
-          if (element && container) {
+          const index = flights.findIndex((f) => f.id === flightId);
+          if (index !== -1) {
             isExternalScrollRef.current = true;
-
-            // Calculate position: element's top - (header + calendar height)
-            const elementRect = element.getBoundingClientRect();
-            const containerRect = container.getBoundingClientRect();
-
-            // topSpacerHeight is the prop we added earlier
-            const targetScroll =
-              container.scrollTop +
-              (elementRect.top - containerRect.top) -
-              (topSpacerHeight || 0);
-
-            container.scrollTo({
-              top: targetScroll,
-              behavior: "smooth",
-            });
-
+            rowVirtualizer.scrollToIndex(index, { align: "start" });
             setTimeout(() => {
               isExternalScrollRef.current = false;
             }, 400);
           }
         },
       }),
-      [topSpacerHeight]
+      [flights, rowVirtualizer]
     );
 
     const handleScroll = useCallback(() => {
@@ -399,43 +389,18 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
       if (!onTopFlightChange || flights.length === 0) return;
 
-      const container = scrollContainerRef.current;
-      if (!container) return;
+      // Find the first visible virtual item
+      const visibleItems = rowVirtualizer.getVirtualItems();
+      if (visibleItems.length > 0) {
+        const topVisibleIndex = visibleItems[0].index;
+        const topFlight = flights[topVisibleIndex];
 
-      const containerRect = container.getBoundingClientRect();
-
-      const calendarBottomEdge = containerRect.top + (topSpacerHeight || 0);
-
-      let topFlight: FlightLog | null = null;
-
-      for (let i = 0; i < Math.min(visibleCount, flights.length); i++) {
-        const flight = flights[i];
-        const element = document.getElementById(`flight-${flight.id}`);
-
-        if (element) {
-          const rect = element.getBoundingClientRect();
-          const cardMidpoint = rect.top + rect.height / 2;
-
-          // UX Tweak: If the midpoint of the card has scrolled past the calendar edge,
-          // or if it's the very first card and still partially visible.
-          if (cardMidpoint > calendarBottomEdge) {
-            topFlight = flight;
-            break;
-          }
+        if (topFlight && topFlight.id !== lastDetectedFlightRef.current) {
+          lastDetectedFlightRef.current = topFlight.id;
+          onTopFlightChange(topFlight);
         }
       }
-
-      if (topFlight && topFlight.id !== lastDetectedFlightRef.current) {
-        lastDetectedFlightRef.current = topFlight.id;
-        onTopFlightChange(topFlight);
-      }
-    }, [
-      flights,
-      visibleCount,
-      onTopFlightChange,
-      onScrollStart,
-      topSpacerHeight,
-    ]);
+    }, [flights, onTopFlightChange, onScrollStart, rowVirtualizer]);
 
     useEffect(() => {
       const container = scrollContainerRef.current;
@@ -464,56 +429,6 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
         container.removeEventListener("scroll", scrollHandler);
       };
     }, [handleScroll, onScroll]);
-
-    const flightsByMonth = useMemo(() => {
-      if (!showMonthHeaders) return null;
-
-      const grouped: {
-        month: string;
-        year: number;
-        monthNum: number;
-        flights: FlightLog[];
-      }[] = [];
-      const monthMap = new Map<string, FlightLog[]>();
-
-      flights.forEach((flight) => {
-        const date = parseDateLocal(flight.date);
-        const key = `${date.getFullYear()}-${date.getMonth()}`;
-        if (!monthMap.has(key)) {
-          monthMap.set(key, []);
-        }
-        monthMap.get(key)!.push(flight);
-      });
-
-      monthMap.forEach((monthFlights, key) => {
-        const [year, month] = key.split("-").map(Number);
-        grouped.push({
-          month: MONTHS[month],
-          year,
-          monthNum: month,
-          flights: monthFlights,
-        });
-      });
-
-      grouped.sort((a, b) => {
-        if (a.year !== b.year) return b.year - a.year;
-        return b.monthNum - a.monthNum;
-      });
-
-      return grouped;
-    }, [flights, showMonthHeaders]);
-
-    const visibleFlights = useMemo(
-      () => flights.slice(0, visibleCount),
-      [flights, visibleCount]
-    );
-    const hasMore = visibleCount < flights.length;
-
-    const loadMore = () => {
-      setVisibleCount((prev) =>
-        Math.min(prev + LOAD_INCREMENT, flights.length)
-      );
-    };
 
     const handleDelete = async () => {
       if (!deleteTarget) return;
@@ -588,21 +503,14 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       );
     }
 
-    const renderFlightCard = (flight: FlightLog) => (
-      <div key={flight.id} id={`flight-${flight.id}`}>
-        <SwipeableFlightCard
-          flight={flight}
-          onEdit={() => onEdit?.(flight)}
-          onDelete={() => setDeleteTarget(flight)}
-          onToggleLock={() => handleToggleLock(flight)}
-          personnel={personnel}
-        />
-      </div>
-    );
-
     return (
       <>
-        <div ref={scrollContainerRef} className="h-full overflow-y-auto">
+        <div
+          ref={scrollContainerRef}
+          className="h-full overflow-y-auto"
+          style={{ contain: "strict" }}
+        >
+          {/* Top spacer for calendar */}
           <div
             style={{
               height: `${topSpacerHeight}px`,
@@ -610,33 +518,48 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             }}
             className="transition-[height] duration-500 will-change-[height]"
           />
+
           {headerContent}
-          {/*Flight Cards*/}
-          <div className="space-y-2">
-            {showMonthHeaders && flightsByMonth
-              ? flightsByMonth.map(({ month, year, flights: monthFlights }) => (
-                  <div key={`${year}-${month}`} className="space-y-3">
-                    <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm py-2">
-                      <h3 className="text-sm font-semibold text-muted-foreground">
-                        {month} {year}
-                      </h3>
-                    </div>
-                    {monthFlights.slice(0, visibleCount).map(renderFlightCard)}
-                  </div>
-                ))
-              : visibleFlights.map(renderFlightCard)}
 
-            {hasMore && (
-              <div className="flex justify-center pt-2 pb-4">
-                <Button variant="ghost" onClick={loadMore} className="gap-2">
-                  <ChevronDown className="h-4 w-4" />
-                  Load More ({flights.length - visibleCount} remaining)
-                </Button>
-              </div>
-            )}
-
-            <div className="h-16" />
+          {/* Virtual list container */}
+          <div
+            style={{
+              height: `${rowVirtualizer.getTotalSize()}px`,
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            {virtualItems.map((virtualRow) => {
+              const flight = flights[virtualRow.index];
+              return (
+                <div
+                  key={flight.id}
+                  id={`flight-${flight.id}`}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualRow.start}px)`,
+                    padding: "0 8px 8px 8px",
+                  }}
+                  data-index={virtualRow.index}
+                  ref={rowVirtualizer.measureElement}
+                >
+                  <SwipeableFlightCard
+                    flight={flight}
+                    onEdit={() => onEdit?.(flight)}
+                    onDelete={() => setDeleteTarget(flight)}
+                    onToggleLock={() => handleToggleLock(flight)}
+                    personnel={personnel}
+                  />
+                </div>
+              );
+            })}
           </div>
+
+          {/* Bottom padding */}
+          <div className="h-16" />
         </div>
 
         <AlertDialog

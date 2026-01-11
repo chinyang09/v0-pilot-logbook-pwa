@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { FlightList, type FlightListRef } from "@/components/flight-list"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
+import { useDebounce } from "@/hooks/use-debounce"
 import { LogbookCalendar, type CalendarHandle } from "@/components/logbook-calendar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -67,6 +68,7 @@ export default function LogbookPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [activeFilterType, setActiveFilterType] = useState<"none" | "flight" | "aircraft" | "airport" | "crew">("none")
   const [searchQuery, setSearchQuery] = useState("")
+  const debouncedSearchQuery = useDebounce(searchQuery, 150)
   const [searchFocused, setSearchFocused] = useState(false)
   const [selectedFilters, setSelectedFilters] = useState<string[]>([])
   const { handleScroll } = useScrollNavbarContext()
@@ -176,7 +178,7 @@ export default function LogbookPage() {
 
   const filterOptions = useMemo(() => {
     const options = new Set<string>()
-    const query = searchQuery.toLowerCase()
+    const query = debouncedSearchQuery.toLowerCase()
 
     switch (activeFilterType) {
       case "flight":
@@ -214,7 +216,7 @@ export default function LogbookPage() {
     }
 
     return Array.from(options).slice(0, 10)
-  }, [activeFilterType, searchQuery, flights, aircraft, airports, personnel])
+  }, [activeFilterType, debouncedSearchQuery, flights, aircraft, airports, personnel])
 
   const filteredFlights = useMemo(() => {
     let result = flights
