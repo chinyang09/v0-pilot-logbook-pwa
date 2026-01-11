@@ -69,38 +69,29 @@ export function subtractHHMM(time1: string | undefined | null, time2: string | u
 
 /**
  * Calculate difference between two HH:MM times (for same day)
+ * Handles overnight flights automatically
  * Returns HH:MM format
  */
 export function calculateDuration(
   startTime: string | undefined | null,
-  endTime: string | undefined | null,
-  date?: string
+  endTime: string | undefined | null
 ): string {
   if (!startTime || !endTime) return "00:00"
 
-  const parseTimeToMinutes = (time: string): number => {
-    const parts = time.split(":")
-    if (parts.length !== 2) return 0
-    const hours = Number.parseInt(parts[0], 10)
-    const minutes = Number.parseInt(parts[1], 10)
-    if (Number.isNaN(hours) || Number.isNaN(minutes)) return 0
-    return hours * 60 + minutes
-  }
-
-  const startMins = parseTimeToMinutes(startTime)
-  let endMins = parseTimeToMinutes(endTime)
+  const startMins = hhmmToMinutes(startTime)
+  let endMins = hhmmToMinutes(endTime)
 
   // Handle overnight (if end is before start, add 24 hours)
   if (endMins < startMins) {
     endMins += 24 * 60
   }
 
-  const diffMinutes = endMins - startMins
-  return minutesToHHMM(diffMinutes)
+  return minutesToHHMM(endMins - startMins)
 }
 
 /**
  * Format HH:MM for display (e.g., "2:30" or "12:45")
+ * No leading zero on hours
  */
 export function formatHHMMDisplay(hhmm: string | undefined | null): string {
   if (!hhmm || typeof hhmm !== "string") return "0:00"
@@ -114,16 +105,9 @@ export function formatHHMMDisplay(hhmm: string | undefined | null): string {
 
 /**
  * Format time as H:MM (no leading zero on hours)
+ * @alias formatHHMMDisplay
  */
-export function formatTimeShort(hhmm: string | undefined | null): string {
-  if (!hhmm || typeof hhmm !== "string") return "0:00"
-  const parts = hhmm.split(":")
-  if (parts.length !== 2) return "0:00"
-  const hours = Number.parseInt(parts[0], 10)
-  const minutes = parts[1]
-  if (Number.isNaN(hours)) return "0:00"
-  return `${hours}:${minutes}`
-}
+export const formatTimeShort = formatHHMMDisplay
 
 /**
  * Sum an array of HH:MM strings

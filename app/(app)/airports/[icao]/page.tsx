@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/page-container";
 import { SyncStatus } from "@/components/sync-status";
-import { useAirportDatabase } from "@/hooks/use-indexed-db";
+import { useAirportDatabase } from "@/hooks/data";
 // Added getAirportLocalTime from your new lib
 import { getAirportByICAO, getAirportLocalTime } from "@/lib/db";
 import {

@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { SyncStatus } from "@/components/sync-status";
 import { PageContainer } from "@/components/page-container";
-import { useAirportDatabase } from "@/hooks/use-indexed-db";
+import { useAirportDatabase } from "@/hooks/data";
 import {
   searchAirports,
   toggleAirportFavorite,

@@ -6,7 +6,7 @@ import { PageContainer } from "@/components/page-container";
 import type { FlightLog } from "@/lib/db";
 import { getFlightById, addFlight } from "@/lib/db";
 import { syncService } from "@/lib/sync";
-import { refreshAllData, useDBReady } from "@/hooks/use-indexed-db";
+import { refreshAllData, useDBReady } from "@/hooks/data";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
