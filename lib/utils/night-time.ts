@@ -10,6 +10,8 @@
  * Phase 3: ON to IN time (on ground at arrival airport)
  */
 
+import { minutesToHHMM } from "./time"
+
 export interface GeoPoint {
   lat: number
   lon: number
@@ -241,17 +243,6 @@ export function calculateNightTimeComplete(
 
   const totalNight = phase1 + phase2 + phase3
   const totalDay = Math.max(0, totalBlockMinutes - totalNight)
-
-  const minutesToHHMM = (m: number) => {
-    if (isNaN(m) || m < 0) return "00:00"
-    const h = Math.floor(m / 60)
-      .toString()
-      .padStart(2, "0")
-    const min = Math.floor(m % 60)
-      .toString()
-      .padStart(2, "0")
-    return `${h}:${min}`
-  }
 
   return {
     phase1NightMinutes: phase1,

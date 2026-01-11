@@ -15,7 +15,7 @@ import {
   useAircraft,
   useAirportDatabase,
   usePersonnel,
-} from "@/hooks/use-indexed-db"
+} from "@/hooks/data"
 import { ArrowLeft, Calendar, Plus, Search, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { SyncStatus } from "@/components/sync-status"

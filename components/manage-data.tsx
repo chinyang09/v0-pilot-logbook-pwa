@@ -25,7 +25,7 @@ import {
   type Aircraft,
   type Personnel,
 } from "@/lib/db"
-import { useAircraft, usePersonnel } from "@/hooks/use-indexed-db"
+import { useAircraft, usePersonnel } from "@/hooks/data"
 import { syncService } from "@/lib/sync"
 import { Plane, Users, Save, X, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"

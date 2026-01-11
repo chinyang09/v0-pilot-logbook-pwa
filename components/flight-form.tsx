@@ -20,13 +20,13 @@ import { Button } from "@/components/ui/button";
 import { TimePicker } from "@/components/time-picker";
 import { DatePicker } from "@/components/date-picker";
 import type { FlightLog, AdditionalCrew, Approach } from "@/lib/db";
-import { updateFlight } from "@/lib/db";
-import { useAirportDatabase } from "@/hooks/use-indexed-db";
-import { getAirportByICAO } from "@/lib/db";
 import {
+  updateFlight,
+  getAirportByICAO,
   addRecentlyUsedAirport,
   addRecentlyUsedAircraft,
-} from "@/lib/utils/preferences";
+} from "@/lib/db";
+import { useAirportDatabase } from "@/hooks/data";
 import {
   createEmptyFlightLog,
   calculateBlockTime,
@@ -44,7 +44,7 @@ import {
   getCurrentTimeUTC,
   isValidHHMM,
 } from "@/lib/utils/time";
-import { usePersonnel } from "@/hooks/use-indexed-db";
+import { usePersonnel } from "@/hooks/data";
 
 const FORM_STORAGE_KEY = "flight-form-draft";
 

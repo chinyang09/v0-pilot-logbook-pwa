@@ -15,7 +15,7 @@ import {
 import { ArrowLeft, Loader2, ChevronRight } from "lucide-react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { mutate } from "swr";
-import { CACHE_KEYS } from "@/hooks/use-indexed-db";
+import { CACHE_KEYS } from "@/hooks/data";
 
 const ROLE_OPTIONS = ["PIC", "SIC", "Instructor", "Examiner"] as const;
 

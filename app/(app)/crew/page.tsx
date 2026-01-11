@@ -6,7 +6,7 @@ import { PageContainer } from "@/components/page-container";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SyncStatus } from "@/components/sync-status";
-import { usePersonnel } from "@/hooks/use-indexed-db";
+import { usePersonnel } from "@/hooks/data";
 import { deletePersonnel } from "@/lib/db";
 import {
   Search,
@@ -20,7 +20,7 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { mutate } from "swr";
-import { CACHE_KEYS } from "@/hooks/use-indexed-db";
+import { CACHE_KEYS } from "@/hooks/data";
 import {
   AlertDialog,
   AlertDialogAction,

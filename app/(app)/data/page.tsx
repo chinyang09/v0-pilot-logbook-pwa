@@ -5,7 +5,7 @@ import { SyncStatus } from "@/components/sync-status"
 import { ManageData } from "@/components/manage-data"
 import { PageContainer } from "@/components/page-container"
 import { syncService } from "@/lib/sync"
-import { refreshAllData } from "@/hooks/use-indexed-db"
+import { refreshAllData } from "@/hooks/data"
 
 export default function DataPage() {
   useEffect(() => {
