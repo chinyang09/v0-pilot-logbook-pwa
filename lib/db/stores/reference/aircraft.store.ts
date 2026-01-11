@@ -64,6 +64,9 @@ const searchCache = new Map<string, { results: NormalizedAircraft[]; timestamp: 
 const SEARCH_CACHE_TTL = 60000 // 1 minute
 const SEARCH_CACHE_MAX_SIZE = 50
 
+// Worker instance (reusable)
+let parserWorker: Worker | null = null
+
 // ============================================
 // Progress reporting
 // ============================================
@@ -76,6 +79,57 @@ function reportProgress(stage: string, percent: number, count?: number): void {
   if (progressCallback) {
     progressCallback({ stage, percent, count })
   }
+}
+
+// ============================================
+// Web Worker functions
+// ============================================
+
+function getParserWorker(): Worker {
+  if (!parserWorker) {
+    parserWorker = new Worker('/workers/aircraft-parser.js')
+  }
+  return parserWorker
+}
+
+function terminateParserWorker(): void {
+  if (parserWorker) {
+    parserWorker.terminate()
+    parserWorker = null
+  }
+}
+
+async function parseAircraftWithWorker(arrayBuffer: ArrayBuffer): Promise<{ registration: string; data: string }[]> {
+  return new Promise((resolve, reject) => {
+    const worker = getParserWorker()
+
+    const handleMessage = (e: MessageEvent) => {
+      const { type, stage, percent, count, records, error } = e.data
+
+      if (type === 'progress') {
+        reportProgress(stage, percent, count)
+      } else if (type === 'complete') {
+        worker.removeEventListener('message', handleMessage)
+        worker.removeEventListener('error', handleError)
+        resolve(records)
+      } else if (type === 'error') {
+        worker.removeEventListener('message', handleMessage)
+        worker.removeEventListener('error', handleError)
+        reject(new Error(error))
+      }
+    }
+
+    const handleError = (e: ErrorEvent) => {
+      worker.removeEventListener('message', handleMessage)
+      worker.removeEventListener('error', handleError)
+      reject(new Error(e.message))
+    }
+
+    worker.addEventListener('message', handleMessage)
+    worker.addEventListener('error', handleError)
+
+    worker.postMessage({ type: 'parse', arrayBuffer })
+  })
 }
 
 // ============================================
@@ -162,6 +216,38 @@ async function decompressGzip(compressedData: ArrayBuffer): Promise<string> {
   return decoder.decode(decompressed)
 }
 
+// Helper for fallback main-thread parsing
+function parseNDJSON(ndjsonText: string): { registration: string; data: string }[] {
+  const records: { registration: string; data: string }[] = []
+  const lines = ndjsonText.split('\n')
+  let parsed = 0
+  const estimatedRecords = 615656
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+
+    try {
+      const obj = JSON.parse(trimmed) as AircraftData
+      if (obj && obj.icao24) {
+        records.push({
+          registration: obj.icao24.toUpperCase(),
+          data: trimmed
+        })
+        parsed++
+
+        if (parsed % 50000 === 0) {
+          reportProgress("Parsing", 40 + Math.round((parsed / estimatedRecords) * 20), parsed)
+        }
+      }
+    } catch {
+      // Skip invalid lines
+    }
+  }
+
+  return records
+}
+
 async function getCachedCount(): Promise<number> {
   try {
     return await referenceDb.aircraftDatabase.count()
@@ -212,46 +298,31 @@ async function loadAndStoreAircraftFromCDN(): Promise<number> {
   reportProgress("Downloading", 20)
   const arrayBuffer = await response.arrayBuffer()
 
-  reportProgress("Decompressing", 30)
-  const ndjsonText = await decompressGzip(arrayBuffer)
+  // Use web worker for parsing (non-blocking)
+  let allRecords: { registration: string; data: string }[]
 
-  reportProgress("Parsing", 40)
-
-  const allRecords: { registration: string; data: string }[] = []
-  let parsed = 0
-  let start = 0
-  const totalLength = ndjsonText.length
-  const estimatedRecords = 615656
-
-  while (start < totalLength) {
-    let end = ndjsonText.indexOf("\n", start)
-    if (end === -1) end = totalLength
-
-    const line = ndjsonText.substring(start, end).trim()
-    start = end + 1
-
-    if (!line) continue
-
+  if (typeof Worker !== 'undefined') {
+    // Use worker if available
     try {
-      const obj = JSON.parse(line) as AircraftData
-      if (obj && obj.icao24) {
-        allRecords.push({
-          registration: obj.icao24.toUpperCase(),
-          data: line,
-        })
-        parsed++
-
-        if (parsed % 50000 === 0) {
-          reportProgress("Parsing", 40 + Math.round((parsed / estimatedRecords) * 20), parsed)
-          await new Promise((resolve) => setTimeout(resolve, 0))
-        }
-      }
-    } catch {
-      // Skip invalid lines
+      allRecords = await parseAircraftWithWorker(arrayBuffer)
+    } catch (workerError) {
+      console.warn("[Aircraft DB] Worker failed, falling back to main thread:", workerError)
+      // Fallback to main thread parsing
+      reportProgress("Decompressing", 30)
+      const ndjsonText = await decompressGzip(arrayBuffer)
+      reportProgress("Parsing", 40)
+      allRecords = parseNDJSON(ndjsonText)
     }
+  } else {
+    // Fallback to main thread parsing
+    reportProgress("Decompressing", 30)
+    const ndjsonText = await decompressGzip(arrayBuffer)
+    reportProgress("Parsing", 40)
+    allRecords = parseNDJSON(ndjsonText)
   }
 
-  reportProgress("Storing", 60)
+  // Store in IndexedDB
+  reportProgress("Storing", 90)
 
   await referenceDb.transaction("rw", referenceDb.aircraftDatabase, async () => {
     await referenceDb.aircraftDatabase.clear()
@@ -261,13 +332,16 @@ async function loadAndStoreAircraftFromCDN(): Promise<number> {
       const batch = allRecords.slice(i, i + batchSize)
       await referenceDb.aircraftDatabase.bulkPut(batch)
 
-      const progress = 60 + Math.round(((i + batch.length) / allRecords.length) * 35)
-      reportProgress("Storing", progress, i + batch.length)
+      const percent = 90 + Math.round(((i + batch.length) / allRecords.length) * 10)
+      reportProgress("Storing", percent, i + batch.length)
     }
   })
 
   localStorage.setItem(CACHE_VERSION_KEY, CACHE_VERSION)
   reportProgress("Complete", 100, allRecords.length)
+
+  // Clean up worker
+  terminateParserWorker()
 
   searchCache.clear()
 

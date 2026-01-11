@@ -3,6 +3,7 @@
 import type React from "react";
 import { useState, useMemo, useRef, useEffect } from "react";
 import { PageContainer } from "@/components/page-container";
+import { useDebounce } from "@/hooks/use-debounce";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SyncStatus } from "@/components/sync-status";
@@ -198,6 +199,7 @@ export default function CrewPage() {
 
   const { personnel, isLoading } = usePersonnel();
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery, 150);
   const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
   const [deleteTarget, setDeleteTarget] = useState<
     (typeof personnel)[0] | null
@@ -217,7 +219,7 @@ export default function CrewPage() {
   }, [personnel]);
 
   const filteredPersonnel = useMemo(() => {
-    const query = searchQuery.toLowerCase().trim();
+    const query = debouncedSearchQuery.toLowerCase().trim();
     if (!query) return sortedPersonnel.slice(0, displayCount);
     return sortedPersonnel
       .filter(
@@ -228,7 +230,7 @@ export default function CrewPage() {
           p.roles?.some((r) => r.toLowerCase().includes(query))
       )
       .slice(0, displayCount);
-  }, [sortedPersonnel, searchQuery, displayCount]);
+  }, [sortedPersonnel, debouncedSearchQuery, displayCount]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -347,7 +349,7 @@ export default function CrewPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {searchQuery && (
+            {debouncedSearchQuery && (
               <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
                 {filteredPersonnel.length} results
               </h2>

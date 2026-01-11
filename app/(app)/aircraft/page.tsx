@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Search, Plane, ArrowLeft, Loader2, ChevronRight } from "lucide-react"
+import { useDebounce } from "@/hooks/use-debounce"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import {
@@ -28,6 +29,7 @@ export default function AircraftPage() {
   const fieldName = searchParams.get("field") || "aircraftReg"
 
   const [searchQuery, setSearchQuery] = useState("")
+  const debouncedSearchQuery = useDebounce(searchQuery, 150)
   const [allAircraft, setAllAircraft] = useState<AircraftData[]>([])
   const [filteredAircraft, setFilteredAircraft] = useState<NormalizedAircraft[]>([])
   const [recentlyUsed, setRecentlyUsed] = useState<NormalizedAircraft[]>([])
@@ -84,14 +86,14 @@ export default function AircraftPage() {
   }, [])
 
   useEffect(() => {
-    if (searchQuery.length >= 2) {
-      const results = searchAircraft(allAircraft, searchQuery, 200)
+    if (debouncedSearchQuery.length >= 2) {
+      const results = searchAircraft(allAircraft, debouncedSearchQuery, 200)
       setFilteredAircraft(results)
       setDisplayCount(ITEMS_PER_PAGE)
     } else {
       setFilteredAircraft([])
     }
-  }, [searchQuery, allAircraft])
+  }, [debouncedSearchQuery, allAircraft])
 
   useEffect(() => {
     if (observerRef.current) observerRef.current.disconnect()
@@ -130,7 +132,7 @@ export default function AircraftPage() {
   )
 
   const displayedAircraft = filteredAircraft.slice(0, displayCount)
-  const showRecentlyUsed = !searchQuery && recentlyUsed.length > 0
+  const showRecentlyUsed = !debouncedSearchQuery && recentlyUsed.length > 0
 
   return (
     <PageContainer
@@ -199,7 +201,7 @@ export default function AircraftPage() {
               </div>
             )}
 
-            {searchQuery.length >= 2 && (
+            {debouncedSearchQuery.length >= 2 && (
               <div className="space-y-1.5">
                 <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
                   {filteredAircraft.length} results
@@ -221,7 +223,7 @@ export default function AircraftPage() {
               </div>
             )}
 
-            {!searchQuery && !showRecentlyUsed && (
+            {!debouncedSearchQuery && !showRecentlyUsed && (
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <Plane className="h-12 w-12 text-muted-foreground mb-4" />
                 <p className="text-sm text-muted-foreground">Search for aircraft by registration or type</p>
