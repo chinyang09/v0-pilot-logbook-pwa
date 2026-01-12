@@ -142,8 +142,8 @@ export interface ScheduleEntry {
   // Sync
   createdAt: number
   updatedAt?: number
+  deleteddAt?: number
   syncStatus: SyncStatus
-  mongoId?: string
 }
 
 // ============================================
@@ -175,8 +175,8 @@ export interface Currency {
   // Sync
   createdAt: number
   updatedAt?: number
+  deleteddAt?: number
   syncStatus: SyncStatus
-  mongoId?: string
 }
 
 export type CurrencyStatus = "valid" | "warning" | "critical" | "expired"

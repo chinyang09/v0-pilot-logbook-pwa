@@ -2,9 +2,9 @@
  * Aircraft store operations (user-owned aircraft)
  */
 
-import { userDb } from "../../user-db"
-import type { Aircraft, AircraftCreate } from "@/types/entities/aircraft.types"
-import { addToSyncQueue } from "./sync-queue.store"
+import { userDb } from "../../user-db";
+import type { Aircraft, AircraftCreate } from "@/types/entities/aircraft.types";
+import { addToSyncQueue } from "./sync-queue.store";
 
 /**
  * Add new aircraft
@@ -15,81 +15,90 @@ export async function addAircraft(aircraft: AircraftCreate): Promise<Aircraft> {
     id: crypto.randomUUID(),
     createdAt: Date.now(),
     syncStatus: "pending",
-  }
+  };
 
-  await userDb.aircraft.put(newAircraft)
-  await addToSyncQueue("create", "aircraft", newAircraft)
+  await userDb.aircraft.put(newAircraft);
+  await addToSyncQueue("create", "aircraft", newAircraft);
 
-  return newAircraft
+  return newAircraft;
 }
 
 /**
  * Update existing aircraft
  */
-export async function updateAircraft(id: string, updates: Partial<Aircraft>): Promise<Aircraft | null> {
-  const aircraft = await userDb.aircraft.get(id)
-  if (!aircraft) return null
+export async function updateAircraft(
+  id: string,
+  updates: Partial<Aircraft>
+): Promise<Aircraft | null> {
+  const aircraft = await userDb.aircraft.get(id);
+  if (!aircraft) return null;
 
   const updatedAircraft: Aircraft = {
     ...aircraft,
     ...updates,
     updatedAt: Date.now(),
     syncStatus: "pending",
-  }
+  };
 
-  await userDb.aircraft.put(updatedAircraft)
-  await addToSyncQueue("update", "aircraft", updatedAircraft)
+  await userDb.aircraft.put(updatedAircraft);
+  await addToSyncQueue("update", "aircraft", updatedAircraft);
 
-  return updatedAircraft
+  return updatedAircraft;
 }
 
 /**
  * Delete aircraft
  */
 export async function deleteAircraft(id: string): Promise<boolean> {
-  const aircraft = await userDb.aircraft.get(id)
-  if (!aircraft) return false
+  const aircraft = await userDb.aircraft.get(id);
+  if (!aircraft) return false;
 
-  await userDb.aircraft.delete(id)
-  await addToSyncQueue("delete", "aircraft", { id, mongoId: aircraft.mongoId })
-  return true
+  await userDb.aircraft.delete(id);
+  await addToSyncQueue("delete", "aircraft", { id });
+  return true;
 }
 
 /**
  * Delete aircraft without adding to sync queue
  */
 export async function silentDeleteAircraft(id: string): Promise<boolean> {
-  const aircraft = await userDb.aircraft.get(id)
+  const aircraft = await userDb.aircraft.get(id);
   if (!aircraft) {
-    const byMongoPattern = await userDb.aircraft.filter((a) => a.id === id || a.mongoId === id).first()
+    const byMongoPattern = await userDb.aircraft
+      .filter((a) => a.id === id )
+      .first();
     if (byMongoPattern) {
-      await userDb.aircraft.delete(byMongoPattern.id)
-      return true
+      await userDb.aircraft.delete(byMongoPattern.id);
+      return true;
     }
-    return false
+    return false;
   }
-  await userDb.aircraft.delete(id)
-  return true
+  await userDb.aircraft.delete(id);
+  return true;
 }
 
 /**
  * Get all aircraft
  */
 export async function getAllAircraft(): Promise<Aircraft[]> {
-  return userDb.aircraft.toArray()
+  return userDb.aircraft.toArray();
 }
 
 /**
  * Get aircraft by ID
  */
-export async function getAircraftById(id: string): Promise<Aircraft | undefined> {
-  return userDb.aircraft.get(id)
+export async function getAircraftById(
+  id: string
+): Promise<Aircraft | undefined> {
+  return userDb.aircraft.get(id);
 }
 
 /**
  * Upsert aircraft from server (for sync)
  */
-export async function upsertAircraftFromServer(serverAircraft: Aircraft): Promise<void> {
+export async function upsertAircraftFromServer(
+  serverAircraft: Aircraft
+): Promise<void> {
   const normalized: Aircraft = {
     id: serverAircraft.id,
     userId: serverAircraft.userId,
@@ -104,24 +113,23 @@ export async function upsertAircraftFromServer(serverAircraft: Aircraft): Promis
     createdAt: serverAircraft.createdAt || Date.now(),
     updatedAt: serverAircraft.updatedAt,
     syncStatus: "synced",
-    mongoId: serverAircraft.mongoId,
-  }
+  };
 
-  let existing: Aircraft | undefined
-  if (normalized.mongoId) {
-    existing = await userDb.aircraft.where("mongoId").equals(normalized.mongoId).first()
+  let existing: Aircraft | undefined;
+  if (normalized.id) {
+    existing = await userDb.aircraft.where("id").equals(normalized.id).first();
   }
   if (!existing && normalized.id) {
-    existing = await userDb.aircraft.get(normalized.id)
+    existing = await userDb.aircraft.get(normalized.id);
   }
 
   if (existing) {
-    const serverTime = normalized.updatedAt || normalized.createdAt
-    const localTime = existing.updatedAt || existing.createdAt
+    const serverTime = normalized.updatedAt || normalized.createdAt;
+    const localTime = existing.updatedAt || existing.createdAt;
     if (serverTime >= localTime) {
-      await userDb.aircraft.put({ ...normalized, id: existing.id })
+      await userDb.aircraft.put({ ...normalized, id: existing.id });
     }
   } else {
-    await userDb.aircraft.put(normalized)
+    await userDb.aircraft.put(normalized);
   }
 }

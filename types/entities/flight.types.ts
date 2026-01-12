@@ -98,10 +98,10 @@ export interface FlightLog {
   isLocked?: boolean
   // Timestamps
   createdAt: number
-  updatedAt: number
+  updatedAt?: number
+  deleteddAt?: number
   // Sync metadata
   syncStatus: SyncStatus
-  mongoId?: string
   lastSyncedAt?: number
 }
 

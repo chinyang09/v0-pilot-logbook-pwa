@@ -194,9 +194,9 @@ class SyncService {
             continue
           }
 
-          if ((item.type === "create" || item.type === "update") && result.mongoId) {
+          if ((item.type === "create" || item.type === "update")) {
             const data = item.data as { id: string }
-            await markRecordSynced(item.collection, data.id, result.mongoId)
+            await markRecordSynced(item.collection, data.id)
           }
 
           await clearSyncQueueItem(item.id)
