@@ -17,6 +17,22 @@ export type { Personnel, PersonnelCreate } from "@/types/entities/crew.types"
 export type { UserSession } from "@/types/entities/user.types"
 export type { UserPreferences } from "@/types/db/stores.types"
 export type { SyncQueueItem, SyncMeta } from "@/types/sync/sync.types"
+export type {
+  ScheduleEntry,
+  ScheduleEntryCreate,
+  Currency,
+  CurrencyCreate,
+  CurrencyWithStatus,
+  CurrencyStatus,
+  Discrepancy,
+  DiscrepancyCreate,
+  DiscrepancyType,
+  DutyType,
+  TimeReference,
+  ScheduledSector,
+  ScheduledCrewMember,
+  ScheduleImportResult,
+} from "@/types/entities/roster.types"
 
 // Re-export user stores
 export {
@@ -82,6 +98,63 @@ export {
   setLastSyncTime,
   markRecordSynced,
 } from "./stores/user/sync-queue.store"
+
+// Re-export roster stores - schedule entries
+export {
+  addScheduleEntry,
+  updateScheduleEntry,
+  deleteScheduleEntry,
+  getAllScheduleEntries,
+  getScheduleEntryById,
+  getScheduleEntriesByDateRange,
+  getScheduleEntriesByDate,
+  getScheduleEntriesByDutyType,
+  getFlightScheduleEntries,
+  getUnlinkedFlightEntries,
+  linkFlightsToScheduleEntry,
+  bulkUpsertScheduleEntries,
+  clearAllScheduleEntries,
+  getScheduleEntriesCount,
+  getScheduleDateRange,
+} from "./stores/user/schedule.store"
+
+// Re-export roster stores - currencies
+export {
+  getCurrencyStatus,
+  addCurrency,
+  updateCurrency,
+  deleteCurrency,
+  getAllCurrencies,
+  getAllCurrenciesWithStatus,
+  getCurrencyById,
+  getCurrencyByCode,
+  getExpiringCurrencies,
+  getExpiredCurrencies,
+  getCurrenciesSortedByExpiry,
+  upsertCurrency,
+  bulkUpsertCurrencies,
+  clearAllCurrencies,
+  getCurrenciesCount,
+} from "./stores/user/currencies.store"
+
+// Re-export roster stores - discrepancies
+export {
+  addDiscrepancy,
+  bulkAddDiscrepancies,
+  getDiscrepancyById,
+  resolveDiscrepancy,
+  unresolveDiscrepancy,
+  getAllDiscrepancies,
+  getUnresolvedDiscrepancies,
+  getResolvedDiscrepancies,
+  getDiscrepanciesByType,
+  getDiscrepanciesByScheduleEntry,
+  getDiscrepanciesByFlightLog,
+  deleteDiscrepancy,
+  clearAllDiscrepancies,
+  getDiscrepanciesCount,
+  getDiscrepanciesBySeverity,
+} from "./stores/user/discrepancies.store"
 
 // Re-export reference stores - airports
 export {

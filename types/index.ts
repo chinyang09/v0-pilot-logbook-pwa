@@ -8,6 +8,7 @@ export * from "./entities/crew.types"
 export * from "./entities/aircraft.types"
 export * from "./entities/airport.types"
 export * from "./entities/user.types"
+export * from "./entities/roster.types"
 
 // Database types
 export * from "./db/dexie.types"
