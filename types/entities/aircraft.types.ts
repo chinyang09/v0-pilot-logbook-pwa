@@ -1,5 +1,9 @@
 /**
- * Aircraft-related type definitions
+ * Aircraft entity type definitions
+ *
+ * Two types of aircraft data:
+ * 1. UserAircraft - USER DATA that syncs with MongoDB (aircraft the user has flown)
+ * 2. ReferenceAircraft - REFERENCE DATA from CDN (global aircraft database)
  */
 
 import type { SyncStatus } from "./flight.types"
@@ -7,11 +11,12 @@ import type { SyncStatus } from "./flight.types"
 export type EngineType = "SEP" | "MEP" | "SET" | "MET" | "JET"
 
 /**
- * User-owned aircraft (syncs with MongoDB)
+ * User's aircraft - syncs with MongoDB
  */
-export interface Aircraft {
-  id: string
-  userId?: string
+export interface UserAircraft {
+  id: string // ULID - domain identity
+  userId: string // Owner's user ID
+
   registration: string
   type: string
   typeDesignator: string
@@ -20,19 +25,43 @@ export interface Aircraft {
   engineType: EngineType
   isComplex: boolean
   isHighPerformance: boolean
+
+  // Metadata
   createdAt: number
   updatedAt?: number
   syncStatus: SyncStatus
   mongoId?: string
 }
 
-export type AircraftCreate = Omit<Aircraft, "id" | "createdAt" | "syncStatus">
-export type AircraftUpdate = Partial<Aircraft>
+export type UserAircraftInput = Omit<UserAircraft, "id" | "createdAt" | "syncStatus">
+export type UserAircraftUpdate = Partial<Omit<UserAircraft, "id" | "userId" | "createdAt">>
 
 /**
- * Reference aircraft data from CDN (read-only, no sync)
+ * Reference aircraft from CDN - read-only, no sync
  */
-export interface AircraftReference {
+export interface ReferenceAircraft {
+  icao24: string // Primary key - hex transponder code
+  registration: string | null
+  typecode: string | null // ICAO type designator
+  shortType: string | null // Short type name
+}
+
+/**
+ * Normalized aircraft for display
+ */
+export interface NormalizedAircraft {
   registration: string
-  data: string // JSON string with aircraft details
+  icao24: string
+  typecode: string
+  shortType: string
+}
+
+/**
+ * Raw aircraft data from CDN (NDJSON format)
+ */
+export interface RawAircraftData {
+  icao24: string
+  reg: string | null
+  icaotype: string | null
+  short_type: string | null
 }

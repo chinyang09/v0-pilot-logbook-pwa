@@ -19,14 +19,14 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { TimePicker } from "@/components/time-picker";
 import { DatePicker } from "@/components/date-picker";
-import type { FlightLog, AdditionalCrew, Approach } from "@/lib/db";
+import type { FlightLog, AdditionalCrew, Approach } from "@/lib/indexed-db";
+import { updateFlight } from "@/lib/indexed-db";
+import { useAirportDatabase } from "@/hooks/use-indexed-db";
+import { getAirportByICAO } from "@/lib/airport-database";
 import {
-  updateFlight,
-  getAirportByICAO,
   addRecentlyUsedAirport,
   addRecentlyUsedAircraft,
-} from "@/lib/db";
-import { useAirportDatabase } from "@/hooks/data";
+} from "@/lib/user-preferences";
 import {
   createEmptyFlightLog,
   calculateBlockTime,
@@ -35,16 +35,16 @@ import {
   calculateTakeoffsLandings,
   calculateRoleTimes,
   getApproachCategory,
-} from "@/lib/utils/flight-calculations";
-import { calculateNightTimeComplete } from "@/lib/utils/night-time";
+} from "@/lib/flight-calculations";
+import { calculateNightTimeComplete } from "@/lib/night-time-calculator";
 import {
   formatTimeShort,
   utcToLocal,
   formatTimezoneOffset,
   getCurrentTimeUTC,
   isValidHHMM,
-} from "@/lib/utils/time";
-import { usePersonnel } from "@/hooks/data";
+} from "@/lib/time-utils";
+import { usePersonnel } from "@/hooks/use-indexed-db";
 
 const FORM_STORAGE_KEY = "flight-form-draft";
 

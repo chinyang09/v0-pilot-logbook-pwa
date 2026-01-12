@@ -1,239 +1,27 @@
 /**
  * Database exports
- *
- * This module provides access to both databases:
- * - userDb: User-specific data (cleared on logout)
- * - referenceDb: Reference data (persists across sessions)
+ * Import databases from here: import { userDb, referenceDb } from "@/lib/db"
  */
 
-export { userDb, initializeUserDB } from "./user-db"
-export { referenceDb, initializeReferenceDB } from "./reference-db"
+export { userDb, initializeUserDb } from "./user-db"
+export { referenceDb, initializeReferenceDb } from "./reference-db"
 
-// Re-export types
-export type { FlightLog, FlightLogCreate, Approach, AdditionalCrew, SyncStatus } from "@/types/entities/flight.types"
-export type { Aircraft, AircraftCreate, AircraftReference } from "@/types/entities/aircraft.types"
-export type { Airport } from "@/types/entities/airport.types"
-export type { Personnel, PersonnelCreate } from "@/types/entities/crew.types"
-export type { UserSession } from "@/types/entities/user.types"
-export type { UserPreferences } from "@/types/db/stores.types"
-export type { SyncQueueItem, SyncMeta } from "@/types/sync/sync.types"
-export type {
-  ScheduleEntry,
-  ScheduleEntryCreate,
-  Currency,
-  CurrencyCreate,
-  CurrencyWithStatus,
-  CurrencyStatus,
-  Discrepancy,
-  DiscrepancyCreate,
-  DiscrepancyType,
-  DutyType,
-  TimeReference,
-  ScheduledSector,
-  ScheduledCrewMember,
-  ScheduleImportResult,
-} from "@/types/entities/roster.types"
-
-// Re-export user stores
-export {
-  addFlight,
-  updateFlight,
-  deleteFlight,
-  silentDeleteFlight,
-  getAllFlights,
-  getFlightById,
-  getFlightByMongoId,
-  getPendingFlights,
-  upsertFlightFromServer,
-  markFlightSynced,
-} from "./stores/user/flights.store"
-
-export {
-  addAircraft,
-  updateAircraft,
-  deleteAircraft,
-  silentDeleteAircraft,
-  getAllAircraft,
-  getAircraftById,
-  upsertAircraftFromServer,
-} from "./stores/user/aircraft.store"
-
-export {
-  addPersonnel,
-  updatePersonnel,
-  deletePersonnel,
-  silentDeletePersonnel,
-  getAllPersonnel,
-  getPersonnelById,
-  getCurrentUserPersonnel,
-  getPersonnelByRole,
-  upsertPersonnelFromServer,
-} from "./stores/user/crew.store"
-
-export {
-  saveUserSession,
-  getUserSession,
-  clearUserSession,
-  getCurrentUserId,
-} from "./stores/user/sessions.store"
-
-export {
-  getUserPreferences,
-  saveUserPreferences,
-  getDefaultFieldOrder,
-  addRecentlyUsedAirport,
-  getRecentlyUsedAirports,
-  addRecentlyUsedAircraft,
-  getRecentlyUsedAircraft,
-} from "./stores/user/preferences.store"
-
-export {
-  addToSyncQueue,
-  getSyncQueue,
-  getSyncQueueByCollection,
-  clearSyncQueueItem,
-  clearSyncQueueByCollection,
-  incrementRetryCount,
-  getLastSyncTime,
-  setLastSyncTime,
-  markRecordSynced,
-} from "./stores/user/sync-queue.store"
-
-// Re-export roster stores - schedule entries
-export {
-  addScheduleEntry,
-  updateScheduleEntry,
-  deleteScheduleEntry,
-  getAllScheduleEntries,
-  getScheduleEntryById,
-  getScheduleEntriesByDateRange,
-  getScheduleEntriesByDate,
-  getScheduleEntriesByDutyType,
-  getFlightScheduleEntries,
-  getUnlinkedFlightEntries,
-  linkFlightsToScheduleEntry,
-  bulkUpsertScheduleEntries,
-  clearAllScheduleEntries,
-  getScheduleEntriesCount,
-  getScheduleDateRange,
-} from "./stores/user/schedule.store"
-
-// Re-export roster stores - currencies
-export {
-  getCurrencyStatus,
-  addCurrency,
-  updateCurrency,
-  deleteCurrency,
-  getAllCurrencies,
-  getAllCurrenciesWithStatus,
-  getCurrencyById,
-  getCurrencyByCode,
-  getExpiringCurrencies,
-  getExpiredCurrencies,
-  getCurrenciesSortedByExpiry,
-  upsertCurrency,
-  bulkUpsertCurrencies,
-  clearAllCurrencies,
-  getCurrenciesCount,
-} from "./stores/user/currencies.store"
-
-// Re-export roster stores - discrepancies
-export {
-  addDiscrepancy,
-  bulkAddDiscrepancies,
-  getDiscrepancyById,
-  resolveDiscrepancy,
-  unresolveDiscrepancy,
-  getAllDiscrepancies,
-  getUnresolvedDiscrepancies,
-  getResolvedDiscrepancies,
-  getDiscrepanciesByType,
-  getDiscrepanciesByScheduleEntry,
-  getDiscrepanciesByFlightLog,
-  deleteDiscrepancy,
-  clearAllDiscrepancies,
-  getDiscrepanciesCount,
-  getDiscrepanciesBySeverity,
-} from "./stores/user/discrepancies.store"
-
-// Re-export reference stores - airports
-export {
-  getAllAirports,
-  getAirportByIcao,
-  getAirportByIata,
-  getAirportById,
-  bulkLoadAirports,
-  addCustomAirport,
-  toggleAirportFavorite,
-  getFavoriteAirports,
-  getAirportLocalTime,
-  getAirportDatabase,
-  searchAirports,
-  getAirportTimeInfo,
-  formatAirport,
-  getAirportByICAO,
-  getAirportByIATA,
-  type AirportData,
-} from "./stores/reference/airports.store"
-
-// Re-export reference stores - aircraft database
-export {
-  // Types
-  type AircraftData,
-  type NormalizedAircraft,
-  // Initialization
-  initializeAircraftDatabase,
-  quickInit,
-  isAircraftDatabaseReady,
-  isAircraftDatabaseLoaded,
-  getAircraftMetadata,
-  clearAircraftCache,
-  setProgressCallback,
-  // Search (DB-based - recommended)
-  searchAircraftFromDB,
-  getAircraftByRegistrationFromDB,
-  getAircraftByIcao24FromDB,
-  // Legacy search (in-memory)
-  getAircraftDatabase,
-  searchAircraft,
-  getAircraftByRegistration,
-  getAircraftByIcao24,
-  loadIntoMemory,
-  // Helpers
-  normalizeAircraft,
-  formatAircraft,
-  // CRUD
-  addAircraftToDatabase,
-  getAircraftFromDatabase,
-  deleteAircraftFromDatabase,
-  getAllAircraftFromDatabase,
-  hasAircraftInDatabase,
-} from "./stores/reference/aircraft.store"
-
-// Re-export metadata stores
-export { getFlightStats, type FlightStats } from "./stores/metadata/stats.store"
-
-// Import userDb for clearAllUserData
-import { userDb } from "./user-db"
-
-/**
- * Clear all user data (called on logout)
- */
-export async function clearAllUserData(): Promise<void> {
-  await userDb.clearAllUserData()
-}
+// Re-export stores
+export * from "./stores/flights.store"
+export * from "./stores/crew.store"
+export * from "./stores/aircraft.store"
+export * from "./stores/sessions.store"
+export * from "./stores/preferences.store"
+export * from "./stores/sync-queue.store"
 
 /**
  * Initialize both databases
  */
-export async function initializeDB(): Promise<boolean> {
-  const { initializeUserDB } = await import("./user-db")
-  const { initializeReferenceDB } = await import("./reference-db")
+export async function initializeDatabases(): Promise<boolean> {
+  const { initializeUserDb } = await import("./user-db")
+  const { initializeReferenceDb } = await import("./reference-db")
 
-  const [userReady, refReady] = await Promise.all([
-    initializeUserDB(),
-    initializeReferenceDB(),
-  ])
+  const [userOk, refOk] = await Promise.all([initializeUserDb(), initializeReferenceDb()])
 
-  return userReady && refReady
+  return userOk && refOk
 }

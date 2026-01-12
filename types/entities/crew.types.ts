@@ -1,35 +1,49 @@
 /**
- * Crew/Personnel-related type definitions
+ * Crew/Personnel entity type definitions
+ * USER DATA - syncs with MongoDB
  */
 
 import type { SyncStatus } from "./flight.types"
 
-export type PersonnelRole = "PIC" | "SIC" | "Instructor" | "Examiner"
+export type CrewRole = "PIC" | "SIC" | "Instructor" | "Examiner"
 
-export interface PersonnelContact {
+export interface CrewContact {
   email?: string
   phone?: string
 }
 
-export interface Personnel {
-  id: string
-  userId?: string
+export interface Crew {
+  id: string // ULID - domain identity
+  userId: string // Owner's user ID
+
+  // Identity
   name: string
-  crewId?: string
+  crewId?: string // Company crew ID
   organization?: string
-  roles?: PersonnelRole[]
+  roles?: CrewRole[]
   licenceNumber?: string
-  contact?: PersonnelContact
+
+  // Contact
+  contact?: CrewContact
+
+  // Notes
   comment?: string
-  isMe?: boolean
+
+  // Flags
+  isMe?: boolean // Is this the current user's profile
   favorite?: boolean
   defaultPIC?: boolean
   defaultSIC?: boolean
+
+  // Metadata
   createdAt: number
   updatedAt?: number
   syncStatus: SyncStatus
   mongoId?: string
 }
 
-export type PersonnelCreate = Omit<Personnel, "id" | "createdAt" | "syncStatus">
-export type PersonnelUpdate = Partial<Personnel>
+// Input type for creating crew
+export type CrewInput = Omit<Crew, "id" | "createdAt" | "syncStatus">
+
+// Input type for updating crew
+export type CrewUpdate = Partial<Omit<Crew, "id" | "userId" | "createdAt">>

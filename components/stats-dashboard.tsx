@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { formatHHMMDisplay } from "@/lib/utils/time";
+import { formatHHMMDisplay } from "@/lib/time-utils";
 import {
   Clock,
   Plane,

@@ -1,79 +1,42 @@
 /**
- * Reference database (persists across sessions)
- *
- * Contains read-only reference data that doesn't sync:
- * - Airports (from CDN/public JSON)
- * - Aircraft database (CDN aircraft lookup cache)
- * - Metadata (version info, cache timestamps)
+ * Reference Database - Dexie/IndexedDB
+ * Contains reference data (airports, aircraft cache from CDN)
+ * PERSISTS ACROSS SESSIONS - never cleared on logout
  */
 
 import Dexie, { type Table } from "dexie"
 import type { Airport } from "@/types/entities/airport.types"
-import type { AircraftReference } from "@/types/entities/aircraft.types"
-
-interface ReferenceMetadata {
-  key: string
-  value: any
-  updatedAt: number
-}
+import type { AircraftCacheEntry, RefMetadata } from "@/types/infrastructure/db.types"
 
 class ReferenceDatabase extends Dexie {
-  airports!: Table<Airport, string>
-  aircraftDatabase!: Table<AircraftReference, string>
-  metadata!: Table<ReferenceMetadata, string>
+  airports!: Table<Airport, string> // Keyed by ICAO
+  aircraftCache!: Table<AircraftCacheEntry, string> // CDN aircraft data cache
+  metadata!: Table<RefMetadata, string>
 
   constructor() {
     super("PilotLogbook_Reference")
 
     this.version(1).stores({
-      airports: "icao, iata, name, id, isFavorite",
-      aircraftDatabase: "registration",
+      airports: "icao, iata, name, city, country, id, isFavorite",
+      aircraftCache: "registration", // registration is icao24 hex
       metadata: "key",
     })
-  }
-
-  /**
-   * Get metadata value by key
-   */
-  async getMetadata(key: string): Promise<any> {
-    const record = await this.metadata.get(key)
-    return record?.value
-  }
-
-  /**
-   * Set metadata value
-   */
-  async setMetadata(key: string, value: any): Promise<void> {
-    await this.metadata.put({
-      key,
-      value,
-      updatedAt: Date.now(),
-    })
-  }
-
-  /**
-   * Check if airports need to be reloaded
-   */
-  async shouldReloadAirports(currentVersion: string): Promise<boolean> {
-    const storedVersion = await this.getMetadata("airport_version")
-    return storedVersion !== currentVersion
   }
 }
 
 export const referenceDb = new ReferenceDatabase()
 
 /**
- * Initialize the reference database
+ * Initialize reference database
  */
-export async function initializeReferenceDB(): Promise<boolean> {
+export async function initializeReferenceDb(): Promise<boolean> {
   try {
     const openPromise = referenceDb.open()
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Reference database open timeout")), 10000)
+      setTimeout(() => reject(new Error("ReferenceDB open timeout")), 10000),
     )
-
     await Promise.race([openPromise, timeoutPromise])
-    console.log("[ReferenceDB] Database initialized successfully")
+    console.log("[ReferenceDB] Initialized successfully")
     return true
   } catch (error) {
     console.error("[ReferenceDB] Failed to initialize:", error)

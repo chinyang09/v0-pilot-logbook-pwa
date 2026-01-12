@@ -24,9 +24,9 @@ import {
   deletePersonnel,
   type Aircraft,
   type Personnel,
-} from "@/lib/db"
-import { useAircraft, usePersonnel } from "@/hooks/data"
-import { syncService } from "@/lib/sync"
+} from "@/lib/indexed-db"
+import { useAircraft, usePersonnel } from "@/hooks/use-indexed-db"
+import { syncService } from "@/lib/sync-service"
 import { Plane, Users, Save, X, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 

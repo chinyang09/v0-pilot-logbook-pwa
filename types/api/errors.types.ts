@@ -1,13 +1,10 @@
 /**
- * API error types
+ * API error type definitions
  */
 
-export interface ApiError {
-  code: string
-  message: string
-  details?: Record<string, any>
-}
-
+/**
+ * API error codes
+ */
 export type ApiErrorCode =
   | "UNAUTHORIZED"
   | "FORBIDDEN"
@@ -15,18 +12,33 @@ export type ApiErrorCode =
   | "VALIDATION_ERROR"
   | "CONFLICT"
   | "INTERNAL_ERROR"
-  | "NETWORK_ERROR"
-  | "TIMEOUT"
-  | "SYNC_ERROR"
+  | "RATE_LIMITED"
+  | "SESSION_EXPIRED"
+  | "INVALID_CREDENTIALS"
 
-export class ApiException extends Error {
+/**
+ * API error response
+ */
+export interface ApiError {
   code: ApiErrorCode
-  details?: Record<string, any>
+  message: string
+  details?: Record<string, unknown>
+}
 
-  constructor(code: ApiErrorCode, message: string, details?: Record<string, any>) {
-    super(message)
-    this.code = code
-    this.details = details
-    this.name = "ApiException"
+/**
+ * Validation error
+ */
+export interface ValidationError {
+  field: string
+  message: string
+}
+
+/**
+ * API error with validation
+ */
+export interface ApiValidationError extends ApiError {
+  code: "VALIDATION_ERROR"
+  details: {
+    errors: ValidationError[]
   }
 }

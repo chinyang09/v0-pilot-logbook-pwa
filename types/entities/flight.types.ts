@@ -1,5 +1,6 @@
 /**
- * Flight-related type definitions
+ * Flight entity type definitions
+ * USER DATA - syncs with MongoDB
  */
 
 export interface Approach {
@@ -15,10 +16,6 @@ export interface AdditionalCrew {
   role: "Observer" | "Check Airman" | "Instructor" | "Examiner" | "Other"
 }
 
-export type PilotRole = "PIC" | "SIC" | "PICUS" | "Dual" | "Instructor"
-
-export type SyncStatus = "synced" | "pending" | "error"
-
 export interface ManualOverrides {
   nightTime?: boolean
   ifrTime?: boolean
@@ -33,77 +30,97 @@ export interface ManualOverrides {
   nightLandings?: boolean
 }
 
-export interface FlightLog {
-  id: string
-  userId?: string
+export type PilotRole = "PIC" | "SIC" | "PICUS" | "Dual" | "Instructor"
+
+export type SyncStatus = "synced" | "pending" | "error"
+
+export interface Flight {
+  id: string // ULID - domain identity
+  userId: string // Owner's user ID
   isDraft: boolean
-  date: string
+
+  // Flight identification
+  date: string // YYYY-MM-DD
   flightNumber: string
+
+  // Aircraft
   aircraftReg: string
   aircraftType: string
+
+  // Airports
   departureIcao: string
   departureIata: string
   arrivalIcao: string
   arrivalIata: string
-  // Timezone offsets in hours (e.g., 8 for UTC+8)
-  departureTimezone: number
+  departureTimezone: number // Offset in hours
   arrivalTimezone: number
-  // Times in HH:MM UTC format
+
+  // Times (HH:MM UTC)
   scheduledOut: string
   scheduledIn: string
   outTime: string
   offTime: string
   onTime: string
   inTime: string
-  // Calculated times in HH:MM format
+
+  // Calculated times (HH:MM)
   blockTime: string
   flightTime: string
   nightTime: string
   dayTime: string
+
   // Crew
   picId: string
   picName: string
   sicId: string
   sicName: string
   additionalCrew: AdditionalCrew[]
+
   // Flying duties
   pilotFlying: boolean
   pilotRole: PilotRole
-  // Time logging - all in HH:MM format
+
+  // Time logging (HH:MM)
   picTime: string
   sicTime: string
   picusTime: string
   dualTime: string
   instructorTime: string
+
   // Takeoffs and Landings
   dayTakeoffs: number
   dayLandings: number
   nightTakeoffs: number
   nightLandings: number
   autolands: number
+
   // Remarks
   remarks: string
   endorsements: string
+
   // Manual overrides
   manualOverrides: ManualOverrides
+
   // Instrument
   ifrTime: string
   actualInstrumentTime: string
   simulatedInstrumentTime: string
   crossCountryTime: string
-  // Approaches
   approaches: Approach[]
   holds: number
   ipcIcc: boolean
+
+  // Metadata
   isLocked?: boolean
-  // Timestamps
   createdAt: number
   updatedAt: number
-  // Sync metadata
   syncStatus: SyncStatus
-  mongoId?: string
+  mongoId?: string // Server-assigned ID (never exposed to client logic)
   lastSyncedAt?: number
 }
 
-export type FlightLogCreate = Omit<FlightLog, "id" | "createdAt" | "updatedAt" | "syncStatus">
-export type FlightLogUpdate = Partial<FlightLog>
+// Input type for creating a new flight
+export type FlightInput = Omit<Flight, "id" | "createdAt" | "updatedAt" | "syncStatus">
+
+// Input type for updating a flight
+export type FlightUpdate = Partial<Omit<Flight, "id" | "userId" | "createdAt">>

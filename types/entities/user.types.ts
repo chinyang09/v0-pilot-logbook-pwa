@@ -1,5 +1,6 @@
 /**
- * User-related type definitions
+ * User entity type definitions
+ * Used for authentication and session management
  */
 
 export type AuthenticatorTransport = "usb" | "ble" | "nfc" | "internal" | "hybrid"
@@ -8,27 +9,27 @@ export type AuthenticatorTransport = "usb" | "ble" | "nfc" | "internal" | "hybri
  * Passkey credential stored in MongoDB
  */
 export interface PasskeyCredential {
-  id: string
-  publicKey: string
-  counter: number
+  id: string // Base64URL encoded credential ID
+  publicKey: string // Base64URL encoded public key
+  counter: number // Signature counter
   deviceType: "singleDevice" | "multiDevice"
   backedUp: boolean
   transports?: AuthenticatorTransport[]
   createdAt: number
-  name?: string
+  name?: string // User-friendly name
 }
 
 /**
- * User schema for MongoDB
+ * User document in MongoDB
  */
 export interface User {
-  _id: string
+  _id: string // CUID - constant anchor
   identity: {
-    callsign: string
-    searchKey: string
+    callsign: string // Display name
+    searchKey: string // Normalized callsign (unique index)
   }
   auth: {
-    totpSecret: string
+    totpSecret: string // Base32 secret
     totpEnabled: boolean
     passkeys: PasskeyCredential[]
   }
@@ -40,41 +41,30 @@ export interface User {
  * Session stored in MongoDB
  */
 export interface Session {
-  _id?: any
-  token: string
+  _id?: unknown // MongoDB ObjectId
+  token: string // CUID session token
   userId: string
   callsign: string
   expiresAt: Date
   lastAccessedAt: Date
   createdAt: Date
-  recoveryLogin?: boolean
+  recoveryLogin?: boolean // Flag for nudge UI
 }
 
 /**
- * User session stored in IndexedDB for silent persistence
- */
-export interface UserSession {
-  id: string
-  userId: string
-  callsign: string
-  sessionToken: string
-  expiresAt: number
-  createdAt: number
-}
-
-/**
- * Local session type for client-side use
+ * Session stored in IndexedDB (client-side)
  */
 export interface LocalSession {
-  userId: string
+  id: string // Always "current"
+  userId: string // CUID reference
   callsign: string
-  sessionToken: string
-  expiresAt: number
+  sessionToken: string // Matches 'token' in MongoDB
+  expiresAt: number // Unix timestamp
   createdAt: number
 }
 
 /**
- * WebAuthn challenge for API responses
+ * WebAuthn challenge for registration/authentication
  */
 export interface WebAuthnChallenge {
   challenge: string
@@ -84,10 +74,10 @@ export interface WebAuthnChallenge {
 }
 
 /**
- * Stored challenge in MongoDB with TTL
+ * Stored challenge in MongoDB (with TTL)
  */
 export interface StoredChallenge {
-  _id: string
+  _id: string // The challenge string
   userId: string
   expiresAt: Date
   type: "registration" | "authentication"

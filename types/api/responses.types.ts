@@ -1,55 +1,72 @@
 /**
- * API response types
+ * API response type definitions
  */
 
-import type { FlightLog } from "../entities/flight.types"
-import type { Aircraft } from "../entities/aircraft.types"
-import type { Personnel } from "../entities/crew.types"
+import type { Flight } from "../entities/flight.types"
+import type { Crew } from "../entities/crew.types"
+import type { UserAircraft } from "../entities/aircraft.types"
 
-export interface ApiResponse<T = any> {
+/**
+ * Generic API response
+ */
+export interface ApiResponse<T = unknown> {
   success: boolean
   data?: T
   error?: string
-  message?: string
 }
 
+/**
+ * Sync push response
+ */
 export interface SyncPushResponse {
   success: boolean
-  results: Array<{
-    localId: string
-    mongoId: string
-    success: boolean
-    error?: string
-  }>
+  mongoId?: string
+  rejected?: boolean
+  reason?: string
 }
 
+/**
+ * Sync pull response
+ */
 export interface SyncPullResponse {
-  success: boolean
-  data: Array<FlightLog | Aircraft | Personnel>
-  deletedIds?: string[]
-  serverTime: number
+  records: (Flight | Crew | UserAircraft)[]
+  deletions: string[]
+  requiresFullResync?: boolean
+  reason?: string
 }
 
-export interface AuthResponse {
-  success: boolean
-  user?: {
-    id: string
-    callsign: string
-  }
-  session?: {
-    token: string
-    expiresAt: string
-  }
-  error?: string
-  requiresTotp?: boolean
-  requiresPasskey?: boolean
-}
-
-export interface SessionResponse {
+/**
+ * Auth session response
+ */
+export interface AuthSessionResponse {
   authenticated: boolean
-  user?: {
+  userId?: string
+  callsign?: string
+  expiresAt?: number
+  recoveryLogin?: boolean
+}
+
+/**
+ * Auth login response
+ */
+export interface AuthLoginResponse {
+  success: boolean
+  sessionToken: string
+  userId: string
+  callsign: string
+  expiresAt: number
+  recoveryLogin?: boolean
+}
+
+/**
+ * Passkey list response
+ */
+export interface PasskeyListResponse {
+  passkeys: Array<{
     id: string
-    callsign: string
-  }
-  expiresAt?: string
+    name?: string
+    createdAt: number
+    deviceType: string
+    backedUp: boolean
+  }>
 }

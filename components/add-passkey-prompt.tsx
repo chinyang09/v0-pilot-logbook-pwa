@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Fingerprint, Loader2, X } from "lucide-react"
-import { base64URLEncode } from "@/lib/auth/server/webauthn"
+import { base64URLEncode } from "@/lib/webauthn"
 
 export function AddPasskeyPrompt() {
   const searchParams = useSearchParams()

@@ -11,7 +11,8 @@
   "tasks": {
     "build": {
       "name": "build",
-      "command": "pnpm build"
+      "command": "pnpm build",
+      "runAtStart": false
     },
     "dev": {
       "name": "dev",
@@ -20,11 +21,13 @@
     },
     "lint": {
       "name": "lint",
-      "command": "pnpm lint"
+      "command": "pnpm lint",
+      "runAtStart": false
     },
     "start": {
       "name": "start",
-      "command": "pnpm start"
+      "command": "pnpm start",
+      "runAtStart": false
     }
   }
 }

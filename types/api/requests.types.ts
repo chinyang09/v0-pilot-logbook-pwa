@@ -1,35 +1,60 @@
 /**
- * API request types
+ * API request type definitions
  */
 
-import type { FlightLog } from "../entities/flight.types"
-import type { Aircraft } from "../entities/aircraft.types"
-import type { Personnel } from "../entities/crew.types"
-import type { SyncOperationType } from "../sync/sync.types"
+import type { SyncPushPayload } from "../infrastructure/sync.types"
 
-export interface SyncPushRequest {
-  collection: "flights" | "aircraft" | "personnel"
-  operations: Array<{
-    type: SyncOperationType
-    data: FlightLog | Aircraft | Personnel | { id: string; mongoId?: string }
-  }>
+/**
+ * Sync push request
+ */
+export type SyncPushRequest = SyncPushPayload
+
+/**
+ * Sync pull request params
+ */
+export interface SyncPullParams {
+  since?: number // Unix timestamp
+  collection: "flights" | "aircraft" | "crew"
 }
 
-export interface SyncPullRequest {
-  collection: "flights" | "aircraft" | "personnel"
-  since?: number // Last sync timestamp
-}
-
-export interface AuthLoginRequest {
-  callsign: string
-  totp?: string
-}
-
+/**
+ * Auth register request
+ */
 export interface AuthRegisterRequest {
   callsign: string
+  totpSecret: string
+  totpCode: string
+  credential: {
+    id: string
+    rawId: string
+    response: {
+      clientDataJSON: string
+      attestationObject: string
+    }
+    type: "public-key"
+  }
 }
 
-export interface PasskeyAddRequest {
-  credential: any // WebAuthn credential
+/**
+ * Auth login TOTP request
+ */
+export interface AuthLoginTotpRequest {
+  callsign: string
+  code: string
+}
+
+/**
+ * Add passkey request
+ */
+export interface AddPasskeyRequest {
+  credential: {
+    id: string
+    rawId: string
+    response: {
+      clientDataJSON: string
+      attestationObject: string
+    }
+    type: "public-key"
+  }
   name?: string
 }
