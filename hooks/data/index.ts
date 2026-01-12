@@ -12,3 +12,12 @@ export { useFlights, useFlightStats } from "./use-flights"
 export { useAircraft } from "./use-aircraft"
 export { useAirports, useAirportDatabase } from "./use-airports"
 export { usePersonnel } from "./use-crew"
+
+// Roster hooks
+export { useScheduleEntries, useScheduleEntriesByDateRange } from "./use-schedule"
+export { useCurrencies, useExpiringCurrencies } from "./use-currencies"
+export {
+  useDiscrepancies,
+  useUnresolvedDiscrepancies,
+  useDiscrepancyCounts,
+} from "./use-discrepancies"
