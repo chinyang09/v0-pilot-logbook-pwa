@@ -17,6 +17,7 @@ import type { Personnel } from "@/types/entities/crew.types"
 import type { UserSession } from "@/types/entities/user.types"
 import type { UserPreferences } from "@/types/db/stores.types"
 import type { SyncQueueItem, SyncMeta } from "@/types/sync/sync.types"
+import type { ScheduleEntry, Currency, Discrepancy } from "@/types/entities/roster.types"
 
 class UserDatabase extends Dexie {
   flights!: Table<FlightLog, string>
@@ -26,6 +27,11 @@ class UserDatabase extends Dexie {
   syncQueue!: Table<SyncQueueItem, string>
   syncMeta!: Table<SyncMeta, string>
   userSession!: Table<UserSession, string>
+
+  // Roster tables
+  scheduleEntries!: Table<ScheduleEntry, string>
+  currencies!: Table<Currency, string>
+  discrepancies!: Table<Discrepancy, string>
 
   constructor() {
     super("PilotLogbook_User")
@@ -39,6 +45,21 @@ class UserDatabase extends Dexie {
       syncMeta: "key",
       userSession: "id",
     })
+
+    // Version 2: Add roster tables and flight/personnel indexes
+    this.version(2).stores({
+      flights: "id, date, syncStatus, aircraftReg, mongoId, userId, flightNumber",
+      aircraft: "id, registration, type, mongoId, userId",
+      personnel: "id, name, mongoId, userId, crewId",
+      preferences: "key",
+      syncQueue: "id, collection, timestamp",
+      syncMeta: "key",
+      userSession: "id",
+      // New roster tables
+      scheduleEntries: "id, date, dutyType, syncStatus, mongoId, [date+dutyType]",
+      currencies: "id, code, expiryDate, syncStatus, mongoId",
+      discrepancies: "id, type, resolved, scheduleEntryId, flightLogId, createdAt",
+    })
   }
 
   /**
@@ -47,7 +68,17 @@ class UserDatabase extends Dexie {
   async clearAllUserData(): Promise<void> {
     await this.transaction(
       "rw",
-      [this.flights, this.aircraft, this.personnel, this.syncQueue, this.syncMeta, this.userSession],
+      [
+        this.flights,
+        this.aircraft,
+        this.personnel,
+        this.syncQueue,
+        this.syncMeta,
+        this.userSession,
+        this.scheduleEntries,
+        this.currencies,
+        this.discrepancies,
+      ],
       async () => {
         await Promise.all([
           this.flights.clear(),
@@ -56,6 +87,9 @@ class UserDatabase extends Dexie {
           this.syncQueue.clear(),
           this.syncMeta.clear(),
           this.userSession.clear(),
+          this.scheduleEntries.clear(),
+          this.currencies.clear(),
+          this.discrepancies.clear(),
         ])
       }
     )
@@ -67,7 +101,16 @@ class UserDatabase extends Dexie {
   async clearLocalDataForResync(): Promise<void> {
     await this.transaction(
       "rw",
-      [this.flights, this.aircraft, this.personnel, this.syncQueue, this.syncMeta],
+      [
+        this.flights,
+        this.aircraft,
+        this.personnel,
+        this.syncQueue,
+        this.syncMeta,
+        this.scheduleEntries,
+        this.currencies,
+        this.discrepancies,
+      ],
       async () => {
         await Promise.all([
           this.flights.clear(),
@@ -75,6 +118,9 @@ class UserDatabase extends Dexie {
           this.personnel.clear(),
           this.syncQueue.clear(),
           this.syncMeta.clear(),
+          this.scheduleEntries.clear(),
+          this.currencies.clear(),
+          this.discrepancies.clear(),
         ])
       }
     )

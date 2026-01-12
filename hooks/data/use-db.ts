@@ -14,6 +14,10 @@ export const CACHE_KEYS = {
   personnel: "idb:personnel",
   stats: "idb:stats",
   dbReady: "idb:ready",
+  // Roster
+  schedule: "idb:schedule",
+  currencies: "idb:currencies",
+  discrepancies: "idb:discrepancies",
 }
 
 // Global state for DB initialization
