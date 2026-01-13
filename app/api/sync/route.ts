@@ -74,7 +74,6 @@ export async function POST(request: NextRequest) {
                 {
                   $set: {
                     ...dataWithUser,
-                    id: data.id,
                     updatedAt: data.updatedAt || Date.now(),
                     syncedAt: Date.now(),
                   },
@@ -85,7 +84,6 @@ export async function POST(request: NextRequest) {
             const insertResult = await coll.insertOne({
               ...dataWithUser,
               _id: new ObjectId(),
-              id: data.id,
               createdAt: data.createdAt || Date.now(),
               updatedAt: data.updatedAt || Date.now(),
               syncedAt: Date.now(),
@@ -109,7 +107,6 @@ export async function POST(request: NextRequest) {
                 {
                   $set: {
                     ...dataWithUser,
-                    id: data.id,
                     updatedAt: data.updatedAt || Date.now(),
                     syncedAt: Date.now(),
                   },
@@ -126,7 +123,6 @@ export async function POST(request: NextRequest) {
               {
                 $set: {
                   ...dataWithUser,
-                  id: data.id,
                   updatedAt: data.updatedAt || Date.now(),
                   syncedAt: Date.now(),
                 },

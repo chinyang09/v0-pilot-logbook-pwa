@@ -86,11 +86,9 @@ export async function GET(
     const transformedRecords = records.map((record) => {
       const { _id, syncedAt, ...rest } = record;
 
-      // Create base record with proper ID mapping
+      // Create base record
       const transformed: Record<string, unknown> = {
         ...rest,
-        id: rest.id || `mongo_${_id.toString()}`,
-
         syncStatus: "synced",
       };
 
