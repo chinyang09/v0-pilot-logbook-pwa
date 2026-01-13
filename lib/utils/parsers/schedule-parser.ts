@@ -580,13 +580,20 @@ export async function parseScheduleCSV(
         if (sector.actualOut && sector.actualIn) {
           // Flight has actual times - try to match with existing flight
           const flightDate = date;
-          const flightNumber = sector.flightNumber;
+          // 1. NORMALIZE FLIGHT NUMBER (Fixes "128" vs "TR128")
+          const csvFlightNum = sector.flightNumber.replace(/\D/g, "");
 
-          // Query for existing flight by date and flight number
+          // 2. Create the standardized versions
+          const fullFlightNumber = `TR${csvFlightNum}`; // Always "TR128"
+
+          // 2. QUERY DATABASE
           const existingFlight = await userDb.flights
             .where("date")
             .equals(flightDate)
-            .filter((f: FlightLog) => f.flightNumber === flightNumber)
+            .filter((f: FlightLog) => {
+              const dbFlightNum = f.flightNumber.replace(/\D/g, "");
+              return dbFlightNum === csvFlightNum;
+            })
             .first();
 
           if (existingFlight) {
@@ -605,7 +612,7 @@ export async function parseScheduleCSV(
                 field: "times",
                 scheduleValue: `OUT: ${sector.actualOut}, IN: ${sector.actualIn}`,
                 logbookValue: `OUT: ${existingFlight.outTime}, IN: ${existingFlight.inTime}`,
-                message: `Flight ${flightNumber} times differ from schedule`,
+                message: `Flight ${fullFlightNumber} times differ from schedule`,
                 resolved: false,
                 createdAt: Date.now(),
               });
@@ -656,7 +663,7 @@ export async function parseScheduleCSV(
               id: crypto.randomUUID(),
               isDraft: false, // Actual times = confirmed flight
               date: flightDate,
-              flightNumber: flightNumber,
+              flightNumber: fullFlightNumber,
               aircraftReg: "", // Not in schedule
               aircraftType: sector.aircraftType,
               departureIata: sector.departureIata,
@@ -694,7 +701,7 @@ export async function parseScheduleCSV(
               nightTakeoffs: 0,
               nightLandings: 0,
               autolands: 0,
-              remarks: `Imported from schedule: ${flightNumber}`,
+              remarks: `Imported from schedule: ${fullFlightNumber}`,
               endorsements: "",
               manualOverrides: {},
               ifrTime: "00:00",
