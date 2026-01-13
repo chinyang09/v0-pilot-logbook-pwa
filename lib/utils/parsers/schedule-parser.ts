@@ -69,6 +69,8 @@ const CREW_ROLE_MAP: Record<string, CrewRole> = {
 // Roles to skip (cabin crew)
 const SKIP_ROLES = new Set(["CL", "CIC", "CC", "DHC", "INS", "TRN"]);
 
+const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
 // ============================================
 // CSV Parsing Utilities
 // ============================================
@@ -330,55 +332,32 @@ function parseActualTimes(timesCell: string, sectors: ScheduledSector[]): void {
 // ============================================
 
 function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
-  // Only extract pilots (CPT, PIC, FO) - skip cabin crew
   const crew: ScheduledCrewMember[] = [];
   const lines = crewCell.split(/\r?\n/).filter(Boolean);
 
   for (const line of lines) {
-    const parts = line.split(" - ").map((p) => p.trim());
+    // This regex handles: "Role - ID - Name" AND "Role - Role - ID - Name"
+    // It captures the name as everything following the last hyphen
+    const match = line.match(
+      /^([A-Z\s]+?)\s-\s(?:[A-Z\s]+?\s-\s)?(\d+)\s-\s(.+)$/
+    );
 
-    if (parts.length >= 3) {
-      let role: CrewRole | undefined;
-      let crewId: string;
-      let name: string;
+    if (match) {
+      const rolePart = match[1].trim().toUpperCase();
+      const crewId = match[2];
+      const name = match[3].trim();
 
-      if (parts.length === 4) {
-        // "CPT - PIC - 2727 - Name" format
-        // Check both positions for pilot role
-        const firstPart = parts[0].toUpperCase();
-        const secondPart = parts[1].toUpperCase();
-
-        if (CREW_ROLE_MAP[firstPart]) {
-          role = CREW_ROLE_MAP[firstPart];
-        } else if (CREW_ROLE_MAP[secondPart]) {
-          role = CREW_ROLE_MAP[secondPart];
-        } else {
-          // Not a pilot role (cabin crew) - skip
-          continue;
-        }
-
-        crewId = parts[2];
-        name = parts[3];
-      } else {
-        // "FO - 9766 - Name" format
-        const firstPart = parts[0].toUpperCase();
-
-        if (!CREW_ROLE_MAP[firstPart]) {
-          // Not a pilot role - skip
-          continue;
-        }
-
-        role = CREW_ROLE_MAP[firstPart];
-        crewId = parts[1];
-        name = parts.slice(2).join(" - ");
-      }
-
-      if (role) {
-        crew.push({ role, crewId, name });
+      // Check if the role is in our Pilot map (CPT, PIC, FO)
+      // This automatically filters out CL, CC, etc.
+      if (CREW_ROLE_MAP[rolePart]) {
+        crew.push({
+          role: CREW_ROLE_MAP[rolePart],
+          crewId,
+          name,
+        });
       }
     }
   }
-
   return crew;
 }
 
@@ -431,7 +410,29 @@ export async function parseScheduleCSV(
   options?: ParseOptions
 ): Promise<ScheduleImportResult> {
   const { onProgress, sourceFile } = options ?? {};
-  const lines = csvContent.split(/\r?\n/);
+  //const lines = csvContent.split(/\r?\n/);
+
+  //quickfix: todo refactor and name fix properly
+  const rows: string[] = [];
+  let currentRow = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < csvContent.length; i++) {
+    const char = csvContent[i];
+    if (char === '"') inQuotes = !inQuotes;
+
+    // Only split on newlines that are OUTSIDE of quotes
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (currentRow.trim()) rows.push(currentRow);
+      currentRow = "";
+    } else {
+      currentRow += char;
+    }
+  }
+  if (currentRow.trim()) rows.push(currentRow);
+
+  // Use 'rows' for the rest of your parsing loop
+  const lines = rows;
 
   const result: ScheduleImportResult = {
     success: false,
@@ -546,7 +547,8 @@ export async function parseScheduleCSV(
 
       // Link/create crew personnel (same logic as scoot-parser)
       for (const member of crew) {
-        const nameKey = member.name.toLowerCase();
+        //const nameKey = member.name.toLowerCase(); used normalisedCsvName instead
+        const normalizedCsvName = normalize(member.name);
 
         let personnelId =
           crewCache.get(normalizedCsvName) || crewCache.get(member.crewId);
@@ -556,31 +558,19 @@ export async function parseScheduleCSV(
             id: crypto.randomUUID(),
             name: member.name,
             crewId: member.crewId,
-            // CPT/PIC -> PIC role, FO -> SIC role
-            roles:
-              member.role === "CPT" || member.role === "PIC"
-                ? ["PIC"]
-                : ["SIC"],
-            isMe: false,
+            organization: "Scoot", //todo: logic to check organization, now is just assumed to be scoot since parse from scoot schedule
+            roles: member.role === "FO" ? ["SIC"] : ["PIC"],
+            isMe: false, // Ensure this doesn't match your own profile
             createdAt: Date.now(),
             syncStatus: "pending",
           };
+
           personnelToCreate.push(newPerson);
-          crewCache.set(nameKey, newPerson.id);
+          crewCache.set(normalizedCsvName, newPerson.id);
           crewCache.set(member.crewId, newPerson.id);
-
-          syncQueueEntries.push({
-            id: crypto.randomUUID(),
-            type: "create",
-            collection: "personnel",
-            data: newPerson,
-            timestamp: Date.now(),
-          });
+          personnelId = newPerson.id;
         }
-
-        // Set personnelId from cache
-        member.personnelId =
-          crewCache.get(nameKey) || crewCache.get(member.crewId);
+        member.personnelId = personnelId;
       }
 
       // ============================================
@@ -615,7 +605,7 @@ export async function parseScheduleCSV(
                 field: "times",
                 scheduleValue: `OUT: ${sector.actualOut}, IN: ${sector.actualIn}`,
                 logbookValue: `OUT: ${existingFlight.outTime}, IN: ${existingFlight.inTime}`,
-                message: `Flight ${fullFlightNumber} times differ from schedule`,
+                message: `Flight ${flightNumber} times differ from schedule`,
                 resolved: false,
                 createdAt: Date.now(),
               });
@@ -666,7 +656,7 @@ export async function parseScheduleCSV(
               id: crypto.randomUUID(),
               isDraft: false, // Actual times = confirmed flight
               date: flightDate,
-              flightNumber: fullFlightNumber,
+              flightNumber: flightNumber,
               aircraftReg: "", // Not in schedule
               aircraftType: sector.aircraftType,
               departureIata: sector.departureIata,
@@ -704,7 +694,7 @@ export async function parseScheduleCSV(
               nightTakeoffs: 0,
               nightLandings: 0,
               autolands: 0,
-              remarks: `Imported from schedule: ${fullFlightNumber}`,
+              remarks: `Imported from schedule: ${flightNumber}`,
               endorsements: "",
               manualOverrides: {},
               ifrTime: "00:00",
