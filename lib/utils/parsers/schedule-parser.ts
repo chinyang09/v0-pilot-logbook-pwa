@@ -486,6 +486,7 @@ export async function parseScheduleCSV(
       "id" | "createdAt" | "syncStatus"
     >[] = [];
     const personnelToCreate: Personnel[] = [];
+    const personnelToUpdate: { id: string; data: Partial<Personnel> }[] = [];
     const flightsToCreate: FlightLog[] = [];
     const syncQueueEntries: any[] = [];
 
@@ -545,50 +546,66 @@ export async function parseScheduleCSV(
       // Parse crew (pilots only)
       const crew = parseCrewColumn(cols[columnIndices.crew] || "");
 
-      // Link/create crew personnel (same logic as scoot-parser) 
+      // Link/create crew personnel (same logic as scoot-parser)
       // updated with "healing" as logbook report as max 20char for crew name
-for (const member of crew) {
-  const normalizedCsvName = normalize(member.name);
-  // Check cache by Name or CrewID
-  let personnelId = crewCache.get(normalizedCsvName) || crewCache.get(member.crewId);
+      for (const member of crew) {
+        const normalizedCsvName = normalize(member.name);
+        // Check cache by Name or CrewID
+        let personnelId =
+          crewCache.get(normalizedCsvName) || crewCache.get(member.crewId);
 
-  if (!personnelId) {
-    // 20-CHAR HEALING: Look for a person in DB with no ID whose name is a prefix of our current full name
-    const truncatedMatch = existingPersonnel.find(p => 
-      !p.crewId && 
-      normalizedCsvName.startsWith(normalize(p.name))
-    );
+        if (!personnelId) {
+          // 20-CHAR HEALING: Look for a person in DB with no ID whose name is a prefix of our current full name
+          const truncatedMatch = existingPersonnel.find(
+            (p) => !p.crewId && normalizedCsvName.startsWith(normalize(p.name))
+          );
 
-    if (truncatedMatch) {
-      // Update the existing record with Full Name and Crew ID
-      await userDb.personnel.update(truncatedMatch.id, {
-        name: member.name,
-        crewId: member.crewId,
-        updatedAt: Date.now()
-      });
-      personnelId = truncatedMatch.id;
-      console.log(`Healed: ${truncatedMatch.name} -> ${member.name}`);
-    } else {
-      // Create New if no match found
-      const newPerson: Personnel = {
-        id: crypto.randomUUID(),
-        name: member.name,
-        crewId: member.crewId,
-        organization: "Scoot", //todo: logic to check organization, now is just assumed to be scoot since parse from scoot schedule
-        roles: member.role === "FO" ? ["SIC"] : ["PIC"],
-        isMe: false, // Ensure this doesn't match your own profile
-        createdAt: Date.now(),
-        syncStatus: "pending",
-      };
-      personnelToCreate.push(newPerson);
-      personnelId = newPerson.id;
-    }
-    // Update cache for the rest of this import
-    crewCache.set(normalizedCsvName, personnelId);
-    crewCache.set(member.crewId, personnelId);
-  }
-  member.personnelId = personnelId;
-}
+          if (truncatedMatch) {
+            const updateData = {
+              name: member.name,
+              crewId: member.crewId,
+              updatedAt: Date.now(),
+            };
+            personnelToUpdate.push({ id: truncatedMatch.id, data: updateData });
+
+            // Track the update for sync
+            syncQueueEntries.push({
+              id: crypto.randomUUID(),
+              type: "update",
+              collection: "personnel",
+              data: { ...truncatedMatch, ...updateData },
+              timestamp: Date.now(),
+            });
+            personnelId = truncatedMatch.id;
+            console.log(`Healed: ${truncatedMatch.name} -> ${member.name}`);
+          } else {
+            // Create New if no match found
+            const newPerson: Personnel = {
+              id: crypto.randomUUID(),
+              name: member.name,
+              crewId: member.crewId,
+              organization: "Scoot", //todo: logic to check organization, now is just assumed to be scoot since parse from scoot schedule
+              roles: member.role === "FO" ? ["SIC"] : ["PIC"],
+              isMe: false, // Ensure this doesn't match your own profile
+              createdAt: Date.now(),
+              syncStatus: "pending",
+            };
+            personnelToCreate.push(newPerson);
+            syncQueueEntries.push({
+              id: crypto.randomUUID(),
+              type: "create",
+              collection: "personnel",
+              data: newPerson,
+              timestamp: Date.now(),
+            });
+            personnelId = newPerson.id;
+          }
+          // Update cache for the rest of this import
+          crewCache.set(normalizedCsvName, personnelId);
+          crewCache.set(member.crewId, personnelId);
+        }
+        member.personnelId = personnelId;
+      }
 
       // ============================================
       // SMART FLIGHT MATCHING (when actual times exist)
@@ -791,10 +808,14 @@ for (const member of crew) {
         userDb.syncQueue,
       ],
       async () => {
-        // Create personnel
+        //Apply the "Healed" names to local DB
+        for (const item of personnelToUpdate) {
+        await userDb.personnel.update(item.id, item.data);
+        }
+
+        //Add brand new personnel to local DB
         if (personnelToCreate.length > 0) {
           await userDb.personnel.bulkAdd(personnelToCreate);
-          result.personnelCreated = personnelToCreate.length;
         }
 
         // Create flights (from actual times)
