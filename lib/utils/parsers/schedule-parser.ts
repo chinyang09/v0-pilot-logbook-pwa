@@ -548,8 +548,10 @@ export async function parseScheduleCSV(
       for (const member of crew) {
         const nameKey = member.name.toLowerCase();
 
-        if (!crewCache.has(nameKey) && !crewCache.has(member.crewId)) {
-          // Create new personnel record
+        let personnelId =
+          crewCache.get(normalizedCsvName) || crewCache.get(member.crewId);
+
+        if (!personnelId) {
           const newPerson: Personnel = {
             id: crypto.randomUUID(),
             name: member.name,
@@ -588,19 +590,13 @@ export async function parseScheduleCSV(
         if (sector.actualOut && sector.actualIn) {
           // Flight has actual times - try to match with existing flight
           const flightDate = date;
-          // 1. NORMALIZE FLIGHT NUMBER
-          const csvFlightNum = sector.flightNumber.replace(/\D/g, "");
-          // 2. Create the standardized versions
-          const fullFlightNumber = `TR${csvFlightNum}`; // Always "TR128"
+          const flightNumber = sector.flightNumber;
 
           // Query for existing flight by date and flight number
           const existingFlight = await userDb.flights
             .where("date")
             .equals(flightDate)
-            .filter((f: FlightLog) => {
-              const dbFlightNum = f.flightNumber.replace(/^(TR|TZ)/i, "");
-              return dbFlightNum === csvFlightNum;
-            })
+            .filter((f: FlightLog) => f.flightNumber === flightNumber)
             .first();
 
           if (existingFlight) {
