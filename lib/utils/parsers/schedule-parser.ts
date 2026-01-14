@@ -296,6 +296,45 @@ function parseDutiesColumn(
 // Time Parsing
 // ============================================
 
+/**
+ * Adjusts a local date/time to UTC, accounting for calendar day boundaries
+ */
+function adjustDateTimeToUTC(
+  dateStr: string, // YYYY-MM-DD
+  timeStr: string | undefined | null,
+  offsetHours: number,
+  hasNextDayIndicator: boolean = false
+): { date: string; time: string } {
+  if (!timeStr) return { date: dateStr, time: "" };
+
+  // 1. Convert everything to total minutes from the start of the base date
+  let totalMinutes = hhmmToMinutes(timeStr);
+  if (hasNextDayIndicator) totalMinutes += 24 * 60;
+
+  // 2. Subtract offset to get UTC minutes
+  let utcMinutes = totalMinutes - offsetHours * 60;
+
+  // 3. Use a Date object to handle the calendar wrap-around safely
+  const adjustedDate = new Date(`${dateStr}T00:00:00Z`);
+
+  if (utcMinutes < 0) {
+    // Roll back one or more days
+    const daysToSubtract = Math.ceil(Math.abs(utcMinutes) / (24 * 60));
+    adjustedDate.setUTCDate(adjustedDate.getUTCDate() - daysToSubtract);
+    utcMinutes += daysToSubtract * 24 * 60;
+  } else if (utcMinutes >= 24 * 60) {
+    // Roll forward one or more days
+    const daysToAdd = Math.floor(utcMinutes / (24 * 60));
+    adjustedDate.setUTCDate(adjustedDate.getUTCDate() + daysToAdd);
+    utcMinutes %= 24 * 60;
+  }
+
+  return {
+    date: adjustedDate.toISOString().split("T")[0],
+    time: minutesToHHMM(utcMinutes),
+  };
+}
+
 function parseActualTimes(timesCell: string, sectors: ScheduledSector[]): void {
   const timeLines = timesCell.split(/\r?\n/).filter(Boolean);
 
@@ -303,26 +342,30 @@ function parseActualTimes(timesCell: string, sectors: ScheduledSector[]): void {
     const timeLine = timeLines[i].trim();
     const sector = sectors[i];
 
+    // Capture the +1 indicator for BOTH Out and In times
     const timeMatch = timeLine.match(
-      /A?(\d{2}:\d{2})(?:⁺¹)?\s*-\s*A?(\d{2}:\d{2})(?:⁺¹)?(?:\/(\d{2}:\d{2}))?/
+      /A?(\d{2}:\d{2})(⁺¹)?\s*-\s*A?(\d{2}:\d{2})(⁺¹)?/
     );
 
     if (timeMatch) {
+      const outT = timeMatch[1];
+      const outPlusOne = !!timeMatch[2];
+      const inT = timeMatch[3];
+      const inPlusOne = !!timeMatch[4];
+
       const hasActualPrefix = timeLine.includes("A");
       if (hasActualPrefix) {
-        sector.actualOut = timeMatch[1];
-        sector.actualIn = timeMatch[2];
+        sector.actualOut = outT;
+        sector.actualIn = inT;
       } else {
-        sector.scheduledOut = timeMatch[1];
-        sector.scheduledIn = timeMatch[2];
+        sector.scheduledOut = outT;
+        sector.scheduledIn = inT;
       }
 
-      if (timeMatch[3]) {
-        const [hh, mm] = timeMatch[3].split(":").map(Number);
-        sector.delay = hh * 60 + mm;
-      }
-
-      sector.nextDay = timeLine.includes("⁺¹");
+      sector.nextDay = inPlusOne;
+      // Attach hidden properties to use in the main loop for date shifting
+      (sector as any)._outPlusOne = outPlusOne;
+      (sector as any)._inPlusOne = inPlusOne;
     }
   }
 }
@@ -454,9 +497,17 @@ export async function parseScheduleCSV(
     onProgress?.(5, "Parsing", "Reading CSV header...");
 
     const header = parseHeader(lines);
+
     result.timeReference = header.timeReference;
     result.dateRange = header.dateRange;
     result.crewMember = header.crewInfo;
+
+    const isLocalBase = header.timeReference === "LOCAL_BASE";
+    const baseAirport = await getAirportByIata(header.crewInfo.base || "SIN");
+    const baseOffsetMinutes = baseAirport
+      ? getAirportTimeInfo(baseAirport.tz).offset
+      : 480;
+    const baseOffsetHours = baseOffsetMinutes / 60;
 
     const { columnIndices, dataStartIndex } = header;
 
@@ -510,6 +561,15 @@ export async function parseScheduleCSV(
         );
       }
 
+      // Skip non-data lines
+      if (
+        !line ||
+        line.startsWith(",") ||
+        line.startsWith("Total") ||
+        line.startsWith("Generated")
+      )
+        continue;
+
       if (line.startsWith("Total Hours")) continue;
       if (line.startsWith("Expiry Dates")) {
         const expiryStart = lines.findIndex(
@@ -531,17 +591,74 @@ export async function parseScheduleCSV(
       if (!line || line.startsWith(",")) continue;
 
       const cols = parseCSVLine(line);
-      const rawDate = cols[columnIndices.date] || "";
-      const dateMatch = rawDate.match(/^(\d{2}\/\d{2}\/\d{4})/);
+      const dateMatch = cols[columnIndices.date]?.match(
+        /^(\d{2}\/\d{2}\/\d{4})/
+      );
       if (!dateMatch) continue;
 
-      const date = parseDDMMYYYY(dateMatch[1]);
+      const rawDate = parseDDMMYYYY(dateMatch[1]); // Original Local Date
       const duty = parseDutiesColumn(
         cols[columnIndices.duties] || "",
         cols[columnIndices.details] || ""
       );
 
       parseActualTimes(cols[columnIndices.actualTimes] || "", duty.sectors);
+
+      // 2. TIME & DATE ADJUSTMENT (The "Confusing" Part integrated here)
+      // We calculate the UTC values NOW so we can use them for everything below
+
+      let dutyDate = rawDate;
+      let reportTime = cols[columnIndices.reportTimes]?.replace(/[^\d:]/g, "");
+      let debriefTime = cols[columnIndices.debriefTimes]
+        ?.replace(/[⁺¹]/g, "")
+        .trim();
+
+      if (isLocalBase) {
+        // A. Adjust Duty (Report/Debrief)
+        const rawReport = reportTime;
+        const rawDebrief = debriefTime;
+        const debriefPlusOne = cols[columnIndices.debriefTimes]?.includes("⁺¹");
+
+        const repAdj = adjustDateTimeToUTC(rawDate, rawReport, baseOffsetHours);
+        dutyDate = repAdj.date; // This is the True UTC Date (might be previous day)
+        reportTime = repAdj.time;
+
+        const debAdj = adjustDateTimeToUTC(
+          rawDate,
+          rawDebrief,
+          baseOffsetHours,
+          debriefPlusOne
+        );
+        debriefTime = debAdj.time;
+
+        // B. Adjust Sectors (In-Place)
+        for (const sector of duty.sectors) {
+          // Use hidden flags from parseActualTimes if you added them, or fallback to sector.nextDay
+          const outAdj = adjustDateTimeToUTC(
+            rawDate,
+            sector.actualOut || sector.scheduledOut,
+            baseOffsetHours,
+            (sector as any)._outPlusOne
+          );
+          const inAdj = adjustDateTimeToUTC(
+            rawDate,
+            sector.actualIn || sector.scheduledIn,
+            baseOffsetHours,
+            (sector as any)._inPlusOne || sector.nextDay
+          );
+
+          if (sector.actualOut) sector.actualOut = outAdj.time;
+          if (sector.actualIn) sector.actualIn = inAdj.time;
+          if (sector.scheduledOut) sector.scheduledOut = outAdj.time;
+          if (sector.scheduledIn) sector.scheduledIn = inAdj.time;
+
+          // Store the UTC date on the sector for the flight matching step below
+          (sector as any)._utcDate = outAdj.date;
+        }
+      } else {
+        // If already UTC, just tag the date
+        duty.sectors.forEach((s) => ((s as any)._utcDate = rawDate));
+      }
 
       // Parse crew (pilots only)
       const crew = parseCrewColumn(cols[columnIndices.crew] || "");
@@ -613,7 +730,7 @@ export async function parseScheduleCSV(
       for (const sector of duty.sectors) {
         if (sector.actualOut && sector.actualIn) {
           // Flight has actual times - try to match with existing flight
-          const flightDate = date;
+          const flightDate = (sector as any)._utcDate || rawDate;
           // 1. NORMALIZE FLIGHT NUMBER (Fixes "128" vs "TR128")
           const csvFlightNum = sector.flightNumber.replace(/\D/g, "");
 
@@ -767,13 +884,10 @@ export async function parseScheduleCSV(
 
       const entry: ScheduleEntry = {
         id: crypto.randomUUID(),
-        date,
-        timeReference: header.timeReference,
-        reportTime:
-          cols[columnIndices.reportTimes]?.replace(/[^\d:]/g, "") || undefined,
-        debriefTime:
-          cols[columnIndices.debriefTimes]?.replace(/[⁺¹]/g, "").trim() ||
-          undefined,
+        date: dutyDate,
+        timeReference: "UTC",
+        reportTime: reportTime || undefined,
+        debriefTime: debriefTime || undefined,
         dutyType: duty.dutyType,
         dutyCode: duty.dutyCode,
         dutyDescription:
@@ -810,7 +924,7 @@ export async function parseScheduleCSV(
       async () => {
         //Apply the "Healed" names to local DB
         for (const item of personnelToUpdate) {
-        await userDb.personnel.update(item.id, item.data);
+          await userDb.personnel.update(item.id, item.data);
         }
 
         //Add brand new personnel to local DB
