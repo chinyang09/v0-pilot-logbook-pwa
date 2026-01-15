@@ -586,7 +586,7 @@ export async function parseScheduleCSV(
       if (header.timeReference === "LOCAL_BASE") {
         // Convert Duty Times
 
-        if (header.timeReference === "LOCAL_BASE") {
+        
           if (reportTime)
             reportTime = localToUtcWithDayOffset(
               reportTime,
@@ -598,7 +598,7 @@ export async function parseScheduleCSV(
               debriefTime,
               baseOffsetHours
             ).time;
-        }
+        
 
         for (const sector of duty.sectors) {
           // Track the offset BEFORE we overwrite the local time
@@ -714,12 +714,14 @@ export async function parseScheduleCSV(
           // Apply UTC day shift captured earlier
           if (header.timeReference === "LOCAL_BASE") {
             const dayOffset = (sector as any)._utcDateOffset ?? 0;
-
+          
             if (dayOffset !== 0) {
               const d = new Date(date + "T00:00:00Z");
               d.setUTCDate(d.getUTCDate() + dayOffset);
               flightDate = d.toISOString().slice(0, 10);
             }
+          
+            delete (sector as any)._utcDateOffset;
           }
           // 1. NORMALIZE FLIGHT NUMBER (Fixes "128" vs "TR128")
           const csvFlightNum = sector.flightNumber.replace(/\D/g, "");
@@ -732,8 +734,6 @@ export async function parseScheduleCSV(
             .where("date")
             .equals(flightDate)
             .filter((f: FlightLog) => {
-              if (!f.flightNumber) return false;
-
               const dbFlightNum = f.flightNumber.replace(/\D/g, "");
               return dbFlightNum === csvFlightNum;
             })
