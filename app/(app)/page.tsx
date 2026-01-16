@@ -10,8 +10,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { syncService } from "@/lib/sync"
 import { useAuth } from "@/components/providers/auth-provider"
 import { UserMenu } from "@/components/user-menu"
-import { useFlights, useFlightStats, refreshAllData, useDBReady } from "@/hooks/data"
-import { RefreshCw, AlertCircle, Plane, Calendar, TrendingUp, Loader2 } from "lucide-react"
+import { useFlights, useFlightStats, refreshAllData, useDBReady, useExpiringCurrencies } from "@/hooks/data"
+import { RefreshCw, AlertCircle, Plane, Calendar, TrendingUp, Loader2, ShieldAlert } from "lucide-react"
 import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
@@ -21,6 +21,7 @@ export default function Dashboard() {
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
   const { flights, isLoading: flightsLoading } = useFlights()
   const { stats, isLoading: statsLoading, refresh: refreshStats } = useFlightStats()
+  const { expiringCurrencies, isLoading: currenciesLoading } = useExpiringCurrencies()
 
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -180,6 +181,77 @@ export default function Dashboard() {
               </Card>
             </div>
           </section>
+
+          {/* Currency Warnings */}
+          {expiringCurrencies.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-foreground">Currency Warnings</h2>
+                <Link href="/currencies">
+                  <Button variant="ghost" size="sm" className="gap-2">
+                    <ShieldAlert className="h-4 w-4" />
+                    View All
+                  </Button>
+                </Link>
+              </div>
+              <div className="space-y-2">
+                {expiringCurrencies.slice(0, 3).map((currency) => {
+                  const isExpired = currency.daysRemaining < 0
+                  const isCritical = currency.status === "critical"
+                  const bgColor = isExpired
+                    ? "bg-red-500/10 border-red-500/20"
+                    : isCritical
+                      ? "bg-orange-500/10 border-orange-500/20"
+                      : "bg-yellow-500/10 border-yellow-500/20"
+                  const textColor = isExpired
+                    ? "text-red-500"
+                    : isCritical
+                      ? "text-orange-500"
+                      : "text-yellow-500"
+
+                  return (
+                    <Card key={currency.id} className={cn("border", bgColor)}>
+                      <CardContent className="p-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <ShieldAlert className={cn("h-4 w-4 flex-shrink-0", textColor)} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-foreground truncate">
+                                {currency.description}
+                              </p>
+                              <p className={cn("text-xs", textColor)}>
+                                {isExpired
+                                  ? `Expired ${Math.abs(currency.daysRemaining)} day${Math.abs(currency.daysRemaining) === 1 ? "" : "s"} ago`
+                                  : currency.daysRemaining === 0
+                                    ? "Expires today"
+                                    : currency.daysRemaining === 1
+                                      ? "Expires tomorrow"
+                                      : `${currency.daysRemaining} days remaining`}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(currency.expiryDate + "T00:00:00").toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                              })}
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+                {expiringCurrencies.length > 3 && (
+                  <p className="text-center text-sm text-muted-foreground">
+                    +{expiringCurrencies.length - 3} more expiring soon
+                  </p>
+                )}
+              </div>
+            </section>
+          )}
+
           {/* Recent Flights Preview */}
           <section>
             <div className="flex items-center justify-between mb-4">
