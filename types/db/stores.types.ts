@@ -2,6 +2,8 @@
  * Store and preference types
  */
 
+import type { DraftGenerationConfig } from "@/types/entities/roster.types"
+
 export interface FieldOrder {
   flight: string[]
   time: string[]
@@ -17,6 +19,7 @@ export interface UserPreferences {
   visibleFields: Record<string, boolean>
   recentlyUsedAirports?: string[]
   recentlyUsedAircraft?: string[]
+  draftGenerationConfig?: DraftGenerationConfig
   createdAt: number
   updatedAt: number
 }

@@ -6,6 +6,14 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import {
   Calendar as CalendarIcon,
   Upload,
   FileText,
@@ -15,13 +23,16 @@ import {
   RefreshCw,
   List,
   CalendarDays,
+  Settings,
+  FileDown,
 } from "lucide-react"
 import { parseScheduleCSV, detectCSVType } from "@/lib/utils/parsers"
 import { useScheduleEntries, useCurrencies, useDiscrepancyCounts, refreshAllData } from "@/hooks/data"
 import type { ScheduleImportResult, ScheduleEntry } from "@/types"
 import { cn } from "@/lib/utils"
-import { DutyEntryCard } from "@/components/roster/duty-entry-card"
-import { RosterCalendar } from "@/components/roster/roster-calendar"
+import { DutyEntryCard, RosterCalendar, DraftSettings } from "@/components/roster"
+import { getDraftGenerationConfig } from "@/lib/db"
+import { processPendingDrafts } from "@/lib/utils/roster/draft-generator"
 
 type ViewMode = "list" | "calendar"
 
@@ -34,6 +45,9 @@ export default function RosterPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("list")
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [selectedEntries, setSelectedEntries] = useState<ScheduleEntry[]>([])
+  const [isGeneratingDrafts, setIsGeneratingDrafts] = useState(false)
+  const [draftResult, setDraftResult] = useState<string | null>(null)
+  const [showSettings, setShowSettings] = useState(false)
 
   const { scheduleEntries, isLoading: entriesLoading, refresh: refreshEntries } = useScheduleEntries()
   const { currencies, isLoading: currenciesLoading } = useCurrencies()
@@ -148,6 +162,31 @@ export default function RosterPage() {
     setSelectedEntries([])
   }
 
+  const handleGenerateDrafts = async () => {
+    try {
+      setIsGeneratingDrafts(true)
+      setDraftResult(null)
+
+      const config = await getDraftGenerationConfig()
+      const result = await processPendingDrafts(config)
+
+      if (result.created > 0) {
+        setDraftResult(`Created ${result.created} draft flight(s) from ${result.entriesProcessed.length} schedule entry(ies)`)
+        await refreshAllData()
+      } else {
+        setDraftResult("No new drafts to create")
+      }
+
+      setTimeout(() => setDraftResult(null), 5000)
+    } catch (error) {
+      console.error("Failed to generate drafts:", error)
+      setDraftResult("Failed to generate drafts")
+      setTimeout(() => setDraftResult(null), 5000)
+    } finally {
+      setIsGeneratingDrafts(false)
+    }
+  }
+
   return (
     <PageContainer
       header={
@@ -155,12 +194,13 @@ export default function RosterPage() {
           <div className="container mx-auto px-4">
             <div className="flex items-center justify-between h-12">
               <h1 className="text-lg font-semibold text-foreground">Roster</h1>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="icon-sm"
                   onClick={() => refreshEntries()}
                   disabled={entriesLoading}
+                  title="Refresh"
                 >
                   <RefreshCw className={cn("h-4 w-4", entriesLoading && "animate-spin")} />
                 </Button>
@@ -180,6 +220,31 @@ export default function RosterPage() {
                 >
                   <CalendarDays className="h-4 w-4" />
                 </Button>
+                <Dialog open={showSettings} onOpenChange={setShowSettings}>
+                  <DialogTrigger asChild>
+                    <Button variant="ghost" size="icon-sm" title="Draft Settings">
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                      <DialogTitle>Draft Generation Settings</DialogTitle>
+                      <DialogDescription>
+                        Configure automatic draft flight generation from your schedule
+                      </DialogDescription>
+                    </DialogHeader>
+                    <DraftSettings onSave={() => setShowSettings(false)} />
+                  </DialogContent>
+                </Dialog>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleGenerateDrafts}
+                  disabled={isGeneratingDrafts}
+                  title="Generate Drafts"
+                >
+                  <FileDown className={cn("h-4 w-4", isGeneratingDrafts && "animate-bounce")} />
+                </Button>
                 <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
                   <Upload className="h-4 w-4 mr-1" />
                   Import
@@ -198,6 +263,18 @@ export default function RosterPage() {
           onChange={handleFileSelect}
           className="hidden"
         />
+
+        {/* Draft Generation Result */}
+        {draftResult && (
+          <Card className="border-blue-500/50">
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-2 text-sm">
+                <CheckCircle2 className="h-4 w-4 text-blue-500" />
+                <span>{draftResult}</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Import Progress */}
         {isImporting && (

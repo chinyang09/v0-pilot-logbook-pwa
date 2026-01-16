@@ -94,6 +94,8 @@ export {
   getRecentlyUsedAirports,
   addRecentlyUsedAircraft,
   getRecentlyUsedAircraft,
+  getDraftGenerationConfig,
+  saveDraftGenerationConfig,
 } from "./stores/user/preferences.store";
 
 export {
