@@ -53,7 +53,7 @@ export async function deleteFlight(id: string): Promise<boolean> {
   if (!flight) return false
 
   await userDb.flights.delete(id)
-  await addToSyncQueue("delete", "flights", { id, mongoId: flight.mongoId })
+  await addToSyncQueue("delete", "flights", { id})
 
   return true
 }
@@ -64,7 +64,7 @@ export async function deleteFlight(id: string): Promise<boolean> {
 export async function silentDeleteFlight(id: string): Promise<boolean> {
   const flight = await userDb.flights.get(id)
   if (!flight) {
-    const byMongoPattern = await userDb.flights.filter((f) => f.id === id || f.mongoId === id).first()
+    const byMongoPattern = await userDb.flights.filter((f) => f.id === id ).first()
     if (byMongoPattern) {
       await userDb.flights.delete(byMongoPattern.id)
       return true
@@ -87,13 +87,6 @@ export async function getAllFlights(): Promise<FlightLog[]> {
  */
 export async function getFlightById(id: string): Promise<FlightLog | undefined> {
   return userDb.flights.get(id)
-}
-
-/**
- * Get a flight by MongoDB ID
- */
-export async function getFlightByMongoId(mongoId: string): Promise<FlightLog | undefined> {
-  return userDb.flights.where("mongoId").equals(mongoId).first()
 }
 
 /**
@@ -161,14 +154,13 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     createdAt: serverFlight.createdAt || Date.now(),
     updatedAt: serverFlight.updatedAt || Date.now(),
     syncStatus: "synced",
-    mongoId: serverFlight.mongoId,
     isLocked: serverFlight.isLocked,
     lastSyncedAt: serverFlight.lastSyncedAt,
   }
 
   let existingFlight: FlightLog | undefined
-  if (normalized.mongoId) {
-    existingFlight = await userDb.flights.where("mongoId").equals(normalized.mongoId).first()
+  if (normalized.id) {
+    existingFlight = await userDb.flights.where("id").equals(normalized.id).first()
   }
   if (!existingFlight && normalized.id) {
     existingFlight = await userDb.flights.get(normalized.id)
@@ -192,9 +184,9 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
 /**
  * Mark a flight as synced
  */
-export async function markFlightSynced(id: string, mongoId: string): Promise<void> {
+export async function markFlightSynced(id: string): Promise<void> {
   const flight = await userDb.flights.get(id)
   if (flight) {
-    await userDb.flights.put({ ...flight, syncStatus: "synced", mongoId })
+    await userDb.flights.put({ ...flight, syncStatus: "synced" })
   }
 }

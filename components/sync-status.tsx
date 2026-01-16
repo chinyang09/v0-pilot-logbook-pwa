@@ -31,10 +31,12 @@ export function SyncStatus() {
   }, [])
 
   const handleSync = async () => {
-    const result = await syncService.syncPendingChanges()
-    if (result.success > 0) {
-      setPendingCount((prev) => Math.max(0, prev - result.success))
-    }
+    // Use force sync which triggers immediately via trigger manager
+    await syncService.forceSyncNow()
+    // Refresh pending count after sync
+    const { getSyncQueue } = await import("@/lib/db")
+    const queue = await getSyncQueue()
+    setPendingCount(queue.length)
   }
 
   return (

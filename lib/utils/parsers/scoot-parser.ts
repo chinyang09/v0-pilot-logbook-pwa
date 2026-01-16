@@ -54,6 +54,14 @@ interface ParseResult {
 // Main Export
 // ============================================
 
+/**
+ * Normalizes strings for consistent comparison across different CSV sources.
+ * Removes all non-alphanumeric characters and converts to lowercase.
+ * e.g., "Kenneth Albert Steph" -> "kennethalbertsteph"
+ */
+const normalize = (s: string): string =>
+  s ? s.toLowerCase().replace(/[^a-z0-9]/g, "") : "";
+
 export async function processScootCSV(
   csvContent: string,
   options?: ParseOptions
@@ -152,12 +160,17 @@ export async function processScootCSV(
   );
 
   // ========== SECOND PASS: Process flights ==========
-  onProgress?.(40, "Processing", "Creating flight records...");
+  onProgress?.(40, "Processing", "Creating/Hydrating flight records...");
 
   // Build crew cache from existing personnel
   const crewCache = new Map<string, string>();
   const existingCrew = await db.personnel.toArray();
-  existingCrew.forEach((p) => crewCache.set(p.name.toLowerCase(), p.id));
+
+  // Cache by normalized name
+  existingCrew.forEach((p) => {
+    const norm = normalize(p.name);
+    if (norm) crewCache.set(norm, p.id);
+  });
 
   const flightsToSave: FlightLog[] = [];
   const personnelToSave: Personnel[] = [];
@@ -167,61 +180,94 @@ export async function processScootCSV(
     const row = parsedRows[idx];
     const { cols, depIata, arrIata, rawReg, flightDate } = row;
 
-    // Get cached lookups (no await needed!)
     const depAp = airportMap.get(depIata);
     const arrAp = airportMap.get(arrIata);
     const matchedAc = aircraftMap.get(rawReg.toUpperCase());
 
-    const outT = cols[2]?.trim();
-    const inT = cols[4]?.trim();
+    const outT = cols[2]?.trim(); // Actual Out
+    const inT = cols[4]?.trim(); // Actual In
     const blockT = cols[7]?.trim();
     const isSim =
       cols[17]?.toUpperCase().includes("SIM") ||
       cols[5]?.toUpperCase().includes("SIM");
 
-    // Crew Logic
-    const rawPicName = cols[8]?.replace(/"/g, "").trim();
+    // --- 1. SMART PERSONNEL LOOKUP (Healing Support) ---
+    const rawPicName = cols[8]?.replace(/"/g, "").trim() || "";
+    const normalizedLogName = normalize(rawPicName);
+
     let picId = "";
-    let picName = "";
+    let picName = rawPicName;
     let sicId = "";
     let sicName = "";
-    const isUserPic =
-      rawPicName?.toLowerCase() === currentUserName.toLowerCase();
+
+    const isUserPic = normalizedLogName === normalize(currentUserName);
 
     if (isUserPic) {
       picId = currentUserId;
       picName = currentUserName;
-    } else {
+    } else if (normalizedLogName) {
       sicId = currentUserId;
       sicName = currentUserName;
-      picName = rawPicName || "";
 
-      if (picName && !crewCache.has(picName.toLowerCase())) {
-        const newPerson: Personnel = {
-          id: crypto.randomUUID(),
-          name: picName,
-          createdAt: Date.now(),
-          syncStatus: "pending",
-          isMe: false,
-          roles: ["PIC"],
-        };
-        personnelToSave.push(newPerson);
-        crewCache.set(picName.toLowerCase(), newPerson.id);
-        syncQueueEntries.push({
-          id: crypto.randomUUID(),
-          type: "create",
-          collection: "personnel",
-          data: newPerson,
-          timestamp: Date.now(),
-        });
+      // SEARCH FOR MASTER: Does this (likely truncated) name match a Full Name in DB?
+      const masterMatch = existingCrew.find((p) =>
+        normalize(p.name).startsWith(normalizedLogName)
+      );
+
+      if (masterMatch) {
+        picId = masterMatch.id;
+        picName = masterMatch.name; // Use the Full Name from the Schedule
+      } else {
+        let matchedId = crewCache.get(normalizedLogName);
+        if (!matchedId) {
+          const newPerson: Personnel = {
+            id: crypto.randomUUID(),
+            name: rawPicName, // Truncated for now
+            createdAt: Date.now(),
+            syncStatus: "pending",
+            isMe: false,
+            roles: ["PIC"],
+          };
+          personnelToSave.push(newPerson);
+          syncQueueEntries.push({
+            id: crypto.randomUUID(),
+            type: "create",
+            collection: "personnel",
+            data: newPerson,
+            timestamp: Date.now(),
+          });
+          matchedId = newPerson.id;
+          crewCache.set(normalizedLogName, matchedId);
+          existingCrew.push(newPerson); // Allow subsequent rows to find this person
+        }
+        picId = matchedId;
       }
-      picId = crewCache.get(picName.toLowerCase()) || "";
     }
+
+    // --- 2. FIND-OR-CREATE FLIGHT (The Handshake) ---
+    const logOutMinutes = hhmmToMinutes(outT || "00:00");
+
+    // Look for a record created by the Schedule Parser today
+    const existingDraft = await db.flights
+      .where("date")
+      .equals(flightDate)
+      .filter(
+        (f) =>
+          f.departureIata === depIata &&
+          f.arrivalIata === arrIata &&
+          Math.abs(
+            hhmmToMinutes(f.scheduledOut || f.outTime || "00:00") -
+              logOutMinutes
+          ) < 90
+      )
+      .first();
+
+    const flightId = existingDraft ? existingDraft.id : crypto.randomUUID();
 
     const depOffset = depAp ? getAirportTimeInfo(depAp.tz).offset : 0;
     const arrOffset = arrAp ? getAirportTimeInfo(arrAp.tz).offset : 0;
 
-    // Night time calculation (still sync - could be deferred if needed)
+    // Calculate Night Time
     const nightT =
       !isSim && depAp && arrAp
         ? calculateNightTimeComplete(
@@ -232,14 +278,15 @@ export async function processScootCSV(
             inT,
             { lat: depAp.latitude, lon: depAp.longitude },
             { lat: arrAp.latitude, lon: arrAp.longitude }
-          )
+          ).nightTimeHHMM
         : "00:00";
 
+    // --- 3. MERGE & HYDRATE ---
     const flight: FlightLog = {
-      id: crypto.randomUUID(),
+      ...existingDraft, // PRESERVE Flight Number (TRxxx) from Schedule
+      id: flightId,
       isDraft: false,
       date: flightDate,
-      flightNumber: "",
       aircraftReg: matchedAc?.registration || rawReg,
       aircraftType: matchedAc?.typecode || cols[5] || "",
       departureIata: depIata,
@@ -248,11 +295,7 @@ export async function processScootCSV(
       arrivalIcao: arrAp?.icao || "",
       departureTimezone: depOffset,
       arrivalTimezone: arrOffset,
-      scheduledOut: "",
-      scheduledIn: "",
       outTime: outT || "",
-      offTime: "",
-      onTime: "",
       inTime: inT || "",
       blockTime: blockT || "00:00",
       flightTime: isSim ? "00:00" : blockT || "00:00",
@@ -264,53 +307,35 @@ export async function processScootCSV(
       picName,
       sicId,
       sicName,
-      additionalCrew: [],
-      pilotFlying: true,
       pilotRole: isUserPic ? "PIC" : "SIC",
       picTime: isUserPic ? blockT || "00:00" : "00:00",
       sicTime: !isUserPic ? blockT || "00:00" : "00:00",
-      picusTime: "00:00",
-      dualTime: "00:00",
-      instructorTime: "00:00",
-      dayTakeoffs: Number.parseInt(cols[9]) || 0,
-      nightTakeoffs: Number.parseInt(cols[10]) || 0,
-      dayLandings: Number.parseInt(cols[11]) || 0,
-      nightLandings: Number.parseInt(cols[12]) || 0,
-      autolands: 0,
+      dayTakeoffs: parseInt(cols[9]) || 0,
+      nightTakeoffs: parseInt(cols[10]) || 0,
+      dayLandings: parseInt(cols[11]) || 0,
+      nightLandings: parseInt(cols[12]) || 0,
       remarks: cols[17]?.trim() || "",
-      endorsements: "",
-      manualOverrides: {},
-      ifrTime: "00:00",
-      actualInstrumentTime: "00:00",
-      simulatedInstrumentTime: isSim ? blockT || "00:00" : "00:00",
-      crossCountryTime: "00:00",
-      approaches: [],
-      holds: 0,
-      ipcIcc: false,
-      createdAt: Date.now(),
       updatedAt: Date.now(),
       syncStatus: "pending",
     };
 
     flightsToSave.push(flight);
+
     syncQueueEntries.push({
       id: crypto.randomUUID(),
-      type: "create",
+      type: existingDraft ? "update" : "create",
       collection: "flights",
       data: flight,
       timestamp: Date.now(),
     });
 
-    // Progress update every 50 flights
     if (idx % 50 === 0) {
       const percent = 40 + Math.floor((idx / parsedRows.length) * 40);
-      onProgress?.(
-        percent,
-        "Processing",
-        `${idx + 1} of ${parsedRows.length} flights...`
-      );
+      onProgress?.(percent, "Processing", `${idx + 1} flights...`);
     }
   }
+
+  // Final step: Ensure you use db.flights.bulkPut(flightsToSave) in the transaction!
 
   // ========== SAVE TO DATABASE ==========
   onProgress?.(85, "Saving", "Writing to database...");
@@ -323,7 +348,8 @@ export async function processScootCSV(
         await db.personnel.bulkAdd(personnelToSave);
       }
       if (flightsToSave.length > 0) {
-        await db.flights.bulkAdd(flightsToSave);
+        // bulkPut handles both new inserts and updates to existing IDs (Drafts)
+        await db.flights.bulkPut(flightsToSave);
       }
       if (syncQueueEntries.length > 0) {
         await db.syncQueue.bulkAdd(syncQueueEntries);

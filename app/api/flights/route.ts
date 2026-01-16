@@ -1,15 +1,18 @@
-import { type NextRequest, NextResponse } from "next/server"
-import { getMongoClient } from "@/lib/mongodb"
+import { type NextRequest, NextResponse } from "next/server";
+import { getMongoClient } from "@/lib/mongodb";
 
 export async function GET(request: NextRequest) {
   try {
-    const mongoClient = await getMongoClient()
-    const db = mongoClient.db("skylog")
-    const flights = await db.collection("flights").find({}).sort({ date: -1 }).toArray()
+    const mongoClient = await getMongoClient();
+    const db = mongoClient.db("skylog");
+    const flights = await db
+      .collection("flights")
+      .find({})
+      .sort({ date: -1 })
+      .toArray();
 
     const transformedFlights = flights.map((flight) => ({
-      id: flight.localId || flight._id.toString(),
-      mongoId: flight._id.toString(),
+      id: flight.id || flight._id.toString(),
       date: flight.date || "",
       flightNumber: flight.flightNumber || "",
 
@@ -84,11 +87,14 @@ export async function GET(request: NextRequest) {
       createdAt: flight.createdAt || Date.now(),
       updatedAt: flight.updatedAt || Date.now(),
       syncStatus: "synced" as const,
-    }))
+    }));
 
-    return NextResponse.json(transformedFlights)
+    return NextResponse.json(transformedFlights);
   } catch (error) {
-    console.error("Fetch flights error:", error)
-    return NextResponse.json({ error: "Failed to fetch flights" }, { status: 500 })
+    console.error("Fetch flights error:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch flights" },
+      { status: 500 }
+    );
   }
 }

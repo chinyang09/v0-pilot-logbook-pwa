@@ -44,7 +44,8 @@ export function ServiceWorkerRegister() {
       navigator.serviceWorker.addEventListener("message", async (event) => {
         if (event.data?.type === "SYNC_REQUIRED") {
           const { syncService } = await import("@/lib/sync")
-          syncService.syncPendingChanges()
+          // Trigger immediate sync when requested by service worker
+          await syncService.forceSyncNow()
         }
       })
 
@@ -55,16 +56,16 @@ export function ServiceWorkerRegister() {
       })
     }
 
-    // Register for background sync when online
+    // Note: Online event handling is now primarily managed by SyncTriggerManager
+    // This is kept for backward compatibility with background sync registration
     const handleOnline = async () => {
       if ("serviceWorker" in navigator && "sync" in window.ServiceWorkerRegistration.prototype) {
         const reg = await navigator.serviceWorker.ready
         try {
           await (reg as any).sync.register("sync-flights")
         } catch (e) {
-          // Background sync not supported or permission denied
-          const { syncService } = await import("@/lib/sync")
-          syncService.syncPendingChanges()
+          // Background sync not supported - trigger manager will handle it
+          console.log("[SW] Background sync registration failed, trigger manager will handle sync")
         }
       }
     }

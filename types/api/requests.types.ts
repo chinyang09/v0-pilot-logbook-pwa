@@ -11,7 +11,7 @@ export interface SyncPushRequest {
   collection: "flights" | "aircraft" | "personnel"
   operations: Array<{
     type: SyncOperationType
-    data: FlightLog | Aircraft | Personnel | { id: string; mongoId?: string }
+    data: FlightLog | Aircraft | Personnel | { id: string;}
   }>
 }
 

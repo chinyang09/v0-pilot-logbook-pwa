@@ -27,8 +27,8 @@ export interface Personnel {
   defaultSIC?: boolean
   createdAt: number
   updatedAt?: number
+  deleteddAt?: number
   syncStatus: SyncStatus
-  mongoId?: string
 }
 
 export type PersonnelCreate = Omit<Personnel, "id" | "createdAt" | "syncStatus">

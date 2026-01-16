@@ -6,17 +6,27 @@
  * - referenceDb: Reference data (persists across sessions)
  */
 
-export { userDb, initializeUserDB } from "./user-db"
-export { referenceDb, initializeReferenceDB } from "./reference-db"
+export { userDb, initializeUserDB } from "./user-db";
+export { referenceDb, initializeReferenceDB } from "./reference-db";
 
 // Re-export types
-export type { FlightLog, FlightLogCreate, Approach, AdditionalCrew, SyncStatus } from "@/types/entities/flight.types"
-export type { Aircraft, AircraftCreate, AircraftReference } from "@/types/entities/aircraft.types"
-export type { Airport } from "@/types/entities/airport.types"
-export type { Personnel, PersonnelCreate } from "@/types/entities/crew.types"
-export type { UserSession } from "@/types/entities/user.types"
-export type { UserPreferences } from "@/types/db/stores.types"
-export type { SyncQueueItem, SyncMeta } from "@/types/sync/sync.types"
+export type {
+  FlightLog,
+  FlightLogCreate,
+  Approach,
+  AdditionalCrew,
+  SyncStatus,
+} from "@/types/entities/flight.types";
+export type {
+  Aircraft,
+  AircraftCreate,
+  AircraftReference,
+} from "@/types/entities/aircraft.types";
+export type { Airport } from "@/types/entities/airport.types";
+export type { Personnel, PersonnelCreate } from "@/types/entities/crew.types";
+export type { UserSession } from "@/types/entities/user.types";
+export type { UserPreferences } from "@/types/db/stores.types";
+export type { SyncQueueItem, SyncMeta } from "@/types/sync/sync.types";
 export type {
   ScheduleEntry,
   ScheduleEntryCreate,
@@ -32,7 +42,7 @@ export type {
   ScheduledSector,
   ScheduledCrewMember,
   ScheduleImportResult,
-} from "@/types/entities/roster.types"
+} from "@/types/entities/roster.types";
 
 // Re-export user stores
 export {
@@ -42,11 +52,10 @@ export {
   silentDeleteFlight,
   getAllFlights,
   getFlightById,
-  getFlightByMongoId,
   getPendingFlights,
   upsertFlightFromServer,
   markFlightSynced,
-} from "./stores/user/flights.store"
+} from "./stores/user/flights.store";
 
 export {
   addAircraft,
@@ -56,7 +65,7 @@ export {
   getAllAircraft,
   getAircraftById,
   upsertAircraftFromServer,
-} from "./stores/user/aircraft.store"
+} from "./stores/user/aircraft.store";
 
 export {
   addPersonnel,
@@ -68,14 +77,14 @@ export {
   getCurrentUserPersonnel,
   getPersonnelByRole,
   upsertPersonnelFromServer,
-} from "./stores/user/crew.store"
+} from "./stores/user/crew.store";
 
 export {
   saveUserSession,
   getUserSession,
   clearUserSession,
   getCurrentUserId,
-} from "./stores/user/sessions.store"
+} from "./stores/user/sessions.store";
 
 export {
   getUserPreferences,
@@ -85,7 +94,7 @@ export {
   getRecentlyUsedAirports,
   addRecentlyUsedAircraft,
   getRecentlyUsedAircraft,
-} from "./stores/user/preferences.store"
+} from "./stores/user/preferences.store";
 
 export {
   addToSyncQueue,
@@ -97,7 +106,7 @@ export {
   getLastSyncTime,
   setLastSyncTime,
   markRecordSynced,
-} from "./stores/user/sync-queue.store"
+} from "./stores/user/sync-queue.store";
 
 // Re-export roster stores - schedule entries
 export {
@@ -116,7 +125,7 @@ export {
   clearAllScheduleEntries,
   getScheduleEntriesCount,
   getScheduleDateRange,
-} from "./stores/user/schedule.store"
+} from "./stores/user/schedule.store";
 
 // Re-export roster stores - currencies
 export {
@@ -135,7 +144,7 @@ export {
   bulkUpsertCurrencies,
   clearAllCurrencies,
   getCurrenciesCount,
-} from "./stores/user/currencies.store"
+} from "./stores/user/currencies.store";
 
 // Re-export roster stores - discrepancies
 export {
@@ -154,7 +163,7 @@ export {
   clearAllDiscrepancies,
   getDiscrepanciesCount,
   getDiscrepanciesBySeverity,
-} from "./stores/user/discrepancies.store"
+} from "./stores/user/discrepancies.store";
 
 // Re-export reference stores - airports
 export {
@@ -174,7 +183,7 @@ export {
   getAirportByICAO,
   getAirportByIATA,
   type AirportData,
-} from "./stores/reference/airports.store"
+} from "./stores/reference/airports.store";
 
 // Re-export reference stores - aircraft database
 export {
@@ -208,32 +217,35 @@ export {
   deleteAircraftFromDatabase,
   getAllAircraftFromDatabase,
   hasAircraftInDatabase,
-} from "./stores/reference/aircraft.store"
+} from "./stores/reference/aircraft.store";
 
 // Re-export metadata stores
-export { getFlightStats, type FlightStats } from "./stores/metadata/stats.store"
+export {
+  getFlightStats,
+  type FlightStats,
+} from "./stores/metadata/stats.store";
 
 // Import userDb for clearAllUserData
-import { userDb } from "./user-db"
+import { userDb } from "./user-db";
 
 /**
  * Clear all user data (called on logout)
  */
 export async function clearAllUserData(): Promise<void> {
-  await userDb.clearAllUserData()
+  await userDb.clearAllUserData();
 }
 
 /**
  * Initialize both databases
  */
 export async function initializeDB(): Promise<boolean> {
-  const { initializeUserDB } = await import("./user-db")
-  const { initializeReferenceDB } = await import("./reference-db")
+  const { initializeUserDB } = await import("./user-db");
+  const { initializeReferenceDB } = await import("./reference-db");
 
   const [userReady, refReady] = await Promise.all([
     initializeUserDB(),
     initializeReferenceDB(),
-  ])
+  ]);
 
-  return userReady && refReady
+  return userReady && refReady;
 }

@@ -37,9 +37,9 @@ class UserDatabase extends Dexie {
     super("PilotLogbook_User")
 
     this.version(1).stores({
-      flights: "id, date, syncStatus, aircraftReg, mongoId, userId",
-      aircraft: "id, registration, type, mongoId, userId",
-      personnel: "id, name, mongoId, userId",
+      flights: "id, date, syncStatus, aircraftReg, userId",
+      aircraft: "id, registration, type, userId",
+      personnel: "id, name, userId",
       preferences: "key",
       syncQueue: "id, collection, timestamp",
       syncMeta: "key",
@@ -48,16 +48,16 @@ class UserDatabase extends Dexie {
 
     // Version 2: Add roster tables and flight/personnel indexes
     this.version(2).stores({
-      flights: "id, date, syncStatus, aircraftReg, mongoId, userId, flightNumber",
-      aircraft: "id, registration, type, mongoId, userId",
-      personnel: "id, name, mongoId, userId, crewId",
+      flights: "id, date, syncStatus, aircraftReg, userId, flightNumber",
+      aircraft: "id, registration, type, userId",
+      personnel: "id, name, userId, crewId",
       preferences: "key",
       syncQueue: "id, collection, timestamp",
       syncMeta: "key",
       userSession: "id",
       // New roster tables
-      scheduleEntries: "id, date, dutyType, syncStatus, mongoId, [date+dutyType]",
-      currencies: "id, code, expiryDate, syncStatus, mongoId",
+      scheduleEntries: "id, date, dutyType, syncStatus, [date+dutyType]",
+      currencies: "id, code, expiryDate, syncStatus",
       discrepancies: "id, type, resolved, scheduleEntryId, flightLogId, createdAt",
     })
   }
