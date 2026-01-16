@@ -5,45 +5,24 @@ import { PageContainer } from "@/components/page-container"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import { RosterCalendar } from "@/components/roster-calendar"
+import { DutyEntryCard } from "@/components/duty-entry-card"
 import {
   Calendar,
   Upload,
-  FileText,
   AlertCircle,
   CheckCircle2,
-  Clock,
-  Plane,
-  Coffee,
-  GraduationCap,
   XCircle,
   RefreshCw,
+  List,
+  CalendarDays,
 } from "lucide-react"
 import { parseScheduleCSV, detectCSVType } from "@/lib/utils/parsers"
 import { useScheduleEntries, useCurrencies, useDiscrepancyCounts, refreshAllData } from "@/hooks/data"
-import type { ScheduleImportResult, DutyType } from "@/types"
+import type { ScheduleImportResult } from "@/types"
 import { cn } from "@/lib/utils"
 
-const DUTY_TYPE_ICONS: Record<DutyType, typeof Plane> = {
-  flight: Plane,
-  standby: Clock,
-  training: GraduationCap,
-  leave: Calendar,
-  off: Coffee,
-  ground: FileText,
-  positioning: Plane,
-  other: FileText,
-}
-
-const DUTY_TYPE_COLORS: Record<DutyType, string> = {
-  flight: "bg-blue-500/10 text-blue-500",
-  standby: "bg-yellow-500/10 text-yellow-500",
-  training: "bg-purple-500/10 text-purple-500",
-  leave: "bg-green-500/10 text-green-500",
-  off: "bg-gray-500/10 text-gray-500",
-  ground: "bg-orange-500/10 text-orange-500",
-  positioning: "bg-cyan-500/10 text-cyan-500",
-  other: "bg-gray-500/10 text-gray-500",
-}
+type ViewMode = "calendar" | "list"
 
 export default function RosterPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -51,9 +30,10 @@ export default function RosterPage() {
   const [importProgress, setImportProgress] = useState(0)
   const [importStage, setImportStage] = useState("")
   const [importResult, setImportResult] = useState<ScheduleImportResult | null>(null)
+  const [viewMode, setViewMode] = useState<ViewMode>("calendar")
 
   const { scheduleEntries, isLoading: entriesLoading, refresh: refreshEntries } = useScheduleEntries()
-  const { currencies, isLoading: currenciesLoading } = useCurrencies()
+  const { currencies } = useCurrencies()
   const { counts: discrepancyCounts } = useDiscrepancyCounts()
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -140,7 +120,7 @@ export default function RosterPage() {
     }
   }
 
-  // Group schedule entries by date
+  // Group schedule entries by date for list view
   const entriesByDate = scheduleEntries.reduce(
     (acc, entry) => {
       if (!acc[entry.date]) {
@@ -161,7 +141,26 @@ export default function RosterPage() {
           <div className="container mx-auto px-4">
             <div className="flex items-center justify-between h-12">
               <h1 className="text-lg font-semibold text-foreground">Roster</h1>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
+                {/* View Toggle */}
+                <div className="flex bg-secondary/50 rounded-lg p-0.5 mr-1">
+                  <Button
+                    variant={viewMode === "calendar" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-7 px-2"
+                    onClick={() => setViewMode("calendar")}
+                  >
+                    <CalendarDays className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant={viewMode === "list" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-7 px-2"
+                    onClick={() => setViewMode("list")}
+                  >
+                    <List className="h-4 w-4" />
+                  </Button>
+                </div>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -312,8 +311,17 @@ export default function RosterPage() {
           </Card>
         )}
 
-        {/* Schedule Entries List */}
-        {sortedDates.length > 0 && (
+        {/* Calendar View */}
+        {viewMode === "calendar" && scheduleEntries.length > 0 && (
+          <Card>
+            <CardContent className="pt-4">
+              <RosterCalendar entries={scheduleEntries} />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* List View */}
+        {viewMode === "list" && sortedDates.length > 0 && (
           <div className="space-y-3">
             {sortedDates.slice(0, 30).map((date) => (
               <Card key={date}>
@@ -327,43 +335,9 @@ export default function RosterPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="px-3 pb-3 space-y-2">
-                  {entriesByDate[date].map((entry) => {
-                    const Icon = DUTY_TYPE_ICONS[entry.dutyType] || FileText
-                    const colorClass = DUTY_TYPE_COLORS[entry.dutyType] || DUTY_TYPE_COLORS.other
-
-                    return (
-                      <div
-                        key={entry.id}
-                        className="flex items-center gap-3 p-2 rounded-lg bg-secondary/30"
-                      >
-                        <div className={cn("p-2 rounded-lg", colorClass)}>
-                          <Icon className="h-4 w-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm truncate">
-                            {entry.dutyCode || entry.dutyType}
-                          </div>
-                          {entry.dutyDescription && (
-                            <div className="text-xs text-muted-foreground truncate">
-                              {entry.dutyDescription}
-                            </div>
-                          )}
-                          {entry.sectors.length > 0 && (
-                            <div className="text-xs text-muted-foreground">
-                              {entry.sectors
-                                .map((s) => `${s.departureIata}-${s.arrivalIata}`)
-                                .join(", ")}
-                            </div>
-                          )}
-                        </div>
-                        {entry.reportTime && (
-                          <span className="text-xs px-2 py-0.5 rounded-full border border-border bg-secondary/50">
-                            {entry.reportTime}
-                          </span>
-                        )}
-                      </div>
-                    )
-                  })}
+                  {entriesByDate[date].map((entry) => (
+                    <DutyEntryCard key={entry.id} entry={entry} variant="compact" />
+                  ))}
                 </CardContent>
               </Card>
             ))}
