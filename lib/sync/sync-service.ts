@@ -18,6 +18,7 @@ import {
   type Personnel,
 } from "@/lib/db"
 import type { SyncQueueItem } from "@/types/sync/sync.types"
+import { getSyncTriggerManager } from "./sync-trigger-manager"
 
 // Wrapper for clearing all local data except preferences
 async function clearAllLocalData(): Promise<void> {
@@ -36,17 +37,55 @@ class SyncService {
     if (typeof window !== "undefined") {
       this.status = navigator.onLine ? "online" : "offline"
 
+      // Note: Network event handling is now managed by SyncTriggerManager
+      // Keep status updates here for UI
       window.addEventListener("online", () => {
-        console.log("[v0] Network online - setting status and syncing")
+        console.log("[v0] Network online - updating status")
         this.setStatus("online")
-        this.fullSync()
       })
 
       window.addEventListener("offline", () => {
-        console.log("[v0] Network offline - setting status")
+        console.log("[v0] Network offline - updating status")
         this.setStatus("offline")
       })
     }
+  }
+
+  /**
+   * Initialize sync with intelligent triggers
+   */
+  initializeTriggers() {
+    if (typeof window === "undefined") return
+
+    const triggerManager = getSyncTriggerManager()
+    triggerManager.initialize(async () => {
+      await this.fullSync()
+    })
+    console.log("[v0] Sync triggers initialized")
+  }
+
+  /**
+   * Notify trigger manager of data change (for debounce)
+   */
+  notifyDataChange() {
+    const triggerManager = getSyncTriggerManager()
+    triggerManager.notifyDataChanged()
+  }
+
+  /**
+   * Force sync immediately (called by user)
+   */
+  async forceSyncNow() {
+    const triggerManager = getSyncTriggerManager()
+    await triggerManager.forceSyncNow()
+  }
+
+  /**
+   * Sync before logout
+   */
+  async syncBeforeLogout() {
+    const triggerManager = getSyncTriggerManager()
+    await triggerManager.syncBeforeLogout()
   }
 
   private setStatus(status: SyncStatus) {
