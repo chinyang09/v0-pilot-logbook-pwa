@@ -17,6 +17,8 @@ import {
   type Aircraft,
   type Personnel,
 } from "@/lib/db"
+import type { SyncQueueItem } from "@/types/sync/sync.types"
+import { getSyncTriggerManager } from "./sync-trigger-manager"
 
 // Wrapper for clearing all local data except preferences
 async function clearAllLocalData(): Promise<void> {
@@ -35,17 +37,55 @@ class SyncService {
     if (typeof window !== "undefined") {
       this.status = navigator.onLine ? "online" : "offline"
 
+      // Note: Network event handling is now managed by SyncTriggerManager
+      // Keep status updates here for UI
       window.addEventListener("online", () => {
-        console.log("[v0] Network online - setting status and syncing")
+        console.log("[v0] Network online - updating status")
         this.setStatus("online")
-        this.fullSync()
       })
 
       window.addEventListener("offline", () => {
-        console.log("[v0] Network offline - setting status")
+        console.log("[v0] Network offline - updating status")
         this.setStatus("offline")
       })
     }
+  }
+
+  /**
+   * Initialize sync with intelligent triggers
+   */
+  initializeTriggers() {
+    if (typeof window === "undefined") return
+
+    const triggerManager = getSyncTriggerManager()
+    triggerManager.initialize(async () => {
+      await this.fullSync()
+    })
+    console.log("[v0] Sync triggers initialized")
+  }
+
+  /**
+   * Notify trigger manager of data change (for debounce)
+   */
+  notifyDataChange() {
+    const triggerManager = getSyncTriggerManager()
+    triggerManager.notifyDataChanged()
+  }
+
+  /**
+   * Force sync immediately (called by user)
+   */
+  async forceSyncNow() {
+    const triggerManager = getSyncTriggerManager()
+    await triggerManager.forceSyncNow()
+  }
+
+  /**
+   * Sync before logout
+   */
+  async syncBeforeLogout() {
+    const triggerManager = getSyncTriggerManager()
+    await triggerManager.syncBeforeLogout()
   }
 
   private setStatus(status: SyncStatus) {
@@ -151,67 +191,174 @@ class SyncService {
     return { pushed, pulled, failed }
   }
 
+  /**
+   * Compact sync queue by merging multiple operations on the same record
+   * Rules:
+   * - create → update → update = single create with latest data
+   * - create → delete = just delete
+   * - update → delete = just delete
+   * - update → update = single update with latest data
+   * - Multiple operations on same record = keep latest operation with latest data
+   */
+  private compactSyncQueue(queue: SyncQueueItem[]): SyncQueueItem[] {
+    console.log(`[v0] Compacting sync queue: ${queue.length} items`)
+
+    // Group by collection and record ID
+    const recordOps = new Map<string, SyncQueueItem[]>()
+
+    for (const item of queue) {
+      const recordId = (item.data as { id: string }).id
+      const key = `${item.collection}:${recordId}`
+
+      if (!recordOps.has(key)) {
+        recordOps.set(key, [])
+      }
+      recordOps.get(key)!.push(item)
+    }
+
+    const compacted: SyncQueueItem[] = []
+
+    for (const [key, operations] of recordOps.entries()) {
+      // Sort by timestamp to get chronological order
+      operations.sort((a, b) => a.timestamp - b.timestamp)
+
+      // Get the latest operation
+      const latest = operations[operations.length - 1]
+
+      // Determine the final operation type
+      let finalType = latest.type
+      let finalData = latest.data
+
+      // If the latest is a delete, that's the final operation
+      if (latest.type === "delete") {
+        // Check if there was a create before - if yes, we can skip entirely
+        const hasCreate = operations.some(op => op.type === "create")
+        if (hasCreate) {
+          // Created then deleted in same sync - skip this record entirely
+          console.log(`[v0] Skipping ${key} - created and deleted in same batch`)
+          continue
+        }
+        // Otherwise, keep the delete
+        compacted.push(latest)
+        continue
+      }
+
+      // If there's a create anywhere in the operations, treat as create with latest data
+      const hasCreate = operations.some(op => op.type === "create")
+      if (hasCreate) {
+        finalType = "create"
+      }
+
+      // Use the latest data
+      compacted.push({
+        ...latest,
+        type: finalType,
+        data: finalData,
+      })
+    }
+
+    console.log(`[v0] Compacted to ${compacted.length} items (${queue.length - compacted.length} items merged)`)
+    return compacted
+  }
+
   async pushPendingChanges(): Promise<{ success: number; failed: number }> {
     if (!navigator.onLine) {
       return { success: 0, failed: 0 }
     }
 
     const queue = await getSyncQueue()
+    if (queue.length === 0) {
+      return { success: 0, failed: 0 }
+    }
+
+    // Compact the queue to reduce operations
+    const compactedQueue = this.compactSyncQueue(queue)
+
+    if (compactedQueue.length === 0) {
+      console.log("[v0] All operations cancelled out - clearing queue")
+      // Clear all original queue items since they cancelled out
+      for (const item of queue) {
+        await clearSyncQueueItem(item.id)
+      }
+      return { success: queue.length, failed: 0 }
+    }
+
     let success = 0
     let failed = 0
 
     const headers = await this.getAuthHeaders()
 
-    for (const item of queue) {
-      try {
-        const response = await fetch("/api/sync", {
-          method: "POST",
-          headers,
-          body: JSON.stringify(item),
-        })
+    // Use bulk sync endpoint
+    try {
+      console.log(`[v0] Sending bulk sync request with ${compactedQueue.length} items`)
 
-        if (response.ok) {
-          const result = await response.json()
+      const response = await fetch("/api/sync/bulk", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ items: compactedQueue }),
+      })
 
-          if (result.rejected) {
-            console.log(`[v0] Record rejected by server: ${result.reason}`)
-            // Remove from queue - the record was deleted on another device
-            await clearSyncQueueItem(item.id)
-            // Also delete locally to sync with server state
-            const data = item.data as { id: string }
-            switch (item.collection) {
-              case "flights":
-                await silentDeleteFlight(data.id)
-                break
-              case "aircraft":
-                await silentDeleteAircraft(data.id)
-                break
-              case "personnel":
-                await silentDeletePersonnel(data.id)
-                break
+      if (response.ok) {
+        const result = await response.json()
+        console.log(`[v0] Bulk sync response:`, result.summary)
+
+        // Process results
+        for (const itemResult of result.results) {
+          const originalItem = compactedQueue.find(item => item.id === itemResult.queueItemId)
+          if (!originalItem) continue
+
+          if (itemResult.success) {
+            // Handle rejection (tombstoned)
+            if (itemResult.rejected) {
+              console.log(`[v0] Record rejected by server: ${itemResult.reason}`)
+              // Delete locally to sync with server state
+              const data = originalItem.data as { id: string }
+              switch (originalItem.collection) {
+                case "flights":
+                  await silentDeleteFlight(data.id)
+                  break
+                case "aircraft":
+                  await silentDeleteAircraft(data.id)
+                  break
+                case "personnel":
+                  await silentDeletePersonnel(data.id)
+                  break
+              }
+            } else if (originalItem.type === "create" || originalItem.type === "update") {
+              // Mark record as synced
+              const data = originalItem.data as { id: string }
+              await markRecordSynced(originalItem.collection, data.id)
             }
-            success++ // Count as success since we handled it
-            continue
-          }
 
-          if ((item.type === "create" || item.type === "update")) {
-            const data = item.data as { id: string }
-            await markRecordSynced(item.collection, data.id)
-          }
+            // Clear all original queue items that contributed to this compacted item
+            // Find all queue items for the same record
+            const recordId = (originalItem.data as { id: string }).id
+            const itemsToClear = queue.filter(item => {
+              const itemRecordId = (item.data as { id: string }).id
+              return item.collection === originalItem.collection && itemRecordId === recordId
+            })
 
-          await clearSyncQueueItem(item.id)
-          success++
-        } else {
-          const errorText = await response.text()
-          console.error("Push failed for item:", item.id, errorText)
-          failed++
+            for (const item of itemsToClear) {
+              await clearSyncQueueItem(item.id)
+            }
+
+            success++
+          } else {
+            console.error(`[v0] Bulk sync item failed:`, itemResult.reason)
+            failed++
+          }
         }
-      } catch (error) {
-        console.error("Push sync error:", error)
-        failed++
+      } else {
+        const errorText = await response.text()
+        console.error("[v0] Bulk sync request failed:", response.status, errorText)
+        failed = compactedQueue.length
       }
+    } catch (error) {
+      console.error("[v0] Bulk sync error:", error)
+      failed = compactedQueue.length
     }
 
+    console.log(`[v0] Bulk sync complete: ${success} succeeded, ${failed} failed`)
     return { success, failed }
   }
 

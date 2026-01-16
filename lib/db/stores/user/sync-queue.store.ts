@@ -15,6 +15,7 @@ import type { Personnel } from "@/types/entities/crew.types";
 
 /**
  * Add item to sync queue
+ * Also notifies the sync trigger manager for intelligent sync scheduling
  */
 export async function addToSyncQueue(
   type: SyncOperationType,
@@ -29,6 +30,16 @@ export async function addToSyncQueue(
     timestamp: Date.now(),
     retryCount: 0,
   });
+
+  // Notify sync service of data change (for intelligent triggers)
+  if (typeof window !== "undefined") {
+    // Dynamically import to avoid circular dependency
+    import("@/lib/sync").then(({ syncService }) => {
+      syncService.notifyDataChange();
+    }).catch(err => {
+      console.warn("[v0] Failed to notify sync service:", err);
+    });
+  }
 }
 
 /**
