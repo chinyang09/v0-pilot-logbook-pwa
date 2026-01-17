@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation"
 import { SyncStatus } from "@/components/sync-status"
 import { cn } from "@/lib/utils"
 import { CSVImportButton } from "@/components/csv-import-button"
+import { ImageImportButton } from "@/components/image-import-button"
 
 const FORM_STORAGE_KEY = "flight-form-draft"
 
@@ -313,6 +314,13 @@ export default function LogbookPage() {
               onComplete={() => {
                 sessionStorage.removeItem(FORM_STORAGE_KEY)
                 refreshAllData()
+              }}
+            />
+
+            <ImageImportButton
+              onDataExtracted={() => {
+                // Navigate to new flight page to use OCR data
+                router.push("/new-flight")
               }}
             />
 
