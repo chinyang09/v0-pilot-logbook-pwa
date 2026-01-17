@@ -11,6 +11,7 @@ import { syncService } from "@/lib/sync"
 import { useAuth } from "@/components/providers/auth-provider"
 import { UserMenu } from "@/components/user-menu"
 import { useFlights, useFlightStats, refreshAllData, useDBReady, useExpiringCurrencies } from "@/hooks/data"
+import { useUnresolvedDiscrepancies } from "@/hooks/data/use-discrepancies"
 import { RefreshCw, AlertCircle, Plane, Calendar, TrendingUp, Loader2, ShieldAlert } from "lucide-react"
 import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
 import Link from "next/link"
@@ -22,6 +23,7 @@ export default function Dashboard() {
   const { flights, isLoading: flightsLoading } = useFlights()
   const { stats, isLoading: statsLoading, refresh: refreshStats } = useFlightStats()
   const { expiringCurrencies, isLoading: currenciesLoading } = useExpiringCurrencies()
+  const { unresolvedDiscrepancies, isLoading: discrepanciesLoading } = useUnresolvedDiscrepancies()
 
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -246,6 +248,79 @@ export default function Dashboard() {
                 {expiringCurrencies.length > 3 && (
                   <p className="text-center text-sm text-muted-foreground">
                     +{expiringCurrencies.length - 3} more expiring soon
+                  </p>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* Discrepancy Warnings */}
+          {unresolvedDiscrepancies.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-foreground">Discrepancies</h2>
+                <Link href="/discrepancies">
+                  <Button variant="ghost" size="sm" className="gap-2">
+                    <AlertCircle className="h-4 w-4" />
+                    View All
+                  </Button>
+                </Link>
+              </div>
+              <div className="space-y-2">
+                {unresolvedDiscrepancies.slice(0, 3).map((discrepancy) => {
+                  const severityColors = {
+                    error: {
+                      bg: "bg-red-500/10 border-red-500/20",
+                      text: "text-red-500",
+                    },
+                    warning: {
+                      bg: "bg-yellow-500/10 border-yellow-500/20",
+                      text: "text-yellow-500",
+                    },
+                    info: {
+                      bg: "bg-blue-500/10 border-blue-500/20",
+                      text: "text-blue-500",
+                    },
+                  }
+                  const colors = severityColors[discrepancy.severity]
+
+                  const typeLabels: Record<string, string> = {
+                    duplicate: "Duplicate Flight",
+                    time_mismatch: "Time Mismatch",
+                    crew_mismatch: "Crew Mismatch",
+                    route_mismatch: "Route Mismatch",
+                    missing_in_logbook: "Missing in Logbook",
+                    missing_in_schedule: "Missing in Schedule",
+                  }
+
+                  return (
+                    <Card key={discrepancy.id} className={cn("border", colors.bg)}>
+                      <CardContent className="p-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <AlertCircle className={cn("h-4 w-4 flex-shrink-0", colors.text)} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-foreground truncate">
+                                {typeLabels[discrepancy.type] || discrepancy.type}
+                              </p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                {discrepancy.message || "Detected during schedule import"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className={cn("text-xs font-medium uppercase", colors.text)}>
+                              {discrepancy.severity}
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+                {unresolvedDiscrepancies.length > 3 && (
+                  <p className="text-center text-sm text-muted-foreground">
+                    +{unresolvedDiscrepancies.length - 3} more to resolve
                   </p>
                 )}
               </div>
