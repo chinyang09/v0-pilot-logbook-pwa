@@ -6,6 +6,8 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Empty turbopack config to allow webpack config for builds
+  turbopack: {},
   webpack: (config, { isServer }) => {
     // Exclude OCR package and its dependencies from server-side bundle
     if (isServer) {
