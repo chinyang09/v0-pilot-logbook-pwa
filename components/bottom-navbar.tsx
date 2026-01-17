@@ -18,7 +18,10 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
       ? "dashboard"
       : pathname === "/logbook"
       ? "logbook"
-      : pathname === "/roster"
+      : pathname === "/roster" ||
+        pathname === "/currencies" ||
+        pathname === "/discrepancies" ||
+        pathname === "/fdp"
       ? "roster"
       : pathname === "/aircraft" || pathname?.startsWith("/aircraft/")
       ? "aircraft"

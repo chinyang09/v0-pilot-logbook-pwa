@@ -25,11 +25,15 @@ import {
   CalendarDays,
   Settings,
   FileDown,
+  Shield,
+  TrendingUp,
+  ArrowRight,
 } from "lucide-react"
 import { parseScheduleCSV, detectCSVType } from "@/lib/utils/parsers"
 import { useScheduleEntries, useCurrencies, useDiscrepancyCounts, refreshAllData } from "@/hooks/data"
 import type { ScheduleImportResult, ScheduleEntry } from "@/types"
 import { cn } from "@/lib/utils"
+import Link from "next/link"
 import { DutyEntryCard, RosterCalendar, DraftSettings } from "@/components/roster"
 import { getDraftGenerationConfig } from "@/lib/db"
 import { processPendingDrafts } from "@/lib/utils/roster/draft-generator"
@@ -381,6 +385,45 @@ export default function RosterPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Quick Access Navigation */}
+        {scheduleEntries.length > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            <Link href="/currencies">
+              <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
+                <CardContent className="pt-4 pb-3 px-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <Shield className="h-5 w-5 text-green-500" />
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                  </div>
+                  <div className="text-xs font-medium">Currencies</div>
+                </CardContent>
+              </Card>
+            </Link>
+            <Link href="/discrepancies">
+              <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
+                <CardContent className="pt-4 pb-3 px-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <AlertCircle className="h-5 w-5 text-yellow-500" />
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                  </div>
+                  <div className="text-xs font-medium">Discrepancies</div>
+                </CardContent>
+              </Card>
+            </Link>
+            <Link href="/fdp">
+              <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
+                <CardContent className="pt-4 pb-3 px-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <TrendingUp className="h-5 w-5 text-blue-500" />
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                  </div>
+                  <div className="text-xs font-medium">FDP Dashboard</div>
+                </CardContent>
+              </Card>
+            </Link>
+          </div>
+        )}
 
         {/* Empty State */}
         {scheduleEntries.length === 0 && !entriesLoading && !isImporting && (
