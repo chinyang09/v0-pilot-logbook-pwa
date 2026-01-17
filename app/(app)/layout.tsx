@@ -4,10 +4,14 @@ import type React from "react"
 import { BottomNavbar } from "@/components/bottom-navbar"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { ScrollNavbarProvider, useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
+import { useDraftGenerator } from "@/hooks/use-draft-generator"
 import { cn } from "@/lib/utils"
 
 function AppLayoutContent({ children }: { children: React.ReactNode }) {
   const { hideNavbar } = useScrollNavbarContext()
+
+  // Background draft generation
+  useDraftGenerator()
 
   return (
     <div className="relative h-[100dvh] w-full flex flex-col bg-background overflow-hidden">

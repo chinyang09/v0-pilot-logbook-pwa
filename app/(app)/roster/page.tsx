@@ -6,44 +6,39 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import {
-  Calendar,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import {
+  Calendar as CalendarIcon,
   Upload,
   FileText,
   AlertCircle,
   CheckCircle2,
-  Clock,
-  Plane,
-  Coffee,
-  GraduationCap,
   XCircle,
   RefreshCw,
+  List,
+  CalendarDays,
+  Settings,
+  FileDown,
+  Shield,
+  TrendingUp,
+  ArrowRight,
 } from "lucide-react"
 import { parseScheduleCSV, detectCSVType } from "@/lib/utils/parsers"
 import { useScheduleEntries, useCurrencies, useDiscrepancyCounts, refreshAllData } from "@/hooks/data"
-import type { ScheduleImportResult, DutyType } from "@/types"
+import type { ScheduleImportResult, ScheduleEntry } from "@/types"
 import { cn } from "@/lib/utils"
+import Link from "next/link"
+import { DutyEntryCard, RosterCalendar, DraftSettings } from "@/components/roster"
+import { getDraftGenerationConfig } from "@/lib/db"
+import { processPendingDrafts } from "@/lib/utils/roster/draft-generator"
 
-const DUTY_TYPE_ICONS: Record<DutyType, typeof Plane> = {
-  flight: Plane,
-  standby: Clock,
-  training: GraduationCap,
-  leave: Calendar,
-  off: Coffee,
-  ground: FileText,
-  positioning: Plane,
-  other: FileText,
-}
-
-const DUTY_TYPE_COLORS: Record<DutyType, string> = {
-  flight: "bg-blue-500/10 text-blue-500",
-  standby: "bg-yellow-500/10 text-yellow-500",
-  training: "bg-purple-500/10 text-purple-500",
-  leave: "bg-green-500/10 text-green-500",
-  off: "bg-gray-500/10 text-gray-500",
-  ground: "bg-orange-500/10 text-orange-500",
-  positioning: "bg-cyan-500/10 text-cyan-500",
-  other: "bg-gray-500/10 text-gray-500",
-}
+type ViewMode = "list" | "calendar"
 
 export default function RosterPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -51,6 +46,12 @@ export default function RosterPage() {
   const [importProgress, setImportProgress] = useState(0)
   const [importStage, setImportStage] = useState("")
   const [importResult, setImportResult] = useState<ScheduleImportResult | null>(null)
+  const [viewMode, setViewMode] = useState<ViewMode>("list")
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [selectedEntries, setSelectedEntries] = useState<ScheduleEntry[]>([])
+  const [isGeneratingDrafts, setIsGeneratingDrafts] = useState(false)
+  const [draftResult, setDraftResult] = useState<string | null>(null)
+  const [showSettings, setShowSettings] = useState(false)
 
   const { scheduleEntries, isLoading: entriesLoading, refresh: refreshEntries } = useScheduleEntries()
   const { currencies, isLoading: currenciesLoading } = useCurrencies()
@@ -154,6 +155,42 @@ export default function RosterPage() {
 
   const sortedDates = Object.keys(entriesByDate).sort((a, b) => b.localeCompare(a))
 
+  const handleDateClick = (date: string, entries: ScheduleEntry[]) => {
+    setSelectedDate(date)
+    setSelectedEntries(entries)
+    setViewMode("list")
+  }
+
+  const handleBackToCalendar = () => {
+    setSelectedDate(null)
+    setSelectedEntries([])
+  }
+
+  const handleGenerateDrafts = async () => {
+    try {
+      setIsGeneratingDrafts(true)
+      setDraftResult(null)
+
+      const config = await getDraftGenerationConfig()
+      const result = await processPendingDrafts(config)
+
+      if (result.created > 0) {
+        setDraftResult(`Created ${result.created} draft flight(s) from ${result.entriesProcessed.length} schedule entry(ies)`)
+        await refreshAllData()
+      } else {
+        setDraftResult("No new drafts to create")
+      }
+
+      setTimeout(() => setDraftResult(null), 5000)
+    } catch (error) {
+      console.error("Failed to generate drafts:", error)
+      setDraftResult("Failed to generate drafts")
+      setTimeout(() => setDraftResult(null), 5000)
+    } finally {
+      setIsGeneratingDrafts(false)
+    }
+  }
+
   return (
     <PageContainer
       header={
@@ -161,14 +198,56 @@ export default function RosterPage() {
           <div className="container mx-auto px-4">
             <div className="flex items-center justify-between h-12">
               <h1 className="text-lg font-semibold text-foreground">Roster</h1>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => refreshEntries()}
+                  disabled={entriesLoading}
+                  title="Refresh"
+                >
+                  <RefreshCw className={cn("h-4 w-4", entriesLoading && "animate-spin")} />
+                </Button>
+                <Button
+                  variant={viewMode === "list" ? "secondary" : "ghost"}
+                  size="icon-sm"
+                  onClick={() => setViewMode("list")}
+                  title="List View"
+                >
+                  <List className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant={viewMode === "calendar" ? "secondary" : "ghost"}
+                  size="icon-sm"
+                  onClick={() => setViewMode("calendar")}
+                  title="Calendar View"
+                >
+                  <CalendarDays className="h-4 w-4" />
+                </Button>
+                <Dialog open={showSettings} onOpenChange={setShowSettings}>
+                  <DialogTrigger asChild>
+                    <Button variant="ghost" size="icon-sm" title="Draft Settings">
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                      <DialogTitle>Draft Generation Settings</DialogTitle>
+                      <DialogDescription>
+                        Configure automatic draft flight generation from your schedule
+                      </DialogDescription>
+                    </DialogHeader>
+                    <DraftSettings onSave={() => setShowSettings(false)} />
+                  </DialogContent>
+                </Dialog>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => refreshEntries()}
-                  disabled={entriesLoading}
+                  onClick={handleGenerateDrafts}
+                  disabled={isGeneratingDrafts}
+                  title="Generate Drafts"
                 >
-                  <RefreshCw className={cn("h-4 w-4", entriesLoading && "animate-spin")} />
+                  <FileDown className={cn("h-4 w-4", isGeneratingDrafts && "animate-bounce")} />
                 </Button>
                 <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
                   <Upload className="h-4 w-4 mr-1" />
@@ -188,6 +267,18 @@ export default function RosterPage() {
           onChange={handleFileSelect}
           className="hidden"
         />
+
+        {/* Draft Generation Result */}
+        {draftResult && (
+          <Card className="border-blue-500/50">
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-2 text-sm">
+                <CheckCircle2 className="h-4 w-4 text-blue-500" />
+                <span>{draftResult}</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Import Progress */}
         {isImporting && (
@@ -295,11 +386,50 @@ export default function RosterPage() {
           </Card>
         </div>
 
+        {/* Quick Access Navigation */}
+        {scheduleEntries.length > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            <Link href="/currencies">
+              <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
+                <CardContent className="pt-4 pb-3 px-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <Shield className="h-5 w-5 text-green-500" />
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                  </div>
+                  <div className="text-xs font-medium">Currencies</div>
+                </CardContent>
+              </Card>
+            </Link>
+            <Link href="/discrepancies">
+              <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
+                <CardContent className="pt-4 pb-3 px-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <AlertCircle className="h-5 w-5 text-yellow-500" />
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                  </div>
+                  <div className="text-xs font-medium">Discrepancies</div>
+                </CardContent>
+              </Card>
+            </Link>
+            <Link href="/fdp">
+              <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
+                <CardContent className="pt-4 pb-3 px-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <TrendingUp className="h-5 w-5 text-blue-500" />
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                  </div>
+                  <div className="text-xs font-medium">FDP Dashboard</div>
+                </CardContent>
+              </Card>
+            </Link>
+          </div>
+        )}
+
         {/* Empty State */}
         {scheduleEntries.length === 0 && !entriesLoading && !isImporting && (
           <Card>
             <CardContent className="pt-8 pb-8 text-center">
-              <Calendar className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <CalendarIcon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <CardTitle className="text-lg mb-2">No Schedule Data</CardTitle>
               <CardDescription className="mb-4">
                 Import your crew schedule CSV to view your roster and track duty times.
@@ -312,65 +442,61 @@ export default function RosterPage() {
           </Card>
         )}
 
-        {/* Schedule Entries List */}
-        {sortedDates.length > 0 && (
-          <div className="space-y-3">
-            {sortedDates.slice(0, 30).map((date) => (
-              <Card key={date}>
-                <CardHeader className="pb-2 pt-3 px-3">
-                  <CardTitle className="text-sm font-medium">
-                    {new Date(date + "T00:00:00").toLocaleDateString("en-US", {
-                      weekday: "short",
-                      month: "short",
-                      day: "numeric",
-                    })}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="px-3 pb-3 space-y-2">
-                  {entriesByDate[date].map((entry) => {
-                    const Icon = DUTY_TYPE_ICONS[entry.dutyType] || FileText
-                    const colorClass = DUTY_TYPE_COLORS[entry.dutyType] || DUTY_TYPE_COLORS.other
+        {/* Calendar View */}
+        {viewMode === "calendar" && sortedDates.length > 0 && (
+          <RosterCalendar entries={scheduleEntries} onDateClick={handleDateClick} />
+        )}
 
-                    return (
-                      <div
-                        key={entry.id}
-                        className="flex items-center gap-3 p-2 rounded-lg bg-secondary/30"
-                      >
-                        <div className={cn("p-2 rounded-lg", colorClass)}>
-                          <Icon className="h-4 w-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm truncate">
-                            {entry.dutyCode || entry.dutyType}
-                          </div>
-                          {entry.dutyDescription && (
-                            <div className="text-xs text-muted-foreground truncate">
-                              {entry.dutyDescription}
-                            </div>
-                          )}
-                          {entry.sectors.length > 0 && (
-                            <div className="text-xs text-muted-foreground">
-                              {entry.sectors
-                                .map((s) => `${s.departureIata}-${s.arrivalIata}`)
-                                .join(", ")}
-                            </div>
-                          )}
-                        </div>
-                        {entry.reportTime && (
-                          <span className="text-xs px-2 py-0.5 rounded-full border border-border bg-secondary/50">
-                            {entry.reportTime}
-                          </span>
-                        )}
-                      </div>
-                    )
-                  })}
-                </CardContent>
-              </Card>
-            ))}
-            {sortedDates.length > 30 && (
-              <p className="text-center text-sm text-muted-foreground">
-                Showing 30 most recent days. {sortedDates.length - 30} more days available.
-              </p>
+        {/* List View */}
+        {viewMode === "list" && sortedDates.length > 0 && (
+          <div className="space-y-3">
+            {selectedDate ? (
+              <>
+                {/* Selected Date Details */}
+                <div className="flex items-center gap-2 mb-4">
+                  <Button variant="ghost" size="sm" onClick={handleBackToCalendar}>
+                    ← Back to Calendar
+                  </Button>
+                  <h2 className="text-lg font-semibold">
+                    {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
+                      weekday: "long",
+                      month: "long",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </h2>
+                </div>
+                {selectedEntries.map((entry) => (
+                  <DutyEntryCard key={entry.id} entry={entry} />
+                ))}
+              </>
+            ) : (
+              <>
+                {/* All Dates List */}
+                {sortedDates.slice(0, 30).map((date) => (
+                  <Card key={date}>
+                    <CardHeader className="pb-2 pt-3 px-3">
+                      <CardTitle className="text-sm font-medium">
+                        {new Date(date + "T00:00:00").toLocaleDateString("en-US", {
+                          weekday: "short",
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-3 pb-3 space-y-2">
+                      {entriesByDate[date].map((entry) => (
+                        <DutyEntryCard key={entry.id} entry={entry} compact />
+                      ))}
+                    </CardContent>
+                  </Card>
+                ))}
+                {sortedDates.length > 30 && (
+                  <p className="text-center text-sm text-muted-foreground">
+                    Showing 30 most recent days. {sortedDates.length - 30} more days available.
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}

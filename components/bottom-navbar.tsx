@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Home, Book, Plus, MapPin, Plane, Users } from "lucide-react";
+import { Home, Book, Plus, Calendar, Plane, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -18,8 +18,11 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
       ? "dashboard"
       : pathname === "/logbook"
       ? "logbook"
-      : pathname === "/airports" || pathname?.startsWith("/airports/")
-      ? "airports"
+      : pathname === "/roster" ||
+        pathname === "/currencies" ||
+        pathname === "/discrepancies" ||
+        pathname === "/fdp"
+      ? "roster"
       : pathname === "/aircraft" || pathname?.startsWith("/aircraft/")
       ? "aircraft"
       : pathname === "/crew" || pathname?.startsWith("/crew/")
@@ -67,16 +70,16 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
             </Button>
           </Link>
 
-          <Link href="/airports">
+          <Link href="/roster">
             <Button
               variant="ghost"
               className={cn(
                 "flex flex-col items-center gap-0.5 h-14 px-2",
-                activeTab === "airports" && "text-primary"
+                activeTab === "roster" && "text-primary"
               )}
             >
-              <MapPin className="h-5 w-5" />
-              <span className="text-[9px]">Airports</span>
+              <Calendar className="h-5 w-5" />
+              <span className="text-[9px]">Roster</span>
             </Button>
           </Link>
 

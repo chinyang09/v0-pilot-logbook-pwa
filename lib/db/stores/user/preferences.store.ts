@@ -5,6 +5,8 @@
 import { userDb } from "../../user-db"
 import type { UserPreferences } from "@/types/db/stores.types"
 import { DEFAULT_FIELD_ORDER } from "@/types/db/stores.types"
+import type { DraftGenerationConfig } from "@/types/entities/roster.types"
+import { DEFAULT_DRAFT_CONFIG } from "@/lib/utils/roster/draft-generator"
 
 /**
  * Get user preferences
@@ -83,4 +85,19 @@ export async function addRecentlyUsedAircraft(registration: string): Promise<voi
 export async function getRecentlyUsedAircraft(): Promise<string[]> {
   const prefs = await getUserPreferences()
   return prefs?.recentlyUsedAircraft || []
+}
+
+/**
+ * Get draft generation config
+ */
+export async function getDraftGenerationConfig(): Promise<DraftGenerationConfig> {
+  const prefs = await getUserPreferences()
+  return prefs?.draftGenerationConfig || DEFAULT_DRAFT_CONFIG
+}
+
+/**
+ * Save draft generation config
+ */
+export async function saveDraftGenerationConfig(config: DraftGenerationConfig): Promise<void> {
+  await saveUserPreferences({ draftGenerationConfig: config })
 }
