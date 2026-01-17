@@ -14,13 +14,16 @@ const nextConfig = {
   },
   webpack: (config, { isServer }) => {
     if (isServer) {
-      // Server-side: externalize browser-only OCR packages
+      // Server-side: externalize OCR packages that contain native modules
+      // These packages have native .node binaries that webpack can't bundle
       config.externals = config.externals || [];
       config.externals.push({
         '@gutenye/ocr-browser': 'commonjs @gutenye/ocr-browser',
+        '@gutenye/ocr-node': 'commonjs @gutenye/ocr-node',
         '@techstark/opencv-js': 'commonjs @techstark/opencv-js',
+        'onnxruntime-node': 'commonjs onnxruntime-node',
+        'sharp': 'commonjs sharp',
       });
-      // Note: @gutenye/ocr-node should NOT be externalized - it's used by the server
     } else {
       // Client-side: provide fallbacks for Node.js modules
       config.resolve = config.resolve || {};
@@ -32,7 +35,7 @@ const nextConfig = {
       };
     }
 
-    // Ignore ONNX and large binary files
+    // Ignore ONNX, WASM, and native binary files
     config.module = config.module || {};
     config.module.noParse = config.module.noParse || [];
     if (!Array.isArray(config.module.noParse)) {
@@ -40,6 +43,7 @@ const nextConfig = {
     }
     config.module.noParse.push(/\.onnx$/);
     config.module.noParse.push(/\.wasm$/);
+    config.module.noParse.push(/\.node$/);
 
     return config;
   },
