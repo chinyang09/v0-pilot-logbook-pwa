@@ -10,9 +10,11 @@ const nextConfig = {
   outputFileTracingExcludes: {
     "*": [
       "node_modules/@gutenye/ocr-browser/**/*",
+      "node_modules/@gutenye/ocr-models/**/*",
       "node_modules/sharp/**/*",
       "**/*.onnx",
       "**/*.wasm",
+      "public/models/**/*",
     ],
   },
 };
