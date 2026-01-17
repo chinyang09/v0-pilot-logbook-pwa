@@ -8,15 +8,19 @@ const nextConfig = {
   },
   // Empty turbopack config to allow webpack config for builds
   turbopack: {},
+  // Disable Turbopack for development to support OCR packages
+  experimental: {
+    // Use webpack for dev server (Turbopack has UTF-8 parsing issues with some OCR deps)
+  },
   webpack: (config, { isServer }) => {
-    // Exclude OCR package and its dependencies from server-side bundle
     if (isServer) {
+      // Server-side: externalize browser-only OCR packages
       config.externals = config.externals || [];
       config.externals.push({
         '@gutenye/ocr-browser': 'commonjs @gutenye/ocr-browser',
-        '@gutenye/ocr-common': 'commonjs @gutenye/ocr-common',
         '@techstark/opencv-js': 'commonjs @techstark/opencv-js',
       });
+      // Note: @gutenye/ocr-node should NOT be externalized - it's used by the server
     } else {
       // Client-side: provide fallbacks for Node.js modules
       config.resolve = config.resolve || {};

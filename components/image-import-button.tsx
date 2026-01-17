@@ -4,7 +4,7 @@ import type React from "react";
 import { useRef, useState } from "react";
 import { Camera, Loader2, ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { extractTextFromImage, extractFlightData, type ExtractedFlightData } from "@/lib/ocr";
+import { type ExtractedFlightData } from "@/lib/ocr/oooi-extractor";
 import {
   Dialog,
   DialogContent,
@@ -48,22 +48,35 @@ export function ImageImportButton({
   const processImage = async (file: File) => {
     setLoading(true);
     setShowDialog(true);
-    setProgress({ percent: 0, stage: "Starting", detail: "Reading image..." });
+    setProgress({ percent: 0, stage: "Starting", detail: "Preparing image..." });
 
     try {
-      // Step 1: Initialize OCR (if not already done)
-      setProgress({ percent: 10, stage: "Initializing", detail: "Loading OCR models..." });
+      // Step 1: Prepare form data
+      setProgress({ percent: 10, stage: "Uploading", detail: "Sending image to server..." });
+      const formData = new FormData();
+      formData.append("image", file);
 
-      // Step 2: Extract text from image
+      // Step 2: Send to server-side OCR API
       setProgress({ percent: 30, stage: "Processing", detail: "Extracting text from image..." });
-      const textLines = await extractTextFromImage(file);
+      const response = await fetch("/api/ocr/oooi", {
+        method: "POST",
+        body: formData,
+      });
 
-      // Combine all text
-      const fullText = textLines.map(line => line.text).join('\n');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server error: ${response.status}`);
+      }
 
-      // Step 3: Parse flight data
-      setProgress({ percent: 70, stage: "Analyzing", detail: "Parsing flight data..." });
-      const flightData = extractFlightData(fullText);
+      // Step 3: Parse response
+      setProgress({ percent: 70, stage: "Analyzing", detail: "Processing flight data..." });
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || "Failed to extract text from image");
+      }
+
+      const flightData: ExtractedFlightData = result.data;
 
       // Step 4: Complete
       setProgress({
