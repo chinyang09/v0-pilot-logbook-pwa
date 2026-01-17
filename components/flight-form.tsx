@@ -45,6 +45,8 @@ import {
   isValidHHMM,
 } from "@/lib/utils/time";
 import { usePersonnel } from "@/hooks/data";
+import { ImageImportButton } from "@/components/image-import-button";
+import type { ExtractedFlightData } from "@/lib/ocr";
 
 const FORM_STORAGE_KEY = "flight-form-draft";
 
@@ -793,6 +795,59 @@ export function FlightForm({
     []
   );
 
+  // Handle OCR data extraction and populate form
+  const handleOCRDataExtracted = useCallback((data: ExtractedFlightData) => {
+    // Update form fields with extracted data
+    if (data.date) {
+      updateField("date", data.date);
+    }
+    if (data.flightNumber) {
+      updateField("flightNumber", data.flightNumber);
+    }
+    if (data.aircraftReg) {
+      updateField("aircraftReg", data.aircraftReg);
+    }
+    if (data.aircraftType) {
+      updateField("aircraftType", data.aircraftType);
+    }
+    if (data.departureIcao) {
+      updateField("departureIcao", data.departureIcao);
+    }
+    if (data.departureIata) {
+      updateField("departureIata", data.departureIata);
+    }
+    if (data.arrivalIcao) {
+      updateField("arrivalIcao", data.arrivalIcao);
+    }
+    if (data.arrivalIata) {
+      updateField("arrivalIata", data.arrivalIata);
+    }
+    if (data.scheduledOut) {
+      updateField("scheduledOut", data.scheduledOut);
+    }
+    if (data.scheduledIn) {
+      updateField("scheduledIn", data.scheduledIn);
+    }
+    if (data.outTime) {
+      updateField("outTime", data.outTime);
+    }
+    if (data.offTime) {
+      updateField("offTime", data.offTime);
+    }
+    if (data.onTime) {
+      updateField("onTime", data.onTime);
+    }
+    if (data.inTime) {
+      updateField("inTime", data.inTime);
+    }
+    if (data.blockTime) {
+      updateField("blockTime", data.blockTime);
+    }
+    if (data.flightTime) {
+      updateField("flightTime", data.flightTime);
+    }
+  }, [updateField]);
+
   // Mark manual override
   const markManualOverride = useCallback(
     (field: keyof FlightLog["manualOverrides"], value: boolean) => {
@@ -1030,9 +1085,16 @@ export function FlightForm({
       {/* Fixed Header */}
       <div className="sticky top-0 z-50 bg-card border-b border-border px-4 py-3">
         <div className="flex items-center justify-between">
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <ChevronLeft className="h-5 w-5" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" onClick={onClose}>
+              <ChevronLeft className="h-5 w-5" />
+            </Button>
+            <ImageImportButton
+              onDataExtracted={handleOCRDataExtracted}
+              variant="ghost"
+              size="icon"
+            />
+          </div>
           <h1 className="text-lg font-semibold">
             {editingFlight && !formData.isDraft ? "Edit Flight" : "New Flight"}
           </h1>
