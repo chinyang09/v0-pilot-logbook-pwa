@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { PageContainer } from "@/components/page-container"
 import { SyncStatus } from "@/components/sync-status"
 import { StatsDashboard } from "@/components/stats-dashboard"
@@ -12,7 +12,10 @@ import { useAuth } from "@/components/providers/auth-provider"
 import { UserMenu } from "@/components/user-menu"
 import { useFlights, useFlightStats, refreshAllData, useDBReady, useExpiringCurrencies } from "@/hooks/data"
 import { useUnresolvedDiscrepancies } from "@/hooks/data/use-discrepancies"
+import { useScheduleEntries } from "@/hooks/data/use-schedule"
 import { RefreshCw, AlertCircle, Plane, Calendar, TrendingUp, Loader2, ShieldAlert } from "lucide-react"
+import { getDutyPeriodsFromSchedule, calculateCumulativeLimits, getComplianceStatus } from "@/lib/utils/roster/fdp-calculator"
+import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
@@ -24,6 +27,35 @@ export default function Dashboard() {
   const { stats, isLoading: statsLoading, refresh: refreshStats } = useFlightStats()
   const { expiringCurrencies, isLoading: currenciesLoading } = useExpiringCurrencies()
   const { unresolvedDiscrepancies, isLoading: discrepanciesLoading } = useUnresolvedDiscrepancies()
+  const { scheduleEntries, isLoading: scheduleLoading } = useScheduleEntries()
+
+  // Calculate FDP compliance
+  const fdpCompliance = useMemo(() => {
+    const dutyPeriods = getDutyPeriodsFromSchedule(scheduleEntries)
+    if (dutyPeriods.length === 0) return null
+
+    const limits = calculateCumulativeLimits(dutyPeriods, new Date(), DEFAULT_FTL_LIMITS)
+    const compliance7Days = getComplianceStatus(limits.last7Days.utilizationPercent)
+    const compliance14Days = getComplianceStatus(limits.last14Days.utilizationPercent)
+    const compliance28Days = getComplianceStatus(limits.last28Days.utilizationPercent)
+
+    // Find the worst compliance status
+    const allCompliance = [compliance7Days, compliance14Days, compliance28Days]
+    const statusOrder = ["ok", "warning", "critical", "exceeded"]
+    const worstCompliance = allCompliance.reduce((worst, current) => {
+      const worstIndex = statusOrder.indexOf(worst.status)
+      const currentIndex = statusOrder.indexOf(current.status)
+      return currentIndex > worstIndex ? current : worst
+    })
+
+    return {
+      limits,
+      worstCompliance,
+      compliance7Days,
+      compliance14Days,
+      compliance28Days,
+    }
+  }, [scheduleEntries])
 
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -323,6 +355,65 @@ export default function Dashboard() {
                     +{unresolvedDiscrepancies.length - 3} more to resolve
                   </p>
                 )}
+              </div>
+            </section>
+          )}
+
+          {/* FDP Compliance Warnings */}
+          {fdpCompliance && fdpCompliance.worstCompliance.status !== "ok" && (
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-foreground">FDP Compliance</h2>
+                <Link href="/fdp">
+                  <Button variant="ghost" size="sm" className="gap-2">
+                    <TrendingUp className="h-4 w-4" />
+                    View Dashboard
+                  </Button>
+                </Link>
+              </div>
+              <div className="space-y-2">
+                {[
+                  { period: "7 Days", compliance: fdpCompliance.compliance7Days, stats: fdpCompliance.limits.last7Days },
+                  { period: "14 Days", compliance: fdpCompliance.compliance14Days, stats: fdpCompliance.limits.last14Days },
+                  { period: "28 Days", compliance: fdpCompliance.compliance28Days, stats: fdpCompliance.limits.last28Days },
+                ]
+                  .filter((item) => item.compliance.status !== "ok")
+                  .slice(0, 3)
+                  .map((item, idx) => {
+                    const colors = {
+                      exceeded: { bg: "bg-red-500/10 border-red-500/20", text: "text-red-500" },
+                      critical: { bg: "bg-orange-500/10 border-orange-500/20", text: "text-orange-500" },
+                      warning: { bg: "bg-yellow-500/10 border-yellow-500/20", text: "text-yellow-500" },
+                      ok: { bg: "bg-green-500/10 border-green-500/20", text: "text-green-500" },
+                    }
+                    const color = colors[item.compliance.status]
+
+                    return (
+                      <Card key={idx} className={cn("border", color.bg)}>
+                        <CardContent className="p-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <TrendingUp className={cn("h-4 w-4 flex-shrink-0", color.text)} />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-foreground truncate">
+                                  Last {item.period}
+                                </p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {item.stats.dutyHours?.toFixed(1)}h duty · {item.stats.flightHours.toFixed(1)}h flight
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <p className={cn("text-xs font-medium", color.text)}>
+                                {item.stats.utilizationPercent.toFixed(0)}%
+                              </p>
+                              <p className="text-xs text-muted-foreground">{item.compliance.label}</p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
               </div>
             </section>
           )}
