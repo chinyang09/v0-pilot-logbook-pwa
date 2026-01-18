@@ -67,21 +67,34 @@ export function extractFlightData(text: string): ExtractedFlightData {
     result.arrivalIata = airports.arrival.iata
   }
 
-  // Extract OOOI times
+  // Extract OOOI times (including AOC VOYAGE RPT format)
   const oooi = extractOOOITimes(normalizedText)
   result.outTime = oooi.out
   result.offTime = oooi.off
   result.onTime = oooi.on
   result.inTime = oooi.in
 
+  // Also try to get block/flight times from AOC format
+  const aocTimes = extractAOCVoyageReportTimes(text)
+
   // Extract scheduled times
   const scheduled = extractScheduledTimes(normalizedText)
   result.scheduledOut = scheduled.out
   result.scheduledIn = scheduled.in
 
-  // Extract block and flight times
-  result.blockTime = extractBlockTime(normalizedText)
-  result.flightTime = extractFlightTime(normalizedText)
+  // Extract block and flight times - prefer AOC format if available
+  result.blockTime = aocTimes.blockTime || extractBlockTime(normalizedText)
+  result.flightTime = aocTimes.flightTime || extractFlightTime(normalizedText)
+
+  // Debug: log extracted OOOI times
+  console.log('OOOI extraction result:', {
+    out: result.outTime,
+    off: result.offTime,
+    on: result.onTime,
+    in: result.inTime,
+    blockTime: result.blockTime,
+    flightTime: result.flightTime
+  })
 
   // Calculate confidence score based on how many fields were extracted
   result.confidence = calculateConfidence(result)
@@ -207,6 +220,101 @@ function extractAirports(text: string): {
 }
 
 /**
+ * Parse a 4-digit time string (HHMM) to HH:MM format
+ */
+function parseTimeHHMM(timeStr: string): string | undefined {
+  // Handle HHMM format (e.g., "0340")
+  if (/^\d{4}$/.test(timeStr)) {
+    const hours = timeStr.slice(0, 2)
+    const minutes = timeStr.slice(2, 4)
+    if (parseInt(hours) < 24 && parseInt(minutes) < 60) {
+      return `${hours}:${minutes}`
+    }
+  }
+  // Handle HH:MM format
+  if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
+    const [hours, minutes] = timeStr.split(':')
+    return `${hours.padStart(2, '0')}:${minutes}`
+  }
+  return undefined
+}
+
+/**
+ * Extract OOOI times from AOC VOYAGE RPT format
+ *
+ * This format has labels on one line and times on the next:
+ * - "DOOR CLS OUT" → "0336 0340" (Door Close time, OUT time)
+ * - "IN TAXI" → "0630 0345" (IN time, TAXI time)
+ * - "ON OFF" → "0626 0354" (ON time, OFF time)
+ * - "BLOCK FLIGHT" → "0250 0232" (Block time, Flight time)
+ */
+function extractAOCVoyageReportTimes(text: string): {
+  out?: string
+  off?: string
+  on?: string
+  in?: string
+  blockTime?: string
+  flightTime?: string
+} {
+  const result: {
+    out?: string
+    off?: string
+    on?: string
+    in?: string
+    blockTime?: string
+    flightTime?: string
+  } = {}
+
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+
+  // Look for AOC VOYAGE RPT header to confirm format
+  const isAOCFormat = lines.some(l => l.includes('AOC') && l.includes('VOYAGE'))
+
+  for (let i = 0; i < lines.length - 1; i++) {
+    const labelLine = lines[i].toUpperCase()
+    const nextLine = lines[i + 1]
+
+    // Extract times from next line (format: "HHMM HHMM" or single "HHMM")
+    const timeMatches = nextLine.match(/\b(\d{4})\b/g)
+    if (!timeMatches || timeMatches.length === 0) continue
+
+    // "DOOR CLS OUT" pattern - OUT is the second time
+    if (labelLine.includes('DOOR') && labelLine.includes('OUT')) {
+      if (timeMatches.length >= 2) {
+        result.out = parseTimeHHMM(timeMatches[1]) // OUT is the second value
+      } else if (timeMatches.length === 1) {
+        result.out = parseTimeHHMM(timeMatches[0])
+      }
+    }
+
+    // "ON OFF" pattern - ON is first, OFF is second
+    if (labelLine.includes('ON') && labelLine.includes('OFF') && !labelLine.includes('TAKEOFF')) {
+      if (timeMatches.length >= 2) {
+        result.on = parseTimeHHMM(timeMatches[0])  // ON is the first value
+        result.off = parseTimeHHMM(timeMatches[1]) // OFF is the second value
+      }
+    }
+
+    // "IN TAXI" pattern - IN is first
+    if (labelLine.includes('IN') && labelLine.includes('TAXI')) {
+      if (timeMatches.length >= 1) {
+        result.in = parseTimeHHMM(timeMatches[0]) // IN is the first value
+      }
+    }
+
+    // "BLOCK FLIGHT" pattern - computed times (for reference)
+    if (labelLine.includes('BLOCK') && labelLine.includes('FLIGHT')) {
+      if (timeMatches.length >= 2) {
+        result.blockTime = parseTimeHHMM(timeMatches[0])
+        result.flightTime = parseTimeHHMM(timeMatches[1])
+      }
+    }
+  }
+
+  return result
+}
+
+/**
  * Extract OOOI times (HH:MM format)
  */
 function extractOOOITimes(text: string): {
@@ -222,7 +330,18 @@ function extractOOOITimes(text: string): {
     in?: string
   } = {}
 
-  // Look for labeled times
+  // First, try to extract from AOC VOYAGE RPT format
+  const aocTimes = extractAOCVoyageReportTimes(text)
+  if (aocTimes.out || aocTimes.off || aocTimes.on || aocTimes.in) {
+    return {
+      out: aocTimes.out,
+      off: aocTimes.off,
+      on: aocTimes.on,
+      in: aocTimes.in
+    }
+  }
+
+  // Fallback: Look for explicitly labeled times
   const outMatch = text.match(/(?:OUT|PUSH)[:\s]*(\d{1,2})[:\s]*(\d{2})/)
   if (outMatch) {
     result.out = `${outMatch[1].padStart(2, '0')}:${outMatch[2]}`

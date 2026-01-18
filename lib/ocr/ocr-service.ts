@@ -6,22 +6,12 @@
  */
 
 // Type definitions for the OCR library result format
-// See: https://github.com/gutenye/ocr
-interface OcrTextLine {
+// The @gutenye/ocr-browser library returns an array of detection results directly
+// Each result has: text, mean (confidence), and box (bounding polygon)
+interface OcrRawResult {
   text: string
-  score: number // Confidence score from OCR (0-1)
-  frame: {
-    top: number
-    left: number
-    width: number
-    height: number
-  }
-}
-
-interface OcrDetectResult {
-  texts: OcrTextLine[]
-  resizedImageWidth: number
-  resizedImageHeight: number
+  mean: number // Confidence score from OCR (0-1)
+  box: number[][] // Bounding box as [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
 }
 
 // Normalized result format for internal use
@@ -32,7 +22,7 @@ interface OcrResult {
 }
 
 interface OcrInstance {
-  detect: (imagePath: string | ImageData | HTMLImageElement) => Promise<OcrDetectResult>
+  detect: (imagePath: string | ImageData | HTMLImageElement) => Promise<OcrRawResult[]>
 }
 
 interface OcrConfig {
@@ -109,27 +99,23 @@ export async function extractTextFromImage(file: File): Promise<OcrResult[]> {
     // Debug: log raw OCR result
     console.log('OCR raw result:', JSON.stringify(result, null, 2))
 
-    // The library returns { texts: TextLine[], resizedImageWidth, resizedImageHeight }
-    // where each TextLine has { text, score, frame: { top, left, width, height } }
-    const texts = result.texts || []
+    // The @gutenye/ocr-browser library returns an array directly
+    // Each item has: { text, mean (confidence), box (polygon) }
+    const rawResults: OcrRawResult[] = Array.isArray(result) ? result : []
 
-    // Map to our normalized format
-    const normalizedResults: OcrResult[] = texts.map((line: OcrTextLine) => {
-      // Convert frame { top, left, width, height } to box [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-      const { top, left, width, height } = line.frame || { top: 0, left: 0, width: 0, height: 0 }
-      const box = [
-        [left, top],
-        [left + width, top],
-        [left + width, top + height],
-        [left, top + height]
-      ]
-
-      return {
-        text: line.text,
-        confidence: line.score, // Map 'score' to 'confidence'
-        box
-      }
-    })
+    // Map to our normalized format, sorted by vertical position (top to bottom)
+    const normalizedResults: OcrResult[] = rawResults
+      .map((item: OcrRawResult) => ({
+        text: item.text,
+        confidence: item.mean, // Map 'mean' to 'confidence'
+        box: item.box // Already in [[x,y], ...] format
+      }))
+      .sort((a, b) => {
+        // Sort by Y coordinate (top of bounding box) to maintain reading order
+        const aTop = Math.min(...a.box.map(p => p[1]))
+        const bTop = Math.min(...b.box.map(p => p[1]))
+        return aTop - bTop
+      })
 
     // Debug: log normalized results
     console.log('OCR normalized results:', normalizedResults.map(r => `${r.confidence.toFixed(2)} ${r.text}`).join('\n'))
