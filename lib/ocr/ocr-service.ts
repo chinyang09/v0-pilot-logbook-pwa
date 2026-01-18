@@ -85,11 +85,11 @@ export async function extractTextFromImage(file: File): Promise<OcrResult[]> {
     // Initialize OCR if needed
     const ocr = await initializeOCR()
 
-    // Convert file to image data
-    const imageData = await fileToImageData(file)
+    // Convert file to data URL - the OCR library expects a URL string, not ImageData
+    const dataUrl = await fileToDataUrl(file)
 
     // Perform OCR
-    const result = await ocr.detect(imageData)
+    const result = await ocr.detect(dataUrl)
 
     // Return the detected text lines
     return result.lines || []
@@ -108,37 +108,22 @@ export async function extractTextAsString(file: File): Promise<string> {
 }
 
 /**
- * Convert a File to ImageData for OCR processing
+ * Convert a File to a data URL string for OCR processing
+ * The @gutenye/ocr-browser library expects a URL string (file path or data URL),
+ * not an ImageData object. Passing ImageData directly causes load errors because
+ * the library tries to use it as a URL in image.src = url.
  */
-async function fileToImageData(file: File): Promise<ImageData> {
+async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
 
     reader.onload = (e) => {
-      const img = new Image()
-
-      img.onload = () => {
-        // Create a canvas to get ImageData
-        const canvas = document.createElement('canvas')
-        canvas.width = img.width
-        canvas.height = img.height
-
-        const ctx = canvas.getContext('2d')
-        if (!ctx) {
-          reject(new Error('Failed to get canvas context'))
-          return
-        }
-
-        ctx.drawImage(img, 0, 0)
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        resolve(imageData)
+      const dataUrl = e.target?.result as string
+      if (!dataUrl) {
+        reject(new Error('Failed to read file as data URL'))
+        return
       }
-
-      img.onerror = () => {
-        reject(new Error('Failed to load image'))
-      }
-
-      img.src = e.target?.result as string
+      resolve(dataUrl)
     }
 
     reader.onerror = () => {
