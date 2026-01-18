@@ -1,123 +1,104 @@
-"use client";
+"use client"
 
-import type React from "react";
-import { useRef, useState } from "react";
-import { Camera, Loader2, ImageIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { extractTextFromImage, extractFlightData, type ExtractedFlightData } from "@/lib/ocr";
+import { useRef, useState } from "react"
+import { Camera, Loader2, ImageIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import {
+  extractTextFromImage,
+  extractFlightData,
+  validateExtractedData,
+  type ExtractedFlightData,
+} from "@/lib/ocr"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Progress } from "@/components/ui/progress";
+} from "@/components/ui/dialog"
+import { Progress } from "@/components/ui/progress"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-
-interface ImportProgress {
-  percent: number;
-  stage: string;
-  detail?: string;
-}
+} from "@/components/ui/dropdown-menu"
 
 interface ImageImportButtonProps {
-  onDataExtracted: (data: ExtractedFlightData) => void;
-  variant?: "ghost" | "default" | "outline";
-  size?: "sm" | "default" | "lg" | "icon";
-  className?: string;
+  onDataExtracted: (data: ExtractedFlightData) => void
+  variant?: "ghost" | "default" | "outline"
+  size?: "sm" | "default" | "lg" | "icon"
+  className?: string
 }
 
 export function ImageImportButton({
   onDataExtracted,
   variant = "ghost",
   size = "icon",
-  className = ""
+  className = "",
 }: ImageImportButtonProps) {
-  const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState<ImportProgress | null>(null);
-  const [showDialog, setShowDialog] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState<{ percent: number; stage: string; detail?: string } | null>(null)
+  const [showDialog, setShowDialog] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
 
   const processImage = async (file: File) => {
-    setLoading(true);
-    setShowDialog(true);
-    setProgress({ percent: 0, stage: "Starting", detail: "Reading image..." });
+    setLoading(true)
+    setShowDialog(true)
+    setProgress({ percent: 10, stage: "Initializing", detail: "Loading OCR..." })
 
     try {
-      // Step 1: Initialize OCR (if not already done)
-      setProgress({ percent: 10, stage: "Initializing", detail: "Loading OCR models..." });
+      // Extract with geometry
+      setProgress({ percent: 40, stage: "Processing", detail: "Reading image..." })
+      const ocrResults = await extractTextFromImage(file)
 
-      // Step 2: Extract text from image
-      setProgress({ percent: 30, stage: "Processing", detail: "Extracting text from image..." });
-      const textLines = await extractTextFromImage(file);
+      // Parse layout
+      setProgress({ percent: 70, stage: "Analyzing", detail: "Extracting times..." })
+      const flightData = extractFlightData(ocrResults)
 
-      // Combine all text
-      const fullText = textLines.map(line => line.text).join('\n');
+      // Validate
+      const validation = validateExtractedData(flightData)
+      const pct = Math.round(flightData.confidence * 100)
 
-      // Step 3: Parse flight data
-      setProgress({ percent: 70, stage: "Analyzing", detail: "Parsing flight data..." });
-      const flightData = extractFlightData(fullText);
-
-      // Step 4: Complete
       setProgress({
         percent: 100,
         stage: "Complete!",
-        detail: `Confidence: ${Math.round(flightData.confidence * 100)}%`,
-      });
+        detail: `Confidence: ${pct}%${validation.issues.length ? ` (${validation.issues.length} warnings)` : ""}`,
+      })
 
-      // Wait a moment to show success message
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      if (validation.issues.length) {
+        console.log("[OCR] Warnings:", validation.issues)
+      }
 
-      // Pass extracted data to parent
-      onDataExtracted(flightData);
-
+      await new Promise((r) => setTimeout(r, 600))
+      onDataExtracted(flightData)
     } catch (error) {
-      console.error("OCR processing failed", error);
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to process image";
-
+      console.error("OCR failed:", error)
       setProgress({
         percent: 0,
         stage: "Error",
-        detail: errorMessage,
-      });
-
-      // Keep error visible longer
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+        detail: error instanceof Error ? error.message : "Processing failed",
+      })
+      await new Promise((r) => setTimeout(r, 2000))
     } finally {
-      setLoading(false);
-      setShowDialog(false);
-      setProgress(null);
-
-      // Reset file inputs
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      if (cameraInputRef.current) cameraInputRef.current.value = "";
+      setLoading(false)
+      setShowDialog(false)
+      setProgress(null)
+      if (fileInputRef.current) fileInputRef.current.value = ""
+      if (cameraInputRef.current) cameraInputRef.current.value = ""
     }
-  };
+  }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      alert('Please select a valid image file');
-      return;
+    const file = e.target.files?.[0]
+    if (file?.type.startsWith("image/")) {
+      await processImage(file)
     }
-
-    await processImage(file);
-  };
+  }
 
   return (
     <>
-      {/* Hidden file inputs */}
       <input
         type="file"
         ref={fileInputRef}
@@ -125,7 +106,6 @@ export function ImageImportButton({
         accept="image/*"
         onChange={handleFileChange}
       />
-
       <input
         type="file"
         ref={cameraInputRef}
@@ -135,7 +115,6 @@ export function ImageImportButton({
         onChange={handleFileChange}
       />
 
-      {/* Button with dropdown for camera/gallery options */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -144,11 +123,7 @@ export function ImageImportButton({
             className={size === "icon" ? "h-9 w-9" : className}
             disabled={loading}
           >
-            {loading ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <Camera className="h-5 w-5" />
-            )}
+            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -163,19 +138,14 @@ export function ImageImportButton({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Progress Dialog */}
       <Dialog open={showDialog} onOpenChange={() => {}}>
-        <DialogContent className="sm:max-w-md" hideCloseButton>
+        <DialogContent className="sm:max-w-md" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>Processing Image</DialogTitle>
-            <DialogDescription>
-              {progress?.stage || "Extracting flight data..."}
-            </DialogDescription>
+            <DialogDescription>{progress?.stage || "Extracting..."}</DialogDescription>
           </DialogHeader>
-
           <div className="space-y-4 py-4">
             <Progress value={progress?.percent || 0} className="h-2" />
-
             <div className="flex justify-between text-sm text-muted-foreground">
               <span>{progress?.detail || ""}</span>
               <span>{progress?.percent || 0}%</span>
@@ -184,5 +154,5 @@ export function ImageImportButton({
         </DialogContent>
       </Dialog>
     </>
-  );
+  )
 }

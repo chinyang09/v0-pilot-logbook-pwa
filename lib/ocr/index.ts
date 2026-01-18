@@ -1,5 +1,5 @@
 /**
- * OCR Module - Export all OCR-related functionality
+ * OCR Module
  */
 
 export {
@@ -9,10 +9,11 @@ export {
   preloadOCR,
   isOCRReady,
   resetOCR,
-} from './ocr-service'
+} from "./ocr-service"
 
 export {
   extractFlightData,
-  extractMultipleFlights,
+  validateExtractedData,
+  type OcrResult,
   type ExtractedFlightData,
-} from './oooi-extractor'
+} from "./oooi-extractor"
