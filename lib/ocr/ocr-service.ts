@@ -1,192 +1,95 @@
 /**
- * OCR Service - Handles text extraction from images using gutenye OCR
- *
- * This service provides OCR capabilities for extracting text from flight documents,
- * pilot logs, and other aviation-related images containing OOOI times and flight data.
+ * OCR Service - Browser-based text extraction using gutenye OCR
  */
 
-// Type definitions for the OCR library result format
-// The @gutenye/ocr-browser library returns an array of detection results directly
-// Each result has: text, mean (confidence), and box (bounding polygon)
+// Re-export type from extractor (single source of truth)
+export type { OcrResult } from "./oooi-extractor"
+
 interface OcrRawResult {
   text: string
-  mean: number // Confidence score from OCR (0-1)
-  box: number[][] // Bounding box as [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-}
-
-// Normalized result format for internal use
-interface OcrResult {
-  text: string
-  confidence: number
-  box: number[][] // Bounding box coordinates [[x1,y1], [x2,y2], ...]
+  mean: number
+  box: number[][]
 }
 
 interface OcrInstance {
-  detect: (imagePath: string | ImageData | HTMLImageElement) => Promise<OcrRawResult[]>
+  detect: (input: string) => Promise<OcrRawResult[]>
 }
 
-interface OcrConfig {
-  models: {
-    detectionPath: string
-    recognitionPath: string
-    dictionaryPath: string
-  }
-}
-
-// Singleton instance
 let ocrInstance: OcrInstance | null = null
-let isInitializing = false
-let initializationPromise: Promise<OcrInstance> | null = null
+let initPromise: Promise<OcrInstance> | null = null
 
-/**
- * Initialize the OCR engine
- * This is an expensive operation, so we use a singleton pattern
- */
 export async function initializeOCR(): Promise<OcrInstance> {
-  // Return existing instance if available
-  if (ocrInstance) {
-    return ocrInstance
-  }
+  if (ocrInstance) return ocrInstance
+  if (initPromise) return initPromise
 
-  // If already initializing, wait for that promise
-  if (isInitializing && initializationPromise) {
-    return initializationPromise
-  }
+  initPromise = (async () => {
+    const { default: Ocr } = await import("@gutenye/ocr-browser")
 
-  isInitializing = true
+    const instance = await Ocr.create({
+      models: {
+        detectionPath: "/models/ch_PP-OCRv4_det_infer.onnx",
+        recognitionPath: "/models/ch_PP-OCRv4_rec_infer.onnx",
+        dictionaryPath: "/models/ppocr_keys_v1.txt",
+      },
+    }) as unknown as OcrInstance
 
-  initializationPromise = (async () => {
-    try {
-      // Dynamically import the OCR library (client-side only)
-      const { default: Ocr } = await import('@gutenye/ocr-browser')
-
-      const config: OcrConfig = {
-        models: {
-          detectionPath: '/models/ch_PP-OCRv4_det_infer.onnx',
-          recognitionPath: '/models/ch_PP-OCRv4_rec_infer.onnx',
-          dictionaryPath: '/models/ppocr_keys_v1.txt',
-        },
-      }
-
-      const instance = await Ocr.create(config)
-      ocrInstance = instance
-      isInitializing = false
-      return instance
-    } catch (error) {
-      isInitializing = false
-      initializationPromise = null
-      throw new Error(`Failed to initialize OCR: ${error instanceof Error ? error.message : String(error)}`)
-    }
+    ocrInstance = instance
+    return instance
   })()
 
-  return initializationPromise
+  return initPromise!
 }
 
-/**
- * Extract text from an image file
- */
-export async function extractTextFromImage(file: File): Promise<OcrResult[]> {
-  try {
-    // Initialize OCR if needed
-    const ocr = await initializeOCR()
+export async function extractTextFromImage(
+  file: File
+): Promise<import("./oooi-extractor").OcrResult[]> {
+  const ocr = await initializeOCR()
+  const dataUrl = await fileToDataUrl(file)
+  const rawResults = await ocr.detect(dataUrl)
 
-    // Convert file to data URL - the OCR library expects a URL string, not ImageData
-    const dataUrl = await fileToDataUrl(file)
-
-    // Perform OCR
-    const result = await ocr.detect(dataUrl)
-
-    // Debug: log raw OCR result
-    console.log('OCR raw result:', JSON.stringify(result, null, 2))
-
-    // The @gutenye/ocr-browser library returns an array directly
-    // Each item has: { text, mean (confidence), box (polygon) }
-    const rawResults: OcrRawResult[] = Array.isArray(result) ? result : []
-
-    // Map to our normalized format, sorted by vertical position (top to bottom)
-    const normalizedResults: OcrResult[] = rawResults
-      .map((item: OcrRawResult) => ({
-        text: item.text,
-        confidence: item.mean, // Map 'mean' to 'confidence'
-        box: item.box // Already in [[x,y], ...] format
-      }))
-      .sort((a, b) => {
-        // Sort by Y coordinate (top of bounding box) to maintain reading order
-        const aTop = Math.min(...a.box.map(p => p[1]))
-        const bTop = Math.min(...b.box.map(p => p[1]))
-        return aTop - bTop
-      })
-
-    // Debug: log normalized results
-    console.log('OCR normalized results:', normalizedResults.map(r => `${r.confidence.toFixed(2)} ${r.text}`).join('\n'))
-
-    return normalizedResults
-  } catch (error) {
-    console.error('Error extracting text from image:', error)
-    throw error
-  }
+  return rawResults
+    .map((item) => ({
+      text: item.text.trim(),
+      confidence: item.mean,
+      box: item.box,
+    }))
+    .filter((item) => item.text.length > 0)
+    .sort((a, b) => {
+      // Sort by Y then X
+      const ay = (a.box[0][1] + a.box[2][1]) / 2
+      const by = (b.box[0][1] + b.box[2][1]) / 2
+      if (Math.abs(ay - by) > 10) return ay - by
+      return a.box[0][0] - b.box[0][0]
+    })
 }
 
-/**
- * Extract all text as a single string (concatenated)
- */
 export async function extractTextAsString(file: File): Promise<string> {
-  const lines = await extractTextFromImage(file)
-  return lines.map(line => line.text).join('\n')
+  const results = await extractTextFromImage(file)
+  return results.map((r) => r.text).join("\n")
 }
 
-/**
- * Convert a File to a data URL string for OCR processing
- * The @gutenye/ocr-browser library expects a URL string (file path or data URL),
- * not an ImageData object. Passing ImageData directly causes load errors because
- * the library tries to use it as a URL in image.src = url.
- */
 async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
-
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string
-      if (!dataUrl) {
-        reject(new Error('Failed to read file as data URL'))
-        return
-      }
-      resolve(dataUrl)
-    }
-
-    reader.onerror = () => {
-      reject(new Error('Failed to read file'))
-    }
-
+    reader.onload = (e) => resolve(e.target?.result as string)
+    reader.onerror = () => reject(new Error("Failed to read file"))
     reader.readAsDataURL(file)
   })
 }
 
-/**
- * Preload OCR models (optional, for better UX)
- * Call this early in the app lifecycle to avoid delays later
- */
 export async function preloadOCR(): Promise<void> {
   try {
     await initializeOCR()
-    console.log('OCR models preloaded successfully')
-  } catch (error) {
-    console.warn('Failed to preload OCR models:', error)
+  } catch (e) {
+    console.warn("OCR preload failed:", e)
   }
 }
 
-/**
- * Check if OCR is ready (models loaded)
- */
 export function isOCRReady(): boolean {
   return ocrInstance !== null
 }
 
-/**
- * Reset OCR instance (useful for testing or troubleshooting)
- */
 export function resetOCR(): void {
   ocrInstance = null
-  isInitializing = false
-  initializationPromise = null
+  initPromise = null
 }

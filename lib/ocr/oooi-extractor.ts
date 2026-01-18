@@ -1,474 +1,416 @@
 /**
- * OOOI Data Extractor
+ * OOOI Data Extractor - Layout-Aware Implementation
  *
- * Extracts flight data (OOOI times, flight numbers, aircraft, airports, etc.)
- * from OCR-extracted text. Uses pattern matching and heuristics to identify
- * relevant information from pilot logbooks and flight documents.
+ * Optimized for Airbus MCDU AOC VOYAGE RPT displays.
+ * Uses bounding box geometry for reliable extraction.
+ *
+ * Target layout:
+ *   DOOR CLS    OUT       (label row)
+ *   0336        0340      (value row - OUT is right column)
+ *   IN          TAXI
+ *   0630        0345      (IN is left column)
+ *   ON          OFF
+ *   0626        0354      (ON left, OFF right)
+ *   BLOCK       FLIGHT
+ *   0250        0232      (BLOCK left, FLIGHT right)
  */
 
+// ============================================
+// Types
+// ============================================
+
+export interface OcrResult {
+  text: string
+  confidence: number
+  box: number[][] // [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+}
+
 export interface ExtractedFlightData {
-  // Core OOOI times (HH:MM format)
   outTime?: string
   offTime?: string
   onTime?: string
   inTime?: string
-
-  // Flight details
-  flightNumber?: string
-  date?: string // YYYY-MM-DD format
-  aircraftReg?: string
-  aircraftType?: string
-
-  // Airports
-  departureIcao?: string
-  departureIata?: string
-  arrivalIcao?: string
-  arrivalIata?: string
-
-  // Additional times
-  scheduledOut?: string
-  scheduledIn?: string
   blockTime?: string
   flightTime?: string
-
-  // Confidence score (0-1)
   confidence: number
-
-  // Raw text for debugging
   rawText?: string
 }
 
-/**
- * Extract flight data from OCR text
- */
-export function extractFlightData(text: string): ExtractedFlightData {
-  const result: ExtractedFlightData = {
-    confidence: 0,
-    rawText: text,
-  }
+interface OcrRow {
+  items: OcrResult[]
+  midY: number
+}
 
-  // Normalize text: convert to uppercase, remove extra whitespace
-  const normalizedText = text.toUpperCase().replace(/\s+/g, ' ').trim()
+// ============================================
+// Geometry Utilities
+// ============================================
 
-  // Extract various fields
-  result.date = extractDate(normalizedText)
-  result.flightNumber = extractFlightNumber(normalizedText)
-  result.aircraftReg = extractAircraftRegistration(normalizedText)
-  result.aircraftType = extractAircraftType(normalizedText)
+function getBoxMidY(box: number[][]): number {
+  return (box[0][1] + box[2][1]) / 2
+}
 
-  // Extract airports
-  const airports = extractAirports(normalizedText)
-  if (airports.departure) {
-    result.departureIcao = airports.departure.icao
-    result.departureIata = airports.departure.iata
-  }
-  if (airports.arrival) {
-    result.arrivalIcao = airports.arrival.icao
-    result.arrivalIata = airports.arrival.iata
-  }
+function getBoxMidX(box: number[][]): number {
+  return (box[0][0] + box[1][0]) / 2
+}
 
-  // Extract OOOI times (including AOC VOYAGE RPT format)
-  const oooi = extractOOOITimes(normalizedText)
-  result.outTime = oooi.out
-  result.offTime = oooi.off
-  result.onTime = oooi.on
-  result.inTime = oooi.in
-
-  // Also try to get block/flight times from AOC format
-  const aocTimes = extractAOCVoyageReportTimes(text)
-
-  // Extract scheduled times
-  const scheduled = extractScheduledTimes(normalizedText)
-  result.scheduledOut = scheduled.out
-  result.scheduledIn = scheduled.in
-
-  // Extract block and flight times - prefer AOC format if available
-  result.blockTime = aocTimes.blockTime || extractBlockTime(normalizedText)
-  result.flightTime = aocTimes.flightTime || extractFlightTime(normalizedText)
-
-  // Debug: log extracted OOOI times
-  console.log('OOOI extraction result:', {
-    out: result.outTime,
-    off: result.offTime,
-    on: result.onTime,
-    in: result.inTime,
-    blockTime: result.blockTime,
-    flightTime: result.flightTime
-  })
-
-  // Calculate confidence score based on how many fields were extracted
-  result.confidence = calculateConfidence(result)
-
-  return result
+function getBoxHeight(box: number[][]): number {
+  return Math.abs(box[2][1] - box[0][1])
 }
 
 /**
- * Extract date in various formats (DD/MM/YYYY, DD-MM-YYYY, DDMMMYY, etc.)
+ * Calculate row tolerance based on median text height
  */
-function extractDate(text: string): string | undefined {
-  // Try ISO format: YYYY-MM-DD
-  const isoMatch = text.match(/\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b/)
-  if (isoMatch) {
-    const [, year, month, day] = isoMatch
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-  }
+function calculateTolerance(results: OcrResult[]): number {
+  if (results.length < 2) return 20
 
-  // Try DD/MM/YYYY or DD-MM-YYYY
-  const dmyMatch = text.match(/\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b/)
-  if (dmyMatch) {
-    const [, day, month, year] = dmyMatch
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-  }
+  const heights = results
+    .map((r) => getBoxHeight(r.box))
+    .filter((h) => h > 5)
+    .sort((a, b) => a - b)
 
-  // Try DD MMM YY (e.g., 15 JAN 24)
-  const dmmyMatch = text.match(/\b(\d{1,2})\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})\b/)
-  if (dmmyMatch) {
-    const [, day, month, year] = dmmyMatch
-    const monthMap: Record<string, string> = {
-      JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
-      JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12',
+  if (heights.length === 0) return 20
+
+  const median = heights[Math.floor(heights.length / 2)]
+  return Math.max(median * 0.6, 15)
+}
+
+// ============================================
+// Row Grouping
+// ============================================
+
+/**
+ * Group OCR results into visual rows by Y-coordinate
+ */
+function groupIntoRows(results: OcrResult[], tolerance: number): OcrRow[] {
+  const rows: OcrRow[] = []
+
+  for (const item of results) {
+    const midY = getBoxMidY(item.box)
+
+    const existingRow = rows.find((r) => Math.abs(r.midY - midY) < tolerance)
+
+    if (existingRow) {
+      existingRow.items.push(item)
+    } else {
+      rows.push({ items: [item], midY })
     }
-    const fullYear = parseInt(year) < 50 ? `20${year}` : `19${year}`
-    return `${fullYear}-${monthMap[month]}-${day.padStart(2, '0')}`
   }
 
-  return undefined
+  // Sort items within rows by X (left to right)
+  for (const row of rows) {
+    row.items.sort((a, b) => getBoxMidX(a.box) - getBoxMidX(b.box))
+  }
+
+  // Sort rows by Y (top to bottom)
+  return rows.sort((a, b) => a.midY - b.midY)
 }
 
 /**
- * Extract flight number (e.g., TR123, SQ456, TR 123, SQ 456)
+ * Get combined text from a row
  */
-function extractFlightNumber(text: string): string | undefined {
-  // Pattern: 2-3 letter airline code + 3-4 digit number
-  const match = text.match(/\b([A-Z]{2,3})\s*(\d{3,4})\b/)
-  if (match) {
-    return `${match[1]}${match[2]}`
-  }
-  return undefined
+function getRowText(row: OcrRow): string {
+  return row.items.map((i) => i.text.trim()).join(" ")
 }
 
 /**
- * Extract aircraft registration (e.g., 9V-ABC, N12345)
+ * Get left/right value from a row (for two-column layout)
  */
-function extractAircraftRegistration(text: string): string | undefined {
-  // Pattern: Country code + hyphen + alphanumeric (e.g., 9V-TRB, N12345)
-  const match = text.match(/\b([A-Z0-9]{1,2})-([A-Z]{3}|[A-Z0-9]{3,5})\b/)
-  if (match) {
-    return match[0]
+function getColumnValue(row: OcrRow, side: "left" | "right"): string | undefined {
+  if (row.items.length >= 2) {
+    return side === "left" ? row.items[0].text.trim() : row.items[row.items.length - 1].text.trim()
   }
-  return undefined
-}
 
-/**
- * Extract aircraft type (e.g., A320, B737, A388)
- */
-function extractAircraftType(text: string): string | undefined {
-  // Common aircraft type patterns
-  const patterns = [
-    /\b(A3[0-9]{2}|A35[0-9]|A38[0-9])\b/, // Airbus
-    /\b(B7[0-9]{2}|B77[0-9]|B78[0-9]|B74[0-9])\b/, // Boeing
-    /\b(E[1-2][0-9]{2})\b/, // Embraer
-    /\b(CRJ[0-9]{3})\b/, // Bombardier
-    /\b(ATR[0-9]{2})\b/, // ATR
-  ]
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern)
-    if (match) {
-      return match[0]
+  // Single item - try splitting by whitespace
+  if (row.items.length === 1) {
+    const parts = row.items[0].text.trim().split(/\s+/)
+    if (parts.length >= 2) {
+      return side === "left" ? parts[0] : parts[parts.length - 1]
     }
   }
 
   return undefined
 }
 
+// ============================================
+// Time Parsing
+// ============================================
+
 /**
- * Extract airports (ICAO and IATA codes)
+ * Format HHMM or HH:MM to HH:MM
  */
-function extractAirports(text: string): {
-  departure?: { icao?: string; iata?: string }
-  arrival?: { icao?: string; iata?: string }
-} {
-  const result: {
-    departure?: { icao?: string; iata?: string }
-    arrival?: { icao?: string; iata?: string }
-  } = {}
+function formatTime(raw: string | undefined): string | undefined {
+  if (!raw) return undefined
 
-  // Look for patterns like "FROM XXX TO YYY" or "XXX - YYY"
-  const routeMatch = text.match(/\b([A-Z]{3,4})\s*[-–—>TO]+\s*([A-Z]{3,4})\b/)
-  if (routeMatch) {
-    const [, from, to] = routeMatch
-    result.departure = from.length === 4 ? { icao: from } : { iata: from }
-    result.arrival = to.length === 4 ? { icao: to } : { iata: to }
-    return result
+  // Remove leading 'A' (actual time prefix) and whitespace
+  const cleaned = raw.replace(/^A/i, "").trim()
+
+  // Match HHMM or HH:MM
+  const match = cleaned.match(/^(\d{2}):?(\d{2})$/)
+  if (!match) return undefined
+
+  const hours = parseInt(match[1], 10)
+  const minutes = parseInt(match[2], 10)
+
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return undefined
   }
 
-  // Look for labeled fields
-  const fromMatch = text.match(/(?:FROM|DEP|DEPARTURE)[:\s]*([A-Z]{3,4})\b/)
-  if (fromMatch) {
-    const code = fromMatch[1]
-    result.departure = code.length === 4 ? { icao: code } : { iata: code }
-  }
-
-  const toMatch = text.match(/(?:TO|ARR|ARRIVAL)[:\s]*([A-Z]{3,4})\b/)
-  if (toMatch) {
-    const code = toMatch[1]
-    result.arrival = code.length === 4 ? { icao: code } : { iata: code }
-  }
-
-  return result
+  return `${match[1]}:${match[2]}`
 }
 
 /**
- * Parse a 4-digit time string (HHMM) to HH:MM format
+ * Check if string is valid HH:MM time
  */
-function parseTimeHHMM(timeStr: string): string | undefined {
-  // Handle HHMM format (e.g., "0340")
-  if (/^\d{4}$/.test(timeStr)) {
-    const hours = timeStr.slice(0, 2)
-    const minutes = timeStr.slice(2, 4)
-    if (parseInt(hours) < 24 && parseInt(minutes) < 60) {
-      return `${hours}:${minutes}`
+function isValidTime(time: string | undefined): time is string {
+  if (!time) return false
+  return /^\d{2}:\d{2}$/.test(time)
+}
+
+/**
+ * Convert HH:MM to minutes
+ */
+function toMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number)
+  return h * 60 + m
+}
+
+/**
+ * Calculate duration handling day rollover
+ */
+function getDuration(start: string, end: string): number {
+  let startMins = toMinutes(start)
+  let endMins = toMinutes(end)
+  if (endMins < startMins) endMins += 1440
+  return endMins - startMins
+}
+
+// ============================================
+// Time Validation
+// ============================================
+
+/**
+ * Validate OOOI times using physics-based logic
+ */
+function validateTimes(data: ExtractedFlightData): number {
+  const { outTime, offTime, onTime, inTime, blockTime, flightTime } = data
+  let score = 0
+
+  // 1. Sequence check: OUT < OFF < ON < IN
+  const times = [
+    { name: "OUT", val: outTime },
+    { name: "OFF", val: offTime },
+    { name: "ON", val: onTime },
+    { name: "IN", val: inTime },
+  ].filter((t) => isValidTime(t.val))
+
+  if (times.length >= 2) {
+    let sequential = true
+    for (let i = 1; i < times.length; i++) {
+      const prev = toMinutes(times[i - 1].val!)
+      let curr = toMinutes(times[i].val!)
+      if (curr < prev) curr += 1440 // day rollover
+      if (curr <= prev) sequential = false
+    }
+    if (sequential) score += 0.4
+  }
+
+  // 2. Block time check (OUT to IN)
+  if (isValidTime(outTime) && isValidTime(inTime)) {
+    const block = getDuration(outTime, inTime)
+    if (block > 0 && block <= 1200) score += 0.15 // <= 20 hours
+  }
+
+  // 3. Flight time check (OFF to ON)
+  if (isValidTime(offTime) && isValidTime(onTime)) {
+    const flight = getDuration(offTime, onTime)
+    if (flight > 0 && flight <= 1140) score += 0.15 // <= 19 hours
+  }
+
+  // 4. Taxi-out check (OUT to OFF): 3-120 min typical
+  if (isValidTime(outTime) && isValidTime(offTime)) {
+    const taxi = getDuration(outTime, offTime)
+    if (taxi >= 3 && taxi <= 120) score += 0.1
+  }
+
+  // 5. Taxi-in check (ON to IN): 2-60 min typical
+  if (isValidTime(onTime) && isValidTime(inTime)) {
+    const taxi = getDuration(onTime, inTime)
+    if (taxi >= 2 && taxi <= 60) score += 0.1
+  }
+
+  // 6. Verify computed times match
+  if (isValidTime(blockTime) && isValidTime(outTime) && isValidTime(inTime)) {
+    const computed = getDuration(outTime, inTime)
+    const reported = toMinutes(blockTime)
+    if (Math.abs(computed - reported) <= 2) score += 0.05
+  }
+
+  if (isValidTime(flightTime) && isValidTime(offTime) && isValidTime(onTime)) {
+    const computed = getDuration(offTime, onTime)
+    const reported = toMinutes(flightTime)
+    if (Math.abs(computed - reported) <= 2) score += 0.05
+  }
+
+  return Math.min(1, score)
+}
+
+// ============================================
+// Layout Extraction (Primary)
+// ============================================
+
+/**
+ * Extract times using layout-aware geometry
+ */
+function extractFromLayout(results: OcrResult[]): ExtractedFlightData {
+  const data: ExtractedFlightData = { confidence: 0 }
+
+  if (results.length === 0) return data
+
+  const tolerance = calculateTolerance(results)
+  const rows = groupIntoRows(results, tolerance)
+
+  // Store raw text for debugging
+  data.rawText = rows.map(getRowText).join("\n")
+
+  // Scan for label patterns and extract from next row
+  for (let i = 0; i < rows.length - 1; i++) {
+    const labelText = getRowText(rows[i]).toUpperCase()
+    const valueRow = rows[i + 1]
+
+    // "DOOR CLS" + "OUT" row → OUT is right column of next row
+    if (/DOOR\s*CL[SO]?/.test(labelText) && /OUT/.test(labelText)) {
+      const val = formatTime(getColumnValue(valueRow, "right"))
+      if (val && !data.outTime) data.outTime = val
+    }
+
+    // "IN" + "TAXI" row → IN is left column of next row
+    if (/\bIN\b/.test(labelText) && /TAXI/.test(labelText)) {
+      const val = formatTime(getColumnValue(valueRow, "left"))
+      if (val && !data.inTime) data.inTime = val
+    }
+
+    // "ON" + "OFF" row → ON left, OFF right of next row
+    if (/\bON\b/.test(labelText) && /\bOFF\b/.test(labelText)) {
+      const onVal = formatTime(getColumnValue(valueRow, "left"))
+      const offVal = formatTime(getColumnValue(valueRow, "right"))
+      if (onVal && !data.onTime) data.onTime = onVal
+      if (offVal && !data.offTime) data.offTime = offVal
+    }
+
+    // "BLOCK" + "FLIGHT" row → times in next row
+    if (/BLOCK/.test(labelText) && /FLIGHT/.test(labelText)) {
+      const blockVal = formatTime(getColumnValue(valueRow, "left"))
+      const flightVal = formatTime(getColumnValue(valueRow, "right"))
+      if (blockVal && !data.blockTime) data.blockTime = blockVal
+      if (flightVal && !data.flightTime) data.flightTime = flightVal
     }
   }
-  // Handle HH:MM format
-  if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
-    const [hours, minutes] = timeStr.split(':')
-    return `${hours.padStart(2, '0')}:${minutes}`
-  }
-  return undefined
+
+  data.confidence = validateTimes(data)
+  return data
 }
 
+// ============================================
+// String Extraction (Fallback)
+// ============================================
+
 /**
- * Extract OOOI times from AOC VOYAGE RPT format
- *
- * This format has labels on one line and times on the next:
- * - "DOOR CLS OUT" → "0336 0340" (Door Close time, OUT time)
- * - "IN TAXI" → "0630 0345" (IN time, TAXI time)
- * - "ON OFF" → "0626 0354" (ON time, OFF time)
- * - "BLOCK FLIGHT" → "0250 0232" (Block time, Flight time)
+ * Extract times from concatenated text (fallback for poor OCR)
  */
-function extractAOCVoyageReportTimes(text: string): {
-  out?: string
-  off?: string
-  on?: string
-  in?: string
-  blockTime?: string
-  flightTime?: string
-} {
-  const result: {
-    out?: string
-    off?: string
-    on?: string
-    in?: string
-    blockTime?: string
-    flightTime?: string
-  } = {}
-
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0)
-
-  // Look for AOC VOYAGE RPT header to confirm format
-  const isAOCFormat = lines.some(l => l.includes('AOC') && l.includes('VOYAGE'))
+function extractFromText(text: string): ExtractedFlightData {
+  const data: ExtractedFlightData = { confidence: 0, rawText: text }
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean)
 
   for (let i = 0; i < lines.length - 1; i++) {
-    const labelLine = lines[i].toUpperCase()
-    const nextLine = lines[i + 1]
+    const label = lines[i].toUpperCase()
+    const values = lines[i + 1].match(/\b(\d{4})\b/g)
+    if (!values) continue
 
-    // Extract times from next line (format: "HHMM HHMM" or single "HHMM")
-    const timeMatches = nextLine.match(/\b(\d{4})\b/g)
-    if (!timeMatches || timeMatches.length === 0) continue
-
-    // "DOOR CLS OUT" pattern - OUT is the second time
-    if (labelLine.includes('DOOR') && labelLine.includes('OUT')) {
-      if (timeMatches.length >= 2) {
-        result.out = parseTimeHHMM(timeMatches[1]) // OUT is the second value
-      } else if (timeMatches.length === 1) {
-        result.out = parseTimeHHMM(timeMatches[0])
-      }
+    if (/DOOR/.test(label) && /OUT/.test(label) && values.length >= 2) {
+      data.outTime = data.outTime || formatTime(values[1])
     }
 
-    // "ON OFF" pattern - ON is first, OFF is second
-    if (labelLine.includes('ON') && labelLine.includes('OFF') && !labelLine.includes('TAKEOFF')) {
-      if (timeMatches.length >= 2) {
-        result.on = parseTimeHHMM(timeMatches[0])  // ON is the first value
-        result.off = parseTimeHHMM(timeMatches[1]) // OFF is the second value
-      }
+    if (/\bIN\b/.test(label) && /TAXI/.test(label) && values.length >= 1) {
+      data.inTime = data.inTime || formatTime(values[0])
     }
 
-    // "IN TAXI" pattern - IN is first
-    if (labelLine.includes('IN') && labelLine.includes('TAXI')) {
-      if (timeMatches.length >= 1) {
-        result.in = parseTimeHHMM(timeMatches[0]) // IN is the first value
-      }
+    if (/\bON\b/.test(label) && /\bOFF\b/.test(label) && values.length >= 2) {
+      data.onTime = data.onTime || formatTime(values[0])
+      data.offTime = data.offTime || formatTime(values[1])
     }
 
-    // "BLOCK FLIGHT" pattern - computed times (for reference)
-    if (labelLine.includes('BLOCK') && labelLine.includes('FLIGHT')) {
-      if (timeMatches.length >= 2) {
-        result.blockTime = parseTimeHHMM(timeMatches[0])
-        result.flightTime = parseTimeHHMM(timeMatches[1])
-      }
+    if (/BLOCK/.test(label) && /FLIGHT/.test(label) && values.length >= 2) {
+      data.blockTime = data.blockTime || formatTime(values[0])
+      data.flightTime = data.flightTime || formatTime(values[1])
     }
   }
 
-  return result
+  data.confidence = validateTimes(data)
+  return data
+}
+
+// ============================================
+// Public API
+// ============================================
+
+/**
+ * Extract flight data from OCR results
+ *
+ * Uses layout-aware extraction with string fallback
+ */
+export function extractFlightData(input: OcrResult[] | string): ExtractedFlightData {
+  // String input → use text extraction
+  if (typeof input === "string") {
+    return extractFromText(input)
+  }
+
+  // Empty input
+  if (input.length === 0) {
+    return { confidence: 0 }
+  }
+
+  // Try layout extraction first
+  const layoutResult = extractFromLayout(input)
+
+  // If good confidence, return it
+  if (layoutResult.confidence >= 0.5) {
+    return layoutResult
+  }
+
+  // Fallback to text extraction
+  const text = input.map((r) => r.text).join("\n")
+  const textResult = extractFromText(text)
+
+  // Return whichever is better
+  return layoutResult.confidence >= textResult.confidence ? layoutResult : textResult
 }
 
 /**
- * Extract OOOI times (HH:MM format)
+ * Validate extracted data (for debugging)
  */
-function extractOOOITimes(text: string): {
-  out?: string
-  off?: string
-  on?: string
-  in?: string
+export function validateExtractedData(data: ExtractedFlightData): {
+  score: number
+  issues: string[]
 } {
-  const result: {
-    out?: string
-    off?: string
-    on?: string
-    in?: string
-  } = {}
+  const issues: string[] = []
+  const { outTime, offTime, onTime, inTime } = data
 
-  // First, try to extract from AOC VOYAGE RPT format
-  const aocTimes = extractAOCVoyageReportTimes(text)
-  if (aocTimes.out || aocTimes.off || aocTimes.on || aocTimes.in) {
-    return {
-      out: aocTimes.out,
-      off: aocTimes.off,
-      on: aocTimes.on,
-      in: aocTimes.in
+  // Check sequence
+  const times = [
+    { name: "OUT", val: outTime },
+    { name: "OFF", val: offTime },
+    { name: "ON", val: onTime },
+    { name: "IN", val: inTime },
+  ].filter((t) => isValidTime(t.val))
+
+  for (let i = 1; i < times.length; i++) {
+    const prev = toMinutes(times[i - 1].val!)
+    let curr = toMinutes(times[i].val!)
+    if (curr < prev) curr += 1440
+    if (curr <= prev) {
+      issues.push(`${times[i].name} should be after ${times[i - 1].name}`)
     }
   }
 
-  // Fallback: Look for explicitly labeled times
-  const outMatch = text.match(/(?:OUT|PUSH)[:\s]*(\d{1,2})[:\s]*(\d{2})/)
-  if (outMatch) {
-    result.out = `${outMatch[1].padStart(2, '0')}:${outMatch[2]}`
-  }
-
-  const offMatch = text.match(/(?:OFF|T[\s/]O|TAKEOFF)[:\s]*(\d{1,2})[:\s]*(\d{2})/)
-  if (offMatch) {
-    result.off = `${offMatch[1].padStart(2, '0')}:${offMatch[2]}`
-  }
-
-  const onMatch = text.match(/(?:ON|LAND|TOUCHDOWN)[:\s]*(\d{1,2})[:\s]*(\d{2})/)
-  if (onMatch) {
-    result.on = `${onMatch[1].padStart(2, '0')}:${onMatch[2]}`
-  }
-
-  const inMatch = text.match(/(?:IN|BLOCK[\s]IN|ARRIVAL)[:\s]*(\d{1,2})[:\s]*(\d{2})/)
-  if (inMatch) {
-    result.in = `${inMatch[1].padStart(2, '0')}:${inMatch[2]}`
-  }
-
-  return result
-}
-
-/**
- * Extract scheduled times
- */
-function extractScheduledTimes(text: string): {
-  out?: string
-  in?: string
-} {
-  const result: {
-    out?: string
-    in?: string
-  } = {}
-
-  const schedOutMatch = text.match(/(?:SCHED[\s]OUT|STD)[:\s]*(\d{1,2})[:\s]*(\d{2})/)
-  if (schedOutMatch) {
-    result.out = `${schedOutMatch[1].padStart(2, '0')}:${schedOutMatch[2]}`
-  }
-
-  const schedInMatch = text.match(/(?:SCHED[\s]IN|STA)[:\s]*(\d{1,2})[:\s]*(\d{2})/)
-  if (schedInMatch) {
-    result.in = `${schedInMatch[1].padStart(2, '0')}:${schedInMatch[2]}`
-  }
-
-  return result
-}
-
-/**
- * Extract block time (HH:MM format)
- */
-function extractBlockTime(text: string): string | undefined {
-  const match = text.match(/(?:BLOCK|BLK)[:\s]*(\d{1,2})[:\s](\d{2})/)
-  if (match) {
-    return `${match[1].padStart(2, '0')}:${match[2]}`
-  }
-  return undefined
-}
-
-/**
- * Extract flight time (HH:MM format)
- */
-function extractFlightTime(text: string): string | undefined {
-  const match = text.match(/(?:FLIGHT[\s]TIME|FLT)[:\s]*(\d{1,2})[:\s](\d{2})/)
-  if (match) {
-    return `${match[1].padStart(2, '0')}:${match[2]}`
-  }
-  return undefined
-}
-
-/**
- * Calculate confidence score based on extracted fields
- */
-function calculateConfidence(data: ExtractedFlightData): number {
-  let score = 0
-  let maxScore = 0
-
-  // OOOI times are critical (40 points total)
-  maxScore += 40
-  if (data.outTime) score += 10
-  if (data.offTime) score += 10
-  if (data.onTime) score += 10
-  if (data.inTime) score += 10
-
-  // Flight number (10 points)
-  maxScore += 10
-  if (data.flightNumber) score += 10
-
-  // Date (10 points)
-  maxScore += 10
-  if (data.date) score += 10
-
-  // Aircraft (10 points)
-  maxScore += 10
-  if (data.aircraftReg || data.aircraftType) score += 10
-
-  // Airports (20 points)
-  maxScore += 20
-  if (data.departureIcao || data.departureIata) score += 10
-  if (data.arrivalIcao || data.arrivalIata) score += 10
-
-  // Scheduled times (10 points)
-  maxScore += 10
-  if (data.scheduledOut || data.scheduledIn) score += 10
-
-  return Math.min(1, score / maxScore)
-}
-
-/**
- * Extract multiple flights from text (if the image contains multiple entries)
- */
-export function extractMultipleFlights(text: string): ExtractedFlightData[] {
-  // Split by common delimiters that might separate flight entries
-  const sections = text.split(/\n{2,}|[-=]{3,}/)
-
-  const flights: ExtractedFlightData[] = []
-
-  for (const section of sections) {
-    if (section.trim().length < 20) continue // Skip very short sections
-
-    const flightData = extractFlightData(section)
-
-    // Only include if we extracted something meaningful
-    if (flightData.confidence > 0.2) {
-      flights.push(flightData)
-    }
-  }
-
-  return flights.length > 0 ? flights : [extractFlightData(text)]
+  return { score: data.confidence, issues }
 }
