@@ -2,18 +2,18 @@
  * OCR Service - Handles text extraction from images using gutenye OCR
  *
  * This service provides OCR capabilities for extracting text from flight documents,
- * pilot logs, and other aviation-related images containing OOOI times and flight data.
+ * specifically focused on OOOI times extraction from AOC VOYAGE reports.
  */
 
-// Type definitions for the OCR library
-interface OcrResult {
+// Type definitions matching the actual OCR library output
+export interface OcrTextResult {
   text: string
-  confidence: number
-  box: number[][] // Bounding box coordinates
+  mean: number // Confidence score (0-1)
+  box: number[][] // Bounding box coordinates [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
 }
 
 interface OcrDetectResult {
-  lines: OcrResult[]
+  lines: OcrTextResult[]
 }
 
 interface OcrInstance {
@@ -78,33 +78,19 @@ export async function initializeOCR(): Promise<OcrInstance> {
 }
 
 /**
- * Extract text from an image file
+ * Extract raw OCR results from an image file
+ * Returns the unprocessed OCR output for downstream processing
  */
-export async function extractTextFromImage(file: File): Promise<OcrResult[]> {
+export async function extractTextFromImage(file: File): Promise<OcrTextResult[]> {
   try {
-    // Initialize OCR if needed
     const ocr = await initializeOCR()
-
-    // Convert file to image data
     const imageData = await fileToImageData(file)
-
-    // Perform OCR
     const result = await ocr.detect(imageData)
-
-    // Return the detected text lines
     return result.lines || []
   } catch (error) {
     console.error('Error extracting text from image:', error)
     throw error
   }
-}
-
-/**
- * Extract all text as a single string (concatenated)
- */
-export async function extractTextAsString(file: File): Promise<string> {
-  const lines = await extractTextFromImage(file)
-  return lines.map(line => line.text).join('\n')
 }
 
 /**
@@ -118,7 +104,6 @@ async function fileToImageData(file: File): Promise<ImageData> {
       const img = new Image()
 
       img.onload = () => {
-        // Create a canvas to get ImageData
         const canvas = document.createElement('canvas')
         canvas.width = img.width
         canvas.height = img.height
@@ -151,7 +136,6 @@ async function fileToImageData(file: File): Promise<ImageData> {
 
 /**
  * Preload OCR models (optional, for better UX)
- * Call this early in the app lifecycle to avoid delays later
  */
 export async function preloadOCR(): Promise<void> {
   try {

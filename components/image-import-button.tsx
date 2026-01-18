@@ -4,7 +4,7 @@ import type React from "react";
 import { useRef, useState } from "react";
 import { Camera, Loader2, ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { extractTextFromImage, extractFlightData, type ExtractedFlightData } from "@/lib/ocr";
+import { extractTextFromImage, extractOOOITimes, type OOOITimes } from "@/lib/ocr";
 import {
   Dialog,
   DialogContent,
@@ -27,7 +27,7 @@ interface ImportProgress {
 }
 
 interface ImageImportButtonProps {
-  onDataExtracted: (data: ExtractedFlightData) => void;
+  onDataExtracted: (data: OOOITimes) => void;
   variant?: "ghost" | "default" | "outline";
   size?: "sm" | "default" | "lg" | "icon";
   className?: string;
@@ -56,27 +56,24 @@ export function ImageImportButton({
 
       // Step 2: Extract text from image
       setProgress({ percent: 30, stage: "Processing", detail: "Extracting text from image..." });
-      const textLines = await extractTextFromImage(file);
+      const ocrResults = await extractTextFromImage(file);
 
-      // Combine all text
-      const fullText = textLines.map(line => line.text).join('\n');
-
-      // Step 3: Parse flight data
-      setProgress({ percent: 70, stage: "Analyzing", detail: "Parsing flight data..." });
-      const flightData = extractFlightData(fullText);
+      // Step 3: Parse OOOI times from raw OCR results
+      setProgress({ percent: 70, stage: "Analyzing", detail: "Extracting OOOI times..." });
+      const oooiTimes = extractOOOITimes(ocrResults);
 
       // Step 4: Complete
       setProgress({
         percent: 100,
         stage: "Complete!",
-        detail: `Confidence: ${Math.round(flightData.confidence * 100)}%`,
+        detail: `Confidence: ${Math.round(oooiTimes.confidence * 100)}%`,
       });
 
       // Wait a moment to show success message
       await new Promise((resolve) => setTimeout(resolve, 800));
 
-      // Pass extracted data to parent
-      onDataExtracted(flightData);
+      // Pass extracted OOOI times to parent
+      onDataExtracted(oooiTimes);
 
     } catch (error) {
       console.error("OCR processing failed", error);

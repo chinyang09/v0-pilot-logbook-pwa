@@ -46,7 +46,7 @@ import {
 } from "@/lib/utils/time";
 import { usePersonnel } from "@/hooks/data";
 import { ImageImportButton } from "@/components/image-import-button";
-import type { ExtractedFlightData } from "@/lib/ocr";
+import type { OOOITimes } from "@/lib/ocr";
 
 const FORM_STORAGE_KEY = "flight-form-draft";
 
@@ -795,39 +795,8 @@ export function FlightForm({
     []
   );
 
-  // Handle OCR data extraction and populate form
-  const handleOCRDataExtracted = useCallback((data: ExtractedFlightData) => {
-    // Update form fields with extracted data
-    if (data.date) {
-      updateField("date", data.date);
-    }
-    if (data.flightNumber) {
-      updateField("flightNumber", data.flightNumber);
-    }
-    if (data.aircraftReg) {
-      updateField("aircraftReg", data.aircraftReg);
-    }
-    if (data.aircraftType) {
-      updateField("aircraftType", data.aircraftType);
-    }
-    if (data.departureIcao) {
-      updateField("departureIcao", data.departureIcao);
-    }
-    if (data.departureIata) {
-      updateField("departureIata", data.departureIata);
-    }
-    if (data.arrivalIcao) {
-      updateField("arrivalIcao", data.arrivalIcao);
-    }
-    if (data.arrivalIata) {
-      updateField("arrivalIata", data.arrivalIata);
-    }
-    if (data.scheduledOut) {
-      updateField("scheduledOut", data.scheduledOut);
-    }
-    if (data.scheduledIn) {
-      updateField("scheduledIn", data.scheduledIn);
-    }
+  // Handle OCR data extraction and populate form with OOOI times
+  const handleOCRDataExtracted = useCallback((data: OOOITimes) => {
     if (data.outTime) {
       updateField("outTime", data.outTime);
     }
@@ -839,12 +808,6 @@ export function FlightForm({
     }
     if (data.inTime) {
       updateField("inTime", data.inTime);
-    }
-    if (data.blockTime) {
-      updateField("blockTime", data.blockTime);
-    }
-    if (data.flightTime) {
-      updateField("flightTime", data.flightTime);
     }
   }, [updateField]);
 

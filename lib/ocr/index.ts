@@ -5,14 +5,13 @@
 export {
   initializeOCR,
   extractTextFromImage,
-  extractTextAsString,
   preloadOCR,
   isOCRReady,
   resetOCR,
+  type OcrTextResult,
 } from './ocr-service'
 
 export {
-  extractFlightData,
-  extractMultipleFlights,
-  type ExtractedFlightData,
+  extractOOOITimes,
+  type OOOITimes,
 } from './oooi-extractor'
