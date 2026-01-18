@@ -5,15 +5,30 @@
  * pilot logs, and other aviation-related images containing OOOI times and flight data.
  */
 
-// Type definitions for the OCR library
-interface OcrResult {
+// Type definitions for the OCR library result format
+// See: https://github.com/gutenye/ocr
+interface OcrTextLine {
   text: string
-  confidence: number
-  box: number[][] // Bounding box coordinates
+  score: number // Confidence score from OCR (0-1)
+  frame: {
+    top: number
+    left: number
+    width: number
+    height: number
+  }
 }
 
 interface OcrDetectResult {
-  lines: OcrResult[]
+  texts: OcrTextLine[]
+  resizedImageWidth: number
+  resizedImageHeight: number
+}
+
+// Normalized result format for internal use
+interface OcrResult {
+  text: string
+  confidence: number
+  box: number[][] // Bounding box coordinates [[x1,y1], [x2,y2], ...]
 }
 
 interface OcrInstance {
@@ -91,8 +106,35 @@ export async function extractTextFromImage(file: File): Promise<OcrResult[]> {
     // Perform OCR
     const result = await ocr.detect(dataUrl)
 
-    // Return the detected text lines
-    return result.lines || []
+    // Debug: log raw OCR result
+    console.log('OCR raw result:', JSON.stringify(result, null, 2))
+
+    // The library returns { texts: TextLine[], resizedImageWidth, resizedImageHeight }
+    // where each TextLine has { text, score, frame: { top, left, width, height } }
+    const texts = result.texts || []
+
+    // Map to our normalized format
+    const normalizedResults: OcrResult[] = texts.map((line: OcrTextLine) => {
+      // Convert frame { top, left, width, height } to box [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+      const { top, left, width, height } = line.frame || { top: 0, left: 0, width: 0, height: 0 }
+      const box = [
+        [left, top],
+        [left + width, top],
+        [left + width, top + height],
+        [left, top + height]
+      ]
+
+      return {
+        text: line.text,
+        confidence: line.score, // Map 'score' to 'confidence'
+        box
+      }
+    })
+
+    // Debug: log normalized results
+    console.log('OCR normalized results:', normalizedResults.map(r => `${r.confidence.toFixed(2)} ${r.text}`).join('\n'))
+
+    return normalizedResults
   } catch (error) {
     console.error('Error extracting text from image:', error)
     throw error
