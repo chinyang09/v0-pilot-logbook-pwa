@@ -5,19 +5,24 @@
  * pilot logs, and other aviation-related images containing OOOI times and flight data.
  */
 
-// Type definitions for the OCR library
+// Type definitions for the OCR library result format
+// The @gutenye/ocr-browser library returns an array of detection results directly
+// Each result has: text, mean (confidence), and box (bounding polygon)
+interface OcrRawResult {
+  text: string
+  mean: number // Confidence score from OCR (0-1)
+  box: number[][] // Bounding box as [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+}
+
+// Normalized result format for internal use
 interface OcrResult {
   text: string
   confidence: number
-  box: number[][] // Bounding box coordinates
-}
-
-interface OcrDetectResult {
-  lines: OcrResult[]
+  box: number[][] // Bounding box coordinates [[x1,y1], [x2,y2], ...]
 }
 
 interface OcrInstance {
-  detect: (imagePath: string | ImageData | HTMLImageElement) => Promise<OcrDetectResult>
+  detect: (imagePath: string | ImageData | HTMLImageElement) => Promise<OcrRawResult[]>
 }
 
 interface OcrConfig {
@@ -85,14 +90,37 @@ export async function extractTextFromImage(file: File): Promise<OcrResult[]> {
     // Initialize OCR if needed
     const ocr = await initializeOCR()
 
-    // Convert file to image data
-    const imageData = await fileToImageData(file)
+    // Convert file to data URL - the OCR library expects a URL string, not ImageData
+    const dataUrl = await fileToDataUrl(file)
 
     // Perform OCR
-    const result = await ocr.detect(imageData)
+    const result = await ocr.detect(dataUrl)
 
-    // Return the detected text lines
-    return result.lines || []
+    // Debug: log raw OCR result
+    console.log('OCR raw result:', JSON.stringify(result, null, 2))
+
+    // The @gutenye/ocr-browser library returns an array directly
+    // Each item has: { text, mean (confidence), box (polygon) }
+    const rawResults: OcrRawResult[] = Array.isArray(result) ? result : []
+
+    // Map to our normalized format, sorted by vertical position (top to bottom)
+    const normalizedResults: OcrResult[] = rawResults
+      .map((item: OcrRawResult) => ({
+        text: item.text,
+        confidence: item.mean, // Map 'mean' to 'confidence'
+        box: item.box // Already in [[x,y], ...] format
+      }))
+      .sort((a, b) => {
+        // Sort by Y coordinate (top of bounding box) to maintain reading order
+        const aTop = Math.min(...a.box.map(p => p[1]))
+        const bTop = Math.min(...b.box.map(p => p[1]))
+        return aTop - bTop
+      })
+
+    // Debug: log normalized results
+    console.log('OCR normalized results:', normalizedResults.map(r => `${r.confidence.toFixed(2)} ${r.text}`).join('\n'))
+
+    return normalizedResults
   } catch (error) {
     console.error('Error extracting text from image:', error)
     throw error
@@ -108,37 +136,22 @@ export async function extractTextAsString(file: File): Promise<string> {
 }
 
 /**
- * Convert a File to ImageData for OCR processing
+ * Convert a File to a data URL string for OCR processing
+ * The @gutenye/ocr-browser library expects a URL string (file path or data URL),
+ * not an ImageData object. Passing ImageData directly causes load errors because
+ * the library tries to use it as a URL in image.src = url.
  */
-async function fileToImageData(file: File): Promise<ImageData> {
+async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
 
     reader.onload = (e) => {
-      const img = new Image()
-
-      img.onload = () => {
-        // Create a canvas to get ImageData
-        const canvas = document.createElement('canvas')
-        canvas.width = img.width
-        canvas.height = img.height
-
-        const ctx = canvas.getContext('2d')
-        if (!ctx) {
-          reject(new Error('Failed to get canvas context'))
-          return
-        }
-
-        ctx.drawImage(img, 0, 0)
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        resolve(imageData)
+      const dataUrl = e.target?.result as string
+      if (!dataUrl) {
+        reject(new Error('Failed to read file as data URL'))
+        return
       }
-
-      img.onerror = () => {
-        reject(new Error('Failed to load image'))
-      }
-
-      img.src = e.target?.result as string
+      resolve(dataUrl)
     }
 
     reader.onerror = () => {
