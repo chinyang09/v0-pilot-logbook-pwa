@@ -1,10 +1,10 @@
 /**
- * OCR Module - Export all OCR-related functionality
+ * OCR Module Exports
  */
 
 export {
-  initializeOCR,
   extractTextFromImage,
+  initializeOCR,
   preloadOCR,
   isOCRReady,
   resetOCR,

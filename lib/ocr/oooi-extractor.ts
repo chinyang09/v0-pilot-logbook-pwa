@@ -1,148 +1,110 @@
 /**
- * OOOI Time Extractor
- *
- * Extracts OUT, OFF, ON, IN times from raw OCR results.
- * Designed to work with AOC VOYAGE report format where labels
- * appear on one line and corresponding times on the next.
+ * OOOI Time Extractor - Parses OUT, OFF, ON, IN times from OCR results
  */
 
 import type { OcrTextResult } from './ocr-service'
 
 export interface OOOITimes {
-  outTime?: string // HH:MM format
-  offTime?: string // HH:MM format
-  onTime?: string // HH:MM format
-  inTime?: string // HH:MM format
-  confidence: number // Overall extraction confidence (0-1)
+  outTime?: string
+  offTime?: string
+  onTime?: string
+  inTime?: string
+  confidence: number
 }
 
 /**
- * Extract OOOI times from raw OCR results
+ * Extract OOOI times from OCR results
  *
- * The AOC VOYAGE report format shows:
- * - "DOOR CLS OUT" followed by "0336 0340" (door close time, out time)
- * - "ON OFF" followed by "0626 0354" (on time, off time)
- * - "IN TAXI" followed by "0630 0345" (in time, taxi time)
+ * AOC VOYAGE format:
+ * - "DOOR CLS OUT" → "0336 0340" (door close, out time)
+ * - "ON OFF" → "0626 0354" (on time, off time)
+ * - "IN TAXI" → "0630 0345" (in time, taxi time)
  */
 export function extractOOOITimes(ocrResults: OcrTextResult[]): OOOITimes {
-  const result: OOOITimes = {
-    confidence: 0,
-  }
+  const result: OOOITimes = { confidence: 0 }
 
-  if (!ocrResults || ocrResults.length === 0) {
-    return result
-  }
+  if (!ocrResults?.length) return result
 
-  // Sort by Y coordinate (top of bounding box) to process in reading order
-  const sortedResults = [...ocrResults].sort((a, b) => {
-    const aY = Math.min(...a.box.map(p => p[1]))
-    const bY = Math.min(...b.box.map(p => p[1]))
+  // Sort by Y position (reading order)
+  const sorted = [...ocrResults].sort((a, b) => {
+    const aY = a.box?.[0]?.[1] ?? 0
+    const bY = b.box?.[0]?.[1] ?? 0
     return aY - bY
   })
 
-  // Build a list of text lines for sequential processing
-  const lines = sortedResults.map(r => ({
-    text: r.text.toUpperCase().trim(),
-    confidence: r.mean,
+  const lines = sorted.map(r => ({
+    text: (r.text || '').toUpperCase().trim(),
+    conf: r.mean || 0,
   }))
 
-  // Track which times we've found for confidence calculation
-  let foundCount = 0
-  let totalConfidence = 0
+  let found = 0
+  let confSum = 0
 
-  // Process lines sequentially looking for label-value pairs
+  // Process label-value pairs
   for (let i = 0; i < lines.length - 1; i++) {
-    const currentLine = lines[i].text
-    const nextLine = lines[i + 1].text
-    const nextConfidence = lines[i + 1].confidence
+    const label = lines[i].text
+    const values = extractTimes(lines[i + 1].text)
+    const conf = lines[i + 1].conf
 
-    // Extract 4-digit time values from the next line
-    const timeValues = extractTimeValues(nextLine)
-    if (timeValues.length === 0) continue
+    if (!values.length) continue
 
-    // Check for OUT time: "DOOR CLS OUT" or just "OUT"
-    if (currentLine.includes('OUT') && !result.outTime) {
-      // OUT time is typically the second value after "DOOR CLS OUT"
-      const outTime = timeValues.length >= 2 ? timeValues[1] : timeValues[0]
-      result.outTime = formatTime(outTime)
-      foundCount++
-      totalConfidence += nextConfidence
+    // OUT: from "DOOR CLS OUT" line
+    if (label.includes('OUT') && !result.outTime) {
+      result.outTime = formatTime(values[1] || values[0])
+      if (result.outTime) { found++; confSum += conf }
     }
 
-    // Check for ON and OFF times: "ON OFF"
-    if (currentLine.includes('ON') && currentLine.includes('OFF')) {
-      if (timeValues.length >= 2) {
-        // First value is ON, second is OFF
-        if (!result.onTime) {
-          result.onTime = formatTime(timeValues[0])
-          foundCount++
-          totalConfidence += nextConfidence
-        }
-        if (!result.offTime) {
-          result.offTime = formatTime(timeValues[1])
-          foundCount++
-          totalConfidence += nextConfidence
-        }
+    // ON and OFF: from "ON OFF" line
+    if (label.includes('ON') && label.includes('OFF') && values.length >= 2) {
+      if (!result.onTime) {
+        result.onTime = formatTime(values[0])
+        if (result.onTime) { found++; confSum += conf }
+      }
+      if (!result.offTime) {
+        result.offTime = formatTime(values[1])
+        if (result.offTime) { found++; confSum += conf }
       }
     }
 
-    // Check for IN time: "IN TAXI" or just "IN"
-    if (currentLine.includes('IN') && !currentLine.includes('PRINT') && !result.inTime) {
-      // IN time is typically the first value after "IN TAXI"
-      result.inTime = formatTime(timeValues[0])
-      foundCount++
-      totalConfidence += nextConfidence
+    // IN: from "IN TAXI" line
+    if (label.includes('IN') && !label.includes('PRINT') && !result.inTime) {
+      result.inTime = formatTime(values[0])
+      if (result.inTime) { found++; confSum += conf }
     }
   }
 
-  // Calculate overall confidence
-  result.confidence = foundCount > 0 ? totalConfidence / foundCount : 0
-
+  result.confidence = found > 0 ? confSum / found : 0
   return result
 }
 
 /**
- * Extract 4-digit time values from a text line
- * Handles formats like "0336 0340", "03:36 03:40", "0336", etc.
+ * Extract 4-digit time values from text
  */
-function extractTimeValues(text: string): string[] {
-  const values: string[] = []
+function extractTimes(text: string): string[] {
+  const times: string[] = []
+  const matches = text.match(/\b\d{4}\b|\b\d{1,2}:\d{2}\b/g) || []
 
-  // Match 4-digit numbers (HHMM format) or HH:MM format
-  const matches = text.match(/\b(\d{4})\b|\b(\d{1,2}):(\d{2})\b/g)
-
-  if (matches) {
-    for (const match of matches) {
-      if (match.includes(':')) {
-        // HH:MM format - convert to HHMM
-        const [h, m] = match.split(':')
-        values.push(h.padStart(2, '0') + m)
-      } else if (match.length === 4) {
-        // HHMM format
-        values.push(match)
-      }
+  for (const m of matches) {
+    if (m.includes(':')) {
+      const [h, min] = m.split(':')
+      times.push(h.padStart(2, '0') + min)
+    } else {
+      times.push(m)
     }
   }
-
-  return values
+  return times
 }
 
 /**
- * Format a 4-digit time string (HHMM) to HH:MM
+ * Format HHMM to HH:MM with validation
  */
 function formatTime(time: string): string {
   if (!time || time.length !== 4) return ''
 
-  const hours = time.substring(0, 2)
-  const minutes = time.substring(2, 4)
+  const h = parseInt(time.slice(0, 2), 10)
+  const m = parseInt(time.slice(2, 4), 10)
 
-  // Validate hours and minutes
-  const h = parseInt(hours, 10)
-  const m = parseInt(minutes, 10)
+  if (isNaN(h) || isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) return ''
 
-  if (isNaN(h) || isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) {
-    return ''
-  }
-
-  return `${hours}:${minutes}`
+  return `${time.slice(0, 2)}:${time.slice(2, 4)}`
 }
