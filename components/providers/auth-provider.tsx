@@ -49,11 +49,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       console.log("[v0] Attempting silent re-auth with passkey...")
 
-      // Get authentication options from server
+      // Get authentication options from server (GET request, not POST)
       const optionsRes = await fetch("/api/auth/login/passkey", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "start" }),
+        method: "GET",
+        cache: "no-store",
       })
 
       if (!optionsRes.ok) {
@@ -61,16 +60,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return false
       }
 
-      const { options } = await optionsRes.json()
+      const options = await optionsRes.json()
+      const rpId = window.location.hostname
 
       // Trigger WebAuthn - this will use resident/discoverable credentials
-      const credential = await startAuthentication({ optionsJSON: options })
+      const credential = await startAuthentication({
+        optionsJSON: {
+          challenge: options.challenge,
+          rpId: rpId,
+          timeout: options.timeout,
+          userVerification: options.userVerification,
+        },
+      })
 
-      // Verify with server
+      // Verify with server - match the expected payload format
       const verifyRes = await fetch("/api/auth/login/passkey", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "verify", credential }),
+        body: JSON.stringify({
+          credential: {
+            id: credential.id,
+            rawId: credential.rawId,
+            response: credential.response,
+            type: credential.type,
+          },
+          challenge: options.challenge,
+          deviceId: "silent-reauth",
+        }),
       })
 
       if (!verifyRes.ok) {
@@ -85,7 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         userId: userData.id,
         callsign: userData.callsign,
         sessionToken: session.token,
-        expiresAt: new Date(session.expiresAt).getTime(),
+        expiresAt: typeof session.expiresAt === "number" ? session.expiresAt : new Date(session.expiresAt).getTime(),
       })
 
       const savedSession = await getUserSession()
