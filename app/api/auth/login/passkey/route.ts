@@ -9,9 +9,11 @@ import { cookies } from "next/headers"
 import { createId } from "@/lib/auth/shared/cuid"
 
 // GET /api/auth/login/passkey
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const options = generateAuthenticationOptions()
+    // Get the host header for accurate RP ID in production
+    const host = request.headers.get("host") || undefined
+    const options = generateAuthenticationOptions(undefined, host)
     const challengeBase64 = base64URLEncode(options.challenge as Uint8Array)
 
     const db = await getDB()

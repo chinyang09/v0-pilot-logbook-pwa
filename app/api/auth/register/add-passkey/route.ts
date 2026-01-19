@@ -7,6 +7,8 @@ import { cookies } from "next/headers"
 // GET: Generate options for an existing user to add a new device
 export async function GET(request: NextRequest) {
   try {
+    // Get the host header for accurate RP ID in production
+    const host = request.headers.get("host") || undefined
     const cookieStore = await cookies()
     const sessionId = cookieStore.get("session")?.value
     console.log("[v0] Add passkey GET - sessionId from cookie:", sessionId)
@@ -39,7 +41,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
-    const options = generateRegistrationOptions(user._id!.toString(), user.identity.callsign, user.auth.passkeys)
+    const options = generateRegistrationOptions(user._id!.toString(), user.identity.callsign, user.auth.passkeys, host)
     const challengeBase64 = base64URLEncode(options.challenge as Uint8Array)
 
     await db.collection<StoredChallenge>("challenges").insertOne({

@@ -8,8 +8,10 @@ import type {
 } from "@/lib/auth/types";
 import { cookies } from "next/headers";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    // Get the host header for accurate RP ID in production
+    const host = request.headers.get("host") || undefined;
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("session")?.value;
 
@@ -19,9 +21,9 @@ export async function GET() {
 
     const db = await getDB();
 
-    // ✅ FIX 1: Use 'token' field and compare against new Date()
+    // Use 'token' field to match session lookup (sessions are stored with token, not _id)
     const session = await db.collection("sessions").findOne({
-      _id: sessionId,
+      token: sessionId,
       expiresAt: { $gt: new Date() },
     });
 
@@ -38,7 +40,8 @@ export async function GET() {
     const options = generateRegistrationOptions(
       user._id,
       user.identity.callsign,
-      user.auth.passkeys
+      user.auth.passkeys,
+      host
     );
     const challengeBase64 = base64URLEncode(options.challenge as Uint8Array);
 
@@ -97,9 +100,9 @@ export async function POST(request: NextRequest) {
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("session")?.value;
 
-    // ✅ FIX 4: Use 'token' field and new Date() for session verification
+    // Use 'token' field to match session lookup (sessions are stored with token, not _id)
     const session = await db.collection("sessions").findOne({
-      _id: sessionId,
+      token: sessionId,
       expiresAt: { $gt: new Date() },
     });
 
@@ -126,10 +129,10 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    // ✅ FIX 5: Match session lookup for clearing recovery flag
+    // Clear recovery flag from session
     await db
       .collection("sessions")
-      .updateOne({ _id: sessionId }, { $unset: { recoveryLogin: "" } });
+      .updateOne({ token: sessionId }, { $unset: { recoveryLogin: "" } });
 
     return NextResponse.json({ success: true });
   } catch (error) {

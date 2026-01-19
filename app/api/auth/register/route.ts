@@ -11,6 +11,8 @@ export async function POST(request: NextRequest) {
       "@/lib/auth/server/webauthn"
     );
 
+    // Get the host header for accurate RP ID in production
+    const host = request.headers.get("host") || undefined;
     const { callsign } = await request.json();
     if (
       !callsign ||
@@ -45,7 +47,8 @@ export async function POST(request: NextRequest) {
     const registrationOptions = generateRegistrationOptions(
       userId,
       callsign.trim(),
-      []
+      [],
+      host
     );
     const challengeBase64 = base64URLEncode(
       registrationOptions.challenge as Uint8Array

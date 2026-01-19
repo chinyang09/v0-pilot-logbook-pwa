@@ -43,9 +43,6 @@ const nextConfig = {
   outputFileTracingExcludes: {
     "*": [
       "node_modules/@gutenye/**/*",
-      "node_modules/@mongodb-js/**/*",
-      "node_modules/mongodb/**/*",
-      "node_modules/mongodb-client-encryption/**/*",
       "node_modules/kerberos/**/*",
       "node_modules/sharp/**/*",
       "node_modules/.pnpm/**/*@gutenye*/**/*",

@@ -29,15 +29,31 @@ export function generateChallenge(): string {
 }
 
 // RP (Relying Party) configuration
-export function getRP() {
-  // Server-side: use environment variable
+// Pass the request host header from API routes for accurate production domain detection
+export function getRP(requestHost?: string) {
+  // Server-side: prefer request host header, then fall back to environment variables
   if (typeof window === "undefined") {
-    const envUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || ""
-    const hostname =
-      envUrl
-        .replace(/^https?:\/\//, "")
-        .split(":")[0]
-        .split("/")[0] || "localhost"
+    let hostname = "localhost"
+
+    // Priority 1: Use the actual request host header (most accurate in production)
+    if (requestHost) {
+      hostname = requestHost.split(":")[0] // Remove port if present
+    } else {
+      // Priority 2: Use NEXT_PUBLIC_APP_URL (user-configured production URL)
+      // Priority 3: Use VERCEL_PROJECT_PRODUCTION_URL (Vercel's production URL)
+      // Priority 4: Use VERCEL_URL (deployment preview URL - least preferred)
+      const envUrl =
+        process.env.NEXT_PUBLIC_APP_URL ||
+        process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+        process.env.VERCEL_URL ||
+        ""
+      hostname =
+        envUrl
+          .replace(/^https?:\/\//, "")
+          .split(":")[0]
+          .split("/")[0] || "localhost"
+    }
+
     return {
       name: "SkyLog Pilot Logbook",
       id: hostname === "localhost" ? "localhost" : hostname,
@@ -57,8 +73,9 @@ export function generateRegistrationOptions(
   userId: string,
   userName: string,
   existingCredentials: (PasskeyCredential | string)[] = [], // Accepts full objects or just IDs
+  requestHost?: string, // Pass request host header for production
 ): PublicKeyCredentialCreationOptions {
-  const rp = getRP();
+  const rp = getRP(requestHost);
   const challenge = crypto.getRandomValues(new Uint8Array(32));
 
   return {
@@ -95,8 +112,9 @@ export function generateRegistrationOptions(
 // Generate authentication options for WebAuthn (username-less)
 export function generateAuthenticationOptions(
   allowCredentials?: PasskeyCredential[],
+  requestHost?: string, // Pass request host header for production
 ): PublicKeyCredentialRequestOptions {
-  const rp = getRP()
+  const rp = getRP(requestHost)
   const challenge = crypto.getRandomValues(new Uint8Array(32))
 
   return {
