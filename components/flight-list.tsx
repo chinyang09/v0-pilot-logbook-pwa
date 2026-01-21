@@ -373,10 +373,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           const index = flights.findIndex((f) => f.id === flightId);
           if (index !== -1) {
             isExternalScrollRef.current = true;
-            rowVirtualizer.scrollToIndex(index, { align: "start" });
+            rowVirtualizer.scrollToIndex(index, {
+              align: "start",
+              behavior: "smooth",
+            });
             setTimeout(() => {
               isExternalScrollRef.current = false;
-            }, 400);
+            }, 600); // Increased timeout to allow smooth scroll to complete
           }
         },
       }),

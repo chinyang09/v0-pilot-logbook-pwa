@@ -116,16 +116,22 @@ export default function LogbookPage() {
       })
 
       if (monthFlights.length > 0) {
-        const sortedFlights = [...monthFlights].sort(
-          (a, b) => parseDateLocal(b.date).getTime() - parseDateLocal(a.date).getTime(),
-        )
+        // Sort by date (newest first), then by time within the same date (latest first)
+        const sortedFlights = [...monthFlights].sort((a, b) => {
+          const dateComparison = parseDateLocal(b.date).getTime() - parseDateLocal(a.date).getTime()
+          if (dateComparison !== 0) return dateComparison
+          // Within same date, sort by outTime (latest first)
+          const timeA = a.outTime || "00:00"
+          const timeB = b.outTime || "00:00"
+          return timeB.localeCompare(timeA)
+        })
         flightListRef.current?.scrollToFlight(sortedFlights[0].id, sortedFlights[0].date)
       }
 
       setTimeout(() => {
         syncLockRef.current = false
         syncSourceRef.current = null
-      }, 400)
+      }, 600) // Increased timeout to allow smooth scroll to complete
     },
     [flights],
   )
