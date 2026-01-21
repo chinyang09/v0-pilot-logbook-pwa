@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#05080B">
+    <title>Offline - OOOI</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/icon-192.png">
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        min-height: 100dvh;
+        margin: 0;
+        background: #05080B;
+        color: #ffffff;
+        text-align: center;
+        padding: 20px;
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+
+      .container {
+        max-width: 400px;
+        width: 100%;
+      }
+
+      .icon {
+        width: 80px;
+        height: 80px;
+        margin: 0 auto 24px;
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border-radius: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .icon svg {
+        width: 40px;
+        height: 40px;
+        color: #64748b;
+      }
+
+      h1 {
+        font-size: 24px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        color: #ffffff;
+      }
+
+      p {
+        color: #94a3b8;
+        font-size: 16px;
+        line-height: 1.5;
+        margin-bottom: 32px;
+      }
+
+      .button-group {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      button {
+        width: 100%;
+        padding: 14px 24px;
+        background: #3b82f6;
+        color: white;
+        border: none;
+        border-radius: 12px;
+        font-size: 16px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.2s, transform 0.1s;
+      }
+
+      button:hover {
+        background: #2563eb;
+      }
+
+      button:active {
+        transform: scale(0.98);
+      }
+
+      .secondary-button {
+        background: #1e293b;
+        color: #94a3b8;
+      }
+
+      .secondary-button:hover {
+        background: #334155;
+        color: #ffffff;
+      }
+
+      .status {
+        margin-top: 32px;
+        font-size: 14px;
+        color: #64748b;
+      }
+
+      .status.online {
+        color: #22c55e;
+      }
+
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="icon">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+        </svg>
+      </div>
+
+      <h1>You're Offline</h1>
+      <p>It looks like you've lost your internet connection. The app hasn't been cached yet - please connect to the internet and open the app once to enable offline mode.</p>
+
+      <div class="button-group">
+        <button onclick="retry()">Try Again</button>
+        <button class="secondary-button" onclick="checkStatus()">Check Connection</button>
+      </div>
+
+      <p id="status" class="status">Checking connection...</p>
+    </div>
+
+    <script>
+      function updateStatus() {
+        const statusEl = document.getElementById('status');
+        if (navigator.onLine) {
+          statusEl.textContent = 'Connection detected! Tap "Try Again"';
+          statusEl.className = 'status online';
+        } else {
+          statusEl.textContent = 'No internet connection';
+          statusEl.className = 'status';
+        }
+      }
+
+      function retry() {
+        // Try to navigate to the original URL or home
+        const urlParams = new URLSearchParams(window.location.search);
+        const returnUrl = urlParams.get('return') || '/';
+        window.location.href = returnUrl;
+      }
+
+      function checkStatus() {
+        updateStatus();
+        if (navigator.onLine) {
+          // If online, try to reload
+          setTimeout(retry, 500);
+        }
+      }
+
+      // Initial status check
+      updateStatus();
+
+      // Listen for online/offline events
+      window.addEventListener('online', () => {
+        updateStatus();
+        // Auto-redirect after a short delay when coming back online
+        setTimeout(retry, 1000);
+      });
+
+      window.addEventListener('offline', updateStatus);
+
+      // Periodic check
+      setInterval(updateStatus, 3000);
+    </script>
+  </body>
+</html>
