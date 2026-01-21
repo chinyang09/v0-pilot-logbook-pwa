@@ -1,63 +1,74 @@
-const CACHE_VERSION = "v2"
+const CACHE_VERSION = "v3"
 const STATIC_CACHE = `skylog-static-${CACHE_VERSION}`
 const DYNAMIC_CACHE = `skylog-dynamic-${CACHE_VERSION}`
 const CDN_CACHE = `skylog-cdn-${CACHE_VERSION}`
 
-// All app routes to precache
-const APP_ROUTES = ["/", "/logbook", "/new-flight", "/aircraft", "/airports", "/crew", "/data"]
-
-// Static assets to precache
-const STATIC_ASSETS = ["/manifest.json", "/icon-192.png", "/icon-512.jpg"]
+// Static assets to precache during install (these don't require auth)
+const PRECACHE_ASSETS = [
+  "/manifest.json",
+  "/icon-192.png",
+  "/icon-512.jpg",
+  "/offline.html",
+  "/login", // Login page can be cached during install
+]
 
 // CDN URLs to cache (will be cached on first use)
 const CDN_PATTERNS = ["cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic.com"]
 
-// Install event - precache static assets and app shell
+// Routes that should be cached when visited (runtime caching)
+const CACHEABLE_ROUTES = ["/", "/logbook", "/new-flight", "/aircraft", "/airports", "/crew", "/data", "/roster", "/fdp", "/currencies", "/discrepancies"]
+
+// Install event - precache static assets only (not protected routes)
 self.addEventListener("install", (event) => {
+  console.log("[SW] Installing version:", CACHE_VERSION)
   event.waitUntil(
     (async () => {
       const staticCache = await caches.open(STATIC_CACHE)
 
-      // Cache static assets
-      await staticCache.addAll(STATIC_ASSETS)
-
-      // Cache app routes (fetch HTML for each route)
-      for (const route of APP_ROUTES) {
+      // Cache static assets that don't require authentication
+      for (const asset of PRECACHE_ASSETS) {
         try {
-          const response = await fetch(route, {
-            credentials: "same-origin",
-            headers: { Accept: "text/html" },
-          })
+          // Use fetch with cache: 'reload' to ensure fresh copies
+          const response = await fetch(asset, { cache: "reload" })
           if (response.ok) {
-            await staticCache.put(route, response)
+            await staticCache.put(asset, response)
+            console.log("[SW] Precached:", asset)
           }
         } catch (e) {
-          console.warn(`Failed to precache route: ${route}`, e)
+          console.warn("[SW] Failed to precache:", asset, e)
         }
       }
 
-      console.log("[SW] Static assets and routes precached")
-    })(),
+      console.log("[SW] Install complete - static assets cached")
+    })()
   )
-  self.skipWaiting()
+  // Don't skip waiting - let the new SW wait until pages are closed
+  // This prevents disrupting users mid-session
 })
 
-// Activate event - clean up old caches
+// Activate event - clean up old caches and claim clients
 self.addEventListener("activate", (event) => {
+  console.log("[SW] Activating version:", CACHE_VERSION)
   event.waitUntil(
     (async () => {
+      // Clean up old caches
       const cacheNames = await caches.keys()
       await Promise.all(
         cacheNames
           .filter((name) => {
             return name.startsWith("skylog-") && name !== STATIC_CACHE && name !== DYNAMIC_CACHE && name !== CDN_CACHE
           })
-          .map((name) => caches.delete(name)),
+          .map((name) => {
+            console.log("[SW] Deleting old cache:", name)
+            return caches.delete(name)
+          })
       )
-      console.log("[SW] Old caches cleaned up")
-    })(),
+
+      // Take control of all clients immediately
+      await self.clients.claim()
+      console.log("[SW] Activation complete")
+    })()
   )
-  self.clients.claim()
 })
 
 // Helper: Check if URL is a CDN resource
@@ -72,14 +83,76 @@ function isAPIRequest(url) {
 
 // Helper: Check if request is for a page navigation
 function isNavigationRequest(request) {
-  return (
-    request.mode === "navigate" || (request.method === "GET" && request.headers.get("accept")?.includes("text/html"))
-  )
+  return request.mode === "navigate" || (request.method === "GET" && request.headers.get("accept")?.includes("text/html"))
 }
 
 // Helper: Check if URL is a Next.js static asset
 function isNextStaticAsset(url) {
   return url.includes("/_next/static/") || url.includes("/_next/image")
+}
+
+// Helper: Check if this is a cacheable app route
+function isCacheableRoute(url) {
+  const urlObj = new URL(url)
+  const pathname = urlObj.pathname
+  return CACHEABLE_ROUTES.includes(pathname) || CACHEABLE_ROUTES.some((route) => pathname.startsWith(route + "/"))
+}
+
+// Helper: Get the offline fallback page
+async function getOfflineFallback() {
+  const cache = await caches.open(STATIC_CACHE)
+  const offlinePage = await cache.match("/offline.html")
+  if (offlinePage) {
+    return offlinePage
+  }
+
+  // If offline.html isn't cached, return a basic offline response
+  return new Response(
+    `<!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Offline - OOOI</title>
+        <style>
+          body {
+            font-family: system-ui, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: #05080B;
+            color: white;
+            text-align: center;
+          }
+          .container { padding: 20px; }
+          h1 { font-size: 24px; margin-bottom: 16px; }
+          p { color: #888; margin-bottom: 20px; }
+          button {
+            padding: 12px 24px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>You're Offline</h1>
+          <p>Please connect to the internet to continue.</p>
+          <button onclick="location.reload()">Retry</button>
+        </div>
+      </body>
+    </html>`,
+    {
+      status: 503,
+      headers: { "Content-Type": "text/html" },
+    }
+  )
 }
 
 // Fetch event - handle different request types with appropriate strategies
@@ -92,7 +165,12 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // Strategy 1: CDN resources - Cache first, then network
+  // Skip chrome-extension and other non-http(s) requests
+  if (!url.startsWith("http")) {
+    return
+  }
+
+  // Strategy 1: CDN resources - Cache first with background update
   if (isCDNRequest(url)) {
     event.respondWith(
       (async () => {
@@ -100,7 +178,7 @@ self.addEventListener("fetch", (event) => {
         const cachedResponse = await cache.match(request)
 
         if (cachedResponse) {
-          // Return cached, but update in background
+          // Return cached, update in background
           fetch(request)
             .then((response) => {
               if (response.ok) {
@@ -118,18 +196,17 @@ self.addEventListener("fetch", (event) => {
           }
           return response
         } catch (e) {
-          // Return offline fallback for CDN
           return new Response(JSON.stringify({ error: "Offline - CDN unavailable" }), {
             status: 503,
             headers: { "Content-Type": "application/json" },
           })
         }
-      })(),
+      })()
     )
     return
   }
 
-  // Strategy 2: API requests - Network first, fallback to offline response
+  // Strategy 2: API requests - Network only (let client handle offline state)
   if (isAPIRequest(url)) {
     event.respondWith(
       (async () => {
@@ -147,10 +224,10 @@ self.addEventListener("fetch", (event) => {
             {
               status: 503,
               headers: { "Content-Type": "application/json" },
-            },
+            }
           )
         }
-      })(),
+      })()
     )
     return
   }
@@ -175,97 +252,79 @@ self.addEventListener("fetch", (event) => {
         } catch (e) {
           return new Response("Offline", { status: 503 })
         }
-      })(),
+      })()
     )
     return
   }
 
-  // Strategy 4: Page navigations - Network first, fallback to cache
+  // Strategy 4: Page navigations - CACHE FIRST with network update (offline-first!)
   if (isNavigationRequest(request)) {
     event.respondWith(
       (async () => {
-        try {
-          const response = await fetch(request)
+        const cache = await caches.open(STATIC_CACHE)
+        const urlObj = new URL(request.url)
+        const pathname = urlObj.pathname
 
-          // Cache successful page responses
-          if (response.ok) {
-            const cache = await caches.open(STATIC_CACHE)
-            cache.put(request, response.clone())
-          }
+        // Try to get from cache first
+        let cachedResponse = await cache.match(request)
 
-          return response
-        } catch (e) {
-          // Try to serve from cache
-          const cache = await caches.open(STATIC_CACHE)
-
-          // Try exact match first
-          let cachedResponse = await cache.match(request)
-
-          if (!cachedResponse) {
-            // Try matching the pathname
-            const urlObj = new URL(request.url)
-            cachedResponse = await cache.match(urlObj.pathname)
-          }
-
-          if (!cachedResponse) {
-            // Fallback to root page (app shell)
-            cachedResponse = await cache.match("/")
-          }
-
-          if (cachedResponse) {
-            return cachedResponse
-          }
-
-          // Return offline page
-          return new Response(
-            `<!DOCTYPE html>
-            <html>
-              <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <title>Offline - SkyLog</title>
-                <style>
-                  body { 
-                    font-family: system-ui, sans-serif; 
-                    display: flex; 
-                    align-items: center; 
-                    justify-content: center; 
-                    height: 100vh; 
-                    margin: 0;
-                    background: #1a1d2e;
-                    color: white;
-                    text-align: center;
-                  }
-                  .container { padding: 20px; }
-                  h1 { font-size: 24px; margin-bottom: 16px; }
-                  p { color: #888; }
-                  button {
-                    margin-top: 20px;
-                    padding: 12px 24px;
-                    background: #3b82f6;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 16px;
-                    cursor: pointer;
-                  }
-                </style>
-              </head>
-              <body>
-                <div class="container">
-                  <h1>You're Offline</h1>
-                  <p>Please check your internet connection and try again.</p>
-                  <button onclick="location.reload()">Retry</button>
-                </div>
-              </body>
-            </html>`,
-            {
-              status: 503,
-              headers: { "Content-Type": "text/html" },
-            },
-          )
+        // Also try matching by pathname (for different URL formats)
+        if (!cachedResponse) {
+          cachedResponse = await cache.match(pathname)
         }
-      })(),
+
+        // If we have a cached response, return it immediately
+        // and update the cache in the background
+        if (cachedResponse) {
+          // Background update (stale-while-revalidate)
+          fetch(request)
+            .then(async (networkResponse) => {
+              if (networkResponse.ok && !networkResponse.redirected) {
+                // Only cache successful, non-redirect responses
+                await cache.put(request, networkResponse.clone())
+                // Also cache by pathname for easier matching
+                if (pathname !== request.url) {
+                  await cache.put(pathname, networkResponse)
+                }
+              }
+            })
+            .catch(() => {
+              // Network failed, but we already returned cached version
+            })
+
+          return cachedResponse
+        }
+
+        // No cache - try network
+        try {
+          const networkResponse = await fetch(request)
+
+          // Cache successful HTML responses for future offline use
+          if (networkResponse.ok && !networkResponse.redirected) {
+            const responseToCache = networkResponse.clone()
+            // Cache both by full URL and pathname
+            cache.put(request, responseToCache.clone())
+            if (pathname !== request.url) {
+              cache.put(pathname, responseToCache)
+            }
+            console.log("[SW] Cached page:", pathname)
+          }
+
+          return networkResponse
+        } catch (e) {
+          // Network failed, no cache - show offline page
+          console.log("[SW] Network failed, no cache for:", pathname)
+
+          // Try to serve root as fallback (app shell)
+          const rootCache = await cache.match("/")
+          if (rootCache) {
+            return rootCache
+          }
+
+          // Last resort - offline page
+          return getOfflineFallback()
+        }
+      })()
     )
     return
   }
@@ -286,7 +345,7 @@ self.addEventListener("fetch", (event) => {
         .catch(() => null)
 
       return cachedResponse || (await fetchPromise) || new Response("Offline", { status: 503 })
-    })(),
+    })()
   )
 })
 
@@ -311,9 +370,35 @@ async function notifyClientsToSync() {
   })
 }
 
-// Listen for skip waiting message
+// Listen for messages from clients
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") {
     self.skipWaiting()
   }
+
+  // Allow clients to request cache updates
+  if (event.data?.type === "CACHE_PAGES") {
+    const pages = event.data.pages || CACHEABLE_ROUTES
+    cachePages(pages)
+  }
 })
+
+// Function to cache pages (called after successful auth)
+async function cachePages(pages) {
+  const cache = await caches.open(STATIC_CACHE)
+
+  for (const page of pages) {
+    try {
+      const response = await fetch(page, {
+        credentials: "same-origin",
+        headers: { Accept: "text/html" },
+      })
+      if (response.ok && !response.redirected) {
+        await cache.put(page, response)
+        console.log("[SW] Runtime cached:", page)
+      }
+    } catch (e) {
+      console.warn("[SW] Failed to cache:", page, e)
+    }
+  }
+}

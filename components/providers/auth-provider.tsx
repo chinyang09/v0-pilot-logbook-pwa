@@ -28,6 +28,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await saveUserSession(session)
     const savedSession = await getUserSession()
     setUser(savedSession || null)
+
+    // After successful login, trigger proactive caching of app pages
+    if (savedSession && "serviceWorker" in navigator) {
+      navigator.serviceWorker.ready.then((registration) => {
+        if (registration.active) {
+          registration.active.postMessage({
+            type: "CACHE_PAGES",
+            pages: ["/", "/logbook", "/new-flight", "/aircraft", "/airports", "/crew", "/data"],
+          })
+          console.log("[Auth] Triggered proactive page caching after login")
+        }
+      })
+    }
   }, [])
 
   const logout = useCallback(async () => {
@@ -130,6 +143,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.log("[v0] Found valid local session for:", localSession.callsign)
           setUser(localSession)
           setIsLoading(false)
+
+          // Proactively cache pages in background for offline access
+          if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.ready.then((registration) => {
+              if (registration.active) {
+                registration.active.postMessage({
+                  type: "CACHE_PAGES",
+                  pages: ["/", "/logbook", "/new-flight", "/aircraft", "/airports", "/crew", "/data"],
+                })
+              }
+            })
+          }
           return
         }
 
