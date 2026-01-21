@@ -4,6 +4,7 @@ import { ServiceWorkerRegister } from "@/components/service-worker-register"
 import { SyncProvider } from "@/components/providers/sync-provider"
 import { AuthProvider } from "@/components/providers/auth-provider"
 import { AircraftPreloader } from "@/components/aircraft-preloader"
+import { OCRModelsPreloader } from "@/components/ocr-models-preloader"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -57,6 +58,7 @@ export default function RootLayout({
       <body className="bg-background font-sans antialiased" style={{ backgroundColor: "#05080B" }}>
         <ServiceWorkerRegister />
         <AircraftPreloader />
+        <OCRModelsPreloader />
         <AuthProvider>
           <SyncProvider>{children}</SyncProvider>
         </AuthProvider>

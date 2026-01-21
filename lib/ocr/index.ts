@@ -9,6 +9,8 @@ export {
   preloadOCR,
   isOCRReady,
   resetOCR,
+  checkOCRModelsCached,
+  ensureOCRModelsCached,
 } from "./ocr-service"
 
 export {
