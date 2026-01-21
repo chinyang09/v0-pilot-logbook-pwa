@@ -1,7 +1,15 @@
-const CACHE_VERSION = "v3"
+const CACHE_VERSION = "v4"
 const STATIC_CACHE = `skylog-static-${CACHE_VERSION}`
 const DYNAMIC_CACHE = `skylog-dynamic-${CACHE_VERSION}`
 const CDN_CACHE = `skylog-cdn-${CACHE_VERSION}`
+const MODELS_CACHE = `skylog-models-${CACHE_VERSION}`
+
+// OCR model files for offline support (critical for offline OCR functionality)
+const OCR_MODEL_FILES = [
+  "/models/ch_PP-OCRv4_det_infer.onnx",
+  "/models/ch_PP-OCRv4_rec_infer.onnx",
+  "/models/ppocr_keys_v1.txt",
+]
 
 // Static assets to precache during install (these don't require auth)
 const PRECACHE_ASSETS = [
@@ -24,6 +32,7 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const staticCache = await caches.open(STATIC_CACHE)
+      const modelsCache = await caches.open(MODELS_CACHE)
 
       // Cache static assets that don't require authentication
       for (const asset of PRECACHE_ASSETS) {
@@ -39,7 +48,23 @@ self.addEventListener("install", (event) => {
         }
       }
 
-      console.log("[SW] Install complete - static assets cached")
+      // Cache OCR models for offline support (non-blocking)
+      console.log("[SW] Starting OCR models precache...")
+      for (const modelPath of OCR_MODEL_FILES) {
+        try {
+          const response = await fetch(modelPath, { credentials: "same-origin" })
+          if (response.ok) {
+            await modelsCache.put(modelPath, response)
+            console.log("[SW] Cached OCR model:", modelPath)
+          } else {
+            console.warn("[SW] Failed to fetch OCR model:", modelPath, response.status)
+          }
+        } catch (e) {
+          console.warn("[SW] Failed to precache OCR model:", modelPath, e)
+        }
+      }
+
+      console.log("[SW] Install complete - static assets and models cached")
     })()
   )
   // Don't skip waiting - let the new SW wait until pages are closed
@@ -53,10 +78,11 @@ self.addEventListener("activate", (event) => {
     (async () => {
       // Clean up old caches
       const cacheNames = await caches.keys()
+      const validCaches = [STATIC_CACHE, DYNAMIC_CACHE, CDN_CACHE, MODELS_CACHE]
       await Promise.all(
         cacheNames
           .filter((name) => {
-            return name.startsWith("skylog-") && name !== STATIC_CACHE && name !== DYNAMIC_CACHE && name !== CDN_CACHE
+            return name.startsWith("skylog-") && !validCaches.includes(name)
           })
           .map((name) => {
             console.log("[SW] Deleting old cache:", name)
@@ -89,6 +115,11 @@ function isNavigationRequest(request) {
 // Helper: Check if URL is a Next.js static asset
 function isNextStaticAsset(url) {
   return url.includes("/_next/static/") || url.includes("/_next/image")
+}
+
+// Helper: Check if URL is an OCR model file
+function isOCRModelRequest(url) {
+  return url.includes("/models/") && (url.endsWith(".onnx") || url.endsWith(".txt"))
 }
 
 // Helper: Check if this is a cacheable app route
@@ -257,7 +288,40 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // Strategy 4: Page navigations - CACHE FIRST with network update (offline-first!)
+  // Strategy 4: OCR model files - Cache first (critical for offline OCR)
+  if (isOCRModelRequest(url)) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(MODELS_CACHE)
+        const cachedResponse = await cache.match(request)
+
+        if (cachedResponse) {
+          console.log("[SW] Serving OCR model from cache:", url)
+          return cachedResponse
+        }
+
+        // Not in cache - try to fetch and cache
+        try {
+          console.log("[SW] Fetching OCR model from network:", url)
+          const response = await fetch(request)
+          if (response.ok) {
+            cache.put(request, response.clone())
+            console.log("[SW] Cached OCR model:", url)
+          }
+          return response
+        } catch (e) {
+          console.error("[SW] Failed to fetch OCR model offline:", url, e)
+          return new Response(JSON.stringify({ error: "OCR model not available offline" }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          })
+        }
+      })()
+    )
+    return
+  }
+
+  // Strategy 5: Page navigations - CACHE FIRST with network update (offline-first!)
   if (isNavigationRequest(request)) {
     event.respondWith(
       (async () => {
@@ -329,7 +393,7 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // Strategy 5: Other requests - Stale while revalidate
+  // Strategy 6: Other requests - Stale while revalidate
   event.respondWith(
     (async () => {
       const cache = await caches.open(DYNAMIC_CACHE)
@@ -380,6 +444,66 @@ self.addEventListener("message", (event) => {
   if (event.data?.type === "CACHE_PAGES") {
     const pages = event.data.pages || CACHEABLE_ROUTES
     cachePages(pages)
+  }
+
+  // Check if OCR models are cached
+  if (event.data?.type === "CHECK_OCR_MODELS_CACHED") {
+    event.waitUntil(
+      (async () => {
+        const cache = await caches.open(MODELS_CACHE)
+        const results = await Promise.all(
+          OCR_MODEL_FILES.map(async (modelPath) => {
+            const response = await cache.match(modelPath)
+            return { path: modelPath, cached: !!response }
+          })
+        )
+        const allCached = results.every((r) => r.cached)
+        event.source.postMessage({
+          type: "OCR_MODELS_CACHE_STATUS",
+          allCached,
+          details: results,
+        })
+      })()
+    )
+  }
+
+  // Manually trigger OCR models caching
+  if (event.data?.type === "CACHE_OCR_MODELS") {
+    event.waitUntil(
+      (async () => {
+        const cache = await caches.open(MODELS_CACHE)
+        const results = []
+
+        for (const modelPath of OCR_MODEL_FILES) {
+          try {
+            // Check if already cached
+            const existing = await cache.match(modelPath)
+            if (existing) {
+              results.push({ path: modelPath, success: true, cached: true })
+              continue
+            }
+
+            // Fetch and cache
+            const response = await fetch(modelPath, { credentials: "same-origin" })
+            if (response.ok) {
+              await cache.put(modelPath, response)
+              results.push({ path: modelPath, success: true, cached: false })
+            } else {
+              results.push({ path: modelPath, success: false, error: `HTTP ${response.status}` })
+            }
+          } catch (e) {
+            results.push({ path: modelPath, success: false, error: e.message })
+          }
+        }
+
+        const allSuccess = results.every((r) => r.success)
+        event.source.postMessage({
+          type: "OCR_MODELS_CACHE_RESULT",
+          success: allSuccess,
+          details: results,
+        })
+      })()
+    )
   }
 })
 
