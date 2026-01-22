@@ -16,6 +16,10 @@ export type {
   Approach,
   AdditionalCrew,
   SyncStatus,
+  SignaturePoint,
+  SignatureStroke,
+  SignerRole,
+  FlightSignature,
 } from "@/types/entities/flight.types";
 export type {
   Aircraft,
