@@ -388,7 +388,8 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
     const handleScroll = useCallback(() => {
       if (isExternalScrollRef.current) return;
-      onScrollStart?.();
+      // Note: onScrollStart is now triggered by touch events, not scroll events
+      // This prevents programmatic/momentum scrolls from changing the sync source
 
       if (!onTopFlightChange || flights.length === 0) return;
 
@@ -403,7 +404,14 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           onTopFlightChange(topFlight);
         }
       }
-    }, [flights, onTopFlightChange, onScrollStart, rowVirtualizer]);
+    }, [flights, onTopFlightChange, rowVirtualizer]);
+
+    // Handle user touch/interaction start on flight list
+    const handleTouchStart = useCallback(() => {
+      if (!isExternalScrollRef.current) {
+        onScrollStart?.();
+      }
+    }, [onScrollStart]);
 
     useEffect(() => {
       const container = scrollContainerRef.current;
@@ -483,7 +491,12 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     if (flights.length === 0) {
       return (
         <>
-          <div ref={scrollContainerRef} className="h-full overflow-y-auto">
+          <div
+            ref={scrollContainerRef}
+            className="h-full overflow-y-auto"
+            onTouchStart={handleTouchStart}
+            onMouseDown={handleTouchStart}
+          >
             <div
               style={{
                 height: `${topSpacerHeight}px`,
@@ -512,6 +525,8 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           ref={scrollContainerRef}
           className="h-full overflow-y-auto"
           style={{ contain: "strict" }}
+          onTouchStart={handleTouchStart}
+          onMouseDown={handleTouchStart}
         >
           {/* Top spacer for calendar */}
           <div
