@@ -393,16 +393,29 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
       if (!onTopFlightChange || flights.length === 0) return;
 
-      // Find the first visible virtual item
       const visibleItems = rowVirtualizer.getVirtualItems();
-      if (visibleItems.length > 0) {
-        const topVisibleIndex = visibleItems[0].index;
-        const topFlight = flights[topVisibleIndex];
+      if (visibleItems.length === 0) return;
 
-        if (topFlight && topFlight.id !== lastDetectedFlightRef.current) {
-          lastDetectedFlightRef.current = topFlight.id;
-          onTopFlightChange(topFlight);
+      // Get the scroll offset from the virtualizer
+      const scrollOffset = rowVirtualizer.scrollOffset ?? 0;
+
+      // Find the first item that is actually visible at the top of the viewport.
+      // getVirtualItems() includes overscan items rendered above/below the viewport.
+      // Overscan items above have item.end <= scrollOffset.
+      // The first visible item is the first one where item.end > scrollOffset.
+      let topVisibleItem = visibleItems[0];
+      for (const item of visibleItems) {
+        if (item.end > scrollOffset) {
+          topVisibleItem = item;
+          break;
         }
+      }
+
+      const topFlight = flights[topVisibleItem.index];
+
+      if (topFlight && topFlight.id !== lastDetectedFlightRef.current) {
+        lastDetectedFlightRef.current = topFlight.id;
+        onTopFlightChange(topFlight);
       }
     }, [flights, onTopFlightChange, rowVirtualizer]);
 
