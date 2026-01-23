@@ -4,28 +4,56 @@
 
 /**
  * Signature data structures for capturing hand-drawn signatures
- * Stores raw drawing data for resolution-independent rendering
+ * Stores vector data for resolution-independent rendering
+ *
+ * Vector-based signature system:
+ * - Signatures are captured as normalized strokes (0-1 range)
+ * - On save, strokes are normalized to their bounding box
+ * - This preserves aspect ratio and allows re-centering
+ * - Rendering uses uniform scaling (same factor for X and Y)
  */
 export interface SignaturePoint {
-  x: number           // X coordinate normalized to 0-1
-  y: number           // Y coordinate normalized to 0-1
+  x: number           // X coordinate normalized to 0-1 (relative to signature bounds)
+  y: number           // Y coordinate normalized to 0-1 (relative to signature bounds)
   pressure?: number   // Pressure if available (0-1), from touch devices
-  timestamp: number   // Milliseconds since stroke start
+  timestamp?: number  // Milliseconds since stroke start (optional for backward compat)
 }
 
 export interface SignatureStroke {
   points: SignaturePoint[]
-  startTime: number   // Unix timestamp when stroke began
+  startTime?: number   // Unix timestamp when stroke began (optional for backward compat)
+}
+
+/**
+ * Bounding box of the signature in normalized coordinates
+ * After normalization, all signatures occupy (0,0) → (1,1)
+ */
+export interface SignatureBounds {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
 }
 
 export type SignerRole = "pic" | "sic" | "instructor" | "examiner" | "student"
 
 export interface FlightSignature {
   strokes: SignatureStroke[]
-  canvasWidth: number   // Original canvas width for reference
-  canvasHeight: number  // Original canvas height for reference
-  capturedAt: number    // Unix timestamp when signature was saved
-  signerId?: string     // ID of the signer (crew member)
+  /**
+   * Original bounding box before normalization
+   * Used to preserve aspect ratio information:
+   * aspectRatio = (maxX - minX) / (maxY - minY)
+   */
+  bounds?: SignatureBounds
+  /**
+   * Original aspect ratio of the signature (width / height)
+   * This is the key value for aspect-preserving rendering
+   */
+  aspectRatio?: number
+  canvasWidth?: number   // Original canvas width (deprecated, kept for backward compat)
+  canvasHeight?: number  // Original canvas height (deprecated, kept for backward compat)
+  capturedAt: number     // Unix timestamp when signature was saved
+  signerId?: string      // ID of the signer (crew member)
   signerRole?: SignerRole
   signerName?: string
   signerLicenseNumber?: string  // License number of the signer

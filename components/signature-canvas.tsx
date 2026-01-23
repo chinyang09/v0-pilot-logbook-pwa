@@ -18,6 +18,12 @@ import type {
   FlightSignature,
   SignerRole,
 } from "@/lib/db";
+import {
+  prepareSignatureForStorage,
+  renderSignatureCentered,
+  migrateToVectorSignature,
+  isVectorSignature,
+} from "@/lib/utils/signature-vector";
 
 // Crew member available for selection in signature
 export interface SignatureCrewMember {
@@ -85,6 +91,8 @@ export function SignatureCanvas({
   }, [selectedCrewId, isLocked]);
 
   // Draw all strokes on canvas
+  // For locked/saved signatures: use vector rendering with aspect ratio preservation
+  // For active drawing: use direct canvas rendering for real-time feedback
   const redrawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -92,10 +100,26 @@ export function SignatureCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
     const computedStyle = getComputedStyle(canvas);
     const foregroundColor = computedStyle.color || "#ffffff";
+
+    // If locked and we have a saved signature, use aspect-preserving render
+    if (isLocked && initialSignature && initialSignature.strokes.length > 0) {
+      // Migrate old signatures to vector format if needed
+      const vectorSignature = isVectorSignature(initialSignature)
+        ? initialSignature
+        : migrateToVectorSignature(initialSignature);
+
+      renderSignatureCentered(ctx, vectorSignature, {
+        strokeColor: foregroundColor,
+        lineWidth: 2,
+        padding: 0.08, // 8% padding
+      });
+      return;
+    }
+
+    // For active drawing, use direct canvas rendering
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     ctx.strokeStyle = foregroundColor;
     ctx.lineWidth = 2;
@@ -126,7 +150,7 @@ export function SignatureCanvas({
       }
       ctx.stroke();
     }
-  }, [strokes, currentStroke]);
+  }, [strokes, currentStroke, isLocked, initialSignature]);
 
   useEffect(() => {
     redrawCanvas();
@@ -255,9 +279,23 @@ export function SignatureCanvas({
       onLicenseUpdate(selectedCrewId, licenseInput);
     }
 
-    const signature: FlightSignature = {
+    // Prepare signature with vector normalization
+    // This computes bounds, normalizes strokes, and calculates aspect ratio
+    const {
+      strokes: normalizedStrokes,
+      bounds,
+      aspectRatio,
+    } = prepareSignatureForStorage(
       strokes,
-      canvasWidth: canvasSize.width,
+      canvasSize.width,
+      canvasSize.height
+    );
+
+    const signature: FlightSignature = {
+      strokes: normalizedStrokes,
+      bounds,
+      aspectRatio,
+      canvasWidth: canvasSize.width, // Keep for backward compatibility
       canvasHeight: canvasSize.height,
       capturedAt: Date.now(),
       signerId: selectedCrewId,
