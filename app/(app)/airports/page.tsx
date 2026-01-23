@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { SyncStatus } from "@/components/sync-status";
 import { PageContainer } from "@/components/page-container";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useSearchableList } from "@/hooks/use-searchable-list";
 import { useAirportDatabase } from "@/hooks/data";
+import { StandardPageHeader } from "@/components/standard-page-header";
 import {
   searchAirports,
   toggleAirportFavorite,
@@ -28,12 +29,26 @@ export default function AirportsPage() {
     searchParams.get("return") || searchParams.get("returnTo") || "/new-flight";
 
   const { airports, isLoading } = useAirportDatabase();
-  const [searchQuery, setSearchQuery] = useState("");
-  const debouncedSearchQuery = useDebounce(searchQuery, 150);
-  const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
   const [recentAirports, setRecentAirports] = useState<typeof airports>([]);
 
-  const observerTarget = useRef<HTMLDivElement>(null);
+  const {
+    searchQuery,
+    setSearchQuery,
+    displayedItems: filteredAirports,
+    observerTarget,
+    totalFilteredCount,
+  } = useSearchableList({
+    items: airports,
+    searchFn: (items, query) => searchAirports(items, query, items.length),
+    sortFn: (a, b) => {
+      // Sort: Favorites first, then Alphabetical ICAO
+      if (a.isFavorite && !b.isFavorite) return -1;
+      if (!a.isFavorite && b.isFavorite) return 1;
+      return a.icao.localeCompare(b.icao);
+    },
+    itemsPerPage: ITEMS_PER_PAGE,
+    isLoading,
+  });
 
   useEffect(() => {
     const loadRecentAirports = async () => {
@@ -45,45 +60,6 @@ export default function AirportsPage() {
     };
     loadRecentAirports();
   }, []);
-
-  const filteredAirports = useMemo(() => {
-    let baseList = airports;
-
-    // If searching, use search utility
-    if (debouncedSearchQuery.trim()) {
-      baseList = searchAirports(airports, debouncedSearchQuery, airports.length);
-    }
-
-    // Sort: Favorites first, then Alphabetical ICAO
-    return baseList
-      .sort((a, b) => {
-        if (a.isFavorite && !b.isFavorite) return -1;
-        if (!a.isFavorite && b.isFavorite) return 1;
-        return a.icao.localeCompare(b.icao);
-      })
-      .slice(0, displayCount);
-  }, [airports, debouncedSearchQuery, displayCount]);
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !isLoading) {
-          setDisplayCount((prev) =>
-            Math.min(prev + ITEMS_PER_PAGE, airports.length)
-          );
-        }
-      },
-      { threshold: 0.1 }
-    );
-    const target = observerTarget.current;
-    if (target) observer.observe(target);
-    return () => {
-      if (target) observer.unobserve(target);
-    };
-  }, [isLoading, airports.length]);
-
-  useEffect(() => {
-    setDisplayCount(ITEMS_PER_PAGE);
-  }, [searchQuery]);
 
   const handleAirportSelect = async (icao: string) => {
     if (fieldType) {
@@ -172,35 +148,19 @@ export default function AirportsPage() {
     </div>
   );
 
+  const pageTitle = !fieldType
+    ? "Airports"
+    : fieldType.includes("departure")
+    ? "Departure"
+    : "Arrival";
+
   return (
     <PageContainer
       header={
-        <header className="flex-none bg-background/30 backdrop-blur-xl border-b border-border/50 z-50">
-          <div className="container mx-auto px-3">
-            <div className="flex items-center justify-between h-12">
-              <div className="flex items-center gap-2">
-                {fieldType && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => router.back()}
-                    className="h-8 w-8 p-0"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                  </Button>
-                )}
-                <h1 className="text-lg font-semibold text-foreground">
-                  {!fieldType
-                    ? "Airports"
-                    : fieldType.includes("departure")
-                    ? "Departure"
-                    : "Arrival"}
-                </h1>
-              </div>
-              <SyncStatus />
-            </div>
-          </div>
-        </header>
+        <StandardPageHeader
+          title={pageTitle}
+          showBack={!!fieldType}
+        />
       }
     >
       <div className="container  mx-auto px-3 pt-3 pb-safe">
@@ -218,7 +178,7 @@ export default function AirportsPage() {
         </div>
 
         <div className="space-y-3">
-          {!debouncedSearchQuery && (
+          {!searchQuery.trim() && (
             <>
               {/* Favorites Section */}
               {airports.some((a) => a.isFavorite) && (
@@ -250,7 +210,7 @@ export default function AirportsPage() {
             </>
           )}
 
-          {debouncedSearchQuery && (
+          {searchQuery.trim() && (
             <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
               {filteredAirports.length} results
             </h2>
