@@ -2,6 +2,15 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Trash2, Check, PenLine } from "lucide-react";
 import type {
   SignaturePoint,
@@ -10,21 +19,29 @@ import type {
   SignerRole,
 } from "@/lib/db";
 
+// Crew member available for selection in signature
+export interface SignatureCrewMember {
+  id: string;
+  name: string;
+  role: SignerRole;
+  licenseNumber?: string;
+}
+
 interface SignatureCanvasProps {
   onSave: (signature: FlightSignature) => void;
   onClear: () => void;
+  onLicenseUpdate?: (crewId: string, licenseNumber: string) => void;
   initialSignature?: FlightSignature | null;
-  signerRole?: SignerRole;
-  signerName?: string;
+  flightCrew?: SignatureCrewMember[];
   disabled?: boolean;
 }
 
 export function SignatureCanvas({
   onSave,
   onClear,
+  onLicenseUpdate,
   initialSignature,
-  signerRole,
-  signerName,
+  flightCrew = [],
   disabled = false,
 }: SignatureCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,6 +58,16 @@ export function SignatureCanvas({
   const [isLocked, setIsLocked] = useState(
     !!(initialSignature?.strokes && initialSignature.strokes.length > 0)
   );
+
+  // Selected crew member state
+  const [selectedCrewId, setSelectedCrewId] = useState<string>(
+    initialSignature?.signerId || ""
+  );
+  // License input for crew without license
+  const [licenseInput, setLicenseInput] = useState<string>("");
+
+  // Get the selected crew member
+  const selectedCrew = flightCrew.find((c) => c.id === selectedCrewId);
 
   // Initialize canvas size
   useEffect(() => {
@@ -80,7 +107,10 @@ export function SignatureCanvas({
     // Draw all strokes
     const allStrokes = [...strokes];
     if (currentStroke.length > 0) {
-      allStrokes.push({ points: currentStroke, startTime: strokeStartTime.current });
+      allStrokes.push({
+        points: currentStroke,
+        startTime: strokeStartTime.current,
+      });
     }
 
     for (const stroke of allStrokes) {
@@ -113,6 +143,9 @@ export function SignatureCanvas({
       setStrokes(initialSignature.strokes);
       setHasUnsavedChanges(false);
       setIsLocked(true);
+      if (initialSignature.signerId) {
+        setSelectedCrewId(initialSignature.signerId);
+      }
     } else {
       setStrokes([]);
       setIsLocked(false);
@@ -122,7 +155,9 @@ export function SignatureCanvas({
   // Get normalized coordinates from event
   const getPoint = useCallback(
     (
-      e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+      e:
+        | React.MouseEvent<HTMLCanvasElement>
+        | React.TouchEvent<HTMLCanvasElement>
     ): SignaturePoint => {
       const canvas = canvasRef.current;
       if (!canvas) return { x: 0, y: 0, timestamp: 0 };
@@ -138,7 +173,7 @@ export function SignatureCanvas({
         clientY = touch.clientY;
         // Try to get pressure from touch event
         if ("force" in touch) {
-          pressure = (touch as any).force;
+          pressure = (touch as unknown as { force: number }).force;
         }
       } else {
         clientX = e.clientX;
@@ -161,7 +196,9 @@ export function SignatureCanvas({
 
   const handleStart = useCallback(
     (
-      e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+      e:
+        | React.MouseEvent<HTMLCanvasElement>
+        | React.TouchEvent<HTMLCanvasElement>
     ) => {
       if (disabled || isLocked) return;
       e.preventDefault();
@@ -175,7 +212,9 @@ export function SignatureCanvas({
 
   const handleMove = useCallback(
     (
-      e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+      e:
+        | React.MouseEvent<HTMLCanvasElement>
+        | React.TouchEvent<HTMLCanvasElement>
     ) => {
       if (!isDrawing || disabled || isLocked) return;
       e.preventDefault();
@@ -187,7 +226,9 @@ export function SignatureCanvas({
 
   const handleEnd = useCallback(
     (
-      e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+      e:
+        | React.MouseEvent<HTMLCanvasElement>
+        | React.TouchEvent<HTMLCanvasElement>
     ) => {
       if (!isDrawing) return;
       e.preventDefault();
@@ -216,19 +257,37 @@ export function SignatureCanvas({
   const handleSave = useCallback(() => {
     if (strokes.length === 0) return;
 
+    // Determine the license number to use
+    const licenseNumber = selectedCrew?.licenseNumber || licenseInput || undefined;
+
+    // If license was entered and callback provided, update the crew record
+    if (licenseInput && selectedCrewId && onLicenseUpdate) {
+      onLicenseUpdate(selectedCrewId, licenseInput);
+    }
+
     const signature: FlightSignature = {
       strokes,
       canvasWidth: canvasSize.width,
       canvasHeight: canvasSize.height,
       capturedAt: Date.now(),
-      signerRole,
-      signerName,
+      signerId: selectedCrewId || undefined,
+      signerRole: selectedCrew?.role,
+      signerName: selectedCrew?.name,
+      signerLicenseNumber: licenseNumber,
     };
 
     onSave(signature);
     setHasUnsavedChanges(false);
     setIsLocked(true);
-  }, [strokes, canvasSize, signerRole, signerName, onSave]);
+  }, [
+    strokes,
+    canvasSize,
+    selectedCrewId,
+    selectedCrew,
+    licenseInput,
+    onLicenseUpdate,
+    onSave,
+  ]);
 
   // Handle re-sign action
   const handleResign = useCallback(() => {
@@ -236,13 +295,87 @@ export function SignatureCanvas({
     setCurrentStroke([]);
     setHasUnsavedChanges(false);
     setIsLocked(false);
+    setLicenseInput("");
     onClear();
   }, [onClear]);
 
+  // Handle crew selection change
+  const handleCrewChange = useCallback((crewId: string) => {
+    setSelectedCrewId(crewId);
+    setLicenseInput(""); // Reset license input when crew changes
+  }, []);
+
   const hasSignature = strokes.length > 0;
+  const showLicenseInput = selectedCrew && !selectedCrew.licenseNumber;
 
   return (
     <div className="space-y-3">
+      {/* Crew Selection */}
+      {flightCrew.length > 0 && !isLocked && (
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Signed by</Label>
+          <Select
+            value={selectedCrewId}
+            onValueChange={handleCrewChange}
+            disabled={disabled}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select crew member" />
+            </SelectTrigger>
+            <SelectContent>
+              {flightCrew.map((crew) => (
+                <SelectItem key={crew.id} value={crew.id}>
+                  {crew.name} ({crew.role.toUpperCase()})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {/* License Display or Input */}
+      {selectedCrew && !isLocked && (
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">License Number</Label>
+          {showLicenseInput ? (
+            <Input
+              type="text"
+              placeholder="Enter license number"
+              value={licenseInput}
+              onChange={(e) => setLicenseInput(e.target.value)}
+              disabled={disabled}
+              className="w-full"
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground px-3 py-2 bg-muted rounded-md">
+              {selectedCrew.licenseNumber}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Locked state: show signer info */}
+      {isLocked && initialSignature?.signerName && (
+        <div className="text-sm text-muted-foreground space-y-1">
+          <p>
+            <span className="font-medium">Signed by:</span>{" "}
+            {initialSignature.signerName}
+            {initialSignature.signerRole && (
+              <span className="ml-1">
+                ({initialSignature.signerRole.toUpperCase()})
+              </span>
+            )}
+          </p>
+          {initialSignature.signerLicenseNumber && (
+            <p>
+              <span className="font-medium">License:</span>{" "}
+              {initialSignature.signerLicenseNumber}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Canvas */}
       <div
         ref={containerRef}
         className="relative border border-border rounded-lg bg-background overflow-hidden"
@@ -264,18 +397,14 @@ export function SignatureCanvas({
         />
         {!hasSignature && !isDrawing && !isLocked && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span className="text-muted-foreground text-sm">
-              Sign here
-            </span>
+            <span className="text-muted-foreground text-sm">Sign here</span>
           </div>
         )}
       </div>
 
       {isLocked ? (
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">
-            Signature saved
-          </p>
+          <p className="text-xs text-muted-foreground">Signature saved</p>
           <Button
             variant="outline"
             size="sm"
