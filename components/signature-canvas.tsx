@@ -63,8 +63,12 @@ export function SignatureCanvas({
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Get the foreground color from computed style (inherits from CSS)
+    const computedStyle = getComputedStyle(canvas);
+    const foregroundColor = computedStyle.color || "#ffffff";
+
     // Set drawing style
-    ctx.strokeStyle = "currentColor";
+    ctx.strokeStyle = foregroundColor;
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -229,10 +233,9 @@ export function SignatureCanvas({
           ref={canvasRef}
           width={canvasSize.width}
           height={canvasSize.height}
-          className={`w-full touch-none ${
+          className={`w-full touch-none text-foreground ${
             disabled ? "opacity-50 cursor-not-allowed" : "cursor-crosshair"
           }`}
-          style={{ color: "var(--foreground)" }}
           onMouseDown={handleStart}
           onMouseMove={handleMove}
           onMouseUp={handleEnd}
