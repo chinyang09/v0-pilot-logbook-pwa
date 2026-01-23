@@ -1,17 +1,20 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
+import type React from "react";
 import { Input } from "@/components/ui/input";
 import { SyncStatus } from "@/components/sync-status";
 import { PageContainer } from "@/components/page-container";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useSearchableList } from "@/hooks/use-searchable-list";
 import { useAirportDatabase } from "@/hooks/data";
+import { StandardPageHeader } from "@/components/standard-page-header";
 import {
   searchAirports,
   toggleAirportFavorite,
   getRecentlyUsedAirports,
   addRecentlyUsedAirport,
   getAirportByIcao,
+  type Airport,
 } from "@/lib/db";
 import { Star, Search, MapPin, ArrowLeft, ChevronRight } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -28,12 +31,26 @@ export default function AirportsPage() {
     searchParams.get("return") || searchParams.get("returnTo") || "/new-flight";
 
   const { airports, isLoading } = useAirportDatabase();
-  const [searchQuery, setSearchQuery] = useState("");
-  const debouncedSearchQuery = useDebounce(searchQuery, 150);
-  const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
   const [recentAirports, setRecentAirports] = useState<typeof airports>([]);
 
-  const observerTarget = useRef<HTMLDivElement>(null);
+  const {
+    searchQuery,
+    setSearchQuery,
+    displayedItems: filteredAirports,
+    observerTarget,
+    totalFilteredCount,
+  } = useSearchableList<Airport>({
+    items: airports,
+    searchFn: (items: Airport[], query: string) => searchAirports(items, query, items.length),
+    sortFn: (a: Airport, b: Airport) => {
+      // Sort: Favorites first, then Alphabetical ICAO
+      if (a.isFavorite && !b.isFavorite) return -1;
+      if (!a.isFavorite && b.isFavorite) return 1;
+      return a.icao.localeCompare(b.icao);
+    },
+    itemsPerPage: ITEMS_PER_PAGE,
+    isLoading,
+  });
 
   useEffect(() => {
     const loadRecentAirports = async () => {
@@ -45,45 +62,6 @@ export default function AirportsPage() {
     };
     loadRecentAirports();
   }, []);
-
-  const filteredAirports = useMemo(() => {
-    let baseList = airports;
-
-    // If searching, use search utility
-    if (debouncedSearchQuery.trim()) {
-      baseList = searchAirports(airports, debouncedSearchQuery, airports.length);
-    }
-
-    // Sort: Favorites first, then Alphabetical ICAO
-    return baseList
-      .sort((a, b) => {
-        if (a.isFavorite && !b.isFavorite) return -1;
-        if (!a.isFavorite && b.isFavorite) return 1;
-        return a.icao.localeCompare(b.icao);
-      })
-      .slice(0, displayCount);
-  }, [airports, debouncedSearchQuery, displayCount]);
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !isLoading) {
-          setDisplayCount((prev) =>
-            Math.min(prev + ITEMS_PER_PAGE, airports.length)
-          );
-        }
-      },
-      { threshold: 0.1 }
-    );
-    const target = observerTarget.current;
-    if (target) observer.observe(target);
-    return () => {
-      if (target) observer.unobserve(target);
-    };
-  }, [isLoading, airports.length]);
-
-  useEffect(() => {
-    setDisplayCount(ITEMS_PER_PAGE);
-  }, [searchQuery]);
 
   const handleAirportSelect = async (icao: string) => {
     if (fieldType) {
@@ -105,7 +83,7 @@ export default function AirportsPage() {
   };
 
   const renderAirportCard = (
-    airport: (typeof airports)[0],
+    airport: Airport,
     isRecent = false
   ) => (
     // Change <button> to <div>
@@ -114,7 +92,7 @@ export default function AirportsPage() {
       onClick={() => handleAirportSelect(airport.icao)}
       role="button" // Accessibility: Tells screen readers this is interactive
       tabIndex={0} // Accessibility: Makes it focusable via keyboard
-      onKeyDown={(e) => {
+      onKeyDown={(e: React.KeyboardEvent) => {
         if (e.key === "Enter" || e.key === " ") {
           handleAirportSelect(airport.icao);
         }
@@ -157,7 +135,7 @@ export default function AirportsPage() {
           variant="ghost"
           size="icon"
           className="h-9 w-9 hover:bg-primary/20 relative z-10"
-          onClick={(e) => handleToggleFavorite(e, airport.icao)}
+          onClick={(e: React.MouseEvent) => handleToggleFavorite(e, airport.icao)}
         >
           <Star
             className={cn(
@@ -172,35 +150,19 @@ export default function AirportsPage() {
     </div>
   );
 
+  const pageTitle = !fieldType
+    ? "Airports"
+    : fieldType.includes("departure")
+    ? "Departure"
+    : "Arrival";
+
   return (
     <PageContainer
       header={
-        <header className="flex-none bg-background/30 backdrop-blur-xl border-b border-border/50 z-50">
-          <div className="container mx-auto px-3">
-            <div className="flex items-center justify-between h-12">
-              <div className="flex items-center gap-2">
-                {fieldType && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => router.back()}
-                    className="h-8 w-8 p-0"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                  </Button>
-                )}
-                <h1 className="text-lg font-semibold text-foreground">
-                  {!fieldType
-                    ? "Airports"
-                    : fieldType.includes("departure")
-                    ? "Departure"
-                    : "Arrival"}
-                </h1>
-              </div>
-              <SyncStatus />
-            </div>
-          </div>
-        </header>
+        <StandardPageHeader
+          title={pageTitle}
+          showBack={!!fieldType}
+        />
       }
     >
       <div className="container  mx-auto px-3 pt-3 pb-safe">
@@ -210,7 +172,7 @@ export default function AirportsPage() {
               type="text"
               placeholder="Search airports..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
               className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
             />
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -218,18 +180,18 @@ export default function AirportsPage() {
         </div>
 
         <div className="space-y-3">
-          {!debouncedSearchQuery && (
+          {!searchQuery.trim() && (
             <>
               {/* Favorites Section */}
-              {airports.some((a) => a.isFavorite) && (
+              {airports.some((a: Airport) => a.isFavorite) && (
                 <div className="space-y-1.5">
                   <h2 className="text-xs font-semibold text-primary uppercase px-1 flex items-center gap-1">
                     <Star className="h-3 w-3 fill-primary" /> Favorites
                   </h2>
                   <div className="space-y-2">
                     {airports
-                      .filter((a) => a.isFavorite)
-                      .map((a) => renderAirportCard(a, false))}
+                      .filter((a: Airport) => a.isFavorite)
+                      .map((a: Airport) => renderAirportCard(a, false))}
                   </div>
                   <div className="border-t border-border/50 my-4" />
                 </div>
@@ -242,7 +204,7 @@ export default function AirportsPage() {
                     Recent
                   </h2>
                   <div className="space-y-2">
-                    {recentAirports.map((a) => renderAirportCard(a, true))}
+                    {recentAirports.map((a: Airport) => renderAirportCard(a, true))}
                   </div>
                   <div className="border-t border-border my-4" />
                 </div>
@@ -250,7 +212,7 @@ export default function AirportsPage() {
             </>
           )}
 
-          {debouncedSearchQuery && (
+          {searchQuery.trim() && (
             <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
               {filteredAirports.length} results
             </h2>

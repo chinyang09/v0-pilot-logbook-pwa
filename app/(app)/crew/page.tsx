@@ -22,19 +22,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { SwipeableCard } from "@/components/swipeable-card";
+import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
+import { StandardPageHeader } from "@/components/standard-page-header";
 
 const ITEMS_PER_PAGE = 50;
-const SWIPE_THRESHOLD = 80;
 
 // --- SwipeableCrewCard Component ---
 function SwipeableCrewCard({
@@ -55,93 +47,25 @@ function SwipeableCrewCard({
   onDelete: () => void;
   isSelectMode: boolean;
 }) {
-  const [swipeX, setSwipeX] = useState(0);
-  const [isSwiping, setIsSwiping] = useState(false);
-  const startX = useRef(0);
-  const startY = useRef(0);
-  const isHorizontalSwipe = useRef<boolean | null>(null);
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    startX.current = e.touches[0].clientX;
-    startY.current = e.touches[0].clientY;
-    isHorizontalSwipe.current = null;
-    setIsSwiping(true);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isSwiping) return;
-    const currentX = e.touches[0].clientX;
-    const currentY = e.touches[0].clientY;
-    const diffX = currentX - startX.current;
-    const diffY = currentY - startY.current;
-    if (
-      isHorizontalSwipe.current === null &&
-      (Math.abs(diffX) > 10 || Math.abs(diffY) > 10)
-    ) {
-      isHorizontalSwipe.current = Math.abs(diffX) > Math.abs(diffY);
-    }
-    if (isHorizontalSwipe.current) {
-      if (diffX < 0) {
-        setSwipeX(Math.max(diffX, -SWIPE_THRESHOLD));
-      } else if (swipeX < 0) {
-        setSwipeX(Math.min(0, swipeX + diffX));
-      }
-    }
-  };
-
-  const handleTouchEnd = () => {
-    setIsSwiping(false);
-    if (swipeX < -SWIPE_THRESHOLD / 2) {
-      setSwipeX(-SWIPE_THRESHOLD);
-    } else {
-      setSwipeX(0);
-    }
-  };
-
-  const handleClick = () => {
-    if (swipeX < 0) {
-      setSwipeX(0);
-    } else {
-      onSelect();
-    }
-  };
-
   const displayName = crew.isMe ? "Self" : crew.name;
 
   return (
-    <div className="relative overflow-hidden rounded-lg">
-      <div
-        className={cn(
-          "absolute inset-y-0 right-0 flex items-center transition-opacity",
-          swipeX < 0 ? "opacity-100" : "opacity-0"
-        )}
-        style={{ width: SWIPE_THRESHOLD }}
-      >
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-full w-full rounded-none bg-destructive text-destructive-foreground"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-        >
-          <Trash2 className="h-5 w-5" />
-        </Button>
-      </div>
-
+    <SwipeableCard
+      onClick={onSelect}
+      actions={[
+        {
+          icon: <Trash2 className="h-5 w-5" />,
+          onClick: onDelete,
+          variant: "destructive",
+        },
+      ]}
+    >
       <button
-        onClick={handleClick}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
         className={cn(
           "w-full text-left bg-card border border-border rounded-lg p-3 transition-all active:scale-[0.98]",
-          !isSwiping && "transition-transform duration-200",
           crew.isMe &&
             "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20"
         )}
-        style={{ transform: `translateX(${swipeX}px)` }}
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -186,7 +110,7 @@ function SwipeableCrewCard({
           <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
         </div>
       </button>
-    </div>
+    </SwipeableCard>
   );
 }
 
@@ -201,10 +125,7 @@ export default function CrewPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebounce(searchQuery, 150);
   const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
-  const [deleteTarget, setDeleteTarget] = useState<
-    (typeof personnel)[0] | null
-  >(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const { confirmDelete, handleDelete, DeleteDialog } = useDeleteConfirmation<(typeof personnel)[0]>();
 
   const observerTarget = useRef<HTMLDivElement>(null);
 
@@ -273,51 +194,28 @@ export default function CrewPage() {
     router.push(url);
   };
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setIsDeleting(true);
-    try {
-      await deletePersonnel(deleteTarget.id);
-      await mutate(CACHE_KEYS.personnel);
-    } finally {
-      setIsDeleting(false);
-      setDeleteTarget(null);
-    }
+  const performDelete = async (crew: (typeof personnel)[0]) => {
+    await deletePersonnel(crew.id);
+    await mutate(CACHE_KEYS.personnel);
   };
+
+  const pageTitle = fieldType
+    ? `Select ${
+        fieldType === "pic"
+          ? "PIC"
+          : fieldType === "sic"
+          ? "SIC"
+          : "Crew"
+      }`
+    : "Crew";
 
   return (
     <PageContainer
       header={
-        <header className="flex-none bg-background/30 backdrop-blur-xl border-b border-border/50 z-50">
-          <div className="container mx-auto px-3">
-            <div className="flex items-center justify-between h-12">
-              <div className="flex items-center gap-2">
-                {fieldType && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => router.back()}
-                    className="h-8 w-8 p-0"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                  </Button>
-                )}
-                <h1 className="text-lg font-semibold text-foreground">
-                  {fieldType
-                    ? `Select ${
-                        fieldType === "pic"
-                          ? "PIC"
-                          : fieldType === "sic"
-                          ? "SIC"
-                          : "Crew"
-                      }`
-                    : "Crew"}
-                </h1>
-              </div>
-              <SyncStatus />
-            </div>
-          </div>
-        </header>
+        <StandardPageHeader
+          title={pageTitle}
+          showBack={!!fieldType}
+        />
       }
     >
       <div className="container mx-auto px-3 pt-3 pb-safe">
@@ -361,7 +259,7 @@ export default function CrewPage() {
                   key={crew.id}
                   crew={crew}
                   onSelect={() => handleCrewSelect(crew)}
-                  onDelete={() => setDeleteTarget(crew)}
+                  onDelete={() => confirmDelete(crew)}
                   isSelectMode={!!fieldType}
                 />
               ))}
@@ -384,30 +282,11 @@ export default function CrewPage() {
         )}
       </div>
 
-      <AlertDialog
-        open={!!deleteTarget}
-        onOpenChange={() => setDeleteTarget(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Crew Member</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete{" "}
-              {deleteTarget?.isMe ? "Self" : deleteTarget?.name}?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground"
-            >
-              {isDeleting ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteDialog
+        title="Delete Crew Member"
+        description="Are you sure you want to delete this crew member? This action cannot be undone."
+        onConfirm={() => handleDelete(performDelete)}
+      />
     </PageContainer>
   );
 }
