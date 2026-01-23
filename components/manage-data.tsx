@@ -5,6 +5,7 @@ import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { SwipeableCard } from "@/components/swipeable-card"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,6 +30,7 @@ import { useAircraft, usePersonnel } from "@/hooks/data"
 import { syncService } from "@/lib/sync"
 import { Plane, Users, Save, X, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { SwipeableCard } from "@/components/swipeable-card"
 
 type TabType = "aircraft" | "personnel"
 
@@ -132,73 +134,26 @@ function SwipeableItem({
   onDelete: () => void
   isActive?: boolean
 }) {
-  const [swipeX, setSwipeX] = useState(0)
-  const [isSwiping, setIsSwiping] = useState(false)
-  const startX = useRef(0)
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    startX.current = e.touches[0].clientX
-    setIsSwiping(true)
-  }
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isSwiping) return
-    const diff = e.touches[0].clientX - startX.current
-    if (diff < 0) {
-      setSwipeX(Math.max(diff, -80))
-    } else if (swipeX < 0) {
-      setSwipeX(Math.min(0, swipeX + diff))
-    }
-  }
-
-  const handleTouchEnd = () => {
-    setIsSwiping(false)
-    setSwipeX(swipeX < -40 ? -80 : 0)
-  }
-
-  const handleClick = () => {
-    if (swipeX < 0) {
-      setSwipeX(0)
-    } else {
-      onEdit()
-    }
-  }
-
   return (
-    <div className="relative overflow-hidden rounded-lg">
+    <SwipeableCard
+      onClick={onEdit}
+      actions={[
+        {
+          icon: <Trash2 className="h-5 w-5" />,
+          onClick: onDelete,
+          variant: "destructive",
+        },
+      ]}
+    >
       <div
         className={cn(
-          "absolute inset-y-0 right-0 flex items-center justify-center bg-destructive transition-opacity z-0",
-          swipeX < 0 ? "opacity-100" : "opacity-0",
-        )}
-        style={{ width: 80 }}
-      >
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            onDelete()
-          }}
-          className="h-full w-full flex items-center justify-center text-destructive-foreground"
-        >
-          <Trash2 className="h-5 w-5" />
-        </button>
-      </div>
-      <div
-        className={cn(
-          "p-3 bg-secondary/50 rounded-lg cursor-pointer relative z-10 transition-transform",
-          !isSwiping && "duration-200",
+          "p-3 bg-secondary/50 rounded-lg cursor-pointer",
           isActive && "ring-2 ring-primary",
         )}
-        style={{ transform: `translateX(${swipeX}px)` }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onClick={handleClick}
       >
         {children}
       </div>
-    </div>
+    </SwipeableCard>
   )
 }
 

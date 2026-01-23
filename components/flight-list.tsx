@@ -21,16 +21,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
   Plane,
   Trash2,
   Lock,
@@ -40,6 +30,8 @@ import {
   FileEdit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SwipeableCard } from "@/components/swipeable-card";
+import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, flightDate?: string) => void;
@@ -63,7 +55,6 @@ interface FlightListProps {
   headerContent?: React.ReactNode; // Height of the top bar (48px)
 }
 
-const SWIPE_THRESHOLD = 80;
 
 const MONTHS = [
   "JAN",
@@ -122,62 +113,8 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   onToggleLock,
   personnel = [],
 }: SwipeableFlightCardProps) {
-  const [swipeX, setSwipeX] = useState(0);
-  const [isSwiping, setIsSwiping] = useState(false);
-  const startX = useRef(0);
-  const startY = useRef(0);
-  const isHorizontalSwipe = useRef<boolean | null>(null);
-
   const isLocked = flight.isLocked || false;
   const isDraft = flight.isDraft || false;
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    startX.current = e.touches[0].clientX;
-    startY.current = e.touches[0].clientY;
-    isHorizontalSwipe.current = null;
-    setIsSwiping(true);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isSwiping) return;
-
-    const currentX = e.touches[0].clientX;
-    const currentY = e.touches[0].clientY;
-    const diffX = currentX - startX.current;
-    const diffY = currentY - startY.current;
-
-    if (
-      isHorizontalSwipe.current === null &&
-      (Math.abs(diffX) > 10 || Math.abs(diffY) > 10)
-    ) {
-      isHorizontalSwipe.current = Math.abs(diffX) > Math.abs(diffY);
-    }
-
-    if (isHorizontalSwipe.current) {
-      if (diffX < 0) {
-        setSwipeX(Math.max(diffX, -(SWIPE_THRESHOLD * 2 + 20)));
-      } else if (swipeX < 0) {
-        setSwipeX(Math.min(0, swipeX + diffX));
-      }
-    }
-  };
-
-  const handleTouchEnd = () => {
-    setIsSwiping(false);
-    if (swipeX < -SWIPE_THRESHOLD) {
-      setSwipeX(-SWIPE_THRESHOLD * 2);
-    } else {
-      setSwipeX(0);
-    }
-  };
-
-  const handleClick = () => {
-    if (swipeX < 0) {
-      setSwipeX(0);
-    } else if (!isLocked) {
-      onEdit();
-    }
-  };
 
   const flightDate = parseDateLocal(flight.date);
   const day = flightDate.getDate().toString().padStart(2, "0");
@@ -200,56 +137,28 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   }, [flight.picName, flight.sicName, flight.additionalCrew]);
 
   return (
-    <div className="relative overflow-hidden rounded-lg">
-      <div
-        className={cn(
-          "absolute inset-y-0 right-0 flex items-center transition-opacity",
-          swipeX < 0 ? "opacity-100" : "opacity-0"
-        )}
-        style={{ width: SWIPE_THRESHOLD * 2 }}
-      >
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-full w-20 rounded-none bg-secondary text-foreground"
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleLock();
-            setSwipeX(0);
-          }}
-        >
-          {isLocked ? (
-            <Unlock className="h-5 w-5" />
-          ) : (
-            <Lock className="h-5 w-5" />
-          )}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-full w-20 rounded-none bg-destructive text-destructive-foreground"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (!isLocked) onDelete();
-          }}
-          disabled={isLocked}
-        >
-          <Trash2 className="h-5 w-5" />
-        </Button>
-      </div>
-
+    <SwipeableCard
+      onClick={() => !isLocked && onEdit()}
+      actions={[
+        {
+          icon: isLocked ? <Unlock className="h-5 w-5" /> : <Lock className="h-5 w-5" />,
+          onClick: onToggleLock,
+          variant: "secondary",
+        },
+        {
+          icon: <Trash2 className="h-5 w-5" />,
+          onClick: onDelete,
+          variant: "destructive",
+          disabled: isLocked,
+        },
+      ]}
+    >
       <Card
         className={cn(
           "bg-card border-border cursor-pointer relative py-0",
-          !isSwiping && "transition-transform duration-200",
           isLocked && "opacity-75",
           isDraft && "border-dashed border-primary/50"
         )}
-        style={{ transform: `translateX(${swipeX}px)` }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onClick={handleClick}
       >
         <CardContent className="px-3 py-1">
           <div className="flex items-start gap-2">
@@ -326,7 +235,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           </div>
         </CardContent>
       </Card>
-    </div>
+    </SwipeableCard>
   );
 });
 
@@ -351,8 +260,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     },
     ref
   ) {
-    const [deleteTarget, setDeleteTarget] = useState<FlightLog | null>(null);
-    const [isDeleting, setIsDeleting] = useState(false);
+    const { confirmDelete, handleDelete, DeleteDialog } = useDeleteConfirmation<FlightLog>();
 
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const isExternalScrollRef = useRef(false);
@@ -457,17 +365,10 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       };
     }, [handleScroll, onScroll]);
 
-    const handleDelete = async () => {
-      if (!deleteTarget) return;
-      setIsDeleting(true);
-      try {
-        await deleteFlight(deleteTarget.id);
-        if (navigator.onLine) syncService.fullSync();
-        onDeleted?.();
-      } finally {
-        setIsDeleting(false);
-        setDeleteTarget(null);
-      }
+    const performDelete = async (flight: FlightLog) => {
+      await deleteFlight(flight.id);
+      if (navigator.onLine) syncService.fullSync();
+      onDeleted?.();
     };
 
     const handleToggleLock = async (flight: FlightLog) => {
@@ -583,7 +484,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                   <SwipeableFlightCard
                     flight={flight}
                     onEdit={() => onEdit?.(flight)}
-                    onDelete={() => setDeleteTarget(flight)}
+                    onDelete={() => confirmDelete(flight)}
                     onToggleLock={() => handleToggleLock(flight)}
                     personnel={personnel}
                   />
@@ -596,30 +497,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           <div className="h-16" />
         </div>
 
-        <AlertDialog
-          open={!!deleteTarget}
-          onOpenChange={() => setDeleteTarget(null)}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete Flight</AlertDialogTitle>
-              <AlertDialogDescription>
-                Are you sure you want to delete this flight? This action cannot
-                be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="bg-destructive text-destructive-foreground"
-              >
-                {isDeleting ? "Deleting..." : "Delete"}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <DeleteDialog
+          title="Delete Flight"
+          description="Are you sure you want to delete this flight? This action cannot be undone."
+          onConfirm={() => handleDelete(performDelete)}
+        />
       </>
     );
   }
