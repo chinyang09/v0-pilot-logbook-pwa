@@ -25,8 +25,10 @@ export interface FlightSignature {
   canvasWidth: number   // Original canvas width for reference
   canvasHeight: number  // Original canvas height for reference
   capturedAt: number    // Unix timestamp when signature was saved
+  signerId?: string     // ID of the signer (crew member)
   signerRole?: SignerRole
   signerName?: string
+  signerLicenseNumber?: string  // License number of the signer
 }
 
 export interface Approach {

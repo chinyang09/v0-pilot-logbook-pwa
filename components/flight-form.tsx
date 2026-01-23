@@ -27,9 +27,10 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { SignatureCanvas } from "@/components/signature-canvas";
+import { SignatureCanvas, type SignatureCrewMember } from "@/components/signature-canvas";
 import {
   updateFlight,
+  updatePersonnel,
   getAirportByICAO,
   addRecentlyUsedAirport,
   addRecentlyUsedAircraft,
@@ -1076,6 +1077,57 @@ export function FlightForm({
     }));
   }, []);
 
+  // Build flight crew list for signature selection
+  const flightCrew = useMemo((): SignatureCrewMember[] => {
+    const crew: SignatureCrewMember[] = [];
+
+    // Add PIC if assigned
+    if (formData.picId && formData.picName) {
+      const picPersonnel = personnel.find((p) => p.id === formData.picId);
+      crew.push({
+        id: formData.picId,
+        name: formData.picName === "Self" ? (picPersonnel?.name || "Self") : formData.picName,
+        role: "pic",
+        licenseNumber: picPersonnel?.licenceNumber,
+      });
+    }
+
+    // Add SIC if assigned
+    if (formData.sicId && formData.sicName) {
+      const sicPersonnel = personnel.find((p) => p.id === formData.sicId);
+      crew.push({
+        id: formData.sicId,
+        name: formData.sicName === "Self" ? (sicPersonnel?.name || "Self") : formData.sicName,
+        role: "sic",
+        licenseNumber: sicPersonnel?.licenceNumber,
+      });
+    }
+
+    // Add additional crew with instructor/examiner roles
+    if (formData.additionalCrew) {
+      for (const ac of formData.additionalCrew) {
+        if (ac.id && ac.name) {
+          const acPersonnel = personnel.find((p) => p.id === ac.id);
+          // Map additional crew role to signer role
+          let signerRole: SignatureCrewMember["role"] = "examiner";
+          if (ac.role === "Instructor") {
+            signerRole = "instructor";
+          } else if (ac.role === "Examiner") {
+            signerRole = "examiner";
+          }
+          crew.push({
+            id: ac.id,
+            name: ac.name,
+            role: signerRole,
+            licenseNumber: acPersonnel?.licenceNumber,
+          });
+        }
+      }
+    }
+
+    return crew;
+  }, [formData.picId, formData.picName, formData.sicId, formData.sicName, formData.additionalCrew, personnel]);
+
   // Signature handling
   const handleSignatureSave = useCallback((signature: FlightSignature) => {
     setFormData((prev) => ({
@@ -1090,6 +1142,18 @@ export function FlightForm({
       signature: undefined,
     }));
   }, []);
+
+  // Handle license update from signature component
+  const handleLicenseUpdate = useCallback(
+    async (crewId: string, licenseNumber: string) => {
+      try {
+        await updatePersonnel(crewId, { licenceNumber: licenseNumber });
+      } catch (error) {
+        console.error("Failed to update personnel license:", error);
+      }
+    },
+    []
+  );
 
   // Get active time picker timezone
   const getTimePickerTimezone = useCallback(() => {
@@ -1708,15 +1772,9 @@ export function FlightForm({
                 <SignatureCanvas
                   onSave={handleSignatureSave}
                   onClear={handleSignatureClear}
+                  onLicenseUpdate={handleLicenseUpdate}
                   initialSignature={formData.signature}
-                  signerName={formData.picName || undefined}
-                  signerRole={
-                    formData.pilotRole?.toLowerCase() as
-                      | "pic"
-                      | "sic"
-                      | "instructor"
-                      | undefined
-                  }
+                  flightCrew={flightCrew}
                 />
               </AccordionContent>
             </AccordionItem>

@@ -2,7 +2,16 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Trash2, Check, PenLine } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Trash2, Check, PenLine, UserCheck } from "lucide-react";
 import type {
   SignaturePoint,
   SignatureStroke,
@@ -10,21 +19,29 @@ import type {
   SignerRole,
 } from "@/lib/db";
 
+// Crew member available for selection in signature
+export interface SignatureCrewMember {
+  id: string;
+  name: string;
+  role: SignerRole;
+  licenseNumber?: string;
+}
+
 interface SignatureCanvasProps {
   onSave: (signature: FlightSignature) => void;
   onClear: () => void;
+  onLicenseUpdate?: (crewId: string, licenseNumber: string) => void;
   initialSignature?: FlightSignature | null;
-  signerRole?: SignerRole;
-  signerName?: string;
+  flightCrew?: SignatureCrewMember[];
   disabled?: boolean;
 }
 
 export function SignatureCanvas({
   onSave,
   onClear,
+  onLicenseUpdate,
   initialSignature,
-  signerRole,
-  signerName,
+  flightCrew = [],
   disabled = false,
 }: SignatureCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -37,24 +54,35 @@ export function SignatureCanvas({
   const strokeStartTime = useRef<number>(0);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  // Lock state: signature is locked when loaded from saved data or after save
   const [isLocked, setIsLocked] = useState(
     !!(initialSignature?.strokes && initialSignature.strokes.length > 0)
   );
 
-  // Initialize canvas size
+  const [selectedCrewId, setSelectedCrewId] = useState<string>(
+    initialSignature?.signerId || ""
+  );
+  const [licenseInput, setLicenseInput] = useState<string>("");
+
+  const selectedCrew = flightCrew.find((c) => c.id === selectedCrewId);
+
+  // Initialize canvas size - re-run when crew is selected (container mounts)
   useEffect(() => {
     const updateSize = () => {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        setCanvasSize({ width: rect.width, height: 150 });
+        setCanvasSize({ width: rect.width, height: 120 });
       }
     };
 
+    // Small delay to ensure DOM has rendered
+    const timer = setTimeout(updateSize, 10);
     updateSize();
     window.addEventListener("resize", updateSize);
-    return () => window.removeEventListener("resize", updateSize);
-  }, []);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", updateSize);
+    };
+  }, [selectedCrewId, isLocked]);
 
   // Draw all strokes on canvas
   const redrawCanvas = useCallback(() => {
@@ -64,23 +92,22 @@ export function SignatureCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Get the foreground color from computed style (inherits from CSS)
     const computedStyle = getComputedStyle(canvas);
     const foregroundColor = computedStyle.color || "#ffffff";
 
-    // Set drawing style
     ctx.strokeStyle = foregroundColor;
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    // Draw all strokes
     const allStrokes = [...strokes];
     if (currentStroke.length > 0) {
-      allStrokes.push({ points: currentStroke, startTime: strokeStartTime.current });
+      allStrokes.push({
+        points: currentStroke,
+        startTime: strokeStartTime.current,
+      });
     }
 
     for (const stroke of allStrokes) {
@@ -92,7 +119,6 @@ export function SignatureCanvas({
 
       for (let i = 1; i < stroke.points.length; i++) {
         const point = stroke.points[i];
-        // Vary line width based on pressure if available
         if (point.pressure !== undefined) {
           ctx.lineWidth = 1 + point.pressure * 3;
         }
@@ -102,27 +128,29 @@ export function SignatureCanvas({
     }
   }, [strokes, currentStroke]);
 
-  // Redraw when strokes or canvas size changes
   useEffect(() => {
     redrawCanvas();
   }, [redrawCanvas, canvasSize]);
 
-  // Load initial signature
   useEffect(() => {
     if (initialSignature?.strokes && initialSignature.strokes.length > 0) {
       setStrokes(initialSignature.strokes);
       setHasUnsavedChanges(false);
       setIsLocked(true);
+      if (initialSignature.signerId) {
+        setSelectedCrewId(initialSignature.signerId);
+      }
     } else {
       setStrokes([]);
       setIsLocked(false);
     }
   }, [initialSignature]);
 
-  // Get normalized coordinates from event
   const getPoint = useCallback(
     (
-      e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+      e:
+        | React.MouseEvent<HTMLCanvasElement>
+        | React.TouchEvent<HTMLCanvasElement>
     ): SignaturePoint => {
       const canvas = canvasRef.current;
       if (!canvas) return { x: 0, y: 0, timestamp: 0 };
@@ -136,14 +164,12 @@ export function SignatureCanvas({
         const touch = e.touches[0] || e.changedTouches[0];
         clientX = touch.clientX;
         clientY = touch.clientY;
-        // Try to get pressure from touch event
         if ("force" in touch) {
-          pressure = (touch as any).force;
+          pressure = (touch as unknown as { force: number }).force;
         }
       } else {
         clientX = e.clientX;
         clientY = e.clientY;
-        // Check for pointer pressure
         if ("pressure" in e.nativeEvent) {
           pressure = (e.nativeEvent as PointerEvent).pressure;
         }
@@ -161,21 +187,25 @@ export function SignatureCanvas({
 
   const handleStart = useCallback(
     (
-      e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+      e:
+        | React.MouseEvent<HTMLCanvasElement>
+        | React.TouchEvent<HTMLCanvasElement>
     ) => {
-      if (disabled || isLocked) return;
+      if (disabled || isLocked || !selectedCrewId) return;
       e.preventDefault();
       setIsDrawing(true);
       strokeStartTime.current = Date.now();
       const point = getPoint(e);
       setCurrentStroke([point]);
     },
-    [disabled, isLocked, getPoint]
+    [disabled, isLocked, selectedCrewId, getPoint]
   );
 
   const handleMove = useCallback(
     (
-      e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+      e:
+        | React.MouseEvent<HTMLCanvasElement>
+        | React.TouchEvent<HTMLCanvasElement>
     ) => {
       if (!isDrawing || disabled || isLocked) return;
       e.preventDefault();
@@ -187,7 +217,9 @@ export function SignatureCanvas({
 
   const handleEnd = useCallback(
     (
-      e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+      e:
+        | React.MouseEvent<HTMLCanvasElement>
+        | React.TouchEvent<HTMLCanvasElement>
     ) => {
       if (!isDrawing) return;
       e.preventDefault();
@@ -214,110 +246,260 @@ export function SignatureCanvas({
   }, [onClear]);
 
   const handleSave = useCallback(() => {
-    if (strokes.length === 0) return;
+    if (strokes.length === 0 || !selectedCrewId) return;
+
+    const licenseNumber =
+      selectedCrew?.licenseNumber || licenseInput || undefined;
+
+    if (licenseInput && selectedCrewId && onLicenseUpdate) {
+      onLicenseUpdate(selectedCrewId, licenseInput);
+    }
 
     const signature: FlightSignature = {
       strokes,
       canvasWidth: canvasSize.width,
       canvasHeight: canvasSize.height,
       capturedAt: Date.now(),
-      signerRole,
-      signerName,
+      signerId: selectedCrewId,
+      signerRole: selectedCrew?.role,
+      signerName: selectedCrew?.name,
+      signerLicenseNumber: licenseNumber,
     };
 
     onSave(signature);
     setHasUnsavedChanges(false);
     setIsLocked(true);
-  }, [strokes, canvasSize, signerRole, signerName, onSave]);
+  }, [
+    strokes,
+    canvasSize,
+    selectedCrewId,
+    selectedCrew,
+    licenseInput,
+    onLicenseUpdate,
+    onSave,
+  ]);
 
-  // Handle re-sign action
   const handleResign = useCallback(() => {
     setStrokes([]);
     setCurrentStroke([]);
     setHasUnsavedChanges(false);
     setIsLocked(false);
+    setSelectedCrewId("");
+    setLicenseInput("");
     onClear();
   }, [onClear]);
 
-  const hasSignature = strokes.length > 0;
+  const handleCrewChange = useCallback((crewId: string) => {
+    setSelectedCrewId(crewId);
+    setLicenseInput("");
+  }, []);
 
+  const hasSignature = strokes.length > 0;
+  const showLicenseInput = selectedCrew && !selectedCrew.licenseNumber;
+  const canSign = selectedCrewId && !isLocked;
+
+  // Locked state - show saved signature with signer details
+  if (isLocked && initialSignature) {
+    return (
+      <div className="rounded-lg border border-border bg-card overflow-hidden">
+        {/* Signer Info Header */}
+        <div className="px-4 py-3 bg-muted/50 border-b border-border">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <UserCheck className="h-4 w-4 text-primary" />
+              <div>
+                <p className="text-sm font-medium">
+                  {initialSignature.signerName}
+                  {initialSignature.signerRole && (
+                    <span className="ml-1.5 text-xs text-muted-foreground font-normal">
+                      ({initialSignature.signerRole.toUpperCase()})
+                    </span>
+                  )}
+                </p>
+                {initialSignature.signerLicenseNumber && (
+                  <p className="text-xs text-muted-foreground">
+                    License: {initialSignature.signerLicenseNumber}
+                  </p>
+                )}
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleResign}
+              disabled={disabled}
+              className="text-xs h-7"
+            >
+              <PenLine className="h-3.5 w-3.5 mr-1" />
+              Re-sign
+            </Button>
+          </div>
+        </div>
+
+        {/* Signature Display */}
+        <div ref={containerRef} className="relative bg-background">
+          <canvas
+            ref={canvasRef}
+            width={canvasSize.width}
+            height={canvasSize.height}
+            className="w-full touch-none text-foreground"
+          />
+          {/* Signature line */}
+          <div className="absolute bottom-6 left-4 right-4 border-b border-dashed border-muted-foreground/30" />
+        </div>
+
+        {/* Timestamp */}
+        <div className="px-4 py-2 bg-muted/30 border-t border-border">
+          <p className="text-[10px] text-muted-foreground text-center">
+            Signed on{" "}
+            {new Date(initialSignature.capturedAt).toLocaleDateString(
+              undefined,
+              {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              }
+            )}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // No crew available
+  if (flightCrew.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-border bg-muted/20 p-6">
+        <div className="text-center text-muted-foreground">
+          <UserCheck className="h-8 w-8 mx-auto mb-2 opacity-50" />
+          <p className="text-sm font-medium">No crew assigned</p>
+          <p className="text-xs mt-1">
+            Assign crew members to this flight to enable signature capture
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Editable state
   return (
-    <div className="space-y-3">
-      <div
-        ref={containerRef}
-        className="relative border border-border rounded-lg bg-background overflow-hidden"
-      >
-        <canvas
-          ref={canvasRef}
-          width={canvasSize.width}
-          height={canvasSize.height}
-          className={`w-full touch-none text-foreground ${
-            disabled || isLocked ? "cursor-default" : "cursor-crosshair"
-          }`}
-          onMouseDown={handleStart}
-          onMouseMove={handleMove}
-          onMouseUp={handleEnd}
-          onMouseLeave={handleEnd}
-          onTouchStart={handleStart}
-          onTouchMove={handleMove}
-          onTouchEnd={handleEnd}
-        />
-        {!hasSignature && !isDrawing && !isLocked && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span className="text-muted-foreground text-sm">
-              Sign here
-            </span>
+    <div className="rounded-lg border border-border bg-card overflow-hidden">
+      {/* Crew Selection Header */}
+      <div className="px-4 py-3 bg-muted/50 border-b border-border space-y-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Signing Crew Member
+          </Label>
+          <Select
+            value={selectedCrewId}
+            onValueChange={handleCrewChange}
+            disabled={disabled}
+          >
+            <SelectTrigger className="w-full bg-background">
+              <SelectValue placeholder="Select who is signing..." />
+            </SelectTrigger>
+            <SelectContent>
+              {flightCrew.map((crew) => (
+                <SelectItem key={crew.id} value={crew.id}>
+                  <span className="font-medium">{crew.name}</span>
+                  <span className="ml-2 text-muted-foreground">
+                    ({crew.role.toUpperCase()})
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* License field - only show when crew is selected */}
+        {selectedCrew && (
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              License Number
+            </Label>
+            {showLicenseInput ? (
+              <Input
+                type="text"
+                placeholder="Enter license number"
+                value={licenseInput}
+                onChange={(e) => setLicenseInput(e.target.value)}
+                disabled={disabled}
+                className="bg-background"
+              />
+            ) : (
+              <div className="px-3 py-2 bg-background rounded-md border border-input text-sm">
+                {selectedCrew.licenseNumber}
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {isLocked ? (
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">
-            Signature saved
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleResign}
-            disabled={disabled}
-            className="flex items-center gap-1.5"
-          >
-            <PenLine className="h-4 w-4" />
-            Re-sign
-          </Button>
-        </div>
-      ) : (
+      {/* Signature Canvas - only show when crew is selected */}
+      {canSign ? (
         <>
-          <div className="flex items-center justify-between gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleClear}
-              disabled={disabled || !hasSignature}
-              className="flex items-center gap-1.5"
-            >
-              <Trash2 className="h-4 w-4" />
-              Clear
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={handleSave}
-              disabled={disabled || !hasSignature || !hasUnsavedChanges}
-              className="flex items-center gap-1.5"
-            >
-              <Check className="h-4 w-4" />
-              Save Signature
-            </Button>
+          <div ref={containerRef} className="relative bg-background">
+            <canvas
+              ref={canvasRef}
+              width={canvasSize.width}
+              height={canvasSize.height}
+              className="w-full touch-none text-foreground cursor-crosshair"
+              onMouseDown={handleStart}
+              onMouseMove={handleMove}
+              onMouseUp={handleEnd}
+              onMouseLeave={handleEnd}
+              onTouchStart={handleStart}
+              onTouchMove={handleMove}
+              onTouchEnd={handleEnd}
+            />
+            {/* Signature line */}
+            <div className="absolute bottom-6 left-4 right-4 border-b border-dashed border-muted-foreground/30" />
+            {/* Placeholder text */}
+            {!hasSignature && !isDrawing && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <span className="text-muted-foreground/50 text-sm">
+                  Sign above the line
+                </span>
+              </div>
+            )}
           </div>
 
-          {hasSignature && !hasUnsavedChanges && (
-            <p className="text-xs text-muted-foreground text-center">
-              Signature saved
-            </p>
-          )}
+          {/* Action Buttons */}
+          <div className="px-4 py-3 bg-muted/30 border-t border-border">
+            <div className="flex items-center justify-between gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleClear}
+                disabled={disabled || !hasSignature}
+                className="flex-1"
+              >
+                <Trash2 className="h-4 w-4 mr-1.5" />
+                Clear
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleSave}
+                disabled={disabled || !hasSignature || !hasUnsavedChanges}
+                className="flex-1"
+              >
+                <Check className="h-4 w-4 mr-1.5" />
+                Save Signature
+              </Button>
+            </div>
+          </div>
         </>
+      ) : (
+        /* Prompt to select crew */
+        <div className="px-4 py-8 bg-background">
+          <div className="text-center text-muted-foreground">
+            <PenLine className="h-6 w-6 mx-auto mb-2 opacity-40" />
+            <p className="text-sm">Select a crew member above to sign</p>
+          </div>
+        </div>
       )}
     </div>
   );
