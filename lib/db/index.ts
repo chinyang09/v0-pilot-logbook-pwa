@@ -18,6 +18,7 @@ export type {
   SyncStatus,
   SignaturePoint,
   SignatureStroke,
+  SignatureBounds,
   SignerRole,
   FlightSignature,
 } from "@/types/entities/flight.types";
