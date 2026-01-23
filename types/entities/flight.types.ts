@@ -2,6 +2,33 @@
  * Flight-related type definitions
  */
 
+/**
+ * Signature data structures for capturing hand-drawn signatures
+ * Stores raw drawing data for resolution-independent rendering
+ */
+export interface SignaturePoint {
+  x: number           // X coordinate normalized to 0-1
+  y: number           // Y coordinate normalized to 0-1
+  pressure?: number   // Pressure if available (0-1), from touch devices
+  timestamp: number   // Milliseconds since stroke start
+}
+
+export interface SignatureStroke {
+  points: SignaturePoint[]
+  startTime: number   // Unix timestamp when stroke began
+}
+
+export type SignerRole = "pic" | "sic" | "instructor" | "examiner" | "student"
+
+export interface FlightSignature {
+  strokes: SignatureStroke[]
+  canvasWidth: number   // Original canvas width for reference
+  canvasHeight: number  // Original canvas height for reference
+  capturedAt: number    // Unix timestamp when signature was saved
+  signerRole?: SignerRole
+  signerName?: string
+}
+
 export interface Approach {
   type: "ILS" | "VOR" | "NDB" | "RNAV" | "LOC" | "LDA" | "SDF" | "GPS" | "VISUAL" | "OTHER"
   category: "precision" | "non-precision"
@@ -96,6 +123,9 @@ export interface FlightLog {
   holds: number
   ipcIcc: boolean
   isLocked?: boolean
+  // Signature (optional)
+  // TODO: Add logic for when signature is required based on flight type/role (future enhancement)
+  signature?: FlightSignature
   // Timestamps
   createdAt: number
   updatedAt?: number

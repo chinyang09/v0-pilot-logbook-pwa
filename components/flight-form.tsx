@@ -14,12 +14,20 @@ import {
   ArrowLeftRight,
   Plus,
   Trash2,
+  PenLine,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { TimePicker } from "@/components/time-picker";
 import { DatePicker } from "@/components/date-picker";
-import type { FlightLog, AdditionalCrew, Approach } from "@/lib/db";
+import type { FlightLog, AdditionalCrew, Approach, FlightSignature } from "@/lib/db";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { SignatureCanvas } from "@/components/signature-canvas";
 import {
   updateFlight,
   getAirportByICAO,
@@ -982,6 +990,7 @@ export function FlightForm({
         approaches: formData.approaches || [],
         holds: formData.holds || 0,
         ipcIcc: formData.ipcIcc || false,
+        signature: formData.signature,
       };
 
       await updateFlight(flightData.id, flightData);
@@ -1064,6 +1073,21 @@ export function FlightForm({
     setFormData((prev) => ({
       ...prev,
       approaches: (prev.approaches || []).filter((a) => a.id !== id),
+    }));
+  }, []);
+
+  // Signature handling
+  const handleSignatureSave = useCallback((signature: FlightSignature) => {
+    setFormData((prev) => ({
+      ...prev,
+      signature,
+    }));
+  }, []);
+
+  const handleSignatureClear = useCallback(() => {
+    setFormData((prev) => ({
+      ...prev,
+      signature: undefined,
     }));
   }, []);
 
@@ -1656,6 +1680,47 @@ export function FlightForm({
               showChevron
             />
           </SwipeableRow>
+        </div>
+
+        {/* SIGNATURE Section */}
+        <div className="rounded-xl bg-card border border-border overflow-hidden">
+          <Accordion
+            type="single"
+            collapsible
+            defaultValue={formData.signature ? "signature" : undefined}
+          >
+            <AccordionItem value="signature" className="border-0">
+              <div className="px-4 py-2 bg-muted/30">
+                <AccordionTrigger className="py-0 hover:no-underline">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      SIGNATURE
+                    </h2>
+                    {formData.signature && (
+                      <span className="text-xs text-primary font-normal normal-case">
+                        (Signed)
+                      </span>
+                    )}
+                  </div>
+                </AccordionTrigger>
+              </div>
+              <AccordionContent className="px-4 pb-4">
+                <SignatureCanvas
+                  onSave={handleSignatureSave}
+                  onClear={handleSignatureClear}
+                  initialSignature={formData.signature}
+                  signerName={formData.picName || undefined}
+                  signerRole={
+                    formData.pilotRole?.toLowerCase() as
+                      | "pic"
+                      | "sic"
+                      | "instructor"
+                      | undefined
+                  }
+                />
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </div>
       </div>
 
