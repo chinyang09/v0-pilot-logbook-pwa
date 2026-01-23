@@ -151,6 +151,7 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     approaches: serverFlight.approaches || [],
     holds: serverFlight.holds || 0,
     ipcIcc: serverFlight.ipcIcc || false,
+    signature: serverFlight.signature,
     createdAt: serverFlight.createdAt || Date.now(),
     updatedAt: serverFlight.updatedAt || Date.now(),
     syncStatus: "synced",

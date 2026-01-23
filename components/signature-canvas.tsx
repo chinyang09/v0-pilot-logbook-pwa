@@ -2,7 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Trash2, Check } from "lucide-react";
+import { Trash2, Check, PenLine } from "lucide-react";
 import type {
   SignaturePoint,
   SignatureStroke,
@@ -37,6 +37,10 @@ export function SignatureCanvas({
   const strokeStartTime = useRef<number>(0);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  // Lock state: signature is locked when loaded from saved data or after save
+  const [isLocked, setIsLocked] = useState(
+    !!(initialSignature?.strokes && initialSignature.strokes.length > 0)
+  );
 
   // Initialize canvas size
   useEffect(() => {
@@ -105,9 +109,13 @@ export function SignatureCanvas({
 
   // Load initial signature
   useEffect(() => {
-    if (initialSignature?.strokes) {
+    if (initialSignature?.strokes && initialSignature.strokes.length > 0) {
       setStrokes(initialSignature.strokes);
       setHasUnsavedChanges(false);
+      setIsLocked(true);
+    } else {
+      setStrokes([]);
+      setIsLocked(false);
     }
   }, [initialSignature]);
 
@@ -155,26 +163,26 @@ export function SignatureCanvas({
     (
       e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
     ) => {
-      if (disabled) return;
+      if (disabled || isLocked) return;
       e.preventDefault();
       setIsDrawing(true);
       strokeStartTime.current = Date.now();
       const point = getPoint(e);
       setCurrentStroke([point]);
     },
-    [disabled, getPoint]
+    [disabled, isLocked, getPoint]
   );
 
   const handleMove = useCallback(
     (
       e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
     ) => {
-      if (!isDrawing || disabled) return;
+      if (!isDrawing || disabled || isLocked) return;
       e.preventDefault();
       const point = getPoint(e);
       setCurrentStroke((prev) => [...prev, point]);
     },
-    [isDrawing, disabled, getPoint]
+    [isDrawing, disabled, isLocked, getPoint]
   );
 
   const handleEnd = useCallback(
@@ -219,7 +227,17 @@ export function SignatureCanvas({
 
     onSave(signature);
     setHasUnsavedChanges(false);
+    setIsLocked(true);
   }, [strokes, canvasSize, signerRole, signerName, onSave]);
+
+  // Handle re-sign action
+  const handleResign = useCallback(() => {
+    setStrokes([]);
+    setCurrentStroke([]);
+    setHasUnsavedChanges(false);
+    setIsLocked(false);
+    onClear();
+  }, [onClear]);
 
   const hasSignature = strokes.length > 0;
 
@@ -234,7 +252,7 @@ export function SignatureCanvas({
           width={canvasSize.width}
           height={canvasSize.height}
           className={`w-full touch-none text-foreground ${
-            disabled ? "opacity-50 cursor-not-allowed" : "cursor-crosshair"
+            disabled || isLocked ? "cursor-default" : "cursor-crosshair"
           }`}
           onMouseDown={handleStart}
           onMouseMove={handleMove}
@@ -244,7 +262,7 @@ export function SignatureCanvas({
           onTouchMove={handleMove}
           onTouchEnd={handleEnd}
         />
-        {!hasSignature && !isDrawing && (
+        {!hasSignature && !isDrawing && !isLocked && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <span className="text-muted-foreground text-sm">
               Sign here
@@ -253,33 +271,53 @@ export function SignatureCanvas({
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleClear}
-          disabled={disabled || !hasSignature}
-          className="flex items-center gap-1.5"
-        >
-          <Trash2 className="h-4 w-4" />
-          Clear
-        </Button>
-        <Button
-          variant="default"
-          size="sm"
-          onClick={handleSave}
-          disabled={disabled || !hasSignature || !hasUnsavedChanges}
-          className="flex items-center gap-1.5"
-        >
-          <Check className="h-4 w-4" />
-          Save Signature
-        </Button>
-      </div>
+      {isLocked ? (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">
+            Signature saved
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleResign}
+            disabled={disabled}
+            className="flex items-center gap-1.5"
+          >
+            <PenLine className="h-4 w-4" />
+            Re-sign
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClear}
+              disabled={disabled || !hasSignature}
+              className="flex items-center gap-1.5"
+            >
+              <Trash2 className="h-4 w-4" />
+              Clear
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleSave}
+              disabled={disabled || !hasSignature || !hasUnsavedChanges}
+              className="flex items-center gap-1.5"
+            >
+              <Check className="h-4 w-4" />
+              Save Signature
+            </Button>
+          </div>
 
-      {hasSignature && !hasUnsavedChanges && (
-        <p className="text-xs text-muted-foreground text-center">
-          Signature saved
-        </p>
+          {hasSignature && !hasUnsavedChanges && (
+            <p className="text-xs text-muted-foreground text-center">
+              Signature saved
+            </p>
+          )}
+        </>
       )}
     </div>
   );
