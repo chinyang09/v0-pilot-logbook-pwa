@@ -3,6 +3,7 @@
  * Displays discrepancy information with severity indicators
  */
 
+import { memo } from "react"
 import type { Discrepancy, DiscrepancyType } from "@/types/entities/roster.types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -99,7 +100,7 @@ interface DiscrepancyCardProps {
   compact?: boolean
 }
 
-export function DiscrepancyCard({
+export const DiscrepancyCard = memo(function DiscrepancyCard({
   discrepancy,
   onResolve,
   onReopen,
@@ -270,4 +271,4 @@ export function DiscrepancyCard({
       </CardContent>
     </Card>
   )
-}
+})

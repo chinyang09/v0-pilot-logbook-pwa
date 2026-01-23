@@ -227,3 +227,149 @@ export function parseTimeInput(input: string): string {
 
   return ""
 }
+
+/**
+ * Date components returned from parseDateString
+ */
+export interface DateComponents {
+  year: number
+  month: number // 1-12
+  day: number
+}
+
+/**
+ * Time components returned from parseTimeString
+ */
+export interface TimeComponents {
+  hours: number
+  minutes: number
+}
+
+/**
+ * Parse YYYY-MM-DD date string to components
+ * Returns null if invalid
+ */
+export function parseDateString(dateStr: string): DateComponents | null {
+  if (!dateStr || typeof dateStr !== "string") return null
+
+  const parts = dateStr.split("-")
+  if (parts.length !== 3) return null
+
+  const year = Number.parseInt(parts[0], 10)
+  const month = Number.parseInt(parts[1], 10)
+  const day = Number.parseInt(parts[2], 10)
+
+  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null
+  if (month < 1 || month > 12) return null
+  if (day < 1 || day > 31) return null
+
+  return { year, month, day }
+}
+
+/**
+ * Parse HH:MM time string to components
+ * Returns null if invalid
+ */
+export function parseTimeString(timeStr: string): TimeComponents | null {
+  if (!timeStr || typeof timeStr !== "string") return null
+
+  const parts = timeStr.split(":")
+  if (parts.length !== 2) return null
+
+  const hours = Number.parseInt(parts[0], 10)
+  const minutes = Number.parseInt(parts[1], 10)
+
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
+  if (hours < 0 || hours > 23) return null
+  if (minutes < 0 || minutes > 59) return null
+
+  return { hours, minutes }
+}
+
+/**
+ * Create a UTC Date from date and time strings
+ * @param dateStr - Date in YYYY-MM-DD format
+ * @param timeStr - Time in HH:MM format
+ * @returns Date object in UTC, or null if invalid
+ */
+export function createUTCDate(dateStr: string, timeStr: string): Date | null {
+  const dateParts = parseDateString(dateStr)
+  const timeParts = parseTimeString(timeStr)
+
+  if (!dateParts || !timeParts) return null
+
+  return new Date(
+    Date.UTC(
+      dateParts.year,
+      dateParts.month - 1,
+      dateParts.day,
+      timeParts.hours,
+      timeParts.minutes,
+      0,
+      0
+    )
+  )
+}
+
+/**
+ * Parse date and time strings to UTC Date, handling overnight flights
+ * If the time appears to wrap to the next day (for overnight detection),
+ * an optional flag can be provided to add a day
+ * @param dateStr - Date in YYYY-MM-DD format
+ * @param timeStr - Time in HH:MM format
+ * @param addDay - Whether to add a day (for overnight flight end times)
+ * @returns Date object in UTC, or null if invalid
+ */
+export function parseTimeToUTC(
+  dateStr: string,
+  timeStr: string,
+  addDay = false
+): Date | null {
+  const date = createUTCDate(dateStr, timeStr)
+  if (!date) return null
+
+  if (addDay) {
+    date.setUTCDate(date.getUTCDate() + 1)
+  }
+
+  return date
+}
+
+/**
+ * Detect if a flight is overnight (end time is before start time)
+ * and return the appropriate day offset for the end time
+ */
+export function detectOvernightOffset(
+  startTime: string,
+  endTime: string
+): number {
+  const startParts = parseTimeString(startTime)
+  const endParts = parseTimeString(endTime)
+
+  if (!startParts || !endParts) return 0
+
+  const startMinutes = startParts.hours * 60 + startParts.minutes
+  const endMinutes = endParts.hours * 60 + endParts.minutes
+
+  return endMinutes < startMinutes ? 1 : 0
+}
+
+/**
+ * Apply a day offset to a date string
+ * @param dateStr - Date in YYYY-MM-DD format
+ * @param dayOffset - Number of days to add (can be negative)
+ * @returns New date string in YYYY-MM-DD format, or empty string if invalid
+ */
+export function applyDayOffset(dateStr: string, dayOffset: number): string {
+  const dateParts = parseDateString(dateStr)
+  if (!dateParts) return ""
+
+  const date = new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day))
+  date.setUTCDate(date.getUTCDate() + dayOffset)
+
+  const year = date.getUTCFullYear()
+  const month = (date.getUTCMonth() + 1).toString().padStart(2, "0")
+  const day = date.getUTCDate().toString().padStart(2, "0")
+
+  return `${year}-${month}-${day}`
+}
