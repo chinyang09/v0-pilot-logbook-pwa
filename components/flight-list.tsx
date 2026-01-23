@@ -10,6 +10,7 @@ import {
   useCallback,
   forwardRef,
   useImperativeHandle,
+  memo,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { FlightLog, Aircraft, Airport, Personnel } from "@/lib/db";
@@ -106,19 +107,21 @@ function parseDateLocal(dateStr: string): Date {
   return new Date(year, month - 1, day);
 }
 
-function SwipeableFlightCard({
-  flight,
-  onEdit,
-  onDelete,
-  onToggleLock,
-  personnel = [],
-}: {
+interface SwipeableFlightCardProps {
   flight: FlightLog;
   onEdit: () => void;
   onDelete: () => void;
   onToggleLock: () => void;
   personnel?: Personnel[];
-}) {
+}
+
+const SwipeableFlightCard = memo(function SwipeableFlightCard({
+  flight,
+  onEdit,
+  onDelete,
+  onToggleLock,
+  personnel = [],
+}: SwipeableFlightCardProps) {
   const [swipeX, setSwipeX] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
   const startX = useRef(0);
@@ -325,7 +328,7 @@ function SwipeableFlightCard({
       </Card>
     </div>
   );
-}
+});
 
 export const FlightList = forwardRef<FlightListRef, FlightListProps>(
   function FlightList(

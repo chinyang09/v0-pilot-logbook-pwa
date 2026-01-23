@@ -3,6 +3,7 @@
  * Displays duty period information with FDP compliance indicators
  */
 
+import { memo } from "react"
 import type { DutyPeriod, FTLLimits } from "@/types/entities/roster.types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -17,7 +18,7 @@ interface DutyPeriodCardProps {
   compact?: boolean
 }
 
-export function DutyPeriodCard({ dutyPeriod, limits, compact = false }: DutyPeriodCardProps) {
+export const DutyPeriodCard = memo(function DutyPeriodCard({ dutyPeriod, limits, compact = false }: DutyPeriodCardProps) {
   const { exceedsFDP, exceedsDuty, exceeds } = isDutyExceedingLimits(dutyPeriod, limits)
 
   const dutyHours = (dutyPeriod.dutyMinutes / 60).toFixed(1)
@@ -171,4 +172,4 @@ export function DutyPeriodCard({ dutyPeriod, limits, compact = false }: DutyPeri
       </CardContent>
     </Card>
   )
-}
+})

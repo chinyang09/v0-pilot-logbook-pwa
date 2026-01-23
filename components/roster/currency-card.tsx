@@ -3,6 +3,7 @@
  * Displays currency/expiry information with visual status indicators
  */
 
+import { memo } from "react"
 import type { CurrencyWithStatus, CurrencyStatus } from "@/types/entities/roster.types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -67,7 +68,7 @@ interface CurrencyCardProps {
   compact?: boolean
 }
 
-export function CurrencyCard({ currency, onEdit, onDelete, compact = false }: CurrencyCardProps) {
+export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDelete, compact = false }: CurrencyCardProps) {
   const config = STATUS_CONFIG[currency.status]
   const Icon = config.icon
 
@@ -201,4 +202,4 @@ export function CurrencyCard({ currency, onEdit, onDelete, compact = false }: Cu
       </CardContent>
     </Card>
   )
-}
+})
