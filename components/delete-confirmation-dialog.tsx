@@ -117,16 +117,19 @@ export function useDeleteConfirmation<T = unknown>(): UseDeleteConfirmationRetur
   )
 
   const DeleteDialog = useCallback(
-    (props: Omit<DeleteConfirmationDialogProps, "open" | "onOpenChange" | "onConfirm" | "isDeleting">) => (
+    (props: Omit<DeleteConfirmationDialogProps, "open" | "onOpenChange" | "isDeleting"> & { onConfirm: () => void | Promise<void> }) => (
       <DeleteConfirmationDialog
         open={!!deleteTarget}
-        onOpenChange={(open) => !open && cancelDelete()}
-        onConfirm={() => handleDelete((item) => props.onConfirm?.())}
+        onOpenChange={(open: boolean) => !open && cancelDelete()}
+        onConfirm={props.onConfirm}
         isDeleting={isDeleting}
-        {...props}
+        title={props.title}
+        description={props.description}
+        confirmText={props.confirmText}
+        cancelText={props.cancelText}
       />
     ),
-    [deleteTarget, isDeleting, cancelDelete, handleDelete]
+    [deleteTarget, isDeleting, cancelDelete]
   )
 
   return {

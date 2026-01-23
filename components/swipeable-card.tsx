@@ -58,7 +58,7 @@ export function SwipeableCard({
         {actions.map((action, index) => (
           <button
             key={index}
-            onClick={(e) => {
+            onClick={(e: React.MouseEvent) => {
               e.stopPropagation()
               action.onClick()
               close()

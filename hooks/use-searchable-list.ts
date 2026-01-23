@@ -83,7 +83,7 @@ export function useSearchableList<T>({
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && !isLoading && hasMore) {
-          setDisplayCount((prev) => Math.min(prev + itemsPerPage, filteredItems.length))
+          setDisplayCount((prev: number) => Math.min(prev + itemsPerPage, filteredItems.length))
         }
       },
       { threshold: 0.1 }
