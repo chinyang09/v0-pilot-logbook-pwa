@@ -65,7 +65,7 @@ export function SignatureCanvas({
 
   const selectedCrew = flightCrew.find((c) => c.id === selectedCrewId);
 
-  // Initialize canvas size
+  // Initialize canvas size - re-run when crew is selected (container mounts)
   useEffect(() => {
     const updateSize = () => {
       if (containerRef.current) {
@@ -74,10 +74,15 @@ export function SignatureCanvas({
       }
     };
 
+    // Small delay to ensure DOM has rendered
+    const timer = setTimeout(updateSize, 10);
     updateSize();
     window.addEventListener("resize", updateSize);
-    return () => window.removeEventListener("resize", updateSize);
-  }, []);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", updateSize);
+    };
+  }, [selectedCrewId, isLocked]);
 
   // Draw all strokes on canvas
   const redrawCanvas = useCallback(() => {
