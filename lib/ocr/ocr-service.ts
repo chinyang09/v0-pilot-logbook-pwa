@@ -1,5 +1,11 @@
 /**
- * OCR Service - Browser-based text extraction using gutenye OCR
+ * OCR Service - Hybrid implementation
+ *
+ * Primary: Server-side OCR using gutenye/ocr-node (when online)
+ * Fallback: Browser-based OCR using gutenye/ocr-browser (when offline)
+ *
+ * The server-side OCR is faster and more reliable, but requires network.
+ * Browser-based OCR works completely offline using WebAssembly.
  */
 
 // Re-export type from extractor (single source of truth)
@@ -15,35 +21,90 @@ interface OcrInstance {
   detect: (input: string) => Promise<OcrRawResult[]>
 }
 
-let ocrInstance: OcrInstance | null = null
-let initPromise: Promise<OcrInstance> | null = null
+// Browser OCR singleton
+let browserOcrInstance: OcrInstance | null = null
+let browserInitPromise: Promise<OcrInstance> | null = null
 
-export async function initializeOCR(): Promise<OcrInstance> {
-  if (ocrInstance) return ocrInstance
-  if (initPromise) return initPromise
+/**
+ * Initialize browser-based OCR (fallback)
+ */
+async function initializeBrowserOCR(): Promise<OcrInstance> {
+  if (browserOcrInstance) return browserOcrInstance
+  if (browserInitPromise) return browserInitPromise
 
-  initPromise = (async () => {
+  browserInitPromise = (async () => {
     const { default: Ocr } = await import("@gutenye/ocr-browser")
 
-    const instance = await Ocr.create({
+    const instance = (await Ocr.create({
       models: {
         detectionPath: "/models/ch_PP-OCRv4_det_infer.onnx",
         recognitionPath: "/models/ch_PP-OCRv4_rec_infer.onnx",
         dictionaryPath: "/models/ppocr_keys_v1.txt",
       },
-    }) as unknown as OcrInstance
+    })) as unknown as OcrInstance
 
-    ocrInstance = instance
+    browserOcrInstance = instance
     return instance
   })()
 
-  return initPromise!
+  return browserInitPromise!
 }
 
-export async function extractTextFromImage(
+/**
+ * Check if we're online and can reach the server
+ */
+function isOnline(): boolean {
+  if (typeof navigator === "undefined") return false
+  return navigator.onLine
+}
+
+/**
+ * Convert File to base64 data URL
+ */
+async function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => resolve(e.target?.result as string)
+    reader.onerror = () => reject(new Error("Failed to read file"))
+    reader.readAsDataURL(file)
+  })
+}
+
+/**
+ * Process image with server-side OCR (primary)
+ */
+async function processWithServerOCR(
   file: File
 ): Promise<import("./oooi-extractor").OcrResult[]> {
-  const ocr = await initializeOCR()
+  const formData = new FormData()
+  formData.append("image", file)
+
+  const response = await fetch("/api/ocr", {
+    method: "POST",
+    body: formData,
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: "Unknown error" }))
+    throw new Error(error.error || `Server OCR failed: ${response.status}`)
+  }
+
+  const data = await response.json()
+
+  if (!data.success || !data.results) {
+    throw new Error("Invalid server OCR response")
+  }
+
+  return data.results
+}
+
+/**
+ * Process image with browser-based OCR (fallback)
+ */
+async function processWithBrowserOCR(
+  file: File
+): Promise<import("./oooi-extractor").OcrResult[]> {
+  const ocr = await initializeBrowserOCR()
   const dataUrl = await fileToDataUrl(file)
   const rawResults = await ocr.detect(dataUrl)
 
@@ -63,35 +124,77 @@ export async function extractTextFromImage(
     })
 }
 
+/**
+ * Extract text from image using hybrid OCR
+ *
+ * Tries server-side OCR first (faster, more reliable),
+ * falls back to browser-based OCR when offline or on error.
+ */
+export async function extractTextFromImage(
+  file: File
+): Promise<import("./oooi-extractor").OcrResult[]> {
+  // Try server-side OCR first if online
+  if (isOnline()) {
+    try {
+      console.log("[OCR] Attempting server-side OCR...")
+      const results = await processWithServerOCR(file)
+      console.log("[OCR] Server-side OCR successful")
+      return results
+    } catch (error) {
+      console.warn("[OCR] Server-side OCR failed, falling back to browser:", error)
+      // Fall through to browser OCR
+    }
+  } else {
+    console.log("[OCR] Offline - using browser-based OCR")
+  }
+
+  // Fallback to browser-based OCR
+  console.log("[OCR] Using browser-based OCR...")
+  const results = await processWithBrowserOCR(file)
+  console.log("[OCR] Browser-based OCR successful")
+  return results
+}
+
+/**
+ * Extract text as concatenated string
+ */
 export async function extractTextAsString(file: File): Promise<string> {
   const results = await extractTextFromImage(file)
   return results.map((r) => r.text).join("\n")
 }
 
-async function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (e) => resolve(e.target?.result as string)
-    reader.onerror = () => reject(new Error("Failed to read file"))
-    reader.readAsDataURL(file)
-  })
+/**
+ * Initialize OCR for preloading
+ * This primarily preloads the browser OCR for offline use
+ */
+export async function initializeOCR(): Promise<OcrInstance> {
+  return initializeBrowserOCR()
 }
 
+/**
+ * Preload OCR for faster first use
+ */
 export async function preloadOCR(): Promise<void> {
   try {
-    await initializeOCR()
+    await initializeBrowserOCR()
   } catch (e) {
     console.warn("OCR preload failed:", e)
   }
 }
 
+/**
+ * Check if browser OCR is ready
+ */
 export function isOCRReady(): boolean {
-  return ocrInstance !== null
+  return browserOcrInstance !== null
 }
 
+/**
+ * Reset OCR instances
+ */
 export function resetOCR(): void {
-  ocrInstance = null
-  initPromise = null
+  browserOcrInstance = null
+  browserInitPromise = null
 }
 
 /**
@@ -169,4 +272,24 @@ export async function ensureOCRModelsCached(): Promise<{
       resolve({ success: false, details: [] })
     }, 60000)
   })
+}
+
+/**
+ * Check server OCR availability
+ */
+export async function checkServerOCRAvailability(): Promise<boolean> {
+  if (!isOnline()) return false
+
+  try {
+    const response = await fetch("/api/ocr", {
+      method: "GET",
+    })
+
+    if (!response.ok) return false
+
+    const data = await response.json()
+    return data.available === true
+  } catch {
+    return false
+  }
 }

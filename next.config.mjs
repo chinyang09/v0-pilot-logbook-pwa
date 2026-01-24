@@ -9,13 +9,16 @@ const nextConfig = {
   // Empty turbopack config to allow webpack config for builds
   turbopack: {},
   webpack: (config, { isServer }) => {
-    // Exclude OCR package and its dependencies from server-side bundle
     if (isServer) {
+      // Server-side: Exclude browser-only OCR packages
+      // Keep ocr-node available for server-side API routes
       config.externals = config.externals || [];
       config.externals.push({
+        // Browser OCR - not needed on server
         '@gutenye/ocr-browser': 'commonjs @gutenye/ocr-browser',
-        '@gutenye/ocr-common': 'commonjs @gutenye/ocr-common',
         '@techstark/opencv-js': 'commonjs @techstark/opencv-js',
+        // Sharp is used by ocr-node, handle it specially
+        'sharp': 'commonjs sharp',
       });
     } else {
       // Client-side: provide fallbacks for Node.js modules
@@ -28,7 +31,7 @@ const nextConfig = {
       };
     }
 
-    // Ignore ONNX and large binary files
+    // Ignore ONNX and large binary files from webpack processing
     config.module = config.module || {};
     config.module.noParse = config.module.noParse || [];
     if (!Array.isArray(config.module.noParse)) {
@@ -39,19 +42,28 @@ const nextConfig = {
 
     return config;
   },
-  // Exclude OCR-related files from file tracing
+  // Exclude certain files from file tracing
+  // Note: We keep ocr-node models included for server-side OCR
   outputFileTracingExcludes: {
     "*": [
-      "node_modules/@gutenye/**/*",
+      // Browser OCR (client handles this via service worker)
+      "node_modules/@gutenye/ocr-browser/**/*",
+      "node_modules/@techstark/opencv-js/**/*",
+      // Other exclusions
       "node_modules/kerberos/**/*",
-      "node_modules/sharp/**/*",
       "node_modules/.pnpm/**/*@gutenye*/**/*",
-      "**/*.onnx",
-      "**/*.wasm",
-      "**/*.node",
+      // Browser model files (served via public/)
       "public/models/**/*",
     ],
   },
+  // Enable server external packages for ocr-node dependencies
+  serverExternalPackages: [
+    '@gutenye/ocr-node',
+    '@gutenye/ocr-common',
+    '@gutenye/ocr-models',
+    'onnxruntime-node',
+    'sharp',
+  ],
 };
 
 export default nextConfig;
