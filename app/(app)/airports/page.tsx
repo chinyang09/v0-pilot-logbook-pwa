@@ -209,83 +209,78 @@ export default function AirportsPage() {
         />
       }
     >
-      <div className="relative h-full">
-        <div ref={scrollContainerRef} className="container mx-auto px-3 pt-3 pb-safe h-full overflow-y-auto">
-          <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
-            <div className="relative">
-              <Input
-                type="text"
-                placeholder="Search airports..."
-                value={searchQuery}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-                className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-              />
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            </div>
-          </div>
-
-          <div className="space-y-3 pr-6">
-            {!searchQuery.trim() && (
-              <>
-                {/* Favorites Section */}
-                {airports.some((a: Airport) => a.isFavorite) && (
-                  <div className="space-y-1.5">
-                    <h2 className="text-xs font-semibold text-primary uppercase px-1 flex items-center gap-1">
-                      <Star className="h-3 w-3 fill-primary" /> Favorites
-                    </h2>
-                    <div className="space-y-2">
-                      {airports
-                        .filter((a: Airport) => a.isFavorite)
-                        .map((a: Airport) => renderAirportCard(a, false))}
-                    </div>
-                    <div className="border-t border-border/50 my-4" />
-                  </div>
-                )}
-
-                {/* Recent Section */}
-                {recentAirports.length > 0 && (
-                  <div className="space-y-1.5">
-                    <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
-                      Recent
-                    </h2>
-                    <div className="space-y-2">
-                      {recentAirports.map((a: Airport) => renderAirportCard(a, true))}
-                    </div>
-                    <div className="border-t border-border my-4" />
-                  </div>
-                )}
-              </>
-            )}
-
-            {searchQuery.trim() && (
-              <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
-                {filteredAirports.length} results
-              </h2>
-            )}
-
-            <div className="space-y-2">
-              {filteredAirports.map((a) => renderAirportCard(a, false))}
-            </div>
-
-            <div ref={observerTarget} className="h-20" />
+      <div className="container mx-auto px-3 pt-3 pb-safe">
+        <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
+          <div className="relative">
+            <Input
+              type="text"
+              placeholder="Search airports..."
+              value={searchQuery}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+              className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
+            />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           </div>
         </div>
 
-        {/* FastScroll rail */}
-        {!searchQuery.trim() && fastScrollItems.length > 1 && (
-          <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
-            <div className="pointer-events-auto">
-              <FastScroll
-                items={fastScrollItems}
-                activeKey={activeLetterKey}
-                onSelect={handleFastScrollSelect}
-                indicatorPosition="left"
-                className="py-16"
-              />
-            </div>
+        <div className={`space-y-3 ${!searchQuery.trim() && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
+          {!searchQuery.trim() && (
+            <>
+              {/* Favorites Section */}
+              {airports.some((a: Airport) => a.isFavorite) && (
+                <div className="space-y-1.5">
+                  <h2 className="text-xs font-semibold text-primary uppercase px-1 flex items-center gap-1">
+                    <Star className="h-3 w-3 fill-primary" /> Favorites
+                  </h2>
+                  <div className="space-y-2">
+                    {airports
+                      .filter((a: Airport) => a.isFavorite)
+                      .map((a: Airport) => renderAirportCard(a, false))}
+                  </div>
+                  <div className="border-t border-border/50 my-4" />
+                </div>
+              )}
+
+              {/* Recent Section */}
+              {recentAirports.length > 0 && (
+                <div className="space-y-1.5">
+                  <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
+                    Recent
+                  </h2>
+                  <div className="space-y-2">
+                    {recentAirports.map((a: Airport) => renderAirportCard(a, true))}
+                  </div>
+                  <div className="border-t border-border my-4" />
+                </div>
+              )}
+            </>
+          )}
+
+          {searchQuery.trim() && (
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
+              {filteredAirports.length} results
+            </h2>
+          )}
+
+          <div className="space-y-2">
+            {filteredAirports.map((a) => renderAirportCard(a, false))}
           </div>
-        )}
+
+          <div ref={observerTarget} className="h-20" />
+        </div>
       </div>
+
+      {/* FastScroll rail - fixed position */}
+      {!searchQuery.trim() && fastScrollItems.length > 1 && (
+        <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
+          <FastScroll
+            items={fastScrollItems}
+            activeKey={activeLetterKey}
+            onSelect={handleFastScrollSelect}
+            indicatorPosition="left"
+          />
+        </div>
+      )}
     </PageContainer>
   );
 }

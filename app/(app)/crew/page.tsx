@@ -261,86 +261,81 @@ export default function CrewPage() {
         />
       }
     >
-      <div className="relative h-full">
-        <div className="container mx-auto px-3 pt-3 pb-safe h-full overflow-y-auto">
-          <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Input
-                  type="text"
-                  placeholder="Search crew..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-                />
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              </div>
-              <Button
-                onClick={handleAddCrew}
-                size="icon"
-                className="h-10 w-10 flex-shrink-0"
-              >
-                <Plus className="h-5 w-5" />
-              </Button>
+      <div className="container mx-auto px-3 pt-3 pb-safe">
+        <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Input
+                type="text"
+                placeholder="Search crew..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
+              />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             </div>
+            <Button
+              onClick={handleAddCrew}
+              size="icon"
+              className="h-10 w-10 flex-shrink-0"
+            >
+              <Plus className="h-5 w-5" />
+            </Button>
           </div>
-
-          {isLoading && displayCount === ITEMS_PER_PAGE ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            <div className={`space-y-3 ${!debouncedSearchQuery && fastScrollItems.length > 1 ? "pr-6" : ""}`}>
-              {debouncedSearchQuery && (
-                <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
-                  {filteredPersonnel.length} results
-                </h2>
-              )}
-
-              <div className="space-y-2">
-                {filteredPersonnel.map((crew) => (
-                  <SwipeableCrewCard
-                    key={crew.id}
-                    crew={crew}
-                    onSelect={() => handleCrewSelect(crew)}
-                    onDelete={() => confirmDelete(crew)}
-                    isSelectMode={!!fieldType}
-                  />
-                ))}
-              </div>
-
-              <div ref={observerTarget} className="h-4" />
-
-              {filteredPersonnel.length === 0 && !isLoading && (
-                <div className="text-center py-12">
-                  <User className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-sm text-muted-foreground mb-4">
-                    No results found.
-                  </p>
-                  <Button onClick={handleAddCrew} variant="outline">
-                    <Plus className="h-4 w-4 mr-2" /> Add Crew Member
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
-        {/* FastScroll rail - show when not searching and there are enough crew members */}
-        {!debouncedSearchQuery && fastScrollItems.length > 1 && (
-          <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
-            <div className="pointer-events-auto">
-              <FastScroll
-                items={fastScrollItems}
-                activeKey={activeLetterKey}
-                onSelect={handleFastScrollSelect}
-                indicatorPosition="left"
-                className="py-16"
-              />
+        {isLoading && displayCount === ITEMS_PER_PAGE ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <div className={`space-y-3 ${!debouncedSearchQuery && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
+            {debouncedSearchQuery && (
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
+                {filteredPersonnel.length} results
+              </h2>
+            )}
+
+            <div className="space-y-2">
+              {filteredPersonnel.map((crew) => (
+                <SwipeableCrewCard
+                  key={crew.id}
+                  crew={crew}
+                  onSelect={() => handleCrewSelect(crew)}
+                  onDelete={() => confirmDelete(crew)}
+                  isSelectMode={!!fieldType}
+                />
+              ))}
             </div>
+
+            <div ref={observerTarget} className="h-4" />
+
+            {filteredPersonnel.length === 0 && !isLoading && (
+              <div className="text-center py-12">
+                <User className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-sm text-muted-foreground mb-4">
+                  No results found.
+                </p>
+                <Button onClick={handleAddCrew} variant="outline">
+                  <Plus className="h-4 w-4 mr-2" /> Add Crew Member
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      {/* FastScroll rail - fixed position */}
+      {!debouncedSearchQuery && fastScrollItems.length > 1 && (
+        <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
+          <FastScroll
+            items={fastScrollItems}
+            activeKey={activeLetterKey}
+            onSelect={handleFastScrollSelect}
+            indicatorPosition="left"
+          />
+        </div>
+      )}
 
       <DeleteDialog
         title="Delete Crew Member"

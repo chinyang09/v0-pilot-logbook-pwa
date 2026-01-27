@@ -214,8 +214,8 @@ export default function AircraftPage() {
           <p className="text-muted-foreground text-sm">{loadingProgress.stage || "Loading..."}</p>
         </div>
       ) : (
-        <div className="relative h-full">
-          <div className="container mx-auto px-3 pt-3 pb-safe h-full overflow-y-auto">
+        <>
+          <div className="container mx-auto px-3 pt-3 pb-safe">
             <div className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl pb-3 -mx-3 px-3">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -230,7 +230,7 @@ export default function AircraftPage() {
               </div>
             </div>
 
-            <div className={`space-y-3 ${debouncedSearchQuery.length >= 2 && fastScrollItems.length > 1 ? "pr-6" : ""}`}>
+            <div className={`space-y-3 ${debouncedSearchQuery.length >= 2 && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
               {showRecentlyUsed && (
                 <div className="space-y-1.5">
                   <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">Recently Used</h2>
@@ -279,21 +279,18 @@ export default function AircraftPage() {
             </div>
           </div>
 
-          {/* FastScroll rail - show only when there are search results */}
+          {/* FastScroll rail - fixed position */}
           {debouncedSearchQuery.length >= 2 && fastScrollItems.length > 1 && (
-            <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
-              <div className="pointer-events-auto">
-                <FastScroll
-                  items={fastScrollItems}
-                  activeKey={activeLetterKey}
-                  onSelect={handleFastScrollSelect}
-                  indicatorPosition="left"
-                  className="py-16"
-                />
-              </div>
+            <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
+              <FastScroll
+                items={fastScrollItems}
+                activeKey={activeLetterKey}
+                onSelect={handleFastScrollSelect}
+                indicatorPosition="left"
+              />
             </div>
           )}
-        </div>
+        </>
       )}
     </PageContainer>
   )

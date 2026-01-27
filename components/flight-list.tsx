@@ -240,46 +240,37 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   );
 });
 
-// Generate FastScroll items from flight dates
-function generateFlightDateItems(flights: FlightLog[]): FastScrollItem[] {
+// Generate FastScroll items from flight dates (year-based navigation)
+function generateFlightYearItems(flights: FlightLog[]): FastScrollItem[] {
   if (flights.length === 0) return [];
 
-  const monthYears = new Map<string, number>();
+  const years = new Map<string, number>();
 
   flights.forEach((flight, index) => {
     const date = parseDateLocal(flight.date);
-    const year = date.getFullYear();
-    const month = (date.getMonth() + 1).toString().padStart(2, "0");
-    const key = `${year}-${month}`;
+    const year = date.getFullYear().toString();
 
-    if (!monthYears.has(key)) {
-      monthYears.set(key, index);
+    if (!years.has(year)) {
+      years.set(year, index);
     }
   });
 
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const sorted = Array.from(monthYears.keys()).sort((a, b) => b.localeCompare(a));
+  // Sort years in descending order (newest first)
+  const sorted = Array.from(years.keys()).sort((a, b) => b.localeCompare(a));
 
-  return sorted.map((monthYear) => {
-    const [year, month] = monthYear.split("-");
-    const monthIndex = parseInt(month, 10) - 1;
-    return {
-      key: monthYear,
-      label: `${monthNames[monthIndex].charAt(0)}`,
-    };
-  });
+  return sorted.map((year) => ({
+    key: year,
+    label: year.slice(-2), // Show last 2 digits (e.g., "24" for 2024)
+  }));
 }
 
-// Get first flight index for a given month/year
-function getFirstFlightIndexForMonth(flights: FlightLog[], monthYear: string): number {
-  const [targetYear, targetMonth] = monthYear.split("-").map(Number);
+// Get first flight index for a given year
+function getFirstFlightIndexForYear(flights: FlightLog[], targetYear: string): number {
+  const year = parseInt(targetYear, 10);
 
   for (let i = 0; i < flights.length; i++) {
     const date = parseDateLocal(flights[i].date);
-    const year = date.getFullYear();
-    const month = date.getMonth() + 1;
-
-    if (year === targetYear && month === targetMonth) {
+    if (date.getFullYear() === year) {
       return i;
     }
   }
@@ -313,11 +304,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const isExternalScrollRef = useRef(false);
     const lastDetectedFlightRef = useRef<string | null>(null);
-    const [activeMonthKey, setActiveMonthKey] = useState<string | undefined>(undefined);
+    const [activeYearKey, setActiveYearKey] = useState<string | undefined>(undefined);
     const [isFastScrolling, setIsFastScrolling] = useState(false);
 
-    // Generate FastScroll items from flights
-    const fastScrollItems = useMemo(() => generateFlightDateItems(flights), [flights]);
+    // Generate FastScroll items from flights (year-based)
+    const fastScrollItems = useMemo(() => generateFlightYearItems(flights), [flights]);
 
     // Create virtualizer instance
     const rowVirtualizer = useVirtualizer({
@@ -378,13 +369,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       const topFlight = flights[topVisibleItem.index];
 
       if (topFlight) {
-        // Update active month for FastScroll
+        // Update active year for FastScroll
         const date = parseDateLocal(topFlight.date);
-        const year = date.getFullYear();
-        const month = (date.getMonth() + 1).toString().padStart(2, "0");
-        const newMonthKey = `${year}-${month}`;
-        if (newMonthKey !== activeMonthKey && !isFastScrolling) {
-          setActiveMonthKey(newMonthKey);
+        const newYearKey = date.getFullYear().toString();
+        if (newYearKey !== activeYearKey && !isFastScrolling) {
+          setActiveYearKey(newYearKey);
         }
 
         if (topFlight.id !== lastDetectedFlightRef.current) {
@@ -392,7 +381,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           onTopFlightChange?.(topFlight);
         }
       }
-    }, [flights, onTopFlightChange, rowVirtualizer, activeMonthKey, isFastScrolling]);
+    }, [flights, onTopFlightChange, rowVirtualizer, activeYearKey, isFastScrolling]);
 
     // Handle user touch/interaction start on flight list
     const handleTouchStart = useCallback(() => {
@@ -441,13 +430,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       onDeleted?.();
     };
 
-    // FastScroll selection handler
+    // FastScroll selection handler (year-based)
     const handleFastScrollSelect = useCallback(
-      (monthYear: string) => {
-        const index = getFirstFlightIndexForMonth(flights, monthYear);
+      (year: string) => {
+        const index = getFirstFlightIndexForYear(flights, year);
         if (index !== -1) {
           isExternalScrollRef.current = true;
-          setActiveMonthKey(monthYear);
+          setActiveYearKey(year);
           rowVirtualizer.scrollToIndex(index, {
             align: "start",
             behavior: "smooth",
@@ -590,13 +579,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             <div className="h-16" />
           </div>
 
-          {/* FastScroll rail */}
+          {/* FastScroll rail (year-based navigation) */}
           {fastScrollItems.length > 1 && (
             <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
               <div className="pointer-events-auto">
                 <FastScroll
                   items={fastScrollItems}
-                  activeKey={activeMonthKey}
+                  activeKey={activeYearKey}
                   onSelect={handleFastScrollSelect}
                   onScrollStart={handleFastScrollStart}
                   onScrollEnd={handleFastScrollEnd}

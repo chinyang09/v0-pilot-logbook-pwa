@@ -477,71 +477,67 @@ export default function RosterPage() {
 
         {/* List View */}
         {viewMode === "list" && sortedDates.length > 0 && (
-          <div className="relative">
-            <div className={`space-y-3 ${!selectedDate && fastScrollItems.length > 1 ? "pr-6" : ""}`}>
-              {selectedDate ? (
-                <>
-                  {/* Selected Date Details */}
-                  <div className="flex items-center gap-2 mb-4">
-                    <Button variant="ghost" size="sm" onClick={handleBackToCalendar}>
-                      ← Back to Calendar
-                    </Button>
-                    <h2 className="text-lg font-semibold">
-                      {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
-                        weekday: "long",
-                        month: "long",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
-                    </h2>
-                  </div>
-                  {selectedEntries.map((entry) => (
-                    <DutyEntryCard key={entry.id} entry={entry} />
-                  ))}
-                </>
-              ) : (
-                <>
-                  {/* All Dates List */}
-                  {sortedDates.slice(0, 30).map((date) => (
-                    <Card key={date} id={`roster-date-${date}`}>
-                      <CardHeader className="pb-2 pt-3 px-3">
-                        <CardTitle className="text-sm font-medium">
-                          {new Date(date + "T00:00:00").toLocaleDateString("en-US", {
-                            weekday: "short",
-                            month: "short",
-                            day: "numeric",
-                          })}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-3 pb-3 space-y-2">
-                        {entriesByDate[date].map((entry) => (
-                          <DutyEntryCard key={entry.id} entry={entry} compact />
-                        ))}
-                      </CardContent>
-                    </Card>
-                  ))}
-                  {sortedDates.length > 30 && (
-                    <p className="text-center text-sm text-muted-foreground">
-                      Showing 30 most recent days. {sortedDates.length - 30} more days available.
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* FastScroll rail - show when not viewing selected date and there are enough months */}
-            {!selectedDate && fastScrollItems.length > 1 && (
-              <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
-                <div className="pointer-events-auto">
-                  <FastScroll
-                    items={fastScrollItems}
-                    activeKey={activeMonthKey}
-                    onSelect={handleFastScrollSelect}
-                    indicatorPosition="left"
-                  />
+          <div className={`space-y-3 ${!selectedDate && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
+            {selectedDate ? (
+              <>
+                {/* Selected Date Details */}
+                <div className="flex items-center gap-2 mb-4">
+                  <Button variant="ghost" size="sm" onClick={handleBackToCalendar}>
+                    ← Back to Calendar
+                  </Button>
+                  <h2 className="text-lg font-semibold">
+                    {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
+                      weekday: "long",
+                      month: "long",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </h2>
                 </div>
-              </div>
+                {selectedEntries.map((entry) => (
+                  <DutyEntryCard key={entry.id} entry={entry} />
+                ))}
+              </>
+            ) : (
+              <>
+                {/* All Dates List */}
+                {sortedDates.slice(0, 30).map((date) => (
+                  <Card key={date} id={`roster-date-${date}`}>
+                    <CardHeader className="pb-2 pt-3 px-3">
+                      <CardTitle className="text-sm font-medium">
+                        {new Date(date + "T00:00:00").toLocaleDateString("en-US", {
+                          weekday: "short",
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-3 pb-3 space-y-2">
+                      {entriesByDate[date].map((entry) => (
+                        <DutyEntryCard key={entry.id} entry={entry} compact />
+                      ))}
+                    </CardContent>
+                  </Card>
+                ))}
+                {sortedDates.length > 30 && (
+                  <p className="text-center text-sm text-muted-foreground">
+                    Showing 30 most recent days. {sortedDates.length - 30} more days available.
+                  </p>
+                )}
+              </>
             )}
+          </div>
+        )}
+
+        {/* FastScroll rail - fixed position */}
+        {viewMode === "list" && !selectedDate && fastScrollItems.length > 1 && (
+          <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
+            <FastScroll
+              items={fastScrollItems}
+              activeKey={activeMonthKey}
+              onSelect={handleFastScrollSelect}
+              indicatorPosition="left"
+            />
           </div>
         )}
       </div>
