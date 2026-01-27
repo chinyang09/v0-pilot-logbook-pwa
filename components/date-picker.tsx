@@ -269,9 +269,13 @@ export function DatePicker({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60"
+      style={{ paddingBottom: "calc(4rem + env(safe-area-inset-bottom))" }}
+      onClick={onClose}
+    >
       <div
-        className="w-full max-w-md rounded-t-3xl bg-card pb-safe animate-in slide-in-from-bottom duration-300"
+        className="w-full max-w-md rounded-3xl bg-card animate-in slide-in-from-bottom duration-300"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -291,139 +295,142 @@ export function DatePicker({
           </button>
         </div>
 
-        {/* Wheel Picker */}
-        <div className="relative px-4 pt-2 pb-4">
-          {/* iOS-style highlight bar */}
-          <div className="pointer-events-none absolute left-4 right-4 top-1/2 z-10 h-11 -translate-y-1/2 rounded-xl bg-muted/50" />
+        {/* Wheel Picker Container - no asymmetric padding */}
+        <div className="relative px-4">
+          {/* Wheel picker area with centered overlay */}
+          <div className="relative h-[200px]">
+            {/* iOS-style highlight bar - centered in the 200px height */}
+            <div className="pointer-events-none absolute left-0 right-0 top-1/2 z-10 h-11 -translate-y-1/2 rounded-xl bg-muted/50" />
 
-          {/* Tap areas for keyboard input */}
-          <div className="absolute inset-x-4 top-1/2 z-30 flex h-11 -translate-y-1/2 items-center justify-between px-2">
-            {/* Day tap area / input */}
-            <div className="flex h-full flex-1 items-center justify-center">
-              {focusedField === "day" ? (
-                <input
-                  ref={dayInputRef}
-                  type="text"
-                  inputMode="numeric"
-                  value={dayInput}
-                  onChange={handleDayInputChange}
-                  onBlur={handleDayBlur}
-                  onKeyDown={(e) => handleKeyDown(e, "day")}
-                  className="w-12 rounded-lg bg-primary/20 text-center text-xl font-semibold tabular-nums text-foreground outline-none"
-                  maxLength={2}
-                />
-              ) : (
-                <button
-                  onClick={handleDayTap}
-                  className="flex h-full w-12 items-center justify-center rounded-lg text-xl font-semibold tabular-nums text-transparent active:bg-primary/10"
-                >
-                  {day.toString().padStart(2, "0")}
-                </button>
-              )}
+            {/* Tap areas for keyboard input - centered in the 200px height */}
+            <div className="absolute inset-x-0 top-1/2 z-30 flex h-11 -translate-y-1/2 items-center justify-between px-2">
+              {/* Day tap area / input */}
+              <div className="flex h-full flex-1 items-center justify-center">
+                {focusedField === "day" ? (
+                  <input
+                    ref={dayInputRef}
+                    type="text"
+                    inputMode="numeric"
+                    value={dayInput}
+                    onChange={handleDayInputChange}
+                    onBlur={handleDayBlur}
+                    onKeyDown={(e) => handleKeyDown(e, "day")}
+                    className="w-12 rounded-lg bg-primary/20 text-center text-xl font-semibold tabular-nums text-foreground outline-none"
+                    maxLength={2}
+                  />
+                ) : (
+                  <button
+                    onClick={handleDayTap}
+                    className="flex h-full w-12 items-center justify-center rounded-lg text-xl font-semibold tabular-nums text-transparent active:bg-primary/10"
+                  >
+                    {day.toString().padStart(2, "0")}
+                  </button>
+                )}
+              </div>
+
+              {/* Month tap area / input */}
+              <div className="flex h-full flex-1 items-center justify-center">
+                {focusedField === "month" ? (
+                  <input
+                    ref={monthInputRef}
+                    type="text"
+                    inputMode="numeric"
+                    value={monthInput}
+                    onChange={handleMonthInputChange}
+                    onBlur={handleMonthBlur}
+                    onKeyDown={(e) => handleKeyDown(e, "month")}
+                    placeholder="MM"
+                    className="w-12 rounded-lg bg-primary/20 text-center text-xl font-semibold text-foreground outline-none"
+                    maxLength={2}
+                  />
+                ) : (
+                  <button
+                    onClick={handleMonthTap}
+                    className="flex h-full w-14 items-center justify-center rounded-lg text-xl font-semibold text-transparent active:bg-primary/10"
+                  >
+                    {MONTHS[month]}
+                  </button>
+                )}
+              </div>
+
+              {/* Year tap area / input */}
+              <div className="flex h-full flex-1 items-center justify-center">
+                {focusedField === "year" ? (
+                  <input
+                    ref={yearInputRef}
+                    type="text"
+                    inputMode="numeric"
+                    value={yearInput}
+                    onChange={handleYearInputChange}
+                    onBlur={handleYearBlur}
+                    onKeyDown={(e) => handleKeyDown(e, "year")}
+                    className="w-16 rounded-lg bg-primary/20 text-center text-xl font-semibold tabular-nums text-foreground outline-none"
+                    maxLength={4}
+                  />
+                ) : (
+                  <button
+                    onClick={handleYearTap}
+                    className="flex h-full w-16 items-center justify-center rounded-lg text-xl font-semibold tabular-nums text-transparent active:bg-primary/10"
+                  >
+                    {year}
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Month tap area / input */}
-            <div className="flex h-full flex-1 items-center justify-center">
-              {focusedField === "month" ? (
-                <input
-                  ref={monthInputRef}
-                  type="text"
-                  inputMode="numeric"
-                  value={monthInput}
-                  onChange={handleMonthInputChange}
-                  onBlur={handleMonthBlur}
-                  onKeyDown={(e) => handleKeyDown(e, "month")}
-                  placeholder="MM"
-                  className="w-12 rounded-lg bg-primary/20 text-center text-xl font-semibold text-foreground outline-none"
-                  maxLength={2}
-                />
-              ) : (
-                <button
-                  onClick={handleMonthTap}
-                  className="flex h-full w-14 items-center justify-center rounded-lg text-xl font-semibold text-transparent active:bg-primary/10"
-                >
-                  {MONTHS[month]}
-                </button>
-              )}
-            </div>
+            <WheelPickerWrapper className="h-full">
+              {/* Day */}
+              <WheelPicker
+                options={dayOptions}
+                value={day}
+                onValueChange={(val) => {
+                  setDay(val as number)
+                  setFocusedField(null)
+                }}
+                infinite
+                optionItemHeight={44}
+                classNames={{
+                  optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
+                  highlightItem: "text-xl tabular-nums text-foreground font-semibold",
+                }}
+              />
 
-            {/* Year tap area / input */}
-            <div className="flex h-full flex-1 items-center justify-center">
-              {focusedField === "year" ? (
-                <input
-                  ref={yearInputRef}
-                  type="text"
-                  inputMode="numeric"
-                  value={yearInput}
-                  onChange={handleYearInputChange}
-                  onBlur={handleYearBlur}
-                  onKeyDown={(e) => handleKeyDown(e, "year")}
-                  className="w-16 rounded-lg bg-primary/20 text-center text-xl font-semibold tabular-nums text-foreground outline-none"
-                  maxLength={4}
-                />
-              ) : (
-                <button
-                  onClick={handleYearTap}
-                  className="flex h-full w-16 items-center justify-center rounded-lg text-xl font-semibold tabular-nums text-transparent active:bg-primary/10"
-                >
-                  {year}
-                </button>
-              )}
-            </div>
+              {/* Month */}
+              <WheelPicker
+                options={monthOptions}
+                value={month}
+                onValueChange={(val) => {
+                  setMonth(val as number)
+                  setFocusedField(null)
+                }}
+                infinite
+                optionItemHeight={44}
+                classNames={{
+                  optionItem: "text-lg text-muted-foreground/50 font-medium",
+                  highlightItem: "text-xl text-foreground font-semibold",
+                }}
+              />
+
+              {/* Year */}
+              <WheelPicker
+                options={yearOptions}
+                value={year}
+                onValueChange={(val) => {
+                  setYear(val as number)
+                  setFocusedField(null)
+                }}
+                optionItemHeight={44}
+                classNames={{
+                  optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
+                  highlightItem: "text-xl tabular-nums text-foreground font-semibold",
+                }}
+              />
+            </WheelPickerWrapper>
           </div>
-
-          <WheelPickerWrapper className="h-[200px]">
-            {/* Day */}
-            <WheelPicker
-              options={dayOptions}
-              value={day}
-              onValueChange={(val) => {
-                setDay(val as number)
-                setFocusedField(null)
-              }}
-              infinite
-              optionItemHeight={44}
-              classNames={{
-                optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
-                highlightItem: "text-xl tabular-nums text-foreground font-semibold",
-              }}
-            />
-
-            {/* Month */}
-            <WheelPicker
-              options={monthOptions}
-              value={month}
-              onValueChange={(val) => {
-                setMonth(val as number)
-                setFocusedField(null)
-              }}
-              infinite
-              optionItemHeight={44}
-              classNames={{
-                optionItem: "text-lg text-muted-foreground/50 font-medium",
-                highlightItem: "text-xl text-foreground font-semibold",
-              }}
-            />
-
-            {/* Year */}
-            <WheelPicker
-              options={yearOptions}
-              value={year}
-              onValueChange={(val) => {
-                setYear(val as number)
-                setFocusedField(null)
-              }}
-              optionItemHeight={44}
-              classNames={{
-                optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
-                highlightItem: "text-xl tabular-nums text-foreground font-semibold",
-              }}
-            />
-          </WheelPickerWrapper>
         </div>
 
         {/* TODAY button */}
-        <div className="flex justify-center pb-6">
+        <div className="flex justify-center py-4">
           <button
             onClick={handleSetToday}
             className="rounded-full bg-primary/10 px-8 py-2 text-sm font-semibold text-primary active:bg-primary/20"
