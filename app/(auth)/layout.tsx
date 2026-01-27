@@ -15,7 +15,7 @@ export default function AuthLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="h-[100dvh] w-full bg-background overflow-auto overscroll-contain pt-safe">
       {children}
     </div>
   )
