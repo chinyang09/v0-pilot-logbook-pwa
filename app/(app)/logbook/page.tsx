@@ -362,7 +362,7 @@ export default function LogbookPage() {
       </div>
 
       {/* FLIGHT LIST */}
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 overflow-hidden overscroll-contain">
         <FlightList
           ref={flightListRef}
           flights={filteredFlights}

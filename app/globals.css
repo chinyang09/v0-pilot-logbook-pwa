@@ -94,11 +94,18 @@
   /* Force background color on html for Android PWA */
   html {
     background-color: #05080B;
+    height: 100%;
+    overflow: hidden;
   }
   body {
     @apply bg-background text-foreground;
-    min-height: 100dvh;
+    height: 100dvh;
     background-color: #05080B;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    top: 0;
+    left: 0;
   }
 }
 
@@ -110,12 +117,21 @@
   }
 }
 
-/* PWA specific styles */
-@supports (padding-top: env(safe-area-inset-top)) {
-  body {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-  }
+/* PWA safe area - handled in app layout container instead of body */
+/* Utility class for safe area top padding */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Utility class for safe area bottom padding */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Scroll containment to prevent scroll chaining on iOS */
+.scroll-container {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* iOS date input fix - standardize appearance */

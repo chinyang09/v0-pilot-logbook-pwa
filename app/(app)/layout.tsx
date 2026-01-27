@@ -14,7 +14,7 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
   useDraftGenerator()
 
   return (
-    <div className="relative h-[100dvh] w-full flex flex-col bg-background overflow-hidden">
+    <div className="relative h-[100dvh] w-full flex flex-col bg-background overflow-hidden pt-safe">
       {children}
 
       <div className={cn(

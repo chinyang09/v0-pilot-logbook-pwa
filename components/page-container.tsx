@@ -19,7 +19,7 @@ export function PageContainer({ children, header, className }: PageContainerProp
 
       <main
         onScroll={handleScroll}
-        className={cn("flex-1 overflow-y-auto", className)}
+        className={cn("flex-1 overflow-y-auto overscroll-contain", className)}
       >
         <div className="pb-24">
           {children}
