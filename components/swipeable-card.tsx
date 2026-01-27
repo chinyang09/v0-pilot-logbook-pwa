@@ -19,6 +19,7 @@ interface SwipeableCardProps {
   onClick?: () => void
   className?: string
   disabled?: boolean
+  id?: string
 }
 
 export function SwipeableCard({
@@ -27,6 +28,7 @@ export function SwipeableCard({
   onClick,
   className,
   disabled = false,
+  id,
 }: SwipeableCardProps) {
   const { swipeX, isSwiping, close, swipeProps } = useSwipeGesture({
     threshold: 80,
@@ -46,7 +48,7 @@ export function SwipeableCard({
   const totalActionsWidth = actions.length * actionWidth
 
   return (
-    <div className="relative overflow-hidden rounded-lg">
+    <div id={id} className="relative overflow-hidden rounded-lg">
       {/* Action buttons revealed on swipe */}
       <div
         className={cn(

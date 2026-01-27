@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useMemo, useCallback } from "react"
 import { PageContainer } from "@/components/page-container"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -37,6 +37,7 @@ import Link from "next/link"
 import { DutyEntryCard, RosterCalendar, DraftSettings } from "@/components/roster"
 import { getDraftGenerationConfig } from "@/lib/db"
 import { processPendingDrafts } from "@/lib/utils/roster/draft-generator"
+import { FastScroll, generateDateItems, type FastScrollItem } from "@/components/ui/fast-scroll"
 
 type ViewMode = "list" | "calendar"
 
@@ -154,6 +155,33 @@ export default function RosterPage() {
   )
 
   const sortedDates = Object.keys(entriesByDate).sort((a, b) => b.localeCompare(a))
+
+  // Generate FastScroll items from dates
+  const fastScrollItems = useMemo(() => {
+    return generateDateItems(sortedDates);
+  }, [sortedDates]);
+
+  const [activeMonthKey, setActiveMonthKey] = useState<string | undefined>(undefined);
+
+  // Handle FastScroll selection with instant scrolling
+  const handleFastScrollSelect = useCallback((monthYear: string) => {
+    setActiveMonthKey(monthYear);
+
+    // Find the first date in this month/year
+    const [targetYear, targetMonth] = monthYear.split("-");
+    const targetDate = sortedDates.find((date) => {
+      const [year, month] = date.split("-");
+      return year === targetYear && month === targetMonth;
+    });
+
+    if (targetDate) {
+      // Scroll to the element with instant behavior for snappy feedback
+      const element = document.getElementById(`roster-date-${targetDate}`);
+      if (element) {
+        element.scrollIntoView({ behavior: "instant", block: "start" });
+      }
+    }
+  }, [sortedDates]);
 
   const handleDateClick = (date: string, entries: ScheduleEntry[]) => {
     setSelectedDate(date)
@@ -449,7 +477,7 @@ export default function RosterPage() {
 
         {/* List View */}
         {viewMode === "list" && sortedDates.length > 0 && (
-          <div className="space-y-3">
+          <div className={`space-y-3 ${!selectedDate && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
             {selectedDate ? (
               <>
                 {/* Selected Date Details */}
@@ -474,7 +502,7 @@ export default function RosterPage() {
               <>
                 {/* All Dates List */}
                 {sortedDates.slice(0, 30).map((date) => (
-                  <Card key={date}>
+                  <Card key={date} id={`roster-date-${date}`}>
                     <CardHeader className="pb-2 pt-3 px-3">
                       <CardTitle className="text-sm font-medium">
                         {new Date(date + "T00:00:00").toLocaleDateString("en-US", {
@@ -498,6 +526,18 @@ export default function RosterPage() {
                 )}
               </>
             )}
+          </div>
+        )}
+
+        {/* FastScroll rail - fixed position */}
+        {viewMode === "list" && !selectedDate && fastScrollItems.length > 1 && (
+          <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
+            <FastScroll
+              items={fastScrollItems}
+              activeKey={activeMonthKey}
+              onSelect={handleFastScrollSelect}
+              indicatorPosition="left"
+            />
           </div>
         )}
       </div>

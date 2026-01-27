@@ -32,6 +32,7 @@ import {
 import { cn } from "@/lib/utils";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
+import { FastScroll, type FastScrollItem } from "@/components/ui/fast-scroll";
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, flightDate?: string) => void;
@@ -239,6 +240,44 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   );
 });
 
+// Generate FastScroll items from flight dates (year-based navigation)
+function generateFlightYearItems(flights: FlightLog[]): FastScrollItem[] {
+  if (flights.length === 0) return [];
+
+  const years = new Map<string, number>();
+
+  flights.forEach((flight, index) => {
+    const date = parseDateLocal(flight.date);
+    const year = date.getFullYear().toString();
+
+    if (!years.has(year)) {
+      years.set(year, index);
+    }
+  });
+
+  // Sort years in descending order (newest first)
+  const sorted = Array.from(years.keys()).sort((a, b) => b.localeCompare(a));
+
+  return sorted.map((year) => ({
+    key: year,
+    label: year.slice(-2), // Show last 2 digits (e.g., "24" for 2024)
+  }));
+}
+
+// Get first flight index for a given year
+function getFirstFlightIndexForYear(flights: FlightLog[], targetYear: string): number {
+  const year = parseInt(targetYear, 10);
+
+  for (let i = 0; i < flights.length; i++) {
+    const date = parseDateLocal(flights[i].date);
+    if (date.getFullYear() === year) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
 export const FlightList = forwardRef<FlightListRef, FlightListProps>(
   function FlightList(
     {
@@ -265,6 +304,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const isExternalScrollRef = useRef(false);
     const lastDetectedFlightRef = useRef<string | null>(null);
+    const [activeYearKey, setActiveYearKey] = useState<string | undefined>(undefined);
+    const isFastScrollingRef = useRef(false);
+
+    // Generate FastScroll items from flights (year-based)
+    const fastScrollItems = useMemo(() => generateFlightYearItems(flights), [flights]);
 
     // Create virtualizer instance
     const rowVirtualizer = useVirtualizer({
@@ -302,7 +346,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       // Note: onScrollStart is now triggered by touch events, not scroll events
       // This prevents programmatic/momentum scrolls from changing the sync source
 
-      if (!onTopFlightChange || flights.length === 0) return;
+      if (flights.length === 0) return;
 
       const visibleItems = rowVirtualizer.getVirtualItems();
       if (visibleItems.length === 0) return;
@@ -324,9 +368,18 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
       const topFlight = flights[topVisibleItem.index];
 
-      if (topFlight && topFlight.id !== lastDetectedFlightRef.current) {
-        lastDetectedFlightRef.current = topFlight.id;
-        onTopFlightChange(topFlight);
+      if (topFlight) {
+        // Update active year for FastScroll (use ref to avoid stale closure)
+        if (!isFastScrollingRef.current) {
+          const date = parseDateLocal(topFlight.date);
+          const newYearKey = date.getFullYear().toString();
+          setActiveYearKey(newYearKey);
+        }
+
+        if (topFlight.id !== lastDetectedFlightRef.current) {
+          lastDetectedFlightRef.current = topFlight.id;
+          onTopFlightChange?.(topFlight);
+        }
       }
     }, [flights, onTopFlightChange, rowVirtualizer]);
 
@@ -376,6 +429,37 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       await updateFlight(flight.id, { isLocked: !flight.isLocked });
       onDeleted?.();
     };
+
+    // FastScroll selection handler (year-based) with instant scrolling
+    const handleFastScrollSelect = useCallback(
+      (year: string) => {
+        const index = getFirstFlightIndexForYear(flights, year);
+        if (index !== -1) {
+          isExternalScrollRef.current = true;
+          isFastScrollingRef.current = true;
+          setActiveYearKey(year);
+          rowVirtualizer.scrollToIndex(index, {
+            align: "start",
+            behavior: "auto", // Use "auto" for instant scroll during fast scroll
+          });
+          setTimeout(() => {
+            isExternalScrollRef.current = false;
+          }, 100);
+        }
+      },
+      [flights, rowVirtualizer]
+    );
+
+    const handleFastScrollStart = useCallback(() => {
+      isFastScrollingRef.current = true;
+    }, []);
+
+    const handleFastScrollEnd = useCallback(() => {
+      // Delay resetting to allow final scroll position to settle
+      setTimeout(() => {
+        isFastScrollingRef.current = false;
+      }, 100);
+    }, []);
 
     if (isLoading) {
       return (
@@ -438,63 +522,83 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
     return (
       <>
-        <div
-          ref={scrollContainerRef}
-          className="h-full overflow-y-auto"
-          style={{ contain: "strict" }}
-          onTouchStart={handleTouchStart}
-          onMouseDown={handleTouchStart}
-        >
-          {/* Top spacer for calendar */}
+        <div className="relative h-full flex">
+          {/* Main scrollable container */}
           <div
-            style={{
-              height: `${topSpacerHeight}px`,
-              transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
-            }}
-            className="transition-[height] duration-500 will-change-[height]"
-          />
-
-          {headerContent}
-
-          {/* Virtual list container */}
-          <div
-            style={{
-              height: `${rowVirtualizer.getTotalSize()}px`,
-              width: "100%",
-              position: "relative",
-            }}
+            ref={scrollContainerRef}
+            className="h-full overflow-y-auto flex-1"
+            style={{ contain: "strict" }}
+            onTouchStart={handleTouchStart}
+            onMouseDown={handleTouchStart}
           >
-            {virtualItems.map((virtualRow) => {
-              const flight = flights[virtualRow.index];
-              return (
-                <div
-                  key={flight.id}
-                  id={`flight-${flight.id}`}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
-                    padding: "0 8px 8px 8px",
-                  }}
-                  data-index={virtualRow.index}
-                  ref={rowVirtualizer.measureElement}
-                >
-                  <SwipeableFlightCard
-                    flight={flight}
-                    onEdit={() => onEdit?.(flight)}
-                    onDelete={() => confirmDelete(flight)}
-                    onToggleLock={() => handleToggleLock(flight)}
-                    personnel={personnel}
-                  />
-                </div>
-              );
-            })}
+            {/* Top spacer for calendar */}
+            <div
+              style={{
+                height: `${topSpacerHeight}px`,
+                transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+              }}
+              className="transition-[height] duration-500 will-change-[height]"
+            />
+
+            {headerContent}
+
+            {/* Virtual list container */}
+            <div
+              style={{
+                height: `${rowVirtualizer.getTotalSize()}px`,
+                width: "100%",
+                position: "relative",
+              }}
+            >
+              {virtualItems.map((virtualRow) => {
+                const flight = flights[virtualRow.index];
+                return (
+                  <div
+                    key={flight.id}
+                    id={`flight-${flight.id}`}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start}px)`,
+                      padding: "0 8px 8px 8px",
+                    }}
+                    data-index={virtualRow.index}
+                    ref={rowVirtualizer.measureElement}
+                  >
+                    <SwipeableFlightCard
+                      flight={flight}
+                      onEdit={() => onEdit?.(flight)}
+                      onDelete={() => confirmDelete(flight)}
+                      onToggleLock={() => handleToggleLock(flight)}
+                      personnel={personnel}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Bottom padding */}
+            <div className="h-16" />
           </div>
 
-          {/* Bottom padding */}
-          <div className="h-16" />
+          {/* FastScroll rail (year-based navigation) */}
+          {fastScrollItems.length > 1 && (
+            <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
+              <div className="pointer-events-auto">
+                <FastScroll
+                  items={fastScrollItems}
+                  activeKey={activeYearKey}
+                  onSelect={handleFastScrollSelect}
+                  onScrollStart={handleFastScrollStart}
+                  onScrollEnd={handleFastScrollEnd}
+                  indicatorPosition="left"
+                  className="py-16"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         <DeleteDialog

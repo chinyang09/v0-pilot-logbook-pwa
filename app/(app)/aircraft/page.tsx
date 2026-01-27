@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Search, Plane, ArrowLeft, Loader2, ChevronRight } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
@@ -18,6 +18,7 @@ import {
 } from "@/lib/db"
 import { PageContainer } from "@/components/page-container"
 import { SyncStatus } from "@/components/sync-status"
+import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll"
 
 const ITEMS_PER_PAGE = 30
 
@@ -134,6 +135,110 @@ export default function AircraftPage() {
   const displayedAircraft = filteredAircraft.slice(0, displayCount)
   const showRecentlyUsed = !debouncedSearchQuery && recentlyUsed.length > 0
 
+  // Generate FastScroll items from search results
+  // Use numberPosition: "start" since registrations starting with numbers come first alphabetically
+  const fastScrollItems = useMemo(() => {
+    if (filteredAircraft.length === 0) return [];
+    return generateAlphabetItemsFromList(
+      filteredAircraft.map((a) => a.registration || a.icao24 || ""),
+      { numberPosition: "start" }
+    );
+  }, [filteredAircraft]);
+
+  const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
+  const isFastScrollingRef = useRef(false);
+
+  // Track visible aircraft and update activeLetterKey on scroll using throttled scroll listener
+  useEffect(() => {
+    if (debouncedSearchQuery.length < 2) return;
+
+    // Find the scrollable main container (PageContainer uses main with overflow-y-auto)
+    const scrollContainer = document.querySelector('main.overflow-y-auto');
+    if (!scrollContainer) return;
+
+    let ticking = false;
+    const handleScroll = () => {
+      if (ticking || isFastScrollingRef.current) return;
+
+      ticking = true;
+      requestAnimationFrame(() => {
+        // Find the first visible aircraft by sampling elements
+        const viewportTop = 120; // Account for header/search bar
+        const cards = document.querySelectorAll('[id^="aircraft-"]');
+
+        for (const card of cards) {
+          const rect = card.getBoundingClientRect();
+          // Check if card is in the visible viewport area
+          if (rect.top >= viewportTop - 50 && rect.top < window.innerHeight / 2) {
+            const id = card.id.replace("aircraft-", "");
+            const aircraft = filteredAircraft.find(
+              (a) => (a.registration || a.icao24) === id
+            );
+            if (aircraft) {
+              const reg = aircraft.registration || aircraft.icao24 || "";
+              const firstChar = reg[0]?.toUpperCase();
+              if (firstChar && /[A-Z]/.test(firstChar)) {
+                setActiveLetterKey(firstChar);
+              } else {
+                setActiveLetterKey("#");
+              }
+              break;
+            }
+          }
+        }
+        ticking = false;
+      });
+    };
+
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+    // Initial check
+    handleScroll();
+
+    return () => scrollContainer.removeEventListener("scroll", handleScroll);
+  }, [filteredAircraft, debouncedSearchQuery]);
+
+  // Handle FastScroll selection
+  const handleFastScrollSelect = useCallback((letter: string) => {
+    isFastScrollingRef.current = true;
+    setActiveLetterKey(letter);
+
+    // Find first aircraft starting with this letter
+    const targetAircraft = filteredAircraft.find((a) => {
+      const reg = a.registration || a.icao24 || "";
+      const firstChar = reg[0]?.toUpperCase();
+      if (letter === "#") {
+        return !/[A-Z]/.test(firstChar || "");
+      }
+      return firstChar === letter;
+    });
+
+    if (targetAircraft) {
+      // Make sure we've loaded enough items to show this aircraft
+      const index = filteredAircraft.findIndex(
+        (a) => (a.registration || a.icao24) === (targetAircraft.registration || targetAircraft.icao24)
+      );
+      if (index >= displayCount) {
+        setDisplayCount(index + ITEMS_PER_PAGE);
+      }
+
+      // Scroll to the element with instant behavior for snappy feedback
+      setTimeout(() => {
+        const element = document.getElementById(
+          `aircraft-${targetAircraft.registration || targetAircraft.icao24}`
+        );
+        if (element) {
+          element.scrollIntoView({ behavior: "instant", block: "start" });
+        }
+        // Reset fast scrolling flag after scroll completes
+        setTimeout(() => {
+          isFastScrollingRef.current = false;
+        }, 100);
+      }, 50);
+    } else {
+      isFastScrollingRef.current = false;
+    }
+  }, [filteredAircraft, displayCount]);
+
   return (
     <PageContainer
       header={
@@ -168,69 +273,83 @@ export default function AircraftPage() {
           <p className="text-muted-foreground text-sm">{loadingProgress.stage || "Loading..."}</p>
         </div>
       ) : (
-        <div className="container mx-auto px-3 pt-3 pb-safe">
-          <div className="sticky top-0 z-40 bg-background/30 backdrop-blur-xl pb-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Search registration, type code..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 h-10"
-                autoFocus
-              />
+        <>
+          <div className="container mx-auto px-3 pt-3 pb-safe">
+            <div className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl pb-3 -mx-3 px-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Search registration, type code..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 h-10"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <div className={`space-y-3 ${debouncedSearchQuery.length >= 2 && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
+              {showRecentlyUsed && (
+                <div className="space-y-1.5">
+                  <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">Recently Used</h2>
+                  <div className="space-y-2">
+                    {recentlyUsed.map((aircraft) => (
+                      <AircraftCard
+                        key={`recent-${aircraft.registration || aircraft.icao24}`}
+                        aircraft={aircraft}
+                        onSelect={handleSelectAircraft}
+                        isRecent
+                      />
+                    ))}
+                  </div>
+                  <div className="border-t border-border my-4" />
+                </div>
+              )}
+
+              {debouncedSearchQuery.length >= 2 && (
+                <div className="space-y-1.5">
+                  <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
+                    {filteredAircraft.length} results
+                  </h2>
+                  <div className="space-y-2">
+                    {displayedAircraft.map((aircraft, index) => (
+                      <AircraftCard
+                        key={`${aircraft.registration || aircraft.icao24}-${index}`}
+                        aircraft={aircraft}
+                        onSelect={handleSelectAircraft}
+                      />
+                    ))}
+                  </div>
+                  {displayCount < filteredAircraft.length && (
+                    <div ref={loadMoreRef} className="py-8">
+                      <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!debouncedSearchQuery && !showRecentlyUsed && (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <Plane className="h-12 w-12 text-muted-foreground mb-4" />
+                  <p className="text-sm text-muted-foreground">Search for aircraft by registration or type</p>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="space-y-3">
-            {showRecentlyUsed && (
-              <div className="space-y-1.5">
-                <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">Recently Used</h2>
-                <div className="space-y-2">
-                  {recentlyUsed.map((aircraft) => (
-                    <AircraftCard
-                      key={`recent-${aircraft.registration || aircraft.icao24}`}
-                      aircraft={aircraft}
-                      onSelect={handleSelectAircraft}
-                      isRecent
-                    />
-                  ))}
-                </div>
-                <div className="border-t border-border my-4" />
-              </div>
-            )}
-
-            {debouncedSearchQuery.length >= 2 && (
-              <div className="space-y-1.5">
-                <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
-                  {filteredAircraft.length} results
-                </h2>
-                <div className="space-y-2">
-                  {displayedAircraft.map((aircraft, index) => (
-                    <AircraftCard
-                      key={`${aircraft.registration || aircraft.icao24}-${index}`}
-                      aircraft={aircraft}
-                      onSelect={handleSelectAircraft}
-                    />
-                  ))}
-                </div>
-                {displayCount < filteredAircraft.length && (
-                  <div ref={loadMoreRef} className="py-8">
-                    <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!debouncedSearchQuery && !showRecentlyUsed && (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Plane className="h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-sm text-muted-foreground">Search for aircraft by registration or type</p>
-              </div>
-            )}
-          </div>
-        </div>
+          {/* FastScroll rail - fixed position */}
+          {debouncedSearchQuery.length >= 2 && fastScrollItems.length > 1 && (
+            <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
+              <FastScroll
+                items={fastScrollItems}
+                activeKey={activeLetterKey}
+                onSelect={handleFastScrollSelect}
+                indicatorPosition="left"
+              />
+            </div>
+          )}
+        </>
       )}
     </PageContainer>
   )
@@ -247,6 +366,7 @@ function AircraftCard({
 }) {
   return (
     <button
+      id={`aircraft-${aircraft.registration || aircraft.icao24}`}
       onClick={() => onSelect(aircraft)}
       className={`w-full text-left p-3 rounded-lg transition-all active:scale-[0.98] ${
         isRecent

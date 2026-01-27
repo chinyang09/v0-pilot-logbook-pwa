@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import type React from "react";
 import { Input } from "@/components/ui/input";
 import { SyncStatus } from "@/components/sync-status";
@@ -20,6 +20,7 @@ import { Star, Search, MapPin, ArrowLeft, ChevronRight } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { FastScroll, generateAlphabetItemsFromList, type FastScrollItem } from "@/components/ui/fast-scroll";
 
 const ITEMS_PER_PAGE = 50;
 
@@ -32,6 +33,9 @@ export default function AirportsPage() {
 
   const { airports, isLoading } = useAirportDatabase();
   const [recentAirports, setRecentAirports] = useState<typeof airports>([]);
+  const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
+  const isFastScrollingRef = useRef(false);
+  const listContainerRef = useRef<HTMLDivElement>(null);
 
   const {
     searchQuery,
@@ -39,6 +43,7 @@ export default function AirportsPage() {
     displayedItems: filteredAirports,
     observerTarget,
     totalFilteredCount,
+    loadAll,
   } = useSearchableList<Airport>({
     items: airports,
     searchFn: (items: Airport[], query: string) => searchAirports(items, query, items.length),
@@ -51,6 +56,105 @@ export default function AirportsPage() {
     itemsPerPage: ITEMS_PER_PAGE,
     isLoading,
   });
+
+  // Generate FastScroll items from sorted airports (excluding favorites)
+  // Use numberPosition: "start" since ICAO codes starting with numbers come first alphabetically
+  const fastScrollItems = useMemo(() => {
+    const nonFavorites = airports.filter((a) => !a.isFavorite);
+    return generateAlphabetItemsFromList(nonFavorites.map((a) => a.icao), {
+      numberPosition: "start",
+    });
+  }, [airports]);
+
+  // Sort all airports consistently
+  const allSortedAirports = useMemo(() => {
+    return [...airports].sort((a, b) => {
+      if (a.isFavorite && !b.isFavorite) return -1;
+      if (!a.isFavorite && b.isFavorite) return 1;
+      return a.icao.localeCompare(b.icao);
+    });
+  }, [airports]);
+
+  // Track visible airports and update activeLetterKey on scroll using throttled scroll listener
+  useEffect(() => {
+    if (searchQuery.trim()) return;
+
+    // Find the scrollable main container (PageContainer uses main with overflow-y-auto)
+    const scrollContainer = document.querySelector('main.overflow-y-auto');
+    if (!scrollContainer) return;
+
+    let ticking = false;
+    const handleScroll = () => {
+      if (ticking || isFastScrollingRef.current) return;
+
+      ticking = true;
+      requestAnimationFrame(() => {
+        // Find the first visible non-favorite airport by sampling elements
+        const viewportTop = 120; // Account for header/search bar
+        const cards = document.querySelectorAll('[id^="airport-"]');
+
+        for (const card of cards) {
+          const rect = card.getBoundingClientRect();
+          // Check if card is in the visible viewport area
+          if (rect.top >= viewportTop - 50 && rect.top < window.innerHeight / 2) {
+            const icao = card.id.replace("airport-", "");
+            const airport = airports.find((a) => a.icao === icao);
+            if (airport && !airport.isFavorite) {
+              const firstChar = airport.icao[0]?.toUpperCase();
+              if (firstChar && /[A-Z]/.test(firstChar)) {
+                setActiveLetterKey(firstChar);
+              } else {
+                setActiveLetterKey("#");
+              }
+              break;
+            }
+          }
+        }
+        ticking = false;
+      });
+    };
+
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+    // Initial check
+    handleScroll();
+
+    return () => scrollContainer.removeEventListener("scroll", handleScroll);
+  }, [airports, searchQuery]);
+
+  // Handle FastScroll selection
+  const handleFastScrollSelect = useCallback((letter: string) => {
+    isFastScrollingRef.current = true;
+    setActiveLetterKey(letter);
+
+    // Load all items first to ensure the target is rendered
+    loadAll();
+
+    // Find first airport starting with this letter (skip favorites)
+    const targetAirport = allSortedAirports.find((a) => {
+      if (a.isFavorite) return false;
+      const firstChar = a.icao[0]?.toUpperCase();
+      if (letter === "#") {
+        return !/[A-Z]/.test(firstChar || "");
+      }
+      return firstChar === letter;
+    });
+
+    if (targetAirport) {
+      // Use setTimeout to ensure DOM is updated after loadAll
+      setTimeout(() => {
+        const element = document.getElementById(`airport-${targetAirport.icao}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "instant", block: "start" });
+        }
+        // Reset fast scrolling flag after scroll completes
+        setTimeout(() => {
+          isFastScrollingRef.current = false;
+        }, 100);
+      }, 50);
+    } else {
+      isFastScrollingRef.current = false;
+    }
+  }, [allSortedAirports, loadAll]);
 
   useEffect(() => {
     const loadRecentAirports = async () => {
@@ -88,6 +192,7 @@ export default function AirportsPage() {
   ) => (
     // Change <button> to <div>
     <div
+      id={`airport-${airport.icao}`}
       key={airport.icao}
       onClick={() => handleAirportSelect(airport.icao)}
       role="button" // Accessibility: Tells screen readers this is interactive
@@ -165,8 +270,8 @@ export default function AirportsPage() {
         />
       }
     >
-      <div className="container  mx-auto px-3 pt-3 pb-safe">
-        <div className="sticky top-0 z-40 pb-3">
+      <div className="container mx-auto px-3 pt-3 pb-safe">
+        <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
           <div className="relative">
             <Input
               type="text"
@@ -179,7 +284,7 @@ export default function AirportsPage() {
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className={`space-y-3 ${!searchQuery.trim() && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
           {!searchQuery.trim() && (
             <>
               {/* Favorites Section */}
@@ -225,6 +330,18 @@ export default function AirportsPage() {
           <div ref={observerTarget} className="h-20" />
         </div>
       </div>
+
+      {/* FastScroll rail - fixed position */}
+      {!searchQuery.trim() && fastScrollItems.length > 1 && (
+        <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
+          <FastScroll
+            items={fastScrollItems}
+            activeKey={activeLetterKey}
+            onSelect={handleFastScrollSelect}
+            indicatorPosition="left"
+          />
+        </div>
+      )}
     </PageContainer>
   );
 }

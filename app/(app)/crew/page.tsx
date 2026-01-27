@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { PageContainer } from "@/components/page-container";
 import { useDebounce } from "@/hooks/use-debounce";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ import { CACHE_KEYS } from "@/hooks/data";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
 import { StandardPageHeader } from "@/components/standard-page-header";
+import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll";
 
 const ITEMS_PER_PAGE = 50;
 
@@ -51,6 +52,7 @@ function SwipeableCrewCard({
 
   return (
     <SwipeableCard
+      id={`crew-${crew.id}`}
       onClick={onSelect}
       actions={[
         {
@@ -175,6 +177,105 @@ export default function CrewPage() {
     setDisplayCount(ITEMS_PER_PAGE);
   }, [searchQuery]);
 
+  // FastScroll state
+  const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
+  const isFastScrollingRef = useRef(false);
+
+  // Generate FastScroll items from crew names (excluding self and favorites)
+  // Use numberPosition: "end" since names typically don't start with numbers
+  const fastScrollItems = useMemo(() => {
+    const regularCrew = sortedPersonnel.filter((p) => !p.isMe && !p.favorite);
+    return generateAlphabetItemsFromList(regularCrew.map((p) => p.name || ""), {
+      numberPosition: "end",
+    });
+  }, [sortedPersonnel]);
+
+  // Track visible crew and update activeLetterKey on scroll using throttled scroll listener
+  useEffect(() => {
+    if (debouncedSearchQuery) return;
+
+    // Find the scrollable main container (PageContainer uses main with overflow-y-auto)
+    const scrollContainer = document.querySelector('main.overflow-y-auto');
+    if (!scrollContainer) return;
+
+    let ticking = false;
+    const handleScroll = () => {
+      if (ticking || isFastScrollingRef.current) return;
+
+      ticking = true;
+      requestAnimationFrame(() => {
+        // Find the first visible non-self, non-favorite crew by sampling elements
+        const viewportTop = 120; // Account for header/search bar
+        const cards = document.querySelectorAll('[id^="crew-"]');
+
+        for (const card of cards) {
+          const rect = card.getBoundingClientRect();
+          // Check if card is in the visible viewport area
+          if (rect.top >= viewportTop - 50 && rect.top < window.innerHeight / 2) {
+            const id = card.id.replace("crew-", "");
+            const crew = personnel.find((p) => p.id === id);
+            if (crew && !crew.isMe && !crew.favorite) {
+              const name = crew.name || "";
+              const firstChar = name[0]?.toUpperCase();
+              if (firstChar && /[A-Z]/.test(firstChar)) {
+                setActiveLetterKey(firstChar);
+              } else {
+                setActiveLetterKey("#");
+              }
+              break;
+            }
+          }
+        }
+        ticking = false;
+      });
+    };
+
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+    // Initial check
+    handleScroll();
+
+    return () => scrollContainer.removeEventListener("scroll", handleScroll);
+  }, [personnel, debouncedSearchQuery]);
+
+  // Handle FastScroll selection
+  const handleFastScrollSelect = useCallback((letter: string) => {
+    isFastScrollingRef.current = true;
+    setActiveLetterKey(letter);
+
+    // Find first crew member starting with this letter (skip self and favorites)
+    const targetCrew = sortedPersonnel.find((p) => {
+      if (p.isMe || p.favorite) return false;
+      const name = p.name || "";
+      const firstChar = name[0]?.toUpperCase();
+      if (letter === "#") {
+        return !/[A-Z]/.test(firstChar || "");
+      }
+      return firstChar === letter;
+    });
+
+    if (targetCrew) {
+      // Make sure we've loaded enough items to show this crew
+      const index = sortedPersonnel.findIndex((p) => p.id === targetCrew.id);
+      if (index >= displayCount) {
+        setDisplayCount(index + ITEMS_PER_PAGE);
+      }
+
+      // Scroll to the element with instant behavior for snappy feedback
+      setTimeout(() => {
+        const element = document.getElementById(`crew-${targetCrew.id}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "instant", block: "start" });
+        }
+        // Reset fast scrolling flag after scroll completes
+        setTimeout(() => {
+          isFastScrollingRef.current = false;
+        }, 100);
+      }, 50);
+    } else {
+      isFastScrollingRef.current = false;
+    }
+  }, [sortedPersonnel, displayCount]);
+
   const handleCrewSelect = (crew: (typeof personnel)[0]) => {
     if (fieldType) {
       const params = new URLSearchParams();
@@ -219,7 +320,7 @@ export default function CrewPage() {
       }
     >
       <div className="container mx-auto px-3 pt-3 pb-safe">
-        <div className="sticky top-0 z-40 pb-3">
+        <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Input
@@ -246,7 +347,7 @@ export default function CrewPage() {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className={`space-y-3 ${!debouncedSearchQuery && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
             {debouncedSearchQuery && (
               <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
                 {filteredPersonnel.length} results
@@ -281,6 +382,18 @@ export default function CrewPage() {
           </div>
         )}
       </div>
+
+      {/* FastScroll rail - fixed position */}
+      {!debouncedSearchQuery && fastScrollItems.length > 1 && (
+        <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
+          <FastScroll
+            items={fastScrollItems}
+            activeKey={activeLetterKey}
+            onSelect={handleFastScrollSelect}
+            indicatorPosition="left"
+          />
+        </div>
+      )}
 
       <DeleteDialog
         title="Delete Crew Member"
