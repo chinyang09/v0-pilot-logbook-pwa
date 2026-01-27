@@ -32,6 +32,7 @@ import {
 import { cn } from "@/lib/utils";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
+import { FastScroll, type FastScrollItem } from "@/components/ui/fast-scroll";
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, flightDate?: string) => void;
@@ -239,6 +240,53 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   );
 });
 
+// Generate FastScroll items from flight dates
+function generateFlightDateItems(flights: FlightLog[]): FastScrollItem[] {
+  if (flights.length === 0) return [];
+
+  const monthYears = new Map<string, number>();
+
+  flights.forEach((flight, index) => {
+    const date = parseDateLocal(flight.date);
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, "0");
+    const key = `${year}-${month}`;
+
+    if (!monthYears.has(key)) {
+      monthYears.set(key, index);
+    }
+  });
+
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const sorted = Array.from(monthYears.keys()).sort((a, b) => b.localeCompare(a));
+
+  return sorted.map((monthYear) => {
+    const [year, month] = monthYear.split("-");
+    const monthIndex = parseInt(month, 10) - 1;
+    return {
+      key: monthYear,
+      label: `${monthNames[monthIndex].charAt(0)}`,
+    };
+  });
+}
+
+// Get first flight index for a given month/year
+function getFirstFlightIndexForMonth(flights: FlightLog[], monthYear: string): number {
+  const [targetYear, targetMonth] = monthYear.split("-").map(Number);
+
+  for (let i = 0; i < flights.length; i++) {
+    const date = parseDateLocal(flights[i].date);
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+
+    if (year === targetYear && month === targetMonth) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
 export const FlightList = forwardRef<FlightListRef, FlightListProps>(
   function FlightList(
     {
@@ -265,6 +313,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const isExternalScrollRef = useRef(false);
     const lastDetectedFlightRef = useRef<string | null>(null);
+    const [activeMonthKey, setActiveMonthKey] = useState<string | undefined>(undefined);
+    const [isFastScrolling, setIsFastScrolling] = useState(false);
+
+    // Generate FastScroll items from flights
+    const fastScrollItems = useMemo(() => generateFlightDateItems(flights), [flights]);
 
     // Create virtualizer instance
     const rowVirtualizer = useVirtualizer({
@@ -302,7 +355,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       // Note: onScrollStart is now triggered by touch events, not scroll events
       // This prevents programmatic/momentum scrolls from changing the sync source
 
-      if (!onTopFlightChange || flights.length === 0) return;
+      if (flights.length === 0) return;
 
       const visibleItems = rowVirtualizer.getVirtualItems();
       if (visibleItems.length === 0) return;
@@ -324,11 +377,22 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
       const topFlight = flights[topVisibleItem.index];
 
-      if (topFlight && topFlight.id !== lastDetectedFlightRef.current) {
-        lastDetectedFlightRef.current = topFlight.id;
-        onTopFlightChange(topFlight);
+      if (topFlight) {
+        // Update active month for FastScroll
+        const date = parseDateLocal(topFlight.date);
+        const year = date.getFullYear();
+        const month = (date.getMonth() + 1).toString().padStart(2, "0");
+        const newMonthKey = `${year}-${month}`;
+        if (newMonthKey !== activeMonthKey && !isFastScrolling) {
+          setActiveMonthKey(newMonthKey);
+        }
+
+        if (topFlight.id !== lastDetectedFlightRef.current) {
+          lastDetectedFlightRef.current = topFlight.id;
+          onTopFlightChange?.(topFlight);
+        }
       }
-    }, [flights, onTopFlightChange, rowVirtualizer]);
+    }, [flights, onTopFlightChange, rowVirtualizer, activeMonthKey, isFastScrolling]);
 
     // Handle user touch/interaction start on flight list
     const handleTouchStart = useCallback(() => {
@@ -376,6 +440,33 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       await updateFlight(flight.id, { isLocked: !flight.isLocked });
       onDeleted?.();
     };
+
+    // FastScroll selection handler
+    const handleFastScrollSelect = useCallback(
+      (monthYear: string) => {
+        const index = getFirstFlightIndexForMonth(flights, monthYear);
+        if (index !== -1) {
+          isExternalScrollRef.current = true;
+          setActiveMonthKey(monthYear);
+          rowVirtualizer.scrollToIndex(index, {
+            align: "start",
+            behavior: "smooth",
+          });
+          setTimeout(() => {
+            isExternalScrollRef.current = false;
+          }, 600);
+        }
+      },
+      [flights, rowVirtualizer]
+    );
+
+    const handleFastScrollStart = useCallback(() => {
+      setIsFastScrolling(true);
+    }, []);
+
+    const handleFastScrollEnd = useCallback(() => {
+      setIsFastScrolling(false);
+    }, []);
 
     if (isLoading) {
       return (
@@ -438,63 +529,83 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
     return (
       <>
-        <div
-          ref={scrollContainerRef}
-          className="h-full overflow-y-auto"
-          style={{ contain: "strict" }}
-          onTouchStart={handleTouchStart}
-          onMouseDown={handleTouchStart}
-        >
-          {/* Top spacer for calendar */}
+        <div className="relative h-full flex">
+          {/* Main scrollable container */}
           <div
-            style={{
-              height: `${topSpacerHeight}px`,
-              transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
-            }}
-            className="transition-[height] duration-500 will-change-[height]"
-          />
-
-          {headerContent}
-
-          {/* Virtual list container */}
-          <div
-            style={{
-              height: `${rowVirtualizer.getTotalSize()}px`,
-              width: "100%",
-              position: "relative",
-            }}
+            ref={scrollContainerRef}
+            className="h-full overflow-y-auto flex-1"
+            style={{ contain: "strict" }}
+            onTouchStart={handleTouchStart}
+            onMouseDown={handleTouchStart}
           >
-            {virtualItems.map((virtualRow) => {
-              const flight = flights[virtualRow.index];
-              return (
-                <div
-                  key={flight.id}
-                  id={`flight-${flight.id}`}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
-                    padding: "0 8px 8px 8px",
-                  }}
-                  data-index={virtualRow.index}
-                  ref={rowVirtualizer.measureElement}
-                >
-                  <SwipeableFlightCard
-                    flight={flight}
-                    onEdit={() => onEdit?.(flight)}
-                    onDelete={() => confirmDelete(flight)}
-                    onToggleLock={() => handleToggleLock(flight)}
-                    personnel={personnel}
-                  />
-                </div>
-              );
-            })}
+            {/* Top spacer for calendar */}
+            <div
+              style={{
+                height: `${topSpacerHeight}px`,
+                transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+              }}
+              className="transition-[height] duration-500 will-change-[height]"
+            />
+
+            {headerContent}
+
+            {/* Virtual list container */}
+            <div
+              style={{
+                height: `${rowVirtualizer.getTotalSize()}px`,
+                width: "100%",
+                position: "relative",
+              }}
+            >
+              {virtualItems.map((virtualRow) => {
+                const flight = flights[virtualRow.index];
+                return (
+                  <div
+                    key={flight.id}
+                    id={`flight-${flight.id}`}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start}px)`,
+                      padding: "0 8px 8px 8px",
+                    }}
+                    data-index={virtualRow.index}
+                    ref={rowVirtualizer.measureElement}
+                  >
+                    <SwipeableFlightCard
+                      flight={flight}
+                      onEdit={() => onEdit?.(flight)}
+                      onDelete={() => confirmDelete(flight)}
+                      onToggleLock={() => handleToggleLock(flight)}
+                      personnel={personnel}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Bottom padding */}
+            <div className="h-16" />
           </div>
 
-          {/* Bottom padding */}
-          <div className="h-16" />
+          {/* FastScroll rail */}
+          {fastScrollItems.length > 1 && (
+            <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
+              <div className="pointer-events-auto">
+                <FastScroll
+                  items={fastScrollItems}
+                  activeKey={activeMonthKey}
+                  onSelect={handleFastScrollSelect}
+                  onScrollStart={handleFastScrollStart}
+                  onScrollEnd={handleFastScrollEnd}
+                  indicatorPosition="left"
+                  className="py-16"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         <DeleteDialog

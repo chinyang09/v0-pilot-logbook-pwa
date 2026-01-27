@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { PageContainer } from "@/components/page-container";
 import { useDebounce } from "@/hooks/use-debounce";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ import { CACHE_KEYS } from "@/hooks/data";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
 import { StandardPageHeader } from "@/components/standard-page-header";
+import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll";
 
 const ITEMS_PER_PAGE = 50;
 
@@ -51,6 +52,7 @@ function SwipeableCrewCard({
 
   return (
     <SwipeableCard
+      id={`crew-${crew.id}`}
       onClick={onSelect}
       actions={[
         {
@@ -175,6 +177,47 @@ export default function CrewPage() {
     setDisplayCount(ITEMS_PER_PAGE);
   }, [searchQuery]);
 
+  // FastScroll state
+  const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
+
+  // Generate FastScroll items from crew names (excluding self and favorites)
+  const fastScrollItems = useMemo(() => {
+    const regularCrew = sortedPersonnel.filter((p) => !p.isMe && !p.favorite);
+    return generateAlphabetItemsFromList(regularCrew.map((p) => p.name || ""));
+  }, [sortedPersonnel]);
+
+  // Handle FastScroll selection
+  const handleFastScrollSelect = useCallback((letter: string) => {
+    setActiveLetterKey(letter);
+
+    // Find first crew member starting with this letter (skip self and favorites)
+    const targetCrew = sortedPersonnel.find((p) => {
+      if (p.isMe || p.favorite) return false;
+      const name = p.name || "";
+      const firstChar = name[0]?.toUpperCase();
+      if (letter === "#") {
+        return !/[A-Z]/.test(firstChar || "");
+      }
+      return firstChar === letter;
+    });
+
+    if (targetCrew) {
+      // Make sure we've loaded enough items to show this crew
+      const index = sortedPersonnel.findIndex((p) => p.id === targetCrew.id);
+      if (index >= displayCount) {
+        setDisplayCount(index + ITEMS_PER_PAGE);
+      }
+
+      // Scroll to the element
+      setTimeout(() => {
+        const element = document.getElementById(`crew-${targetCrew.id}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }, 100);
+    }
+  }, [sortedPersonnel, displayCount]);
+
   const handleCrewSelect = (crew: (typeof personnel)[0]) => {
     if (fieldType) {
       const params = new URLSearchParams();
@@ -218,66 +261,83 @@ export default function CrewPage() {
         />
       }
     >
-      <div className="container mx-auto px-3 pt-3 pb-safe">
-        <div className="sticky top-0 z-40 pb-3">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Input
-                type="text"
-                placeholder="Search crew..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-              />
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      <div className="relative h-full">
+        <div className="container mx-auto px-3 pt-3 pb-safe h-full overflow-y-auto">
+          <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Input
+                  type="text"
+                  placeholder="Search crew..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
+                />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              </div>
+              <Button
+                onClick={handleAddCrew}
+                size="icon"
+                className="h-10 w-10 flex-shrink-0"
+              >
+                <Plus className="h-5 w-5" />
+              </Button>
             </div>
-            <Button
-              onClick={handleAddCrew}
-              size="icon"
-              className="h-10 w-10 flex-shrink-0"
-            >
-              <Plus className="h-5 w-5" />
-            </Button>
           </div>
+
+          {isLoading && displayCount === ITEMS_PER_PAGE ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className={`space-y-3 ${!debouncedSearchQuery && fastScrollItems.length > 1 ? "pr-6" : ""}`}>
+              {debouncedSearchQuery && (
+                <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
+                  {filteredPersonnel.length} results
+                </h2>
+              )}
+
+              <div className="space-y-2">
+                {filteredPersonnel.map((crew) => (
+                  <SwipeableCrewCard
+                    key={crew.id}
+                    crew={crew}
+                    onSelect={() => handleCrewSelect(crew)}
+                    onDelete={() => confirmDelete(crew)}
+                    isSelectMode={!!fieldType}
+                  />
+                ))}
+              </div>
+
+              <div ref={observerTarget} className="h-4" />
+
+              {filteredPersonnel.length === 0 && !isLoading && (
+                <div className="text-center py-12">
+                  <User className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-sm text-muted-foreground mb-4">
+                    No results found.
+                  </p>
+                  <Button onClick={handleAddCrew} variant="outline">
+                    <Plus className="h-4 w-4 mr-2" /> Add Crew Member
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {isLoading && displayCount === ITEMS_PER_PAGE ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {debouncedSearchQuery && (
-              <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
-                {filteredPersonnel.length} results
-              </h2>
-            )}
-
-            <div className="space-y-2">
-              {filteredPersonnel.map((crew) => (
-                <SwipeableCrewCard
-                  key={crew.id}
-                  crew={crew}
-                  onSelect={() => handleCrewSelect(crew)}
-                  onDelete={() => confirmDelete(crew)}
-                  isSelectMode={!!fieldType}
-                />
-              ))}
+        {/* FastScroll rail - show when not searching and there are enough crew members */}
+        {!debouncedSearchQuery && fastScrollItems.length > 1 && (
+          <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
+            <div className="pointer-events-auto">
+              <FastScroll
+                items={fastScrollItems}
+                activeKey={activeLetterKey}
+                onSelect={handleFastScrollSelect}
+                indicatorPosition="left"
+                className="py-16"
+              />
             </div>
-
-            <div ref={observerTarget} className="h-4" />
-
-            {filteredPersonnel.length === 0 && !isLoading && (
-              <div className="text-center py-12">
-                <User className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-sm text-muted-foreground mb-4">
-                  No results found.
-                </p>
-                <Button onClick={handleAddCrew} variant="outline">
-                  <Plus className="h-4 w-4 mr-2" /> Add Crew Member
-                </Button>
-              </div>
-            )}
           </div>
         )}
       </div>
