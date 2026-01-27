@@ -1,16 +1,29 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
-import { X } from "lucide-react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { X, Keyboard } from "lucide-react"
+import { WheelPicker, WheelPickerWrapper } from "@ncdai/react-wheel-picker"
+import "@ncdai/react-wheel-picker/style.css"
 
 interface TimePickerProps {
   isOpen?: boolean
-  initialTime?: string // HH:MM format (was: value)
-  onSelect?: (value: string) => void // (was: onChange)
+  initialTime?: string // HH:MM format
+  onSelect?: (value: string) => void
   onClose: () => void
   label?: string
-  timezoneOffset?: number // (was: utcOffset)
+  timezoneOffset?: number // In hours for local time display
 }
+
+// Generate options for hours (0-23) and minutes (0-59)
+const hourOptions = Array.from({ length: 24 }, (_, i) => ({
+  value: i,
+  label: i.toString().padStart(2, "0"),
+}))
+
+const minuteOptions = Array.from({ length: 60 }, (_, i) => ({
+  value: i,
+  label: i.toString().padStart(2, "0"),
+}))
 
 export function TimePicker({
   isOpen = true,
@@ -22,20 +35,24 @@ export function TimePicker({
 }: TimePickerProps) {
   const [hours, setHours] = useState(0)
   const [minutes, setMinutes] = useState(0)
-  const hoursRef = useRef<HTMLDivElement>(null)
-  const minutesRef = useRef<HTMLDivElement>(null)
+  const [isKeyboardMode, setIsKeyboardMode] = useState(false)
+  const [keyboardValue, setKeyboardValue] = useState("")
+  const inputRef = useRef<HTMLInputElement>(null)
 
   // Parse initial value
   useEffect(() => {
     if (initialTime) {
       const parts = initialTime.split(":")
       if (parts.length === 2) {
-        setHours(Number.parseInt(parts[0], 10) || 0)
-        setMinutes(Number.parseInt(parts[1], 10) || 0)
+        const h = Number.parseInt(parts[0], 10)
+        const m = Number.parseInt(parts[1], 10)
+        if (!Number.isNaN(h) && h >= 0 && h <= 23) setHours(h)
+        if (!Number.isNaN(m) && m >= 0 && m <= 59) setMinutes(m)
       }
     }
   }, [initialTime])
 
+  // Lock body scroll when open
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = "hidden"
@@ -45,28 +62,58 @@ export function TimePicker({
     }
   }, [isOpen])
 
-  // Scroll to selected values on mount
+  // Focus input when entering keyboard mode
   useEffect(() => {
-    if (hoursRef.current) {
-      const hourItem = hoursRef.current.querySelector(`[data-hour="${hours}"]`)
-      hourItem?.scrollIntoView({ block: "center", behavior: "instant" })
+    if (isKeyboardMode && inputRef.current) {
+      inputRef.current.focus()
+      setKeyboardValue(`${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`)
     }
-    if (minutesRef.current) {
-      const minItem = minutesRef.current.querySelector(`[data-minute="${minutes}"]`)
-      minItem?.scrollIntoView({ block: "center", behavior: "instant" })
-    }
-  }, [hours, minutes])
+  }, [isKeyboardMode, hours, minutes])
 
   const handleConfirm = useCallback(() => {
-    const formatted = `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-    onSelect?.(formatted)
+    if (isKeyboardMode) {
+      // Parse keyboard input
+      const cleanValue = keyboardValue.replace(/[^0-9:]/g, "")
+      let h = hours
+      let m = minutes
+
+      if (cleanValue.includes(":")) {
+        const parts = cleanValue.split(":")
+        const parsedH = Number.parseInt(parts[0], 10)
+        const parsedM = Number.parseInt(parts[1], 10)
+        if (!Number.isNaN(parsedH) && parsedH >= 0 && parsedH <= 23) h = parsedH
+        if (!Number.isNaN(parsedM) && parsedM >= 0 && parsedM <= 59) m = parsedM
+      } else if (cleanValue.length <= 2) {
+        const parsedH = Number.parseInt(cleanValue, 10)
+        if (!Number.isNaN(parsedH) && parsedH >= 0 && parsedH <= 23) h = parsedH
+        m = 0
+      } else if (cleanValue.length <= 4) {
+        const parsedH = Number.parseInt(cleanValue.slice(0, 2), 10)
+        const parsedM = Number.parseInt(cleanValue.slice(2), 10)
+        if (!Number.isNaN(parsedH) && parsedH >= 0 && parsedH <= 23) h = parsedH
+        if (!Number.isNaN(parsedM) && parsedM >= 0 && parsedM <= 59) m = parsedM
+      }
+
+      const formatted = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
+      onSelect?.(formatted)
+    } else {
+      const formatted = `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
+      onSelect?.(formatted)
+    }
     onClose()
-  }, [hours, minutes, onSelect, onClose])
+  }, [hours, minutes, isKeyboardMode, keyboardValue, onSelect, onClose])
 
   const handleSetNow = useCallback(() => {
     const now = new Date()
     setHours(now.getUTCHours())
     setMinutes(now.getUTCMinutes())
+    if (isKeyboardMode) {
+      setKeyboardValue(`${now.getUTCHours().toString().padStart(2, "0")}:${now.getUTCMinutes().toString().padStart(2, "0")}`)
+    }
+  }, [isKeyboardMode])
+
+  const toggleKeyboardMode = useCallback(() => {
+    setIsKeyboardMode((prev) => !prev)
   }, [])
 
   // Calculate local time if offset provided
@@ -83,111 +130,115 @@ export function TimePicker({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
-      <div className="w-full max-w-md rounded-t-2xl bg-card pb-8" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="w-full max-w-md rounded-t-3xl bg-card pb-8 animate-in slide-in-from-bottom duration-300"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border p-4">
-          <button onClick={onClose} className="text-muted-foreground">
+        <div className="flex items-center justify-between p-4">
+          <button
+            onClick={onClose}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground active:bg-muted/50"
+          >
             <X className="h-6 w-6" />
           </button>
-          <span className="text-lg font-medium text-foreground">{label || "Select Time"}</span>
-          <button onClick={handleConfirm} className="text-lg font-medium text-primary">
+          <span className="text-lg font-semibold text-foreground">{label || "Select Time"}</span>
+          <button
+            onClick={handleConfirm}
+            className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground active:opacity-80"
+          >
             Done
           </button>
         </div>
 
         {/* Time Display */}
-        <div className="flex flex-col items-center gap-1 py-4">
-          <div className="text-4xl font-light text-foreground tabular-nums">
-            {hours.toString().padStart(2, "0")}:{minutes.toString().padStart(2, "0")}
-          </div>
+        <div className="flex flex-col items-center gap-1 py-2">
+          {isKeyboardMode ? (
+            <input
+              ref={inputRef}
+              type="text"
+              inputMode="numeric"
+              value={keyboardValue}
+              onChange={(e) => setKeyboardValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleConfirm()
+              }}
+              placeholder="HH:MM"
+              className="w-32 border-b-2 border-primary bg-transparent text-center text-4xl font-light tabular-nums text-foreground outline-none"
+              maxLength={5}
+            />
+          ) : (
+            <div className="text-5xl font-extralight text-foreground tabular-nums">
+              {hours.toString().padStart(2, "0")}:{minutes.toString().padStart(2, "0")}
+            </div>
+          )}
           <div className="text-sm text-muted-foreground">UTC</div>
           {timezoneOffset !== 0 && (
             <div className="text-sm text-muted-foreground">
-              {localTime} (UTC{timezoneOffset >= 0 ? "+" : ""}
-              {timezoneOffset})
+              {localTime} (UTC{timezoneOffset >= 0 ? "+" : ""}{timezoneOffset})
             </div>
           )}
         </div>
 
-        {/* NOW button */}
-        <div className="flex justify-center pb-4">
+        {/* Action Buttons */}
+        <div className="flex justify-center gap-3 py-3">
           <button
             onClick={handleSetNow}
-            className="rounded-full border border-primary px-4 py-1 text-sm font-medium text-primary"
+            className="rounded-full border border-primary px-5 py-2 text-sm font-semibold text-primary active:bg-primary/10"
           >
             NOW
           </button>
+          <button
+            onClick={toggleKeyboardMode}
+            className={`flex items-center gap-2 rounded-full border px-5 py-2 text-sm font-semibold active:opacity-80 ${
+              isKeyboardMode
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-muted-foreground/30 text-muted-foreground"
+            }`}
+          >
+            <Keyboard className="h-4 w-4" />
+            {isKeyboardMode ? "Wheel" : "Type"}
+          </button>
         </div>
 
-        {/* Picker Wheels */}
-        <div className="relative flex justify-center gap-1 px-4">
-          {/* Hours wheel */}
-          <div className="relative h-48 w-24 overflow-hidden">
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-gradient-to-b from-card to-transparent" />
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-16 bg-gradient-to-t from-card to-transparent" />
-            <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-12 -translate-y-1/2 rounded-lg border border-border bg-muted/30" />
-            <div
-              ref={hoursRef}
-              className="scrollbar-hide h-full snap-y snap-mandatory overflow-y-scroll py-[72px]"
-              onScroll={(e) => {
-                const target = e.target as HTMLDivElement
-                const scrollTop = target.scrollTop
-                const itemHeight = 48
-                const selectedIndex = Math.round(scrollTop / itemHeight)
-                if (selectedIndex >= 0 && selectedIndex <= 23) {
-                  setHours(selectedIndex)
-                }
-              }}
-            >
-              {Array.from({ length: 24 }, (_, i) => (
-                <div
-                  key={i}
-                  data-hour={i}
-                  className={`flex h-12 snap-center items-center justify-center text-2xl tabular-nums transition-all ${
-                    hours === i ? "font-medium text-foreground" : "text-muted-foreground/50"
-                  }`}
-                >
-                  {i.toString().padStart(2, "0")}
-                </div>
-              ))}
-            </div>
-          </div>
+        {/* Wheel Picker */}
+        {!isKeyboardMode && (
+          <div className="relative px-6 py-4">
+            {/* iOS-style highlight bar */}
+            <div className="pointer-events-none absolute left-6 right-6 top-1/2 z-10 h-11 -translate-y-1/2 rounded-xl bg-muted/40" />
 
-          {/* Separator */}
-          <div className="flex h-48 items-center text-2xl font-medium text-foreground">:</div>
+            <WheelPickerWrapper className="h-[200px]">
+              <WheelPicker
+                options={hourOptions}
+                value={hours}
+                onValueChange={(val) => setHours(val as number)}
+                infinite
+                optionItemHeight={44}
+                classNames={{
+                  optionItem: "text-2xl tabular-nums text-muted-foreground/60 font-medium",
+                  highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
+                }}
+              />
 
-          {/* Minutes wheel */}
-          <div className="relative h-48 w-24 overflow-hidden">
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-gradient-to-b from-card to-transparent" />
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-16 bg-gradient-to-t from-card to-transparent" />
-            <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-12 -translate-y-1/2 rounded-lg border border-border bg-muted/30" />
-            <div
-              ref={minutesRef}
-              className="scrollbar-hide h-full snap-y snap-mandatory overflow-y-scroll py-[72px]"
-              onScroll={(e) => {
-                const target = e.target as HTMLDivElement
-                const scrollTop = target.scrollTop
-                const itemHeight = 48
-                const selectedIndex = Math.round(scrollTop / itemHeight)
-                if (selectedIndex >= 0 && selectedIndex <= 59) {
-                  setMinutes(selectedIndex)
-                }
-              }}
-            >
-              {Array.from({ length: 60 }, (_, i) => (
-                <div
-                  key={i}
-                  data-minute={i}
-                  className={`flex h-12 snap-center items-center justify-center text-2xl tabular-nums transition-all ${
-                    minutes === i ? "font-medium text-foreground" : "text-muted-foreground/50"
-                  }`}
-                >
-                  {i.toString().padStart(2, "0")}
-                </div>
-              ))}
-            </div>
+              {/* Separator */}
+              <div className="flex items-center justify-center px-1">
+                <span className="text-3xl font-semibold text-foreground">:</span>
+              </div>
+
+              <WheelPicker
+                options={minuteOptions}
+                value={minutes}
+                onValueChange={(val) => setMinutes(val as number)}
+                infinite
+                optionItemHeight={44}
+                classNames={{
+                  optionItem: "text-2xl tabular-nums text-muted-foreground/60 font-medium",
+                  highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
+                }}
+              />
+            </WheelPickerWrapper>
           </div>
-        </div>
+        )}
       </div>
     </div>
   )

@@ -238,3 +238,34 @@ textarea:focus-within {
 .animate-accordion-up {
   animation: accordion-up 0.2s ease-out;
 }
+
+/* React Wheel Picker iOS-style customization */
+[data-rwp-wrapper] {
+  --rwp-highlight-bg: transparent;
+  gap: 0.5rem;
+}
+
+[data-rwp] {
+  cursor: grab;
+}
+
+[data-rwp]:active {
+  cursor: grabbing;
+}
+
+[data-rwp-highlight-wrapper] {
+  background: transparent;
+  border-radius: 0.75rem;
+}
+
+[data-rwp-option],
+[data-rwp-highlight-item] {
+  transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+}
+
+/* Improve touch scrolling on iOS */
+@supports (-webkit-touch-callout: none) {
+  [data-rwp] {
+    -webkit-overflow-scrolling: touch;
+  }
+}
