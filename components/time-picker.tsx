@@ -64,6 +64,17 @@ export function TimePicker({
     }
   }, [isOpen])
 
+  // Focus input when field is activated
+  useEffect(() => {
+    if (focusedField === "hour" && hourInputRef.current) {
+      hourInputRef.current.focus()
+      hourInputRef.current.select()
+    } else if (focusedField === "minute" && minuteInputRef.current) {
+      minuteInputRef.current.focus()
+      minuteInputRef.current.select()
+    }
+  }, [focusedField])
+
   // Validate and clamp hour value
   const validateHour = useCallback((value: string): number => {
     const num = Number.parseInt(value, 10)
@@ -98,49 +109,53 @@ export function TimePicker({
     }
   }, [validateMinute])
 
-  // Handle input focus
-  const handleHourFocus = useCallback(() => {
+  // Handle tapping on hour to edit
+  const handleHourTap = useCallback(() => {
     setFocusedField("hour")
     setHourInput(hours.toString().padStart(2, "0"))
   }, [hours])
 
-  const handleMinuteFocus = useCallback(() => {
+  // Handle tapping on minute to edit
+  const handleMinuteTap = useCallback(() => {
     setFocusedField("minute")
     setMinuteInput(minutes.toString().padStart(2, "0"))
   }, [minutes])
 
   // Handle input blur - validate final value
   const handleHourBlur = useCallback(() => {
-    setFocusedField(null)
     if (hourInput) {
       setHours(validateHour(hourInput))
     }
     setHourInput("")
+    setFocusedField(null)
   }, [hourInput, validateHour])
 
   const handleMinuteBlur = useCallback(() => {
-    setFocusedField(null)
     if (minuteInput) {
       setMinutes(validateMinute(minuteInput))
     }
     setMinuteInput("")
+    setFocusedField(null)
   }, [minuteInput, validateMinute])
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent, field: "hour" | "minute") => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault()
       if (field === "hour") {
-        handleHourBlur()
-        minuteInputRef.current?.focus()
+        if (hourInput) setHours(validateHour(hourInput))
+        setHourInput("")
+        setFocusedField("minute")
+        setMinuteInput(minutes.toString().padStart(2, "0"))
       } else {
         handleMinuteBlur()
       }
-    } else if (e.key === "Tab" && !e.shiftKey && field === "hour") {
-      e.preventDefault()
-      handleHourBlur()
-      minuteInputRef.current?.focus()
+    } else if (e.key === "Escape") {
+      setHourInput("")
+      setMinuteInput("")
+      setFocusedField(null)
     }
-  }, [handleHourBlur, handleMinuteBlur])
+  }, [hourInput, validateHour, minutes, handleMinuteBlur])
 
   const handleConfirm = useCallback(() => {
     const formatted = `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
@@ -152,6 +167,7 @@ export function TimePicker({
     const now = new Date()
     setHours(now.getUTCHours())
     setMinutes(now.getUTCMinutes())
+    setFocusedField(null)
   }, [])
 
   // Calculate local time if offset provided
@@ -167,7 +183,7 @@ export function TimePicker({
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-t-3xl bg-card pb-6 animate-in slide-in-from-bottom duration-300"
+        className="w-full max-w-md rounded-t-3xl bg-card pb-safe animate-in slide-in-from-bottom duration-300"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -194,75 +210,105 @@ export function TimePicker({
           </button>
         </div>
 
-        {/* Wheel Picker with Inline Inputs */}
-        <div className="relative px-8 py-2">
+        {/* Wheel Picker */}
+        <div className="relative px-8 pt-2 pb-4">
           {/* iOS-style highlight bar */}
-          <div className="pointer-events-none absolute left-8 right-8 top-1/2 z-0 h-11 -translate-y-1/2 rounded-xl bg-muted/40" />
+          <div className="pointer-events-none absolute left-8 right-8 top-1/2 z-10 h-11 -translate-y-1/2 rounded-xl bg-muted/50" />
 
-          {/* Focusable inputs overlay */}
-          <div className="pointer-events-none absolute inset-x-8 top-1/2 z-20 flex h-11 -translate-y-1/2 items-center justify-center">
-            <input
-              ref={hourInputRef}
-              type="text"
-              inputMode="numeric"
-              value={focusedField === "hour" ? hourInput : hours.toString().padStart(2, "0")}
-              onChange={handleHourInputChange}
-              onFocus={handleHourFocus}
-              onBlur={handleHourBlur}
-              onKeyDown={(e) => handleKeyDown(e, "hour")}
-              className="pointer-events-auto w-14 bg-transparent text-center text-2xl font-semibold tabular-nums text-foreground outline-none focus:bg-primary/10 focus:rounded-lg"
-              maxLength={2}
-            />
-            <span className="px-1 text-2xl font-semibold text-foreground">:</span>
-            <input
-              ref={minuteInputRef}
-              type="text"
-              inputMode="numeric"
-              value={focusedField === "minute" ? minuteInput : minutes.toString().padStart(2, "0")}
-              onChange={handleMinuteInputChange}
-              onFocus={handleMinuteFocus}
-              onBlur={handleMinuteBlur}
-              onKeyDown={(e) => handleKeyDown(e, "minute")}
-              className="pointer-events-auto w-14 bg-transparent text-center text-2xl font-semibold tabular-nums text-foreground outline-none focus:bg-primary/10 focus:rounded-lg"
-              maxLength={2}
-            />
+          {/* Tap areas for keyboard input */}
+          <div className="absolute inset-x-8 top-1/2 z-30 flex h-11 -translate-y-1/2 items-center justify-center gap-1">
+            {/* Hour tap area / input */}
+            <div className="flex h-full flex-1 items-center justify-end pr-1">
+              {focusedField === "hour" ? (
+                <input
+                  ref={hourInputRef}
+                  type="text"
+                  inputMode="numeric"
+                  value={hourInput}
+                  onChange={handleHourInputChange}
+                  onBlur={handleHourBlur}
+                  onKeyDown={(e) => handleKeyDown(e, "hour")}
+                  className="w-14 rounded-lg bg-primary/20 text-center text-2xl font-semibold tabular-nums text-foreground outline-none"
+                  maxLength={2}
+                />
+              ) : (
+                <button
+                  onClick={handleHourTap}
+                  className="flex h-full w-14 items-center justify-center rounded-lg text-2xl font-semibold tabular-nums text-transparent active:bg-primary/10"
+                >
+                  {hours.toString().padStart(2, "0")}
+                </button>
+              )}
+            </div>
+
+            <span className="text-2xl font-semibold text-foreground">:</span>
+
+            {/* Minute tap area / input */}
+            <div className="flex h-full flex-1 items-center justify-start pl-1">
+              {focusedField === "minute" ? (
+                <input
+                  ref={minuteInputRef}
+                  type="text"
+                  inputMode="numeric"
+                  value={minuteInput}
+                  onChange={handleMinuteInputChange}
+                  onBlur={handleMinuteBlur}
+                  onKeyDown={(e) => handleKeyDown(e, "minute")}
+                  className="w-14 rounded-lg bg-primary/20 text-center text-2xl font-semibold tabular-nums text-foreground outline-none"
+                  maxLength={2}
+                />
+              ) : (
+                <button
+                  onClick={handleMinuteTap}
+                  className="flex h-full w-14 items-center justify-center rounded-lg text-2xl font-semibold tabular-nums text-transparent active:bg-primary/10"
+                >
+                  {minutes.toString().padStart(2, "0")}
+                </button>
+              )}
+            </div>
           </div>
 
-          <WheelPickerWrapper className="h-[180px]">
+          <WheelPickerWrapper className="h-[200px]">
             <WheelPicker
               options={hourOptions}
               value={hours}
-              onValueChange={(val) => setHours(val as number)}
+              onValueChange={(val) => {
+                setHours(val as number)
+                setFocusedField(null)
+              }}
               infinite
               optionItemHeight={44}
               classNames={{
-                optionItem: "text-xl tabular-nums text-muted-foreground/40 font-medium",
-                highlightItem: "text-xl tabular-nums text-transparent font-semibold",
+                optionItem: "text-xl tabular-nums text-muted-foreground/50 font-medium",
+                highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
               }}
             />
 
             {/* Spacer for colon alignment */}
-            <div className="w-8 flex-none" />
+            <div className="w-6 flex-none" />
 
             <WheelPicker
               options={minuteOptions}
               value={minutes}
-              onValueChange={(val) => setMinutes(val as number)}
+              onValueChange={(val) => {
+                setMinutes(val as number)
+                setFocusedField(null)
+              }}
               infinite
               optionItemHeight={44}
               classNames={{
-                optionItem: "text-xl tabular-nums text-muted-foreground/40 font-medium",
-                highlightItem: "text-xl tabular-nums text-transparent font-semibold",
+                optionItem: "text-xl tabular-nums text-muted-foreground/50 font-medium",
+                highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
               }}
             />
           </WheelPickerWrapper>
         </div>
 
         {/* NOW button */}
-        <div className="flex justify-center pt-2 pb-1">
+        <div className="flex justify-center pb-6">
           <button
             onClick={handleSetNow}
-            className="rounded-full border border-primary/50 px-6 py-1.5 text-sm font-medium text-primary active:bg-primary/10"
+            className="rounded-full bg-primary/10 px-8 py-2 text-sm font-semibold text-primary active:bg-primary/20"
           >
             NOW
           </button>

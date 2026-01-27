@@ -45,7 +45,7 @@ export function DatePicker({
   const monthInputRef = useRef<HTMLInputElement>(null)
   const yearInputRef = useRef<HTMLInputElement>(null)
 
-  // Generate years array (current year - 5 to current year + 2)
+  // Generate years array (current year - 5 to current year + 4)
   const currentYear = new Date().getFullYear()
   const years = useMemo(
     () => Array.from({ length: 10 }, (_, i) => currentYear - 5 + i),
@@ -107,6 +107,20 @@ export function DatePicker({
     }
   }, [year, month, day])
 
+  // Focus input when field is activated
+  useEffect(() => {
+    if (focusedField === "day" && dayInputRef.current) {
+      dayInputRef.current.focus()
+      dayInputRef.current.select()
+    } else if (focusedField === "month" && monthInputRef.current) {
+      monthInputRef.current.focus()
+      monthInputRef.current.select()
+    } else if (focusedField === "year" && yearInputRef.current) {
+      yearInputRef.current.focus()
+      yearInputRef.current.select()
+    }
+  }, [focusedField])
+
   // Validate and clamp day value
   const validateDay = useCallback((value: string, currentMonth: number, currentYear: number): number => {
     const num = Number.parseInt(value, 10)
@@ -131,7 +145,7 @@ export function DatePicker({
     return Math.max(minYear, Math.min(maxYear, num))
   }, [year, currentYear])
 
-  // Handle day input change
+  // Handle input changes
   const handleDayInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/\D/g, "").slice(0, 2)
     setDayInput(value)
@@ -141,59 +155,54 @@ export function DatePicker({
     }
   }, [validateDay, month, year])
 
-  // Handle month input change
   const handleMonthInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/\D/g, "").slice(0, 2)
     setMonthInput(value)
     if (value.length > 0) {
       const validated = validateMonth(value)
       setMonth(validated)
-      // Also adjust day if needed
       const maxDays = getDaysInMonth(year, validated)
       if (day > maxDays) setDay(maxDays)
     }
   }, [validateMonth, year, day])
 
-  // Handle year input change
   const handleYearInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/\D/g, "").slice(0, 4)
     setYearInput(value)
     if (value.length === 4) {
       const validated = validateYear(value)
       setYear(validated)
-      // Also adjust day if needed
       const maxDays = getDaysInMonth(validated, month)
       if (day > maxDays) setDay(maxDays)
     }
   }, [validateYear, month, day])
 
-  // Handle input focus
-  const handleDayFocus = useCallback(() => {
+  // Handle tapping to edit
+  const handleDayTap = useCallback(() => {
     setFocusedField("day")
     setDayInput(day.toString().padStart(2, "0"))
   }, [day])
 
-  const handleMonthFocus = useCallback(() => {
+  const handleMonthTap = useCallback(() => {
     setFocusedField("month")
     setMonthInput((month + 1).toString().padStart(2, "0"))
   }, [month])
 
-  const handleYearFocus = useCallback(() => {
+  const handleYearTap = useCallback(() => {
     setFocusedField("year")
     setYearInput(year.toString())
   }, [year])
 
-  // Handle input blur - validate final value
+  // Handle input blur
   const handleDayBlur = useCallback(() => {
-    setFocusedField(null)
     if (dayInput) {
       setDay(validateDay(dayInput, month, year))
     }
     setDayInput("")
+    setFocusedField(null)
   }, [dayInput, validateDay, month, year])
 
   const handleMonthBlur = useCallback(() => {
-    setFocusedField(null)
     if (monthInput) {
       const validated = validateMonth(monthInput)
       setMonth(validated)
@@ -201,10 +210,10 @@ export function DatePicker({
       if (day > maxDays) setDay(maxDays)
     }
     setMonthInput("")
+    setFocusedField(null)
   }, [monthInput, validateMonth, year, day])
 
   const handleYearBlur = useCallback(() => {
-    setFocusedField(null)
     if (yearInput && yearInput.length === 4) {
       const validated = validateYear(yearInput)
       setYear(validated)
@@ -212,23 +221,36 @@ export function DatePicker({
       if (day > maxDays) setDay(maxDays)
     }
     setYearInput("")
+    setFocusedField(null)
   }, [yearInput, validateYear, month, day])
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent, field: "day" | "month" | "year") => {
-    if (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey)) {
+    if (e.key === "Enter" || e.key === "Tab") {
       e.preventDefault()
       if (field === "day") {
-        handleDayBlur()
-        monthInputRef.current?.focus()
+        if (dayInput) setDay(validateDay(dayInput, month, year))
+        setDayInput("")
+        setFocusedField("month")
+        setMonthInput((month + 1).toString().padStart(2, "0"))
       } else if (field === "month") {
-        handleMonthBlur()
-        yearInputRef.current?.focus()
+        if (monthInput) {
+          const validated = validateMonth(monthInput)
+          setMonth(validated)
+        }
+        setMonthInput("")
+        setFocusedField("year")
+        setYearInput(year.toString())
       } else {
         handleYearBlur()
       }
+    } else if (e.key === "Escape") {
+      setDayInput("")
+      setMonthInput("")
+      setYearInput("")
+      setFocusedField(null)
     }
-  }, [handleDayBlur, handleMonthBlur, handleYearBlur])
+  }, [dayInput, validateDay, month, year, monthInput, validateMonth, handleYearBlur])
 
   const handleConfirm = useCallback(() => {
     const formatted = `${year}-${(month + 1).toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`
@@ -241,6 +263,7 @@ export function DatePicker({
     setYear(today.getFullYear())
     setMonth(today.getMonth())
     setDay(today.getDate())
+    setFocusedField(null)
   }, [])
 
   if (!isOpen) return null
@@ -248,7 +271,7 @@ export function DatePicker({
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-t-3xl bg-card pb-6 animate-in slide-in-from-bottom duration-300"
+        className="w-full max-w-md rounded-t-3xl bg-card pb-safe animate-in slide-in-from-bottom duration-300"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -268,74 +291,101 @@ export function DatePicker({
           </button>
         </div>
 
-        {/* Wheel Picker with Inline Inputs */}
-        <div className="relative px-6 py-2">
+        {/* Wheel Picker */}
+        <div className="relative px-4 pt-2 pb-4">
           {/* iOS-style highlight bar */}
-          <div className="pointer-events-none absolute left-6 right-6 top-1/2 z-0 h-11 -translate-y-1/2 rounded-xl bg-muted/40" />
+          <div className="pointer-events-none absolute left-4 right-4 top-1/2 z-10 h-11 -translate-y-1/2 rounded-xl bg-muted/50" />
 
-          {/* Focusable inputs overlay */}
-          <div className="pointer-events-none absolute inset-x-6 top-1/2 z-20 flex h-11 -translate-y-1/2 items-center justify-between px-2">
-            {/* Day input */}
-            <div className="flex flex-1 justify-center">
-              <input
-                ref={dayInputRef}
-                type="text"
-                inputMode="numeric"
-                value={focusedField === "day" ? dayInput : day.toString().padStart(2, "0")}
-                onChange={handleDayInputChange}
-                onFocus={handleDayFocus}
-                onBlur={handleDayBlur}
-                onKeyDown={(e) => handleKeyDown(e, "day")}
-                className="pointer-events-auto w-12 bg-transparent text-center text-xl font-semibold tabular-nums text-foreground outline-none focus:bg-primary/10 focus:rounded-lg"
-                maxLength={2}
-              />
+          {/* Tap areas for keyboard input */}
+          <div className="absolute inset-x-4 top-1/2 z-30 flex h-11 -translate-y-1/2 items-center justify-between px-2">
+            {/* Day tap area / input */}
+            <div className="flex h-full flex-1 items-center justify-center">
+              {focusedField === "day" ? (
+                <input
+                  ref={dayInputRef}
+                  type="text"
+                  inputMode="numeric"
+                  value={dayInput}
+                  onChange={handleDayInputChange}
+                  onBlur={handleDayBlur}
+                  onKeyDown={(e) => handleKeyDown(e, "day")}
+                  className="w-12 rounded-lg bg-primary/20 text-center text-xl font-semibold tabular-nums text-foreground outline-none"
+                  maxLength={2}
+                />
+              ) : (
+                <button
+                  onClick={handleDayTap}
+                  className="flex h-full w-12 items-center justify-center rounded-lg text-xl font-semibold tabular-nums text-transparent active:bg-primary/10"
+                >
+                  {day.toString().padStart(2, "0")}
+                </button>
+              )}
             </div>
 
-            {/* Month input (display as text) */}
-            <div className="flex flex-1 justify-center">
-              <input
-                ref={monthInputRef}
-                type="text"
-                inputMode="numeric"
-                value={focusedField === "month" ? monthInput : MONTHS[month]}
-                onChange={handleMonthInputChange}
-                onFocus={handleMonthFocus}
-                onBlur={handleMonthBlur}
-                onKeyDown={(e) => handleKeyDown(e, "month")}
-                placeholder="MM"
-                className="pointer-events-auto w-14 bg-transparent text-center text-xl font-semibold text-foreground outline-none focus:bg-primary/10 focus:rounded-lg"
-                maxLength={2}
-              />
+            {/* Month tap area / input */}
+            <div className="flex h-full flex-1 items-center justify-center">
+              {focusedField === "month" ? (
+                <input
+                  ref={monthInputRef}
+                  type="text"
+                  inputMode="numeric"
+                  value={monthInput}
+                  onChange={handleMonthInputChange}
+                  onBlur={handleMonthBlur}
+                  onKeyDown={(e) => handleKeyDown(e, "month")}
+                  placeholder="MM"
+                  className="w-12 rounded-lg bg-primary/20 text-center text-xl font-semibold text-foreground outline-none"
+                  maxLength={2}
+                />
+              ) : (
+                <button
+                  onClick={handleMonthTap}
+                  className="flex h-full w-14 items-center justify-center rounded-lg text-xl font-semibold text-transparent active:bg-primary/10"
+                >
+                  {MONTHS[month]}
+                </button>
+              )}
             </div>
 
-            {/* Year input */}
-            <div className="flex flex-1 justify-center">
-              <input
-                ref={yearInputRef}
-                type="text"
-                inputMode="numeric"
-                value={focusedField === "year" ? yearInput : year.toString()}
-                onChange={handleYearInputChange}
-                onFocus={handleYearFocus}
-                onBlur={handleYearBlur}
-                onKeyDown={(e) => handleKeyDown(e, "year")}
-                className="pointer-events-auto w-16 bg-transparent text-center text-xl font-semibold tabular-nums text-foreground outline-none focus:bg-primary/10 focus:rounded-lg"
-                maxLength={4}
-              />
+            {/* Year tap area / input */}
+            <div className="flex h-full flex-1 items-center justify-center">
+              {focusedField === "year" ? (
+                <input
+                  ref={yearInputRef}
+                  type="text"
+                  inputMode="numeric"
+                  value={yearInput}
+                  onChange={handleYearInputChange}
+                  onBlur={handleYearBlur}
+                  onKeyDown={(e) => handleKeyDown(e, "year")}
+                  className="w-16 rounded-lg bg-primary/20 text-center text-xl font-semibold tabular-nums text-foreground outline-none"
+                  maxLength={4}
+                />
+              ) : (
+                <button
+                  onClick={handleYearTap}
+                  className="flex h-full w-16 items-center justify-center rounded-lg text-xl font-semibold tabular-nums text-transparent active:bg-primary/10"
+                >
+                  {year}
+                </button>
+              )}
             </div>
           </div>
 
-          <WheelPickerWrapper className="h-[180px]">
+          <WheelPickerWrapper className="h-[200px]">
             {/* Day */}
             <WheelPicker
               options={dayOptions}
               value={day}
-              onValueChange={(val) => setDay(val as number)}
+              onValueChange={(val) => {
+                setDay(val as number)
+                setFocusedField(null)
+              }}
               infinite
               optionItemHeight={44}
               classNames={{
-                optionItem: "text-lg tabular-nums text-muted-foreground/40 font-medium",
-                highlightItem: "text-lg tabular-nums text-transparent font-semibold",
+                optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
+                highlightItem: "text-xl tabular-nums text-foreground font-semibold",
               }}
             />
 
@@ -343,12 +393,15 @@ export function DatePicker({
             <WheelPicker
               options={monthOptions}
               value={month}
-              onValueChange={(val) => setMonth(val as number)}
+              onValueChange={(val) => {
+                setMonth(val as number)
+                setFocusedField(null)
+              }}
               infinite
               optionItemHeight={44}
               classNames={{
-                optionItem: "text-lg text-muted-foreground/40 font-medium",
-                highlightItem: "text-lg text-transparent font-semibold",
+                optionItem: "text-lg text-muted-foreground/50 font-medium",
+                highlightItem: "text-xl text-foreground font-semibold",
               }}
             />
 
@@ -356,21 +409,24 @@ export function DatePicker({
             <WheelPicker
               options={yearOptions}
               value={year}
-              onValueChange={(val) => setYear(val as number)}
+              onValueChange={(val) => {
+                setYear(val as number)
+                setFocusedField(null)
+              }}
               optionItemHeight={44}
               classNames={{
-                optionItem: "text-lg tabular-nums text-muted-foreground/40 font-medium",
-                highlightItem: "text-lg tabular-nums text-transparent font-semibold",
+                optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
+                highlightItem: "text-xl tabular-nums text-foreground font-semibold",
               }}
             />
           </WheelPickerWrapper>
         </div>
 
         {/* TODAY button */}
-        <div className="flex justify-center pt-2 pb-1">
+        <div className="flex justify-center pb-6">
           <button
             onClick={handleSetToday}
-            className="rounded-full border border-primary/50 px-6 py-1.5 text-sm font-medium text-primary active:bg-primary/10"
+            className="rounded-full bg-primary/10 px-8 py-2 text-sm font-semibold text-primary active:bg-primary/20"
           >
             TODAY
           </button>
