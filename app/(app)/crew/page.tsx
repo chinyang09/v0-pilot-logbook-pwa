@@ -179,6 +179,7 @@ export default function CrewPage() {
 
   // FastScroll state
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
+  const isFastScrollingRef = useRef(false);
 
   // Generate FastScroll items from crew names (excluding self and favorites)
   const fastScrollItems = useMemo(() => {
@@ -186,8 +187,45 @@ export default function CrewPage() {
     return generateAlphabetItemsFromList(regularCrew.map((p) => p.name || ""));
   }, [sortedPersonnel]);
 
+  // Track visible crew and update activeLetterKey on scroll
+  useEffect(() => {
+    if (debouncedSearchQuery || filteredPersonnel.length === 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (isFastScrollingRef.current) return;
+
+        // Find the topmost visible non-self, non-favorite crew
+        for (const entry of entries) {
+          if (entry.isIntersecting && entry.boundingClientRect.top >= 0) {
+            const id = entry.target.id.replace("crew-", "");
+            const crew = personnel.find((p) => p.id === id);
+            if (crew && !crew.isMe && !crew.favorite) {
+              const name = crew.name || "";
+              const firstChar = name[0]?.toUpperCase();
+              if (firstChar && /[A-Z]/.test(firstChar)) {
+                setActiveLetterKey(firstChar);
+              } else {
+                setActiveLetterKey("#");
+              }
+              break;
+            }
+          }
+        }
+      },
+      { threshold: 0, rootMargin: "-100px 0px -80% 0px" }
+    );
+
+    // Observe all crew cards
+    const cards = document.querySelectorAll('[id^="crew-"]');
+    cards.forEach((card) => observer.observe(card));
+
+    return () => observer.disconnect();
+  }, [filteredPersonnel, personnel, debouncedSearchQuery]);
+
   // Handle FastScroll selection
   const handleFastScrollSelect = useCallback((letter: string) => {
+    isFastScrollingRef.current = true;
     setActiveLetterKey(letter);
 
     // Find first crew member starting with this letter (skip self and favorites)
@@ -214,7 +252,13 @@ export default function CrewPage() {
         if (element) {
           element.scrollIntoView({ behavior: "instant", block: "start" });
         }
+        // Reset fast scrolling flag after scroll completes
+        setTimeout(() => {
+          isFastScrollingRef.current = false;
+        }, 100);
       }, 50);
+    } else {
+      isFastScrollingRef.current = false;
     }
   }, [sortedPersonnel, displayCount]);
 

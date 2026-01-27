@@ -34,8 +34,8 @@ export default function AirportsPage() {
   const { airports, isLoading } = useAirportDatabase();
   const [recentAirports, setRecentAirports] = useState<typeof airports>([]);
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const letterRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const isFastScrollingRef = useRef(false);
+  const listContainerRef = useRef<HTMLDivElement>(null);
 
   const {
     searchQuery,
@@ -72,12 +72,48 @@ export default function AirportsPage() {
     });
   }, [airports]);
 
+  // Track visible airports and update activeLetterKey on scroll
+  useEffect(() => {
+    if (searchQuery.trim() || filteredAirports.length === 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (isFastScrollingRef.current) return;
+
+        // Find the topmost visible non-favorite airport
+        for (const entry of entries) {
+          if (entry.isIntersecting && entry.boundingClientRect.top >= 0) {
+            const icao = entry.target.id.replace("airport-", "");
+            const airport = airports.find((a) => a.icao === icao);
+            if (airport && !airport.isFavorite) {
+              const firstChar = airport.icao[0]?.toUpperCase();
+              if (firstChar && /[A-Z]/.test(firstChar)) {
+                setActiveLetterKey(firstChar);
+              } else {
+                setActiveLetterKey("#");
+              }
+              break;
+            }
+          }
+        }
+      },
+      { threshold: 0, rootMargin: "-100px 0px -80% 0px" }
+    );
+
+    // Observe all airport cards
+    const cards = document.querySelectorAll('[id^="airport-"]');
+    cards.forEach((card) => observer.observe(card));
+
+    return () => observer.disconnect();
+  }, [filteredAirports, airports, searchQuery]);
+
   // Handle FastScroll selection
-  const handleFastScrollSelect = useCallback(async (letter: string) => {
+  const handleFastScrollSelect = useCallback((letter: string) => {
+    isFastScrollingRef.current = true;
     setActiveLetterKey(letter);
 
     // Load all items first to ensure the target is rendered
-    await loadAll();
+    loadAll();
 
     // Find first airport starting with this letter (skip favorites)
     const targetAirport = allSortedAirports.find((a) => {
@@ -96,7 +132,13 @@ export default function AirportsPage() {
         if (element) {
           element.scrollIntoView({ behavior: "instant", block: "start" });
         }
+        // Reset fast scrolling flag after scroll completes
+        setTimeout(() => {
+          isFastScrollingRef.current = false;
+        }, 100);
       }, 50);
+    } else {
+      isFastScrollingRef.current = false;
     }
   }, [allSortedAirports, loadAll]);
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo, type RefObject } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Search, Plane, ArrowLeft, Loader2, ChevronRight } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
@@ -144,9 +144,49 @@ export default function AircraftPage() {
   }, [filteredAircraft]);
 
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
+  const isFastScrollingRef = useRef(false);
+
+  // Track visible aircraft and update activeLetterKey on scroll
+  useEffect(() => {
+    if (debouncedSearchQuery.length < 2 || filteredAircraft.length === 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (isFastScrollingRef.current) return;
+
+        // Find the topmost visible aircraft
+        for (const entry of entries) {
+          if (entry.isIntersecting && entry.boundingClientRect.top >= 0) {
+            const id = entry.target.id.replace("aircraft-", "");
+            const aircraft = filteredAircraft.find(
+              (a) => (a.registration || a.icao24) === id
+            );
+            if (aircraft) {
+              const reg = aircraft.registration || aircraft.icao24 || "";
+              const firstChar = reg[0]?.toUpperCase();
+              if (firstChar && /[A-Z]/.test(firstChar)) {
+                setActiveLetterKey(firstChar);
+              } else {
+                setActiveLetterKey("#");
+              }
+              break;
+            }
+          }
+        }
+      },
+      { threshold: 0, rootMargin: "-100px 0px -80% 0px" }
+    );
+
+    // Observe all aircraft cards
+    const cards = document.querySelectorAll('[id^="aircraft-"]');
+    cards.forEach((card) => observer.observe(card));
+
+    return () => observer.disconnect();
+  }, [filteredAircraft, debouncedSearchQuery]);
 
   // Handle FastScroll selection
   const handleFastScrollSelect = useCallback((letter: string) => {
+    isFastScrollingRef.current = true;
     setActiveLetterKey(letter);
 
     // Find first aircraft starting with this letter
@@ -176,7 +216,13 @@ export default function AircraftPage() {
         if (element) {
           element.scrollIntoView({ behavior: "instant", block: "start" });
         }
+        // Reset fast scrolling flag after scroll completes
+        setTimeout(() => {
+          isFastScrollingRef.current = false;
+        }, 100);
       }, 50);
+    } else {
+      isFastScrollingRef.current = false;
     }
   }, [filteredAircraft, displayCount]);
 

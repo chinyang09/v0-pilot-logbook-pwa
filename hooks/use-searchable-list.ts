@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useRef, useEffect } from "react"
+import { useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useDebounce } from "@/hooks/use-debounce"
 
 export interface UseSearchableListOptions<T> {
@@ -39,6 +39,8 @@ export interface UseSearchableListReturn<T> {
   isLoading: boolean
   /** Manually set display count */
   setDisplayCount: (count: number | ((prev: number) => number)) => void
+  /** Load all items (set display count to total) */
+  loadAll: () => void
 }
 
 export function useSearchableList<T>({
@@ -106,6 +108,11 @@ export function useSearchableList<T>({
     setDisplayCount(itemsPerPage)
   }, [searchQuery, itemsPerPage])
 
+  // Load all items at once
+  const loadAll = useCallback(() => {
+    setDisplayCount(filteredItems.length)
+  }, [filteredItems.length])
+
   return {
     searchQuery,
     setSearchQuery,
@@ -117,5 +124,6 @@ export function useSearchableList<T>({
     observerTarget,
     isLoading,
     setDisplayCount,
+    loadAll,
   }
 }
