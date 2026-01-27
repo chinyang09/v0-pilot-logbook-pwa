@@ -23,6 +23,9 @@ importers:
       '@mongodb-js/zstd':
         specifier: latest
         version: 7.0.0
+      '@ncdai/react-wheel-picker':
+        specifier: ^1.1.0
+        version: 1.1.0(react@19.2.0)
       '@radix-ui/react-accordion':
         specifier: 1.2.2
         version: 1.2.2(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -795,6 +798,11 @@ packages:
 
   '@napi-rs/wasm-runtime@1.1.1':
     resolution: {integrity: sha512-p64ah1M1ld8xjWv3qbvFwHiFVWrq1yFvV4f7w+mzaqiR4IlSgkqhcRdHwsGgomwzBH51sRY4NEowLxnaBjcW/A==}
+
+  '@ncdai/react-wheel-picker@1.1.0':
+    resolution: {integrity: sha512-c6zFfO0lVlJCnmBufBbmpq7GFYFrLi1wpt11wZDP5EukWMLKd3lrBNQ1Mofv8fsxEsM0PqksMCvxwJg3NrOBgQ==}
+    peerDependencies:
+      react: ^16.8 || ^17.0 || ^18.0 || ^19.0.0 || ^19.0.0-rc
 
   '@next/env@16.0.10':
     resolution: {integrity: sha512-8tuaQkyDVgeONQ1MeT9Mkk8pQmZapMKFh5B+OrFUlG3rVmYTXcXlBetBgTurKXGaIZvkoqRT9JL5K3phXcgang==}
@@ -3661,6 +3669,10 @@ snapshots:
       '@emnapi/runtime': 1.8.1
       '@tybys/wasm-util': 0.10.1
     optional: true
+
+  '@ncdai/react-wheel-picker@1.1.0(react@19.2.0)':
+    dependencies:
+      react: 19.2.0
 
   '@next/env@16.0.10': {}
 
