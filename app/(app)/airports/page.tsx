@@ -73,8 +73,11 @@ export default function AirportsPage() {
   }, [airports]);
 
   // Handle FastScroll selection
-  const handleFastScrollSelect = useCallback((letter: string) => {
+  const handleFastScrollSelect = useCallback(async (letter: string) => {
     setActiveLetterKey(letter);
+
+    // Load all items first to ensure the target is rendered
+    await loadAll();
 
     // Find first airport starting with this letter (skip favorites)
     const targetAirport = allSortedAirports.find((a) => {
@@ -87,13 +90,15 @@ export default function AirportsPage() {
     });
 
     if (targetAirport) {
-      // Scroll to the element with this ICAO
-      const element = document.getElementById(`airport-${targetAirport.icao}`);
-      if (element) {
-        element.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
+      // Use setTimeout to ensure DOM is updated after loadAll
+      setTimeout(() => {
+        const element = document.getElementById(`airport-${targetAirport.icao}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "instant", block: "start" });
+        }
+      }, 50);
     }
-  }, [allSortedAirports]);
+  }, [allSortedAirports, loadAll]);
 
   useEffect(() => {
     const loadRecentAirports = async () => {

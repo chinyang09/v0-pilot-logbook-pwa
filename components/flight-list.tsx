@@ -305,7 +305,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     const isExternalScrollRef = useRef(false);
     const lastDetectedFlightRef = useRef<string | null>(null);
     const [activeYearKey, setActiveYearKey] = useState<string | undefined>(undefined);
-    const [isFastScrolling, setIsFastScrolling] = useState(false);
+    const isFastScrollingRef = useRef(false);
 
     // Generate FastScroll items from flights (year-based)
     const fastScrollItems = useMemo(() => generateFlightYearItems(flights), [flights]);
@@ -369,10 +369,10 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       const topFlight = flights[topVisibleItem.index];
 
       if (topFlight) {
-        // Update active year for FastScroll
-        const date = parseDateLocal(topFlight.date);
-        const newYearKey = date.getFullYear().toString();
-        if (newYearKey !== activeYearKey && !isFastScrolling) {
+        // Update active year for FastScroll (use ref to avoid stale closure)
+        if (!isFastScrollingRef.current) {
+          const date = parseDateLocal(topFlight.date);
+          const newYearKey = date.getFullYear().toString();
           setActiveYearKey(newYearKey);
         }
 
@@ -381,7 +381,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           onTopFlightChange?.(topFlight);
         }
       }
-    }, [flights, onTopFlightChange, rowVirtualizer, activeYearKey, isFastScrolling]);
+    }, [flights, onTopFlightChange, rowVirtualizer]);
 
     // Handle user touch/interaction start on flight list
     const handleTouchStart = useCallback(() => {
@@ -430,31 +430,35 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       onDeleted?.();
     };
 
-    // FastScroll selection handler (year-based)
+    // FastScroll selection handler (year-based) with instant scrolling
     const handleFastScrollSelect = useCallback(
       (year: string) => {
         const index = getFirstFlightIndexForYear(flights, year);
         if (index !== -1) {
           isExternalScrollRef.current = true;
+          isFastScrollingRef.current = true;
           setActiveYearKey(year);
           rowVirtualizer.scrollToIndex(index, {
             align: "start",
-            behavior: "smooth",
+            behavior: "auto", // Use "auto" for instant scroll during fast scroll
           });
           setTimeout(() => {
             isExternalScrollRef.current = false;
-          }, 600);
+          }, 100);
         }
       },
       [flights, rowVirtualizer]
     );
 
     const handleFastScrollStart = useCallback(() => {
-      setIsFastScrolling(true);
+      isFastScrollingRef.current = true;
     }, []);
 
     const handleFastScrollEnd = useCallback(() => {
-      setIsFastScrolling(false);
+      // Delay resetting to allow final scroll position to settle
+      setTimeout(() => {
+        isFastScrollingRef.current = false;
+      }, 100);
     }, []);
 
     if (isLoading) {

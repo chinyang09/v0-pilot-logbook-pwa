@@ -163,7 +163,7 @@ export default function RosterPage() {
 
   const [activeMonthKey, setActiveMonthKey] = useState<string | undefined>(undefined);
 
-  // Handle FastScroll selection
+  // Handle FastScroll selection with instant scrolling
   const handleFastScrollSelect = useCallback((monthYear: string) => {
     setActiveMonthKey(monthYear);
 
@@ -175,10 +175,10 @@ export default function RosterPage() {
     });
 
     if (targetDate) {
-      // Scroll to the element
+      // Scroll to the element with instant behavior for snappy feedback
       const element = document.getElementById(`roster-date-${targetDate}`);
       if (element) {
-        element.scrollIntoView({ behavior: "smooth", block: "start" });
+        element.scrollIntoView({ behavior: "instant", block: "start" });
       }
     }
   }, [sortedDates]);

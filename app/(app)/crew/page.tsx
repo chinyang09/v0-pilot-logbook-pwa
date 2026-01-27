@@ -208,13 +208,13 @@ export default function CrewPage() {
         setDisplayCount(index + ITEMS_PER_PAGE);
       }
 
-      // Scroll to the element
+      // Scroll to the element with instant behavior for snappy feedback
       setTimeout(() => {
         const element = document.getElementById(`crew-${targetCrew.id}`);
         if (element) {
-          element.scrollIntoView({ behavior: "smooth", block: "start" });
+          element.scrollIntoView({ behavior: "instant", block: "start" });
         }
-      }, 100);
+      }, 50);
     }
   }, [sortedPersonnel, displayCount]);
 

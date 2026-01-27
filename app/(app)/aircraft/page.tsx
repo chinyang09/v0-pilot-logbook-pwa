@@ -168,15 +168,15 @@ export default function AircraftPage() {
         setDisplayCount(index + ITEMS_PER_PAGE);
       }
 
-      // Scroll to the element
+      // Scroll to the element with instant behavior for snappy feedback
       setTimeout(() => {
         const element = document.getElementById(
           `aircraft-${targetAircraft.registration || targetAircraft.icao24}`
         );
         if (element) {
-          element.scrollIntoView({ behavior: "smooth", block: "start" });
+          element.scrollIntoView({ behavior: "instant", block: "start" });
         }
-      }, 100);
+      }, 50);
     }
   }, [filteredAircraft, displayCount]);
 
