@@ -354,11 +354,20 @@ export function generateDateItems(dates: string[]): FastScrollItem[] {
 /**
  * Generate items from a list of strings (first letter grouping)
  * Useful for alphabetical lists like airports, crew, etc.
+ *
+ * @param items - List of strings to generate alphabet items from
+ * @param options - Configuration options
+ * @param options.getKey - Function to extract the key from each item (default: identity)
+ * @param options.numberPosition - Where to place # (numeric items): "start" or "end" (default: "start")
  */
 export function generateAlphabetItemsFromList(
   items: string[],
-  getKey: (item: string) => string = (item) => item
+  options: {
+    getKey?: (item: string) => string
+    numberPosition?: "start" | "end"
+  } = {}
 ): FastScrollItem[] {
+  const { getKey = (item) => item, numberPosition = "start" } = options
   const letters = new Set<string>()
 
   items.forEach((item) => {
@@ -374,8 +383,8 @@ export function generateAlphabetItemsFromList(
   })
 
   const sorted = Array.from(letters).sort((a, b) => {
-    if (a === "#") return 1
-    if (b === "#") return -1
+    if (a === "#") return numberPosition === "start" ? -1 : 1
+    if (b === "#") return numberPosition === "start" ? 1 : -1
     return a.localeCompare(b)
   })
 

@@ -182,23 +182,33 @@ export default function CrewPage() {
   const isFastScrollingRef = useRef(false);
 
   // Generate FastScroll items from crew names (excluding self and favorites)
+  // Use numberPosition: "end" since names typically don't start with numbers
   const fastScrollItems = useMemo(() => {
     const regularCrew = sortedPersonnel.filter((p) => !p.isMe && !p.favorite);
-    return generateAlphabetItemsFromList(regularCrew.map((p) => p.name || ""));
+    return generateAlphabetItemsFromList(regularCrew.map((p) => p.name || ""), {
+      numberPosition: "end",
+    });
   }, [sortedPersonnel]);
 
-  // Track visible crew and update activeLetterKey on scroll
+  // Track visible crew and update activeLetterKey on scroll using throttled scroll listener
   useEffect(() => {
-    if (debouncedSearchQuery || filteredPersonnel.length === 0) return;
+    if (debouncedSearchQuery) return;
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (isFastScrollingRef.current) return;
+    let ticking = false;
+    const handleScroll = () => {
+      if (ticking || isFastScrollingRef.current) return;
 
-        // Find the topmost visible non-self, non-favorite crew
-        for (const entry of entries) {
-          if (entry.isIntersecting && entry.boundingClientRect.top >= 0) {
-            const id = entry.target.id.replace("crew-", "");
+      ticking = true;
+      requestAnimationFrame(() => {
+        // Find the first visible non-self, non-favorite crew by sampling elements
+        const viewportTop = 120; // Account for header/search bar
+        const cards = document.querySelectorAll('[id^="crew-"]');
+
+        for (const card of cards) {
+          const rect = card.getBoundingClientRect();
+          // Check if card is in the visible viewport area
+          if (rect.top >= viewportTop - 50 && rect.top < window.innerHeight / 2) {
+            const id = card.id.replace("crew-", "");
             const crew = personnel.find((p) => p.id === id);
             if (crew && !crew.isMe && !crew.favorite) {
               const name = crew.name || "";
@@ -212,16 +222,16 @@ export default function CrewPage() {
             }
           }
         }
-      },
-      { threshold: 0, rootMargin: "-100px 0px -80% 0px" }
-    );
+        ticking = false;
+      });
+    };
 
-    // Observe all crew cards
-    const cards = document.querySelectorAll('[id^="crew-"]');
-    cards.forEach((card) => observer.observe(card));
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    // Initial check
+    handleScroll();
 
-    return () => observer.disconnect();
-  }, [filteredPersonnel, personnel, debouncedSearchQuery]);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [personnel, debouncedSearchQuery]);
 
   // Handle FastScroll selection
   const handleFastScrollSelect = useCallback((letter: string) => {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback, useMemo, type RefObject } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Search, Plane, ArrowLeft, Loader2, ChevronRight } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
@@ -136,28 +136,37 @@ export default function AircraftPage() {
   const showRecentlyUsed = !debouncedSearchQuery && recentlyUsed.length > 0
 
   // Generate FastScroll items from search results
+  // Use numberPosition: "start" since registrations starting with numbers come first alphabetically
   const fastScrollItems = useMemo(() => {
     if (filteredAircraft.length === 0) return [];
     return generateAlphabetItemsFromList(
-      filteredAircraft.map((a) => a.registration || a.icao24 || "")
+      filteredAircraft.map((a) => a.registration || a.icao24 || ""),
+      { numberPosition: "start" }
     );
   }, [filteredAircraft]);
 
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
   const isFastScrollingRef = useRef(false);
 
-  // Track visible aircraft and update activeLetterKey on scroll
+  // Track visible aircraft and update activeLetterKey on scroll using throttled scroll listener
   useEffect(() => {
-    if (debouncedSearchQuery.length < 2 || filteredAircraft.length === 0) return;
+    if (debouncedSearchQuery.length < 2) return;
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (isFastScrollingRef.current) return;
+    let ticking = false;
+    const handleScroll = () => {
+      if (ticking || isFastScrollingRef.current) return;
 
-        // Find the topmost visible aircraft
-        for (const entry of entries) {
-          if (entry.isIntersecting && entry.boundingClientRect.top >= 0) {
-            const id = entry.target.id.replace("aircraft-", "");
+      ticking = true;
+      requestAnimationFrame(() => {
+        // Find the first visible aircraft by sampling elements
+        const viewportTop = 120; // Account for header/search bar
+        const cards = document.querySelectorAll('[id^="aircraft-"]');
+
+        for (const card of cards) {
+          const rect = card.getBoundingClientRect();
+          // Check if card is in the visible viewport area
+          if (rect.top >= viewportTop - 50 && rect.top < window.innerHeight / 2) {
+            const id = card.id.replace("aircraft-", "");
             const aircraft = filteredAircraft.find(
               (a) => (a.registration || a.icao24) === id
             );
@@ -173,15 +182,15 @@ export default function AircraftPage() {
             }
           }
         }
-      },
-      { threshold: 0, rootMargin: "-100px 0px -80% 0px" }
-    );
+        ticking = false;
+      });
+    };
 
-    // Observe all aircraft cards
-    const cards = document.querySelectorAll('[id^="aircraft-"]');
-    cards.forEach((card) => observer.observe(card));
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    // Initial check
+    handleScroll();
 
-    return () => observer.disconnect();
+    return () => window.removeEventListener("scroll", handleScroll);
   }, [filteredAircraft, debouncedSearchQuery]);
 
   // Handle FastScroll selection

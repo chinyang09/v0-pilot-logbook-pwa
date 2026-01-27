@@ -58,9 +58,12 @@ export default function AirportsPage() {
   });
 
   // Generate FastScroll items from sorted airports (excluding favorites)
+  // Use numberPosition: "start" since ICAO codes starting with numbers come first alphabetically
   const fastScrollItems = useMemo(() => {
     const nonFavorites = airports.filter((a) => !a.isFavorite);
-    return generateAlphabetItemsFromList(nonFavorites.map((a) => a.icao));
+    return generateAlphabetItemsFromList(nonFavorites.map((a) => a.icao), {
+      numberPosition: "start",
+    });
   }, [airports]);
 
   // Sort all airports consistently
@@ -72,18 +75,25 @@ export default function AirportsPage() {
     });
   }, [airports]);
 
-  // Track visible airports and update activeLetterKey on scroll
+  // Track visible airports and update activeLetterKey on scroll using throttled scroll listener
   useEffect(() => {
-    if (searchQuery.trim() || filteredAirports.length === 0) return;
+    if (searchQuery.trim()) return;
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (isFastScrollingRef.current) return;
+    let ticking = false;
+    const handleScroll = () => {
+      if (ticking || isFastScrollingRef.current) return;
 
-        // Find the topmost visible non-favorite airport
-        for (const entry of entries) {
-          if (entry.isIntersecting && entry.boundingClientRect.top >= 0) {
-            const icao = entry.target.id.replace("airport-", "");
+      ticking = true;
+      requestAnimationFrame(() => {
+        // Find the first visible non-favorite airport by sampling elements
+        const viewportTop = 120; // Account for header/search bar
+        const cards = document.querySelectorAll('[id^="airport-"]');
+
+        for (const card of cards) {
+          const rect = card.getBoundingClientRect();
+          // Check if card is in the visible viewport area
+          if (rect.top >= viewportTop - 50 && rect.top < window.innerHeight / 2) {
+            const icao = card.id.replace("airport-", "");
             const airport = airports.find((a) => a.icao === icao);
             if (airport && !airport.isFavorite) {
               const firstChar = airport.icao[0]?.toUpperCase();
@@ -96,16 +106,16 @@ export default function AirportsPage() {
             }
           }
         }
-      },
-      { threshold: 0, rootMargin: "-100px 0px -80% 0px" }
-    );
+        ticking = false;
+      });
+    };
 
-    // Observe all airport cards
-    const cards = document.querySelectorAll('[id^="airport-"]');
-    cards.forEach((card) => observer.observe(card));
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    // Initial check
+    handleScroll();
 
-    return () => observer.disconnect();
-  }, [filteredAirports, airports, searchQuery]);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [airports, searchQuery]);
 
   // Handle FastScroll selection
   const handleFastScrollSelect = useCallback((letter: string) => {
