@@ -269,9 +269,10 @@ export function DatePicker({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-t-3xl bg-card pb-safe animate-in slide-in-from-bottom duration-300"
+        className="w-full max-w-md rounded-t-3xl bg-card animate-in slide-in-from-bottom duration-300"
+        style={{ paddingBottom: "calc(5rem + env(safe-area-inset-bottom))" }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -423,7 +424,7 @@ export function DatePicker({
         </div>
 
         {/* TODAY button */}
-        <div className="flex justify-center pb-6">
+        <div className="flex justify-center py-4">
           <button
             onClick={handleSetToday}
             className="rounded-full bg-primary/10 px-8 py-2 text-sm font-semibold text-primary active:bg-primary/20"
