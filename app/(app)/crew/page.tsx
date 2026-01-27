@@ -194,6 +194,10 @@ export default function CrewPage() {
   useEffect(() => {
     if (debouncedSearchQuery) return;
 
+    // Find the scrollable main container (PageContainer uses main with overflow-y-auto)
+    const scrollContainer = document.querySelector('main.overflow-y-auto');
+    if (!scrollContainer) return;
+
     let ticking = false;
     const handleScroll = () => {
       if (ticking || isFastScrollingRef.current) return;
@@ -226,11 +230,11 @@ export default function CrewPage() {
       });
     };
 
-    window.addEventListener("scroll", handleScroll, { passive: true });
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
     // Initial check
     handleScroll();
 
-    return () => window.removeEventListener("scroll", handleScroll);
+    return () => scrollContainer.removeEventListener("scroll", handleScroll);
   }, [personnel, debouncedSearchQuery]);
 
   // Handle FastScroll selection
