@@ -1,5 +1,6 @@
 "use client"
 
+import React from "react"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { X } from "lucide-react"
 import { WheelPicker, WheelPickerWrapper } from "@ncdai/react-wheel-picker"
@@ -25,10 +26,12 @@ const minuteOptions = Array.from({ length: 60 }, (_, i) => ({
   label: i.toString().padStart(2, "0"),
 }))
 
-// Constants for wheel sizing - visibleCount must be multiple of 4
-const ITEM_HEIGHT = 40
-const VISIBLE_COUNT = 4
-const WHEEL_HEIGHT = ITEM_HEIGHT * VISIBLE_COUNT // 160px
+// Constants for wheel sizing
+// visibleCount must be a multiple of 4 - it controls how many items render in the 3D perspective
+// The actual visible area is determined by the container height
+const ITEM_HEIGHT = 44
+const VISIBLE_COUNT = 20 // Render plenty of items for smooth scrolling
+const WHEEL_HEIGHT = ITEM_HEIGHT * 7 // Show 7 items (3 above, center, 3 below) = 308px
 
 export function TimePicker({
   isOpen = true,
@@ -220,25 +223,58 @@ export function TimePicker({
         </div>
 
         {/* Wheel Picker */}
-        <div className="relative px-6">
-          {/* iOS-style highlight bar - pointer-events-none so it doesn't block wheel */}
-          <div
-            className="pointer-events-none absolute left-6 right-6 top-1/2 z-10 rounded-xl bg-muted/40"
-            style={{ height: ITEM_HEIGHT, transform: "translateY(-50%)" }}
-          />
-
-          {/* Colon separator - positioned at center */}
-          <div
-            className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 text-2xl font-semibold text-foreground"
-          >
-            :
+        <div className="relative px-6" style={{ height: WHEEL_HEIGHT }}>
+          {/* Colon in the center - positioned to align with wheel highlight */}
+          <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
+            <span className="text-2xl font-semibold text-foreground">:</span>
           </div>
 
-          {/* Input overlays - only shown when focused, positioned precisely */}
+          <WheelPickerWrapper className="h-full">
+            <WheelPicker
+              options={hourOptions}
+              value={hours}
+              onValueChange={(val) => {
+                setHours(val as number)
+                if (focusedField === "hour") setFocusedField(null)
+              }}
+              onTap={handleHourTap}
+              infinite
+              optionItemHeight={ITEM_HEIGHT}
+              visibleCount={VISIBLE_COUNT}
+              classNames={{
+                optionItem: "text-xl tabular-nums text-muted-foreground/50 font-medium",
+                highlightWrapper: "rounded-xl bg-muted/40",
+                highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
+              }}
+            />
+
+            {/* Spacer for colon */}
+            <div className="w-10 flex-none" />
+
+            <WheelPicker
+              options={minuteOptions}
+              value={minutes}
+              onValueChange={(val) => {
+                setMinutes(val as number)
+                if (focusedField === "minute") setFocusedField(null)
+              }}
+              onTap={handleMinuteTap}
+              infinite
+              optionItemHeight={ITEM_HEIGHT}
+              visibleCount={VISIBLE_COUNT}
+              classNames={{
+                optionItem: "text-xl tabular-nums text-muted-foreground/50 font-medium",
+                highlightWrapper: "rounded-xl bg-muted/40",
+                highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
+              }}
+            />
+          </WheelPickerWrapper>
+
+          {/* Input overlays - only shown when focused */}
           {focusedField === "hour" && (
             <div
               className="absolute left-6 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center"
-              style={{ width: "calc(50% - 1rem)", height: ITEM_HEIGHT }}
+              style={{ width: "calc(50% - 2rem)", height: ITEM_HEIGHT }}
             >
               <input
                 ref={hourInputRef}
@@ -258,7 +294,7 @@ export function TimePicker({
           {focusedField === "minute" && (
             <div
               className="absolute right-6 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center"
-              style={{ width: "calc(50% - 1rem)", height: ITEM_HEIGHT }}
+              style={{ width: "calc(50% - 2rem)", height: ITEM_HEIGHT }}
             >
               <input
                 ref={minuteInputRef}
@@ -274,45 +310,6 @@ export function TimePicker({
               />
             </div>
           )}
-
-          <WheelPickerWrapper style={{ height: WHEEL_HEIGHT }}>
-            <WheelPicker
-              options={hourOptions}
-              value={hours}
-              onValueChange={(val) => {
-                setHours(val as number)
-                if (focusedField === "hour") setFocusedField(null)
-              }}
-              onTap={handleHourTap}
-              infinite
-              optionItemHeight={ITEM_HEIGHT}
-              visibleCount={VISIBLE_COUNT}
-              classNames={{
-                optionItem: "text-xl tabular-nums text-muted-foreground/60 font-medium",
-                highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
-              }}
-            />
-
-            {/* Spacer for colon */}
-            <div className="w-8 flex-none" />
-
-            <WheelPicker
-              options={minuteOptions}
-              value={minutes}
-              onValueChange={(val) => {
-                setMinutes(val as number)
-                if (focusedField === "minute") setFocusedField(null)
-              }}
-              onTap={handleMinuteTap}
-              infinite
-              optionItemHeight={ITEM_HEIGHT}
-              visibleCount={VISIBLE_COUNT}
-              classNames={{
-                optionItem: "text-xl tabular-nums text-muted-foreground/60 font-medium",
-                highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
-              }}
-            />
-          </WheelPickerWrapper>
         </div>
 
         {/* NOW button */}

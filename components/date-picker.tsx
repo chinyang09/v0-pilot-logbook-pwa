@@ -1,5 +1,6 @@
 "use client"
 
+import React from "react"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { X } from "lucide-react"
 import { WheelPicker, WheelPickerWrapper } from "@ncdai/react-wheel-picker"
@@ -27,10 +28,12 @@ const monthOptions = MONTHS.map((m, i) => ({
   textValue: MONTHS_FULL[i],
 }))
 
-// Constants for wheel sizing - visibleCount must be multiple of 4
-const ITEM_HEIGHT = 40
-const VISIBLE_COUNT = 4
-const WHEEL_HEIGHT = ITEM_HEIGHT * VISIBLE_COUNT // 160px
+// Constants for wheel sizing
+// visibleCount must be a multiple of 4 - it controls how many items render in the 3D perspective
+// The actual visible area is determined by the container height
+const ITEM_HEIGHT = 44
+const VISIBLE_COUNT = 20 // Render plenty of items for smooth scrolling
+const WHEEL_HEIGHT = ITEM_HEIGHT * 7 // Show 7 items (3 above, center, 3 below) = 308px
 
 export function DatePicker({
   isOpen = true,
@@ -301,12 +304,64 @@ export function DatePicker({
         </div>
 
         {/* Wheel Picker */}
-        <div className="relative px-4">
-          {/* iOS-style highlight bar - pointer-events-none so it doesn't block wheel */}
-          <div
-            className="pointer-events-none absolute left-4 right-4 top-1/2 z-10 rounded-xl bg-muted/40"
-            style={{ height: ITEM_HEIGHT, transform: "translateY(-50%)" }}
-          />
+        <div className="relative px-4" style={{ height: WHEEL_HEIGHT }}>
+          <WheelPickerWrapper className="h-full">
+            {/* Day */}
+            <WheelPicker
+              options={dayOptions}
+              value={day}
+              onValueChange={(val) => {
+                setDay(val as number)
+                if (focusedField === "day") setFocusedField(null)
+              }}
+              onTap={handleDayTap}
+              infinite
+              optionItemHeight={ITEM_HEIGHT}
+              visibleCount={VISIBLE_COUNT}
+              classNames={{
+                optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
+                highlightWrapper: "rounded-xl bg-muted/40",
+                highlightItem: "text-xl tabular-nums text-foreground font-semibold",
+              }}
+            />
+
+            {/* Month */}
+            <WheelPicker
+              options={monthOptions}
+              value={month}
+              onValueChange={(val) => {
+                setMonth(val as number)
+                if (focusedField === "month") setFocusedField(null)
+              }}
+              onTap={handleMonthTap}
+              infinite
+              optionItemHeight={ITEM_HEIGHT}
+              visibleCount={VISIBLE_COUNT}
+              classNames={{
+                optionItem: "text-lg text-muted-foreground/50 font-medium",
+                highlightWrapper: "rounded-xl bg-muted/40",
+                highlightItem: "text-xl text-foreground font-semibold",
+              }}
+            />
+
+            {/* Year */}
+            <WheelPicker
+              options={yearOptions}
+              value={year}
+              onValueChange={(val) => {
+                setYear(val as number)
+                if (focusedField === "year") setFocusedField(null)
+              }}
+              onTap={handleYearTap}
+              optionItemHeight={ITEM_HEIGHT}
+              visibleCount={VISIBLE_COUNT}
+              classNames={{
+                optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
+                highlightWrapper: "rounded-xl bg-muted/40",
+                highlightItem: "text-xl tabular-nums text-foreground font-semibold",
+              }}
+            />
+          </WheelPickerWrapper>
 
           {/* Input overlays - only shown when focused */}
           {focusedField === "day" && (
@@ -369,61 +424,6 @@ export function DatePicker({
               />
             </div>
           )}
-
-          <WheelPickerWrapper style={{ height: WHEEL_HEIGHT }}>
-            {/* Day */}
-            <WheelPicker
-              options={dayOptions}
-              value={day}
-              onValueChange={(val) => {
-                setDay(val as number)
-                if (focusedField === "day") setFocusedField(null)
-              }}
-              onTap={handleDayTap}
-              infinite
-              optionItemHeight={ITEM_HEIGHT}
-              visibleCount={VISIBLE_COUNT}
-              classNames={{
-                optionItem: "text-lg tabular-nums text-muted-foreground/60 font-medium",
-                highlightItem: "text-xl tabular-nums text-foreground font-semibold",
-              }}
-            />
-
-            {/* Month */}
-            <WheelPicker
-              options={monthOptions}
-              value={month}
-              onValueChange={(val) => {
-                setMonth(val as number)
-                if (focusedField === "month") setFocusedField(null)
-              }}
-              onTap={handleMonthTap}
-              infinite
-              optionItemHeight={ITEM_HEIGHT}
-              visibleCount={VISIBLE_COUNT}
-              classNames={{
-                optionItem: "text-lg text-muted-foreground/60 font-medium",
-                highlightItem: "text-xl text-foreground font-semibold",
-              }}
-            />
-
-            {/* Year */}
-            <WheelPicker
-              options={yearOptions}
-              value={year}
-              onValueChange={(val) => {
-                setYear(val as number)
-                if (focusedField === "year") setFocusedField(null)
-              }}
-              onTap={handleYearTap}
-              optionItemHeight={ITEM_HEIGHT}
-              visibleCount={VISIBLE_COUNT}
-              classNames={{
-                optionItem: "text-lg tabular-nums text-muted-foreground/60 font-medium",
-                highlightItem: "text-xl tabular-nums text-foreground font-semibold",
-              }}
-            />
-          </WheelPickerWrapper>
         </div>
 
         {/* TODAY button */}
