@@ -25,6 +25,11 @@ const minuteOptions = Array.from({ length: 60 }, (_, i) => ({
   label: i.toString().padStart(2, "0"),
 }))
 
+// Constants for wheel sizing - visibleCount must be multiple of 4
+const ITEM_HEIGHT = 40
+const VISIBLE_COUNT = 4
+const WHEEL_HEIGHT = ITEM_HEIGHT * VISIBLE_COUNT // 160px
+
 export function TimePicker({
   isOpen = true,
   initialTime = "",
@@ -214,101 +219,100 @@ export function TimePicker({
           </button>
         </div>
 
-        {/* Wheel Picker Container - no asymmetric padding */}
-        <div className="relative px-8">
-          {/* Wheel picker area with centered overlay */}
-          <div className="relative h-[200px]">
-            {/* iOS-style highlight bar - centered in the 200px height */}
-            <div className="pointer-events-none absolute left-0 right-0 top-1/2 z-10 h-11 -translate-y-1/2 rounded-xl bg-muted/50" />
+        {/* Wheel Picker */}
+        <div className="relative px-6">
+          {/* iOS-style highlight bar - pointer-events-none so it doesn't block wheel */}
+          <div
+            className="pointer-events-none absolute left-6 right-6 top-1/2 z-10 rounded-xl bg-muted/40"
+            style={{ height: ITEM_HEIGHT, transform: "translateY(-50%)" }}
+          />
 
-            {/* Tap areas for keyboard input - centered in the 200px height */}
-            <div className="absolute inset-x-0 top-1/2 z-30 flex h-11 -translate-y-1/2 items-center justify-center gap-1">
-              {/* Hour tap area / input */}
-              <div className="flex h-full flex-1 items-center justify-end pr-1">
-                {focusedField === "hour" ? (
-                  <input
-                    ref={hourInputRef}
-                    type="text"
-                    inputMode="numeric"
-                    value={hourInput}
-                    onChange={handleHourInputChange}
-                    onBlur={handleHourBlur}
-                    onKeyDown={(e) => handleKeyDown(e, "hour")}
-                    className="w-14 rounded-lg bg-primary/20 text-center text-2xl font-semibold tabular-nums text-foreground outline-none"
-                    maxLength={2}
-                  />
-                ) : (
-                  <button
-                    onClick={handleHourTap}
-                    className="flex h-full w-14 items-center justify-center rounded-lg text-2xl font-semibold tabular-nums text-transparent active:bg-primary/10"
-                  >
-                    {hours.toString().padStart(2, "0")}
-                  </button>
-                )}
-              </div>
-
-              <span className="text-2xl font-semibold text-foreground">:</span>
-
-              {/* Minute tap area / input */}
-              <div className="flex h-full flex-1 items-center justify-start pl-1">
-                {focusedField === "minute" ? (
-                  <input
-                    ref={minuteInputRef}
-                    type="text"
-                    inputMode="numeric"
-                    value={minuteInput}
-                    onChange={handleMinuteInputChange}
-                    onBlur={handleMinuteBlur}
-                    onKeyDown={(e) => handleKeyDown(e, "minute")}
-                    className="w-14 rounded-lg bg-primary/20 text-center text-2xl font-semibold tabular-nums text-foreground outline-none"
-                    maxLength={2}
-                  />
-                ) : (
-                  <button
-                    onClick={handleMinuteTap}
-                    className="flex h-full w-14 items-center justify-center rounded-lg text-2xl font-semibold tabular-nums text-transparent active:bg-primary/10"
-                  >
-                    {minutes.toString().padStart(2, "0")}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <WheelPickerWrapper className="h-full">
-              <WheelPicker
-                options={hourOptions}
-                value={hours}
-                onValueChange={(val) => {
-                  setHours(val as number)
-                  setFocusedField(null)
-                }}
-                infinite
-                optionItemHeight={44}
-                classNames={{
-                  optionItem: "text-xl tabular-nums text-muted-foreground/50 font-medium",
-                  highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
-                }}
-              />
-
-              {/* Spacer for colon alignment */}
-              <div className="w-6 flex-none" />
-
-              <WheelPicker
-                options={minuteOptions}
-                value={minutes}
-                onValueChange={(val) => {
-                  setMinutes(val as number)
-                  setFocusedField(null)
-                }}
-                infinite
-                optionItemHeight={44}
-                classNames={{
-                  optionItem: "text-xl tabular-nums text-muted-foreground/50 font-medium",
-                  highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
-                }}
-              />
-            </WheelPickerWrapper>
+          {/* Colon separator - positioned at center */}
+          <div
+            className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 text-2xl font-semibold text-foreground"
+          >
+            :
           </div>
+
+          {/* Input overlays - only shown when focused, positioned precisely */}
+          {focusedField === "hour" && (
+            <div
+              className="absolute left-6 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center"
+              style={{ width: "calc(50% - 1rem)", height: ITEM_HEIGHT }}
+            >
+              <input
+                ref={hourInputRef}
+                type="text"
+                inputMode="numeric"
+                value={hourInput}
+                onChange={handleHourInputChange}
+                onBlur={handleHourBlur}
+                onKeyDown={(e) => handleKeyDown(e, "hour")}
+                className="w-16 rounded-lg bg-card text-center text-2xl font-semibold tabular-nums text-foreground outline-none ring-2 ring-primary"
+                style={{ height: ITEM_HEIGHT }}
+                maxLength={2}
+              />
+            </div>
+          )}
+
+          {focusedField === "minute" && (
+            <div
+              className="absolute right-6 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center"
+              style={{ width: "calc(50% - 1rem)", height: ITEM_HEIGHT }}
+            >
+              <input
+                ref={minuteInputRef}
+                type="text"
+                inputMode="numeric"
+                value={minuteInput}
+                onChange={handleMinuteInputChange}
+                onBlur={handleMinuteBlur}
+                onKeyDown={(e) => handleKeyDown(e, "minute")}
+                className="w-16 rounded-lg bg-card text-center text-2xl font-semibold tabular-nums text-foreground outline-none ring-2 ring-primary"
+                style={{ height: ITEM_HEIGHT }}
+                maxLength={2}
+              />
+            </div>
+          )}
+
+          <WheelPickerWrapper style={{ height: WHEEL_HEIGHT }}>
+            <WheelPicker
+              options={hourOptions}
+              value={hours}
+              onValueChange={(val) => {
+                setHours(val as number)
+                if (focusedField === "hour") setFocusedField(null)
+              }}
+              onTap={handleHourTap}
+              infinite
+              optionItemHeight={ITEM_HEIGHT}
+              visibleCount={VISIBLE_COUNT}
+              classNames={{
+                optionItem: "text-xl tabular-nums text-muted-foreground/60 font-medium",
+                highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
+              }}
+            />
+
+            {/* Spacer for colon */}
+            <div className="w-8 flex-none" />
+
+            <WheelPicker
+              options={minuteOptions}
+              value={minutes}
+              onValueChange={(val) => {
+                setMinutes(val as number)
+                if (focusedField === "minute") setFocusedField(null)
+              }}
+              onTap={handleMinuteTap}
+              infinite
+              optionItemHeight={ITEM_HEIGHT}
+              visibleCount={VISIBLE_COUNT}
+              classNames={{
+                optionItem: "text-xl tabular-nums text-muted-foreground/60 font-medium",
+                highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
+              }}
+            />
+          </WheelPickerWrapper>
         </div>
 
         {/* NOW button */}
