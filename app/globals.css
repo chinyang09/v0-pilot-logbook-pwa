@@ -239,6 +239,11 @@ textarea:focus-within {
   animation: accordion-up 0.2s ease-out;
 }
 
+/* Sidebar width variable */
+:root {
+  --sidebar-width: 16rem;
+}
+
 /* React Wheel Picker iOS-style customization */
 [data-rwp-wrapper] {
   --rwp-highlight-bg: transparent;
