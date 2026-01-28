@@ -344,12 +344,8 @@ export function DatePicker({
           />
 
           <WheelPickerWrapper>
-            {/* Day with tap detection wrapper */}
-            <div
-              className="relative flex-1"
-              onTouchStart={dayTap.handleTouchStart}
-              onTouchEnd={dayTap.handleTouchEnd}
-            >
+            {/* Day wheel - no tap wrapper, wheel handles its own events */}
+            <div className="relative flex-1">
               <WheelPicker
                 options={dayOptions}
                 value={day}
@@ -367,12 +363,8 @@ export function DatePicker({
               />
             </div>
 
-            {/* Month with tap detection wrapper */}
-            <div
-              className="relative flex-1"
-              onTouchStart={monthTap.handleTouchStart}
-              onTouchEnd={monthTap.handleTouchEnd}
-            >
+            {/* Month wheel - no tap wrapper, wheel handles its own events */}
+            <div className="relative flex-1">
               <WheelPicker
                 options={monthOptions}
                 value={month}
@@ -390,12 +382,8 @@ export function DatePicker({
               />
             </div>
 
-            {/* Year with tap detection wrapper */}
-            <div
-              className="relative flex-1"
-              onTouchStart={yearTap.handleTouchStart}
-              onTouchEnd={yearTap.handleTouchEnd}
-            >
+            {/* Year wheel - no tap wrapper, wheel handles its own events */}
+            <div className="relative flex-1">
               <WheelPicker
                 options={yearOptions}
                 value={year}
@@ -413,10 +401,36 @@ export function DatePicker({
             </div>
           </WheelPickerWrapper>
 
-          {/* Input overlays - only shown when focused */}
+          {/* Tap zones - positioned only over highlight area to trigger input */}
+          {focusedField !== "day" && (
+            <div
+              className="absolute left-4 top-1/2 z-20 -translate-y-1/2 cursor-pointer"
+              style={{ width: "33.33%", height: ITEM_HEIGHT }}
+              onTouchStart={dayTap.handleTouchStart}
+              onTouchEnd={dayTap.handleTouchEnd}
+            />
+          )}
+          {focusedField !== "month" && (
+            <div
+              className="absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 cursor-pointer"
+              style={{ width: "33.33%", height: ITEM_HEIGHT }}
+              onTouchStart={monthTap.handleTouchStart}
+              onTouchEnd={monthTap.handleTouchEnd}
+            />
+          )}
+          {focusedField !== "year" && (
+            <div
+              className="absolute right-4 top-1/2 z-20 -translate-y-1/2 cursor-pointer"
+              style={{ width: "33.33%", height: ITEM_HEIGHT }}
+              onTouchStart={yearTap.handleTouchStart}
+              onTouchEnd={yearTap.handleTouchEnd}
+            />
+          )}
+
+          {/* Input overlays - only shown when focused, styled to match highlight bar */}
           {focusedField === "day" && (
             <div
-              className="absolute left-4 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center"
+              className="absolute left-4 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center rounded-xl bg-muted/50"
               style={{ width: "33.33%", height: ITEM_HEIGHT }}
             >
               <input
@@ -427,8 +441,7 @@ export function DatePicker({
                 onChange={handleDayInputChange}
                 onBlur={handleDayBlur}
                 onKeyDown={(e) => handleKeyDown(e, "day")}
-                className="w-14 rounded-lg bg-card text-center text-xl font-semibold tabular-nums text-foreground outline-none ring-2 ring-primary"
-                style={{ height: ITEM_HEIGHT }}
+                className="w-full h-full bg-transparent text-center text-xl font-semibold tabular-nums text-foreground outline-none"
                 maxLength={2}
               />
             </div>
@@ -436,7 +449,7 @@ export function DatePicker({
 
           {focusedField === "month" && (
             <div
-              className="absolute left-1/2 top-1/2 z-30 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+              className="absolute left-1/2 top-1/2 z-30 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-xl bg-muted/50"
               style={{ width: "33.33%", height: ITEM_HEIGHT }}
             >
               <input
@@ -448,8 +461,7 @@ export function DatePicker({
                 onBlur={handleMonthBlur}
                 onKeyDown={(e) => handleKeyDown(e, "month")}
                 placeholder="MM"
-                className="w-14 rounded-lg bg-card text-center text-xl font-semibold text-foreground outline-none ring-2 ring-primary"
-                style={{ height: ITEM_HEIGHT }}
+                className="w-full h-full bg-transparent text-center text-xl font-semibold text-foreground outline-none"
                 maxLength={2}
               />
             </div>
@@ -457,7 +469,7 @@ export function DatePicker({
 
           {focusedField === "year" && (
             <div
-              className="absolute right-4 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center"
+              className="absolute right-4 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center rounded-xl bg-muted/50"
               style={{ width: "33.33%", height: ITEM_HEIGHT }}
             >
               <input
@@ -468,8 +480,7 @@ export function DatePicker({
                 onChange={handleYearInputChange}
                 onBlur={handleYearBlur}
                 onKeyDown={(e) => handleKeyDown(e, "year")}
-                className="w-20 rounded-lg bg-card text-center text-xl font-semibold tabular-nums text-foreground outline-none ring-2 ring-primary"
-                style={{ height: ITEM_HEIGHT }}
+                className="w-full h-full bg-transparent text-center text-xl font-semibold tabular-nums text-foreground outline-none"
                 maxLength={4}
               />
             </div>

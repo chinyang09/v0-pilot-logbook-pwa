@@ -270,12 +270,8 @@ export function TimePicker({
           </div>
 
           <WheelPickerWrapper>
-            {/* Hour wheel with tap detection wrapper */}
-            <div
-              className="relative flex-1"
-              onTouchStart={hourTap.handleTouchStart}
-              onTouchEnd={hourTap.handleTouchEnd}
-            >
+            {/* Hour wheel - no tap wrapper, wheel handles its own events */}
+            <div className="relative flex-1">
               <WheelPicker
                 options={hourOptions}
                 value={hours}
@@ -296,12 +292,8 @@ export function TimePicker({
             {/* Spacer for colon */}
             <div className="w-8 flex-none" />
 
-            {/* Minute wheel with tap detection wrapper */}
-            <div
-              className="relative flex-1"
-              onTouchStart={minuteTap.handleTouchStart}
-              onTouchEnd={minuteTap.handleTouchEnd}
-            >
+            {/* Minute wheel - no tap wrapper, wheel handles its own events */}
+            <div className="relative flex-1">
               <WheelPicker
                 options={minuteOptions}
                 value={minutes}
@@ -320,10 +312,28 @@ export function TimePicker({
             </div>
           </WheelPickerWrapper>
 
-          {/* Input overlays - only shown when focused */}
+          {/* Tap zones - positioned only over highlight area to trigger input */}
+          {focusedField !== "hour" && (
+            <div
+              className="absolute left-6 top-1/2 z-20 -translate-y-1/2 cursor-pointer"
+              style={{ width: "calc(50% - 1.5rem)", height: ITEM_HEIGHT }}
+              onTouchStart={hourTap.handleTouchStart}
+              onTouchEnd={hourTap.handleTouchEnd}
+            />
+          )}
+          {focusedField !== "minute" && (
+            <div
+              className="absolute right-6 top-1/2 z-20 -translate-y-1/2 cursor-pointer"
+              style={{ width: "calc(50% - 1.5rem)", height: ITEM_HEIGHT }}
+              onTouchStart={minuteTap.handleTouchStart}
+              onTouchEnd={minuteTap.handleTouchEnd}
+            />
+          )}
+
+          {/* Input overlays - only shown when focused, styled to match highlight bar */}
           {focusedField === "hour" && (
             <div
-              className="absolute left-6 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center"
+              className="absolute left-6 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center rounded-xl bg-muted/50"
               style={{ width: "calc(50% - 1.5rem)", height: ITEM_HEIGHT }}
             >
               <input
@@ -334,8 +344,7 @@ export function TimePicker({
                 onChange={handleHourInputChange}
                 onBlur={handleHourBlur}
                 onKeyDown={(e) => handleKeyDown(e, "hour")}
-                className="w-16 rounded-lg bg-card text-center text-2xl font-semibold tabular-nums text-foreground outline-none ring-2 ring-primary"
-                style={{ height: ITEM_HEIGHT }}
+                className="w-full h-full bg-transparent text-center text-2xl font-semibold tabular-nums text-foreground outline-none"
                 maxLength={2}
               />
             </div>
@@ -343,7 +352,7 @@ export function TimePicker({
 
           {focusedField === "minute" && (
             <div
-              className="absolute right-6 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center"
+              className="absolute right-6 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center rounded-xl bg-muted/50"
               style={{ width: "calc(50% - 1.5rem)", height: ITEM_HEIGHT }}
             >
               <input
@@ -354,8 +363,7 @@ export function TimePicker({
                 onChange={handleMinuteInputChange}
                 onBlur={handleMinuteBlur}
                 onKeyDown={(e) => handleKeyDown(e, "minute")}
-                className="w-16 rounded-lg bg-card text-center text-2xl font-semibold tabular-nums text-foreground outline-none ring-2 ring-primary"
-                style={{ height: ITEM_HEIGHT }}
+                className="w-full h-full bg-transparent text-center text-2xl font-semibold tabular-nums text-foreground outline-none"
                 maxLength={2}
               />
             </div>
