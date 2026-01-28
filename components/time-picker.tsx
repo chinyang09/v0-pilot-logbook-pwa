@@ -27,11 +27,38 @@ const minuteOptions = Array.from({ length: 60 }, (_, i) => ({
 }))
 
 // Constants for wheel sizing
-// visibleCount must be a multiple of 4 - it controls how many items render in the 3D perspective
-// The actual visible area is determined by the container height
 const ITEM_HEIGHT = 44
-const VISIBLE_COUNT = 20 // Render plenty of items for smooth scrolling
-const WHEEL_HEIGHT = ITEM_HEIGHT * 7 // Show 7 items (3 above, center, 3 below) = 308px
+const VISIBLE_COUNT = 20
+
+// Tap detection hook - distinguishes tap from scroll/drag
+function useTapDetection(onTap: () => void) {
+  const touchStartRef = useRef<{ time: number; y: number } | null>(null)
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartRef.current = {
+      time: Date.now(),
+      y: e.touches[0].clientY
+    }
+  }, [])
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!touchStartRef.current) return
+
+    const elapsed = Date.now() - touchStartRef.current.time
+    const deltaY = Math.abs(e.changedTouches[0].clientY - touchStartRef.current.y)
+
+    // Tap: quick touch (<200ms) with minimal movement (<10px)
+    if (elapsed < 200 && deltaY < 10) {
+      e.preventDefault()
+      e.stopPropagation()
+      onTap()
+    }
+
+    touchStartRef.current = null
+  }, [onTap])
+
+  return { handleTouchStart, handleTouchEnd }
+}
 
 export function TimePicker({
   isOpen = true,
@@ -129,6 +156,10 @@ export function TimePicker({
     setMinuteInput(minutes.toString().padStart(2, "0"))
   }, [minutes])
 
+  // Tap detection for hour and minute wheels
+  const hourTap = useTapDetection(handleHourTap)
+  const minuteTap = useTapDetection(handleMinuteTap)
+
   // Handle input blur - validate final value
   const handleHourBlur = useCallback(() => {
     if (hourInput) {
@@ -223,58 +254,77 @@ export function TimePicker({
         </div>
 
         {/* Wheel Picker */}
-        <div className="relative px-6" style={{ height: WHEEL_HEIGHT }}>
-          {/* Colon in the center - positioned to align with wheel highlight */}
-          <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
+        <div className="relative px-6">
+          {/* Custom highlight bar spanning both wheels */}
+          <div
+            className="pointer-events-none absolute left-6 right-6 top-1/2 z-0 -translate-y-1/2 rounded-xl bg-muted/50"
+            style={{ height: ITEM_HEIGHT }}
+          />
+
+          {/* Colon in the center */}
+          <div
+            className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2"
+            style={{ height: ITEM_HEIGHT, lineHeight: `${ITEM_HEIGHT}px` }}
+          >
             <span className="text-2xl font-semibold text-foreground">:</span>
           </div>
 
-          <WheelPickerWrapper className="h-full">
-            <WheelPicker
-              options={hourOptions}
-              value={hours}
-              onValueChange={(val) => {
-                setHours(val as number)
-                if (focusedField === "hour") setFocusedField(null)
-              }}
-              onTap={handleHourTap}
-              infinite
-              optionItemHeight={ITEM_HEIGHT}
-              visibleCount={VISIBLE_COUNT}
-              classNames={{
-                optionItem: "text-xl tabular-nums text-muted-foreground/50 font-medium",
-                highlightWrapper: "rounded-xl bg-muted/40",
-                highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
-              }}
-            />
+          <WheelPickerWrapper>
+            {/* Hour wheel with tap detection wrapper */}
+            <div
+              className="relative flex-1"
+              onTouchStart={hourTap.handleTouchStart}
+              onTouchEnd={hourTap.handleTouchEnd}
+            >
+              <WheelPicker
+                options={hourOptions}
+                value={hours}
+                onValueChange={(val) => {
+                  setHours(val as number)
+                  if (focusedField === "hour") setFocusedField(null)
+                }}
+                infinite
+                optionItemHeight={ITEM_HEIGHT}
+                visibleCount={VISIBLE_COUNT}
+                classNames={{
+                  optionItem: "text-xl tabular-nums text-muted-foreground/60 font-medium",
+                  highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
+                }}
+              />
+            </div>
 
             {/* Spacer for colon */}
-            <div className="w-10 flex-none" />
+            <div className="w-8 flex-none" />
 
-            <WheelPicker
-              options={minuteOptions}
-              value={minutes}
-              onValueChange={(val) => {
-                setMinutes(val as number)
-                if (focusedField === "minute") setFocusedField(null)
-              }}
-              onTap={handleMinuteTap}
-              infinite
-              optionItemHeight={ITEM_HEIGHT}
-              visibleCount={VISIBLE_COUNT}
-              classNames={{
-                optionItem: "text-xl tabular-nums text-muted-foreground/50 font-medium",
-                highlightWrapper: "rounded-xl bg-muted/40",
-                highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
-              }}
-            />
+            {/* Minute wheel with tap detection wrapper */}
+            <div
+              className="relative flex-1"
+              onTouchStart={minuteTap.handleTouchStart}
+              onTouchEnd={minuteTap.handleTouchEnd}
+            >
+              <WheelPicker
+                options={minuteOptions}
+                value={minutes}
+                onValueChange={(val) => {
+                  setMinutes(val as number)
+                  if (focusedField === "minute") setFocusedField(null)
+                }}
+                infinite
+                optionItemHeight={ITEM_HEIGHT}
+                visibleCount={VISIBLE_COUNT}
+                classNames={{
+                  optionItem: "text-xl tabular-nums text-muted-foreground/60 font-medium",
+                  highlightItem: "text-2xl tabular-nums text-foreground font-semibold",
+                }}
+              />
+            </div>
           </WheelPickerWrapper>
 
           {/* Input overlays - only shown when focused */}
           {focusedField === "hour" && (
             <div
               className="absolute left-6 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center"
-              style={{ width: "calc(50% - 2rem)", height: ITEM_HEIGHT }}
+              style={{ width: "calc(50% - 1.5rem)", height: ITEM_HEIGHT }}
             >
               <input
                 ref={hourInputRef}
@@ -294,7 +344,7 @@ export function TimePicker({
           {focusedField === "minute" && (
             <div
               className="absolute right-6 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center"
-              style={{ width: "calc(50% - 2rem)", height: ITEM_HEIGHT }}
+              style={{ width: "calc(50% - 1.5rem)", height: ITEM_HEIGHT }}
             >
               <input
                 ref={minuteInputRef}

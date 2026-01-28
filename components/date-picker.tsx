@@ -29,11 +29,38 @@ const monthOptions = MONTHS.map((m, i) => ({
 }))
 
 // Constants for wheel sizing
-// visibleCount must be a multiple of 4 - it controls how many items render in the 3D perspective
-// The actual visible area is determined by the container height
 const ITEM_HEIGHT = 44
-const VISIBLE_COUNT = 20 // Render plenty of items for smooth scrolling
-const WHEEL_HEIGHT = ITEM_HEIGHT * 7 // Show 7 items (3 above, center, 3 below) = 308px
+const VISIBLE_COUNT = 20
+
+// Tap detection hook - distinguishes tap from scroll/drag
+function useTapDetection(onTap: () => void) {
+  const touchStartRef = useRef<{ time: number; y: number } | null>(null)
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartRef.current = {
+      time: Date.now(),
+      y: e.touches[0].clientY
+    }
+  }, [])
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!touchStartRef.current) return
+
+    const elapsed = Date.now() - touchStartRef.current.time
+    const deltaY = Math.abs(e.changedTouches[0].clientY - touchStartRef.current.y)
+
+    // Tap: quick touch (<200ms) with minimal movement (<10px)
+    if (elapsed < 200 && deltaY < 10) {
+      e.preventDefault()
+      e.stopPropagation()
+      onTap()
+    }
+
+    touchStartRef.current = null
+  }, [onTap])
+
+  return { handleTouchStart, handleTouchEnd }
+}
 
 export function DatePicker({
   isOpen = true,
@@ -201,6 +228,11 @@ export function DatePicker({
     setYearInput(year.toString())
   }, [year])
 
+  // Tap detection for each wheel
+  const dayTap = useTapDetection(handleDayTap)
+  const monthTap = useTapDetection(handleMonthTap)
+  const yearTap = useTapDetection(handleYearTap)
+
   // Handle input blur
   const handleDayBlur = useCallback(() => {
     if (dayInput) {
@@ -304,63 +336,81 @@ export function DatePicker({
         </div>
 
         {/* Wheel Picker */}
-        <div className="relative px-4" style={{ height: WHEEL_HEIGHT }}>
-          <WheelPickerWrapper className="h-full">
-            {/* Day */}
-            <WheelPicker
-              options={dayOptions}
-              value={day}
-              onValueChange={(val) => {
-                setDay(val as number)
-                if (focusedField === "day") setFocusedField(null)
-              }}
-              onTap={handleDayTap}
-              infinite
-              optionItemHeight={ITEM_HEIGHT}
-              visibleCount={VISIBLE_COUNT}
-              classNames={{
-                optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
-                highlightWrapper: "rounded-xl bg-muted/40",
-                highlightItem: "text-xl tabular-nums text-foreground font-semibold",
-              }}
-            />
+        <div className="relative px-4">
+          {/* Custom highlight bar spanning all wheels */}
+          <div
+            className="pointer-events-none absolute left-4 right-4 top-1/2 z-0 -translate-y-1/2 rounded-xl bg-muted/50"
+            style={{ height: ITEM_HEIGHT }}
+          />
 
-            {/* Month */}
-            <WheelPicker
-              options={monthOptions}
-              value={month}
-              onValueChange={(val) => {
-                setMonth(val as number)
-                if (focusedField === "month") setFocusedField(null)
-              }}
-              onTap={handleMonthTap}
-              infinite
-              optionItemHeight={ITEM_HEIGHT}
-              visibleCount={VISIBLE_COUNT}
-              classNames={{
-                optionItem: "text-lg text-muted-foreground/50 font-medium",
-                highlightWrapper: "rounded-xl bg-muted/40",
-                highlightItem: "text-xl text-foreground font-semibold",
-              }}
-            />
+          <WheelPickerWrapper>
+            {/* Day with tap detection wrapper */}
+            <div
+              className="relative flex-1"
+              onTouchStart={dayTap.handleTouchStart}
+              onTouchEnd={dayTap.handleTouchEnd}
+            >
+              <WheelPicker
+                options={dayOptions}
+                value={day}
+                onValueChange={(val) => {
+                  setDay(val as number)
+                  if (focusedField === "day") setFocusedField(null)
+                }}
+                infinite
+                optionItemHeight={ITEM_HEIGHT}
+                visibleCount={VISIBLE_COUNT}
+                classNames={{
+                  optionItem: "text-lg tabular-nums text-muted-foreground/60 font-medium",
+                  highlightItem: "text-xl tabular-nums text-foreground font-semibold",
+                }}
+              />
+            </div>
 
-            {/* Year */}
-            <WheelPicker
-              options={yearOptions}
-              value={year}
-              onValueChange={(val) => {
-                setYear(val as number)
-                if (focusedField === "year") setFocusedField(null)
-              }}
-              onTap={handleYearTap}
-              optionItemHeight={ITEM_HEIGHT}
-              visibleCount={VISIBLE_COUNT}
-              classNames={{
-                optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
-                highlightWrapper: "rounded-xl bg-muted/40",
-                highlightItem: "text-xl tabular-nums text-foreground font-semibold",
-              }}
-            />
+            {/* Month with tap detection wrapper */}
+            <div
+              className="relative flex-1"
+              onTouchStart={monthTap.handleTouchStart}
+              onTouchEnd={monthTap.handleTouchEnd}
+            >
+              <WheelPicker
+                options={monthOptions}
+                value={month}
+                onValueChange={(val) => {
+                  setMonth(val as number)
+                  if (focusedField === "month") setFocusedField(null)
+                }}
+                infinite
+                optionItemHeight={ITEM_HEIGHT}
+                visibleCount={VISIBLE_COUNT}
+                classNames={{
+                  optionItem: "text-lg text-muted-foreground/60 font-medium",
+                  highlightItem: "text-xl text-foreground font-semibold",
+                }}
+              />
+            </div>
+
+            {/* Year with tap detection wrapper */}
+            <div
+              className="relative flex-1"
+              onTouchStart={yearTap.handleTouchStart}
+              onTouchEnd={yearTap.handleTouchEnd}
+            >
+              <WheelPicker
+                options={yearOptions}
+                value={year}
+                onValueChange={(val) => {
+                  setYear(val as number)
+                  if (focusedField === "year") setFocusedField(null)
+                }}
+                optionItemHeight={ITEM_HEIGHT}
+                visibleCount={VISIBLE_COUNT}
+                classNames={{
+                  optionItem: "text-lg tabular-nums text-muted-foreground/60 font-medium",
+                  highlightItem: "text-xl tabular-nums text-foreground font-semibold",
+                }}
+              />
+            </div>
           </WheelPickerWrapper>
 
           {/* Input overlays - only shown when focused */}
