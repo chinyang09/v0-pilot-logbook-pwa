@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { usePathname } from "next/navigation"
 import { SidebarNav, SidebarToggle } from "@/components/sidebar-nav"
 import { SidebarProvider } from "@/hooks/use-sidebar-context"
 import {
@@ -14,8 +15,18 @@ interface DesktopLayoutProps {
   detail?: React.ReactNode
 }
 
+// Routes that have detail views (pattern: /base/[param])
+const DETAIL_ROUTES = [
+  "/aircraft/",
+  "/airports/",
+  "/crew/",
+]
+
 function DesktopLayoutContent({ children, detail }: DesktopLayoutProps) {
-  const hasDetail = detail !== null && detail !== undefined
+  const pathname = usePathname()
+
+  // Check if current route is a detail route by checking URL pattern
+  const isDetailRoute = DETAIL_ROUTES.some(route => pathname?.startsWith(route))
 
   return (
     <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden">
@@ -29,18 +40,18 @@ function DesktopLayoutContent({ children, detail }: DesktopLayoutProps) {
 
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {hasDetail ? (
+        {isDetailRoute ? (
           <ResizablePanelGroup direction="horizontal" className="h-full">
             <ResizablePanel defaultSize={50} minSize={30}>
-              <div className="h-full overflow-hidden">{children}</div>
+              <div className="h-full overflow-auto">{children}</div>
             </ResizablePanel>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize={50} minSize={30}>
-              <div className="h-full overflow-hidden">{detail}</div>
+              <div className="h-full overflow-auto">{detail}</div>
             </ResizablePanel>
           </ResizablePanelGroup>
         ) : (
-          <div className="flex-1 overflow-hidden">{children}</div>
+          <div className="flex-1 overflow-auto">{children}</div>
         )}
       </div>
     </div>
