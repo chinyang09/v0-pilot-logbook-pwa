@@ -37,8 +37,8 @@ function DesktopLayoutContent({ children }: DesktopLayoutProps) {
       {/* Main content area - always show with detail panel */}
       <div className="flex-1 flex min-w-0">
         <ResizablePanelGroup direction="horizontal" className="h-full">
-          <ResizablePanel defaultSize={50} minSize={30}>
-            <div className="h-full flex flex-col overflow-hidden">{children}</div>
+          <ResizablePanel defaultSize={50} minSize={25}>
+            <div className="h-full flex flex-col overflow-hidden min-w-[375px]">{children}</div>
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={50} minSize={30}>

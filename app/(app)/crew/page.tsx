@@ -185,6 +185,7 @@ export default function CrewPage() {
     if (selectedCrewId) {
       setDetailContent(
         <CrewDetailPanel
+          key={selectedCrewId}
           crewId={selectedCrewId}
           onUpdated={() => mutate(CACHE_KEYS.personnel)}
         />
@@ -377,8 +378,8 @@ export default function CrewPage() {
         />
       }
     >
-      <div ref={mainContentRef} className="relative h-full">
-        <div className="container mx-auto px-3 pt-3 pb-safe h-full overflow-auto">
+      <div ref={mainContentRef} className="relative">
+        <div className="container mx-auto px-3 pt-3 pb-safe">
           <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
             <div className="flex gap-2">
               <div className="relative flex-1">
