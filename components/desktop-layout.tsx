@@ -15,12 +15,7 @@ interface DesktopLayoutProps {
 }
 
 function DetailPanelContent() {
-  const { detailContent, hasDetailSupport } = useDetailPanel()
-
-  if (!hasDetailSupport) {
-    // Page doesn't support detail panel, show nothing
-    return null
-  }
+  const { detailContent } = useDetailPanel()
 
   return (
     <div className="h-full overflow-auto bg-background">
@@ -34,33 +29,27 @@ function DetailPanelContent() {
 }
 
 function DesktopLayoutContent({ children }: DesktopLayoutProps) {
-  const { hasDetailSupport } = useDetailPanel()
-
   return (
-    <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden">
+    <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden pt-safe">
       {/* Sidebar toggle button - always visible */}
-      <div className="absolute top-3 left-3 z-50">
+      <div className="absolute top-3 left-3 z-50 mt-safe">
         <SidebarToggle />
       </div>
 
       {/* Sidebar */}
       <SidebarNav />
 
-      {/* Main content area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {hasDetailSupport ? (
-          <ResizablePanelGroup direction="horizontal" className="h-full">
-            <ResizablePanel defaultSize={50} minSize={30}>
-              <div className="h-full overflow-auto">{children}</div>
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={50} minSize={30}>
-              <DetailPanelContent />
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        ) : (
-          <div className="flex-1 overflow-auto">{children}</div>
-        )}
+      {/* Main content area - always show with detail panel */}
+      <div className="flex-1 flex min-w-0">
+        <ResizablePanelGroup direction="horizontal" className="h-full">
+          <ResizablePanel defaultSize={50} minSize={30}>
+            <div className="h-full flex flex-col overflow-hidden">{children}</div>
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize={50} minSize={30}>
+            <DetailPanelContent />
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
     </div>
   )

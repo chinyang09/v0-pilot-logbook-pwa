@@ -246,9 +246,11 @@ export default function AircraftPage() {
           <div className="container mx-auto px-3">
             <div className="flex items-center justify-between h-12">
               <div className="flex items-center gap-2">
-                <Button variant="ghost" size="sm" onClick={() => router.back()} className="h-8 w-8 p-0">
-                  <ArrowLeft className="h-4 w-4" />
-                </Button>
+                {selectMode && (
+                  <Button variant="ghost" size="sm" onClick={() => router.back()} className="h-8 w-8 p-0">
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+                )}
                 <h1 className="text-lg font-semibold text-foreground">{selectMode ? "Select Aircraft" : "Aircraft"}</h1>
               </div>
               <SyncStatus />
