@@ -78,26 +78,29 @@ function SwipeableCrewCard({
               <User className="h-5 w-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="font-semibold text-foreground">
+              {/* Name row - truncated to single line */}
+              <div className="flex items-center gap-2 mb-0.5 min-w-0">
+                <span className="font-semibold text-foreground truncate">
                   {displayName}
                 </span>
-                {crew.crewId && (
-                  <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                    {crew.crewId}
-                  </span>
-                )}
                 {crew.isMe && (
-                  <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                  <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded flex-shrink-0">
                     Me
                   </span>
                 )}
               </div>
-              {crew.organization && (
-                <div className="text-sm text-muted-foreground truncate">
-                  {crew.organization}
-                </div>
-              )}
+              {/* Organization and ID row */}
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                {crew.organization && (
+                  <span className="truncate">{crew.organization}</span>
+                )}
+                {crew.crewId && (
+                  <span className="text-xs bg-muted px-1.5 py-0.5 rounded flex-shrink-0">
+                    {crew.crewId}
+                  </span>
+                )}
+              </div>
+              {/* Roles row */}
               {crew.roles && crew.roles.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">
                   {crew.roles.map((role) => (
@@ -443,15 +446,19 @@ export default function CrewPage() {
           )}
         </div>
 
-        {/* FastScroll rail - absolute position within main content */}
+        {/* FastScroll - sticky positioned at viewport center */}
         {!debouncedSearchQuery && fastScrollItems.length > 1 && (
-          <div className="absolute right-1 top-1/2 -translate-y-1/2 z-40">
-            <FastScroll
-              items={fastScrollItems}
-              activeKey={activeLetterKey}
-              onSelect={handleFastScrollSelect}
-              indicatorPosition="left"
-            />
+          <div className="sticky top-0 float-right w-0 h-0 z-40 pointer-events-none">
+            <div className="h-screen flex items-center pr-1">
+              <div className="pointer-events-auto">
+                <FastScroll
+                  items={fastScrollItems}
+                  activeKey={activeLetterKey}
+                  onSelect={handleFastScrollSelect}
+                  indicatorPosition="left"
+                />
+              </div>
+            </div>
           </div>
         )}
       </div>

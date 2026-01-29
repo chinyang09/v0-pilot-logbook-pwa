@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState, useRef, useCallback, type ReactNode } from "react"
+import React, { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from "react"
 
 interface ScrollNavbarContextType {
   hideNavbar: boolean
@@ -22,6 +22,23 @@ export function ScrollNavbarProvider({
 }: ScrollNavbarProviderProps) {
   const [hideNavbar, setHideNavbar] = useState(false)
   const lastScrollY = useRef(0)
+
+  // Reset navbar state on orientation/resize changes
+  useEffect(() => {
+    const handleResize = () => {
+      // Reset to visible state on orientation change
+      setHideNavbar(false)
+      lastScrollY.current = 0
+    }
+
+    window.addEventListener("resize", handleResize)
+    window.addEventListener("orientationchange", handleResize)
+
+    return () => {
+      window.removeEventListener("resize", handleResize)
+      window.removeEventListener("orientationchange", handleResize)
+    }
+  }, [])
 
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLElement>) => {

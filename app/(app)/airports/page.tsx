@@ -385,15 +385,19 @@ export default function AirportsPage() {
           </div>
         </div>
 
-        {/* FastScroll rail - absolute position within main content */}
+        {/* FastScroll - sticky positioned at viewport center */}
         {!searchQuery.trim() && fastScrollItems.length > 1 && (
-          <div className="absolute right-1 top-1/2 -translate-y-1/2 z-40">
-            <FastScroll
-              items={fastScrollItems}
-              activeKey={activeLetterKey}
-              onSelect={handleFastScrollSelect}
-              indicatorPosition="left"
-            />
+          <div className="sticky top-0 float-right w-0 h-0 z-40 pointer-events-none">
+            <div className="h-screen flex items-center pr-1">
+              <div className="pointer-events-auto">
+                <FastScroll
+                  items={fastScrollItems}
+                  activeKey={activeLetterKey}
+                  onSelect={handleFastScrollSelect}
+                  indicatorPosition="left"
+                />
+              </div>
+            </div>
           </div>
         )}
       </div>
