@@ -275,8 +275,8 @@ export default function AircraftPage() {
           <p className="text-muted-foreground text-sm">{loadingProgress.stage || "Loading..."}</p>
         </div>
       ) : (
-        <>
-          <div className="container mx-auto px-3 pt-3 pb-safe">
+        <div className="relative h-full">
+          <div className="container mx-auto px-3 pt-3 pb-safe h-full overflow-auto">
             <div className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl pb-3 -mx-3 px-3">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -340,9 +340,9 @@ export default function AircraftPage() {
             </div>
           </div>
 
-          {/* FastScroll rail - fixed position */}
+          {/* FastScroll rail - absolute position within main content */}
           {debouncedSearchQuery.length >= 2 && fastScrollItems.length > 1 && (
-            <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
+            <div className="absolute right-1 top-1/2 -translate-y-1/2 z-40">
               <FastScroll
                 items={fastScrollItems}
                 activeKey={activeLetterKey}
@@ -351,7 +351,7 @@ export default function AircraftPage() {
               />
             </div>
           )}
-        </>
+        </div>
       )}
     </PageContainer>
   )

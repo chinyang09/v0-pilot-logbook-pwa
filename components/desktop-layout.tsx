@@ -31,11 +31,6 @@ function DetailPanelContent() {
 function DesktopLayoutContent({ children }: DesktopLayoutProps) {
   return (
     <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden pt-safe">
-      {/* Sidebar toggle button - always visible */}
-      <div className="absolute top-3 left-3 z-50 mt-safe">
-        <SidebarToggle />
-      </div>
-
       {/* Sidebar */}
       <SidebarNav />
 
@@ -50,6 +45,11 @@ function DesktopLayoutContent({ children }: DesktopLayoutProps) {
             <DetailPanelContent />
           </ResizablePanel>
         </ResizablePanelGroup>
+      </div>
+
+      {/* Sidebar toggle button - placed last to render on top */}
+      <div className="absolute top-3 left-3 z-[100] mt-safe">
+        <SidebarToggle />
       </div>
     </div>
   )
