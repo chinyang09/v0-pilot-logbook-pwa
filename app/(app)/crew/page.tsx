@@ -26,6 +26,9 @@ import { SwipeableCard } from "@/components/swipeable-card";
 import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
 import { StandardPageHeader } from "@/components/standard-page-header";
 import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll";
+import { useDetailPanel } from "@/hooks/use-detail-panel";
+import { useIsDesktop } from "@/hooks/use-is-desktop";
+import { CrewDetailPanel } from "@/components/crew-detail-panel";
 
 const ITEMS_PER_PAGE = 50;
 
@@ -122,12 +125,21 @@ export default function CrewPage() {
   const searchParams = useSearchParams();
   const fieldType = searchParams.get("field");
   const returnUrl = searchParams.get("return") || "/new-flight";
+  const isDesktop = useIsDesktop();
+  const mainContentRef = useRef<HTMLDivElement>(null);
 
   const { personnel, isLoading } = usePersonnel();
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebounce(searchQuery, 150);
   const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
   const { confirmDelete, handleDelete, DeleteDialog } = useDeleteConfirmation<(typeof personnel)[0]>();
+
+  // Detail panel integration
+  const {
+    selectedId: selectedCrewId,
+    setSelectedId: setSelectedCrewId,
+    setDetailContent,
+  } = useDetailPanel();
 
   const observerTarget = useRef<HTMLDivElement>(null);
 
@@ -140,6 +152,47 @@ export default function CrewPage() {
       return (a.name || "").localeCompare(b.name || "");
     });
   }, [personnel]);
+
+  // Auto-select first crew when loading (desktop only, not in select mode)
+  useEffect(() => {
+    if (isDesktop && !fieldType && !isLoading && sortedPersonnel.length > 0 && !selectedCrewId) {
+      setSelectedCrewId(sortedPersonnel[0].id);
+    }
+  }, [isDesktop, fieldType, isLoading, sortedPersonnel, selectedCrewId, setSelectedCrewId]);
+
+  // Update detail content when selection changes (desktop only)
+  useEffect(() => {
+    if (!isDesktop || fieldType) return;
+
+    if (isLoading) {
+      setDetailContent(
+        <div className="flex items-center justify-center h-full">
+          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+        </div>
+      );
+      return;
+    }
+
+    if (sortedPersonnel.length === 0) {
+      setDetailContent(
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+          <p>No crew members</p>
+        </div>
+      );
+      return;
+    }
+
+    if (selectedCrewId) {
+      setDetailContent(
+        <CrewDetailPanel
+          crewId={selectedCrewId}
+          onUpdated={() => mutate(CACHE_KEYS.personnel)}
+        />
+      );
+    } else if (sortedPersonnel.length > 0) {
+      setSelectedCrewId(sortedPersonnel[0].id);
+    }
+  }, [isDesktop, fieldType, selectedCrewId, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
 
   const filteredPersonnel = useMemo(() => {
     const query = debouncedSearchQuery.toLowerCase().trim();
@@ -278,12 +331,17 @@ export default function CrewPage() {
 
   const handleCrewSelect = (crew: (typeof personnel)[0]) => {
     if (fieldType) {
+      // Select mode - always navigate back with selected crew
       const params = new URLSearchParams();
       params.set("field", fieldType);
       params.set("crewId", crew.id);
       params.set("crewName", crew.isMe ? "Self" : crew.name);
       router.push(`${returnUrl}?${params.toString()}`);
+    } else if (isDesktop) {
+      // Desktop - show in detail panel
+      setSelectedCrewId(crew.id);
     } else {
+      // Mobile - navigate to detail page
       router.push(`/crew/${crew.id}`);
     }
   };
@@ -319,81 +377,83 @@ export default function CrewPage() {
         />
       }
     >
-      <div className="container mx-auto px-3 pt-3 pb-safe">
-        <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Input
-                type="text"
-                placeholder="Search crew..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-              />
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      <div ref={mainContentRef} className="relative h-full">
+        <div className="container mx-auto px-3 pt-3 pb-safe h-full overflow-auto">
+          <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Input
+                  type="text"
+                  placeholder="Search crew..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
+                />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              </div>
+              <Button
+                onClick={handleAddCrew}
+                size="icon"
+                className="h-10 w-10 flex-shrink-0"
+              >
+                <Plus className="h-5 w-5" />
+              </Button>
             </div>
-            <Button
-              onClick={handleAddCrew}
-              size="icon"
-              className="h-10 w-10 flex-shrink-0"
-            >
-              <Plus className="h-5 w-5" />
-            </Button>
           </div>
+
+          {isLoading && displayCount === ITEMS_PER_PAGE ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className={`space-y-3 ${!debouncedSearchQuery && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
+              {debouncedSearchQuery && (
+                <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
+                  {filteredPersonnel.length} results
+                </h2>
+              )}
+
+              <div className="space-y-2">
+                {filteredPersonnel.map((crew) => (
+                  <SwipeableCrewCard
+                    key={crew.id}
+                    crew={crew}
+                    onSelect={() => handleCrewSelect(crew)}
+                    onDelete={() => confirmDelete(crew)}
+                    isSelectMode={!!fieldType}
+                  />
+                ))}
+              </div>
+
+              <div ref={observerTarget} className="h-4" />
+
+              {filteredPersonnel.length === 0 && !isLoading && (
+                <div className="text-center py-12">
+                  <User className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-sm text-muted-foreground mb-4">
+                    No results found.
+                  </p>
+                  <Button onClick={handleAddCrew} variant="outline">
+                    <Plus className="h-4 w-4 mr-2" /> Add Crew Member
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {isLoading && displayCount === ITEMS_PER_PAGE ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <div className={`space-y-3 ${!debouncedSearchQuery && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
-            {debouncedSearchQuery && (
-              <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
-                {filteredPersonnel.length} results
-              </h2>
-            )}
-
-            <div className="space-y-2">
-              {filteredPersonnel.map((crew) => (
-                <SwipeableCrewCard
-                  key={crew.id}
-                  crew={crew}
-                  onSelect={() => handleCrewSelect(crew)}
-                  onDelete={() => confirmDelete(crew)}
-                  isSelectMode={!!fieldType}
-                />
-              ))}
-            </div>
-
-            <div ref={observerTarget} className="h-4" />
-
-            {filteredPersonnel.length === 0 && !isLoading && (
-              <div className="text-center py-12">
-                <User className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-sm text-muted-foreground mb-4">
-                  No results found.
-                </p>
-                <Button onClick={handleAddCrew} variant="outline">
-                  <Plus className="h-4 w-4 mr-2" /> Add Crew Member
-                </Button>
-              </div>
-            )}
+        {/* FastScroll rail - absolute position within main content */}
+        {!debouncedSearchQuery && fastScrollItems.length > 1 && (
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 z-40">
+            <FastScroll
+              items={fastScrollItems}
+              activeKey={activeLetterKey}
+              onSelect={handleFastScrollSelect}
+              indicatorPosition="left"
+            />
           </div>
         )}
       </div>
-
-      {/* FastScroll rail - fixed position */}
-      {!debouncedSearchQuery && fastScrollItems.length > 1 && (
-        <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
-          <FastScroll
-            items={fastScrollItems}
-            activeKey={activeLetterKey}
-            onSelect={handleFastScrollSelect}
-            indicatorPosition="left"
-          />
-        </div>
-      )}
 
       <DeleteDialog
         title="Delete Crew Member"

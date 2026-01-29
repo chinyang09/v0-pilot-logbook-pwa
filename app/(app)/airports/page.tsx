@@ -21,6 +21,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FastScroll, generateAlphabetItemsFromList, type FastScrollItem } from "@/components/ui/fast-scroll";
+import { useDetailPanel } from "@/hooks/use-detail-panel";
+import { useIsDesktop } from "@/hooks/use-is-desktop";
+import { AirportDetailPanel } from "@/components/airport-detail-panel";
 
 const ITEMS_PER_PAGE = 50;
 
@@ -30,12 +33,21 @@ export default function AirportsPage() {
   const fieldType = searchParams.get("field");
   const returnUrl =
     searchParams.get("return") || searchParams.get("returnTo") || "/new-flight";
+  const isDesktop = useIsDesktop();
+  const mainContentRef = useRef<HTMLDivElement>(null);
 
   const { airports, isLoading } = useAirportDatabase();
   const [recentAirports, setRecentAirports] = useState<typeof airports>([]);
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
   const isFastScrollingRef = useRef(false);
   const listContainerRef = useRef<HTMLDivElement>(null);
+
+  // Detail panel integration
+  const {
+    selectedId: selectedAirportIcao,
+    setSelectedId: setSelectedAirportIcao,
+    setDetailContent,
+  } = useDetailPanel();
 
   const {
     searchQuery,
@@ -74,6 +86,42 @@ export default function AirportsPage() {
       return a.icao.localeCompare(b.icao);
     });
   }, [airports]);
+
+  // Auto-select first airport when loading (desktop only, not in select mode)
+  useEffect(() => {
+    if (isDesktop && !fieldType && !isLoading && allSortedAirports.length > 0 && !selectedAirportIcao) {
+      setSelectedAirportIcao(allSortedAirports[0].icao);
+    }
+  }, [isDesktop, fieldType, isLoading, allSortedAirports, selectedAirportIcao, setSelectedAirportIcao]);
+
+  // Update detail content when selection changes (desktop only)
+  useEffect(() => {
+    if (!isDesktop || fieldType) return;
+
+    if (isLoading) {
+      setDetailContent(
+        <div className="flex items-center justify-center h-full">
+          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+        </div>
+      );
+      return;
+    }
+
+    if (allSortedAirports.length === 0) {
+      setDetailContent(
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+          <p>No airports found</p>
+        </div>
+      );
+      return;
+    }
+
+    if (selectedAirportIcao) {
+      setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} />);
+    } else if (allSortedAirports.length > 0) {
+      setSelectedAirportIcao(allSortedAirports[0].icao);
+    }
+  }, [isDesktop, fieldType, selectedAirportIcao, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao]);
 
   // Track visible airports and update activeLetterKey on scroll using throttled scroll listener
   useEffect(() => {
@@ -169,12 +217,17 @@ export default function AirportsPage() {
 
   const handleAirportSelect = async (icao: string) => {
     if (fieldType) {
+      // Select mode - always navigate back with selected airport
       await addRecentlyUsedAirport(icao);
       const params = new URLSearchParams();
       params.set("field", fieldType);
       params.set("airport", icao);
       router.push(`${returnUrl}?${params.toString()}`);
+    } else if (isDesktop) {
+      // Desktop - show in detail panel
+      setSelectedAirportIcao(icao);
     } else {
+      // Mobile - navigate to detail page
       router.push(`/airports/${icao}`);
     }
   };
@@ -270,78 +323,80 @@ export default function AirportsPage() {
         />
       }
     >
-      <div className="container mx-auto px-3 pt-3 pb-safe">
-        <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
-          <div className="relative">
-            <Input
-              type="text"
-              placeholder="Search airports..."
-              value={searchQuery}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-              className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
+      <div ref={mainContentRef} className="relative h-full">
+        <div className="container mx-auto px-3 pt-3 pb-safe h-full overflow-auto">
+          <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
+            <div className="relative">
+              <Input
+                type="text"
+                placeholder="Search airports..."
+                value={searchQuery}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+                className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
+              />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            </div>
+          </div>
+
+          <div className={`space-y-3 ${!searchQuery.trim() && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
+            {!searchQuery.trim() && (
+              <>
+                {/* Favorites Section */}
+                {airports.some((a: Airport) => a.isFavorite) && (
+                  <div className="space-y-1.5">
+                    <h2 className="text-xs font-semibold text-primary uppercase px-1 flex items-center gap-1">
+                      <Star className="h-3 w-3 fill-primary" /> Favorites
+                    </h2>
+                    <div className="space-y-2">
+                      {airports
+                        .filter((a: Airport) => a.isFavorite)
+                        .map((a: Airport) => renderAirportCard(a, false))}
+                    </div>
+                    <div className="border-t border-border/50 my-4" />
+                  </div>
+                )}
+
+                {/* Recent Section */}
+                {recentAirports.length > 0 && (
+                  <div className="space-y-1.5">
+                    <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
+                      Recent
+                    </h2>
+                    <div className="space-y-2">
+                      {recentAirports.map((a: Airport) => renderAirportCard(a, true))}
+                    </div>
+                    <div className="border-t border-border my-4" />
+                  </div>
+                )}
+              </>
+            )}
+
+            {searchQuery.trim() && (
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
+                {filteredAirports.length} results
+              </h2>
+            )}
+
+            <div className="space-y-2">
+              {filteredAirports.map((a) => renderAirportCard(a, false))}
+            </div>
+
+            <div ref={observerTarget} className="h-20" />
+          </div>
+        </div>
+
+        {/* FastScroll rail - absolute position within main content */}
+        {!searchQuery.trim() && fastScrollItems.length > 1 && (
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 z-40">
+            <FastScroll
+              items={fastScrollItems}
+              activeKey={activeLetterKey}
+              onSelect={handleFastScrollSelect}
+              indicatorPosition="left"
             />
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           </div>
-        </div>
-
-        <div className={`space-y-3 ${!searchQuery.trim() && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
-          {!searchQuery.trim() && (
-            <>
-              {/* Favorites Section */}
-              {airports.some((a: Airport) => a.isFavorite) && (
-                <div className="space-y-1.5">
-                  <h2 className="text-xs font-semibold text-primary uppercase px-1 flex items-center gap-1">
-                    <Star className="h-3 w-3 fill-primary" /> Favorites
-                  </h2>
-                  <div className="space-y-2">
-                    {airports
-                      .filter((a: Airport) => a.isFavorite)
-                      .map((a: Airport) => renderAirportCard(a, false))}
-                  </div>
-                  <div className="border-t border-border/50 my-4" />
-                </div>
-              )}
-
-              {/* Recent Section */}
-              {recentAirports.length > 0 && (
-                <div className="space-y-1.5">
-                  <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
-                    Recent
-                  </h2>
-                  <div className="space-y-2">
-                    {recentAirports.map((a: Airport) => renderAirportCard(a, true))}
-                  </div>
-                  <div className="border-t border-border my-4" />
-                </div>
-              )}
-            </>
-          )}
-
-          {searchQuery.trim() && (
-            <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
-              {filteredAirports.length} results
-            </h2>
-          )}
-
-          <div className="space-y-2">
-            {filteredAirports.map((a) => renderAirportCard(a, false))}
-          </div>
-
-          <div ref={observerTarget} className="h-20" />
-        </div>
+        )}
       </div>
-
-      {/* FastScroll rail - fixed position */}
-      {!searchQuery.trim() && fastScrollItems.length > 1 && (
-        <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
-          <FastScroll
-            items={fastScrollItems}
-            activeKey={activeLetterKey}
-            onSelect={handleFastScrollSelect}
-            indicatorPosition="left"
-          />
-        </div>
-      )}
     </PageContainer>
   );
 }
