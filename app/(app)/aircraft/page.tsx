@@ -19,6 +19,9 @@ import {
 import { PageContainer } from "@/components/page-container"
 import { SyncStatus } from "@/components/sync-status"
 import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
+import { AircraftDetailPanel } from "@/components/aircraft-detail-panel"
 
 const ITEMS_PER_PAGE = 30
 
@@ -28,6 +31,14 @@ export default function AircraftPage() {
   const selectMode = searchParams.get("select") === "true"
   const returnTo = searchParams.get("returnTo") || "/new-flight"
   const fieldName = searchParams.get("field") || "aircraftReg"
+  const isDesktop = useIsDesktop()
+
+  // Detail panel integration
+  const {
+    selectedId: selectedAircraftReg,
+    setSelectedId: setSelectedAircraftReg,
+    setDetailContent,
+  } = useDetailPanel()
 
   const [searchQuery, setSearchQuery] = useState("")
   const debouncedSearchQuery = useDebounce(searchQuery, 150)
@@ -96,6 +107,33 @@ export default function AircraftPage() {
     }
   }, [debouncedSearchQuery, allAircraft])
 
+  // Update detail content when selection changes (desktop only)
+  useEffect(() => {
+    if (!isDesktop || selectMode) return
+
+    if (isLoading) {
+      setDetailContent(
+        <div className="flex items-center justify-center h-full">
+          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+        </div>
+      )
+      return
+    }
+
+    if (selectedAircraftReg) {
+      setDetailContent(
+        <AircraftDetailPanel key={selectedAircraftReg} registration={selectedAircraftReg} />
+      )
+    } else {
+      setDetailContent(
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+          <Plane className="h-12 w-12 mb-4" />
+          <p>Search for aircraft to view details</p>
+        </div>
+      )
+    }
+  }, [isDesktop, selectMode, selectedAircraftReg, isLoading, setDetailContent])
+
   useEffect(() => {
     if (observerRef.current) observerRef.current.disconnect()
     observerRef.current = new IntersectionObserver(
@@ -120,16 +158,21 @@ export default function AircraftPage() {
         await saveUserPreferences({ recentlyUsedAircraft: updated })
       }
       if (selectMode) {
+        // Select mode - always navigate back with selected aircraft
         const params = new URLSearchParams()
         params.set("field", fieldName)
         params.set("aircraftReg", aircraft.registration)
         params.set("aircraftType", aircraft.typecode)
         router.push(`${returnTo}?${params.toString()}`)
+      } else if (isDesktop) {
+        // Desktop - show in detail panel
+        setSelectedAircraftReg(aircraft.registration || aircraft.icao24)
       } else {
+        // Mobile - navigate to detail page
         router.push(`/aircraft/${encodeURIComponent(aircraft.registration || aircraft.icao24)}`)
       }
     },
-    [selectMode, returnTo, fieldName, router],
+    [selectMode, returnTo, fieldName, router, isDesktop, setSelectedAircraftReg],
   )
 
   const displayedAircraft = filteredAircraft.slice(0, displayCount)
@@ -275,8 +318,8 @@ export default function AircraftPage() {
           <p className="text-muted-foreground text-sm">{loadingProgress.stage || "Loading..."}</p>
         </div>
       ) : (
-        <div className="relative h-full">
-          <div className="container mx-auto px-3 pt-3 pb-safe h-full overflow-auto">
+        <div className="relative">
+          <div className="container mx-auto px-3 pt-3 pb-safe">
             <div className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl pb-3 -mx-3 px-3">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

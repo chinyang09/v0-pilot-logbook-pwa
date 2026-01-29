@@ -117,7 +117,7 @@ export default function AirportsPage() {
     }
 
     if (selectedAirportIcao) {
-      setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} />);
+      setDetailContent(<AirportDetailPanel key={selectedAirportIcao} icao={selectedAirportIcao} />);
     } else if (allSortedAirports.length > 0) {
       setSelectedAirportIcao(allSortedAirports[0].icao);
     }
@@ -323,8 +323,8 @@ export default function AirportsPage() {
         />
       }
     >
-      <div ref={mainContentRef} className="relative h-full">
-        <div className="container mx-auto px-3 pt-3 pb-safe h-full overflow-auto">
+      <div ref={mainContentRef} className="relative">
+        <div className="container mx-auto px-3 pt-3 pb-safe">
           <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
             <div className="relative">
               <Input
