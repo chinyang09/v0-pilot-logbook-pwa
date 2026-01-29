@@ -35,20 +35,20 @@ function DesktopLayoutContent({ children }: DesktopLayoutProps) {
       <SidebarNav />
 
       {/* Main content area - always show with detail panel */}
-      <div className="flex-1 flex min-w-0">
-        <ResizablePanelGroup direction="horizontal" className="h-full">
-          <ResizablePanel defaultSize={50} minSize={25}>
-            <div className="h-full flex flex-col overflow-hidden min-w-[375px]">{children}</div>
+      <div className="flex-1 flex min-w-0 overflow-x-auto">
+        <ResizablePanelGroup direction="horizontal" className="h-full min-w-[750px]">
+          <ResizablePanel defaultSize={50} minSize={30} style={{ minWidth: "375px" }}>
+            <div className="h-full flex flex-col overflow-hidden">{children}</div>
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={50} minSize={30}>
+          <ResizablePanel defaultSize={50} minSize={25}>
             <DetailPanelContent />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
 
-      {/* Sidebar toggle button - placed last to render on top */}
-      <div className="absolute top-3 left-3 z-[100] mt-safe">
+      {/* Sidebar toggle button - positioned to align with sidebar header */}
+      <div className="absolute left-3 z-[100] top-[calc(env(safe-area-inset-top)+0.875rem)]">
         <SidebarToggle />
       </div>
     </div>
