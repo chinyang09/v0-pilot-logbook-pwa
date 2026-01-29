@@ -1,9 +1,9 @@
 "use client"
 
 import type React from "react"
-import { usePathname } from "next/navigation"
 import { SidebarNav, SidebarToggle } from "@/components/sidebar-nav"
 import { SidebarProvider } from "@/hooks/use-sidebar-context"
+import { DetailPanelProvider, useDetailPanel } from "@/hooks/use-detail-panel"
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -12,21 +12,29 @@ import {
 
 interface DesktopLayoutProps {
   children: React.ReactNode
-  detail?: React.ReactNode
 }
 
-// Routes that have detail views (pattern: /base/[param])
-const DETAIL_ROUTES = [
-  "/aircraft/",
-  "/airports/",
-  "/crew/",
-]
+function DetailPanelContent() {
+  const { detailContent, hasDetailSupport } = useDetailPanel()
 
-function DesktopLayoutContent({ children, detail }: DesktopLayoutProps) {
-  const pathname = usePathname()
+  if (!hasDetailSupport) {
+    // Page doesn't support detail panel, show nothing
+    return null
+  }
 
-  // Check if current route is a detail route by checking URL pattern
-  const isDetailRoute = DETAIL_ROUTES.some(route => pathname?.startsWith(route))
+  return (
+    <div className="h-full overflow-auto bg-background">
+      {detailContent || (
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+          <p>Select an item to view details</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DesktopLayoutContent({ children }: DesktopLayoutProps) {
+  const { hasDetailSupport } = useDetailPanel()
 
   return (
     <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden">
@@ -40,14 +48,14 @@ function DesktopLayoutContent({ children, detail }: DesktopLayoutProps) {
 
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {isDetailRoute ? (
+        {hasDetailSupport ? (
           <ResizablePanelGroup direction="horizontal" className="h-full">
             <ResizablePanel defaultSize={50} minSize={30}>
               <div className="h-full overflow-auto">{children}</div>
             </ResizablePanel>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize={50} minSize={30}>
-              <div className="h-full overflow-auto">{detail}</div>
+              <DetailPanelContent />
             </ResizablePanel>
           </ResizablePanelGroup>
         ) : (
@@ -58,10 +66,12 @@ function DesktopLayoutContent({ children, detail }: DesktopLayoutProps) {
   )
 }
 
-export function DesktopLayout({ children, detail }: DesktopLayoutProps) {
+export function DesktopLayout({ children }: DesktopLayoutProps) {
   return (
     <SidebarProvider defaultOpen={true}>
-      <DesktopLayoutContent detail={detail}>{children}</DesktopLayoutContent>
+      <DetailPanelProvider>
+        <DesktopLayoutContent>{children}</DesktopLayoutContent>
+      </DetailPanelProvider>
     </SidebarProvider>
   )
 }

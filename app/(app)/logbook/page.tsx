@@ -23,6 +23,9 @@ import { SyncStatus } from "@/components/sync-status"
 import { cn } from "@/lib/utils"
 import { CSVImportButton } from "@/components/csv-import-button"
 import { ImageImportButton } from "@/components/image-import-button"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { FlightDetailPanel } from "@/components/flight-detail-panel"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
 
 const FORM_STORAGE_KEY = "flight-form-draft"
 
@@ -55,6 +58,7 @@ function parseDateLocal(dateStr: string): Date {
 
 export default function LogbookPage() {
   const router = useRouter()
+  const isDesktop = useIsDesktop()
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
   const { aircraft } = useAircraft()
@@ -73,6 +77,61 @@ export default function LogbookPage() {
   const [searchFocused, setSearchFocused] = useState(false)
   const [selectedFilters, setSelectedFilters] = useState<string[]>([])
   const { handleScroll } = useScrollNavbarContext()
+
+  // Detail panel integration
+  const {
+    selectedId: selectedFlightId,
+    setSelectedId: setSelectedFlightId,
+    setDetailContent,
+    setHasDetailSupport,
+  } = useDetailPanel()
+
+  // Register detail panel support and manage detail content
+  useEffect(() => {
+    setHasDetailSupport(true)
+    return () => setHasDetailSupport(false)
+  }, [setHasDetailSupport])
+
+  // Auto-select first flight when flights load
+  useEffect(() => {
+    if (!flightsLoading && flights.length > 0 && !selectedFlightId) {
+      setSelectedFlightId(flights[0].id)
+    }
+  }, [flightsLoading, flights, selectedFlightId, setSelectedFlightId])
+
+  // Update detail content when selection changes
+  useEffect(() => {
+    if (flightsLoading) {
+      setDetailContent(
+        <div className="flex items-center justify-center h-full">
+          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+        </div>
+      )
+      return
+    }
+
+    if (flights.length === 0) {
+      setDetailContent(
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+          <p>No flights recorded</p>
+        </div>
+      )
+      return
+    }
+
+    const selectedFlight = flights.find(f => f.id === selectedFlightId)
+    if (selectedFlight) {
+      setDetailContent(
+        <FlightDetailPanel
+          flight={selectedFlight}
+          onEdit={(flight) => router.push(`/new-flight?edit=${flight.id}`)}
+        />
+      )
+    } else if (flights.length > 0) {
+      // Selection not found, select first flight
+      setSelectedFlightId(flights[0].id)
+    }
+  }, [selectedFlightId, flights, flightsLoading, setDetailContent, setSelectedFlightId, router])
 
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)
@@ -175,9 +234,18 @@ export default function LogbookPage() {
     setSelectedDate((prev) => (prev === date ? null : date))
   }, [])
 
-  const handleEditFlight = (flight: FlightLog) => {
-    router.push(`/new-flight?edit=${flight.id}`)
-  }
+  // Handle flight selection/edit
+  // On desktop: Select flight to show in detail panel
+  // On mobile: Navigate to edit page
+  const handleEditFlight = useCallback((flight: FlightLog) => {
+    if (isDesktop) {
+      // On desktop, just select the flight to show in detail panel
+      setSelectedFlightId(flight.id)
+    } else {
+      // On mobile, navigate to edit page
+      router.push(`/new-flight?edit=${flight.id}`)
+    }
+  }, [isDesktop, setSelectedFlightId, router])
 
   const handleFlightDeleted = async () => {
     await refreshFlights()

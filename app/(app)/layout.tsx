@@ -9,11 +9,6 @@ import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { DesktopLayout } from "@/components/desktop-layout"
 import { cn } from "@/lib/utils"
 
-interface AppLayoutContentProps {
-  children: React.ReactNode
-  detail: React.ReactNode
-}
-
 function MobileLayoutContent({ children }: { children: React.ReactNode }) {
   const { hideNavbar } = useScrollNavbarContext()
 
@@ -33,7 +28,7 @@ function MobileLayoutContent({ children }: { children: React.ReactNode }) {
   )
 }
 
-function AppLayoutContent({ children, detail }: AppLayoutContentProps) {
+function AppLayoutContent({ children }: { children: React.ReactNode }) {
   const isDesktop = useIsDesktop()
 
   // Background draft generation
@@ -41,11 +36,7 @@ function AppLayoutContent({ children, detail }: AppLayoutContentProps) {
 
   // On desktop, use the desktop layout with sidebar and detail panel
   if (isDesktop) {
-    return (
-      <DesktopLayout detail={detail}>
-        {children}
-      </DesktopLayout>
-    )
+    return <DesktopLayout>{children}</DesktopLayout>
   }
 
   // On mobile, use the mobile layout with bottom navbar
@@ -57,18 +48,16 @@ function AppLayoutContent({ children, detail }: AppLayoutContentProps) {
  * Individual pages handle their own headers
  *
  * On mobile (< 1024px): Bottom navbar with single-column layout
- * On desktop (>= 1024px): Sidebar navigation with optional detail panel
+ * On desktop (>= 1024px): Sidebar navigation with detail panel
  */
 export default function AppLayout({
   children,
-  detail,
 }: {
   children: React.ReactNode
-  detail: React.ReactNode
 }) {
   return (
     <ScrollNavbarProvider>
-      <AppLayoutContent detail={detail}>{children}</AppLayoutContent>
+      <AppLayoutContent>{children}</AppLayoutContent>
     </ScrollNavbarProvider>
   )
 }
