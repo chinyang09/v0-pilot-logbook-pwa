@@ -19,6 +19,8 @@ import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import { useSidebar } from "@/hooks/use-sidebar-context"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
 
 export default function Dashboard() {
   const { user, isLoading: authLoading, isAuthenticated } = useAuth()
@@ -28,6 +30,11 @@ export default function Dashboard() {
   const { expiringCurrencies, isLoading: currenciesLoading } = useExpiringCurrencies()
   const { unresolvedDiscrepancies, isLoading: discrepanciesLoading } = useUnresolvedDiscrepancies()
   const { scheduleEntries, isLoading: scheduleLoading } = useScheduleEntries()
+  const { isOpen: sidebarOpen } = useSidebar()
+  const isDesktop = useIsDesktop()
+
+  // Add left padding on desktop when sidebar is closed to avoid toggle button overlap
+  const needsTogglePadding = isDesktop && !sidebarOpen
 
   // Calculate FDP compliance
   const fdpCompliance = useMemo(() => {
@@ -113,7 +120,7 @@ export default function Dashboard() {
       header={
         <header className="flex-none bg-background/80 backdrop-blur-xl border-b border-border/50 z-50">
           <div className="container mx-auto px-4">
-            <div className="flex items-center justify-between h-12">
+            <div className={`flex items-center justify-between h-12 ${needsTogglePadding ? "pl-10" : ""}`}>
               <h1 className="text-lg font-semibold text-foreground">Dashboard</h1>
               <div className="flex items-center gap-2">
                 <SyncStatus />

@@ -21,6 +21,7 @@ import { SyncStatus } from "@/components/sync-status"
 import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
+import { useSidebar } from "@/hooks/use-sidebar-context"
 import { AircraftDetailPanel } from "@/components/aircraft-detail-panel"
 
 const ITEMS_PER_PAGE = 30
@@ -32,6 +33,10 @@ export default function AircraftPage() {
   const returnTo = searchParams.get("returnTo") || "/new-flight"
   const fieldName = searchParams.get("field") || "aircraftReg"
   const isDesktop = useIsDesktop()
+  const { isOpen: sidebarOpen } = useSidebar()
+
+  // Add left padding on desktop when sidebar is closed to avoid toggle button overlap
+  const needsTogglePadding = isDesktop && !sidebarOpen
 
   // Detail panel integration
   const {
@@ -121,8 +126,9 @@ export default function AircraftPage() {
     }
 
     if (selectedAircraftReg) {
+      // Don't use key prop to avoid component remounting and flickering
       setDetailContent(
-        <AircraftDetailPanel key={selectedAircraftReg} registration={selectedAircraftReg} />
+        <AircraftDetailPanel registration={selectedAircraftReg} />
       )
     } else {
       setDetailContent(
@@ -287,7 +293,7 @@ export default function AircraftPage() {
       header={
         <header className="flex-none bg-background/30 backdrop-blur-xl border-b border-border/50 z-50">
           <div className="container mx-auto px-3">
-            <div className="flex items-center justify-between h-12">
+            <div className={`flex items-center justify-between h-12 ${needsTogglePadding ? "pl-10" : ""}`}>
               <div className="flex items-center gap-2">
                 {selectMode && (
                   <Button variant="ghost" size="sm" onClick={() => router.back()} className="h-8 w-8 p-0">
@@ -383,18 +389,16 @@ export default function AircraftPage() {
             </div>
           </div>
 
-          {/* FastScroll - sticky positioned at viewport center */}
+          {/* FastScroll - absolute positioned within container */}
           {debouncedSearchQuery.length >= 2 && fastScrollItems.length > 1 && (
-            <div className="sticky top-0 float-right w-0 h-0 z-40 pointer-events-none">
-              <div className="h-screen flex items-center pr-1">
-                <div className="pointer-events-auto">
-                  <FastScroll
-                    items={fastScrollItems}
-                    activeKey={activeLetterKey}
-                    onSelect={handleFastScrollSelect}
-                    indicatorPosition="left"
-                  />
-                </div>
+            <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
+              <div className="pointer-events-auto pr-1">
+                <FastScroll
+                  items={fastScrollItems}
+                  activeKey={activeLetterKey}
+                  onSelect={handleFastScrollSelect}
+                  indicatorPosition="left"
+                />
               </div>
             </div>
           )}

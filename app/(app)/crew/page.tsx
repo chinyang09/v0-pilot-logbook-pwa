@@ -446,18 +446,16 @@ export default function CrewPage() {
           )}
         </div>
 
-        {/* FastScroll - sticky positioned at viewport center */}
+        {/* FastScroll - absolute positioned within container */}
         {!debouncedSearchQuery && fastScrollItems.length > 1 && (
-          <div className="sticky top-0 float-right w-0 h-0 z-40 pointer-events-none">
-            <div className="h-screen flex items-center pr-1">
-              <div className="pointer-events-auto">
-                <FastScroll
-                  items={fastScrollItems}
-                  activeKey={activeLetterKey}
-                  onSelect={handleFastScrollSelect}
-                  indicatorPosition="left"
-                />
-              </div>
+          <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
+            <div className="pointer-events-auto pr-1">
+              <FastScroll
+                items={fastScrollItems}
+                activeKey={activeLetterKey}
+                onSelect={handleFastScrollSelect}
+                indicatorPosition="left"
+              />
             </div>
           </div>
         )}

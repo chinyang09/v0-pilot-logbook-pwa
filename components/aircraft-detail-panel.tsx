@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Plane, Loader2, Hash, Tag } from "lucide-react"
 import {
   getAircraftDatabase,
@@ -16,10 +16,14 @@ interface AircraftDetailPanelProps {
 export function AircraftDetailPanel({ registration }: AircraftDetailPanelProps) {
   const [aircraft, setAircraft] = useState<NormalizedAircraft | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const hasLoadedOnceRef = useRef(false)
 
   useEffect(() => {
     async function loadAircraft() {
-      setIsLoading(true)
+      // Only show loading state on initial load, not on subsequent changes
+      if (!hasLoadedOnceRef.current) {
+        setIsLoading(true)
+      }
       try {
         const database = await getAircraftDatabase()
         let found = getAircraftByRegistration(database, registration)
@@ -27,6 +31,7 @@ export function AircraftDetailPanel({ registration }: AircraftDetailPanelProps) 
           found = getAircraftByIcao24(database, registration)
         }
         setAircraft(found || null)
+        hasLoadedOnceRef.current = true
       } catch (error) {
         console.error("[Aircraft Detail Panel] Failed to load:", error)
       } finally {
@@ -37,7 +42,8 @@ export function AircraftDetailPanel({ registration }: AircraftDetailPanelProps) 
     loadAircraft()
   }, [registration])
 
-  if (isLoading) {
+  // Only show loading spinner on initial load
+  if (isLoading && !hasLoadedOnceRef.current) {
     return (
       <div className="h-full flex items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
