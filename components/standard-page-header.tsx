@@ -5,8 +5,6 @@ import { Button } from "@/components/ui/button"
 import { SyncStatus } from "@/components/sync-status"
 import { ArrowLeft } from "lucide-react"
 import type React from "react"
-import { useSidebar } from "@/hooks/use-sidebar-context"
-import { useIsDesktop } from "@/hooks/use-is-desktop"
 
 export interface StandardPageHeaderProps {
   /** Page title */
@@ -32,8 +30,6 @@ export function StandardPageHeader({
   className,
 }: StandardPageHeaderProps) {
   const router = useRouter()
-  const { isOpen: sidebarOpen } = useSidebar()
-  const isDesktop = useIsDesktop()
 
   const handleBack = () => {
     if (onBack) {
@@ -43,13 +39,11 @@ export function StandardPageHeader({
     }
   }
 
-  // Add left padding on desktop when sidebar is closed to avoid toggle button overlap
-  const needsTogglePadding = isDesktop && !sidebarOpen
-
   return (
     <header className={`flex-none bg-background/30 backdrop-blur-xl border-b border-border/50 z-50 ${className || ""}`}>
       <div className="container mx-auto px-3">
-        <div className={`flex items-center justify-between h-12 ${needsTogglePadding ? "pl-10" : ""}`}>
+        {/* Always add pl-10 padding to avoid overlap with sidebar toggle button */}
+        <div className="flex items-center justify-between h-12 pl-10">
           <div className="flex items-center gap-2">
             {showBack && (
               <Button

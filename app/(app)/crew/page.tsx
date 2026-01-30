@@ -380,8 +380,18 @@ export default function CrewPage() {
           showBack={!!fieldType}
         />
       }
+      rightContent={
+        !debouncedSearchQuery && fastScrollItems.length > 1 ? (
+          <FastScroll
+            items={fastScrollItems}
+            activeKey={activeLetterKey}
+            onSelect={handleFastScrollSelect}
+            indicatorPosition="left"
+          />
+        ) : null
+      }
     >
-      <div ref={mainContentRef} className="relative">
+      <div ref={mainContentRef}>
         <div className="container mx-auto px-3 pt-3 pb-safe">
           <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
             <div className="flex gap-2">
@@ -445,20 +455,6 @@ export default function CrewPage() {
             </div>
           )}
         </div>
-
-        {/* FastScroll - absolute positioned within container */}
-        {!debouncedSearchQuery && fastScrollItems.length > 1 && (
-          <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
-            <div className="pointer-events-auto pr-1">
-              <FastScroll
-                items={fastScrollItems}
-                activeKey={activeLetterKey}
-                onSelect={handleFastScrollSelect}
-                indicatorPosition="left"
-              />
-            </div>
-          </div>
-        )}
       </div>
 
       <DeleteDialog

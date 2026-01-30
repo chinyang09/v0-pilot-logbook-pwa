@@ -27,7 +27,6 @@ import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { FlightDetailPanel } from "@/components/flight-detail-panel"
 import { FlightForm } from "@/components/flight-form"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
-import { useSidebar } from "@/hooks/use-sidebar-context"
 import { useSearchParams } from "next/navigation"
 
 const FORM_STORAGE_KEY = "flight-form-draft"
@@ -63,11 +62,12 @@ export default function LogbookPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const isDesktop = useIsDesktop()
-  const { isOpen: sidebarOpen } = useSidebar()
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
 
   // Track if we're editing a flight in the detail panel (desktop only)
   const [editingFlightId, setEditingFlightId] = useState<string | null>(null)
+  // Track if we're adding a new flight in the detail panel (desktop only)
+  const [isAddingFlight, setIsAddingFlight] = useState(false)
 
   // Check if we're returning from a picker page with draft data (run on mount)
   useEffect(() => {
@@ -77,11 +77,17 @@ export default function LogbookPage() {
     if (savedDraft) {
       try {
         const draft = JSON.parse(savedDraft)
-        // If there's a draft with an ID and we have picker params, restore editing state
+        // If there's a draft with picker params, restore editing/adding state
         const hasPickerParams = searchParams.get("field") || searchParams.get("airport") ||
                                  searchParams.get("aircraftReg") || searchParams.get("crewId")
-        if (draft.id && hasPickerParams) {
-          setEditingFlightId(draft.id)
+        if (hasPickerParams) {
+          if (draft.id) {
+            // Editing existing flight
+            setEditingFlightId(draft.id)
+          } else {
+            // Adding new flight
+            setIsAddingFlight(true)
+          }
         }
       } catch {
         // Ignore parse errors
@@ -97,8 +103,6 @@ export default function LogbookPage() {
   const selectedCrewId = searchParams.get("crewId")
   const selectedCrewName = searchParams.get("crewName")
 
-  // Add left padding on desktop when sidebar is closed to avoid toggle button overlap
-  const needsTogglePadding = isDesktop && !sidebarOpen
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
   const { aircraft } = useAircraft()
   const { airports } = useAirportDatabase()
@@ -138,8 +142,47 @@ export default function LogbookPage() {
     }
   }, [flightsLoading, flights, selectedFlightId, setSelectedFlightId])
 
-  // Update detail content when selection changes or editing state changes
+  // Update detail content when selection changes or editing/adding state changes
   useEffect(() => {
+    // Determine which field types we have for picker selections
+    const isAirportField = selectedField === "departureIcao" || selectedField === "arrivalIcao"
+    const isAircraftField = selectedField === "aircraftReg"
+    const isCrewField = selectedField === "pic" || selectedField === "sic" ||
+                        selectedField === "picId" || selectedField === "sicId"
+    const crewFieldMapped = selectedField === "pic" ? "picId" :
+                            selectedField === "sic" ? "sicId" : selectedField
+
+    // If adding a new flight on desktop, show the FlightForm in detail panel
+    if (isAddingFlight && isDesktop) {
+      setDetailContent(
+        <FlightForm
+          onFlightAdded={async (flight) => {
+            setIsAddingFlight(false)
+            sessionStorage.removeItem(FORM_STORAGE_KEY)
+            await refreshFlights()
+            // Select the newly added flight
+            if (flight?.id) {
+              setSelectedFlightId(flight.id)
+            }
+            if (navigator.onLine) {
+              syncService.fullSync()
+            }
+          }}
+          onClose={() => {
+            setIsAddingFlight(false)
+          }}
+          selectedAirportField={isAirportField ? selectedField : null}
+          selectedAirportCode={isAirportField ? selectedAirport : null}
+          selectedAircraftReg={isAircraftField ? selectedAircraftReg : null}
+          selectedAircraftType={isAircraftField ? selectedAircraftType : null}
+          selectedCrewField={isCrewField ? crewFieldMapped : null}
+          selectedCrewId={isCrewField ? selectedCrewId : null}
+          selectedCrewName={isCrewField ? selectedCrewName : null}
+        />
+      )
+      return
+    }
+
     if (flightsLoading) {
       setDetailContent(
         <div className="flex items-center justify-center h-full">
@@ -162,14 +205,6 @@ export default function LogbookPage() {
     if (editingFlightId && isDesktop) {
       const editingFlight = flights.find(f => f.id === editingFlightId)
       if (editingFlight) {
-        // Determine which field types we have for picker selections
-        const isAirportField = selectedField === "departureIcao" || selectedField === "arrivalIcao"
-        const isAircraftField = selectedField === "aircraftReg"
-        const isCrewField = selectedField === "pic" || selectedField === "sic" ||
-                            selectedField === "picId" || selectedField === "sicId"
-        const crewFieldMapped = selectedField === "pic" ? "picId" :
-                                selectedField === "sic" ? "sicId" : selectedField
-
         setDetailContent(
           <FlightForm
             editingFlight={editingFlight}
@@ -215,7 +250,7 @@ export default function LogbookPage() {
       // Selection not found, select first flight
       setSelectedFlightId(flights[0].id)
     }
-  }, [selectedFlightId, flights, flightsLoading, setDetailContent, setSelectedFlightId, router, editingFlightId, isDesktop, refreshFlights, selectedField, selectedAirport, selectedAircraftReg, selectedAircraftType, selectedCrewId, selectedCrewName])
+  }, [selectedFlightId, flights, flightsLoading, setDetailContent, setSelectedFlightId, router, editingFlightId, isAddingFlight, isDesktop, refreshFlights, selectedField, selectedAirport, selectedAircraftReg, selectedAircraftType, selectedCrewId, selectedCrewName])
 
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)
@@ -437,7 +472,8 @@ export default function LogbookPage() {
     <>
       {/* HEADER */}
       <header className="flex-none h-12 z-50 bg-background/40 backdrop-blur-xl border-b border-border/50">
-        <div className={`flex items-center justify-between h-full px-4 ${needsTogglePadding ? "pl-14" : ""}`}>
+        {/* Always add pl-14 padding to avoid overlap with sidebar toggle button */}
+        <div className="flex items-center justify-between h-full px-4 pl-14">
           {showCalendar ? (
             <Button
               variant="ghost"
@@ -489,7 +525,17 @@ export default function LogbookPage() {
               }}
             />
 
-            <Button size="icon" onClick={() => router.push("/new-flight")} className="h-8 w-8">
+            <Button
+              size="icon"
+              onClick={() => {
+                if (isDesktop) {
+                  setIsAddingFlight(true)
+                } else {
+                  router.push("/new-flight")
+                }
+              }}
+              className="h-8 w-8"
+            >
               <Plus className="h-4 w-4" />
             </Button>
           </div>
