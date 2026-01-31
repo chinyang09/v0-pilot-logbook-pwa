@@ -42,7 +42,8 @@ export function StandardPageHeader({
   return (
     <header className={`flex-none bg-background/30 backdrop-blur-xl border-b border-border/50 z-50 ${className || ""}`}>
       <div className="container mx-auto px-3">
-        <div className="flex items-center justify-between h-12">
+        {/* Always add pl-10 padding to avoid overlap with sidebar toggle button */}
+        <div className="flex items-center justify-between h-12 pl-10">
           <div className="flex items-center gap-2">
             {showBack && (
               <Button

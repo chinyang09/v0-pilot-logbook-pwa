@@ -121,8 +121,9 @@ export default function AircraftPage() {
     }
 
     if (selectedAircraftReg) {
+      // Don't use key prop to avoid component remounting and flickering
       setDetailContent(
-        <AircraftDetailPanel key={selectedAircraftReg} registration={selectedAircraftReg} />
+        <AircraftDetailPanel registration={selectedAircraftReg} />
       )
     } else {
       setDetailContent(
@@ -287,7 +288,7 @@ export default function AircraftPage() {
       header={
         <header className="flex-none bg-background/30 backdrop-blur-xl border-b border-border/50 z-50">
           <div className="container mx-auto px-3">
-            <div className="flex items-center justify-between h-12">
+            <div className="flex items-center justify-between h-12 pl-10">
               <div className="flex items-center gap-2">
                 {selectMode && (
                   <Button variant="ghost" size="sm" onClick={() => router.back()} className="h-8 w-8 p-0">
@@ -311,6 +312,16 @@ export default function AircraftPage() {
           </div>
         </header>
       }
+      rightContent={
+        debouncedSearchQuery.length >= 2 && fastScrollItems.length > 1 ? (
+          <FastScroll
+            items={fastScrollItems}
+            activeKey={activeLetterKey}
+            onSelect={handleFastScrollSelect}
+            indicatorPosition="left"
+          />
+        ) : null
+      }
     >
       {isLoading ? (
         <div className="flex flex-col items-center justify-center h-full gap-3 p-4">
@@ -318,82 +329,68 @@ export default function AircraftPage() {
           <p className="text-muted-foreground text-sm">{loadingProgress.stage || "Loading..."}</p>
         </div>
       ) : (
-        <div className="relative">
-          <div className="container mx-auto px-3 pt-3 pb-safe">
-            <div className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl pb-3 -mx-3 px-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="text"
-                  placeholder="Search registration, type code..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 h-10"
-                  autoFocus
-                />
-              </div>
-            </div>
-
-            <div className={`space-y-3 ${debouncedSearchQuery.length >= 2 && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
-              {showRecentlyUsed && (
-                <div className="space-y-1.5">
-                  <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">Recently Used</h2>
-                  <div className="space-y-2">
-                    {recentlyUsed.map((aircraft) => (
-                      <AircraftCard
-                        key={`recent-${aircraft.registration || aircraft.icao24}`}
-                        aircraft={aircraft}
-                        onSelect={handleSelectAircraft}
-                        isRecent
-                      />
-                    ))}
-                  </div>
-                  <div className="border-t border-border my-4" />
-                </div>
-              )}
-
-              {debouncedSearchQuery.length >= 2 && (
-                <div className="space-y-1.5">
-                  <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
-                    {filteredAircraft.length} results
-                  </h2>
-                  <div className="space-y-2">
-                    {displayedAircraft.map((aircraft, index) => (
-                      <AircraftCard
-                        key={`${aircraft.registration || aircraft.icao24}-${index}`}
-                        aircraft={aircraft}
-                        onSelect={handleSelectAircraft}
-                      />
-                    ))}
-                  </div>
-                  {displayCount < filteredAircraft.length && (
-                    <div ref={loadMoreRef} className="py-8">
-                      <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {!debouncedSearchQuery && !showRecentlyUsed && (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <Plane className="h-12 w-12 text-muted-foreground mb-4" />
-                  <p className="text-sm text-muted-foreground">Search for aircraft by registration or type</p>
-                </div>
-              )}
+        <div className="container mx-auto px-3 pt-3 pb-safe">
+          <div className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl pb-3 -mx-3 px-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Search registration, type code..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 h-10"
+                autoFocus
+              />
             </div>
           </div>
 
-          {/* FastScroll rail - absolute position within main content */}
-          {debouncedSearchQuery.length >= 2 && fastScrollItems.length > 1 && (
-            <div className="absolute right-1 top-1/2 -translate-y-1/2 z-40">
-              <FastScroll
-                items={fastScrollItems}
-                activeKey={activeLetterKey}
-                onSelect={handleFastScrollSelect}
-                indicatorPosition="left"
-              />
-            </div>
-          )}
+          <div className={`space-y-3 ${debouncedSearchQuery.length >= 2 && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
+            {showRecentlyUsed && (
+              <div className="space-y-1.5">
+                <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">Recently Used</h2>
+                <div className="space-y-2">
+                  {recentlyUsed.map((aircraft) => (
+                    <AircraftCard
+                      key={`recent-${aircraft.registration || aircraft.icao24}`}
+                      aircraft={aircraft}
+                      onSelect={handleSelectAircraft}
+                      isRecent
+                    />
+                  ))}
+                </div>
+                <div className="border-t border-border my-4" />
+              </div>
+            )}
+
+            {debouncedSearchQuery.length >= 2 && (
+              <div className="space-y-1.5">
+                <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
+                  {filteredAircraft.length} results
+                </h2>
+                <div className="space-y-2">
+                  {displayedAircraft.map((aircraft, index) => (
+                    <AircraftCard
+                      key={`${aircraft.registration || aircraft.icao24}-${index}`}
+                      aircraft={aircraft}
+                      onSelect={handleSelectAircraft}
+                    />
+                  ))}
+                </div>
+                {displayCount < filteredAircraft.length && (
+                  <div ref={loadMoreRef} className="py-8">
+                    <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!debouncedSearchQuery && !showRecentlyUsed && (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Plane className="h-12 w-12 text-muted-foreground mb-4" />
+                <p className="text-sm text-muted-foreground">Search for aircraft by registration or type</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </PageContainer>

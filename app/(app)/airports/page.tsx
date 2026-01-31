@@ -117,7 +117,8 @@ export default function AirportsPage() {
     }
 
     if (selectedAirportIcao) {
-      setDetailContent(<AirportDetailPanel key={selectedAirportIcao} icao={selectedAirportIcao} />);
+      // Don't use key prop to avoid component remounting and flickering
+      setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} />);
     } else if (allSortedAirports.length > 0) {
       setSelectedAirportIcao(allSortedAirports[0].icao);
     }
@@ -322,8 +323,18 @@ export default function AirportsPage() {
           showBack={!!fieldType}
         />
       }
+      rightContent={
+        !searchQuery.trim() && fastScrollItems.length > 1 ? (
+          <FastScroll
+            items={fastScrollItems}
+            activeKey={activeLetterKey}
+            onSelect={handleFastScrollSelect}
+            indicatorPosition="left"
+          />
+        ) : null
+      }
     >
-      <div ref={mainContentRef} className="relative">
+      <div ref={mainContentRef}>
         <div className="container mx-auto px-3 pt-3 pb-safe">
           <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
             <div className="relative">
@@ -384,18 +395,6 @@ export default function AirportsPage() {
             <div ref={observerTarget} className="h-20" />
           </div>
         </div>
-
-        {/* FastScroll rail - absolute position within main content */}
-        {!searchQuery.trim() && fastScrollItems.length > 1 && (
-          <div className="absolute right-1 top-1/2 -translate-y-1/2 z-40">
-            <FastScroll
-              items={fastScrollItems}
-              activeKey={activeLetterKey}
-              onSelect={handleFastScrollSelect}
-              indicatorPosition="left"
-            />
-          </div>
-        )}
       </div>
     </PageContainer>
   );

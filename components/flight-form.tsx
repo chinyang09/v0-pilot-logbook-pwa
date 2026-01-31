@@ -15,6 +15,7 @@ import {
   Plus,
   Trash2,
   PenLine,
+  RefreshCw,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -34,7 +35,9 @@ import {
   getAirportByICAO,
   addRecentlyUsedAirport,
   addRecentlyUsedAircraft,
+  deleteFlight,
 } from "@/lib/db";
+import { useDebounce } from "@/hooks/use-debounce";
 import { useAirportDatabase } from "@/hooks/data";
 import {
   createEmptyFlightLog,
@@ -56,8 +59,6 @@ import {
 import { usePersonnel } from "@/hooks/data";
 import { ImageImportButton } from "@/components/image-import-button";
 import type { ExtractedFlightData } from "@/lib/ocr";
-
-const FORM_STORAGE_KEY = "flight-form-draft";
 
 // Swipeable row component
 function SwipeableRow({
@@ -372,27 +373,13 @@ export function FlightForm({
     crew?: string;
   }>({});
 
-  // Initialize form data
+  // Initialize form data from editingFlight (draft or existing flight)
   const [formData, setFormData] = useState<Partial<FlightLog>>(() => {
-    if (typeof window !== "undefined") {
-      const saved = sessionStorage.getItem(FORM_STORAGE_KEY);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (editingFlight && parsed.id === editingFlight.id) {
-            editingFlightInitializedRef.current = editingFlight.id;
-            return { ...editingFlight, ...parsed };
-          }
-          return { ...createEmptyFlightLog(), ...parsed };
-        } catch {
-          // Ignore parse errors
-        }
-      }
-    }
     if (editingFlight) {
       editingFlightInitializedRef.current = editingFlight.id;
+      return editingFlight;
     }
-    return editingFlight || createEmptyFlightLog();
+    return createEmptyFlightLog();
   });
 
   // Track manual overrides state
@@ -444,28 +431,12 @@ export function FlightForm({
     () => getNumericOffset(arrAirport?.tz),
     [arrAirport]
   );
+  // Update form data when editingFlight changes (e.g., after refresh)
   useEffect(() => {
     if (!editingFlight) return;
     if (editingFlightInitializedRef.current === editingFlight.id) return;
 
     editingFlightInitializedRef.current = editingFlight.id;
-
-    const saved = sessionStorage.getItem(FORM_STORAGE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.id === editingFlight.id) {
-          setFormData({ ...editingFlight, ...parsed });
-          setManualOverrides(
-            parsed.manualOverrides || editingFlight.manualOverrides || {}
-          );
-          return;
-        }
-      } catch {
-        // Ignore parse errors
-      }
-    }
-
     setFormData(editingFlight);
     setManualOverrides(editingFlight.manualOverrides || {});
   }, [editingFlight]);
@@ -487,7 +458,6 @@ export function FlightForm({
         updated.arrivalIcao = selectedAirportCode;
         updated.arrivalIata = "";
       }
-      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(updated));
       return updated;
     });
 
@@ -530,9 +500,6 @@ export function FlightForm({
         }
       }
 
-      if (changed) {
-        sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(updated));
-      }
       return changed ? updated : prev;
     });
   }, [airports, formData.departureIcao, formData.arrivalIcao]);
@@ -545,15 +512,11 @@ export function FlightForm({
 
     selectionsProcessedRef.current.aircraft = selectionKey;
 
-    setFormData((prev) => {
-      const updated = {
-        ...prev,
-        aircraftReg: selectedAircraftReg,
-        aircraftType: selectedAircraftType || prev.aircraftType,
-      };
-      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(updated));
-      return updated;
-    });
+    setFormData((prev) => ({
+      ...prev,
+      aircraftReg: selectedAircraftReg,
+      aircraftType: selectedAircraftType || prev.aircraftType,
+    }));
 
     addRecentlyUsedAircraft(selectedAircraftReg);
 
@@ -581,7 +544,6 @@ export function FlightForm({
         updated.sicId = selectedCrewId;
         updated.sicName = selectedCrewName || "";
       }
-      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(updated));
       return updated;
     });
 
@@ -789,12 +751,28 @@ export function FlightForm({
     });
   }, [calculatedFields, manualOverrides]);
 
-  // Save to session storage on form data change
+  // Debounce form data for auto-save
+  const debouncedFormData = useDebounce(formData, 500);
+
+  // Auto-save to IndexedDB for existing flights (drafts or otherwise)
+  // This replaces sessionStorage draft management
   useEffect(() => {
-    if (formData && typeof window !== "undefined") {
-      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData));
-    }
-  }, [formData]);
+    const autoSave = async () => {
+      // Only auto-save if we have an existing flight with an ID
+      if (!debouncedFormData?.id || !editingFlight?.id) return;
+
+      try {
+        await updateFlight(debouncedFormData.id, {
+          ...debouncedFormData,
+          manualOverrides,
+        });
+      } catch (error) {
+        console.error("Auto-save failed:", error);
+      }
+    };
+
+    autoSave();
+  }, [debouncedFormData, editingFlight?.id, manualOverrides]);
 
   // Update field helper
   const updateField = useCallback(
@@ -887,21 +865,21 @@ export function FlightForm({
     [updateField, markManualOverride, manualOverrides]
   );
 
-  // Open pickers
+  // Open pickers - use flight ID in URL for return navigation
   const openAirportPicker = (field: "departureIcao" | "arrivalIcao") => {
-    sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData));
-    router.push(`/airports?select=true&returnTo=/new-flight&field=${field}`);
+    const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
+    router.push(`/airports?select=true&returnTo=${encodeURIComponent(returnUrl)}&field=${field}`);
   };
 
   const openAircraftPicker = () => {
-    sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData));
-    router.push(`/aircraft?select=true&returnTo=/new-flight&field=aircraftReg`);
+    const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
+    router.push(`/aircraft?select=true&returnTo=${encodeURIComponent(returnUrl)}&field=aircraftReg`);
   };
 
   const openCrewPicker = (field: "picId" | "sicId") => {
-    sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData));
     const crewField = field === "picId" ? "pic" : "sic";
-    router.push(`/crew?select=true&return=/new-flight&field=${crewField}`);
+    const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
+    router.push(`/crew?select=true&return=${encodeURIComponent(returnUrl)}&field=${crewField}`);
   };
 
   const swapCrew = useCallback(() => {
@@ -933,16 +911,17 @@ export function FlightForm({
     [updateField]
   );
 
-  const handleSubmit = async () => {
+  // Sync Flight: Mark as non-draft and sync to backend
+  const handleSyncFlight = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
 
     try {
       const flightData: FlightLog = {
         id: formData.id || editingFlight?.id || crypto.randomUUID(),
-        isDraft: false,
-        createdAt: editingFlight?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        isDraft: false, // Mark as not a draft - will trigger sync
+        createdAt: editingFlight?.createdAt || Date.now(),
+        updatedAt: Date.now(),
         syncStatus: "pending",
         date: formData.date || new Date().toISOString().split("T")[0],
         flightNumber: formData.flightNumber || "",
@@ -995,13 +974,29 @@ export function FlightForm({
       };
 
       await updateFlight(flightData.id, flightData);
-      sessionStorage.removeItem(FORM_STORAGE_KEY);
       onFlightAdded(flightData);
     } catch (error) {
-      console.error("Failed to save flight:", error);
+      console.error("Failed to sync flight:", error);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // Keep as Draft: Just close without marking as non-draft (auto-save already saved)
+  const handleKeepAsDraft = () => {
+    onClose();
+  };
+
+  // Discard Draft: Delete the draft flight and close
+  const handleDiscardDraft = async () => {
+    if (editingFlight?.id && editingFlight.isDraft) {
+      try {
+        await deleteFlight(editingFlight.id);
+      } catch (error) {
+        console.error("Failed to delete draft:", error);
+      }
+    }
+    onClose();
   };
 
   // Additional crew management
@@ -1168,14 +1163,17 @@ export function FlightForm({
     return arrTimezone;
   }, [activeTimePicker, depTimezone, arrTimezone]);
 
+  const isDraft = editingFlight?.isDraft ?? true;
+
   return (
     <div className="min-h-screen bg-background pb-20">
       {/* Fixed Header */}
       <div className="sticky top-0 z-50 bg-card border-b border-border px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={onClose}>
-              <ChevronLeft className="h-5 w-5" />
+            <Button variant="ghost" size="sm" onClick={handleKeepAsDraft} className="gap-1">
+              <ChevronLeft className="h-4 w-4" />
+              {isDraft ? "Keep Draft" : "Back"}
             </Button>
             <ImageImportButton
               onDataExtracted={handleOCRDataExtracted}
@@ -1183,16 +1181,22 @@ export function FlightForm({
               size="icon"
             />
           </div>
-          <h1 className="text-lg font-semibold">
-            {editingFlight && !formData.isDraft ? "Edit Flight" : "New Flight"}
+          <h1 className="text-lg font-semibold flex items-center gap-2">
+            {isDraft ? "Draft" : "Edit Flight"}
+            {isDraft && (
+              <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full font-normal">
+                Auto-saved
+              </span>
+            )}
           </h1>
           <Button
-            onClick={handleSubmit}
+            onClick={handleSyncFlight}
             disabled={isSubmitting}
             size="sm"
-            className="px-4"
+            className="px-3 gap-1.5"
           >
-            {isSubmitting ? "Saving..." : "Save"}
+            <RefreshCw className={`h-4 w-4 ${isSubmitting ? "animate-spin" : ""}`} />
+            {isSubmitting ? "Syncing..." : "Sync Flight"}
           </Button>
         </div>
       </div>

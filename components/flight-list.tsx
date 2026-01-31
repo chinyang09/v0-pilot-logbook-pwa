@@ -54,6 +54,7 @@ interface FlightListProps {
   hideFilters?: boolean;
   topSpacerHeight?: number; // Height of the calendar
   headerContent?: React.ReactNode; // Height of the top bar (48px)
+  selectedFlightId?: string | null; // Currently selected flight for visual highlighting
 }
 
 
@@ -105,6 +106,7 @@ interface SwipeableFlightCardProps {
   onDelete: () => void;
   onToggleLock: () => void;
   personnel?: Personnel[];
+  isSelected?: boolean;
 }
 
 const SwipeableFlightCard = memo(function SwipeableFlightCard({
@@ -113,6 +115,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   onDelete,
   onToggleLock,
   personnel = [],
+  isSelected = false,
 }: SwipeableFlightCardProps) {
   const isLocked = flight.isLocked || false;
   const isDraft = flight.isDraft || false;
@@ -156,9 +159,11 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
     >
       <Card
         className={cn(
-          "bg-card border-border cursor-pointer relative py-0",
+          "bg-card border-border cursor-pointer relative py-0 transition-all",
           isLocked && "opacity-75",
-          isDraft && "border-dashed border-primary/50"
+          isDraft && "border-dashed border-primary/50",
+          isSelected && "ring-2 ring-primary bg-primary/5",
+          !isSelected && "hover:bg-muted/50"
         )}
       >
         <CardContent className="px-3 py-1">
@@ -296,6 +301,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       hideFilters = false,
       topSpacerHeight = 0,
       headerContent,
+      selectedFlightId,
     },
     ref
   ) {
@@ -573,6 +579,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                       onDelete={() => confirmDelete(flight)}
                       onToggleLock={() => handleToggleLock(flight)}
                       personnel={personnel}
+                      isSelected={selectedFlightId === flight.id}
                     />
                   </div>
                 );

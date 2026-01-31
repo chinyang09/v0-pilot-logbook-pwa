@@ -113,7 +113,8 @@ export default function Dashboard() {
       header={
         <header className="flex-none bg-background/80 backdrop-blur-xl border-b border-border/50 z-50">
           <div className="container mx-auto px-4">
-            <div className="flex items-center justify-between h-12">
+            {/* Always add pl-10 padding to avoid overlap with sidebar toggle button */}
+            <div className="flex items-center justify-between h-12 pl-10">
               <h1 className="text-lg font-semibold text-foreground">Dashboard</h1>
               <div className="flex items-center gap-2">
                 <SyncStatus />

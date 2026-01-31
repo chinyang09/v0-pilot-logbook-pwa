@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react"
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 interface DetailPanelContextType {
@@ -65,9 +65,21 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
   const selectedIdFromUrl = searchParams.get("selected")
   const [selectedId, setSelectedIdState] = useState<string | null>(selectedIdFromUrl)
 
-  // Sync selectedId with URL params
+  // Track when we're updating URL to avoid sync race condition
+  const pendingUpdateRef = useRef<string | null | undefined>(undefined)
+
+  // Sync selectedId with URL params (only when URL changes externally)
   useEffect(() => {
     const urlSelected = searchParams.get("selected")
+    // Skip sync if we have a pending update that matches (our own update)
+    if (pendingUpdateRef.current !== undefined) {
+      if (pendingUpdateRef.current === urlSelected) {
+        // URL caught up with our update, clear pending
+        pendingUpdateRef.current = undefined
+      }
+      // Skip syncing while we have a pending update
+      return
+    }
     if (urlSelected !== selectedId) {
       setSelectedIdState(urlSelected)
     }
@@ -75,6 +87,9 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
 
   // On pathname change, restore selection from sessionStorage if not in URL
   useEffect(() => {
+    // Clear pending update on pathname change
+    pendingUpdateRef.current = undefined
+
     const urlSelected = searchParams.get("selected")
     if (!urlSelected) {
       const stored = getStoredSelections()
@@ -87,6 +102,8 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
   }, [pathname, searchParams])
 
   const setSelectedId = useCallback((id: string | null) => {
+    // Mark that we're updating to this value (prevents sync effect from reverting)
+    pendingUpdateRef.current = id
     setSelectedIdState(id)
 
     // Update URL
