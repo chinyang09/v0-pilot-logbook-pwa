@@ -324,10 +324,10 @@ export default function AirportsPage() {
         />
       }
       rightContent={
-        !searchQuery.trim() && fastScrollItems.length > 1 ? (
+        fastScrollItems.length > 1 ? (
           <FastScroll
             items={fastScrollItems}
-            activeKey={activeLetterKey}
+            activeKey={searchQuery.trim() ? undefined : activeLetterKey}
             onSelect={handleFastScrollSelect}
             indicatorPosition="left"
           />
@@ -349,7 +349,7 @@ export default function AirportsPage() {
             </div>
           </div>
 
-          <div className={`space-y-3 ${!searchQuery.trim() && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
+          <div className={`space-y-3 ${fastScrollItems.length > 1 ? "pr-8" : ""}`}>
             {!searchQuery.trim() && (
               <>
                 {/* Favorites Section */}

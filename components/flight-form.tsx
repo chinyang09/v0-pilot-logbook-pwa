@@ -343,6 +343,8 @@ interface FlightFormProps {
   selectedCrewField?: string | null;
   selectedCrewId?: string | null;
   selectedCrewName?: string | null;
+  /** If true, picker navigation returns to /logbook with flightId instead of /flights/[id] */
+  isDesktop?: boolean;
 }
 
 export function FlightForm({
@@ -356,6 +358,7 @@ export function FlightForm({
   selectedCrewField,
   selectedCrewId,
   selectedCrewName,
+  isDesktop = false,
 }: FlightFormProps) {
   const router = useRouter();
   const { airports } = useAirportDatabase();
@@ -865,21 +868,34 @@ export function FlightForm({
     [updateField, markManualOverride, manualOverrides]
   );
 
-  // Open pickers - use flight ID in URL for return navigation
+  // Open pickers - on desktop, return to /logbook with flightId; on mobile, return to /flights/[id]
   const openAirportPicker = (field: "departureIcao" | "arrivalIcao") => {
-    const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
-    router.push(`/airports?select=true&returnTo=${encodeURIComponent(returnUrl)}&field=${field}`);
+    if (isDesktop && formData.id) {
+      // On desktop, return to logbook with flightId to restore editing state
+      router.push(`/airports?select=true&returnTo=/logbook&flightId=${formData.id}&field=${field}`);
+    } else {
+      const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
+      router.push(`/airports?select=true&returnTo=${encodeURIComponent(returnUrl)}&field=${field}`);
+    }
   };
 
   const openAircraftPicker = () => {
-    const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
-    router.push(`/aircraft?select=true&returnTo=${encodeURIComponent(returnUrl)}&field=aircraftReg`);
+    if (isDesktop && formData.id) {
+      router.push(`/aircraft?select=true&returnTo=/logbook&flightId=${formData.id}&field=aircraftReg`);
+    } else {
+      const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
+      router.push(`/aircraft?select=true&returnTo=${encodeURIComponent(returnUrl)}&field=aircraftReg`);
+    }
   };
 
   const openCrewPicker = (field: "picId" | "sicId") => {
     const crewField = field === "picId" ? "pic" : "sic";
-    const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
-    router.push(`/crew?select=true&return=${encodeURIComponent(returnUrl)}&field=${crewField}`);
+    if (isDesktop && formData.id) {
+      router.push(`/crew?select=true&return=/logbook&flightId=${formData.id}&field=${crewField}`);
+    } else {
+      const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
+      router.push(`/crew?select=true&return=${encodeURIComponent(returnUrl)}&field=${crewField}`);
+    }
   };
 
   const swapCrew = useCallback(() => {
