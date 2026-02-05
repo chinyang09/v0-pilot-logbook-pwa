@@ -16,6 +16,7 @@ import { ArrowLeft, Loader2, ChevronRight } from "lucide-react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
+import { useIsDesktop } from "@/hooks/use-is-desktop";
 
 const ROLE_OPTIONS = ["PIC", "SIC", "Instructor", "Examiner"] as const;
 
@@ -89,6 +90,15 @@ export default function CrewDetailPage() {
   const fieldType = searchParams.get("field");
   const returnUrl = searchParams.get("return") || "/new-flight";
   const router = useRouter();
+  const isDesktop = useIsDesktop();
+
+  // When switching to desktop view, redirect to crew page with selection
+  // Skip for "new" crew creation which stays as a full page
+  useEffect(() => {
+    if (isDesktop && !isNew && id) {
+      router.replace(`/crew?selected=${encodeURIComponent(id)}`);
+    }
+  }, [isDesktop, isNew, id, router]);
 
   const [crew, setCrew] = useState<Personnel | null>(null);
   const [isLoading, setIsLoading] = useState(!isNew);

@@ -11,14 +11,23 @@ import {
   getAircraftByIcao24,
   type NormalizedAircraft,
 } from "@/lib/db";
+import { useIsDesktop } from "@/hooks/use-is-desktop";
 
 export default function AircraftDetailPage() {
   const params = useParams();
   const router = useRouter();
   const registration = decodeURIComponent(params.registration as string);
+  const isDesktop = useIsDesktop();
 
   const [aircraft, setAircraft] = useState<NormalizedAircraft | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // When switching to desktop view, redirect to aircraft page with selection
+  useEffect(() => {
+    if (isDesktop && registration) {
+      router.replace(`/aircraft?selected=${encodeURIComponent(registration)}`);
+    }
+  }, [isDesktop, registration, router]);
 
   useEffect(() => {
     async function loadAircraft() {

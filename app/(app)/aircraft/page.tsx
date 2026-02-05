@@ -31,6 +31,7 @@ export default function AircraftPage() {
   const selectMode = searchParams.get("select") === "true"
   const returnTo = searchParams.get("returnTo") || "/new-flight"
   const fieldName = searchParams.get("field") || "aircraftReg"
+  const selectedFromUrl = searchParams.get("selected")
   const isDesktop = useIsDesktop()
 
   // Detail panel integration
@@ -39,6 +40,17 @@ export default function AircraftPage() {
     setSelectedId: setSelectedAircraftReg,
     setDetailContent,
   } = useDetailPanel()
+
+  // Handle selection from URL (when redirected from mobile detail view)
+  useEffect(() => {
+    if (selectedFromUrl && isDesktop) {
+      setSelectedAircraftReg(selectedFromUrl)
+      // Clean up the URL
+      const url = new URL(window.location.href)
+      url.searchParams.delete("selected")
+      window.history.replaceState({}, "", url.toString())
+    }
+  }, [selectedFromUrl, isDesktop, setSelectedAircraftReg])
 
   const [searchQuery, setSearchQuery] = useState("")
   const debouncedSearchQuery = useDebounce(searchQuery, 150)

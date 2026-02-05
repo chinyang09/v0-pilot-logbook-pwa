@@ -1207,7 +1207,8 @@ export function FlightForm({
   const isDraft = editingFlight?.isDraft ?? true;
 
   return (
-    <div className="min-h-screen bg-background pb-20">
+    <div className="h-full overflow-y-auto bg-background">
+      <div className="min-h-full pb-20">
       {/* Fixed Header */}
       <div className="sticky top-0 z-50 bg-card border-b border-border px-4 py-3">
         <div className="flex items-center justify-between">
@@ -1849,6 +1850,7 @@ export function FlightForm({
           label="Select Date"
         />
       )}
+      </div>
     </div>
   );
 }

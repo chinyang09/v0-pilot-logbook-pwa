@@ -131,6 +131,7 @@ export default function CrewPage() {
   const searchParams = useSearchParams();
   const fieldType = searchParams.get("field");
   const returnUrl = searchParams.get("return") || "/new-flight";
+  const selectedFromUrl = searchParams.get("selected");
   const isDesktop = useIsDesktop();
   const mainContentRef = useRef<HTMLDivElement>(null);
 
@@ -146,6 +147,17 @@ export default function CrewPage() {
     setSelectedId: setSelectedCrewId,
     setDetailContent,
   } = useDetailPanel();
+
+  // Handle selection from URL (when redirected from mobile detail view)
+  useEffect(() => {
+    if (selectedFromUrl && isDesktop) {
+      setSelectedCrewId(selectedFromUrl);
+      // Clean up the URL
+      const url = new URL(window.location.href);
+      url.searchParams.delete("selected");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [selectedFromUrl, isDesktop, setSelectedCrewId]);
 
   const observerTarget = useRef<HTMLDivElement>(null);
 

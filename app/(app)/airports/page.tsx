@@ -33,6 +33,7 @@ export default function AirportsPage() {
   const fieldType = searchParams.get("field");
   const returnUrl =
     searchParams.get("return") || searchParams.get("returnTo") || "/new-flight";
+  const selectedFromUrl = searchParams.get("selected");
   const isDesktop = useIsDesktop();
   const mainContentRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +49,17 @@ export default function AirportsPage() {
     setSelectedId: setSelectedAirportIcao,
     setDetailContent,
   } = useDetailPanel();
+
+  // Handle selection from URL (when redirected from mobile detail view)
+  useEffect(() => {
+    if (selectedFromUrl && isDesktop) {
+      setSelectedAirportIcao(selectedFromUrl);
+      // Clean up the URL
+      const url = new URL(window.location.href);
+      url.searchParams.delete("selected");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [selectedFromUrl, isDesktop, setSelectedAirportIcao]);
 
   const {
     searchQuery,

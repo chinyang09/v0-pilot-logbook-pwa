@@ -8,15 +8,42 @@ import { Loader2 } from "lucide-react"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
 import { syncService } from "@/lib/sync"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
 
 export default function FlightDetailPage() {
   const params = useParams()
   const router = useRouter()
   const searchParams = useSearchParams()
   const id = params.id as string
+  const isDesktop = useIsDesktop()
 
   const [flight, setFlight] = useState<FlightLog | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+
+  // When switching to desktop view, redirect to logbook with the flight selected
+  useEffect(() => {
+    if (isDesktop && id) {
+      // Preserve any picker params when redirecting
+      const pickerParams = new URLSearchParams()
+      pickerParams.set("flightId", id)
+
+      const field = searchParams.get("field")
+      const airport = searchParams.get("airport")
+      const aircraftReg = searchParams.get("aircraftReg")
+      const aircraftType = searchParams.get("aircraftType")
+      const crewId = searchParams.get("crewId")
+      const crewName = searchParams.get("crewName")
+
+      if (field) pickerParams.set("field", field)
+      if (airport) pickerParams.set("airport", airport)
+      if (aircraftReg) pickerParams.set("aircraftReg", aircraftReg)
+      if (aircraftType) pickerParams.set("aircraftType", aircraftType)
+      if (crewId) pickerParams.set("crewId", crewId)
+      if (crewName) pickerParams.set("crewName", crewName)
+
+      router.replace(`/logbook?${pickerParams.toString()}`)
+    }
+  }, [isDesktop, id, router, searchParams])
 
   // Get picker selection params to pass to FlightForm
   const selectedField = searchParams.get("field")
