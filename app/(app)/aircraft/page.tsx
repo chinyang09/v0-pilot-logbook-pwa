@@ -49,6 +49,14 @@ export default function AircraftPage() {
       const url = new URL(window.location.href)
       url.searchParams.delete("selected")
       window.history.replaceState({}, "", url.toString())
+
+      // Scroll to the selected aircraft after a brief delay for render
+      setTimeout(() => {
+        const element = document.getElementById(`aircraft-${selectedFromUrl}`)
+        if (element) {
+          element.scrollIntoView({ behavior: "instant", block: "center" })
+        }
+      }, 100)
     }
   }, [selectedFromUrl, isDesktop, setSelectedAircraftReg])
 

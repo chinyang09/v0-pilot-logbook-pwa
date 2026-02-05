@@ -78,7 +78,25 @@ export default function LogbookPage() {
   const { airports } = useAirportDatabase()
   const { personnel } = usePersonnel()
 
-  const [showCalendar, setShowCalendar] = useState(false)
+  // Initialize calendar state from URL (preserves state when switching layouts)
+  const [showCalendar, setShowCalendar] = useState(() => {
+    if (typeof window !== "undefined") {
+      return searchParams.get("calendar") === "true"
+    }
+    return false
+  })
+
+  // Sync calendar state to URL
+  const toggleCalendar = useCallback((show: boolean) => {
+    setShowCalendar(show)
+    const url = new URL(window.location.href)
+    if (show) {
+      url.searchParams.set("calendar", "true")
+    } else {
+      url.searchParams.delete("calendar")
+    }
+    window.history.replaceState({}, "", url.toString())
+  }, [])
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date()
     return { year: now.getFullYear(), month: now.getMonth() }
@@ -105,17 +123,35 @@ export default function LogbookPage() {
     return () => setHasDetailSupport(false)
   }, [setHasDetailSupport])
 
-  // Check if we're returning from a picker page with flight ID (run on mount)
+  // Check if we're returning from a picker page or mobile detail view with flight ID
   useEffect(() => {
     if (!isDesktop) return
 
-    // If there's a flight ID in URL params (from picker), restore editing state
+    // If there's a flight ID in URL params, restore selection
     const flightId = searchParams.get("flightId")
-    const hasPickerParams = searchParams.get("field") || searchParams.get("airport") ||
-                             searchParams.get("aircraftReg") || searchParams.get("crewId")
-    if (flightId && hasPickerParams) {
-      setEditingFlightId(flightId)
+    if (flightId) {
+      const hasPickerParams = searchParams.get("field") || searchParams.get("airport") ||
+                               searchParams.get("aircraftReg") || searchParams.get("crewId")
+      // If coming from picker, also set editing state
+      if (hasPickerParams) {
+        setEditingFlightId(flightId)
+      }
       setSelectedFlightId(flightId)
+
+      // Scroll to the selected flight after a brief delay for render
+      setTimeout(() => {
+        const element = document.getElementById(`flight-${flightId}`)
+        if (element) {
+          element.scrollIntoView({ behavior: "instant", block: "center" })
+        }
+      }, 100)
+
+      // Clean up the URL after restoring selection (but keep picker params for form)
+      if (!hasPickerParams) {
+        const url = new URL(window.location.href)
+        url.searchParams.delete("flightId")
+        window.history.replaceState({}, "", url.toString())
+      }
     }
   }, [isDesktop, searchParams, setSelectedFlightId])
 
@@ -429,7 +465,7 @@ export default function LogbookPage() {
               variant="ghost"
               size="icon"
               onClick={() => {
-                setShowCalendar(false)
+                toggleCalendar(false)
                 setSelectedDate(null)
               }}
               className="h-8 w-8 p-0"
@@ -452,7 +488,7 @@ export default function LogbookPage() {
               variant={showCalendar ? "default" : "ghost"}
               size="icon"
               onClick={() => {
-                setShowCalendar(!showCalendar)
+                toggleCalendar(!showCalendar)
                 setSelectedDate(null)
                 setSearchFocused(false)
               }}

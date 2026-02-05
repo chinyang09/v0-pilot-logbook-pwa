@@ -58,6 +58,14 @@ export default function AirportsPage() {
       const url = new URL(window.location.href);
       url.searchParams.delete("selected");
       window.history.replaceState({}, "", url.toString());
+
+      // Scroll to the selected airport after a brief delay for render
+      setTimeout(() => {
+        const element = document.getElementById(`airport-${selectedFromUrl}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "instant", block: "center" });
+        }
+      }, 100);
     }
   }, [selectedFromUrl, isDesktop, setSelectedAirportIcao]);
 
