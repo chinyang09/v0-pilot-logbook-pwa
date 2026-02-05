@@ -1,12 +1,12 @@
 "use client";
 
 import type React from "react";
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { PageContainer } from "@/components/page-container";
 import { useDebounce } from "@/hooks/use-debounce";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { SyncStatus } from "@/components/sync-status";
 import { usePersonnel } from "@/hooks/data";
 import { deletePersonnel } from "@/lib/db";
 import {
@@ -14,7 +14,6 @@ import {
   Loader2,
   User,
   Plus,
-  ArrowLeft,
   Trash2,
   ChevronRight,
 } from "lucide-react";
@@ -30,10 +29,8 @@ import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { CrewDetailPanel } from "@/components/crew-detail-panel";
 
-const ITEMS_PER_PAGE = 50;
-
-// --- SwipeableCrewCard Component ---
-function SwipeableCrewCard({
+// Memoized crew card to prevent unnecessary re-renders during virtualization
+const SwipeableCrewCard = memo(function SwipeableCrewCard({
   crew,
   onSelect,
   onDelete,
@@ -81,7 +78,6 @@ function SwipeableCrewCard({
               <User className="h-5 w-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
-              {/* Name row - truncated to single line */}
               <div className="flex items-center gap-2 mb-0.5 min-w-0">
                 <span className="font-semibold text-foreground truncate">
                   {displayName}
@@ -92,7 +88,6 @@ function SwipeableCrewCard({
                   </span>
                 )}
               </div>
-              {/* Organization and ID row */}
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 {crew.organization && (
                   <span className="truncate">{crew.organization}</span>
@@ -103,7 +98,6 @@ function SwipeableCrewCard({
                   </span>
                 )}
               </div>
-              {/* Roles row */}
               {crew.roles && crew.roles.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">
                   {crew.roles.map((role) => (
@@ -123,7 +117,7 @@ function SwipeableCrewCard({
       </button>
     </SwipeableCard>
   );
-}
+});
 
 // --- Main CrewPage Component ---
 export default function CrewPage() {
@@ -133,12 +127,15 @@ export default function CrewPage() {
   const returnUrl = searchParams.get("return") || "/new-flight";
   const selectedFromUrl = searchParams.get("selected");
   const isDesktop = useIsDesktop();
-  const mainContentRef = useRef<HTMLDivElement>(null);
+
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
+  const scrollContainerCallbackRef = useCallback((el: HTMLElement | null) => {
+    scrollContainerRef.current = el;
+  }, []);
 
   const { personnel, isLoading } = usePersonnel();
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebounce(searchQuery, 150);
-  const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
   const { confirmDelete, handleDelete, DeleteDialog } = useDeleteConfirmation<(typeof personnel)[0]>();
 
   // Detail panel integration
@@ -148,26 +145,19 @@ export default function CrewPage() {
     setDetailContent,
   } = useDetailPanel();
 
+  // FastScroll state
+  const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
+  const isFastScrollingRef = useRef(false);
+
   // Handle selection from URL (when redirected from mobile detail view)
   useEffect(() => {
     if (selectedFromUrl && isDesktop) {
       setSelectedCrewId(selectedFromUrl);
-      // Clean up the URL
       const url = new URL(window.location.href);
       url.searchParams.delete("selected");
       window.history.replaceState({}, "", url.toString());
-
-      // Scroll to the selected crew after a brief delay for render
-      setTimeout(() => {
-        const element = document.getElementById(`crew-${selectedFromUrl}`);
-        if (element) {
-          element.scrollIntoView({ behavior: "instant", block: "center" });
-        }
-      }, 100);
     }
   }, [selectedFromUrl, isDesktop, setSelectedCrewId]);
-
-  const observerTarget = useRef<HTMLDivElement>(null);
 
   const sortedPersonnel = useMemo(() => {
     return [...personnel].sort((a, b) => {
@@ -178,6 +168,81 @@ export default function CrewPage() {
       return (a.name || "").localeCompare(b.name || "");
     });
   }, [personnel]);
+
+  // Filtered personnel for search mode
+  const filteredPersonnel = useMemo(() => {
+    const query = debouncedSearchQuery.toLowerCase().trim();
+    if (!query) return sortedPersonnel;
+    return sortedPersonnel.filter(
+      (p) =>
+        p.name?.toLowerCase().includes(query) ||
+        p.crewId?.toLowerCase().includes(query) ||
+        p.organization?.toLowerCase().includes(query) ||
+        p.roles?.some((r) => r.toLowerCase().includes(query))
+    );
+  }, [sortedPersonnel, debouncedSearchQuery]);
+
+  // The list to virtualize
+  const displayPersonnel = debouncedSearchQuery.trim() ? filteredPersonnel : sortedPersonnel;
+
+  // Generate FastScroll items from crew names (excluding self and favorites)
+  const fastScrollItems = useMemo(() => {
+    const regularCrew = sortedPersonnel.filter((p) => !p.isMe && !p.favorite);
+    return generateAlphabetItemsFromList(regularCrew.map((p) => p.name || ""), {
+      numberPosition: "end",
+    });
+  }, [sortedPersonnel]);
+
+  // Pre-compute letter -> virtual list index mapping for fast scroll
+  const letterIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    sortedPersonnel.forEach((crew, index) => {
+      if (crew.isMe || crew.favorite) return;
+      const name = crew.name || "";
+      const firstChar = name[0]?.toUpperCase();
+      const letter = firstChar && /[A-Z]/.test(firstChar) ? firstChar : "#";
+      if (!map.has(letter)) {
+        map.set(letter, index);
+      }
+    });
+    return map;
+  }, [sortedPersonnel]);
+
+  // Measure scroll margin: height of non-virtualized content above the virtual list
+  const aboveVirtualRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+
+  useEffect(() => {
+    const el = aboveVirtualRef.current;
+    const scrollEl = scrollContainerRef.current;
+    if (!el || !scrollEl) {
+      setScrollMargin(0);
+      return;
+    }
+
+    const updateMargin = () => {
+      const scrollRect = scrollEl.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const margin = (elRect.bottom - scrollRect.top) + scrollEl.scrollTop;
+      setScrollMargin(margin);
+    };
+
+    updateMargin();
+    const observer = new ResizeObserver(updateMargin);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [debouncedSearchQuery, personnel]);
+
+  // Virtual list
+  const rowVirtualizer = useVirtualizer({
+    count: displayPersonnel.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => 84, // Estimated crew card height
+    overscan: 10,
+    scrollMargin,
+  });
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
 
   // Auto-select first crew when loading (desktop only, not in select mode)
   useEffect(() => {
@@ -221,61 +286,11 @@ export default function CrewPage() {
     }
   }, [isDesktop, fieldType, selectedCrewId, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
 
-  const filteredPersonnel = useMemo(() => {
-    const query = debouncedSearchQuery.toLowerCase().trim();
-    if (!query) return sortedPersonnel.slice(0, displayCount);
-    return sortedPersonnel
-      .filter(
-        (p) =>
-          p.name?.toLowerCase().includes(query) ||
-          p.crewId?.toLowerCase().includes(query) ||
-          p.organization?.toLowerCase().includes(query) ||
-          p.roles?.some((r) => r.toLowerCase().includes(query))
-      )
-      .slice(0, displayCount);
-  }, [sortedPersonnel, debouncedSearchQuery, displayCount]);
-
+  // Track active letter from virtualizer scroll position
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !isLoading) {
-          setDisplayCount((prev) =>
-            Math.min(prev + ITEMS_PER_PAGE, personnel.length)
-          );
-        }
-      },
-      { threshold: 0.1 }
-    );
-    const target = observerTarget.current;
-    if (target) observer.observe(target);
-    return () => {
-      if (target) observer.unobserve(target);
-    };
-  }, [isLoading, personnel.length]);
+    if (debouncedSearchQuery.trim()) return;
 
-  useEffect(() => {
-    setDisplayCount(ITEMS_PER_PAGE);
-  }, [searchQuery]);
-
-  // FastScroll state
-  const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
-  const isFastScrollingRef = useRef(false);
-
-  // Generate FastScroll items from crew names (excluding self and favorites)
-  // Use numberPosition: "end" since names typically don't start with numbers
-  const fastScrollItems = useMemo(() => {
-    const regularCrew = sortedPersonnel.filter((p) => !p.isMe && !p.favorite);
-    return generateAlphabetItemsFromList(regularCrew.map((p) => p.name || ""), {
-      numberPosition: "end",
-    });
-  }, [sortedPersonnel]);
-
-  // Track visible crew and update activeLetterKey on scroll using throttled scroll listener
-  useEffect(() => {
-    if (debouncedSearchQuery) return;
-
-    // Find the scrollable main container (PageContainer uses main with overflow-y-auto)
-    const scrollContainer = document.querySelector('main.overflow-y-auto');
+    const scrollContainer = scrollContainerRef.current;
     if (!scrollContainer) return;
 
     let ticking = false;
@@ -284,25 +299,24 @@ export default function CrewPage() {
 
       ticking = true;
       requestAnimationFrame(() => {
-        // Find the first visible non-self, non-favorite crew by sampling elements
-        const viewportTop = 120; // Account for header/search bar
-        const cards = document.querySelectorAll('[id^="crew-"]');
-
-        for (const card of cards) {
-          const rect = card.getBoundingClientRect();
-          // Check if card is in the visible viewport area
-          if (rect.top >= viewportTop - 50 && rect.top < window.innerHeight / 2) {
-            const id = card.id.replace("crew-", "");
-            const crew = personnel.find((p) => p.id === id);
-            if (crew && !crew.isMe && !crew.favorite) {
-              const name = crew.name || "";
-              const firstChar = name[0]?.toUpperCase();
-              if (firstChar && /[A-Z]/.test(firstChar)) {
-                setActiveLetterKey(firstChar);
-              } else {
-                setActiveLetterKey("#");
-              }
+        const items = rowVirtualizer.getVirtualItems();
+        if (items.length > 0) {
+          const scrollOffset = rowVirtualizer.scrollOffset ?? 0;
+          let topItem = items[0];
+          for (const item of items) {
+            if (item.start + scrollMargin >= scrollOffset) {
+              topItem = item;
               break;
+            }
+          }
+          const crew = displayPersonnel[topItem.index];
+          if (crew && !crew.isMe && !crew.favorite) {
+            const name = crew.name || "";
+            const firstChar = name[0]?.toUpperCase();
+            if (firstChar && /[A-Z]/.test(firstChar)) {
+              setActiveLetterKey(firstChar);
+            } else {
+              setActiveLetterKey("#");
             }
           }
         }
@@ -311,67 +325,52 @@ export default function CrewPage() {
     };
 
     scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
-    // Initial check
     handleScroll();
 
     return () => scrollContainer.removeEventListener("scroll", handleScroll);
-  }, [personnel, debouncedSearchQuery]);
+  }, [displayPersonnel, debouncedSearchQuery, rowVirtualizer, scrollMargin]);
 
-  // Handle FastScroll selection
+  // Handle FastScroll selection - uses scrollToIndex
   const handleFastScrollSelect = useCallback((letter: string) => {
-    isFastScrollingRef.current = true;
-    setActiveLetterKey(letter);
-
-    // Find first crew member starting with this letter (skip self and favorites)
-    const targetCrew = sortedPersonnel.find((p) => {
-      if (p.isMe || p.favorite) return false;
-      const name = p.name || "";
-      const firstChar = name[0]?.toUpperCase();
-      if (letter === "#") {
-        return !/[A-Z]/.test(firstChar || "");
-      }
-      return firstChar === letter;
-    });
-
-    if (targetCrew) {
-      // Make sure we've loaded enough items to show this crew
-      const index = sortedPersonnel.findIndex((p) => p.id === targetCrew.id);
-      if (index >= displayCount) {
-        setDisplayCount(index + ITEMS_PER_PAGE);
-      }
-
-      // Scroll to the element with instant behavior for snappy feedback
+    const index = letterIndexMap.get(letter);
+    if (index !== undefined) {
+      isFastScrollingRef.current = true;
+      setActiveLetterKey(letter);
+      rowVirtualizer.scrollToIndex(index, {
+        align: "start",
+        behavior: "auto",
+      });
       setTimeout(() => {
-        const element = document.getElementById(`crew-${targetCrew.id}`);
-        if (element) {
-          element.scrollIntoView({ behavior: "instant", block: "start" });
-        }
-        // Reset fast scrolling flag after scroll completes
-        setTimeout(() => {
-          isFastScrollingRef.current = false;
-        }, 100);
-      }, 50);
-    } else {
-      isFastScrollingRef.current = false;
+        isFastScrollingRef.current = false;
+      }, 150);
     }
-  }, [sortedPersonnel, displayCount]);
+  }, [letterIndexMap, rowVirtualizer]);
 
-  const handleCrewSelect = (crew: (typeof personnel)[0]) => {
+  // Scroll to selected crew from URL after data loads
+  useEffect(() => {
+    if (selectedFromUrl && isDesktop && !isLoading && sortedPersonnel.length > 0) {
+      const index = sortedPersonnel.findIndex((p) => p.id === selectedFromUrl);
+      if (index !== -1) {
+        setTimeout(() => {
+          rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "auto" });
+        }, 100);
+      }
+    }
+  }, [selectedFromUrl, isDesktop, isLoading, sortedPersonnel, rowVirtualizer]);
+
+  const handleCrewSelect = useCallback((crew: (typeof personnel)[0]) => {
     if (fieldType) {
-      // Select mode - always navigate back with selected crew
       const params = new URLSearchParams();
       params.set("field", fieldType);
       params.set("crewId", crew.id);
       params.set("crewName", crew.isMe ? "Self" : crew.name);
       router.push(`${returnUrl}?${params.toString()}`);
     } else if (isDesktop) {
-      // Desktop - show in detail panel
       setSelectedCrewId(crew.id);
     } else {
-      // Mobile - navigate to detail page
       router.push(`/crew/${crew.id}`);
     }
-  };
+  }, [fieldType, isDesktop, router, returnUrl, setSelectedCrewId]);
 
   const handleAddCrew = () => {
     const url = fieldType
@@ -395,6 +394,8 @@ export default function CrewPage() {
       }`
     : "Crew";
 
+  const showFastScroll = !debouncedSearchQuery && fastScrollItems.length > 1;
+
   return (
     <PageContainer
       header={
@@ -404,7 +405,7 @@ export default function CrewPage() {
         />
       }
       rightContent={
-        !debouncedSearchQuery && fastScrollItems.length > 1 ? (
+        showFastScroll ? (
           <FastScroll
             items={fastScrollItems}
             activeKey={activeLetterKey}
@@ -413,69 +414,96 @@ export default function CrewPage() {
           />
         ) : null
       }
+      mainRef={scrollContainerCallbackRef}
     >
-      <div ref={mainContentRef}>
+      <div>
         <div className="container mx-auto px-3 pt-3 pb-safe">
-          <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Input
-                  type="text"
-                  placeholder="Search crew..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-                />
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          {/* Non-virtualized content above the virtual list */}
+          <div ref={aboveVirtualRef}>
+            <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Input
+                    type="text"
+                    placeholder="Search crew..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
+                  />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                </div>
+                <Button
+                  onClick={handleAddCrew}
+                  size="icon"
+                  className="h-10 w-10 flex-shrink-0"
+                >
+                  <Plus className="h-5 w-5" />
+                </Button>
               </div>
-              <Button
-                onClick={handleAddCrew}
-                size="icon"
-                className="h-10 w-10 flex-shrink-0"
-              >
-                <Plus className="h-5 w-5" />
-              </Button>
             </div>
-          </div>
 
-          {isLoading && displayCount === ITEMS_PER_PAGE ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            <div className={`space-y-3 ${!debouncedSearchQuery && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
-              {debouncedSearchQuery && (
+            {debouncedSearchQuery.trim() && (
+              <div className={`space-y-3 ${showFastScroll ? "pr-8" : ""}`}>
                 <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
                   {filteredPersonnel.length} results
                 </h2>
-              )}
-
-              <div className="space-y-2">
-                {filteredPersonnel.map((crew) => (
-                  <SwipeableCrewCard
-                    key={crew.id}
-                    crew={crew}
-                    onSelect={() => handleCrewSelect(crew)}
-                    onDelete={() => confirmDelete(crew)}
-                    isSelectMode={!!fieldType}
-                    isSelected={!fieldType && selectedCrewId === crew.id}
-                  />
-                ))}
               </div>
+            )}
+          </div>
 
-              <div ref={observerTarget} className="h-4" />
-
-              {filteredPersonnel.length === 0 && !isLoading && (
-                <div className="text-center py-12">
-                  <User className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-sm text-muted-foreground mb-4">
-                    No results found.
-                  </p>
-                  <Button onClick={handleAddCrew} variant="outline">
-                    <Plus className="h-4 w-4 mr-2" /> Add Crew Member
-                  </Button>
-                </div>
-              )}
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : displayPersonnel.length === 0 ? (
+            <div className="text-center py-12">
+              <User className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-sm text-muted-foreground mb-4">
+                No results found.
+              </p>
+              <Button onClick={handleAddCrew} variant="outline">
+                <Plus className="h-4 w-4 mr-2" /> Add Crew Member
+              </Button>
+            </div>
+          ) : (
+            /* Virtualized crew list */
+            <div className={showFastScroll ? "pr-8" : ""}>
+              <div
+                style={{
+                  height: `${rowVirtualizer.getTotalSize()}px`,
+                  width: "100%",
+                  position: "relative",
+                }}
+              >
+                {virtualItems.map((virtualRow) => {
+                  const crew = displayPersonnel[virtualRow.index];
+                  if (!crew) return null;
+                  return (
+                    <div
+                      key={crew.id}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
+                      }}
+                      data-index={virtualRow.index}
+                      ref={rowVirtualizer.measureElement}
+                    >
+                      <div className="pb-2">
+                        <SwipeableCrewCard
+                          crew={crew}
+                          onSelect={() => handleCrewSelect(crew)}
+                          onDelete={() => confirmDelete(crew)}
+                          isSelectMode={!!fieldType}
+                          isSelected={!fieldType && selectedCrewId === crew.id}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
