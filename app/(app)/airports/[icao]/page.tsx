@@ -158,7 +158,7 @@ export default function AirportDetailPage() {
                       <Mountain className="h-3 w-3" /> Elevation
                     </div>
                     <div className="text-sm font-mono bg-muted/50 p-1.5 rounded text-center">
-                      {airport.altitude} FT
+                      {airport.elevation} FT
                     </div>
                   </div>
                 </div>

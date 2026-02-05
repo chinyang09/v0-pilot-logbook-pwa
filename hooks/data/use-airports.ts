@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type SetStateAction } from "react"
 import useSWR from "swr"
 import {
   getAllAirports,
@@ -107,5 +107,9 @@ export function useAirportDatabase() {
     }
   }, [])
 
-  return { airports, isLoading, error }
+  const mutate = useCallback((updater: SetStateAction<Airport[]>) => {
+    setAirports(updater)
+  }, [])
+
+  return { airports, isLoading, error, mutate }
 }

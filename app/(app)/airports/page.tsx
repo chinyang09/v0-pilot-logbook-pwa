@@ -120,7 +120,7 @@ export default function AirportsPage() {
     scrollContainerRef.current = el;
   }, []);
 
-  const { airports, isLoading } = useAirportDatabase();
+  const { airports, isLoading, mutate: mutateAirports } = useAirportDatabase();
   const [recentAirports, setRecentAirports] = useState<typeof airports>([]);
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
   const isFastScrollingRef = useRef(false);
@@ -166,8 +166,13 @@ export default function AirportsPage() {
     });
   }, [airports, allSortedAirports, debouncedSearchQuery]);
 
-  // The list to virtualize
-  const displayAirports = debouncedSearchQuery.trim() ? filteredAirports : allSortedAirports;
+  // Non-favorite airports for the virtualized list (favorites are shown separately above)
+  const nonFavoriteAirports = useMemo(() => {
+    return allSortedAirports.filter((a) => !a.isFavorite);
+  }, [allSortedAirports]);
+
+  // The list to virtualize: when searching show all results, otherwise exclude favorites
+  const displayAirports = debouncedSearchQuery.trim() ? filteredAirports : nonFavoriteAirports;
 
   // Generate FastScroll alphabet items (excluding favorites)
   const fastScrollItems = useMemo(() => {
@@ -180,8 +185,7 @@ export default function AirportsPage() {
   // Pre-compute letter -> virtual list index mapping for fast scroll
   const letterIndexMap = useMemo(() => {
     const map = new Map<string, number>();
-    allSortedAirports.forEach((airport, index) => {
-      if (airport.isFavorite) return;
+    nonFavoriteAirports.forEach((airport, index) => {
       const firstChar = airport.icao[0]?.toUpperCase();
       const letter = /[A-Z]/.test(firstChar || "") ? firstChar! : "#";
       if (!map.has(letter)) {
@@ -189,7 +193,7 @@ export default function AirportsPage() {
       }
     });
     return map;
-  }, [allSortedAirports]);
+  }, [nonFavoriteAirports]);
 
   // Measure scroll margin: height of non-virtualized content above the virtual list
   const aboveVirtualRef = useRef<HTMLDivElement>(null);
@@ -365,7 +369,13 @@ export default function AirportsPage() {
     e.preventDefault();
     e.stopPropagation();
     await toggleAirportFavorite(icao);
-  }, []);
+    // Optimistically update local state so UI reflects the change immediately
+    mutateAirports((prev) =>
+      prev.map((a) =>
+        a.icao === icao ? { ...a, isFavorite: !a.isFavorite } : a
+      )
+    );
+  }, [mutateAirports]);
 
   const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim();
 
