@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import type React from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Input } from "@/components/ui/input";
-import { SyncStatus } from "@/components/sync-status";
 import { PageContainer } from "@/components/page-container";
-import { useSearchableList } from "@/hooks/use-searchable-list";
 import { useAirportDatabase } from "@/hooks/data";
 import { StandardPageHeader } from "@/components/standard-page-header";
 import {
@@ -16,265 +15,41 @@ import {
   getAirportByIcao,
   type Airport,
 } from "@/lib/db";
-import { Star, Search, MapPin, ArrowLeft, ChevronRight } from "lucide-react";
+import { Star, Search, MapPin } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { FastScroll, generateAlphabetItemsFromList, type FastScrollItem } from "@/components/ui/fast-scroll";
+import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { AirportDetailPanel } from "@/components/airport-detail-panel";
+import { useDebounce } from "@/hooks/use-debounce";
 
-const ITEMS_PER_PAGE = 50;
+// Memoized airport card to prevent unnecessary re-renders during virtualization
+interface AirportCardProps {
+  airport: Airport;
+  isRecent?: boolean;
+  isSelected?: boolean;
+  onSelect: (icao: string) => void;
+  onToggleFavorite: (e: React.MouseEvent, icao: string) => void;
+}
 
-export default function AirportsPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const fieldType = searchParams.get("field");
-  const returnUrl =
-    searchParams.get("return") || searchParams.get("returnTo") || "/new-flight";
-  const selectedFromUrl = searchParams.get("selected");
-  const isDesktop = useIsDesktop();
-  const mainContentRef = useRef<HTMLDivElement>(null);
-
-  const { airports, isLoading } = useAirportDatabase();
-  const [recentAirports, setRecentAirports] = useState<typeof airports>([]);
-  const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
-  const isFastScrollingRef = useRef(false);
-  const listContainerRef = useRef<HTMLDivElement>(null);
-
-  // Detail panel integration
-  const {
-    selectedId: selectedAirportIcao,
-    setSelectedId: setSelectedAirportIcao,
-    setDetailContent,
-  } = useDetailPanel();
-
-  // Handle selection from URL (when redirected from mobile detail view)
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop) {
-      setSelectedAirportIcao(selectedFromUrl);
-      // Clean up the URL
-      const url = new URL(window.location.href);
-      url.searchParams.delete("selected");
-      window.history.replaceState({}, "", url.toString());
-
-      // Scroll to the selected airport after a brief delay for render
-      setTimeout(() => {
-        const element = document.getElementById(`airport-${selectedFromUrl}`);
-        if (element) {
-          element.scrollIntoView({ behavior: "instant", block: "center" });
-        }
-      }, 100);
-    }
-  }, [selectedFromUrl, isDesktop, setSelectedAirportIcao]);
-
-  const {
-    searchQuery,
-    setSearchQuery,
-    displayedItems: filteredAirports,
-    observerTarget,
-    totalFilteredCount,
-    loadAll,
-  } = useSearchableList<Airport>({
-    items: airports,
-    searchFn: (items: Airport[], query: string) => searchAirports(items, query, items.length),
-    sortFn: (a: Airport, b: Airport) => {
-      // Sort: Favorites first, then Alphabetical ICAO
-      if (a.isFavorite && !b.isFavorite) return -1;
-      if (!a.isFavorite && b.isFavorite) return 1;
-      return a.icao.localeCompare(b.icao);
-    },
-    itemsPerPage: ITEMS_PER_PAGE,
-    isLoading,
-  });
-
-  // Generate FastScroll items from sorted airports (excluding favorites)
-  // Use numberPosition: "start" since ICAO codes starting with numbers come first alphabetically
-  const fastScrollItems = useMemo(() => {
-    const nonFavorites = airports.filter((a) => !a.isFavorite);
-    return generateAlphabetItemsFromList(nonFavorites.map((a) => a.icao), {
-      numberPosition: "start",
-    });
-  }, [airports]);
-
-  // Sort all airports consistently
-  const allSortedAirports = useMemo(() => {
-    return [...airports].sort((a, b) => {
-      if (a.isFavorite && !b.isFavorite) return -1;
-      if (!a.isFavorite && b.isFavorite) return 1;
-      return a.icao.localeCompare(b.icao);
-    });
-  }, [airports]);
-
-  // Auto-select first airport when loading (desktop only, not in select mode)
-  useEffect(() => {
-    if (isDesktop && !fieldType && !isLoading && allSortedAirports.length > 0 && !selectedAirportIcao) {
-      setSelectedAirportIcao(allSortedAirports[0].icao);
-    }
-  }, [isDesktop, fieldType, isLoading, allSortedAirports, selectedAirportIcao, setSelectedAirportIcao]);
-
-  // Update detail content when selection changes (desktop only)
-  useEffect(() => {
-    if (!isDesktop || fieldType) return;
-
-    if (isLoading) {
-      setDetailContent(
-        <div className="flex items-center justify-center h-full">
-          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
-        </div>
-      );
-      return;
-    }
-
-    if (allSortedAirports.length === 0) {
-      setDetailContent(
-        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <p>No airports found</p>
-        </div>
-      );
-      return;
-    }
-
-    if (selectedAirportIcao) {
-      // Don't use key prop to avoid component remounting and flickering
-      setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} />);
-    } else if (allSortedAirports.length > 0) {
-      setSelectedAirportIcao(allSortedAirports[0].icao);
-    }
-  }, [isDesktop, fieldType, selectedAirportIcao, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao]);
-
-  // Track visible airports and update activeLetterKey on scroll using throttled scroll listener
-  useEffect(() => {
-    if (searchQuery.trim()) return;
-
-    // Find the scrollable main container (PageContainer uses main with overflow-y-auto)
-    const scrollContainer = document.querySelector('main.overflow-y-auto');
-    if (!scrollContainer) return;
-
-    let ticking = false;
-    const handleScroll = () => {
-      if (ticking || isFastScrollingRef.current) return;
-
-      ticking = true;
-      requestAnimationFrame(() => {
-        // Find the first visible non-favorite airport by sampling elements
-        const viewportTop = 120; // Account for header/search bar
-        const cards = document.querySelectorAll('[id^="airport-"]');
-
-        for (const card of cards) {
-          const rect = card.getBoundingClientRect();
-          // Check if card is in the visible viewport area
-          if (rect.top >= viewportTop - 50 && rect.top < window.innerHeight / 2) {
-            const icao = card.id.replace("airport-", "");
-            const airport = airports.find((a) => a.icao === icao);
-            if (airport && !airport.isFavorite) {
-              const firstChar = airport.icao[0]?.toUpperCase();
-              if (firstChar && /[A-Z]/.test(firstChar)) {
-                setActiveLetterKey(firstChar);
-              } else {
-                setActiveLetterKey("#");
-              }
-              break;
-            }
-          }
-        }
-        ticking = false;
-      });
-    };
-
-    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
-    // Initial check
-    handleScroll();
-
-    return () => scrollContainer.removeEventListener("scroll", handleScroll);
-  }, [airports, searchQuery]);
-
-  // Handle FastScroll selection
-  const handleFastScrollSelect = useCallback((letter: string) => {
-    isFastScrollingRef.current = true;
-    setActiveLetterKey(letter);
-
-    // Load all items first to ensure the target is rendered
-    loadAll();
-
-    // Find first airport starting with this letter (skip favorites)
-    const targetAirport = allSortedAirports.find((a) => {
-      if (a.isFavorite) return false;
-      const firstChar = a.icao[0]?.toUpperCase();
-      if (letter === "#") {
-        return !/[A-Z]/.test(firstChar || "");
-      }
-      return firstChar === letter;
-    });
-
-    if (targetAirport) {
-      // Use setTimeout to ensure DOM is updated after loadAll
-      setTimeout(() => {
-        const element = document.getElementById(`airport-${targetAirport.icao}`);
-        if (element) {
-          element.scrollIntoView({ behavior: "instant", block: "start" });
-        }
-        // Reset fast scrolling flag after scroll completes
-        setTimeout(() => {
-          isFastScrollingRef.current = false;
-        }, 100);
-      }, 50);
-    } else {
-      isFastScrollingRef.current = false;
-    }
-  }, [allSortedAirports, loadAll]);
-
-  useEffect(() => {
-    const loadRecentAirports = async () => {
-      const recentCodes = await getRecentlyUsedAirports();
-      const airports = await Promise.all(
-        recentCodes.map((code) => getAirportByIcao(code))
-      );
-      setRecentAirports(airports.filter(Boolean) as typeof recentAirports);
-    };
-    loadRecentAirports();
-  }, []);
-
-  const handleAirportSelect = async (icao: string) => {
-    if (fieldType) {
-      // Select mode - always navigate back with selected airport
-      await addRecentlyUsedAirport(icao);
-      const params = new URLSearchParams();
-      params.set("field", fieldType);
-      params.set("airport", icao);
-      router.push(`${returnUrl}?${params.toString()}`);
-    } else if (isDesktop) {
-      // Desktop - show in detail panel
-      setSelectedAirportIcao(icao);
-    } else {
-      // Mobile - navigate to detail page
-      router.push(`/airports/${icao}`);
-    }
-  };
-
-  const handleToggleFavorite = async (e: React.MouseEvent, icao: string) => {
-    e.preventDefault();
-    e.stopPropagation(); // Stops the event from bubbling up to the outer <div>
-    await toggleAirportFavorite(icao);
-    // Optional: Trigger a state refresh here if not using SWR
-  };
-
-  const renderAirportCard = (
-    airport: Airport,
-    isRecent = false,
-    isSelected = false
-  ) => (
-    // Change <button> to <div>
+const AirportCard = memo(function AirportCard({
+  airport,
+  isRecent = false,
+  isSelected = false,
+  onSelect,
+  onToggleFavorite,
+}: AirportCardProps) {
+  return (
     <div
       id={`airport-${airport.icao}`}
-      key={airport.icao}
-      onClick={() => handleAirportSelect(airport.icao)}
-      role="button" // Accessibility: Tells screen readers this is interactive
-      tabIndex={0} // Accessibility: Makes it focusable via keyboard
+      onClick={() => onSelect(airport.icao)}
+      role="button"
+      tabIndex={0}
       onKeyDown={(e: React.KeyboardEvent) => {
         if (e.key === "Enter" || e.key === " ") {
-          handleAirportSelect(airport.icao);
+          onSelect(airport.icao);
         }
       }}
       className={cn(
@@ -311,12 +86,11 @@ export default function AirportsPage() {
           </div>
         </div>
 
-        {/* The inner Button is now safe inside a <div> */}
         <Button
           variant="ghost"
           size="icon"
           className="h-9 w-9 hover:bg-primary/20 relative z-10"
-          onClick={(e: React.MouseEvent) => handleToggleFavorite(e, airport.icao)}
+          onClick={(e: React.MouseEvent) => onToggleFavorite(e, airport.icao)}
         >
           <Star
             className={cn(
@@ -330,6 +104,270 @@ export default function AirportsPage() {
       </div>
     </div>
   );
+});
+
+export default function AirportsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const fieldType = searchParams.get("field");
+  const returnUrl =
+    searchParams.get("return") || searchParams.get("returnTo") || "/new-flight";
+  const selectedFromUrl = searchParams.get("selected");
+  const isDesktop = useIsDesktop();
+
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
+  const scrollContainerCallbackRef = useCallback((el: HTMLElement | null) => {
+    scrollContainerRef.current = el;
+  }, []);
+
+  const { airports, isLoading } = useAirportDatabase();
+  const [recentAirports, setRecentAirports] = useState<typeof airports>([]);
+  const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
+  const isFastScrollingRef = useRef(false);
+
+  // Search state (replacing useSearchableList)
+  const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery, 150);
+
+  // Detail panel integration
+  const {
+    selectedId: selectedAirportIcao,
+    setSelectedId: setSelectedAirportIcao,
+    setDetailContent,
+  } = useDetailPanel();
+
+  // Handle selection from URL (when redirected from mobile detail view)
+  useEffect(() => {
+    if (selectedFromUrl && isDesktop) {
+      setSelectedAirportIcao(selectedFromUrl);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("selected");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [selectedFromUrl, isDesktop, setSelectedAirportIcao]);
+
+  // Sort all airports: favorites first, then alphabetical by ICAO
+  const allSortedAirports = useMemo(() => {
+    return [...airports].sort((a, b) => {
+      if (a.isFavorite && !b.isFavorite) return -1;
+      if (!a.isFavorite && b.isFavorite) return 1;
+      return a.icao.localeCompare(b.icao);
+    });
+  }, [airports]);
+
+  // Filtered airports for search mode
+  const filteredAirports = useMemo(() => {
+    if (!debouncedSearchQuery.trim()) return allSortedAirports;
+    const results = searchAirports(airports, debouncedSearchQuery, airports.length);
+    return [...results].sort((a, b) => {
+      if (a.isFavorite && !b.isFavorite) return -1;
+      if (!a.isFavorite && b.isFavorite) return 1;
+      return a.icao.localeCompare(b.icao);
+    });
+  }, [airports, allSortedAirports, debouncedSearchQuery]);
+
+  // The list to virtualize
+  const displayAirports = debouncedSearchQuery.trim() ? filteredAirports : allSortedAirports;
+
+  // Generate FastScroll alphabet items (excluding favorites)
+  const fastScrollItems = useMemo(() => {
+    const nonFavorites = airports.filter((a) => !a.isFavorite);
+    return generateAlphabetItemsFromList(nonFavorites.map((a) => a.icao), {
+      numberPosition: "start",
+    });
+  }, [airports]);
+
+  // Pre-compute letter -> virtual list index mapping for fast scroll
+  const letterIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    allSortedAirports.forEach((airport, index) => {
+      if (airport.isFavorite) return;
+      const firstChar = airport.icao[0]?.toUpperCase();
+      const letter = /[A-Z]/.test(firstChar || "") ? firstChar! : "#";
+      if (!map.has(letter)) {
+        map.set(letter, index);
+      }
+    });
+    return map;
+  }, [allSortedAirports]);
+
+  // Measure scroll margin: height of non-virtualized content above the virtual list
+  const aboveVirtualRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+
+  useEffect(() => {
+    const el = aboveVirtualRef.current;
+    const scrollEl = scrollContainerRef.current;
+    if (!el || !scrollEl) {
+      setScrollMargin(0);
+      return;
+    }
+
+    const updateMargin = () => {
+      // Measure the distance from scroll container top to the virtual list start
+      const scrollRect = scrollEl.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const margin = (elRect.bottom - scrollRect.top) + scrollEl.scrollTop;
+      setScrollMargin(margin);
+    };
+
+    updateMargin();
+    const observer = new ResizeObserver(updateMargin);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [debouncedSearchQuery, airports, recentAirports]);
+
+  // Virtual list
+  const rowVirtualizer = useVirtualizer({
+    count: displayAirports.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => 88, // Estimated airport card height (p-3 + content + gap)
+    overscan: 10,
+    scrollMargin,
+  });
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+
+  // Auto-select first airport when loading (desktop only, not in select mode)
+  useEffect(() => {
+    if (isDesktop && !fieldType && !isLoading && allSortedAirports.length > 0 && !selectedAirportIcao) {
+      setSelectedAirportIcao(allSortedAirports[0].icao);
+    }
+  }, [isDesktop, fieldType, isLoading, allSortedAirports, selectedAirportIcao, setSelectedAirportIcao]);
+
+  // Update detail content when selection changes (desktop only)
+  useEffect(() => {
+    if (!isDesktop || fieldType) return;
+
+    if (isLoading) {
+      setDetailContent(
+        <div className="flex items-center justify-center h-full">
+          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+        </div>
+      );
+      return;
+    }
+
+    if (allSortedAirports.length === 0) {
+      setDetailContent(
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+          <p>No airports found</p>
+        </div>
+      );
+      return;
+    }
+
+    if (selectedAirportIcao) {
+      setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} />);
+    } else if (allSortedAirports.length > 0) {
+      setSelectedAirportIcao(allSortedAirports[0].icao);
+    }
+  }, [isDesktop, fieldType, selectedAirportIcao, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao]);
+
+  // Track active letter from virtualizer scroll position (replaces expensive DOM query)
+  useEffect(() => {
+    if (debouncedSearchQuery.trim()) return;
+
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+
+    let ticking = false;
+    const handleScroll = () => {
+      if (ticking || isFastScrollingRef.current) return;
+
+      ticking = true;
+      requestAnimationFrame(() => {
+        const items = rowVirtualizer.getVirtualItems();
+        if (items.length > 0) {
+          const scrollOffset = rowVirtualizer.scrollOffset ?? 0;
+          // Find first visible item (skip overscan items above viewport)
+          let topItem = items[0];
+          for (const item of items) {
+            if (item.start + scrollMargin >= scrollOffset) {
+              topItem = item;
+              break;
+            }
+          }
+          const airport = displayAirports[topItem.index];
+          if (airport && !airport.isFavorite) {
+            const firstChar = airport.icao[0]?.toUpperCase();
+            if (firstChar && /[A-Z]/.test(firstChar)) {
+              setActiveLetterKey(firstChar);
+            } else {
+              setActiveLetterKey("#");
+            }
+          }
+        }
+        ticking = false;
+      });
+    };
+
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+
+    return () => scrollContainer.removeEventListener("scroll", handleScroll);
+  }, [displayAirports, debouncedSearchQuery, rowVirtualizer, scrollMargin]);
+
+  // Handle FastScroll selection - uses scrollToIndex instead of loadAll + scrollIntoView
+  const handleFastScrollSelect = useCallback((letter: string) => {
+    const index = letterIndexMap.get(letter);
+    if (index !== undefined) {
+      isFastScrollingRef.current = true;
+      setActiveLetterKey(letter);
+      rowVirtualizer.scrollToIndex(index, {
+        align: "start",
+        behavior: "auto",
+      });
+      setTimeout(() => {
+        isFastScrollingRef.current = false;
+      }, 150);
+    }
+  }, [letterIndexMap, rowVirtualizer]);
+
+  // Scroll to selected airport from URL after data loads
+  useEffect(() => {
+    if (selectedFromUrl && isDesktop && !isLoading && allSortedAirports.length > 0) {
+      const index = allSortedAirports.findIndex(a => a.icao === selectedFromUrl);
+      if (index !== -1) {
+        setTimeout(() => {
+          rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "auto" });
+        }, 100);
+      }
+    }
+  }, [selectedFromUrl, isDesktop, isLoading, allSortedAirports, rowVirtualizer]);
+
+  useEffect(() => {
+    const loadRecentAirports = async () => {
+      const recentCodes = await getRecentlyUsedAirports();
+      const recentList = await Promise.all(
+        recentCodes.map((code) => getAirportByIcao(code))
+      );
+      setRecentAirports(recentList.filter(Boolean) as typeof recentAirports);
+    };
+    loadRecentAirports();
+  }, []);
+
+  const handleAirportSelect = useCallback(async (icao: string) => {
+    if (fieldType) {
+      await addRecentlyUsedAirport(icao);
+      const params = new URLSearchParams();
+      params.set("field", fieldType);
+      params.set("airport", icao);
+      router.push(`${returnUrl}?${params.toString()}`);
+    } else if (isDesktop) {
+      setSelectedAirportIcao(icao);
+    } else {
+      router.push(`/airports/${icao}`);
+    }
+  }, [fieldType, isDesktop, router, returnUrl, setSelectedAirportIcao]);
+
+  const handleToggleFavorite = useCallback(async (e: React.MouseEvent, icao: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    await toggleAirportFavorite(icao);
+  }, []);
+
+  const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim();
 
   const pageTitle = !fieldType
     ? "Airports"
@@ -346,34 +384,36 @@ export default function AirportsPage() {
         />
       }
       rightContent={
-        fastScrollItems.length > 1 ? (
+        showFastScroll ? (
           <FastScroll
             items={fastScrollItems}
-            activeKey={searchQuery.trim() ? undefined : activeLetterKey}
+            activeKey={activeLetterKey}
             onSelect={handleFastScrollSelect}
             indicatorPosition="left"
           />
         ) : null
       }
+      mainRef={scrollContainerCallbackRef}
     >
-      <div ref={mainContentRef}>
+      <div>
         <div className="container mx-auto px-3 pt-3 pb-safe">
-          <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
-            <div className="relative">
-              <Input
-                type="text"
-                placeholder="Search airports..."
-                value={searchQuery}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-                className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-              />
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          {/* Non-virtualized content above the virtual list */}
+          <div ref={aboveVirtualRef}>
+            <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
+              <div className="relative">
+                <Input
+                  type="text"
+                  placeholder="Search airports..."
+                  value={searchQuery}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
+                />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              </div>
             </div>
-          </div>
 
-          <div className={`space-y-3 ${fastScrollItems.length > 1 ? "pr-8" : ""}`}>
-            {!searchQuery.trim() && (
-              <>
+            {!debouncedSearchQuery.trim() && (
+              <div className={`space-y-3 ${showFastScroll ? "pr-8" : ""}`}>
                 {/* Favorites Section */}
                 {airports.some((a: Airport) => a.isFavorite) && (
                   <div className="space-y-1.5">
@@ -383,7 +423,15 @@ export default function AirportsPage() {
                     <div className="space-y-2">
                       {airports
                         .filter((a: Airport) => a.isFavorite)
-                        .map((a: Airport) => renderAirportCard(a, false, !fieldType && selectedAirportIcao === a.icao))}
+                        .map((a: Airport) => (
+                          <AirportCard
+                            key={a.icao}
+                            airport={a}
+                            isSelected={!fieldType && selectedAirportIcao === a.icao}
+                            onSelect={handleAirportSelect}
+                            onToggleFavorite={handleToggleFavorite}
+                          />
+                        ))}
                     </div>
                     <div className="border-t border-border/50 my-4" />
                   </div>
@@ -396,25 +444,69 @@ export default function AirportsPage() {
                       Recent
                     </h2>
                     <div className="space-y-2">
-                      {recentAirports.map((a: Airport) => renderAirportCard(a, true, !fieldType && selectedAirportIcao === a.icao))}
+                      {recentAirports.map((a: Airport) => (
+                        <AirportCard
+                          key={a.icao}
+                          airport={a}
+                          isRecent
+                          isSelected={!fieldType && selectedAirportIcao === a.icao}
+                          onSelect={handleAirportSelect}
+                          onToggleFavorite={handleToggleFavorite}
+                        />
+                      ))}
                     </div>
                     <div className="border-t border-border my-4" />
                   </div>
                 )}
-              </>
+              </div>
             )}
 
-            {searchQuery.trim() && (
-              <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
-                {filteredAirports.length} results
-              </h2>
+            {debouncedSearchQuery.trim() && (
+              <div className={`space-y-3 ${showFastScroll ? "pr-8" : ""}`}>
+                <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
+                  {filteredAirports.length} results
+                </h2>
+              </div>
             )}
+          </div>
 
-            <div className="space-y-2">
-              {filteredAirports.map((a) => renderAirportCard(a, false, !fieldType && selectedAirportIcao === a.icao))}
+          {/* Virtualized airport list */}
+          <div className={showFastScroll ? "pr-8" : ""}>
+            <div
+              style={{
+                height: `${rowVirtualizer.getTotalSize()}px`,
+                width: "100%",
+                position: "relative",
+              }}
+            >
+              {virtualItems.map((virtualRow) => {
+                const airport = displayAirports[virtualRow.index];
+                if (!airport) return null;
+                return (
+                  <div
+                    key={airport.icao}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
+                    }}
+                    data-index={virtualRow.index}
+                    ref={rowVirtualizer.measureElement}
+                  >
+                    <div className="pb-2">
+                      <AirportCard
+                        airport={airport}
+                        isSelected={!fieldType && selectedAirportIcao === airport.icao}
+                        onSelect={handleAirportSelect}
+                        onToggleFavorite={handleToggleFavorite}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-
-            <div ref={observerTarget} className="h-20" />
           </div>
         </div>
       </div>

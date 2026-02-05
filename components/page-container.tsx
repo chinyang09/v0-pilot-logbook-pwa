@@ -1,6 +1,6 @@
 "use client"
 
-import { ReactNode } from "react"
+import { ReactNode, type RefCallback } from "react"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { cn } from "@/lib/utils"
 
@@ -10,9 +10,11 @@ interface PageContainerProps {
   className?: string
   /** Content to render on the right side, positioned relative to the viewport (e.g., FastScroll) */
   rightContent?: ReactNode
+  /** Optional ref callback to access the main scroll container element */
+  mainRef?: RefCallback<HTMLElement>
 }
 
-export function PageContainer({ children, header, className, rightContent }: PageContainerProps) {
+export function PageContainer({ children, header, className, rightContent, mainRef }: PageContainerProps) {
   const { handleScroll } = useScrollNavbarContext()
 
   return (
@@ -21,6 +23,7 @@ export function PageContainer({ children, header, className, rightContent }: Pag
 
       <div className="flex-1 relative flex overflow-hidden">
         <main
+          ref={mainRef}
           onScroll={handleScroll}
           className={cn("flex-1 overflow-y-auto overscroll-contain", className)}
         >
