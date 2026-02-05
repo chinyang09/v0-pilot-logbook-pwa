@@ -33,6 +33,7 @@ export default function AirportsPage() {
   const fieldType = searchParams.get("field");
   const returnUrl =
     searchParams.get("return") || searchParams.get("returnTo") || "/new-flight";
+  const selectedFromUrl = searchParams.get("selected");
   const isDesktop = useIsDesktop();
   const mainContentRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +49,25 @@ export default function AirportsPage() {
     setSelectedId: setSelectedAirportIcao,
     setDetailContent,
   } = useDetailPanel();
+
+  // Handle selection from URL (when redirected from mobile detail view)
+  useEffect(() => {
+    if (selectedFromUrl && isDesktop) {
+      setSelectedAirportIcao(selectedFromUrl);
+      // Clean up the URL
+      const url = new URL(window.location.href);
+      url.searchParams.delete("selected");
+      window.history.replaceState({}, "", url.toString());
+
+      // Scroll to the selected airport after a brief delay for render
+      setTimeout(() => {
+        const element = document.getElementById(`airport-${selectedFromUrl}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "instant", block: "center" });
+        }
+      }, 100);
+    }
+  }, [selectedFromUrl, isDesktop, setSelectedAirportIcao]);
 
   const {
     searchQuery,
@@ -242,7 +262,8 @@ export default function AirportsPage() {
 
   const renderAirportCard = (
     airport: Airport,
-    isRecent = false
+    isRecent = false,
+    isSelected = false
   ) => (
     // Change <button> to <div>
     <div
@@ -260,7 +281,8 @@ export default function AirportsPage() {
         "w-full text-left rounded-lg p-3 transition-all cursor-pointer active:scale-[0.98]",
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
-          : "bg-card border border-border hover:bg-accent"
+          : "bg-card border border-border hover:bg-accent",
+        isSelected && "bg-primary/20 border-primary"
       )}
     >
       <div className="flex items-center justify-between gap-2">
@@ -324,10 +346,10 @@ export default function AirportsPage() {
         />
       }
       rightContent={
-        !searchQuery.trim() && fastScrollItems.length > 1 ? (
+        fastScrollItems.length > 1 ? (
           <FastScroll
             items={fastScrollItems}
-            activeKey={activeLetterKey}
+            activeKey={searchQuery.trim() ? undefined : activeLetterKey}
             onSelect={handleFastScrollSelect}
             indicatorPosition="left"
           />
@@ -349,7 +371,7 @@ export default function AirportsPage() {
             </div>
           </div>
 
-          <div className={`space-y-3 ${!searchQuery.trim() && fastScrollItems.length > 1 ? "pr-8" : ""}`}>
+          <div className={`space-y-3 ${fastScrollItems.length > 1 ? "pr-8" : ""}`}>
             {!searchQuery.trim() && (
               <>
                 {/* Favorites Section */}
@@ -361,7 +383,7 @@ export default function AirportsPage() {
                     <div className="space-y-2">
                       {airports
                         .filter((a: Airport) => a.isFavorite)
-                        .map((a: Airport) => renderAirportCard(a, false))}
+                        .map((a: Airport) => renderAirportCard(a, false, !fieldType && selectedAirportIcao === a.icao))}
                     </div>
                     <div className="border-t border-border/50 my-4" />
                   </div>
@@ -374,7 +396,7 @@ export default function AirportsPage() {
                       Recent
                     </h2>
                     <div className="space-y-2">
-                      {recentAirports.map((a: Airport) => renderAirportCard(a, true))}
+                      {recentAirports.map((a: Airport) => renderAirportCard(a, true, !fieldType && selectedAirportIcao === a.icao))}
                     </div>
                     <div className="border-t border-border my-4" />
                   </div>
@@ -389,7 +411,7 @@ export default function AirportsPage() {
             )}
 
             <div className="space-y-2">
-              {filteredAirports.map((a) => renderAirportCard(a, false))}
+              {filteredAirports.map((a) => renderAirportCard(a, false, !fieldType && selectedAirportIcao === a.icao))}
             </div>
 
             <div ref={observerTarget} className="h-20" />

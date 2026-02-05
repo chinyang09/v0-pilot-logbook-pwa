@@ -38,6 +38,7 @@ function SwipeableCrewCard({
   onSelect,
   onDelete,
   isSelectMode,
+  isSelected = false,
 }: {
   crew: {
     id: string;
@@ -50,6 +51,7 @@ function SwipeableCrewCard({
   onSelect: () => void;
   onDelete: () => void;
   isSelectMode: boolean;
+  isSelected?: boolean;
 }) {
   const displayName = crew.isMe ? "Self" : crew.name;
 
@@ -69,7 +71,8 @@ function SwipeableCrewCard({
         className={cn(
           "w-full text-left bg-card border border-border rounded-lg p-3 transition-all active:scale-[0.98]",
           crew.isMe &&
-            "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20"
+            "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20",
+          isSelected && "bg-primary/20 border-primary"
         )}
       >
         <div className="flex items-center justify-between gap-2">
@@ -128,6 +131,7 @@ export default function CrewPage() {
   const searchParams = useSearchParams();
   const fieldType = searchParams.get("field");
   const returnUrl = searchParams.get("return") || "/new-flight";
+  const selectedFromUrl = searchParams.get("selected");
   const isDesktop = useIsDesktop();
   const mainContentRef = useRef<HTMLDivElement>(null);
 
@@ -143,6 +147,25 @@ export default function CrewPage() {
     setSelectedId: setSelectedCrewId,
     setDetailContent,
   } = useDetailPanel();
+
+  // Handle selection from URL (when redirected from mobile detail view)
+  useEffect(() => {
+    if (selectedFromUrl && isDesktop) {
+      setSelectedCrewId(selectedFromUrl);
+      // Clean up the URL
+      const url = new URL(window.location.href);
+      url.searchParams.delete("selected");
+      window.history.replaceState({}, "", url.toString());
+
+      // Scroll to the selected crew after a brief delay for render
+      setTimeout(() => {
+        const element = document.getElementById(`crew-${selectedFromUrl}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "instant", block: "center" });
+        }
+      }, 100);
+    }
+  }, [selectedFromUrl, isDesktop, setSelectedCrewId]);
 
   const observerTarget = useRef<HTMLDivElement>(null);
 
@@ -435,6 +458,7 @@ export default function CrewPage() {
                     onSelect={() => handleCrewSelect(crew)}
                     onDelete={() => confirmDelete(crew)}
                     isSelectMode={!!fieldType}
+                    isSelected={!fieldType && selectedCrewId === crew.id}
                   />
                 ))}
               </div>

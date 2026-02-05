@@ -343,6 +343,8 @@ interface FlightFormProps {
   selectedCrewField?: string | null;
   selectedCrewId?: string | null;
   selectedCrewName?: string | null;
+  /** If true, picker navigation returns to /logbook with flightId instead of /flights/[id] */
+  isDesktop?: boolean;
 }
 
 export function FlightForm({
@@ -356,6 +358,7 @@ export function FlightForm({
   selectedCrewField,
   selectedCrewId,
   selectedCrewName,
+  isDesktop = false,
 }: FlightFormProps) {
   const router = useRouter();
   const { airports } = useAirportDatabase();
@@ -754,6 +757,11 @@ export function FlightForm({
   // Debounce form data for auto-save
   const debouncedFormData = useDebounce(formData, 500);
 
+  // Track the last saved state to avoid unnecessary saves
+  const lastSavedStateRef = useRef<string | null>(null);
+  // Track which flight ID the baseline was captured for
+  const baselineFlightIdRef = useRef<string | null>(null);
+
   // Auto-save to IndexedDB for existing flights (drafts or otherwise)
   // This replaces sessionStorage draft management
   useEffect(() => {
@@ -761,11 +769,31 @@ export function FlightForm({
       // Only auto-save if we have an existing flight with an ID
       if (!debouncedFormData?.id || !editingFlight?.id) return;
 
+      // Create a serializable state to compare
+      const currentState = JSON.stringify({
+        ...debouncedFormData,
+        manualOverrides,
+      });
+
+      // If this is a new flight (ID changed), capture baseline from first debounced state
+      // This ensures we capture the state AFTER calculations have run
+      if (baselineFlightIdRef.current !== debouncedFormData.id) {
+        baselineFlightIdRef.current = debouncedFormData.id;
+        lastSavedStateRef.current = currentState;
+        return; // Don't save on initial load, just capture baseline
+      }
+
+      // Skip save if nothing actually changed from baseline
+      if (lastSavedStateRef.current === currentState) {
+        return;
+      }
+
       try {
         await updateFlight(debouncedFormData.id, {
           ...debouncedFormData,
           manualOverrides,
         });
+        lastSavedStateRef.current = currentState;
       } catch (error) {
         console.error("Auto-save failed:", error);
       }
@@ -865,21 +893,34 @@ export function FlightForm({
     [updateField, markManualOverride, manualOverrides]
   );
 
-  // Open pickers - use flight ID in URL for return navigation
+  // Open pickers - on desktop, return to /logbook with flightId; on mobile, return to /flights/[id]
   const openAirportPicker = (field: "departureIcao" | "arrivalIcao") => {
-    const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
-    router.push(`/airports?select=true&returnTo=${encodeURIComponent(returnUrl)}&field=${field}`);
+    if (isDesktop && formData.id) {
+      // On desktop, return to logbook with flightId to restore editing state
+      router.push(`/airports?select=true&returnTo=/logbook&flightId=${formData.id}&field=${field}`);
+    } else {
+      const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
+      router.push(`/airports?select=true&returnTo=${encodeURIComponent(returnUrl)}&field=${field}`);
+    }
   };
 
   const openAircraftPicker = () => {
-    const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
-    router.push(`/aircraft?select=true&returnTo=${encodeURIComponent(returnUrl)}&field=aircraftReg`);
+    if (isDesktop && formData.id) {
+      router.push(`/aircraft?select=true&returnTo=/logbook&flightId=${formData.id}&field=aircraftReg`);
+    } else {
+      const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
+      router.push(`/aircraft?select=true&returnTo=${encodeURIComponent(returnUrl)}&field=aircraftReg`);
+    }
   };
 
   const openCrewPicker = (field: "picId" | "sicId") => {
     const crewField = field === "picId" ? "pic" : "sic";
-    const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
-    router.push(`/crew?select=true&return=${encodeURIComponent(returnUrl)}&field=${crewField}`);
+    if (isDesktop && formData.id) {
+      router.push(`/crew?select=true&return=/logbook&flightId=${formData.id}&field=${crewField}`);
+    } else {
+      const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
+      router.push(`/crew?select=true&return=${encodeURIComponent(returnUrl)}&field=${crewField}`);
+    }
   };
 
   const swapCrew = useCallback(() => {
@@ -1166,7 +1207,8 @@ export function FlightForm({
   const isDraft = editingFlight?.isDraft ?? true;
 
   return (
-    <div className="min-h-screen bg-background pb-20">
+    <div className="h-full overflow-y-auto bg-background">
+      <div className="min-h-full pb-20">
       {/* Fixed Header */}
       <div className="sticky top-0 z-50 bg-card border-b border-border px-4 py-3">
         <div className="flex items-center justify-between">
@@ -1808,6 +1850,7 @@ export function FlightForm({
           label="Select Date"
         />
       )}
+      </div>
     </div>
   );
 }

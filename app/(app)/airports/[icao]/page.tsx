@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/page-container";
 import { SyncStatus } from "@/components/sync-status";
@@ -18,12 +18,21 @@ import {
   History, // Added for Recents
 } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
+import { useIsDesktop } from "@/hooks/use-is-desktop";
 
 export default function AirportDetailPage() {
   const params = useParams();
   const icao = params.icao as string;
   const router = useRouter();
+  const isDesktop = useIsDesktop();
   const { airports, isLoading } = useAirportDatabase();
+
+  // When switching to desktop view, redirect to airports page with selection
+  useEffect(() => {
+    if (isDesktop && icao) {
+      router.replace(`/airports?selected=${encodeURIComponent(icao)}`);
+    }
+  }, [isDesktop, icao, router]);
 
   const airport = useMemo(() => {
     if (!airports.length) return null;

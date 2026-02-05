@@ -31,6 +31,7 @@ export default function AircraftPage() {
   const selectMode = searchParams.get("select") === "true"
   const returnTo = searchParams.get("returnTo") || "/new-flight"
   const fieldName = searchParams.get("field") || "aircraftReg"
+  const selectedFromUrl = searchParams.get("selected")
   const isDesktop = useIsDesktop()
 
   // Detail panel integration
@@ -39,6 +40,25 @@ export default function AircraftPage() {
     setSelectedId: setSelectedAircraftReg,
     setDetailContent,
   } = useDetailPanel()
+
+  // Handle selection from URL (when redirected from mobile detail view)
+  useEffect(() => {
+    if (selectedFromUrl && isDesktop) {
+      setSelectedAircraftReg(selectedFromUrl)
+      // Clean up the URL
+      const url = new URL(window.location.href)
+      url.searchParams.delete("selected")
+      window.history.replaceState({}, "", url.toString())
+
+      // Scroll to the selected aircraft after a brief delay for render
+      setTimeout(() => {
+        const element = document.getElementById(`aircraft-${selectedFromUrl}`)
+        if (element) {
+          element.scrollIntoView({ behavior: "instant", block: "center" })
+        }
+      }, 100)
+    }
+  }, [selectedFromUrl, isDesktop, setSelectedAircraftReg])
 
   const [searchQuery, setSearchQuery] = useState("")
   const debouncedSearchQuery = useDebounce(searchQuery, 150)
@@ -355,6 +375,7 @@ export default function AircraftPage() {
                       aircraft={aircraft}
                       onSelect={handleSelectAircraft}
                       isRecent
+                      isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
                     />
                   ))}
                 </div>
@@ -373,6 +394,7 @@ export default function AircraftPage() {
                       key={`${aircraft.registration || aircraft.icao24}-${index}`}
                       aircraft={aircraft}
                       onSelect={handleSelectAircraft}
+                      isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
                     />
                   ))}
                 </div>
@@ -401,10 +423,12 @@ function AircraftCard({
   aircraft,
   onSelect,
   isRecent = false,
+  isSelected = false,
 }: {
   aircraft: NormalizedAircraft
   onSelect: (aircraft: NormalizedAircraft) => void
   isRecent?: boolean
+  isSelected?: boolean
 }) {
   return (
     <button
@@ -414,7 +438,7 @@ function AircraftCard({
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
           : "bg-card border border-border hover:bg-accent"
-      }`}
+      } ${isSelected ? "bg-primary/20 border-primary" : ""}`}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex-1 min-w-0">
