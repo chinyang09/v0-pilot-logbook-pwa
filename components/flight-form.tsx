@@ -757,6 +757,9 @@ export function FlightForm({
   // Debounce form data for auto-save
   const debouncedFormData = useDebounce(formData, 500);
 
+  // Track the last saved state to avoid unnecessary saves
+  const lastSavedStateRef = useRef<string | null>(null);
+
   // Auto-save to IndexedDB for existing flights (drafts or otherwise)
   // This replaces sessionStorage draft management
   useEffect(() => {
@@ -764,11 +767,23 @@ export function FlightForm({
       // Only auto-save if we have an existing flight with an ID
       if (!debouncedFormData?.id || !editingFlight?.id) return;
 
+      // Create a serializable state to compare
+      const currentState = JSON.stringify({
+        ...debouncedFormData,
+        manualOverrides,
+      });
+
+      // Skip save if nothing actually changed
+      if (lastSavedStateRef.current === currentState) {
+        return;
+      }
+
       try {
         await updateFlight(debouncedFormData.id, {
           ...debouncedFormData,
           manualOverrides,
         });
+        lastSavedStateRef.current = currentState;
       } catch (error) {
         console.error("Auto-save failed:", error);
       }
@@ -776,6 +791,16 @@ export function FlightForm({
 
     autoSave();
   }, [debouncedFormData, editingFlight?.id, manualOverrides]);
+
+  // Reset last saved state when switching flights
+  useEffect(() => {
+    if (editingFlight?.id) {
+      lastSavedStateRef.current = JSON.stringify({
+        ...editingFlight,
+        manualOverrides: editingFlight.manualOverrides || {},
+      });
+    }
+  }, [editingFlight?.id]);
 
   // Update field helper
   const updateField = useCallback(

@@ -119,10 +119,14 @@ export default function LogbookPage() {
     }
   }, [isDesktop, searchParams, setSelectedFlightId])
 
-  // Auto-select first flight when flights load
+  // Auto-select first flight when flights load, or when selected flight no longer exists
   useEffect(() => {
-    if (!flightsLoading && flights.length > 0 && !selectedFlightId) {
-      setSelectedFlightId(flights[0].id)
+    if (!flightsLoading && flights.length > 0) {
+      // Check if selected flight still exists
+      const selectedExists = selectedFlightId && flights.some(f => f.id === selectedFlightId)
+      if (!selectedExists) {
+        setSelectedFlightId(flights[0].id)
+      }
     }
   }, [flightsLoading, flights, selectedFlightId, setSelectedFlightId])
 
@@ -192,9 +196,14 @@ export default function LogbookPage() {
       return
     }
 
-    // If no flight to show and we have flights, select the first one
-    if (flights.length > 0 && !selectedFlightId) {
-      setSelectedFlightId(flights[0].id)
+    // If no flight to show and we have flights, show a placeholder message
+    // (The auto-select effect will pick the first flight momentarily)
+    if (flights.length > 0 && !flightToShow) {
+      setDetailContent(
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+          <p>Select a Flight to View</p>
+        </div>
+      )
     }
   }, [selectedFlightId, flights, flightsLoading, setDetailContent, setSelectedFlightId, router, editingFlightId, isDesktop, refreshFlights, selectedField, selectedAirport, selectedAircraftReg, selectedAircraftType, selectedCrewId, selectedCrewName])
 

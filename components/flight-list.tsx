@@ -162,7 +162,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           "bg-card border-border cursor-pointer relative py-0 transition-all",
           isLocked && "opacity-75",
           isDraft && "border-dashed border-primary/50",
-          isSelected && "ring-2 ring-primary bg-primary/5",
+          isSelected && "bg-primary/20 border-primary",
           !isSelected && "hover:bg-muted/50"
         )}
       >
