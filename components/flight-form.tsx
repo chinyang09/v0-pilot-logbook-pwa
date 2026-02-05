@@ -759,6 +759,8 @@ export function FlightForm({
 
   // Track the last saved state to avoid unnecessary saves
   const lastSavedStateRef = useRef<string | null>(null);
+  // Track which flight ID the baseline was captured for
+  const baselineFlightIdRef = useRef<string | null>(null);
 
   // Auto-save to IndexedDB for existing flights (drafts or otherwise)
   // This replaces sessionStorage draft management
@@ -773,7 +775,15 @@ export function FlightForm({
         manualOverrides,
       });
 
-      // Skip save if nothing actually changed
+      // If this is a new flight (ID changed), capture baseline from first debounced state
+      // This ensures we capture the state AFTER calculations have run
+      if (baselineFlightIdRef.current !== debouncedFormData.id) {
+        baselineFlightIdRef.current = debouncedFormData.id;
+        lastSavedStateRef.current = currentState;
+        return; // Don't save on initial load, just capture baseline
+      }
+
+      // Skip save if nothing actually changed from baseline
       if (lastSavedStateRef.current === currentState) {
         return;
       }
@@ -791,16 +801,6 @@ export function FlightForm({
 
     autoSave();
   }, [debouncedFormData, editingFlight?.id, manualOverrides]);
-
-  // Reset last saved state when switching flights
-  useEffect(() => {
-    if (editingFlight?.id) {
-      lastSavedStateRef.current = JSON.stringify({
-        ...editingFlight,
-        manualOverrides: editingFlight.manualOverrides || {},
-      });
-    }
-  }, [editingFlight?.id]);
 
   // Update field helper
   const updateField = useCallback(

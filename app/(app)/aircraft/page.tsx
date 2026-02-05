@@ -355,6 +355,7 @@ export default function AircraftPage() {
                       aircraft={aircraft}
                       onSelect={handleSelectAircraft}
                       isRecent
+                      isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
                     />
                   ))}
                 </div>
@@ -373,6 +374,7 @@ export default function AircraftPage() {
                       key={`${aircraft.registration || aircraft.icao24}-${index}`}
                       aircraft={aircraft}
                       onSelect={handleSelectAircraft}
+                      isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
                     />
                   ))}
                 </div>
@@ -401,10 +403,12 @@ function AircraftCard({
   aircraft,
   onSelect,
   isRecent = false,
+  isSelected = false,
 }: {
   aircraft: NormalizedAircraft
   onSelect: (aircraft: NormalizedAircraft) => void
   isRecent?: boolean
+  isSelected?: boolean
 }) {
   return (
     <button
@@ -414,7 +418,7 @@ function AircraftCard({
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
           : "bg-card border border-border hover:bg-accent"
-      }`}
+      } ${isSelected ? "bg-primary/20 border-primary" : ""}`}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex-1 min-w-0">

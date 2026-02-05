@@ -242,7 +242,8 @@ export default function AirportsPage() {
 
   const renderAirportCard = (
     airport: Airport,
-    isRecent = false
+    isRecent = false,
+    isSelected = false
   ) => (
     // Change <button> to <div>
     <div
@@ -260,7 +261,8 @@ export default function AirportsPage() {
         "w-full text-left rounded-lg p-3 transition-all cursor-pointer active:scale-[0.98]",
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
-          : "bg-card border border-border hover:bg-accent"
+          : "bg-card border border-border hover:bg-accent",
+        isSelected && "bg-primary/20 border-primary"
       )}
     >
       <div className="flex items-center justify-between gap-2">
@@ -361,7 +363,7 @@ export default function AirportsPage() {
                     <div className="space-y-2">
                       {airports
                         .filter((a: Airport) => a.isFavorite)
-                        .map((a: Airport) => renderAirportCard(a, false))}
+                        .map((a: Airport) => renderAirportCard(a, false, !fieldType && selectedAirportIcao === a.icao))}
                     </div>
                     <div className="border-t border-border/50 my-4" />
                   </div>
@@ -374,7 +376,7 @@ export default function AirportsPage() {
                       Recent
                     </h2>
                     <div className="space-y-2">
-                      {recentAirports.map((a: Airport) => renderAirportCard(a, true))}
+                      {recentAirports.map((a: Airport) => renderAirportCard(a, true, !fieldType && selectedAirportIcao === a.icao))}
                     </div>
                     <div className="border-t border-border my-4" />
                   </div>
@@ -389,7 +391,7 @@ export default function AirportsPage() {
             )}
 
             <div className="space-y-2">
-              {filteredAirports.map((a) => renderAirportCard(a, false))}
+              {filteredAirports.map((a) => renderAirportCard(a, false, !fieldType && selectedAirportIcao === a.icao))}
             </div>
 
             <div ref={observerTarget} className="h-20" />

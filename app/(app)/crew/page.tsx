@@ -38,6 +38,7 @@ function SwipeableCrewCard({
   onSelect,
   onDelete,
   isSelectMode,
+  isSelected = false,
 }: {
   crew: {
     id: string;
@@ -50,6 +51,7 @@ function SwipeableCrewCard({
   onSelect: () => void;
   onDelete: () => void;
   isSelectMode: boolean;
+  isSelected?: boolean;
 }) {
   const displayName = crew.isMe ? "Self" : crew.name;
 
@@ -69,7 +71,8 @@ function SwipeableCrewCard({
         className={cn(
           "w-full text-left bg-card border border-border rounded-lg p-3 transition-all active:scale-[0.98]",
           crew.isMe &&
-            "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20"
+            "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20",
+          isSelected && "bg-primary/20 border-primary"
         )}
       >
         <div className="flex items-center justify-between gap-2">
@@ -435,6 +438,7 @@ export default function CrewPage() {
                     onSelect={() => handleCrewSelect(crew)}
                     onDelete={() => confirmDelete(crew)}
                     isSelectMode={!!fieldType}
+                    isSelected={!fieldType && selectedCrewId === crew.id}
                   />
                 ))}
               </div>
