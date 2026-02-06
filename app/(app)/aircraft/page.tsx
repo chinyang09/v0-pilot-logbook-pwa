@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react"
 import type React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { Search, Plane, Loader2, ChevronRight } from "lucide-react"
+import { Search, Plane, Loader2, Star } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import { Input } from "@/components/ui/input"
 import {
@@ -16,7 +16,10 @@ import {
   setProgressCallback,
   getUserPreferences,
   saveUserPreferences,
+  toggleFavoriteAircraft,
+  getFavoriteAircraft,
 } from "@/lib/db"
+import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
 import { StandardPageHeader } from "@/components/standard-page-header"
 import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll"
@@ -30,16 +33,20 @@ interface AircraftCardProps {
   aircraft: NormalizedAircraft
   isRecent?: boolean
   isSelected?: boolean
+  isFavorite?: boolean
   compact?: boolean
   onSelect: (aircraft: NormalizedAircraft) => void
+  onToggleFavorite?: (e: React.MouseEvent, registration: string) => void
 }
 
 const AircraftCard = memo(function AircraftCard({
   aircraft,
   isRecent = false,
   isSelected = false,
+  isFavorite = false,
   compact = false,
   onSelect,
+  onToggleFavorite,
 }: AircraftCardProps) {
   return (
     <div
@@ -54,7 +61,7 @@ const AircraftCard = memo(function AircraftCard({
       }}
       className={cn(
         "w-full text-left rounded-lg transition-all cursor-pointer active:scale-[0.98]",
-        compact ? "py-2 px-3" : "p-3",
+        compact ? "py-1.5 px-3" : "py-2 px-3",
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
           : "bg-card border border-border hover:bg-accent",
@@ -63,19 +70,41 @@ const AircraftCard = memo(function AircraftCard({
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
+          <div className="flex items-center gap-2">
             <span className="font-semibold text-foreground">{aircraft.registration || aircraft.icao24}</span>
             {aircraft.typecode && (
               <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">{aircraft.typecode}</span>
             )}
           </div>
-          <div className="text-sm text-muted-foreground">
-            {aircraft.icao24 && <span className="font-mono">{aircraft.icao24}</span>}
-            {aircraft.icao24 && aircraft.shortType && <span> · </span>}
-            {aircraft.shortType && <span>Cat: {aircraft.shortType}</span>}
-          </div>
+          {!compact && (
+            <div className="text-sm text-muted-foreground mt-0.5">
+              {aircraft.icao24 && <span className="font-mono">{aircraft.icao24}</span>}
+              {aircraft.icao24 && aircraft.shortType && <span> · </span>}
+              {aircraft.shortType && <span>Cat: {aircraft.shortType}</span>}
+            </div>
+          )}
         </div>
-        <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
+          onClick={(e: React.MouseEvent) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (onToggleFavorite && aircraft.registration) {
+              onToggleFavorite(e, aircraft.registration)
+            }
+          }}
+        >
+          <Star
+            className={cn(
+              "h-4 w-4",
+              isFavorite
+                ? "fill-yellow-400 text-yellow-400"
+                : "text-muted-foreground/40"
+            )}
+          />
+        </Button>
       </div>
     </div>
   )
@@ -116,6 +145,7 @@ export default function AircraftPage() {
   const debouncedSearchQuery = useDebounce(searchQuery, 150)
   const [allAircraft, setAllAircraft] = useState<AircraftData[]>([])
   const [recentlyUsed, setRecentlyUsed] = useState<NormalizedAircraft[]>([])
+  const [favoriteRegs, setFavoriteRegs] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(true)
   const [loadingProgress, setLoadingProgress] = useState({
     stage: "",
@@ -152,6 +182,8 @@ export default function AircraftPage() {
             if (found) recentAc.push(normalizeAircraft(found))
           }
           setRecentlyUsed(recentAc)
+          const favRegs = prefs?.favoriteAircraft || []
+          setFavoriteRegs(new Set(favRegs.map((r) => r.toUpperCase())))
         }
       } catch (error) {
         console.error("[Aircraft Page] Failed to load database:", error)
@@ -190,16 +222,30 @@ export default function AircraftPage() {
     })
   }, [allAircraft, allSortedAircraft, debouncedSearchQuery])
 
+  // Favorite aircraft from the sorted list
+  const favoriteAircraft = useMemo(() => {
+    if (favoriteRegs.size === 0) return []
+    return allSortedAircraft.filter((a) => favoriteRegs.has(a.registration.toUpperCase()))
+  }, [allSortedAircraft, favoriteRegs])
+
   // Set of recently used registrations for fast lookup
   const recentRegistrations = useMemo(() => {
     return new Set(recentlyUsed.map((a) => a.registration.toUpperCase()))
   }, [recentlyUsed])
 
-  // Browse list excludes recently used (they're shown in their own section above)
+  // Recently used excluding favorites (shown in their own section)
+  const recentNonFavorites = useMemo(() => {
+    if (favoriteRegs.size === 0) return recentlyUsed
+    return recentlyUsed.filter((a) => !favoriteRegs.has(a.registration.toUpperCase()))
+  }, [recentlyUsed, favoriteRegs])
+
+  // Browse list excludes favorites and recently used (they're shown in their own sections above)
   const browseAircraft = useMemo(() => {
-    if (recentRegistrations.size === 0) return allSortedAircraft
-    return allSortedAircraft.filter((a) => !recentRegistrations.has(a.registration.toUpperCase()))
-  }, [allSortedAircraft, recentRegistrations])
+    return allSortedAircraft.filter((a) => {
+      const regUpper = a.registration.toUpperCase()
+      return !favoriteRegs.has(regUpper) && !recentRegistrations.has(regUpper)
+    })
+  }, [allSortedAircraft, favoriteRegs, recentRegistrations])
 
   // The list to virtualize: search results or browse list (excluding recently used)
   const displayAircraft = debouncedSearchQuery.trim() ? filteredAircraft : browseAircraft
@@ -255,7 +301,7 @@ export default function AircraftPage() {
   const rowVirtualizer = useVirtualizer({
     count: displayAircraft.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 56, // Compact card height (py-2 + content + pb-1 gap)
+    estimateSize: () => 36, // Ultra-compact single-line card height (py-1.5 + content + pb-1 gap)
     overscan: 10,
     scrollMargin,
   })
@@ -377,6 +423,22 @@ export default function AircraftPage() {
     }
   }, [selectedFromUrl, isDesktop, isLoading, allSortedAircraft, rowVirtualizer])
 
+  const handleToggleFavorite = useCallback(async (e: React.MouseEvent, registration: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const isNowFavorite = await toggleFavoriteAircraft(registration)
+    setFavoriteRegs((prev) => {
+      const next = new Set(prev)
+      const regUpper = registration.toUpperCase()
+      if (isNowFavorite) {
+        next.add(regUpper)
+      } else {
+        next.delete(regUpper)
+      }
+      return next
+    })
+  }, [])
+
   const handleSelectAircraft = useCallback(
     async (aircraft: NormalizedAircraft) => {
       if (aircraft.registration) {
@@ -401,7 +463,8 @@ export default function AircraftPage() {
     [selectMode, returnTo, fieldName, router, isDesktop, setSelectedAircraftReg],
   )
 
-  const showRecentlyUsed = !debouncedSearchQuery && recentlyUsed.length > 0
+  const showFavorites = !debouncedSearchQuery && favoriteAircraft.length > 0
+  const showRecentlyUsed = !debouncedSearchQuery && recentNonFavorites.length > 0
   const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim()
 
   return (
@@ -463,17 +526,41 @@ export default function AircraftPage() {
 
               {!debouncedSearchQuery.trim() && (
                 <div className={`space-y-3 ${showFastScroll ? "pr-8" : ""}`}>
-                  {/* Recently Used Section */}
+                  {/* Favorites Section */}
+                  {showFavorites && (
+                    <div className="space-y-1.5">
+                      <h2 className="text-xs font-semibold text-primary uppercase px-1 flex items-center gap-1">
+                        <Star className="h-3 w-3 fill-primary" /> Favorites
+                      </h2>
+                      <div className="space-y-1">
+                        {favoriteAircraft.map((aircraft) => (
+                          <AircraftCard
+                            key={`fav-${aircraft.registration}`}
+                            aircraft={aircraft}
+                            onSelect={handleSelectAircraft}
+                            isFavorite
+                            onToggleFavorite={handleToggleFavorite}
+                            isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
+                          />
+                        ))}
+                      </div>
+                      <div className="border-t border-border/50 my-4" />
+                    </div>
+                  )}
+
+                  {/* Recently Used Section (excluding favorites) */}
                   {showRecentlyUsed && (
                     <div className="space-y-1.5">
                       <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">Recently Used</h2>
-                      <div className="space-y-2">
-                        {recentlyUsed.map((aircraft) => (
+                      <div className="space-y-1">
+                        {recentNonFavorites.map((aircraft) => (
                           <AircraftCard
                             key={`recent-${aircraft.registration || aircraft.icao24}`}
                             aircraft={aircraft}
                             onSelect={handleSelectAircraft}
                             isRecent
+                            isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
+                            onToggleFavorite={handleToggleFavorite}
                             isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
                           />
                         ))}
@@ -522,6 +609,8 @@ export default function AircraftPage() {
                         <AircraftCard
                           aircraft={aircraft}
                           onSelect={handleSelectAircraft}
+                          isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
+                          onToggleFavorite={handleToggleFavorite}
                           isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
                           compact
                         />

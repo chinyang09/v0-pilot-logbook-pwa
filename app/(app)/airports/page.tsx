@@ -15,7 +15,7 @@ import {
   getAirportByIcao,
   type Airport,
 } from "@/lib/db";
-import { Star, Search, MapPin } from "lucide-react";
+import { Star, Search } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -53,7 +53,7 @@ const AirportCard = memo(function AirportCard({
         }
       }}
       className={cn(
-        "w-full text-left rounded-lg p-3 transition-all cursor-pointer active:scale-[0.98]",
+        "w-full text-left rounded-lg py-2 px-3 transition-all cursor-pointer active:scale-[0.98]",
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
           : "bg-card border border-border hover:bg-accent",
@@ -62,39 +62,24 @@ const AirportCard = memo(function AirportCard({
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="font-semibold text-foreground">
-              {airport.icao}
-            </span>
-            {airport.iata && (
-              <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                {airport.iata}
-              </span>
-            )}
-            {airport.isFavorite && (
-              <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-            )}
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-foreground">{airport.icao}</span>
+            <span className="text-sm text-foreground truncate">{airport.name}</span>
           </div>
-          <div className="text-sm font-medium text-foreground truncate">
-            {airport.name}
-          </div>
-          <div className="flex items-center gap-1 text-sm text-muted-foreground mt-0.5">
-            <MapPin className="h-3 w-3 flex-shrink-0" />
-            <span className="truncate">
-              {airport.city}, {airport.country}
-            </span>
+          <div className="text-sm text-muted-foreground truncate mt-0.5">
+            {airport.city}, {airport.country}
           </div>
         </div>
 
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9 hover:bg-primary/20 relative z-10"
+          className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
           onClick={(e: React.MouseEvent) => onToggleFavorite(e, airport.icao)}
         >
           <Star
             className={cn(
-              "h-5 w-5",
+              "h-4 w-4",
               airport.isFavorite
                 ? "fill-yellow-400 text-yellow-400"
                 : "text-muted-foreground/40"
@@ -229,7 +214,7 @@ export default function AirportsPage() {
   const rowVirtualizer = useVirtualizer({
     count: displayAirports.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 88, // Estimated airport card height (p-3 + content + gap)
+    estimateSize: () => 60, // Compact airport card height (py-2 + 2 lines + pb-1 gap)
     overscan: 10,
     scrollMargin,
   });
@@ -434,7 +419,7 @@ export default function AirportsPage() {
                     <h2 className="text-xs font-semibold text-primary uppercase px-1 flex items-center gap-1">
                       <Star className="h-3 w-3 fill-primary" /> Favorites
                     </h2>
-                    <div className="space-y-2">
+                    <div className="space-y-1">
                       {airports
                         .filter((a: Airport) => a.isFavorite)
                         .map((a: Airport) => (
@@ -457,7 +442,7 @@ export default function AirportsPage() {
                     <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
                       Recent
                     </h2>
-                    <div className="space-y-2">
+                    <div className="space-y-1">
                       {recentAirports
                         .filter((a: Airport) => !a.isFavorite)
                         .map((a: Airport) => (
@@ -511,7 +496,7 @@ export default function AirportsPage() {
                     data-index={virtualRow.index}
                     ref={rowVirtualizer.measureElement}
                   >
-                    <div className="pb-2">
+                    <div className="pb-1">
                       <AirportCard
                         airport={airport}
                         isSelected={!fieldType && selectedAirportIcao === airport.icao}

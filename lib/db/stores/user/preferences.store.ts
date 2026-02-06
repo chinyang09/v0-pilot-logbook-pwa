@@ -88,6 +88,28 @@ export async function getRecentlyUsedAircraft(): Promise<string[]> {
 }
 
 /**
+ * Toggle aircraft favorite status
+ */
+export async function toggleFavoriteAircraft(registration: string): Promise<boolean> {
+  const prefs = await getUserPreferences()
+  const favorites = prefs?.favoriteAircraft || []
+  const isFavorite = favorites.includes(registration)
+  const updated = isFavorite
+    ? favorites.filter((r) => r !== registration)
+    : [...favorites, registration]
+  await saveUserPreferences({ favoriteAircraft: updated })
+  return !isFavorite
+}
+
+/**
+ * Get favorite aircraft registrations
+ */
+export async function getFavoriteAircraft(): Promise<string[]> {
+  const prefs = await getUserPreferences()
+  return prefs?.favoriteAircraft || []
+}
+
+/**
  * Get draft generation config
  */
 export async function getDraftGenerationConfig(): Promise<DraftGenerationConfig> {
