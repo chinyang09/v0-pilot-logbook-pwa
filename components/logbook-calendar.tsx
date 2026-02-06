@@ -239,7 +239,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                   key={dayIndex}
                   onClick={() => handleDateClick(dayInfo.dateStr, !!flightInfo)}
                   className={cn(
-                    "flex flex-col items-center justify-center rounded-md text-xs py-1 transition-all relative",
+                    "flex flex-col items-center justify-center rounded-md text-xs aspect-square transition-all relative",
                     isCurrentMonth
                       ? "text-foreground/90"
                       : "text-foreground/15",

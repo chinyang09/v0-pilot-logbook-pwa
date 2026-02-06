@@ -42,7 +42,7 @@ export function StandardPageHeader({
 
   return (
     <header className={cn(
-      "flex-none h-12 bg-background/80 backdrop-blur-xl border-b border-border/50 z-50",
+      "h-12 bg-background/10 backdrop-blur-xl border-b border-border/50 z-50",
       className
     )}>
       <div className="flex items-center justify-between h-full px-4 pl-12">

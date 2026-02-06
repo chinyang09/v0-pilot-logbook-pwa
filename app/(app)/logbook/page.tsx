@@ -454,64 +454,61 @@ export default function LogbookPage() {
   const isLoading = dbLoading || !dbReady
 
   return (
-    <>
-      {/* HEADER */}
-      <StandardPageHeader
-        title={showCalendar ? `${MONTHS[selectedMonth.month]} ${selectedMonth.year}` : "Logbook"}
-        showBack={showCalendar}
-        onBack={() => {
-          toggleCalendar(false)
-          setSelectedDate(null)
-        }}
-        actions={
-          <>
-            <Button
-              variant={showCalendar ? "default" : "ghost"}
-              size="icon-sm"
-              onClick={() => {
-                toggleCalendar(!showCalendar)
-                setSelectedDate(null)
-                setSearchFocused(false)
-              }}
-            >
-              <Calendar className="h-4 w-4" />
-            </Button>
+    <div className="h-full relative flex flex-col">
+      {/* HEADER - absolute overlay for frosted glass */}
+      <div className="absolute top-0 left-0 right-0 z-50">
+        <StandardPageHeader
+          title={showCalendar ? `${MONTHS[selectedMonth.month]} ${selectedMonth.year}` : "Logbook"}
+          actions={
+            <>
+              <Button
+                variant={showCalendar ? "default" : "ghost"}
+                size="icon-sm"
+                onClick={() => {
+                  toggleCalendar(!showCalendar)
+                  setSelectedDate(null)
+                  setSearchFocused(false)
+                }}
+              >
+                <Calendar className="h-4 w-4" />
+              </Button>
 
-            <CSVImportButton
-              onComplete={() => {
-                refreshAllData()
-              }}
-            />
+              <CSVImportButton
+                onComplete={() => {
+                  refreshAllData()
+                }}
+              />
 
-            <Button
-              size="icon-sm"
-              onClick={async () => {
-                // Create a draft flight first
-                const emptyFlight = createEmptyFlightLog()
-                const draftFlight = await addFlight({
-                  ...emptyFlight,
-                  isDraft: true,
-                  date: new Date().toISOString().split("T")[0],
-                })
+              <Button
+                size="icon-sm"
+                onClick={async () => {
+                  // Create a draft flight first
+                  const emptyFlight = createEmptyFlightLog()
+                  const draftFlight = await addFlight({
+                    ...emptyFlight,
+                    isDraft: true,
+                    date: new Date().toISOString().split("T")[0],
+                  })
 
-                // Refresh the flight list to show the new draft
-                await refreshFlights()
+                  // Refresh the flight list to show the new draft
+                  await refreshFlights()
 
-                if (isDesktop) {
-                  // On desktop: select the draft to show in detail panel
-                  setSelectedFlightId(draftFlight.id)
-                  setEditingFlightId(draftFlight.id)
-                } else {
-                  // On mobile: navigate to the flight edit page
-                  router.push(`/flights/${draftFlight.id}`)
-                }
-              }}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </>
-        }
-      />
+                  if (isDesktop) {
+                    // On desktop: select the draft to show in detail panel
+                    setSelectedFlightId(draftFlight.id)
+                    setEditingFlightId(draftFlight.id)
+                  } else {
+                    // On mobile: navigate to the flight edit page
+                    router.push(`/flights/${draftFlight.id}`)
+                  }
+                }}
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </>
+          }
+        />
+      </div>
 
       {/* FLIGHT LIST with calendar overlay */}
       <main className="flex-1 overflow-hidden overscroll-contain relative">
@@ -519,7 +516,7 @@ export default function LogbookPage() {
         <div
           ref={calendarContainerRef}
           className={cn(
-            "absolute top-0 left-0 right-0 z-40",
+            "absolute top-12 left-0 right-0 z-40",
             "bg-background/10 backdrop-blur-xl border-b border-border/50",
             "transition-[max-height,opacity] duration-300 ease-in-out overflow-hidden",
             showCalendar ? "opacity-100" : "max-h-0 opacity-0 border-b-0 pointer-events-none",
@@ -548,7 +545,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={showCalendar ? calendarNaturalHeight : 0}
+          topSpacerHeight={48 + (showCalendar ? calendarNaturalHeight : 0)}
           selectedFlightId={selectedFlightId}
           headerContent={
             <div className="flex-shrink-0 top-0 z-40 px-2 py-1">
@@ -669,6 +666,6 @@ export default function LogbookPage() {
           }
         />
       </main>
-    </>
+    </div>
   )
 }

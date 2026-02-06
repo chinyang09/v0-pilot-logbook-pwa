@@ -18,19 +18,18 @@ export function PageContainer({ children, header, className, rightContent, mainR
   const { handleScroll } = useScrollNavbarContext()
 
   return (
-    <>
-      {header && <div className="flex-none z-50">{header}</div>}
+    <div className="h-full relative flex flex-col">
+      {header && <div className="absolute top-0 left-0 right-0 z-50">{header}</div>}
 
-      <div className="flex-1 relative flex overflow-hidden">
-        <main
-          ref={mainRef}
-          onScroll={handleScroll}
-          className={cn("flex-1 overflow-y-auto overscroll-contain", className)}
-        >
-          <div className="pb-24">
-            {children}
-          </div>
-        </main>
+      <main
+        ref={mainRef}
+        onScroll={handleScroll}
+        className={cn("flex-1 overflow-y-auto overscroll-contain", header && "pt-12", className)}
+      >
+        <div className="pb-24">
+          {children}
+        </div>
+      </main>
 
         {/* Right content (e.g., FastScroll) positioned relative to viewport, not scrolling content */}
         {rightContent && (
@@ -40,7 +39,6 @@ export function PageContainer({ children, header, className, rightContent, mainR
             </div>
           </div>
         )}
-      </div>
-    </>
+    </div>
   )
 }
