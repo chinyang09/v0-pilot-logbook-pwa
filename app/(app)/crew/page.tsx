@@ -51,6 +51,10 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
   isSelected?: boolean;
 }) {
   const displayName = crew.isMe ? "Self" : crew.name;
+  const secondaryParts: string[] = [];
+  if (crew.organization) secondaryParts.push(crew.organization);
+  if (crew.crewId) secondaryParts.push(crew.crewId);
+  if (crew.roles && crew.roles.length > 0) secondaryParts.push(crew.roles.join(", "));
 
   return (
     <SwipeableCard
@@ -66,53 +70,31 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
     >
       <button
         className={cn(
-          "w-full text-left bg-card border border-border rounded-lg p-3 transition-all active:scale-[0.98]",
+          "w-full text-left bg-card border border-border rounded-lg py-2 px-3 transition-all active:scale-[0.98]",
           crew.isMe &&
             "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20",
           isSelected && "bg-primary/20 border-primary"
         )}
       >
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-              <User className="h-5 w-5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-0.5 min-w-0">
-                <span className="font-semibold text-foreground truncate">
-                  {displayName}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-foreground truncate">
+                {displayName}
+              </span>
+              {crew.isMe && (
+                <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded flex-shrink-0">
+                  Me
                 </span>
-                {crew.isMe && (
-                  <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded flex-shrink-0">
-                    Me
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                {crew.organization && (
-                  <span className="truncate">{crew.organization}</span>
-                )}
-                {crew.crewId && (
-                  <span className="text-xs bg-muted px-1.5 py-0.5 rounded flex-shrink-0">
-                    {crew.crewId}
-                  </span>
-                )}
-              </div>
-              {crew.roles && crew.roles.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {crew.roles.map((role) => (
-                    <span
-                      key={role}
-                      className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary"
-                    >
-                      {role}
-                    </span>
-                  ))}
-                </div>
               )}
             </div>
+            {secondaryParts.length > 0 && (
+              <div className="text-sm text-muted-foreground truncate mt-0.5">
+                {secondaryParts.join(" · ")}
+              </div>
+            )}
           </div>
-          <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+          <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
         </div>
       </button>
     </SwipeableCard>
@@ -237,7 +219,7 @@ export default function CrewPage() {
   const rowVirtualizer = useVirtualizer({
     count: displayPersonnel.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 84, // Estimated crew card height
+    estimateSize: () => 60, // Uniform 2-row card height (py-2 + 2 lines + pb-1 gap)
     overscan: 10,
     scrollMargin,
   });
@@ -491,7 +473,7 @@ export default function CrewPage() {
                       data-index={virtualRow.index}
                       ref={rowVirtualizer.measureElement}
                     >
-                      <div className="pb-2">
+                      <div className="pb-1">
                         <SwipeableCrewCard
                           crew={crew}
                           onSelect={() => handleCrewSelect(crew)}

@@ -34,7 +34,6 @@ interface AircraftCardProps {
   isRecent?: boolean
   isSelected?: boolean
   isFavorite?: boolean
-  compact?: boolean
   onSelect: (aircraft: NormalizedAircraft) => void
   onToggleFavorite?: (e: React.MouseEvent, registration: string) => void
 }
@@ -44,7 +43,6 @@ const AircraftCard = memo(function AircraftCard({
   isRecent = false,
   isSelected = false,
   isFavorite = false,
-  compact = false,
   onSelect,
   onToggleFavorite,
 }: AircraftCardProps) {
@@ -60,8 +58,7 @@ const AircraftCard = memo(function AircraftCard({
         }
       }}
       className={cn(
-        "w-full text-left rounded-lg transition-all cursor-pointer active:scale-[0.98]",
-        compact ? "py-1.5 px-3" : "py-2 px-3",
+        "w-full text-left rounded-lg py-2 px-3 transition-all cursor-pointer active:scale-[0.98]",
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
           : "bg-card border border-border hover:bg-accent",
@@ -76,13 +73,11 @@ const AircraftCard = memo(function AircraftCard({
               <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">{aircraft.typecode}</span>
             )}
           </div>
-          {!compact && (
-            <div className="text-sm text-muted-foreground mt-0.5">
-              {aircraft.icao24 && <span className="font-mono">{aircraft.icao24}</span>}
-              {aircraft.icao24 && aircraft.shortType && <span> · </span>}
-              {aircraft.shortType && <span>Cat: {aircraft.shortType}</span>}
-            </div>
-          )}
+          <div className="text-sm text-muted-foreground truncate mt-0.5">
+            {aircraft.icao24 && <span className="font-mono">{aircraft.icao24}</span>}
+            {aircraft.icao24 && aircraft.shortType && <span> · </span>}
+            {aircraft.shortType && <span>{aircraft.shortType}</span>}
+          </div>
         </div>
         <Button
           variant="ghost"
@@ -301,7 +296,7 @@ export default function AircraftPage() {
   const rowVirtualizer = useVirtualizer({
     count: displayAircraft.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 36, // Ultra-compact single-line card height (py-1.5 + content + pb-1 gap)
+    estimateSize: () => 60, // Uniform 2-row card height (py-2 + 2 lines + pb-1 gap)
     overscan: 10,
     scrollMargin,
   })
@@ -612,7 +607,6 @@ export default function AircraftPage() {
                           isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
                           onToggleFavorite={handleToggleFavorite}
                           isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
-                          compact
                         />
                       </div>
                     </div>
