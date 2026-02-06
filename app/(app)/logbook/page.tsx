@@ -259,7 +259,8 @@ export default function LogbookPage() {
   const totalOffset = showCalendar ? calendarHeight + HEADER_HEIGHT : HEADER_HEIGHT
 
   const syncSourceRef = useRef<"calendar" | "flights" | null>(null)
-  const syncLockRef = useRef(false)
+  const selectedMonthRef = useRef(selectedMonth)
+  const showCalendarRef = useRef(showCalendar)
 
   useEffect(() => {
     const unsubscribe = syncService.onDataChanged(() => {
@@ -268,15 +269,22 @@ export default function LogbookPage() {
     return unsubscribe
   }, [])
 
+  useEffect(() => {
+    selectedMonthRef.current = selectedMonth
+  }, [selectedMonth])
+
+  useEffect(() => {
+    showCalendarRef.current = showCalendar
+  }, [showCalendar])
+
   const handleCalendarMonthChange = useCallback(
     (year: number, month: number) => {
       setSelectedMonth({ year, month })
+      selectedMonthRef.current = { year, month }
 
-      if (syncSourceRef.current !== "calendar" || syncLockRef.current) {
+      if (syncSourceRef.current !== "calendar") {
         return
       }
-
-      syncLockRef.current = true
 
       const monthFlights = flights.filter((f) => {
         const date = parseDateLocal(f.date)
@@ -295,48 +303,34 @@ export default function LogbookPage() {
         })
         flightListRef.current?.scrollToFlight(sortedFlights[0].id, sortedFlights[0].date)
       }
-
-      setTimeout(() => {
-        syncLockRef.current = false
-        syncSourceRef.current = null
-      }, 600) // Increased timeout to allow smooth scroll to complete
     },
     [flights],
   )
 
   const handleFlightScroll = useCallback(
     (topFlight: FlightLog | null) => {
-      if (!showCalendar || !topFlight) return
-      if (syncSourceRef.current !== "flights" || syncLockRef.current) return
+      if (!showCalendarRef.current || !topFlight) return
+      if (syncSourceRef.current !== "flights") return
 
       const flightDate = parseDateLocal(topFlight.date)
       const newYear = flightDate.getFullYear()
       const newMonth = flightDate.getMonth()
 
-      if (newYear !== selectedMonth.year || newMonth !== selectedMonth.month) {
-        syncLockRef.current = true
+      if (newYear !== selectedMonthRef.current.year || newMonth !== selectedMonthRef.current.month) {
+        selectedMonthRef.current = { year: newYear, month: newMonth }
         setSelectedMonth({ year: newYear, month: newMonth })
         calendarRef.current?.scrollToMonth(newYear, newMonth)
-
-        setTimeout(() => {
-          syncLockRef.current = false
-          syncSourceRef.current = null
-        }, 400)
       }
     },
-    [selectedMonth, showCalendar],
+    [],
   )
 
   const handleCalendarScrollStart = useCallback(() => {
-    if (!syncLockRef.current) {
-      syncSourceRef.current = "calendar"
-    }
+    syncSourceRef.current = "calendar"
   }, [])
 
   const handleFlightScrollStart = useCallback(() => {
-    if (!syncLockRef.current) {
-      syncSourceRef.current = "flights"
-    }
+    syncSourceRef.current = "flights"
   }, [])
 
   const handleDateSelect = useCallback((date: string) => {
@@ -517,8 +511,8 @@ export default function LogbookPage() {
       <div
         ref={calendarContainerRef}
         className={cn(
-          "flex-none z-40 border-b border-border/30",
-          "bg-background/40 backdrop-blur-2xl",
+          "flex-none z-40 border-b border-border/40",
+          "bg-background/60 backdrop-blur-xl shadow-sm",
           "transition-all duration-500 will-change-transform overflow-hidden",
           showCalendar ? "max-h-[40dvh] opacity-100" : "max-h-0 opacity-0",
         )}
@@ -526,7 +520,7 @@ export default function LogbookPage() {
       >
         <LogbookCalendar
           ref={calendarRef}
-          className="bg-transparent shadow-none border-none"
+          className="bg-transparent shadow-none border-none max-w-md mx-auto"
           flights={flights}
           selectedMonth={selectedMonth}
           onMonthChange={handleCalendarMonthChange}

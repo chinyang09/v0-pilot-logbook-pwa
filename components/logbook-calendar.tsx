@@ -28,7 +28,7 @@ export interface CalendarHandle {
   scrollToMonth: (year: number, month: number) => void;
 }
 
-const DAYS = ["S", "M", "T", "W", "T", "F", "S"];
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function formatDateLocal(date: Date): string {
   const year = date.getFullYear();
@@ -204,10 +204,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
     return (
       <div
-        className={cn("flex flex-col w-full pb-2", className)}
+        className={cn("flex flex-col w-full pb-0.5 overflow-hidden", className)}
       >
         {/* HEADER: Days of the week */}
-        <div className="grid grid-cols-7 gap-1 px-4 pt-3 pb-1">
+        <div className="grid grid-cols-7 gap-0 px-1.5 pt-1 pb-0.5">
           {DAYS.map((day, i) => (
             <div
               key={i}
@@ -221,13 +221,13 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         {/* GRID: The actual month days */}
         <div
           ref={containerRef}
-          className="flex-1 px-3 py-1 overflow-hidden touch-none"
+          className="flex-1 px-1.5 py-0.5 overflow-hidden touch-none"
           style={{ contain: "layout", touchAction: "none" }}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-0.5">
             {calendarDays.map((dayInfo, dayIndex) => {
               const flightInfo = flightDates.get(dayInfo.dateStr);
               const isCurrentMonth = dayInfo.isCurrentMonth;
@@ -239,7 +239,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                   key={dayIndex}
                   onClick={() => handleDateClick(dayInfo.dateStr, !!flightInfo)}
                   className={cn(
-                    "aspect-square flex flex-col items-center justify-center rounded-lg text-sm transition-all relative",
+                    "flex flex-col items-center justify-center rounded-md text-xs py-1 transition-all relative",
                     isCurrentMonth
                       ? "text-foreground/90"
                       : "text-foreground/15",
@@ -250,7 +250,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 >
                   <span>{dayInfo.date.getDate()}</span>
                   {flightInfo && isCurrentMonth && !isSelected && (
-                    <div className="absolute bottom-1 w-1 h-1 rounded-full bg-primary/70" />
+                    <div className="absolute bottom-0.5 w-1 h-1 rounded-full bg-primary/70" />
                   )}
                 </button>
               );
