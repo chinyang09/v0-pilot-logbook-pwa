@@ -340,8 +340,13 @@ export default function LogbookPage() {
   }, [])
 
   const handleDateSelect = useCallback((date: string) => {
-    setSelectedDate((prev) => (prev === date ? null : date))
-  }, [])
+    // Scroll to the first flight on this date instead of filtering
+    const flight = flights.find(f => f.date === date)
+    if (flight) {
+      syncSourceRef.current = "calendar"
+      flightListRef.current?.scrollToFlight(flight.id, flight.date)
+    }
+  }, [flights])
 
   // Handle flight selection from list
   // On desktop: Select flight to show FlightForm in detail panel
@@ -407,10 +412,6 @@ export default function LogbookPage() {
   const filteredFlights = useMemo(() => {
     let result = flights
 
-    if (selectedDate) {
-      result = result.filter((f) => f.date === selectedDate)
-    }
-
     if (selectedFilters.length > 0 && activeFilterType !== "none") {
       result = result.filter((flight) => {
         switch (activeFilterType) {
@@ -437,7 +438,7 @@ export default function LogbookPage() {
     }
 
     return result
-  }, [flights, selectedDate, selectedFilters, activeFilterType])
+  }, [flights, selectedFilters, activeFilterType])
 
   const clearAllFilters = () => {
     setSelectedDate(null)
@@ -450,7 +451,7 @@ export default function LogbookPage() {
     setSelectedFilters((prev) => (prev.includes(option) ? prev.filter((f) => f !== option) : [...prev, option]))
   }
 
-  const hasActiveFilters = selectedDate || selectedFilters.length > 0
+  const hasActiveFilters = selectedFilters.length > 0
   const isLoading = dbLoading || !dbReady
 
   return (

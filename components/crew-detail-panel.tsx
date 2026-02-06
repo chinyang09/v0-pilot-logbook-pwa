@@ -244,9 +244,9 @@ export function CrewDetailPanel({ crewId, onUpdated }: CrewDetailPanelProps) {
   }
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Header */}
-      <header className="flex-none bg-background/30 backdrop-blur-lg border-b border-border">
+    <div className="h-full relative flex flex-col">
+      {/* Header - absolute overlay for frosted glass */}
+      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
         <div className="px-4 h-12 flex items-center justify-between">
           {isEditing ? (
             <Button
@@ -287,7 +287,7 @@ export function CrewDetailPanel({ crewId, onUpdated }: CrewDetailPanelProps) {
       </header>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto pt-12">
         <div className="px-4 pt-4 pb-safe">
           {/* Main Info Card */}
           <div className="bg-card rounded-xl overflow-hidden mb-6 border border-border">

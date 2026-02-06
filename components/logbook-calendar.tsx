@@ -238,18 +238,21 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 <button
                   key={dayIndex}
                   onClick={() => handleDateClick(dayInfo.dateStr, !!flightInfo)}
-                  className={cn(
-                    "flex items-center justify-center text-sm aspect-square transition-all",
-                    "rounded-full",
-                    isCurrentMonth
-                      ? "text-foreground/90"
-                      : "text-foreground/15",
-                    flightInfo && isCurrentMonth && !isSelected && "font-semibold text-primary bg-primary/20",
-                    isToday && "ring-1.5 ring-primary/60",
-                    isSelected && "bg-primary text-primary-foreground shadow-md z-10"
-                  )}
+                  className="aspect-square p-[2px]"
                 >
-                  {dayInfo.date.getDate()}
+                  <div
+                    className={cn(
+                      "w-full h-full flex items-center justify-center text-sm rounded-full transition-all",
+                      isCurrentMonth
+                        ? "text-foreground/90"
+                        : "text-foreground/15",
+                      flightInfo && isCurrentMonth && !isSelected && "font-semibold text-primary bg-primary/20",
+                      isToday && "ring-1.5 ring-primary/60",
+                      isSelected && "bg-primary text-primary-foreground shadow-md z-10"
+                    )}
+                  >
+                    {dayInfo.date.getDate()}
+                  </div>
                 </button>
               );
             })}
