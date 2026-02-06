@@ -320,7 +320,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     const rowVirtualizer = useVirtualizer({
       count: flights.length,
       getScrollElement: () => scrollContainerRef.current,
-      estimateSize: () => 100, // Estimated height of FlightCard in pixels
+      estimateSize: () => 104, // Measured: 86px content + 8px py-1 + 2px border + 8px container padding
       overscan: 5, // Render 5 extra items above/below viewport
     });
 
@@ -340,7 +340,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             });
             setTimeout(() => {
               isExternalScrollRef.current = false;
-            }, 600); // Increased timeout to allow smooth scroll to complete
+            }, 800); // Allow smooth scroll to complete with accurate 104px estimation
           }
         },
       }),
@@ -448,12 +448,17 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             align: "start",
             behavior: "auto", // Use "auto" for instant scroll during fast scroll
           });
+
+          // Notify parent for calendar sync
+          onScrollStart?.();
+          onTopFlightChange?.(flights[index]);
+
           setTimeout(() => {
             isExternalScrollRef.current = false;
           }, 100);
         }
       },
-      [flights, rowVirtualizer]
+      [flights, rowVirtualizer, onScrollStart, onTopFlightChange]
     );
 
     const handleFastScrollStart = useCallback(() => {
@@ -505,11 +510,8 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             onMouseDown={handleTouchStart}
           >
             <div
-              style={{
-                height: `${topSpacerHeight}px`,
-                transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
-              }}
-              className="transition-[height] duration-500 will-change-[height]"
+              style={{ height: `${topSpacerHeight}px` }}
+              className="transition-[height] duration-300 ease-in-out"
             />
             {headerContent}
             <div className="text-center py-12">
@@ -539,11 +541,8 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           >
             {/* Top spacer for calendar */}
             <div
-              style={{
-                height: `${topSpacerHeight}px`,
-                transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
-              }}
-              className="transition-[height] duration-500 will-change-[height]"
+              style={{ height: `${topSpacerHeight}px` }}
+              className="transition-[height] duration-300 ease-in-out"
             />
 
             {headerContent}

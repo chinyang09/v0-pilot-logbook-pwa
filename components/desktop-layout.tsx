@@ -38,7 +38,7 @@ function DesktopLayoutContent({ children }: DesktopLayoutProps) {
       <div className="flex-1 flex min-w-0 overflow-x-auto">
         <ResizablePanelGroup direction="horizontal" className="h-full min-w-[750px]">
           <ResizablePanel defaultSize={50} minSize={30} style={{ minWidth: "375px" }}>
-            <div className="h-full flex flex-col overflow-hidden">{children}</div>
+            <div className="h-full flex flex-col overflow-hidden relative">{children}</div>
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={50} minSize={25}>
