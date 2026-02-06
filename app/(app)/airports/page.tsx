@@ -166,26 +166,30 @@ export default function AirportsPage() {
     });
   }, [airports, allSortedAirports, debouncedSearchQuery]);
 
-  // Non-favorite airports for the virtualized list (favorites are shown separately above)
-  const nonFavoriteAirports = useMemo(() => {
-    return allSortedAirports.filter((a) => !a.isFavorite);
-  }, [allSortedAirports]);
+  // Set of recent ICAO codes for fast lookup
+  const recentIcaos = useMemo(() => {
+    return new Set(recentAirports.map((a) => a.icao));
+  }, [recentAirports]);
 
-  // The list to virtualize: when searching show all results, otherwise exclude favorites
-  const displayAirports = debouncedSearchQuery.trim() ? filteredAirports : nonFavoriteAirports;
+  // Browse list excludes both favorites and recently used (shown in their own sections above)
+  const browseAirports = useMemo(() => {
+    return allSortedAirports.filter((a) => !a.isFavorite && !recentIcaos.has(a.icao));
+  }, [allSortedAirports, recentIcaos]);
 
-  // Generate FastScroll alphabet items (excluding favorites)
+  // The list to virtualize: when searching show all results, otherwise the browse list
+  const displayAirports = debouncedSearchQuery.trim() ? filteredAirports : browseAirports;
+
+  // Generate FastScroll alphabet items from the browse list
   const fastScrollItems = useMemo(() => {
-    const nonFavorites = airports.filter((a) => !a.isFavorite);
-    return generateAlphabetItemsFromList(nonFavorites.map((a) => a.icao), {
+    return generateAlphabetItemsFromList(browseAirports.map((a) => a.icao), {
       numberPosition: "start",
     });
-  }, [airports]);
+  }, [browseAirports]);
 
   // Pre-compute letter -> virtual list index mapping for fast scroll
   const letterIndexMap = useMemo(() => {
     const map = new Map<string, number>();
-    nonFavoriteAirports.forEach((airport, index) => {
+    browseAirports.forEach((airport, index) => {
       const firstChar = airport.icao[0]?.toUpperCase();
       const letter = /[A-Z]/.test(firstChar || "") ? firstChar! : "#";
       if (!map.has(letter)) {
@@ -193,7 +197,7 @@ export default function AirportsPage() {
       }
     });
     return map;
-  }, [nonFavoriteAirports]);
+  }, [browseAirports]);
 
   // Measure scroll margin: height of non-virtualized content above the virtual list
   const aboveVirtualRef = useRef<HTMLDivElement>(null);
@@ -447,23 +451,25 @@ export default function AirportsPage() {
                   </div>
                 )}
 
-                {/* Recent Section */}
-                {recentAirports.length > 0 && (
+                {/* Recent Section (excluding favorites, which are shown above) */}
+                {recentAirports.filter((a) => !a.isFavorite).length > 0 && (
                   <div className="space-y-1.5">
                     <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
                       Recent
                     </h2>
                     <div className="space-y-2">
-                      {recentAirports.map((a: Airport) => (
-                        <AirportCard
-                          key={a.icao}
-                          airport={a}
-                          isRecent
-                          isSelected={!fieldType && selectedAirportIcao === a.icao}
-                          onSelect={handleAirportSelect}
-                          onToggleFavorite={handleToggleFavorite}
-                        />
-                      ))}
+                      {recentAirports
+                        .filter((a: Airport) => !a.isFavorite)
+                        .map((a: Airport) => (
+                          <AirportCard
+                            key={a.icao}
+                            airport={a}
+                            isRecent
+                            isSelected={!fieldType && selectedAirportIcao === a.icao}
+                            onSelect={handleAirportSelect}
+                            onToggleFavorite={handleToggleFavorite}
+                          />
+                        ))}
                     </div>
                     <div className="border-t border-border my-4" />
                   </div>

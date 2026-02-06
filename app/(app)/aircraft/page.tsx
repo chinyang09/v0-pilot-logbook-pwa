@@ -30,6 +30,7 @@ interface AircraftCardProps {
   aircraft: NormalizedAircraft
   isRecent?: boolean
   isSelected?: boolean
+  compact?: boolean
   onSelect: (aircraft: NormalizedAircraft) => void
 }
 
@@ -37,6 +38,7 @@ const AircraftCard = memo(function AircraftCard({
   aircraft,
   isRecent = false,
   isSelected = false,
+  compact = false,
   onSelect,
 }: AircraftCardProps) {
   return (
@@ -51,7 +53,8 @@ const AircraftCard = memo(function AircraftCard({
         }
       }}
       className={cn(
-        "w-full text-left p-3 rounded-lg transition-all cursor-pointer active:scale-[0.98]",
+        "w-full text-left rounded-lg transition-all cursor-pointer active:scale-[0.98]",
+        compact ? "py-2 px-3" : "p-3",
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
           : "bg-card border border-border hover:bg-accent",
@@ -187,22 +190,33 @@ export default function AircraftPage() {
     })
   }, [allAircraft, allSortedAircraft, debouncedSearchQuery])
 
-  // The list to virtualize
-  const displayAircraft = debouncedSearchQuery.trim() ? filteredAircraft : allSortedAircraft
+  // Set of recently used registrations for fast lookup
+  const recentRegistrations = useMemo(() => {
+    return new Set(recentlyUsed.map((a) => a.registration.toUpperCase()))
+  }, [recentlyUsed])
 
-  // Generate FastScroll alphabet items from the full sorted list
+  // Browse list excludes recently used (they're shown in their own section above)
+  const browseAircraft = useMemo(() => {
+    if (recentRegistrations.size === 0) return allSortedAircraft
+    return allSortedAircraft.filter((a) => !recentRegistrations.has(a.registration.toUpperCase()))
+  }, [allSortedAircraft, recentRegistrations])
+
+  // The list to virtualize: search results or browse list (excluding recently used)
+  const displayAircraft = debouncedSearchQuery.trim() ? filteredAircraft : browseAircraft
+
+  // Generate FastScroll alphabet items from the browse list
   const fastScrollItems = useMemo(() => {
-    if (allSortedAircraft.length === 0) return []
+    if (browseAircraft.length === 0) return []
     return generateAlphabetItemsFromList(
-      allSortedAircraft.map((a) => a.registration),
+      browseAircraft.map((a) => a.registration),
       { numberPosition: "start" }
     )
-  }, [allSortedAircraft])
+  }, [browseAircraft])
 
   // Pre-compute letter -> virtual list index mapping for fast scroll
   const letterIndexMap = useMemo(() => {
     const map = new Map<string, number>()
-    allSortedAircraft.forEach((aircraft, index) => {
+    browseAircraft.forEach((aircraft, index) => {
       const firstChar = aircraft.registration[0]?.toUpperCase()
       const letter = firstChar && /[A-Z]/.test(firstChar) ? firstChar : "#"
       if (!map.has(letter)) {
@@ -210,7 +224,7 @@ export default function AircraftPage() {
       }
     })
     return map
-  }, [allSortedAircraft])
+  }, [browseAircraft])
 
   // Measure scroll margin: height of non-virtualized content above the virtual list
   const aboveVirtualRef = useRef<HTMLDivElement>(null)
@@ -241,7 +255,7 @@ export default function AircraftPage() {
   const rowVirtualizer = useVirtualizer({
     count: displayAircraft.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 76, // Estimated aircraft card height (p-3 + content + gap)
+    estimateSize: () => 56, // Compact card height (py-2 + content + pb-1 gap)
     overscan: 10,
     scrollMargin,
   })
@@ -504,11 +518,12 @@ export default function AircraftPage() {
                       data-index={virtualRow.index}
                       ref={rowVirtualizer.measureElement}
                     >
-                      <div className="pb-2">
+                      <div className="pb-1">
                         <AircraftCard
                           aircraft={aircraft}
                           onSelect={handleSelectAircraft}
                           isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
+                          compact
                         />
                       </div>
                     </div>
