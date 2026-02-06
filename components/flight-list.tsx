@@ -334,13 +334,39 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           const index = flights.findIndex((f) => f.id === flightId);
           if (index !== -1) {
             isExternalScrollRef.current = true;
-            rowVirtualizer.scrollToIndex(index, {
-              align: "start",
-              behavior: "auto",
-            });
-            setTimeout(() => {
+            const container = scrollContainerRef.current;
+            if (!container) return;
+
+            // Capture current position, instant-jump to target, capture target, reset
+            const startOffset = container.scrollTop;
+            rowVirtualizer.scrollToIndex(index, { align: "start", behavior: "auto" });
+            const targetOffset = container.scrollTop;
+            container.scrollTop = startOffset;
+
+            // Animate smoothly over fixed 300ms with ease-out cubic
+            const duration = 300;
+            const startTime = performance.now();
+            const distance = targetOffset - startOffset;
+
+            if (Math.abs(distance) < 1) {
               isExternalScrollRef.current = false;
-            }, 100);
+              return;
+            }
+
+            const animate = (currentTime: number) => {
+              const elapsed = currentTime - startTime;
+              const progress = Math.min(elapsed / duration, 1);
+              const eased = 1 - Math.pow(1 - progress, 3);
+              container.scrollTop = startOffset + distance * eased;
+
+              if (progress < 1) {
+                requestAnimationFrame(animate);
+              } else {
+                isExternalScrollRef.current = false;
+              }
+            };
+
+            requestAnimationFrame(animate);
           }
         },
       }),
