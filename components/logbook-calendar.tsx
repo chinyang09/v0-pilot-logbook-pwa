@@ -238,11 +238,11 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 <button
                   key={dayIndex}
                   onClick={() => handleDateClick(dayInfo.dateStr, !!flightInfo)}
-                  className="aspect-square p-[2px]"
+                  className="flex items-center justify-center aspect-square p-1"
                 >
                   <div
                     className={cn(
-                      "w-full h-full flex items-center justify-center text-sm rounded-full transition-all",
+                      "w-full aspect-square flex items-center justify-center text-sm rounded-full transition-all",
                       isCurrentMonth
                         ? "text-foreground/90"
                         : "text-foreground/15",

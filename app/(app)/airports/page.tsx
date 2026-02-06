@@ -53,7 +53,7 @@ const AirportCard = memo(function AirportCard({
         }
       }}
       className={cn(
-        "w-full text-left rounded-lg py-2 px-3 transition-all cursor-pointer active:scale-[0.98]",
+        "w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer active:scale-[0.98]",
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
           : "bg-card border border-border hover:bg-accent",
@@ -413,7 +413,7 @@ export default function AirportsPage() {
           {/* Non-virtualized content above the virtual list */}
           <div ref={aboveVirtualRef}>
             {!debouncedSearchQuery.trim() && (
-              <div className={`space-y-3 ${showFastScroll ? "pr-8" : ""}`}>
+              <div className={`space-y-3 `}>
                 {/* Favorites Section */}
                 {airports.some((a: Airport) => a.isFavorite) && (
                   <div className="space-y-1.5">
@@ -464,7 +464,7 @@ export default function AirportsPage() {
             )}
 
             {debouncedSearchQuery.trim() && (
-              <div className={`space-y-3 ${showFastScroll ? "pr-8" : ""}`}>
+              <div className={`space-y-3 `}>
                 <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
                   {filteredAirports.length} results
                 </h2>
@@ -473,7 +473,7 @@ export default function AirportsPage() {
           </div>
 
           {/* Virtualized airport list */}
-          <div className={showFastScroll ? "pr-8" : ""}>
+          <div>
             <div
               style={{
                 height: `${rowVirtualizer.getTotalSize()}px`,

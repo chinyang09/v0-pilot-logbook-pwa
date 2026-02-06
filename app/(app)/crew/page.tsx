@@ -70,7 +70,7 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
     >
       <button
         className={cn(
-          "w-full text-left bg-card border border-border rounded-lg py-2 px-3 transition-all active:scale-[0.98]",
+          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all active:scale-[0.98]",
           crew.isMe &&
             "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20",
           isSelected && "bg-primary/20 border-primary"
@@ -426,7 +426,7 @@ export default function CrewPage() {
           {/* Non-virtualized content above the virtual list */}
           <div ref={aboveVirtualRef}>
             {debouncedSearchQuery.trim() && (
-              <div className={`space-y-3 ${showFastScroll ? "pr-8" : ""}`}>
+              <div className="space-y-3">
                 <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
                   {filteredPersonnel.length} results
                 </h2>
@@ -450,7 +450,7 @@ export default function CrewPage() {
             </div>
           ) : (
             /* Virtualized crew list */
-            <div className={showFastScroll ? "pr-8" : ""}>
+            <div>
               <div
                 style={{
                   height: `${rowVirtualizer.getTotalSize()}px`,

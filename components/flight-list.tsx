@@ -336,11 +336,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             isExternalScrollRef.current = true;
             rowVirtualizer.scrollToIndex(index, {
               align: "start",
-              behavior: "smooth",
+              behavior: "auto",
             });
             setTimeout(() => {
               isExternalScrollRef.current = false;
-            }, 800); // Allow smooth scroll to complete with accurate 104px estimation
+            }, 100);
           }
         },
       }),
