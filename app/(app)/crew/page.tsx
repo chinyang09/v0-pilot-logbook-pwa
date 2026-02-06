@@ -399,7 +399,7 @@ export default function CrewPage() {
       mainRef={scrollContainerCallbackRef}
     >
       <div>
-        <div className="container mx-auto px-3 pt-3 pb-safe">
+        <div className="px-4 pt-4 pb-safe">
           {/* Sticky search bar - outside aboveVirtualRef so it stays visible during scroll */}
           <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
             <div className="flex gap-2">

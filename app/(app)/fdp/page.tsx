@@ -2,8 +2,9 @@
 
 import { useMemo } from "react"
 import { PageContainer } from "@/components/page-container"
+import { StandardPageHeader } from "@/components/standard-page-header"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { RefreshCw, TrendingUp, AlertTriangle, CheckCircle2, Info } from "lucide-react"
 import { useScheduleEntries } from "@/hooks/data/use-schedule"
@@ -133,27 +134,17 @@ export default function FDPPage() {
   return (
     <PageContainer
       header={
-        <header className="flex-none bg-background/95 backdrop-blur-lg border-b border-border z-50">
-          <div className="container mx-auto px-4">
-            <div className="flex items-center justify-between h-12">
-              <h1 className="text-lg font-semibold text-foreground">FDP Dashboard</h1>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => refresh()}
-                  disabled={isLoading}
-                  title="Refresh"
-                >
-                  <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-                </Button>
-              </div>
-            </div>
-          </div>
-        </header>
+        <StandardPageHeader
+          title="FDP Dashboard"
+          actions={
+            <Button variant="ghost" size="icon-sm" onClick={() => refresh()} disabled={isLoading}>
+              <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+            </Button>
+          }
+        />
       }
     >
-      <div className="container mx-auto px-3 pt-4 pb-safe space-y-4">
+      <div className="px-4 pt-4 pb-safe space-y-4">
         {/* Overall Status Card */}
         <Card
           className={cn(
@@ -275,12 +266,10 @@ export default function FDPPage() {
         {/* Empty State */}
         {dutyPeriods.length === 0 && !isLoading && (
           <Card>
-            <CardContent className="pt-8 pb-8 text-center">
-              <TrendingUp className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <CardTitle className="text-lg mb-2">No Duty Periods</CardTitle>
-              <CardDescription>
-                Import your schedule to see FDP calculations and regulatory compliance.
-              </CardDescription>
+            <CardContent className="py-12 text-center">
+              <TrendingUp className="h-10 w-10 text-muted-foreground/40 mb-3 mx-auto" />
+              <p className="text-sm font-medium text-foreground mb-1">No Duty Periods</p>
+              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto">Import your schedule to see FDP calculations and regulatory compliance.</p>
             </CardContent>
           </Card>
         )}

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useMemo, useCallback } from "react"
 import { PageContainer } from "@/components/page-container"
+import { StandardPageHeader } from "@/components/standard-page-header"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
@@ -16,7 +17,6 @@ import {
 import {
   Calendar as CalendarIcon,
   Upload,
-  FileText,
   AlertCircle,
   CheckCircle2,
   XCircle,
@@ -222,72 +222,56 @@ export default function RosterPage() {
   return (
     <PageContainer
       header={
-        <header className="flex-none bg-background/95 backdrop-blur-lg border-b border-border z-50">
-          <div className="container mx-auto px-4">
-            <div className="flex items-center justify-between h-12">
-              <h1 className="text-lg font-semibold text-foreground">Roster</h1>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => refreshEntries()}
-                  disabled={entriesLoading}
-                  title="Refresh"
-                >
-                  <RefreshCw className={cn("h-4 w-4", entriesLoading && "animate-spin")} />
-                </Button>
-                <Button
-                  variant={viewMode === "list" ? "secondary" : "ghost"}
-                  size="icon-sm"
-                  onClick={() => setViewMode("list")}
-                  title="List View"
-                >
-                  <List className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant={viewMode === "calendar" ? "secondary" : "ghost"}
-                  size="icon-sm"
-                  onClick={() => setViewMode("calendar")}
-                  title="Calendar View"
-                >
-                  <CalendarDays className="h-4 w-4" />
-                </Button>
-                <Dialog open={showSettings} onOpenChange={setShowSettings}>
-                  <DialogTrigger asChild>
-                    <Button variant="ghost" size="icon-sm" title="Draft Settings">
-                      <Settings className="h-4 w-4" />
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-lg">
-                    <DialogHeader>
-                      <DialogTitle>Draft Generation Settings</DialogTitle>
-                      <DialogDescription>
-                        Configure automatic draft flight generation from your schedule
-                      </DialogDescription>
-                    </DialogHeader>
-                    <DraftSettings onSave={() => setShowSettings(false)} />
-                  </DialogContent>
-                </Dialog>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleGenerateDrafts}
-                  disabled={isGeneratingDrafts}
-                  title="Generate Drafts"
-                >
-                  <FileDown className={cn("h-4 w-4", isGeneratingDrafts && "animate-bounce")} />
-                </Button>
-                <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
-                  <Upload className="h-4 w-4 mr-1" />
-                  Import
-                </Button>
-              </div>
-            </div>
-          </div>
-        </header>
+        <StandardPageHeader
+          title="Roster"
+          actions={
+            <>
+              <Button variant="ghost" size="icon-sm" onClick={() => refreshEntries()} disabled={entriesLoading}>
+                <RefreshCw className={cn("h-4 w-4", entriesLoading && "animate-spin")} />
+              </Button>
+              <Button
+                variant={viewMode === "list" ? "secondary" : "ghost"}
+                size="icon-sm"
+                onClick={() => setViewMode("list")}
+              >
+                <List className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={viewMode === "calendar" ? "secondary" : "ghost"}
+                size="icon-sm"
+                onClick={() => setViewMode("calendar")}
+              >
+                <CalendarDays className="h-4 w-4" />
+              </Button>
+              <Dialog open={showSettings} onOpenChange={setShowSettings}>
+                <DialogTrigger asChild>
+                  <Button variant="ghost" size="icon-sm">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle>Draft Generation Settings</DialogTitle>
+                    <DialogDescription>
+                      Configure automatic draft flight generation from your schedule
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DraftSettings onSave={() => setShowSettings(false)} />
+                </DialogContent>
+              </Dialog>
+              <Button variant="ghost" size="icon-sm" onClick={handleGenerateDrafts} disabled={isGeneratingDrafts}>
+                <FileDown className={cn("h-4 w-4", isGeneratingDrafts && "animate-bounce")} />
+              </Button>
+              <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
+                <Upload className="h-4 w-4" />
+                Import
+              </Button>
+            </>
+          }
+        />
       }
     >
-      <div className="container mx-auto px-3 pt-4 pb-safe space-y-4">
+      <div className="px-4 pt-4 pb-safe space-y-4">
         <input
           type="file"
           ref={fileInputRef}
@@ -456,14 +440,12 @@ export default function RosterPage() {
         {/* Empty State */}
         {scheduleEntries.length === 0 && !entriesLoading && !isImporting && (
           <Card>
-            <CardContent className="pt-8 pb-8 text-center">
-              <CalendarIcon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <CardTitle className="text-lg mb-2">No Schedule Data</CardTitle>
-              <CardDescription className="mb-4">
-                Import your crew schedule CSV to view your roster and track duty times.
-              </CardDescription>
-              <Button onClick={() => fileInputRef.current?.click()}>
-                <Upload className="h-4 w-4 mr-2" />
+            <CardContent className="py-12 text-center">
+              <CalendarIcon className="h-10 w-10 mx-auto text-muted-foreground/40 mb-3" />
+              <p className="text-sm font-medium text-foreground mb-1">No Schedule Data</p>
+              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto mb-4">Import your crew schedule CSV to view your roster and track duty times.</p>
+              <Button size="sm" onClick={() => fileInputRef.current?.click()}>
+                <Upload className="h-4 w-4" />
                 Import Schedule CSV
               </Button>
             </CardContent>

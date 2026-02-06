@@ -204,14 +204,14 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
     return (
       <div
-        className={cn("flex flex-col bg-transparent w-full pb-4", className)}
+        className={cn("flex flex-col w-full pb-2", className)}
       >
         {/* HEADER: Days of the week */}
-        <div className="grid grid-cols-7 gap-1 px-4 py-3">
+        <div className="grid grid-cols-7 gap-1 px-4 pt-3 pb-1">
           {DAYS.map((day, i) => (
             <div
               key={i}
-              className="text-center text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest"
+              className="text-center text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider"
             >
               {day}
             </div>
@@ -221,13 +221,13 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         {/* GRID: The actual month days */}
         <div
           ref={containerRef}
-          className="flex-1 px-3 py-2 overflow-hidden touch-none"
+          className="flex-1 px-3 py-1 overflow-hidden touch-none"
           style={{ contain: "layout", touchAction: "none" }}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="grid grid-cols-7 gap-2">
+          <div className="grid grid-cols-7 gap-1">
             {calendarDays.map((dayInfo, dayIndex) => {
               const flightInfo = flightDates.get(dayInfo.dateStr);
               const isCurrentMonth = dayInfo.isCurrentMonth;
@@ -239,25 +239,18 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                   key={dayIndex}
                   onClick={() => handleDateClick(dayInfo.dateStr, !!flightInfo)}
                   className={cn(
-                    "flex flex-col items-center justify-center rounded-xl text-sm transition-all relative",
-                    // Only show current month days clearly
+                    "aspect-square flex flex-col items-center justify-center rounded-lg text-sm transition-all relative",
                     isCurrentMonth
-                      ? "text-foreground font-semibold"
-                      : "text-foreground/10 font-normal",
-                    // If there are flights, give it a subtle "button" look
-                    flightInfo &&
-                      isCurrentMonth &&
-                      "bg-primary/10 text-primary shadow-[inset_0_0_0_1px_rgba(var(--primary),0.1)]",
-                    // High contrast for selected/today
-                    isToday && "ring-2 ring-primary ring-offset-1",
-                    isSelected &&
-                      "bg-primary! text-primary-foreground! scale-105 shadow-lg z-10"
+                      ? "text-foreground/90"
+                      : "text-foreground/15",
+                    flightInfo && isCurrentMonth && "font-semibold text-primary bg-primary/8",
+                    isToday && "ring-1.5 ring-primary/60",
+                    isSelected && "bg-primary text-primary-foreground shadow-md z-10"
                   )}
                 >
                   <span>{dayInfo.date.getDate()}</span>
-                  {/* Tiny dot for flights instead of a big badge to keep it clean */}
                   {flightInfo && isCurrentMonth && !isSelected && (
-                    <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-primary" />
+                    <div className="absolute bottom-1 w-1 h-1 rounded-full bg-primary/70" />
                   )}
                 </button>
               );

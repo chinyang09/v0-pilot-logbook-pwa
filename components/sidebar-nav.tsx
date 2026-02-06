@@ -156,10 +156,8 @@ export function SidebarNav() {
           isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
       >
-        {/* Header with space for toggle button and safe area */}
-        <div className="h-14 flex items-center pl-12 pr-4 border-b border-sidebar-border mt-safe">
-          <span className="text-sm font-semibold text-sidebar-foreground">Pilot Logbook</span>
-        </div>
+        {/* Spacer aligned with page header h-12 + safe area */}
+        <div className="h-12 flex-shrink-0 border-b border-sidebar-border mt-safe" />
 
         {/* Navigation sections */}
         <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-4">
