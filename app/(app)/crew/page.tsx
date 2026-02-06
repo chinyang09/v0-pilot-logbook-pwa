@@ -400,30 +400,31 @@ export default function CrewPage() {
     >
       <div>
         <div className="container mx-auto px-3 pt-3 pb-safe">
+          {/* Sticky search bar - outside aboveVirtualRef so it stays visible during scroll */}
+          <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Input
+                  type="text"
+                  placeholder="Search crew..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
+                />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              </div>
+              <Button
+                onClick={handleAddCrew}
+                size="icon"
+                className="h-10 w-10 flex-shrink-0"
+              >
+                <Plus className="h-5 w-5" />
+              </Button>
+            </div>
+          </div>
+
           {/* Non-virtualized content above the virtual list */}
           <div ref={aboveVirtualRef}>
-            <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Input
-                    type="text"
-                    placeholder="Search crew..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-                  />
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                </div>
-                <Button
-                  onClick={handleAddCrew}
-                  size="icon"
-                  className="h-10 w-10 flex-shrink-0"
-                >
-                  <Plus className="h-5 w-5" />
-                </Button>
-              </div>
-            </div>
-
             {debouncedSearchQuery.trim() && (
               <div className={`space-y-3 ${showFastScroll ? "pr-8" : ""}`}>
                 <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">

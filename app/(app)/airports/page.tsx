@@ -396,21 +396,22 @@ export default function AirportsPage() {
     >
       <div>
         <div className="container mx-auto px-3 pt-3 pb-safe">
+          {/* Sticky search bar - outside aboveVirtualRef so it stays visible during scroll */}
+          <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
+            <div className="relative">
+              <Input
+                type="text"
+                placeholder="Search airports..."
+                value={searchQuery}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+                className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
+              />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            </div>
+          </div>
+
           {/* Non-virtualized content above the virtual list */}
           <div ref={aboveVirtualRef}>
-            <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
-              <div className="relative">
-                <Input
-                  type="text"
-                  placeholder="Search airports..."
-                  value={searchQuery}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-                />
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              </div>
-            </div>
-
             {!debouncedSearchQuery.trim() && (
               <div className={`space-y-3 ${showFastScroll ? "pr-8" : ""}`}>
                 {/* Favorites Section */}
