@@ -18,12 +18,11 @@ import {
   useAirportDatabase,
   usePersonnel,
 } from "@/hooks/data"
-import { ArrowLeft, Calendar, Plus, Search, X } from "lucide-react"
+import { Calendar, Plus, Search, X } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { SyncStatus } from "@/components/sync-status"
+import { StandardPageHeader } from "@/components/standard-page-header"
 import { cn } from "@/lib/utils"
 import { CSVImportButton } from "@/components/csv-import-button"
-import { ImageImportButton } from "@/components/image-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { FlightForm } from "@/components/flight-form"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
@@ -457,42 +456,23 @@ export default function LogbookPage() {
   return (
     <>
       {/* HEADER */}
-      <header className="flex-none h-12 z-50 bg-background/40 backdrop-blur-xl border-b border-border/50">
-        {/* Always add pl-14 padding to avoid overlap with sidebar toggle button */}
-        <div className="flex items-center justify-between h-full px-4 pl-14">
-          {showCalendar ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => {
-                toggleCalendar(false)
-                setSelectedDate(null)
-              }}
-              className="h-8 w-8 p-0"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-          ) : (
-            <h1 className="text-lg font-semibold text-foreground">Logbook</h1>
-          )}
-
-          {showCalendar && (
-            <h1 className="text-lg font-semibold text-foreground">
-              {MONTHS[selectedMonth.month]} {selectedMonth.year}
-            </h1>
-          )}
-
-          <div className="flex items-center gap-2">
-            <SyncStatus />
+      <StandardPageHeader
+        title={showCalendar ? `${MONTHS[selectedMonth.month]} ${selectedMonth.year}` : "Logbook"}
+        showBack={showCalendar}
+        onBack={() => {
+          toggleCalendar(false)
+          setSelectedDate(null)
+        }}
+        actions={
+          <>
             <Button
               variant={showCalendar ? "default" : "ghost"}
-              size="icon"
+              size="icon-sm"
               onClick={() => {
                 toggleCalendar(!showCalendar)
                 setSelectedDate(null)
                 setSearchFocused(false)
               }}
-              className="h-8 w-8"
             >
               <Calendar className="h-4 w-4" />
             </Button>
@@ -503,15 +483,8 @@ export default function LogbookPage() {
               }}
             />
 
-            <ImageImportButton
-              onDataExtracted={() => {
-                // Navigate to new flight page to use OCR data
-                router.push("/new-flight")
-              }}
-            />
-
             <Button
-              size="icon"
+              size="icon-sm"
               onClick={async () => {
                 // Create a draft flight first
                 const emptyFlight = createEmptyFlightLog()
@@ -533,23 +506,21 @@ export default function LogbookPage() {
                   router.push(`/flights/${draftFlight.id}`)
                 }
               }}
-              className="h-8 w-8"
             >
               <Plus className="h-4 w-4" />
             </Button>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       {/* CALENDAR */}
       <div
         ref={calendarContainerRef}
         className={cn(
-          "flex-none z-40 border-b border-white/10 dark:border-white/5",
-          "bg-white/60 dark:bg-background/60 backdrop-blur-2xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1)]",
+          "flex-none z-40 border-b border-border/30",
+          "bg-background/40 backdrop-blur-2xl",
           "transition-all duration-500 will-change-transform overflow-hidden",
-          "max-h-[40vh]",
-          showCalendar ? "opacity-100" : "max-h-0 opacity-0",
+          showCalendar ? "max-h-[40dvh] opacity-100" : "max-h-0 opacity-0",
         )}
         style={{ transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)" }}
       >

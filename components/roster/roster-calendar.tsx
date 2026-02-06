@@ -7,7 +7,7 @@
 
 import { useState, useMemo } from "react"
 import type { ScheduleEntry, DutyType } from "@/types/entities/roster.types"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -22,6 +22,8 @@ const DUTY_TYPE_DOTS: Record<DutyType, string> = {
   positioning: "bg-cyan-500",
   other: "bg-gray-400",
 }
+
+const DAYS = ["S", "M", "T", "W", "T", "F", "S"]
 
 interface RosterCalendarProps {
   entries: ScheduleEntry[]
@@ -55,7 +57,7 @@ export function RosterCalendar({ entries, onDateClick }: RosterCalendarProps) {
 
     const firstDay = new Date(year, month, 1)
     const lastDay = new Date(year, month + 1, 0)
-    const startingDayOfWeek = firstDay.getDay() // 0 = Sunday
+    const startingDayOfWeek = firstDay.getDay()
 
     const days: Array<{
       date: Date
@@ -96,7 +98,7 @@ export function RosterCalendar({ entries, onDateClick }: RosterCalendarProps) {
     }
 
     // Add days from next month to complete the grid
-    const remainingDays = 42 - days.length // 6 weeks * 7 days
+    const remainingDays = 42 - days.length
     for (let day = 1; day <= remainingDays; day++) {
       const date = new Date(year, month + 1, day)
       const dateString = date.toISOString().split("T")[0]
@@ -132,27 +134,27 @@ export function RosterCalendar({ entries, onDateClick }: RosterCalendarProps) {
 
   return (
     <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-lg">{monthName}</CardTitle>
+      <CardContent className="p-3">
+        {/* Month header with navigation */}
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-foreground">{monthName}</h3>
           <div className="flex items-center gap-1">
-            <Button variant="outline" size="sm" onClick={goToToday}>
+            <Button variant="ghost" size="sm" onClick={goToToday} className="text-xs h-7 px-2">
               Today
             </Button>
-            <Button variant="ghost" size="icon" onClick={goToPreviousMonth}>
+            <Button variant="ghost" size="icon-sm" onClick={goToPreviousMonth}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={goToNextMonth}>
+            <Button variant="ghost" size="icon-sm" onClick={goToNextMonth}>
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
         </div>
-      </CardHeader>
-      <CardContent className="p-2">
-        {/* Weekday headers */}
-        <div className="grid grid-cols-7 mb-1">
-          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-            <div key={day} className="text-center text-xs font-medium text-muted-foreground py-2">
+
+        {/* Weekday headers - matching LogbookCalendar style */}
+        <div className="grid grid-cols-7 gap-1 mb-1">
+          {DAYS.map((day, i) => (
+            <div key={i} className="text-center text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">
               {day}
             </div>
           ))}
@@ -162,42 +164,34 @@ export function RosterCalendar({ entries, onDateClick }: RosterCalendarProps) {
         <div className="grid grid-cols-7 gap-1">
           {calendarDays.map((day, idx) => {
             const hasEntries = day.entries.length > 0
-            const primaryEntry = day.entries[0]
 
             return (
               <button
                 key={idx}
                 onClick={() => hasEntries && onDateClick?.(day.dateString, day.entries)}
                 className={cn(
-                  "aspect-square p-1 rounded-lg text-sm transition-colors relative",
-                  "hover:bg-secondary/50",
-                  day.isCurrentMonth ? "bg-background" : "bg-muted/30",
-                  day.isToday && "ring-2 ring-primary",
-                  !day.isCurrentMonth && "text-muted-foreground",
-                  hasEntries && "cursor-pointer font-medium",
+                  "aspect-square flex flex-col items-center justify-center rounded-lg text-sm transition-all relative",
+                  day.isCurrentMonth ? "text-foreground/90" : "text-foreground/15",
+                  day.isToday && "ring-1.5 ring-primary/60",
+                  hasEntries && day.isCurrentMonth && "font-semibold cursor-pointer",
                   !hasEntries && "cursor-default"
                 )}
               >
-                <div className="absolute top-1 left-1 right-1 text-left">
-                  {day.date.getDate()}
-                </div>
+                <span className="text-xs">{day.date.getDate()}</span>
 
                 {/* Duty indicators */}
-                {hasEntries && (
-                  <div className="absolute bottom-1 left-1 right-1 flex flex-wrap gap-0.5 justify-center">
+                {hasEntries && day.isCurrentMonth && (
+                  <div className="absolute bottom-0.5 flex gap-0.5 justify-center">
                     {day.entries.slice(0, 3).map((entry, entryIdx) => {
                       const dotColor = DUTY_TYPE_DOTS[entry.dutyType] || DUTY_TYPE_DOTS.other
                       return (
                         <div
                           key={entryIdx}
-                          className={cn("h-1.5 w-1.5 rounded-full", dotColor)}
+                          className={cn("h-1 w-1 rounded-full", dotColor)}
                           title={entry.dutyCode || entry.dutyType}
                         />
                       )
                     })}
-                    {day.entries.length > 3 && (
-                      <div className="text-[8px] text-muted-foreground">+{day.entries.length - 3}</div>
-                    )}
                   </div>
                 )}
               </button>
@@ -206,28 +200,14 @@ export function RosterCalendar({ entries, onDateClick }: RosterCalendarProps) {
         </div>
 
         {/* Legend */}
-        <div className="mt-4 pt-3 border-t border-border/50">
-          <div className="flex flex-wrap gap-3 text-xs">
-            <div className="flex items-center gap-1.5">
-              <div className={cn("h-2 w-2 rounded-full", DUTY_TYPE_DOTS.flight)} />
-              <span>Flight</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className={cn("h-2 w-2 rounded-full", DUTY_TYPE_DOTS.standby)} />
-              <span>Standby</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className={cn("h-2 w-2 rounded-full", DUTY_TYPE_DOTS.training)} />
-              <span>Training</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className={cn("h-2 w-2 rounded-full", DUTY_TYPE_DOTS.leave)} />
-              <span>Leave</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className={cn("h-2 w-2 rounded-full", DUTY_TYPE_DOTS.off)} />
-              <span>Off</span>
-            </div>
+        <div className="mt-3 pt-2 border-t border-border/30">
+          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+            {(["flight", "standby", "training", "leave", "off"] as DutyType[]).map((type) => (
+              <div key={type} className="flex items-center gap-1">
+                <div className={cn("h-1.5 w-1.5 rounded-full", DUTY_TYPE_DOTS[type])} />
+                <span className="capitalize">{type}</span>
+              </div>
+            ))}
           </div>
         </div>
       </CardContent>

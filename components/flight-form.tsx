@@ -1210,19 +1210,13 @@ export function FlightForm({
     <div className="h-full overflow-y-auto bg-background">
       <div className="min-h-full pb-20">
       {/* Fixed Header */}
-      <div className="sticky top-0 z-50 bg-card border-b border-border px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={handleKeepAsDraft} className="gap-1">
+      <div className="sticky top-0 z-50 h-12 bg-background/80 backdrop-blur-xl border-b border-border/50 px-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {!isDesktop && (
+            <Button variant="ghost" size="icon-sm" onClick={handleKeepAsDraft}>
               <ChevronLeft className="h-4 w-4" />
-              {isDraft ? "Keep Draft" : "Back"}
             </Button>
-            <ImageImportButton
-              onDataExtracted={handleOCRDataExtracted}
-              variant="ghost"
-              size="icon"
-            />
-          </div>
+          )}
           <h1 className="text-lg font-semibold flex items-center gap-2">
             {isDraft ? "Draft" : "Edit Flight"}
             {isDraft && (
@@ -1231,14 +1225,20 @@ export function FlightForm({
               </span>
             )}
           </h1>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <ImageImportButton
+            onDataExtracted={handleOCRDataExtracted}
+            variant="ghost"
+            size="icon-sm"
+          />
           <Button
             onClick={handleSyncFlight}
             disabled={isSubmitting}
             size="sm"
-            className="px-3 gap-1.5"
           >
             <RefreshCw className={`h-4 w-4 ${isSubmitting ? "animate-spin" : ""}`} />
-            {isSubmitting ? "Syncing..." : "Sync Flight"}
+            {isSubmitting ? "Syncing..." : "Sync"}
           </Button>
         </div>
       </div>

@@ -27,7 +27,7 @@ import {
 interface ImageImportButtonProps {
   onDataExtracted: (data: ExtractedFlightData) => void
   variant?: "ghost" | "default" | "outline"
-  size?: "sm" | "default" | "lg" | "icon"
+  size?: "sm" | "default" | "lg" | "icon" | "icon-sm"
   className?: string
 }
 
@@ -120,10 +120,10 @@ export function ImageImportButton({
           <Button
             variant={variant}
             size={size}
-            className={size === "icon" ? "h-9 w-9" : className}
+            className={className}
             disabled={loading}
           >
-            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">

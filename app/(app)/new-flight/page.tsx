@@ -145,23 +145,35 @@ function NewFlightContent() {
       {/* 2. Scrollable Content Area */}
       {
         <div className="pb-safe">
-          {" "}
           {isLoadingFlight ? (
-            <div className="container mx-auto px-3 py-3">
-              <Card className="bg-card border-border">
-                <CardContent className="p-6 space-y-4">
-                  <Skeleton className="h-8 w-48" />
-                  <div className="grid grid-cols-3 gap-4">
+            <div className="h-full">
+              {/* Skeleton matching FlightForm header */}
+              <div className="h-12 bg-background/80 backdrop-blur-xl border-b border-border/50 px-4 flex items-center justify-between">
+                <Skeleton className="h-5 w-24" />
+                <Skeleton className="h-8 w-20" />
+              </div>
+              {/* Skeleton matching form sections */}
+              <div className="space-y-4 px-2 py-4">
+                <div className="rounded-xl bg-card border border-border p-4 space-y-3">
+                  <Skeleton className="h-4 w-20" />
+                  <div className="grid grid-cols-3 gap-3">
                     <Skeleton className="h-10" />
                     <Skeleton className="h-10" />
                     <Skeleton className="h-10" />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                </div>
+                <div className="rounded-xl bg-card border border-border p-4 space-y-3">
+                  <Skeleton className="h-4 w-16" />
+                  <div className="grid grid-cols-2 gap-3">
                     <Skeleton className="h-10" />
                     <Skeleton className="h-10" />
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Skeleton className="h-10" />
+                    <Skeleton className="h-10" />
+                  </div>
+                </div>
+              </div>
             </div>
           ) : (
             <FlightForm
@@ -190,14 +202,20 @@ export default function NewFlightPage() {
     <Suspense
       fallback={
         <PageContainer>
-          {
-            <Card className="bg-card border-border">
-              <CardContent className="p-6">
-                <Skeleton className="h-8 w-48 mb-4" />
-                <Skeleton className="h-64" />
-              </CardContent>
-            </Card>
-          }
+          <div className="h-12 bg-background/80 backdrop-blur-xl border-b border-border/50 px-4 flex items-center justify-between">
+            <Skeleton className="h-5 w-24" />
+            <Skeleton className="h-8 w-20" />
+          </div>
+          <div className="space-y-4 px-2 py-4">
+            <div className="rounded-xl bg-card border border-border p-4 space-y-3">
+              <Skeleton className="h-4 w-20" />
+              <div className="grid grid-cols-3 gap-3">
+                <Skeleton className="h-10" />
+                <Skeleton className="h-10" />
+                <Skeleton className="h-10" />
+              </div>
+            </div>
+          </div>
         </PageContainer>
       }
     >

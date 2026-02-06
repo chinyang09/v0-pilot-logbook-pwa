@@ -91,8 +91,7 @@ export function CSVImportButton({ onComplete }: { onComplete: () => void }) {
 
       <Button
         variant="ghost"
-        size="icon"
-        className="h-9 w-9"
+        size="icon-sm"
         disabled={loading}
         onClick={() => fileInputRef.current?.click()}
       >

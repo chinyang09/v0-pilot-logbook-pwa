@@ -2,8 +2,9 @@
 
 import { useState } from "react"
 import { PageContainer } from "@/components/page-container"
+import { StandardPageHeader } from "@/components/standard-page-header"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import {
   Select,
   SelectContent,
@@ -11,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { RefreshCw, AlertCircle, CheckCircle2, XCircle } from "lucide-react"
+import { RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react"
 import { useDiscrepancies } from "@/hooks/data"
 import { DiscrepancyCard, DiscrepancyResolutionDialog } from "@/components/roster"
 import type { Discrepancy, DiscrepancyType } from "@/types/entities/roster.types"
@@ -50,27 +51,22 @@ export default function DiscrepanciesPage() {
   return (
     <PageContainer
       header={
-        <header className="flex-none bg-background/95 backdrop-blur-lg border-b border-border z-50">
-          <div className="container mx-auto px-4">
-            <div className="flex items-center justify-between h-12">
-              <h1 className="text-lg font-semibold text-foreground">Discrepancies</h1>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => refresh()}
-                  disabled={isLoading}
-                  title="Refresh"
-                >
-                  <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-                </Button>
-              </div>
-            </div>
-          </div>
-        </header>
+        <StandardPageHeader
+          title="Discrepancies"
+          actions={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => refresh()}
+              disabled={isLoading}
+            >
+              <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+            </Button>
+          }
+        />
       }
     >
-      <div className="container mx-auto px-3 pt-4 pb-safe space-y-4">
+      <div className="px-4 pt-4 pb-safe space-y-4">
         {/* Status Cards */}
         <div className="grid grid-cols-4 gap-2">
           <Card>
@@ -123,13 +119,13 @@ export default function DiscrepanciesPage() {
         {/* Empty State */}
         {discrepancies.length === 0 && !isLoading && (
           <Card>
-            <CardContent className="pt-8 pb-8 text-center">
-              <CheckCircle2 className="h-12 w-12 mx-auto text-green-500 mb-4" />
-              <CardTitle className="text-lg mb-2">No Discrepancies</CardTitle>
-              <CardDescription>
+            <CardContent className="py-12 text-center">
+              <CheckCircle2 className="h-10 w-10 mx-auto text-green-500/60 mb-3" />
+              <p className="text-sm font-medium text-foreground mb-1">No Discrepancies</p>
+              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto">
                 Your schedule and logbook are in sync. Discrepancies will appear here when
                 detected during schedule imports.
-              </CardDescription>
+              </p>
             </CardContent>
           </Card>
         )}
@@ -156,10 +152,10 @@ export default function DiscrepanciesPage() {
         {/* No Results */}
         {discrepancies.length > 0 && sortedDiscrepancies.length === 0 && (
           <Card>
-            <CardContent className="pt-8 pb-8 text-center">
-              <AlertCircle className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <CardTitle className="text-lg mb-2">No {filterType} discrepancies</CardTitle>
-              <CardDescription>Try changing the filter to see more discrepancies.</CardDescription>
+            <CardContent className="py-12 text-center">
+              <AlertCircle className="h-10 w-10 mx-auto text-muted-foreground/40 mb-3" />
+              <p className="text-sm font-medium text-foreground mb-1">No {filterType} discrepancies</p>
+              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto">Try changing the filter to see more discrepancies.</p>
             </CardContent>
           </Card>
         )}

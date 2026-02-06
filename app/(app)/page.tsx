@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { PageContainer } from "@/components/page-container"
-import { SyncStatus } from "@/components/sync-status"
+import { StandardPageHeader } from "@/components/standard-page-header"
 import { StatsDashboard } from "@/components/stats-dashboard"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -111,32 +111,26 @@ export default function Dashboard() {
   return (
     <PageContainer
       header={
-        <header className="flex-none bg-background/80 backdrop-blur-xl border-b border-border/50 z-50">
-          <div className="container mx-auto px-4">
-            {/* Always add pl-10 padding to avoid overlap with sidebar toggle button */}
-            <div className="flex items-center justify-between h-12 pl-10">
-              <h1 className="text-lg font-semibold text-foreground">Dashboard</h1>
-              <div className="flex items-center gap-2">
-                <SyncStatus />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleManualSync}
-                  disabled={isSyncing || isLoading}
-                  className="h-8 w-8 p-0"
-                >
-                  <RefreshCw className={cn("h-4 w-4", isSyncing && "animate-spin")} />
-                </Button>
-                <UserMenu />
-              </div>
-            </div>
-          </div>
-        </header>
+        <StandardPageHeader
+          title="Dashboard"
+          actions={
+            <>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={handleManualSync}
+                disabled={isSyncing || isLoading}
+              >
+                <RefreshCw className={cn("h-4 w-4", isSyncing && "animate-spin")} />
+              </Button>
+              <UserMenu />
+            </>
+          }
+        />
       }
     >
       {
-        <div className="container mx-auto px-4 pt-4 pb-safe space-y-6">
-          {" "}
+        <div className="px-4 pt-4 pb-safe space-y-6">
           {syncError && (
             <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
               <AlertCircle className="h-4 w-4 flex-shrink-0" />
@@ -168,9 +162,19 @@ export default function Dashboard() {
               </Button>
             </div>
             {statsLoading || isLoading ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-24 rounded-xl" />
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <Card key={i} className="bg-card border-border">
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-3">
+                        <Skeleton className="h-8 w-8 rounded-lg" />
+                        <div className="space-y-1.5">
+                          <Skeleton className="h-5 w-14" />
+                          <Skeleton className="h-3 w-16" />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             ) : (
@@ -431,9 +435,22 @@ export default function Dashboard() {
               </Link>
             </div>
             {flightsLoading || isLoading ? (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-20 rounded-xl" />
+                  <Card key={i} className="bg-card border-border">
+                    <CardContent className="p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Skeleton className="h-4 w-24" />
+                          <Skeleton className="h-3 w-12" />
+                        </div>
+                        <div className="text-right space-y-1">
+                          <Skeleton className="h-4 w-12 ml-auto" />
+                          <Skeleton className="h-3 w-10 ml-auto" />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             ) : recentFlights.length === 0 ? (

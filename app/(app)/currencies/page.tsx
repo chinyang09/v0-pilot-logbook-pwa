@@ -2,8 +2,9 @@
 
 import { useState } from "react"
 import { PageContainer } from "@/components/page-container"
+import { StandardPageHeader } from "@/components/standard-page-header"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import {
   Select,
   SelectContent,
@@ -17,15 +18,12 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import {
   Shield,
   RefreshCw,
   Plus,
   ShieldCheck,
-  ShieldAlert,
-  ShieldX,
   Trash2,
 } from "lucide-react"
 import { useCurrencies } from "@/hooks/data"
@@ -82,31 +80,23 @@ export default function CurrenciesPage() {
   return (
     <PageContainer
       header={
-        <header className="flex-none bg-background/95 backdrop-blur-lg border-b border-border z-50">
-          <div className="container mx-auto px-4">
-            <div className="flex items-center justify-between h-12">
-              <h1 className="text-lg font-semibold text-foreground">Currencies & Expiries</h1>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => refresh()}
-                  disabled={isLoading}
-                  title="Refresh"
-                >
-                  <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-                </Button>
-                <Button size="sm" onClick={() => setShowAddDialog(true)}>
-                  <Plus className="h-4 w-4 mr-1" />
-                  Add
-                </Button>
-              </div>
-            </div>
-          </div>
-        </header>
+        <StandardPageHeader
+          title="Currencies & Expiries"
+          actions={
+            <>
+              <Button variant="ghost" size="icon-sm" onClick={() => refresh()} disabled={isLoading}>
+                <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              </Button>
+              <Button size="sm" onClick={() => setShowAddDialog(true)}>
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            </>
+          }
+        />
       }
     >
-      <div className="container mx-auto px-3 pt-4 pb-safe space-y-4">
+      <div className="px-4 pt-4 pb-safe space-y-4">
         {/* Status Cards */}
         <div className="grid grid-cols-4 gap-2">
           <Card>
@@ -155,14 +145,14 @@ export default function CurrenciesPage() {
         {/* Empty State */}
         {currencies.length === 0 && !isLoading && (
           <Card>
-            <CardContent className="pt-8 pb-8 text-center">
-              <Shield className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <CardTitle className="text-lg mb-2">No Currencies</CardTitle>
-              <CardDescription className="mb-4">
+            <CardContent className="py-12 text-center">
+              <Shield className="h-10 w-10 mx-auto text-muted-foreground/40 mb-3" />
+              <p className="text-sm font-medium text-foreground mb-1">No Currencies</p>
+              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto mb-4">
                 Add currencies and expiry dates to track your training, medical, and license renewals.
-              </CardDescription>
-              <Button onClick={() => setShowAddDialog(true)}>
-                <Plus className="h-4 w-4 mr-2" />
+              </p>
+              <Button size="sm" onClick={() => setShowAddDialog(true)}>
+                <Plus className="h-4 w-4" />
                 Add Currency
               </Button>
             </CardContent>
@@ -186,10 +176,10 @@ export default function CurrenciesPage() {
         {/* No Results */}
         {currencies.length > 0 && sortedCurrencies.length === 0 && (
           <Card>
-            <CardContent className="pt-8 pb-8 text-center">
-              <ShieldCheck className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <CardTitle className="text-lg mb-2">No {filterStatus} currencies</CardTitle>
-              <CardDescription>Try changing the filter to see more currencies.</CardDescription>
+            <CardContent className="py-12 text-center">
+              <ShieldCheck className="h-10 w-10 mx-auto text-muted-foreground/40 mb-3" />
+              <p className="text-sm font-medium text-foreground mb-1">No {filterStatus} currencies</p>
+              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto">Try changing the filter to see more currencies.</p>
             </CardContent>
           </Card>
         )}
