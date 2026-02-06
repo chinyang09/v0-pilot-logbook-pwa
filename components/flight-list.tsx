@@ -320,7 +320,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     const rowVirtualizer = useVirtualizer({
       count: flights.length,
       getScrollElement: () => scrollContainerRef.current,
-      estimateSize: () => 100, // Estimated height of FlightCard in pixels
+      estimateSize: () => 104, // Measured: 86px content + 8px py-1 + 2px border + 8px container padding
       overscan: 5, // Render 5 extra items above/below viewport
     });
 
@@ -340,7 +340,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             });
             setTimeout(() => {
               isExternalScrollRef.current = false;
-            }, 600); // Increased timeout to allow smooth scroll to complete
+            }, 800); // Allow smooth scroll to complete with accurate 104px estimation
           }
         },
       }),

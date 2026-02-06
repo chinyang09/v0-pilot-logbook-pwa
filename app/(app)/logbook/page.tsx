@@ -246,17 +246,20 @@ export default function LogbookPage() {
   const flightListRef = useRef<FlightListRef>(null)
   const calendarContainerRef = useRef<HTMLDivElement>(null)
 
-  const HEADER_HEIGHT = 48
-
   const [calendarHeight, setCalendarHeight] = useState(0)
 
+  // Track calendar rendered height with ResizeObserver for accurate spacer
   useEffect(() => {
-    if (calendarContainerRef.current) {
-      setCalendarHeight(calendarContainerRef.current.offsetHeight)
-    }
+    const el = calendarContainerRef.current
+    if (!el) return
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setCalendarHeight(Math.round(entry.contentRect.height))
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
   }, [])
-
-  const totalOffset = showCalendar ? calendarHeight + HEADER_HEIGHT : HEADER_HEIGHT
 
   const syncSourceRef = useRef<"calendar" | "flights" | null>(null)
   const selectedMonthRef = useRef(selectedMonth)
@@ -507,31 +510,31 @@ export default function LogbookPage() {
         }
       />
 
-      {/* CALENDAR */}
-      <div
-        ref={calendarContainerRef}
-        className={cn(
-          "flex-none z-40 border-b border-border/40",
-          "bg-background/60 backdrop-blur-xl shadow-sm",
-          "transition-all duration-500 will-change-transform overflow-hidden",
-          showCalendar ? "max-h-[40dvh] opacity-100" : "max-h-0 opacity-0",
-        )}
-        style={{ transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)" }}
-      >
-        <LogbookCalendar
-          ref={calendarRef}
-          className="bg-transparent shadow-none border-none max-w-md mx-auto"
-          flights={flights}
-          selectedMonth={selectedMonth}
-          onMonthChange={handleCalendarMonthChange}
-          onDateSelect={handleDateSelect}
-          selectedDate={selectedDate}
-          onScrollStart={handleCalendarScrollStart}
-        />
-      </div>
+      {/* FLIGHT LIST with calendar overlay */}
+      <main className="flex-1 overflow-hidden overscroll-contain relative">
+        {/* Calendar - absolute overlay so flight cards scroll behind it for frosted glass */}
+        <div
+          ref={calendarContainerRef}
+          className={cn(
+            "absolute top-0 left-0 right-0 z-40",
+            "bg-background/10 backdrop-blur-xl border-b border-border/50",
+            "transition-all duration-300 overflow-hidden",
+            showCalendar ? "max-h-[40dvh] opacity-100" : "max-h-0 opacity-0 border-b-0 pointer-events-none",
+          )}
+          style={{ transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)" }}
+        >
+          <LogbookCalendar
+            ref={calendarRef}
+            className="bg-transparent shadow-none border-none max-w-md mx-auto"
+            flights={flights}
+            selectedMonth={selectedMonth}
+            onMonthChange={handleCalendarMonthChange}
+            onDateSelect={handleDateSelect}
+            selectedDate={selectedDate}
+            onScrollStart={handleCalendarScrollStart}
+          />
+        </div>
 
-      {/* FLIGHT LIST */}
-      <main className="flex-1 overflow-hidden overscroll-contain">
         <FlightList
           ref={flightListRef}
           flights={filteredFlights}
@@ -542,7 +545,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={0}
+          topSpacerHeight={calendarHeight}
           selectedFlightId={selectedFlightId}
           headerContent={
             <div className="flex-shrink-0 top-0 z-40 px-2 py-1">
