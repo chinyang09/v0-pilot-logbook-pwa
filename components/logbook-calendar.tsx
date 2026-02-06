@@ -238,7 +238,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 <button
                   key={dayIndex}
                   onClick={() => handleDateClick(dayInfo.dateStr, !!flightInfo)}
-                  className="flex items-center justify-center aspect-square p-1"
+                  className="flex items-center justify-center aspect-square p-0.5"
                 >
                   <div
                     className={cn(

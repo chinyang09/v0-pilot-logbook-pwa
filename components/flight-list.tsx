@@ -35,7 +35,7 @@ import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
 import { FastScroll, type FastScrollItem } from "@/components/ui/fast-scroll";
 
 export interface FlightListRef {
-  scrollToFlight: (flightId: string, flightDate?: string) => void;
+  scrollToFlight: (flightId: string, instant?: boolean) => void;
 }
 
 interface FlightListProps {
@@ -330,10 +330,17 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     useImperativeHandle(
       ref,
       () => ({
-        scrollToFlight: (flightId: string) => {
+        scrollToFlight: (flightId: string, instant?: boolean) => {
           const index = flights.findIndex((f) => f.id === flightId);
           if (index !== -1) {
             isExternalScrollRef.current = true;
+
+            if (instant) {
+              rowVirtualizer.scrollToIndex(index, { align: "start", behavior: "auto" });
+              setTimeout(() => { isExternalScrollRef.current = false; }, 100);
+              return;
+            }
+
             const container = scrollContainerRef.current;
             if (!container) return;
 

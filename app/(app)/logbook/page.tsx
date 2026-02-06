@@ -55,6 +55,9 @@ function parseDateLocal(dateStr: string): Date {
   return new Date(year, month - 1, day)
 }
 
+// Persists top flight ID across layout switches (mobile ↔ desktop remounts)
+let savedTopFlightId: string | null = null
+
 export default function LogbookPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -264,6 +267,20 @@ export default function LogbookPage() {
     return () => observer.disconnect()
   }, [])
 
+  // Restore scroll position after layout switch (mobile ↔ desktop remount)
+  const hasRestoredScrollRef = useRef(false)
+  useEffect(() => {
+    if (hasRestoredScrollRef.current) return
+    if (!flights.length || flightsLoading) return
+    hasRestoredScrollRef.current = true
+
+    if (savedTopFlightId && flights.some(f => f.id === savedTopFlightId)) {
+      requestAnimationFrame(() => {
+        flightListRef.current?.scrollToFlight(savedTopFlightId!, true)
+      })
+    }
+  }, [flights, flightsLoading])
+
   const syncSourceRef = useRef<"calendar" | "flights" | null>(null)
   const selectedMonthRef = useRef(selectedMonth)
   const showCalendarRef = useRef(showCalendar)
@@ -307,7 +324,7 @@ export default function LogbookPage() {
           const timeB = b.outTime || "00:00"
           return timeB.localeCompare(timeA)
         })
-        flightListRef.current?.scrollToFlight(sortedFlights[0].id, sortedFlights[0].date)
+        flightListRef.current?.scrollToFlight(sortedFlights[0].id)
       }
     },
     [flights],
@@ -315,7 +332,11 @@ export default function LogbookPage() {
 
   const handleFlightScroll = useCallback(
     (topFlight: FlightLog | null) => {
-      if (!showCalendarRef.current || !topFlight) return
+      if (!topFlight) return
+      // Always persist for scroll restoration across layout switches
+      savedTopFlightId = topFlight.id
+
+      if (!showCalendarRef.current) return
       if (syncSourceRef.current !== "flights") return
 
       const flightDate = parseDateLocal(topFlight.date)
@@ -344,7 +365,7 @@ export default function LogbookPage() {
     const flight = flights.find(f => f.date === date)
     if (flight) {
       syncSourceRef.current = "calendar"
-      flightListRef.current?.scrollToFlight(flight.id, flight.date)
+      flightListRef.current?.scrollToFlight(flight.id)
     }
   }, [flights])
 
