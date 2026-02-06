@@ -246,17 +246,20 @@ export default function LogbookPage() {
   const flightListRef = useRef<FlightListRef>(null)
   const calendarContainerRef = useRef<HTMLDivElement>(null)
 
-  const [calendarHeight, setCalendarHeight] = useState(0)
+  // Measure calendar's natural height once for fixed spacer (not animated via ResizeObserver)
+  const [calendarNaturalHeight, setCalendarNaturalHeight] = useState(0)
 
-  // Track calendar rendered height with ResizeObserver for accurate spacer
   useEffect(() => {
     const el = calendarContainerRef.current
     if (!el) return
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setCalendarHeight(Math.round(entry.contentRect.height))
-      }
-    })
+    // scrollHeight gives natural content height regardless of max-height constraint
+    const measure = () => {
+      const h = el.scrollHeight
+      if (h > 0) setCalendarNaturalHeight(h)
+    }
+    measure()
+    // Re-measure on resize (panel width changes affect calendar height)
+    const observer = new ResizeObserver(() => measure())
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
@@ -518,10 +521,10 @@ export default function LogbookPage() {
           className={cn(
             "absolute top-0 left-0 right-0 z-40",
             "bg-background/10 backdrop-blur-xl border-b border-border/50",
-            "transition-all duration-300 overflow-hidden",
-            showCalendar ? "max-h-[40dvh] opacity-100" : "max-h-0 opacity-0 border-b-0 pointer-events-none",
+            "transition-[max-height,opacity] duration-300 ease-in-out overflow-hidden",
+            showCalendar ? "opacity-100" : "max-h-0 opacity-0 border-b-0 pointer-events-none",
           )}
-          style={{ transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)" }}
+          style={showCalendar ? { maxHeight: `${calendarNaturalHeight}px` } : undefined}
         >
           <LogbookCalendar
             ref={calendarRef}
@@ -545,7 +548,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={calendarHeight}
+          topSpacerHeight={showCalendar ? calendarNaturalHeight : 0}
           selectedFlightId={selectedFlightId}
           headerContent={
             <div className="flex-shrink-0 top-0 z-40 px-2 py-1">

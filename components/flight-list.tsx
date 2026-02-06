@@ -448,12 +448,17 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             align: "start",
             behavior: "auto", // Use "auto" for instant scroll during fast scroll
           });
+
+          // Notify parent for calendar sync
+          onScrollStart?.();
+          onTopFlightChange?.(flights[index]);
+
           setTimeout(() => {
             isExternalScrollRef.current = false;
           }, 100);
         }
       },
-      [flights, rowVirtualizer]
+      [flights, rowVirtualizer, onScrollStart, onTopFlightChange]
     );
 
     const handleFastScrollStart = useCallback(() => {
@@ -505,11 +510,8 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             onMouseDown={handleTouchStart}
           >
             <div
-              style={{
-                height: `${topSpacerHeight}px`,
-                transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
-              }}
-              className="transition-[height] duration-500 will-change-[height]"
+              style={{ height: `${topSpacerHeight}px` }}
+              className="transition-[height] duration-300 ease-in-out"
             />
             {headerContent}
             <div className="text-center py-12">
@@ -539,11 +541,8 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           >
             {/* Top spacer for calendar */}
             <div
-              style={{
-                height: `${topSpacerHeight}px`,
-                transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
-              }}
-              className="transition-[height] duration-500 will-change-[height]"
+              style={{ height: `${topSpacerHeight}px` }}
+              className="transition-[height] duration-300 ease-in-out"
             />
 
             {headerContent}
