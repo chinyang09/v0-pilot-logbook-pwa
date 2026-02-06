@@ -455,10 +455,11 @@ export default function LogbookPage() {
 
   return (
     <div className="h-full relative flex flex-col">
-      {/* HEADER - absolute overlay for frosted glass */}
-      <div className="absolute top-0 left-0 right-0 z-50">
+      {/* Combined header + calendar overlay - single continuous frosted glass */}
+      <div className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
         <StandardPageHeader
           title={showCalendar ? `${MONTHS[selectedMonth.month]} ${selectedMonth.year}` : "Logbook"}
+          className="bg-transparent backdrop-blur-none border-b-0"
           actions={
             <>
               <Button
@@ -508,18 +509,12 @@ export default function LogbookPage() {
             </>
           }
         />
-      </div>
-
-      {/* FLIGHT LIST with calendar overlay */}
-      <main className="flex-1 overflow-hidden overscroll-contain relative">
-        {/* Calendar - absolute overlay so flight cards scroll behind it for frosted glass */}
+        {/* Calendar collapse section */}
         <div
           ref={calendarContainerRef}
           className={cn(
-            "absolute top-12 left-0 right-0 z-40",
-            "bg-background/10 backdrop-blur-xl border-b border-border/50",
             "transition-[max-height,opacity] duration-300 ease-in-out overflow-hidden",
-            showCalendar ? "opacity-100" : "max-h-0 opacity-0 border-b-0 pointer-events-none",
+            showCalendar ? "opacity-100" : "max-h-0 opacity-0 pointer-events-none",
           )}
           style={showCalendar ? { maxHeight: `${calendarNaturalHeight}px` } : undefined}
         >
@@ -534,7 +529,10 @@ export default function LogbookPage() {
             onScrollStart={handleCalendarScrollStart}
           />
         </div>
+      </div>
 
+      {/* FLIGHT LIST */}
+      <main className="flex-1 overflow-hidden overscroll-contain relative">
         <FlightList
           ref={flightListRef}
           flights={filteredFlights}

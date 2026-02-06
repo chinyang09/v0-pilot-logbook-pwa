@@ -589,9 +589,12 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             <div className="h-16" />
           </div>
 
-          {/* FastScroll rail (year-based navigation) */}
+          {/* FastScroll rail (year-based navigation) - positioned in visible area below calendar/header */}
           {fastScrollItems.length > 1 && (
-            <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
+            <div
+              className="absolute right-0 bottom-0 z-40 flex items-center pointer-events-none transition-[top] duration-300 ease-in-out"
+              style={{ top: `${topSpacerHeight}px` }}
+            >
               <div className="pointer-events-auto">
                 <FastScroll
                   items={fastScrollItems}
@@ -600,7 +603,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                   onScrollStart={handleFastScrollStart}
                   onScrollEnd={handleFastScrollEnd}
                   indicatorPosition="left"
-                  className="py-16"
+                  className="py-8"
                 />
               </div>
             </div>

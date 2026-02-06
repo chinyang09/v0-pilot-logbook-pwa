@@ -211,7 +211,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
           {DAYS.map((day, i) => (
             <div
               key={i}
-              className="text-center text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider"
+              className="text-center text-xs font-medium text-muted-foreground/60 uppercase tracking-wider"
             >
               {day}
             </div>
@@ -239,19 +239,17 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                   key={dayIndex}
                   onClick={() => handleDateClick(dayInfo.dateStr, !!flightInfo)}
                   className={cn(
-                    "flex flex-col items-center justify-center rounded-md text-xs aspect-square transition-all relative",
+                    "flex items-center justify-center text-sm aspect-square transition-all",
+                    "rounded-full",
                     isCurrentMonth
                       ? "text-foreground/90"
                       : "text-foreground/15",
-                    flightInfo && isCurrentMonth && "font-semibold text-primary bg-primary/8",
+                    flightInfo && isCurrentMonth && !isSelected && "font-semibold text-primary bg-primary/20",
                     isToday && "ring-1.5 ring-primary/60",
                     isSelected && "bg-primary text-primary-foreground shadow-md z-10"
                   )}
                 >
-                  <span>{dayInfo.date.getDate()}</span>
-                  {flightInfo && isCurrentMonth && !isSelected && (
-                    <div className="absolute bottom-0.5 w-1 h-1 rounded-full bg-primary/70" />
-                  )}
+                  {dayInfo.date.getDate()}
                 </button>
               );
             })}

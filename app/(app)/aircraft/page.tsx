@@ -510,7 +510,7 @@ export default function AircraftPage() {
         <div>
           <div className="px-4 pt-4 pb-safe">
             {/* Sticky search bar - outside aboveVirtualRef so it stays visible during scroll */}
-            <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
+            <div className="sticky top-0 z-40 pb-3 bg-background/30 backdrop-blur-xl -mx-3 px-3">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input

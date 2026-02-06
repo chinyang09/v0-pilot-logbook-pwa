@@ -32,7 +32,7 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
   return (
     <nav
       className={cn(
-        "flex-shrink-0 bg-background/10 backdrop-blur-xl border-t border-border/50 pb-[env(safe-area-inset-bottom)]",
+        "flex-shrink-0 bg-background/30 backdrop-blur-xl border-t border-border/50 pb-[env(safe-area-inset-bottom)]",
         className
       )}
     >
