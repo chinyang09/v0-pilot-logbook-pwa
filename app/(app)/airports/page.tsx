@@ -15,7 +15,7 @@ import {
   getAirportByIcao,
   type Airport,
 } from "@/lib/db";
-import { Star, Search, MapPin } from "lucide-react";
+import { Star, Search } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -53,7 +53,7 @@ const AirportCard = memo(function AirportCard({
         }
       }}
       className={cn(
-        "w-full text-left rounded-lg p-3 transition-all cursor-pointer active:scale-[0.98]",
+        "w-full text-left rounded-lg py-2 px-3 transition-all cursor-pointer active:scale-[0.98]",
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
           : "bg-card border border-border hover:bg-accent",
@@ -62,39 +62,24 @@ const AirportCard = memo(function AirportCard({
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="font-semibold text-foreground">
-              {airport.icao}
-            </span>
-            {airport.iata && (
-              <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                {airport.iata}
-              </span>
-            )}
-            {airport.isFavorite && (
-              <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-            )}
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-foreground">{airport.icao}</span>
+            <span className="text-sm text-foreground truncate">{airport.name}</span>
           </div>
-          <div className="text-sm font-medium text-foreground truncate">
-            {airport.name}
-          </div>
-          <div className="flex items-center gap-1 text-sm text-muted-foreground mt-0.5">
-            <MapPin className="h-3 w-3 flex-shrink-0" />
-            <span className="truncate">
-              {airport.city}, {airport.country}
-            </span>
+          <div className="text-sm text-muted-foreground truncate mt-0.5">
+            {airport.city}, {airport.country}
           </div>
         </div>
 
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9 hover:bg-primary/20 relative z-10"
+          className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
           onClick={(e: React.MouseEvent) => onToggleFavorite(e, airport.icao)}
         >
           <Star
             className={cn(
-              "h-5 w-5",
+              "h-4 w-4",
               airport.isFavorite
                 ? "fill-yellow-400 text-yellow-400"
                 : "text-muted-foreground/40"
@@ -120,7 +105,7 @@ export default function AirportsPage() {
     scrollContainerRef.current = el;
   }, []);
 
-  const { airports, isLoading } = useAirportDatabase();
+  const { airports, isLoading, mutate: mutateAirports } = useAirportDatabase();
   const [recentAirports, setRecentAirports] = useState<typeof airports>([]);
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
   const isFastScrollingRef = useRef(false);
@@ -166,22 +151,30 @@ export default function AirportsPage() {
     });
   }, [airports, allSortedAirports, debouncedSearchQuery]);
 
-  // The list to virtualize
-  const displayAirports = debouncedSearchQuery.trim() ? filteredAirports : allSortedAirports;
+  // Set of recent ICAO codes for fast lookup
+  const recentIcaos = useMemo(() => {
+    return new Set(recentAirports.map((a) => a.icao));
+  }, [recentAirports]);
 
-  // Generate FastScroll alphabet items (excluding favorites)
+  // Browse list excludes both favorites and recently used (shown in their own sections above)
+  const browseAirports = useMemo(() => {
+    return allSortedAirports.filter((a) => !a.isFavorite && !recentIcaos.has(a.icao));
+  }, [allSortedAirports, recentIcaos]);
+
+  // The list to virtualize: when searching show all results, otherwise the browse list
+  const displayAirports = debouncedSearchQuery.trim() ? filteredAirports : browseAirports;
+
+  // Generate FastScroll alphabet items from the browse list
   const fastScrollItems = useMemo(() => {
-    const nonFavorites = airports.filter((a) => !a.isFavorite);
-    return generateAlphabetItemsFromList(nonFavorites.map((a) => a.icao), {
+    return generateAlphabetItemsFromList(browseAirports.map((a) => a.icao), {
       numberPosition: "start",
     });
-  }, [airports]);
+  }, [browseAirports]);
 
   // Pre-compute letter -> virtual list index mapping for fast scroll
   const letterIndexMap = useMemo(() => {
     const map = new Map<string, number>();
-    allSortedAirports.forEach((airport, index) => {
-      if (airport.isFavorite) return;
+    browseAirports.forEach((airport, index) => {
       const firstChar = airport.icao[0]?.toUpperCase();
       const letter = /[A-Z]/.test(firstChar || "") ? firstChar! : "#";
       if (!map.has(letter)) {
@@ -189,7 +182,7 @@ export default function AirportsPage() {
       }
     });
     return map;
-  }, [allSortedAirports]);
+  }, [browseAirports]);
 
   // Measure scroll margin: height of non-virtualized content above the virtual list
   const aboveVirtualRef = useRef<HTMLDivElement>(null);
@@ -221,7 +214,7 @@ export default function AirportsPage() {
   const rowVirtualizer = useVirtualizer({
     count: displayAirports.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 88, // Estimated airport card height (p-3 + content + gap)
+    estimateSize: () => 60, // Compact airport card height (py-2 + 2 lines + pb-1 gap)
     overscan: 10,
     scrollMargin,
   });
@@ -365,7 +358,13 @@ export default function AirportsPage() {
     e.preventDefault();
     e.stopPropagation();
     await toggleAirportFavorite(icao);
-  }, []);
+    // Optimistically update local state so UI reflects the change immediately
+    mutateAirports((prev) =>
+      prev.map((a) =>
+        a.icao === icao ? { ...a, isFavorite: !a.isFavorite } : a
+      )
+    );
+  }, [mutateAirports]);
 
   const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim();
 
@@ -397,21 +396,22 @@ export default function AirportsPage() {
     >
       <div>
         <div className="container mx-auto px-3 pt-3 pb-safe">
+          {/* Sticky search bar - outside aboveVirtualRef so it stays visible during scroll */}
+          <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
+            <div className="relative">
+              <Input
+                type="text"
+                placeholder="Search airports..."
+                value={searchQuery}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+                className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
+              />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            </div>
+          </div>
+
           {/* Non-virtualized content above the virtual list */}
           <div ref={aboveVirtualRef}>
-            <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
-              <div className="relative">
-                <Input
-                  type="text"
-                  placeholder="Search airports..."
-                  value={searchQuery}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-                />
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              </div>
-            </div>
-
             {!debouncedSearchQuery.trim() && (
               <div className={`space-y-3 ${showFastScroll ? "pr-8" : ""}`}>
                 {/* Favorites Section */}
@@ -420,7 +420,7 @@ export default function AirportsPage() {
                     <h2 className="text-xs font-semibold text-primary uppercase px-1 flex items-center gap-1">
                       <Star className="h-3 w-3 fill-primary" /> Favorites
                     </h2>
-                    <div className="space-y-2">
+                    <div className="space-y-1">
                       {airports
                         .filter((a: Airport) => a.isFavorite)
                         .map((a: Airport) => (
@@ -437,23 +437,25 @@ export default function AirportsPage() {
                   </div>
                 )}
 
-                {/* Recent Section */}
-                {recentAirports.length > 0 && (
+                {/* Recent Section (excluding favorites, which are shown above) */}
+                {recentAirports.filter((a) => !a.isFavorite).length > 0 && (
                   <div className="space-y-1.5">
                     <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
                       Recent
                     </h2>
-                    <div className="space-y-2">
-                      {recentAirports.map((a: Airport) => (
-                        <AirportCard
-                          key={a.icao}
-                          airport={a}
-                          isRecent
-                          isSelected={!fieldType && selectedAirportIcao === a.icao}
-                          onSelect={handleAirportSelect}
-                          onToggleFavorite={handleToggleFavorite}
-                        />
-                      ))}
+                    <div className="space-y-1">
+                      {recentAirports
+                        .filter((a: Airport) => !a.isFavorite)
+                        .map((a: Airport) => (
+                          <AirportCard
+                            key={a.icao}
+                            airport={a}
+                            isRecent
+                            isSelected={!fieldType && selectedAirportIcao === a.icao}
+                            onSelect={handleAirportSelect}
+                            onToggleFavorite={handleToggleFavorite}
+                          />
+                        ))}
                     </div>
                     <div className="border-t border-border my-4" />
                   </div>
@@ -495,7 +497,7 @@ export default function AirportsPage() {
                     data-index={virtualRow.index}
                     ref={rowVirtualizer.measureElement}
                   >
-                    <div className="pb-2">
+                    <div className="pb-1">
                       <AirportCard
                         airport={airport}
                         isSelected={!fieldType && selectedAirportIcao === airport.icao}

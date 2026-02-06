@@ -19,6 +19,7 @@ export interface UserPreferences {
   visibleFields: Record<string, boolean>
   recentlyUsedAirports?: string[]
   recentlyUsedAircraft?: string[]
+  favoriteAircraft?: string[]
   draftGenerationConfig?: DraftGenerationConfig
   createdAt: number
   updatedAt: number

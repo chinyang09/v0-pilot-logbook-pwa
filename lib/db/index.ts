@@ -99,6 +99,8 @@ export {
   getRecentlyUsedAirports,
   addRecentlyUsedAircraft,
   getRecentlyUsedAircraft,
+  toggleFavoriteAircraft,
+  getFavoriteAircraft,
   getDraftGenerationConfig,
   saveDraftGenerationConfig,
 } from "./stores/user/preferences.store";

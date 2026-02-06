@@ -113,6 +113,7 @@ export function FastScroll({
   const handleMouseDown = React.useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault()
+      e.stopPropagation()
       handleStart(e.clientY)
     },
     [handleStart]
@@ -120,6 +121,7 @@ export function FastScroll({
 
   const handleMouseMove = React.useCallback(
     (e: React.MouseEvent) => {
+      e.stopPropagation()
       if (isDragging) {
         handleInteraction(e.clientY)
       }
@@ -136,6 +138,7 @@ export function FastScroll({
   // Touch event handlers
   const handleTouchStart = React.useCallback(
     (e: React.TouchEvent) => {
+      e.stopPropagation()
       if (e.touches.length === 1) {
         handleStart(e.touches[0].clientY)
       }
@@ -145,18 +148,23 @@ export function FastScroll({
 
   const handleTouchMove = React.useCallback(
     (e: React.TouchEvent) => {
-      if (e.touches.length === 1) {
+      e.stopPropagation()
+      if (isDragging && e.touches.length === 1) {
         // Prevent page scrolling while using fast scroll
         e.preventDefault()
         handleInteraction(e.touches[0].clientY)
       }
     },
-    [handleInteraction]
+    [isDragging, handleInteraction]
   )
 
-  const handleTouchEnd = React.useCallback(() => {
-    handleEnd()
-  }, [handleEnd])
+  const handleTouchEnd = React.useCallback(
+    (e: React.TouchEvent) => {
+      e.stopPropagation()
+      handleEnd()
+    },
+    [handleEnd]
+  )
 
   // Global mouse up listener for when mouse leaves the component while dragging
   React.useEffect(() => {
@@ -239,9 +247,15 @@ export function FastScroll({
             ? "bg-muted/80 shadow-inner"
             : "hover:bg-muted/40"
         )}
+        onPointerDown={(e) => {
+          e.stopPropagation()
+          // Capture pointer to isolate fast scroll from adjacent resize handle
+          e.currentTarget.setPointerCapture(e.pointerId)
+        }}
+        onPointerUp={(e) => { e.stopPropagation() }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
-        onMouseUp={handleEnd}
+        onMouseUp={(e) => { e.stopPropagation(); handleEnd() }}
         onMouseLeave={handleMouseLeave}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
