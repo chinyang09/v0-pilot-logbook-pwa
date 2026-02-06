@@ -149,13 +149,13 @@ export function FastScroll({
   const handleTouchMove = React.useCallback(
     (e: React.TouchEvent) => {
       e.stopPropagation()
-      if (e.touches.length === 1) {
+      if (isDragging && e.touches.length === 1) {
         // Prevent page scrolling while using fast scroll
         e.preventDefault()
         handleInteraction(e.touches[0].clientY)
       }
     },
-    [handleInteraction]
+    [isDragging, handleInteraction]
   )
 
   const handleTouchEnd = React.useCallback(
@@ -247,7 +247,12 @@ export function FastScroll({
             ? "bg-muted/80 shadow-inner"
             : "hover:bg-muted/40"
         )}
-        onPointerDown={(e) => { e.stopPropagation() }}
+        onPointerDown={(e) => {
+          e.stopPropagation()
+          // Capture pointer to isolate fast scroll from adjacent resize handle
+          e.currentTarget.setPointerCapture(e.pointerId)
+        }}
+        onPointerUp={(e) => { e.stopPropagation() }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={(e) => { e.stopPropagation(); handleEnd() }}
