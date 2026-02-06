@@ -164,16 +164,16 @@ export default function AircraftPage() {
     }
   }, [])
 
-  // Normalize and sort all aircraft alphabetically by registration
+  // Normalize and sort aircraft with registrations alphabetically.
+  // Only include aircraft that have an actual registration for the browse list;
+  // the full dataset (~615k records) exceeds browser max scroll height (~33M px).
+  // Aircraft without registrations (ICAO24-only) are still findable via search.
   const allSortedAircraft = useMemo(() => {
     if (allAircraft.length === 0) return []
     return allAircraft
+      .filter((a) => a.reg)
       .map(normalizeAircraft)
-      .sort((a, b) => {
-        const regA = a.registration || a.icao24
-        const regB = b.registration || b.icao24
-        return regA.localeCompare(regB)
-      })
+      .sort((a, b) => a.registration.localeCompare(b.registration))
   }, [allAircraft])
 
   // Filtered aircraft for search mode
@@ -194,7 +194,7 @@ export default function AircraftPage() {
   const fastScrollItems = useMemo(() => {
     if (allSortedAircraft.length === 0) return []
     return generateAlphabetItemsFromList(
-      allSortedAircraft.map((a) => a.registration || a.icao24 || ""),
+      allSortedAircraft.map((a) => a.registration),
       { numberPosition: "start" }
     )
   }, [allSortedAircraft])
@@ -203,8 +203,7 @@ export default function AircraftPage() {
   const letterIndexMap = useMemo(() => {
     const map = new Map<string, number>()
     allSortedAircraft.forEach((aircraft, index) => {
-      const reg = aircraft.registration || aircraft.icao24 || ""
-      const firstChar = reg[0]?.toUpperCase()
+      const firstChar = aircraft.registration[0]?.toUpperCase()
       const letter = firstChar && /[A-Z]/.test(firstChar) ? firstChar : "#"
       if (!map.has(letter)) {
         map.set(letter, index)
@@ -316,8 +315,7 @@ export default function AircraftPage() {
           }
           const aircraft = displayAircraft[topItem.index]
           if (aircraft) {
-            const reg = aircraft.registration || aircraft.icao24 || ""
-            const firstChar = reg[0]?.toUpperCase()
+            const firstChar = (aircraft.registration || aircraft.icao24)?.[0]?.toUpperCase()
             if (firstChar && /[A-Z]/.test(firstChar)) {
               setActiveLetterKey(firstChar)
             } else {
