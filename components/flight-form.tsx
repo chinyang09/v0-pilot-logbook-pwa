@@ -57,6 +57,7 @@ import {
   isValidHHMM,
 } from "@/lib/utils/time";
 import { usePersonnel } from "@/hooks/data";
+import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { ImageImportButton } from "@/components/image-import-button";
 import type { ExtractedFlightData } from "@/lib/ocr";
 import { AirportPicker } from "@/components/airport-picker";
@@ -366,6 +367,7 @@ export function FlightForm({
   const router = useRouter();
   const { airports } = useAirportDatabase();
   const { personnel } = usePersonnel();
+  const { pinDetailContent } = useDetailPanel();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
 
@@ -479,6 +481,7 @@ export function FlightForm({
     const url = new URL(window.location.href);
     url.searchParams.delete("field");
     url.searchParams.delete("airport");
+    url.searchParams.delete("flightId");
     window.history.replaceState({}, "", url.toString());
   }, [selectedAirportField, selectedAirportCode]);
 
@@ -537,6 +540,7 @@ export function FlightForm({
     url.searchParams.delete("field");
     url.searchParams.delete("aircraftReg");
     url.searchParams.delete("aircraftType");
+    url.searchParams.delete("flightId");
     window.history.replaceState({}, "", url.toString());
   }, [selectedAircraftReg, selectedAircraftType]);
 
@@ -564,6 +568,7 @@ export function FlightForm({
     url.searchParams.delete("field");
     url.searchParams.delete("crewId");
     url.searchParams.delete("crewName");
+    url.searchParams.delete("flightId");
     window.history.replaceState({}, "", url.toString());
   }, [selectedCrewField, selectedCrewId, selectedCrewName]);
 
@@ -903,19 +908,60 @@ export function FlightForm({
     [updateField, markManualOverride, manualOverrides]
   );
 
-  // Open picker modals
+  // Force-save current form data before navigating away (bypasses debounce)
+  const forceSave = useCallback(async () => {
+    if (!formData?.id || !editingFlight?.id) return;
+    try {
+      await updateFlight(formData.id, { ...formData, manualOverrides });
+    } catch (error) {
+      console.error("Force save before picker navigation failed:", error);
+    }
+  }, [formData, editingFlight?.id, manualOverrides]);
+
+  // Open picker modals (mobile) or navigate to full pages (desktop)
   const openAirportPicker = (field: "departureIcao" | "arrivalIcao") => {
-    setAirportPickerField(field);
-    setAirportPickerOpen(true);
+    if (isDesktop && formData.id) {
+      forceSave();
+      pinDetailContent();
+      const params = new URLSearchParams();
+      params.set("field", field);
+      params.set("returnTo", "/logbook");
+      params.set("flightId", formData.id);
+      router.push(`/airports?${params.toString()}`);
+    } else {
+      setAirportPickerField(field);
+      setAirportPickerOpen(true);
+    }
   };
 
   const openAircraftPicker = () => {
-    setAircraftPickerOpen(true);
+    if (isDesktop && formData.id) {
+      forceSave();
+      pinDetailContent();
+      const params = new URLSearchParams();
+      params.set("select", "true");
+      params.set("field", "aircraftReg");
+      params.set("returnTo", "/logbook");
+      params.set("flightId", formData.id);
+      router.push(`/aircraft?${params.toString()}`);
+    } else {
+      setAircraftPickerOpen(true);
+    }
   };
 
   const openCrewPicker = (field: "picId" | "sicId") => {
-    setCrewPickerField(field);
-    setCrewPickerOpen(true);
+    if (isDesktop && formData.id) {
+      forceSave();
+      pinDetailContent();
+      const params = new URLSearchParams();
+      params.set("field", field);
+      params.set("return", "/logbook");
+      params.set("flightId", formData.id);
+      router.push(`/crew?${params.toString()}`);
+    } else {
+      setCrewPickerField(field);
+      setCrewPickerOpen(true);
+    }
   };
 
   // Picker selection handlers
@@ -1876,22 +1922,26 @@ export function FlightForm({
       </div>
       </div>
 
-      {/* Picker overlays — positioned within the relative wrapper, above the scroll area */}
-      <AirportPicker
-        open={airportPickerOpen}
-        onClose={() => setAirportPickerOpen(false)}
-        onSelect={handleAirportPickerSelect}
-      />
-      <AircraftPicker
-        open={aircraftPickerOpen}
-        onClose={() => setAircraftPickerOpen(false)}
-        onSelect={handleAircraftPickerSelect}
-      />
-      <CrewPicker
-        open={crewPickerOpen}
-        onClose={() => setCrewPickerOpen(false)}
-        onSelect={handleCrewPickerSelect}
-      />
+      {/* Picker overlays — only used on mobile; desktop navigates to full pages */}
+      {!isDesktop && (
+        <>
+          <AirportPicker
+            open={airportPickerOpen}
+            onClose={() => setAirportPickerOpen(false)}
+            onSelect={handleAirportPickerSelect}
+          />
+          <AircraftPicker
+            open={aircraftPickerOpen}
+            onClose={() => setAircraftPickerOpen(false)}
+            onSelect={handleAircraftPickerSelect}
+          />
+          <CrewPicker
+            open={crewPickerOpen}
+            onClose={() => setCrewPickerOpen(false)}
+            onSelect={handleCrewPickerSelect}
+          />
+        </>
+      )}
     </div>
   );
 }

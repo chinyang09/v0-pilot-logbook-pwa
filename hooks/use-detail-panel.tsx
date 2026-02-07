@@ -16,6 +16,8 @@ interface DetailPanelContextType {
   hasDetailSupport: boolean
   // Register that current page supports detail panel
   setHasDetailSupport: (value: boolean) => void
+  // Pin detail content so it survives one pathname change (for picker navigation)
+  pinDetailContent: () => void
 }
 
 const DetailPanelContext = createContext<DetailPanelContextType | null>(null)
@@ -60,6 +62,12 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
 
   const [detailContent, setDetailContent] = useState<ReactNode | null>(null)
   const [hasDetailSupport, setHasDetailSupport] = useState(false)
+
+  // One-shot pin: when true, the next pathname change won't clear detailContent
+  const pinnedRef = useRef(false)
+  const pinDetailContent = useCallback(() => {
+    pinnedRef.current = true
+  }, [])
 
   // Get selected ID from URL or sessionStorage
   const selectedIdFromUrl = searchParams.get("selected")
@@ -125,7 +133,12 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
   }, [pathname, router, searchParams])
 
   // Reset state when pathname changes (different page)
+  // If pinned, skip one reset so detail content survives picker navigation
   useEffect(() => {
+    if (pinnedRef.current) {
+      pinnedRef.current = false
+      return
+    }
     setDetailContent(null)
     setHasDetailSupport(false)
   }, [pathname])
@@ -139,6 +152,7 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
         setSelectedId,
         hasDetailSupport,
         setHasDetailSupport,
+        pinDetailContent,
       }}
     >
       {children}
@@ -154,6 +168,7 @@ const defaultValue: DetailPanelContextType = {
   setSelectedId: () => {},
   hasDetailSupport: false,
   setHasDetailSupport: () => {},
+  pinDetailContent: () => {},
 }
 
 export function useDetailPanel() {

@@ -107,6 +107,7 @@ export default function CrewPage() {
   const searchParams = useSearchParams();
   const fieldType = searchParams.get("field");
   const returnUrl = searchParams.get("return") || "/new-flight";
+  const flightId = searchParams.get("flightId");
   const selectedFromUrl = searchParams.get("selected");
   const isDesktop = useIsDesktop();
 
@@ -346,19 +347,24 @@ export default function CrewPage() {
       params.set("field", fieldType);
       params.set("crewId", crew.id);
       params.set("crewName", crew.isMe ? "Self" : crew.name);
+      if (flightId) params.set("flightId", flightId);
       router.push(`${returnUrl}?${params.toString()}`);
     } else if (isDesktop) {
       setSelectedCrewId(crew.id);
     } else {
       router.push(`/crew/${crew.id}`);
     }
-  }, [fieldType, isDesktop, router, returnUrl, setSelectedCrewId]);
+  }, [fieldType, flightId, isDesktop, router, returnUrl, setSelectedCrewId]);
 
   const handleAddCrew = () => {
-    const url = fieldType
-      ? `/crew/new?field=${fieldType}&return=${encodeURIComponent(returnUrl)}`
-      : "/crew/new";
-    router.push(url);
+    const params = new URLSearchParams();
+    if (fieldType) {
+      params.set("field", fieldType);
+      params.set("return", returnUrl);
+      if (flightId) params.set("flightId", flightId);
+    }
+    const query = params.toString();
+    router.push(query ? `/crew/new?${query}` : "/crew/new");
   };
 
   const performDelete = async (crew: (typeof personnel)[0]) => {
@@ -384,6 +390,12 @@ export default function CrewPage() {
         <StandardPageHeader
           title={pageTitle}
           showBack={!!fieldType}
+          onBack={fieldType ? () => {
+            const params = new URLSearchParams()
+            if (flightId) params.set("flightId", flightId)
+            const query = params.toString()
+            router.push(query ? `${returnUrl}?${query}` : returnUrl)
+          } : undefined}
         />
       }
       rightContent={
