@@ -204,14 +204,14 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
     return (
       <div
-        className={cn("flex flex-col w-full pb-0.5 overflow-hidden", className)}
+        className={cn("flex flex-col w-full pb-0 overflow-hidden", className)}
       >
         {/* HEADER: Days of the week */}
-        <div className="grid grid-cols-7 gap-0 px-1.5 pt-1 pb-0.5">
+        <div className="grid grid-cols-7 gap-0 px-1 pt-0.5 pb-0">
           {DAYS.map((day, i) => (
             <div
               key={i}
-              className="text-center text-xs font-medium text-muted-foreground/60 uppercase tracking-wider"
+              className="text-center text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider"
             >
               {day}
             </div>
@@ -221,13 +221,13 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         {/* GRID: The actual month days */}
         <div
           ref={containerRef}
-          className="flex-1 px-1.5 py-0.5 overflow-hidden touch-none"
+          className="flex-1 px-1 py-0 overflow-hidden touch-none"
           style={{ contain: "layout", touchAction: "none" }}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="grid grid-cols-7 gap-0.5">
+          <div className="grid grid-cols-7 gap-0">
             {calendarDays.map((dayInfo, dayIndex) => {
               const flightInfo = flightDates.get(dayInfo.dateStr);
               const isCurrentMonth = dayInfo.isCurrentMonth;
@@ -238,11 +238,11 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 <button
                   key={dayIndex}
                   onClick={() => handleDateClick(dayInfo.dateStr, !!flightInfo)}
-                  className="flex items-center justify-center aspect-square p-0.5"
+                  className="flex items-center justify-center aspect-square p-px"
                 >
                   <div
                     className={cn(
-                      "w-full aspect-square flex items-center justify-center text-base rounded-full transition-all",
+                      "w-full aspect-square flex items-center justify-center text-sm rounded-full transition-all",
                       isCurrentMonth
                         ? "text-foreground/90"
                         : "text-foreground/15",

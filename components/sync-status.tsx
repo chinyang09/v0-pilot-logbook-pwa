@@ -43,7 +43,7 @@ export function SyncStatus() {
     <button
       onClick={handleSync}
       className={cn(
-        "flex items-center gap-1.5 p-1.5 rounded-full transition-colors",
+        "relative p-1.5 rounded-full transition-colors",
         status === "online" && "text-[var(--status-synced)]",
         status === "offline" && "text-[var(--status-offline)]",
         status === "syncing" && "text-[var(--status-pending)]",
@@ -53,7 +53,7 @@ export function SyncStatus() {
       {status === "offline" && <CloudOff className="h-4 w-4" />}
       {status === "syncing" && <RefreshCw className="h-4 w-4 animate-spin" />}
       {pendingCount > 0 && (
-        <span className="bg-[var(--status-pending)] text-background text-xs min-w-[18px] text-center px-1 rounded-full">{pendingCount}</span>
+        <span className="absolute -top-1 -right-1 bg-[var(--status-pending)] text-background text-[10px] leading-none min-w-[16px] h-[16px] flex items-center justify-center px-1 rounded-full font-medium">{pendingCount}</span>
       )}
     </button>
   )
