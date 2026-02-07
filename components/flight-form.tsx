@@ -60,9 +60,6 @@ import { usePersonnel } from "@/hooks/data";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { ImageImportButton } from "@/components/image-import-button";
 import type { ExtractedFlightData } from "@/lib/ocr";
-import { AirportPicker } from "@/components/airport-picker";
-import { AircraftPicker } from "@/components/aircraft-picker";
-import { CrewPicker } from "@/components/crew-picker";
 
 // Swipeable row component
 function SwipeableRow({
@@ -372,13 +369,6 @@ export function FlightForm({
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
-
-  // Picker modal state
-  const [airportPickerOpen, setAirportPickerOpen] = useState(false);
-  const [airportPickerField, setAirportPickerField] = useState<"departureIcao" | "arrivalIcao">("departureIcao");
-  const [aircraftPickerOpen, setAircraftPickerOpen] = useState(false);
-  const [crewPickerOpen, setCrewPickerOpen] = useState(false);
-  const [crewPickerField, setCrewPickerField] = useState<"picId" | "sicId">("picId");
 
   const editingFlightInitializedRef = useRef<string | null>(null);
 
@@ -918,77 +908,42 @@ export function FlightForm({
     }
   }, [formData, editingFlight?.id, manualOverrides]);
 
-  // Open picker modals (mobile) or navigate to full pages (desktop)
-  const openAirportPicker = (field: "departureIcao" | "arrivalIcao") => {
-    if (isDesktop && formData.id) {
-      forceSave();
-      pinDetailContent();
-      const params = new URLSearchParams();
-      params.set("field", field);
-      params.set("returnTo", "/logbook");
-      params.set("flightId", formData.id);
-      router.push(`/airports?${params.toString()}`);
-    } else {
-      setAirportPickerField(field);
-      setAirportPickerOpen(true);
-    }
+  // Navigate to full pages for aircraft/airport/crew selection
+  const returnTo = isDesktop ? "/logbook" : `/flights/${formData.id}`;
+
+  const openAirportPicker = async (field: "departureIcao" | "arrivalIcao") => {
+    if (!formData.id) return;
+    await forceSave();
+    if (isDesktop) pinDetailContent();
+    const params = new URLSearchParams();
+    params.set("field", field);
+    params.set("returnTo", returnTo);
+    params.set("flightId", formData.id);
+    router.push(`/airports?${params.toString()}`);
   };
 
-  const openAircraftPicker = () => {
-    if (isDesktop && formData.id) {
-      forceSave();
-      pinDetailContent();
-      const params = new URLSearchParams();
-      params.set("select", "true");
-      params.set("field", "aircraftReg");
-      params.set("returnTo", "/logbook");
-      params.set("flightId", formData.id);
-      router.push(`/aircraft?${params.toString()}`);
-    } else {
-      setAircraftPickerOpen(true);
-    }
+  const openAircraftPicker = async () => {
+    if (!formData.id) return;
+    await forceSave();
+    if (isDesktop) pinDetailContent();
+    const params = new URLSearchParams();
+    params.set("select", "true");
+    params.set("field", "aircraftReg");
+    params.set("returnTo", returnTo);
+    params.set("flightId", formData.id);
+    router.push(`/aircraft?${params.toString()}`);
   };
 
-  const openCrewPicker = (field: "picId" | "sicId") => {
-    if (isDesktop && formData.id) {
-      forceSave();
-      pinDetailContent();
-      const params = new URLSearchParams();
-      params.set("field", field);
-      params.set("return", "/logbook");
-      params.set("flightId", formData.id);
-      router.push(`/crew?${params.toString()}`);
-    } else {
-      setCrewPickerField(field);
-      setCrewPickerOpen(true);
-    }
+  const openCrewPicker = async (field: "picId" | "sicId") => {
+    if (!formData.id) return;
+    await forceSave();
+    if (isDesktop) pinDetailContent();
+    const params = new URLSearchParams();
+    params.set("field", field);
+    params.set("return", returnTo);
+    params.set("flightId", formData.id);
+    router.push(`/crew?${params.toString()}`);
   };
-
-  // Picker selection handlers
-  const handleAirportPickerSelect = useCallback((icao: string) => {
-    if (airportPickerField === "departureIcao") {
-      updateField("departureIcao", icao);
-      updateField("departureIata", "");
-    } else {
-      updateField("arrivalIcao", icao);
-      updateField("arrivalIata", "");
-    }
-  }, [airportPickerField, updateField]);
-
-  const handleAircraftPickerSelect = useCallback((registration: string, type: string) => {
-    updateField("aircraftReg", registration);
-    updateField("aircraftType", type);
-  }, [updateField]);
-
-  const handleCrewPickerSelect = useCallback((crewId: string, crewName: string) => {
-    if (crewPickerField === "picId") {
-      updateField("picId", crewId);
-      updateField("picName", crewName);
-    } else {
-      updateField("sicId", crewId);
-      updateField("sicName", crewName);
-    }
-  }, [crewPickerField, updateField]);
 
   const swapCrew = useCallback(() => {
     setFormData((prev) => ({
@@ -1922,26 +1877,6 @@ export function FlightForm({
       </div>
       </div>
 
-      {/* Picker overlays — only used on mobile; desktop navigates to full pages */}
-      {!isDesktop && (
-        <>
-          <AirportPicker
-            open={airportPickerOpen}
-            onClose={() => setAirportPickerOpen(false)}
-            onSelect={handleAirportPickerSelect}
-          />
-          <AircraftPicker
-            open={aircraftPickerOpen}
-            onClose={() => setAircraftPickerOpen(false)}
-            onSelect={handleAircraftPickerSelect}
-          />
-          <CrewPicker
-            open={crewPickerOpen}
-            onClose={() => setCrewPickerOpen(false)}
-            onSelect={handleCrewPickerSelect}
-          />
-        </>
-      )}
     </div>
   );
 }
