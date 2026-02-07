@@ -1874,6 +1874,7 @@ export function FlightForm({
       )}
 
       </div>
+      </div>
 
       {/* Picker overlays — positioned within the relative wrapper, above the scroll area */}
       <AirportPicker
