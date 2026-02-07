@@ -204,10 +204,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
     return (
       <div
-        className={cn("flex flex-col w-full pb-0.5 overflow-hidden", className)}
+        className={cn("flex flex-col w-full pb-0 overflow-hidden", className)}
       >
         {/* HEADER: Days of the week */}
-        <div className="grid grid-cols-7 gap-0 px-1.5 pt-1 pb-0.5">
+        <div className="grid grid-cols-7 gap-0 px-1 pt-0.5 pb-0">
           {DAYS.map((day, i) => (
             <div
               key={i}
@@ -221,13 +221,13 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         {/* GRID: The actual month days */}
         <div
           ref={containerRef}
-          className="flex-1 px-1.5 py-0.5 overflow-hidden touch-none"
+          className="flex-1 px-1 py-0 overflow-hidden touch-none"
           style={{ contain: "layout", touchAction: "none" }}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="grid grid-cols-7 gap-0.5">
+          <div className="grid grid-cols-7 gap-0">
             {calendarDays.map((dayInfo, dayIndex) => {
               const flightInfo = flightDates.get(dayInfo.dateStr);
               const isCurrentMonth = dayInfo.isCurrentMonth;
@@ -238,20 +238,21 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 <button
                   key={dayIndex}
                   onClick={() => handleDateClick(dayInfo.dateStr, !!flightInfo)}
-                  className={cn(
-                    "flex flex-col items-center justify-center rounded-md text-xs aspect-square transition-all relative",
-                    isCurrentMonth
-                      ? "text-foreground/90"
-                      : "text-foreground/15",
-                    flightInfo && isCurrentMonth && "font-semibold text-primary bg-primary/8",
-                    isToday && "ring-1.5 ring-primary/60",
-                    isSelected && "bg-primary text-primary-foreground shadow-md z-10"
-                  )}
+                  className="flex items-center justify-center aspect-square p-px"
                 >
-                  <span>{dayInfo.date.getDate()}</span>
-                  {flightInfo && isCurrentMonth && !isSelected && (
-                    <div className="absolute bottom-0.5 w-1 h-1 rounded-full bg-primary/70" />
-                  )}
+                  <div
+                    className={cn(
+                      "w-full aspect-square flex items-center justify-center text-lg rounded-full transition-all",
+                      isCurrentMonth
+                        ? "text-foreground/90"
+                        : "text-foreground/15",
+                      flightInfo && isCurrentMonth && !isSelected && "font-semibold text-primary bg-primary/20",
+                      isToday && "ring-1.5 ring-primary/60",
+                      isSelected && "bg-primary text-primary-foreground shadow-md z-10"
+                    )}
+                  >
+                    {dayInfo.date.getDate()}
+                  </div>
                 </button>
               );
             })}

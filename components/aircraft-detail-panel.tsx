@@ -60,9 +60,9 @@ export function AircraftDetailPanel({ registration }: AircraftDetailPanelProps) 
   }
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Header */}
-      <header className="flex-none bg-background/30 backdrop-blur-lg border-b border-border">
+    <div className="h-full relative flex flex-col">
+      {/* Header - absolute overlay for frosted glass */}
+      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
         <div className="px-4 h-12 flex items-center justify-center">
           <div className="text-center">
             <h1 className="text-lg font-semibold">
@@ -76,7 +76,7 @@ export function AircraftDetailPanel({ registration }: AircraftDetailPanelProps) 
       </header>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto pt-12">
         <div className="p-4 pb-safe space-y-4">
           <div className="bg-card border border-border rounded-xl p-4">
             <div className="flex items-center gap-3 mb-4">

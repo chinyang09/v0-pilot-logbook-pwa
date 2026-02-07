@@ -35,7 +35,7 @@ import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
 import { FastScroll, type FastScrollItem } from "@/components/ui/fast-scroll";
 
 export interface FlightListRef {
-  scrollToFlight: (flightId: string, flightDate?: string) => void;
+  scrollToFlight: (flightId: string, instant?: boolean) => void;
 }
 
 interface FlightListProps {
@@ -330,17 +330,50 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     useImperativeHandle(
       ref,
       () => ({
-        scrollToFlight: (flightId: string) => {
+        scrollToFlight: (flightId: string, instant?: boolean) => {
           const index = flights.findIndex((f) => f.id === flightId);
           if (index !== -1) {
             isExternalScrollRef.current = true;
-            rowVirtualizer.scrollToIndex(index, {
-              align: "start",
-              behavior: "smooth",
-            });
-            setTimeout(() => {
+
+            if (instant) {
+              rowVirtualizer.scrollToIndex(index, { align: "start", behavior: "auto" });
+              setTimeout(() => { isExternalScrollRef.current = false; }, 100);
+              return;
+            }
+
+            const container = scrollContainerRef.current;
+            if (!container) return;
+
+            // Capture current position, instant-jump to target, capture target, reset
+            const startOffset = container.scrollTop;
+            rowVirtualizer.scrollToIndex(index, { align: "start", behavior: "auto" });
+            const targetOffset = container.scrollTop;
+            container.scrollTop = startOffset;
+
+            // Animate smoothly over fixed 300ms with ease-out cubic
+            const duration = 300;
+            const startTime = performance.now();
+            const distance = targetOffset - startOffset;
+
+            if (Math.abs(distance) < 1) {
               isExternalScrollRef.current = false;
-            }, 800); // Allow smooth scroll to complete with accurate 104px estimation
+              return;
+            }
+
+            const animate = (currentTime: number) => {
+              const elapsed = currentTime - startTime;
+              const progress = Math.min(elapsed / duration, 1);
+              const eased = 1 - Math.pow(1 - progress, 3);
+              container.scrollTop = startOffset + distance * eased;
+
+              if (progress < 1) {
+                requestAnimationFrame(animate);
+              } else {
+                isExternalScrollRef.current = false;
+              }
+            };
+
+            requestAnimationFrame(animate);
           }
         },
       }),
@@ -589,9 +622,12 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             <div className="h-16" />
           </div>
 
-          {/* FastScroll rail (year-based navigation) */}
+          {/* FastScroll rail (year-based navigation) - positioned in visible area below calendar/header */}
           {fastScrollItems.length > 1 && (
-            <div className="absolute right-0 top-0 bottom-0 z-40 flex items-center pointer-events-none">
+            <div
+              className="absolute right-0 bottom-0 z-40 flex items-center pointer-events-none transition-[top] duration-300 ease-in-out"
+              style={{ top: `${topSpacerHeight}px` }}
+            >
               <div className="pointer-events-auto">
                 <FastScroll
                   items={fastScrollItems}
@@ -600,7 +636,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                   onScrollStart={handleFastScrollStart}
                   onScrollEnd={handleFastScrollEnd}
                   indicatorPosition="left"
-                  className="py-16"
+                  className="py-8"
                 />
               </div>
             </div>

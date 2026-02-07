@@ -55,6 +55,9 @@ function parseDateLocal(dateStr: string): Date {
   return new Date(year, month - 1, day)
 }
 
+// Persists top flight ID across layout switches (mobile ↔ desktop remounts)
+let savedTopFlightId: string | null = null
+
 export default function LogbookPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -264,6 +267,20 @@ export default function LogbookPage() {
     return () => observer.disconnect()
   }, [])
 
+  // Restore scroll position after layout switch (mobile ↔ desktop remount)
+  const hasRestoredScrollRef = useRef(false)
+  useEffect(() => {
+    if (hasRestoredScrollRef.current) return
+    if (!flights.length || flightsLoading) return
+    hasRestoredScrollRef.current = true
+
+    if (savedTopFlightId && flights.some(f => f.id === savedTopFlightId)) {
+      requestAnimationFrame(() => {
+        flightListRef.current?.scrollToFlight(savedTopFlightId!, true)
+      })
+    }
+  }, [flights, flightsLoading])
+
   const syncSourceRef = useRef<"calendar" | "flights" | null>(null)
   const selectedMonthRef = useRef(selectedMonth)
   const showCalendarRef = useRef(showCalendar)
@@ -307,7 +324,7 @@ export default function LogbookPage() {
           const timeB = b.outTime || "00:00"
           return timeB.localeCompare(timeA)
         })
-        flightListRef.current?.scrollToFlight(sortedFlights[0].id, sortedFlights[0].date)
+        flightListRef.current?.scrollToFlight(sortedFlights[0].id)
       }
     },
     [flights],
@@ -315,7 +332,11 @@ export default function LogbookPage() {
 
   const handleFlightScroll = useCallback(
     (topFlight: FlightLog | null) => {
-      if (!showCalendarRef.current || !topFlight) return
+      if (!topFlight) return
+      // Always persist for scroll restoration across layout switches
+      savedTopFlightId = topFlight.id
+
+      if (!showCalendarRef.current) return
       if (syncSourceRef.current !== "flights") return
 
       const flightDate = parseDateLocal(topFlight.date)
@@ -340,8 +361,13 @@ export default function LogbookPage() {
   }, [])
 
   const handleDateSelect = useCallback((date: string) => {
-    setSelectedDate((prev) => (prev === date ? null : date))
-  }, [])
+    // Scroll to the first flight on this date instead of filtering
+    const flight = flights.find(f => f.date === date)
+    if (flight) {
+      syncSourceRef.current = "calendar"
+      flightListRef.current?.scrollToFlight(flight.id)
+    }
+  }, [flights])
 
   // Handle flight selection from list
   // On desktop: Select flight to show FlightForm in detail panel
@@ -407,10 +433,6 @@ export default function LogbookPage() {
   const filteredFlights = useMemo(() => {
     let result = flights
 
-    if (selectedDate) {
-      result = result.filter((f) => f.date === selectedDate)
-    }
-
     if (selectedFilters.length > 0 && activeFilterType !== "none") {
       result = result.filter((flight) => {
         switch (activeFilterType) {
@@ -437,7 +459,7 @@ export default function LogbookPage() {
     }
 
     return result
-  }, [flights, selectedDate, selectedFilters, activeFilterType])
+  }, [flights, selectedFilters, activeFilterType])
 
   const clearAllFilters = () => {
     setSelectedDate(null)
@@ -450,15 +472,16 @@ export default function LogbookPage() {
     setSelectedFilters((prev) => (prev.includes(option) ? prev.filter((f) => f !== option) : [...prev, option]))
   }
 
-  const hasActiveFilters = selectedDate || selectedFilters.length > 0
+  const hasActiveFilters = selectedFilters.length > 0
   const isLoading = dbLoading || !dbReady
 
   return (
     <div className="h-full relative flex flex-col">
-      {/* HEADER - absolute overlay for frosted glass */}
-      <div className="absolute top-0 left-0 right-0 z-50">
+      {/* Combined header + calendar overlay - single continuous frosted glass */}
+      <div className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
         <StandardPageHeader
           title={showCalendar ? `${MONTHS[selectedMonth.month]} ${selectedMonth.year}` : "Logbook"}
+          className="bg-transparent backdrop-blur-none border-b-0"
           actions={
             <>
               <Button
@@ -508,24 +531,18 @@ export default function LogbookPage() {
             </>
           }
         />
-      </div>
-
-      {/* FLIGHT LIST with calendar overlay */}
-      <main className="flex-1 overflow-hidden overscroll-contain relative">
-        {/* Calendar - absolute overlay so flight cards scroll behind it for frosted glass */}
+        {/* Calendar collapse section */}
         <div
           ref={calendarContainerRef}
           className={cn(
-            "absolute top-12 left-0 right-0 z-40",
-            "bg-background/10 backdrop-blur-xl border-b border-border/50",
             "transition-[max-height,opacity] duration-300 ease-in-out overflow-hidden",
-            showCalendar ? "opacity-100" : "max-h-0 opacity-0 border-b-0 pointer-events-none",
+            showCalendar ? "opacity-100" : "max-h-0 opacity-0 pointer-events-none",
           )}
           style={showCalendar ? { maxHeight: `${calendarNaturalHeight}px` } : undefined}
         >
           <LogbookCalendar
             ref={calendarRef}
-            className="bg-transparent shadow-none border-none max-w-md mx-auto"
+            className="bg-transparent shadow-none border-none max-w-[300px] mx-auto"
             flights={flights}
             selectedMonth={selectedMonth}
             onMonthChange={handleCalendarMonthChange}
@@ -534,7 +551,10 @@ export default function LogbookPage() {
             onScrollStart={handleCalendarScrollStart}
           />
         </div>
+      </div>
 
+      {/* FLIGHT LIST */}
+      <main className="flex-1 overflow-hidden overscroll-contain relative">
         <FlightList
           ref={flightListRef}
           flights={filteredFlights}

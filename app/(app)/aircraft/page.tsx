@@ -61,7 +61,7 @@ const AircraftCard = memo(function AircraftCard({
       }}
       className={cn(
         "w-full text-left rounded-lg transition-all cursor-pointer active:scale-[0.98]",
-        compact ? "py-1.5 px-3" : "py-2 px-3",
+        compact ? "py-1.5 pl-3 pr-6" : "py-2 pl-3 pr-6",
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
           : "bg-card border border-border hover:bg-accent",
@@ -510,7 +510,7 @@ export default function AircraftPage() {
         <div>
           <div className="px-4 pt-4 pb-safe">
             {/* Sticky search bar - outside aboveVirtualRef so it stays visible during scroll */}
-            <div className="sticky top-0 z-40 pb-3 bg-background/80 backdrop-blur-xl -mx-3 px-3">
+            <div className="sticky top-0 z-40 pb-3 bg-background/30 backdrop-blur-xl -mx-3 px-3">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -526,7 +526,7 @@ export default function AircraftPage() {
             {/* Non-virtualized content above the virtual list */}
             <div ref={aboveVirtualRef}>
               {!debouncedSearchQuery.trim() && (
-                <div className={`space-y-3 ${showFastScroll ? "pr-8" : ""}`}>
+                <div className={`space-y-3 `}>
                   {/* Favorites Section */}
                   {showFavorites && (
                     <div className="space-y-1.5">
@@ -573,7 +573,7 @@ export default function AircraftPage() {
               )}
 
               {debouncedSearchQuery.trim() && (
-                <div className={`space-y-3 ${showFastScroll ? "pr-8" : ""}`}>
+                <div className={`space-y-3 `}>
                   <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
                     {filteredAircraft.length} results
                   </h2>
@@ -582,7 +582,7 @@ export default function AircraftPage() {
             </div>
 
             {/* Virtualized aircraft list */}
-            <div className={showFastScroll ? "pr-8" : ""}>
+            <div>
               <div
                 style={{
                   height: `${rowVirtualizer.getTotalSize()}px`,
