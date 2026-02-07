@@ -1228,6 +1228,7 @@ export function FlightForm({
   const isDraft = editingFlight?.isDraft ?? true;
 
   return (
+    <div className="h-full relative">
     <div className="h-full overflow-y-auto bg-background">
       <div className="min-h-full pb-20">
       {/* Fixed Header */}
@@ -1872,7 +1873,9 @@ export function FlightForm({
         />
       )}
 
-      {/* Picker Modals */}
+      </div>
+
+      {/* Picker overlays — positioned within the relative wrapper, above the scroll area */}
       <AirportPicker
         open={airportPickerOpen}
         onClose={() => setAirportPickerOpen(false)}
@@ -1888,7 +1891,6 @@ export function FlightForm({
         onClose={() => setCrewPickerOpen(false)}
         onSelect={handleCrewPickerSelect}
       />
-      </div>
     </div>
   );
 }
