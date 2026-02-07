@@ -59,6 +59,9 @@ import {
 import { usePersonnel } from "@/hooks/data";
 import { ImageImportButton } from "@/components/image-import-button";
 import type { ExtractedFlightData } from "@/lib/ocr";
+import { AirportPicker } from "@/components/airport-picker";
+import { AircraftPicker } from "@/components/aircraft-picker";
+import { CrewPicker } from "@/components/crew-picker";
 
 // Swipeable row component
 function SwipeableRow({
@@ -367,6 +370,13 @@ export function FlightForm({
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+
+  // Picker modal state
+  const [airportPickerOpen, setAirportPickerOpen] = useState(false);
+  const [airportPickerField, setAirportPickerField] = useState<"departureIcao" | "arrivalIcao">("departureIcao");
+  const [aircraftPickerOpen, setAircraftPickerOpen] = useState(false);
+  const [crewPickerOpen, setCrewPickerOpen] = useState(false);
+  const [crewPickerField, setCrewPickerField] = useState<"picId" | "sicId">("picId");
 
   const editingFlightInitializedRef = useRef<string | null>(null);
 
@@ -893,35 +903,46 @@ export function FlightForm({
     [updateField, markManualOverride, manualOverrides]
   );
 
-  // Open pickers - on desktop, return to /logbook with flightId; on mobile, return to /flights/[id]
+  // Open picker modals
   const openAirportPicker = (field: "departureIcao" | "arrivalIcao") => {
-    if (isDesktop && formData.id) {
-      // On desktop, return to logbook with flightId to restore editing state
-      router.push(`/airports?select=true&returnTo=/logbook&flightId=${formData.id}&field=${field}`);
-    } else {
-      const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
-      router.push(`/airports?select=true&returnTo=${encodeURIComponent(returnUrl)}&field=${field}`);
-    }
+    setAirportPickerField(field);
+    setAirportPickerOpen(true);
   };
 
   const openAircraftPicker = () => {
-    if (isDesktop && formData.id) {
-      router.push(`/aircraft?select=true&returnTo=/logbook&flightId=${formData.id}&field=aircraftReg`);
-    } else {
-      const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
-      router.push(`/aircraft?select=true&returnTo=${encodeURIComponent(returnUrl)}&field=aircraftReg`);
-    }
+    setAircraftPickerOpen(true);
   };
 
   const openCrewPicker = (field: "picId" | "sicId") => {
-    const crewField = field === "picId" ? "pic" : "sic";
-    if (isDesktop && formData.id) {
-      router.push(`/crew?select=true&return=/logbook&flightId=${formData.id}&field=${crewField}`);
-    } else {
-      const returnUrl = formData.id ? `/flights/${formData.id}` : "/logbook";
-      router.push(`/crew?select=true&return=${encodeURIComponent(returnUrl)}&field=${crewField}`);
-    }
+    setCrewPickerField(field);
+    setCrewPickerOpen(true);
   };
+
+  // Picker selection handlers
+  const handleAirportPickerSelect = useCallback((icao: string) => {
+    if (airportPickerField === "departureIcao") {
+      updateField("departureIcao", icao);
+      updateField("departureIata", "");
+    } else {
+      updateField("arrivalIcao", icao);
+      updateField("arrivalIata", "");
+    }
+  }, [airportPickerField, updateField]);
+
+  const handleAircraftPickerSelect = useCallback((registration: string, type: string) => {
+    updateField("aircraftReg", registration);
+    updateField("aircraftType", type);
+  }, [updateField]);
+
+  const handleCrewPickerSelect = useCallback((crewId: string, crewName: string) => {
+    if (crewPickerField === "picId") {
+      updateField("picId", crewId);
+      updateField("picName", crewName);
+    } else {
+      updateField("sicId", crewId);
+      updateField("sicName", crewName);
+    }
+  }, [crewPickerField, updateField]);
 
   const swapCrew = useCallback(() => {
     setFormData((prev) => ({
@@ -1850,6 +1871,23 @@ export function FlightForm({
           label="Select Date"
         />
       )}
+
+      {/* Picker Modals */}
+      <AirportPicker
+        open={airportPickerOpen}
+        onClose={() => setAirportPickerOpen(false)}
+        onSelect={handleAirportPickerSelect}
+      />
+      <AircraftPicker
+        open={aircraftPickerOpen}
+        onClose={() => setAircraftPickerOpen(false)}
+        onSelect={handleAircraftPickerSelect}
+      />
+      <CrewPicker
+        open={crewPickerOpen}
+        onClose={() => setCrewPickerOpen(false)}
+        onSelect={handleCrewPickerSelect}
+      />
       </div>
     </div>
   );
