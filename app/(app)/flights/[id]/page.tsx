@@ -113,13 +113,9 @@ export default function FlightDetailPage() {
     )
   }
 
-  // Key includes selection params so React creates a fresh FlightForm
-  // instance each time a picker selection is returned
-  const selectionKey = `${id}-${selectedField || ""}-${selectedAirport || ""}-${selectedAircraftReg || ""}-${selectedCrewId || ""}`
-
   return (
     <FlightForm
-      key={selectionKey}
+      key={id}
       editingFlight={flight}
       onFlightAdded={handleFlightSaved}
       onClose={handleClose}

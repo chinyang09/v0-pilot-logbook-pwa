@@ -463,6 +463,11 @@ export function FlightForm({
         updated.arrivalIcao = selectedAirportCode;
         updated.arrivalIata = "";
       }
+      // Immediately persist to DB (bypasses debounce) so the selection
+      // survives any component remount before the debounced auto-save fires
+      if (updated.id) {
+        updateFlight(updated.id, { ...updated, manualOverrides } as FlightLog).catch(() => {});
+      }
       return updated;
     });
 
@@ -473,7 +478,7 @@ export function FlightForm({
     url.searchParams.delete("airport");
     url.searchParams.delete("flightId");
     window.history.replaceState({}, "", url.toString());
-  }, [selectedAirportField, selectedAirportCode]);
+  }, [selectedAirportField, selectedAirportCode, manualOverrides]);
 
   useEffect(() => {
     if (airports.length === 0) return;
@@ -518,11 +523,19 @@ export function FlightForm({
 
     selectionsProcessedRef.current.aircraft = selectionKey;
 
-    setFormData((prev) => ({
-      ...prev,
-      aircraftReg: selectedAircraftReg,
-      aircraftType: selectedAircraftType || prev.aircraftType,
-    }));
+    setFormData((prev) => {
+      const updated = {
+        ...prev,
+        aircraftReg: selectedAircraftReg,
+        aircraftType: selectedAircraftType || prev.aircraftType,
+      };
+      // Immediately persist to DB (bypasses debounce) so the selection
+      // survives any component remount before the debounced auto-save fires
+      if (updated.id) {
+        updateFlight(updated.id, { ...updated, manualOverrides } as FlightLog).catch(() => {});
+      }
+      return updated;
+    });
 
     addRecentlyUsedAircraft(selectedAircraftReg);
 
@@ -532,7 +545,7 @@ export function FlightForm({
     url.searchParams.delete("aircraftType");
     url.searchParams.delete("flightId");
     window.history.replaceState({}, "", url.toString());
-  }, [selectedAircraftReg, selectedAircraftType]);
+  }, [selectedAircraftReg, selectedAircraftType, manualOverrides]);
 
   useEffect(() => {
     if (!selectedCrewField || !selectedCrewId) return;
@@ -551,6 +564,11 @@ export function FlightForm({
         updated.sicId = selectedCrewId;
         updated.sicName = selectedCrewName || "";
       }
+      // Immediately persist to DB (bypasses debounce) so the selection
+      // survives any component remount before the debounced auto-save fires
+      if (updated.id) {
+        updateFlight(updated.id, { ...updated, manualOverrides } as FlightLog).catch(() => {});
+      }
       return updated;
     });
 
@@ -560,7 +578,7 @@ export function FlightForm({
     url.searchParams.delete("crewName");
     url.searchParams.delete("flightId");
     window.history.replaceState({}, "", url.toString());
-  }, [selectedCrewField, selectedCrewId, selectedCrewName]);
+  }, [selectedCrewField, selectedCrewId, selectedCrewName, manualOverrides]);
 
   useEffect(() => {
     if (editingFlight || !personnel.length) return;

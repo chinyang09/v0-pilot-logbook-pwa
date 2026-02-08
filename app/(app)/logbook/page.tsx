@@ -202,12 +202,9 @@ export default function LogbookPage() {
       : flights.find(f => f.id === selectedFlightId)
 
     if (flightToShow && isDesktop) {
-      // Key includes selection params so React creates a fresh FlightForm
-      // instance each time a picker selection is returned
-      const selectionKey = `${flightToShow.id}-${selectedField || ""}-${selectedAirport || ""}-${selectedAircraftReg || ""}-${selectedCrewId || ""}`
       setDetailContent(
         <FlightForm
-          key={selectionKey}
+          key={flightToShow.id}
           editingFlight={flightToShow}
           isDesktop={true}
           onFlightAdded={async (flight) => {
