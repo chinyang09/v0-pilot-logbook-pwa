@@ -4,6 +4,8 @@ import type React from "react";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useLiveQuery } from "dexie-react-hooks";
+import { userDb } from "@/lib/db/user-db";
 import {
   ChevronLeft,
   ChevronRight,
@@ -60,6 +62,10 @@ import { usePersonnel } from "@/hooks/data";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { ImageImportButton } from "@/components/image-import-button";
 import type { ExtractedFlightData } from "@/lib/ocr";
+import { AircraftPicker } from "@/components/aircraft-picker";
+import { AirportPicker } from "@/components/airport-picker";
+import { CrewPicker } from "@/components/crew-picker";
+import { syncService } from "@/lib/sync";
 
 // Swipeable row component
 function SwipeableRow({
@@ -337,6 +343,8 @@ interface FlightFormProps {
   onFlightAdded: (flight: FlightLog) => void;
   onClose: () => void;
   editingFlight?: FlightLog | null;
+  /** When provided, the form loads data from Dexie via useLiveQuery (desktop mode) */
+  flightId?: string;
   selectedAirportField?: string | null;
   selectedAirportCode?: string | null;
   selectedAircraftReg?: string | null;
@@ -354,6 +362,7 @@ export function FlightForm({
   onFlightAdded,
   onClose,
   editingFlight,
+  flightId: flightIdProp,
   selectedAirportField,
   selectedAirportCode,
   selectedAircraftReg,
@@ -384,11 +393,27 @@ export function FlightForm({
   // Scroll position preservation across picker navigation
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // Initialize form data from editingFlight (draft or existing flight)
+  // --- Desktop: useLiveQuery for reactive flight data ---
+  const liveQueryId = flightIdProp && isDesktop ? flightIdProp : undefined;
+  const liveFlight = useLiveQuery(
+    () => (liveQueryId ? userDb.flights.get(liveQueryId) : undefined),
+    [liveQueryId]
+  );
+
+  // Resolve which flight data to use
+  const resolvedFlight = editingFlight || liveFlight || null;
+
+  // --- Desktop inline picker state ---
+  const [desktopPickerOpen, setDesktopPickerOpen] = useState<{
+    type: "aircraft" | "airport" | "crew";
+    field?: string;
+  } | null>(null);
+
+  // Initialize form data from resolvedFlight (draft or existing flight)
   const [formData, setFormData] = useState<Partial<FlightLog>>(() => {
-    if (editingFlight) {
-      editingFlightInitializedRef.current = editingFlight.id;
-      return editingFlight;
+    if (resolvedFlight) {
+      editingFlightInitializedRef.current = resolvedFlight.id;
+      return resolvedFlight;
     }
     return createEmptyFlightLog();
   });
@@ -396,7 +421,7 @@ export function FlightForm({
   // Track manual overrides state
   const [manualOverrides, setManualOverrides] = useState<
     FlightLog["manualOverrides"]
-  >(editingFlight?.manualOverrides || {});
+  >(resolvedFlight?.manualOverrides || {});
 
   // Inside FlightForm component...
 
@@ -442,15 +467,55 @@ export function FlightForm({
     () => getNumericOffset(arrAirport?.tz),
     [arrAirport]
   );
-  // Update form data when editingFlight changes (e.g., after refresh)
+  // Update form data when resolvedFlight changes (e.g., after refresh or live query)
   useEffect(() => {
-    if (!editingFlight) return;
-    if (editingFlightInitializedRef.current === editingFlight.id) return;
+    if (!resolvedFlight) return;
+    if (editingFlightInitializedRef.current === resolvedFlight.id) return;
 
-    editingFlightInitializedRef.current = editingFlight.id;
-    setFormData(editingFlight);
-    setManualOverrides(editingFlight.manualOverrides || {});
-  }, [editingFlight]);
+    editingFlightInitializedRef.current = resolvedFlight.id;
+    setFormData(resolvedFlight);
+    setManualOverrides(resolvedFlight.manualOverrides || {});
+  }, [resolvedFlight?.id]);
+
+  // --- Desktop: detect external DB changes (picker writes) via useLiveQuery ---
+  // When a picker writes directly to Dexie, the liveFlight object updates.
+  // We compare picker-modifiable fields to detect external changes and
+  // merge them into formData without resetting user's in-progress edits.
+  const prevLiveFlightRef = useRef<FlightLog | undefined>(undefined);
+  useEffect(() => {
+    if (!liveFlight || !liveQueryId) return;
+
+    // First load: already handled by initialization or the effect above
+    if (!prevLiveFlightRef.current || prevLiveFlightRef.current.id !== liveFlight.id) {
+      prevLiveFlightRef.current = liveFlight;
+      return;
+    }
+
+    // Check for external changes in picker-modifiable fields
+    const pickerFields = [
+      "aircraftReg", "aircraftType",
+      "departureIcao", "departureIata", "arrivalIcao", "arrivalIata",
+      "picId", "picName", "sicId", "sicName",
+    ] as const;
+
+    let hasExternalChange = false;
+    const updates: Partial<FlightLog> = {};
+
+    for (const field of pickerFields) {
+      const dbVal = liveFlight[field];
+      const prevVal = prevLiveFlightRef.current[field];
+      if (dbVal !== prevVal) {
+        (updates as any)[field] = dbVal;
+        hasExternalChange = true;
+      }
+    }
+
+    prevLiveFlightRef.current = liveFlight;
+
+    if (hasExternalChange) {
+      setFormData((prev) => ({ ...prev, ...updates }));
+    }
+  }, [liveFlight, liveQueryId]);
 
   useEffect(() => {
     if (!selectedAirportField || !selectedAirportCode) return;
@@ -581,7 +646,7 @@ export function FlightForm({
   }, [selectedCrewField, selectedCrewId, selectedCrewName, onPickerParamsConsumed]);
 
   useEffect(() => {
-    if (editingFlight || !personnel.length) return;
+    if (resolvedFlight || !personnel.length) return;
 
     const selfCrew = personnel.find((p) => p.isMe);
     if (selfCrew) {
@@ -601,7 +666,7 @@ export function FlightForm({
         }));
       }
     }
-  }, [editingFlight, personnel]);
+  }, [resolvedFlight, personnel]);
 
   // Calculate derived fields
   const calculatedFields = useMemo(() => {
@@ -790,7 +855,8 @@ export function FlightForm({
   useEffect(() => {
     const autoSave = async () => {
       // Only auto-save if we have an existing flight with an ID
-      if (!debouncedFormData?.id || !editingFlight?.id) return;
+      const effectiveId = resolvedFlight?.id || flightIdProp;
+      if (!debouncedFormData?.id || !effectiveId) return;
 
       // Create a serializable state to compare
       const currentState = JSON.stringify({
@@ -823,7 +889,7 @@ export function FlightForm({
     };
 
     autoSave();
-  }, [debouncedFormData, editingFlight?.id, manualOverrides]);
+  }, [debouncedFormData, resolvedFlight?.id, flightIdProp, manualOverrides]);
 
   // Update field helper
   const updateField = useCallback(
@@ -946,7 +1012,8 @@ export function FlightForm({
   // Force-save current form data before navigating away (bypasses debounce)
   // Skips save if nothing changed from last saved state to avoid sync queue bloat
   const forceSave = useCallback(async () => {
-    if (!formData?.id || !editingFlight?.id) return;
+    const effectiveId = resolvedFlight?.id || flightIdProp;
+    if (!formData?.id || !effectiveId) return;
     const currentState = JSON.stringify({ ...formData, manualOverrides });
     if (lastSavedStateRef.current === currentState) return;
     try {
@@ -955,13 +1022,24 @@ export function FlightForm({
     } catch (error) {
       console.error("Force save before picker navigation failed:", error);
     }
-  }, [formData, editingFlight?.id, manualOverrides]);
+  }, [formData, resolvedFlight?.id, flightIdProp, manualOverrides]);
 
   // Navigate to full pages for aircraft/airport/crew selection
+  // On desktop with flightIdProp: open inline picker sheets (no navigation)
+  // On mobile or legacy desktop: navigate to picker pages
   const returnTo = isDesktop ? "/logbook" : `/flights/${formData.id}`;
 
   const openAirportPicker = async (field: "departureIcao" | "arrivalIcao") => {
     if (!formData.id) return;
+
+    // Desktop inline picker: open sheet directly
+    if (isDesktop && flightIdProp) {
+      await forceSave();
+      setDesktopPickerOpen({ type: "airport", field });
+      return;
+    }
+
+    // Mobile / legacy: navigate to picker page
     saveScrollPosition();
     await forceSave();
     if (isDesktop) pinDetailContent();
@@ -974,6 +1052,15 @@ export function FlightForm({
 
   const openAircraftPicker = async () => {
     if (!formData.id) return;
+
+    // Desktop inline picker: open sheet directly
+    if (isDesktop && flightIdProp) {
+      await forceSave();
+      setDesktopPickerOpen({ type: "aircraft" });
+      return;
+    }
+
+    // Mobile / legacy: navigate to picker page
     saveScrollPosition();
     await forceSave();
     if (isDesktop) pinDetailContent();
@@ -987,6 +1074,15 @@ export function FlightForm({
 
   const openCrewPicker = async (field: "picId" | "sicId") => {
     if (!formData.id) return;
+
+    // Desktop inline picker: open sheet directly
+    if (isDesktop && flightIdProp) {
+      await forceSave();
+      setDesktopPickerOpen({ type: "crew", field });
+      return;
+    }
+
+    // Mobile / legacy: navigate to picker page
     saveScrollPosition();
     await forceSave();
     if (isDesktop) pinDetailContent();
@@ -1033,9 +1129,9 @@ export function FlightForm({
 
     try {
       const flightData: FlightLog = {
-        id: formData.id || editingFlight?.id || crypto.randomUUID(),
+        id: formData.id || resolvedFlight?.id || flightIdProp || crypto.randomUUID(),
         isDraft: false, // Mark as not a draft - will trigger sync
-        createdAt: editingFlight?.createdAt || Date.now(),
+        createdAt: resolvedFlight?.createdAt || Date.now(),
         updatedAt: Date.now(),
         syncStatus: "pending",
         date: formData.date || new Date().toISOString().split("T")[0],
@@ -1104,9 +1200,9 @@ export function FlightForm({
 
   // Discard Draft: Delete the draft flight and close
   const handleDiscardDraft = async () => {
-    if (editingFlight?.id && editingFlight.isDraft) {
+    if (resolvedFlight?.id && resolvedFlight.isDraft) {
       try {
-        await deleteFlight(editingFlight.id);
+        await deleteFlight(resolvedFlight.id);
       } catch (error) {
         console.error("Failed to delete draft:", error);
       }
@@ -1278,7 +1374,16 @@ export function FlightForm({
     return arrTimezone;
   }, [activeTimePicker, depTimezone, arrTimezone]);
 
-  const isDraft = editingFlight?.isDraft ?? true;
+  const isDraft = resolvedFlight?.isDraft ?? true;
+
+  // Show loading state when using useLiveQuery and data hasn't arrived yet
+  if (flightIdProp && !resolvedFlight && !formData.id) {
+    return (
+      <div className="h-full flex items-center justify-center bg-background">
+        <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
 
   return (
     <div className="h-full relative">
@@ -1928,6 +2033,90 @@ export function FlightForm({
 
       </div>
       </div>
+
+      {/* Desktop inline picker sheets - rendered within the form's container
+          so the form stays mounted while picker is open */}
+      {isDesktop && flightIdProp && desktopPickerOpen?.type === "aircraft" && (
+        <AircraftPicker
+          open={true}
+          onClose={() => setDesktopPickerOpen(null)}
+          onSelect={async (registration, type) => {
+            // Write directly to Dexie
+            if (formData.id) {
+              await updateFlight(formData.id, {
+                aircraftReg: registration,
+                aircraftType: type,
+              });
+              syncService.notifyDataChange();
+            }
+            // Also update local formData immediately
+            setFormData((prev) => ({
+              ...prev,
+              aircraftReg: registration,
+              aircraftType: type,
+            }));
+            addRecentlyUsedAircraft(registration);
+            setDesktopPickerOpen(null);
+          }}
+        />
+      )}
+
+      {isDesktop && flightIdProp && desktopPickerOpen?.type === "airport" && (
+        <AirportPicker
+          open={true}
+          onClose={() => setDesktopPickerOpen(null)}
+          onSelect={async (icao) => {
+            const field = desktopPickerOpen.field as "departureIcao" | "arrivalIcao";
+            const updates: Partial<FlightLog> = {};
+
+            if (field === "departureIcao") {
+              updates.departureIcao = icao;
+              updates.departureIata = "";
+            } else if (field === "arrivalIcao") {
+              updates.arrivalIcao = icao;
+              updates.arrivalIata = "";
+            }
+
+            // Write directly to Dexie
+            if (formData.id) {
+              await updateFlight(formData.id, updates);
+              syncService.notifyDataChange();
+            }
+            // Also update local formData immediately
+            setFormData((prev) => ({ ...prev, ...updates }));
+            addRecentlyUsedAirport(icao);
+            setDesktopPickerOpen(null);
+          }}
+        />
+      )}
+
+      {isDesktop && flightIdProp && desktopPickerOpen?.type === "crew" && (
+        <CrewPicker
+          open={true}
+          onClose={() => setDesktopPickerOpen(null)}
+          onSelect={async (crewId, crewName) => {
+            const field = desktopPickerOpen.field as "picId" | "sicId";
+            const updates: Partial<FlightLog> = {};
+
+            if (field === "picId") {
+              updates.picId = crewId;
+              updates.picName = crewName;
+            } else if (field === "sicId") {
+              updates.sicId = crewId;
+              updates.sicName = crewName;
+            }
+
+            // Write directly to Dexie
+            if (formData.id) {
+              await updateFlight(formData.id, updates);
+              syncService.notifyDataChange();
+            }
+            // Also update local formData immediately
+            setFormData((prev) => ({ ...prev, ...updates }));
+            setDesktopPickerOpen(null);
+          }}
+        />
+      )}
 
     </div>
   );

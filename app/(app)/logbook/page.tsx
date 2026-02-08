@@ -24,7 +24,6 @@ import { StandardPageHeader } from "@/components/standard-page-header"
 import { cn } from "@/lib/utils"
 import { CSVImportButton } from "@/components/csv-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
-import { FlightForm } from "@/components/flight-form"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useSearchParams } from "next/navigation"
 
@@ -64,74 +63,6 @@ export default function LogbookPage() {
   const isDesktop = useIsDesktop()
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
 
-  // Track if we're editing a flight in the detail panel (desktop only)
-  const [editingFlightId, setEditingFlightId] = useState<string | null>(null)
-
-  // Capture picker selection params into state so URL cleanup doesn't
-  // trigger a re-render cascade that recreates the FlightForm on desktop.
-  // The state is set once on arrival and cleared after the FlightForm consumes it.
-  const [pickerParams, setPickerParams] = useState<{
-    field: string | null
-    airport: string | null
-    aircraftReg: string | null
-    aircraftType: string | null
-    crewId: string | null
-    crewName: string | null
-  } | null>(() => {
-    // Initialize from URL on first render (handles page load with picker params)
-    const field = searchParams.get("field")
-    if (!field) return null
-    return {
-      field,
-      airport: searchParams.get("airport"),
-      aircraftReg: searchParams.get("aircraftReg"),
-      aircraftType: searchParams.get("aircraftType"),
-      crewId: searchParams.get("crewId"),
-      crewName: searchParams.get("crewName"),
-    }
-  })
-
-  // When URL search params change with new picker params, capture them and clean URL
-  const pickerParamsCapturedRef = useRef(!!pickerParams)
-  useEffect(() => {
-    const field = searchParams.get("field")
-    if (!field) return
-    if (pickerParamsCapturedRef.current) return
-    pickerParamsCapturedRef.current = true
-    setPickerParams({
-      field,
-      airport: searchParams.get("airport"),
-      aircraftReg: searchParams.get("aircraftReg"),
-      aircraftType: searchParams.get("aircraftType"),
-      crewId: searchParams.get("crewId"),
-      crewName: searchParams.get("crewName"),
-    })
-  }, [searchParams])
-
-  // Use captured picker params (stable across URL changes)
-  const selectedField = pickerParams?.field ?? null
-  const selectedAirport = pickerParams?.airport ?? null
-  const selectedAircraftReg = pickerParams?.aircraftReg ?? null
-  const selectedAircraftType = pickerParams?.aircraftType ?? null
-  const selectedCrewId = pickerParams?.crewId ?? null
-  const selectedCrewName = pickerParams?.crewName ?? null
-
-  // Called by FlightForm after it consumes picker selection params.
-  // Clears captured state and URL params without triggering FlightForm re-creation.
-  const handlePickerParamsConsumed = useCallback(() => {
-    setPickerParams(null)
-    pickerParamsCapturedRef.current = false
-    const url = new URL(window.location.href)
-    url.searchParams.delete("field")
-    url.searchParams.delete("airport")
-    url.searchParams.delete("aircraftReg")
-    url.searchParams.delete("aircraftType")
-    url.searchParams.delete("crewId")
-    url.searchParams.delete("crewName")
-    url.searchParams.delete("flightId")
-    window.history.replaceState({}, "", url.toString())
-  }, [])
-
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
   const { aircraft } = useAircraft()
   const { airports } = useAirportDatabase()
@@ -169,50 +100,19 @@ export default function LogbookPage() {
   const { handleScroll } = useScrollNavbarContext()
 
   // Detail panel integration
+  // The layout now renders FlightForm directly based on selectedId (Smart Switcher pattern).
+  // This page only manages selection state - no more pushing ReactNodes via setDetailContent.
   const {
     selectedId: selectedFlightId,
     setSelectedId: setSelectedFlightId,
-    setDetailContent,
     setHasDetailSupport,
   } = useDetailPanel()
 
-  // Register detail panel support and manage detail content
+  // Register detail panel support
   useEffect(() => {
     setHasDetailSupport(true)
     return () => setHasDetailSupport(false)
   }, [setHasDetailSupport])
-
-  // Check if we're returning from a picker page or mobile detail view with flight ID
-  useEffect(() => {
-    if (!isDesktop) return
-
-    // If there's a flight ID in URL params, restore selection
-    const flightId = searchParams.get("flightId")
-    if (flightId) {
-      const hasPickerParams = searchParams.get("field") || searchParams.get("airport") ||
-                               searchParams.get("aircraftReg") || searchParams.get("crewId")
-      // If coming from picker, also set editing state
-      if (hasPickerParams) {
-        setEditingFlightId(flightId)
-      }
-      setSelectedFlightId(flightId)
-
-      // Scroll to the selected flight after a brief delay for render
-      setTimeout(() => {
-        const element = document.getElementById(`flight-${flightId}`)
-        if (element) {
-          element.scrollIntoView({ behavior: "instant", block: "center" })
-        }
-      }, 100)
-
-      // Clean up the URL after restoring selection (but keep picker params for form)
-      if (!hasPickerParams) {
-        const url = new URL(window.location.href)
-        url.searchParams.delete("flightId")
-        window.history.replaceState({}, "", url.toString())
-      }
-    }
-  }, [isDesktop, searchParams, setSelectedFlightId])
 
   // Auto-select first flight when flights load, or when selected flight no longer exists
   useEffect(() => {
@@ -224,85 +124,6 @@ export default function LogbookPage() {
       }
     }
   }, [flightsLoading, flights, selectedFlightId, setSelectedFlightId])
-
-  // Update detail content when selection changes or editing state changes
-  useEffect(() => {
-    // Determine which field types we have for picker selections
-    const isAirportField = selectedField === "departureIcao" || selectedField === "arrivalIcao"
-    const isAircraftField = selectedField === "aircraftReg"
-    const isCrewField = selectedField === "pic" || selectedField === "sic" ||
-                        selectedField === "picId" || selectedField === "sicId"
-    const crewFieldMapped = selectedField === "pic" ? "picId" :
-                            selectedField === "sic" ? "sicId" : selectedField
-
-    if (flightsLoading) {
-      setDetailContent(
-        <div className="flex items-center justify-center h-full">
-          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
-        </div>
-      )
-      return
-    }
-
-    if (flights.length === 0) {
-      setDetailContent(
-        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <p>No flights recorded</p>
-        </div>
-      )
-      return
-    }
-
-    // Always show FlightForm for the selected flight on desktop (no separate "view" mode)
-    const flightToShow = editingFlightId
-      ? flights.find(f => f.id === editingFlightId)
-      : flights.find(f => f.id === selectedFlightId)
-
-    if (flightToShow && isDesktop) {
-      setDetailContent(
-        <FlightForm
-          key={flightToShow.id}
-          editingFlight={flightToShow}
-          isDesktop={true}
-          onFlightAdded={async (flight) => {
-            setEditingFlightId(null)
-            await refreshFlights()
-            // Keep the flight selected
-            if (flight?.id) {
-              setSelectedFlightId(flight.id)
-            }
-            if (navigator.onLine) {
-              syncService.fullSync()
-            }
-          }}
-          onClose={async () => {
-            setEditingFlightId(null)
-            // Refresh flights to update the list (draft may have been modified)
-            await refreshFlights()
-          }}
-          selectedAirportField={isAirportField ? selectedField : null}
-          selectedAirportCode={isAirportField ? selectedAirport : null}
-          selectedAircraftReg={isAircraftField ? selectedAircraftReg : null}
-          selectedAircraftType={isAircraftField ? selectedAircraftType : null}
-          selectedCrewField={isCrewField ? crewFieldMapped : null}
-          selectedCrewId={isCrewField ? selectedCrewId : null}
-          selectedCrewName={isCrewField ? selectedCrewName : null}
-          onPickerParamsConsumed={handlePickerParamsConsumed}
-        />
-      )
-      return
-    }
-
-    // If no flight to show and we have flights, show a placeholder message
-    // (The auto-select effect will pick the first flight momentarily)
-    if (flights.length > 0 && !flightToShow) {
-      setDetailContent(
-        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <p>Select a Flight to View</p>
-        </div>
-      )
-    }
-  }, [selectedFlightId, flights, flightsLoading, setDetailContent, setSelectedFlightId, router, editingFlightId, isDesktop, refreshFlights, selectedField, selectedAirport, selectedAircraftReg, selectedAircraftType, selectedCrewId, selectedCrewName, handlePickerParamsConsumed])
 
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)
@@ -429,14 +250,12 @@ export default function LogbookPage() {
   }, [flights])
 
   // Handle flight selection from list
-  // On desktop: Select flight to show FlightForm in detail panel
+  // On desktop: Select flight to show FlightForm in detail panel (rendered by layout)
   // On mobile: Navigate to edit page
   const handleEditFlight = useCallback((flight: FlightLog) => {
     if (isDesktop) {
-      // On desktop, select the flight to show in detail panel
+      // On desktop, select the flight - layout's Smart Switcher renders FlightForm
       setSelectedFlightId(flight.id)
-      // Clear editing state (will use selected flight)
-      setEditingFlightId(null)
     } else {
       // On mobile, navigate to edit page
       router.push(`/flights/${flight.id}`)
@@ -576,9 +395,8 @@ export default function LogbookPage() {
                   await refreshFlights()
 
                   if (isDesktop) {
-                    // On desktop: select the draft to show in detail panel
+                    // On desktop: select the draft - layout renders FlightForm via Smart Switcher
                     setSelectedFlightId(draftFlight.id)
-                    setEditingFlightId(draftFlight.id)
                   } else {
                     // On mobile: navigate to the flight edit page
                     router.push(`/flights/${draftFlight.id}`)
