@@ -346,6 +346,8 @@ interface FlightFormProps {
   selectedCrewName?: string | null;
   /** If true, picker navigation returns to /logbook with flightId instead of /flights/[id] */
   isDesktop?: boolean;
+  /** Called after picker selection params have been consumed (desktop only) */
+  onPickerParamsConsumed?: () => void;
 }
 
 export function FlightForm({
@@ -360,6 +362,7 @@ export function FlightForm({
   selectedCrewId,
   selectedCrewName,
   isDesktop = false,
+  onPickerParamsConsumed,
 }: FlightFormProps) {
   const router = useRouter();
   const { airports } = useAirportDatabase();
@@ -377,6 +380,9 @@ export function FlightForm({
     aircraft?: string;
     crew?: string;
   }>({});
+
+  // Scroll position preservation across picker navigation
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Initialize form data from editingFlight (draft or existing flight)
   const [formData, setFormData] = useState<Partial<FlightLog>>(() => {
@@ -468,12 +474,16 @@ export function FlightForm({
 
     addRecentlyUsedAirport(selectedAirportCode);
 
-    const url = new URL(window.location.href);
-    url.searchParams.delete("field");
-    url.searchParams.delete("airport");
-    url.searchParams.delete("flightId");
-    window.history.replaceState({}, "", url.toString());
-  }, [selectedAirportField, selectedAirportCode]);
+    if (onPickerParamsConsumed) {
+      onPickerParamsConsumed();
+    } else {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("field");
+      url.searchParams.delete("airport");
+      url.searchParams.delete("flightId");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [selectedAirportField, selectedAirportCode, onPickerParamsConsumed]);
 
   useEffect(() => {
     if (airports.length === 0) return;
@@ -526,13 +536,17 @@ export function FlightForm({
 
     addRecentlyUsedAircraft(selectedAircraftReg);
 
-    const url = new URL(window.location.href);
-    url.searchParams.delete("field");
-    url.searchParams.delete("aircraftReg");
-    url.searchParams.delete("aircraftType");
-    url.searchParams.delete("flightId");
-    window.history.replaceState({}, "", url.toString());
-  }, [selectedAircraftReg, selectedAircraftType]);
+    if (onPickerParamsConsumed) {
+      onPickerParamsConsumed();
+    } else {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("field");
+      url.searchParams.delete("aircraftReg");
+      url.searchParams.delete("aircraftType");
+      url.searchParams.delete("flightId");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [selectedAircraftReg, selectedAircraftType, onPickerParamsConsumed]);
 
   useEffect(() => {
     if (!selectedCrewField || !selectedCrewId) return;
@@ -554,13 +568,17 @@ export function FlightForm({
       return updated;
     });
 
-    const url = new URL(window.location.href);
-    url.searchParams.delete("field");
-    url.searchParams.delete("crewId");
-    url.searchParams.delete("crewName");
-    url.searchParams.delete("flightId");
-    window.history.replaceState({}, "", url.toString());
-  }, [selectedCrewField, selectedCrewId, selectedCrewName]);
+    if (onPickerParamsConsumed) {
+      onPickerParamsConsumed();
+    } else {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("field");
+      url.searchParams.delete("crewId");
+      url.searchParams.delete("crewName");
+      url.searchParams.delete("flightId");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [selectedCrewField, selectedCrewId, selectedCrewName, onPickerParamsConsumed]);
 
   useEffect(() => {
     if (editingFlight || !personnel.length) return;
@@ -898,6 +916,33 @@ export function FlightForm({
     [updateField, markManualOverride, manualOverrides]
   );
 
+  const SCROLL_STORAGE_KEY = "flight-form-scroll";
+
+  // Save scroll position before navigating to picker
+  const saveScrollPosition = useCallback(() => {
+    if (scrollContainerRef.current) {
+      sessionStorage.setItem(SCROLL_STORAGE_KEY, String(scrollContainerRef.current.scrollTop));
+    }
+  }, []);
+
+  // Restore scroll position after returning from picker
+  const restoreScrollPosition = useCallback(() => {
+    const saved = sessionStorage.getItem(SCROLL_STORAGE_KEY);
+    if (saved && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = Number(saved);
+      sessionStorage.removeItem(SCROLL_STORAGE_KEY);
+    }
+  }, []);
+
+  // Restore scroll on mount if we have picker params (returning from picker)
+  useEffect(() => {
+    if (selectedAirportField || selectedAircraftReg || selectedCrewField) {
+      // Defer to after the selection effect has updated the form
+      requestAnimationFrame(() => restoreScrollPosition());
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only on mount
+
   // Force-save current form data before navigating away (bypasses debounce)
   // Skips save if nothing changed from last saved state to avoid sync queue bloat
   const forceSave = useCallback(async () => {
@@ -917,6 +962,7 @@ export function FlightForm({
 
   const openAirportPicker = async (field: "departureIcao" | "arrivalIcao") => {
     if (!formData.id) return;
+    saveScrollPosition();
     await forceSave();
     if (isDesktop) pinDetailContent();
     const params = new URLSearchParams();
@@ -928,6 +974,7 @@ export function FlightForm({
 
   const openAircraftPicker = async () => {
     if (!formData.id) return;
+    saveScrollPosition();
     await forceSave();
     if (isDesktop) pinDetailContent();
     const params = new URLSearchParams();
@@ -940,6 +987,7 @@ export function FlightForm({
 
   const openCrewPicker = async (field: "picId" | "sicId") => {
     if (!formData.id) return;
+    saveScrollPosition();
     await forceSave();
     if (isDesktop) pinDetailContent();
     const params = new URLSearchParams();
@@ -1234,7 +1282,7 @@ export function FlightForm({
 
   return (
     <div className="h-full relative">
-    <div className="h-full overflow-y-auto bg-background">
+    <div ref={scrollContainerRef} className="h-full overflow-y-auto bg-background">
       <div className="min-h-full pb-20">
       {/* Fixed Header */}
       <div className="sticky top-0 z-50 h-12 bg-background/30 backdrop-blur-xl border-b border-border/50 px-4 flex items-center justify-between">
