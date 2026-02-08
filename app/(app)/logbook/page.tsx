@@ -67,13 +67,70 @@ export default function LogbookPage() {
   // Track if we're editing a flight in the detail panel (desktop only)
   const [editingFlightId, setEditingFlightId] = useState<string | null>(null)
 
-  // Get picker selection params to pass to FlightForm
-  const selectedField = searchParams.get("field")
-  const selectedAirport = searchParams.get("airport")
-  const selectedAircraftReg = searchParams.get("aircraftReg")
-  const selectedAircraftType = searchParams.get("aircraftType")
-  const selectedCrewId = searchParams.get("crewId")
-  const selectedCrewName = searchParams.get("crewName")
+  // Capture picker selection params into state so URL cleanup doesn't
+  // trigger a re-render cascade that recreates the FlightForm on desktop.
+  // The state is set once on arrival and cleared after the FlightForm consumes it.
+  const [pickerParams, setPickerParams] = useState<{
+    field: string | null
+    airport: string | null
+    aircraftReg: string | null
+    aircraftType: string | null
+    crewId: string | null
+    crewName: string | null
+  } | null>(() => {
+    // Initialize from URL on first render (handles page load with picker params)
+    const field = searchParams.get("field")
+    if (!field) return null
+    return {
+      field,
+      airport: searchParams.get("airport"),
+      aircraftReg: searchParams.get("aircraftReg"),
+      aircraftType: searchParams.get("aircraftType"),
+      crewId: searchParams.get("crewId"),
+      crewName: searchParams.get("crewName"),
+    }
+  })
+
+  // When URL search params change with new picker params, capture them and clean URL
+  const pickerParamsCapturedRef = useRef(!!pickerParams)
+  useEffect(() => {
+    const field = searchParams.get("field")
+    if (!field) return
+    if (pickerParamsCapturedRef.current) return
+    pickerParamsCapturedRef.current = true
+    setPickerParams({
+      field,
+      airport: searchParams.get("airport"),
+      aircraftReg: searchParams.get("aircraftReg"),
+      aircraftType: searchParams.get("aircraftType"),
+      crewId: searchParams.get("crewId"),
+      crewName: searchParams.get("crewName"),
+    })
+  }, [searchParams])
+
+  // Use captured picker params (stable across URL changes)
+  const selectedField = pickerParams?.field ?? null
+  const selectedAirport = pickerParams?.airport ?? null
+  const selectedAircraftReg = pickerParams?.aircraftReg ?? null
+  const selectedAircraftType = pickerParams?.aircraftType ?? null
+  const selectedCrewId = pickerParams?.crewId ?? null
+  const selectedCrewName = pickerParams?.crewName ?? null
+
+  // Called by FlightForm after it consumes picker selection params.
+  // Clears captured state and URL params without triggering FlightForm re-creation.
+  const handlePickerParamsConsumed = useCallback(() => {
+    setPickerParams(null)
+    pickerParamsCapturedRef.current = false
+    const url = new URL(window.location.href)
+    url.searchParams.delete("field")
+    url.searchParams.delete("airport")
+    url.searchParams.delete("aircraftReg")
+    url.searchParams.delete("aircraftType")
+    url.searchParams.delete("crewId")
+    url.searchParams.delete("crewName")
+    url.searchParams.delete("flightId")
+    window.history.replaceState({}, "", url.toString())
+  }, [])
 
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
   const { aircraft } = useAircraft()
@@ -230,6 +287,7 @@ export default function LogbookPage() {
           selectedCrewField={isCrewField ? crewFieldMapped : null}
           selectedCrewId={isCrewField ? selectedCrewId : null}
           selectedCrewName={isCrewField ? selectedCrewName : null}
+          onPickerParamsConsumed={handlePickerParamsConsumed}
         />
       )
       return
@@ -244,7 +302,7 @@ export default function LogbookPage() {
         </div>
       )
     }
-  }, [selectedFlightId, flights, flightsLoading, setDetailContent, setSelectedFlightId, router, editingFlightId, isDesktop, refreshFlights, selectedField, selectedAirport, selectedAircraftReg, selectedAircraftType, selectedCrewId, selectedCrewName])
+  }, [selectedFlightId, flights, flightsLoading, setDetailContent, setSelectedFlightId, router, editingFlightId, isDesktop, refreshFlights, selectedField, selectedAirport, selectedAircraftReg, selectedAircraftType, selectedCrewId, selectedCrewName, handlePickerParamsConsumed])
 
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)
