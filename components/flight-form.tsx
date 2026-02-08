@@ -463,11 +463,6 @@ export function FlightForm({
         updated.arrivalIcao = selectedAirportCode;
         updated.arrivalIata = "";
       }
-      // Immediately persist to DB (bypasses debounce) so the selection
-      // survives any component remount before the debounced auto-save fires
-      if (updated.id) {
-        updateFlight(updated.id, { ...updated, manualOverrides } as FlightLog).catch(() => {});
-      }
       return updated;
     });
 
@@ -478,7 +473,7 @@ export function FlightForm({
     url.searchParams.delete("airport");
     url.searchParams.delete("flightId");
     window.history.replaceState({}, "", url.toString());
-  }, [selectedAirportField, selectedAirportCode, manualOverrides]);
+  }, [selectedAirportField, selectedAirportCode]);
 
   useEffect(() => {
     if (airports.length === 0) return;
@@ -523,19 +518,11 @@ export function FlightForm({
 
     selectionsProcessedRef.current.aircraft = selectionKey;
 
-    setFormData((prev) => {
-      const updated = {
-        ...prev,
-        aircraftReg: selectedAircraftReg,
-        aircraftType: selectedAircraftType || prev.aircraftType,
-      };
-      // Immediately persist to DB (bypasses debounce) so the selection
-      // survives any component remount before the debounced auto-save fires
-      if (updated.id) {
-        updateFlight(updated.id, { ...updated, manualOverrides } as FlightLog).catch(() => {});
-      }
-      return updated;
-    });
+    setFormData((prev) => ({
+      ...prev,
+      aircraftReg: selectedAircraftReg,
+      aircraftType: selectedAircraftType || prev.aircraftType,
+    }));
 
     addRecentlyUsedAircraft(selectedAircraftReg);
 
@@ -545,7 +532,7 @@ export function FlightForm({
     url.searchParams.delete("aircraftType");
     url.searchParams.delete("flightId");
     window.history.replaceState({}, "", url.toString());
-  }, [selectedAircraftReg, selectedAircraftType, manualOverrides]);
+  }, [selectedAircraftReg, selectedAircraftType]);
 
   useEffect(() => {
     if (!selectedCrewField || !selectedCrewId) return;
@@ -564,11 +551,6 @@ export function FlightForm({
         updated.sicId = selectedCrewId;
         updated.sicName = selectedCrewName || "";
       }
-      // Immediately persist to DB (bypasses debounce) so the selection
-      // survives any component remount before the debounced auto-save fires
-      if (updated.id) {
-        updateFlight(updated.id, { ...updated, manualOverrides } as FlightLog).catch(() => {});
-      }
       return updated;
     });
 
@@ -578,7 +560,7 @@ export function FlightForm({
     url.searchParams.delete("crewName");
     url.searchParams.delete("flightId");
     window.history.replaceState({}, "", url.toString());
-  }, [selectedCrewField, selectedCrewId, selectedCrewName, manualOverrides]);
+  }, [selectedCrewField, selectedCrewId, selectedCrewName]);
 
   useEffect(() => {
     if (editingFlight || !personnel.length) return;
@@ -917,10 +899,14 @@ export function FlightForm({
   );
 
   // Force-save current form data before navigating away (bypasses debounce)
+  // Skips save if nothing changed from last saved state to avoid sync queue bloat
   const forceSave = useCallback(async () => {
     if (!formData?.id || !editingFlight?.id) return;
+    const currentState = JSON.stringify({ ...formData, manualOverrides });
+    if (lastSavedStateRef.current === currentState) return;
     try {
       await updateFlight(formData.id, { ...formData, manualOverrides });
+      lastSavedStateRef.current = currentState;
     } catch (error) {
       console.error("Force save before picker navigation failed:", error);
     }
