@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { usePathname } from "next/navigation"
 import { SidebarNav, SidebarToggle } from "@/components/sidebar-nav"
 import { SidebarProvider } from "@/hooks/use-sidebar-context"
 import { DetailPanelProvider, useDetailPanel } from "@/hooks/use-detail-panel"
@@ -9,14 +10,54 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable"
+import { FlightForm } from "@/components/flight-form"
+import { mutate } from "swr"
+import { CACHE_KEYS } from "@/hooks/data"
+import { syncService } from "@/lib/sync"
 
 interface DesktopLayoutProps {
   children: React.ReactNode
 }
 
+/**
+ * Smart Switcher: renders the correct detail component based on
+ * the current route and selected ID.
+ *
+ * For /logbook the FlightForm is a permanent resident of the layout
+ * (keyed by selectedId). This means it stays mounted when pickers
+ * open as inline sheets, eliminating the flash caused by
+ * pushing ReactNodes through context.
+ *
+ * Other pages fall back to the legacy detailContent from context.
+ */
 function DetailPanelContent() {
-  const { detailContent } = useDetailPanel()
+  const { selectedId, detailContent } = useDetailPanel()
+  const pathname = usePathname()
 
+  // Logbook path: render FlightForm as a stable resident
+  if (pathname?.includes("/logbook") && selectedId) {
+    return (
+      <div className="h-full overflow-auto bg-background">
+        <FlightForm
+          key={selectedId}
+          flightId={selectedId}
+          isDesktop
+          onFlightAdded={async () => {
+            await mutate(CACHE_KEYS.flights)
+            await mutate(CACHE_KEYS.stats)
+            if (navigator.onLine) {
+              syncService.fullSync()
+            }
+          }}
+          onClose={async () => {
+            await mutate(CACHE_KEYS.flights)
+          }}
+        />
+      </div>
+    )
+  }
+
+  // Other pages: fall back to context-provided content
   return (
     <div className="h-full overflow-auto bg-background">
       {detailContent || (
