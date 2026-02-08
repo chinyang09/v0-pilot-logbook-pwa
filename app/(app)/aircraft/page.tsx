@@ -116,6 +116,7 @@ export default function AircraftPage() {
   const selectMode = searchParams.get("select") === "true"
   const returnTo = searchParams.get("returnTo") || "/new-flight"
   const fieldName = searchParams.get("field") || "aircraftReg"
+  const flightId = searchParams.get("flightId")
   const selectedFromUrl = searchParams.get("selected")
   const isDesktop = useIsDesktop()
 
@@ -453,6 +454,7 @@ export default function AircraftPage() {
         params.set("field", fieldName)
         params.set("aircraftReg", aircraft.registration)
         params.set("aircraftType", aircraft.typecode)
+        if (flightId) params.set("flightId", flightId)
         router.push(`${returnTo}?${params.toString()}`)
       } else if (isDesktop) {
         setSelectedAircraftReg(aircraft.registration || aircraft.icao24)
@@ -460,7 +462,7 @@ export default function AircraftPage() {
         router.push(`/aircraft/${encodeURIComponent(aircraft.registration || aircraft.icao24)}`)
       }
     },
-    [selectMode, returnTo, fieldName, router, isDesktop, setSelectedAircraftReg],
+    [selectMode, returnTo, fieldName, flightId, router, isDesktop, setSelectedAircraftReg],
   )
 
   const showFavorites = !debouncedSearchQuery && favoriteAircraft.length > 0
@@ -474,6 +476,12 @@ export default function AircraftPage() {
           <StandardPageHeader
             title={selectMode ? "Select Aircraft" : "Aircraft"}
             showBack={selectMode}
+            onBack={selectMode ? () => {
+              const params = new URLSearchParams()
+              if (flightId) params.set("flightId", flightId)
+              const query = params.toString()
+              router.push(query ? `${returnTo}?${query}` : returnTo)
+            } : undefined}
           />
           {loadingProgress.stage && isLoading && (
             <div className="bg-background/30 backdrop-blur-xl border-b border-border/50 px-3 pb-2">

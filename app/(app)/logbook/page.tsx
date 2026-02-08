@@ -204,6 +204,7 @@ export default function LogbookPage() {
     if (flightToShow && isDesktop) {
       setDetailContent(
         <FlightForm
+          key={flightToShow.id}
           editingFlight={flightToShow}
           isDesktop={true}
           onFlightAdded={async (flight) => {

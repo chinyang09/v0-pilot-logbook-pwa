@@ -57,11 +57,9 @@ import {
   isValidHHMM,
 } from "@/lib/utils/time";
 import { usePersonnel } from "@/hooks/data";
+import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { ImageImportButton } from "@/components/image-import-button";
 import type { ExtractedFlightData } from "@/lib/ocr";
-import { AirportPicker } from "@/components/airport-picker";
-import { AircraftPicker } from "@/components/aircraft-picker";
-import { CrewPicker } from "@/components/crew-picker";
 
 // Swipeable row component
 function SwipeableRow({
@@ -366,17 +364,11 @@ export function FlightForm({
   const router = useRouter();
   const { airports } = useAirportDatabase();
   const { personnel } = usePersonnel();
+  const { pinDetailContent } = useDetailPanel();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
-
-  // Picker modal state
-  const [airportPickerOpen, setAirportPickerOpen] = useState(false);
-  const [airportPickerField, setAirportPickerField] = useState<"departureIcao" | "arrivalIcao">("departureIcao");
-  const [aircraftPickerOpen, setAircraftPickerOpen] = useState(false);
-  const [crewPickerOpen, setCrewPickerOpen] = useState(false);
-  const [crewPickerField, setCrewPickerField] = useState<"picId" | "sicId">("picId");
 
   const editingFlightInitializedRef = useRef<string | null>(null);
 
@@ -471,6 +463,11 @@ export function FlightForm({
         updated.arrivalIcao = selectedAirportCode;
         updated.arrivalIata = "";
       }
+      // Immediately persist to DB (bypasses debounce) so the selection
+      // survives any component remount before the debounced auto-save fires
+      if (updated.id) {
+        updateFlight(updated.id, { ...updated, manualOverrides } as FlightLog).catch(() => {});
+      }
       return updated;
     });
 
@@ -479,8 +476,9 @@ export function FlightForm({
     const url = new URL(window.location.href);
     url.searchParams.delete("field");
     url.searchParams.delete("airport");
+    url.searchParams.delete("flightId");
     window.history.replaceState({}, "", url.toString());
-  }, [selectedAirportField, selectedAirportCode]);
+  }, [selectedAirportField, selectedAirportCode, manualOverrides]);
 
   useEffect(() => {
     if (airports.length === 0) return;
@@ -525,11 +523,19 @@ export function FlightForm({
 
     selectionsProcessedRef.current.aircraft = selectionKey;
 
-    setFormData((prev) => ({
-      ...prev,
-      aircraftReg: selectedAircraftReg,
-      aircraftType: selectedAircraftType || prev.aircraftType,
-    }));
+    setFormData((prev) => {
+      const updated = {
+        ...prev,
+        aircraftReg: selectedAircraftReg,
+        aircraftType: selectedAircraftType || prev.aircraftType,
+      };
+      // Immediately persist to DB (bypasses debounce) so the selection
+      // survives any component remount before the debounced auto-save fires
+      if (updated.id) {
+        updateFlight(updated.id, { ...updated, manualOverrides } as FlightLog).catch(() => {});
+      }
+      return updated;
+    });
 
     addRecentlyUsedAircraft(selectedAircraftReg);
 
@@ -537,8 +543,9 @@ export function FlightForm({
     url.searchParams.delete("field");
     url.searchParams.delete("aircraftReg");
     url.searchParams.delete("aircraftType");
+    url.searchParams.delete("flightId");
     window.history.replaceState({}, "", url.toString());
-  }, [selectedAircraftReg, selectedAircraftType]);
+  }, [selectedAircraftReg, selectedAircraftType, manualOverrides]);
 
   useEffect(() => {
     if (!selectedCrewField || !selectedCrewId) return;
@@ -557,6 +564,11 @@ export function FlightForm({
         updated.sicId = selectedCrewId;
         updated.sicName = selectedCrewName || "";
       }
+      // Immediately persist to DB (bypasses debounce) so the selection
+      // survives any component remount before the debounced auto-save fires
+      if (updated.id) {
+        updateFlight(updated.id, { ...updated, manualOverrides } as FlightLog).catch(() => {});
+      }
       return updated;
     });
 
@@ -564,8 +576,9 @@ export function FlightForm({
     url.searchParams.delete("field");
     url.searchParams.delete("crewId");
     url.searchParams.delete("crewName");
+    url.searchParams.delete("flightId");
     window.history.replaceState({}, "", url.toString());
-  }, [selectedCrewField, selectedCrewId, selectedCrewName]);
+  }, [selectedCrewField, selectedCrewId, selectedCrewName, manualOverrides]);
 
   useEffect(() => {
     if (editingFlight || !personnel.length) return;
@@ -903,46 +916,52 @@ export function FlightForm({
     [updateField, markManualOverride, manualOverrides]
   );
 
-  // Open picker modals
-  const openAirportPicker = (field: "departureIcao" | "arrivalIcao") => {
-    setAirportPickerField(field);
-    setAirportPickerOpen(true);
-  };
-
-  const openAircraftPicker = () => {
-    setAircraftPickerOpen(true);
-  };
-
-  const openCrewPicker = (field: "picId" | "sicId") => {
-    setCrewPickerField(field);
-    setCrewPickerOpen(true);
-  };
-
-  // Picker selection handlers
-  const handleAirportPickerSelect = useCallback((icao: string) => {
-    if (airportPickerField === "departureIcao") {
-      updateField("departureIcao", icao);
-      updateField("departureIata", "");
-    } else {
-      updateField("arrivalIcao", icao);
-      updateField("arrivalIata", "");
+  // Force-save current form data before navigating away (bypasses debounce)
+  const forceSave = useCallback(async () => {
+    if (!formData?.id || !editingFlight?.id) return;
+    try {
+      await updateFlight(formData.id, { ...formData, manualOverrides });
+    } catch (error) {
+      console.error("Force save before picker navigation failed:", error);
     }
-  }, [airportPickerField, updateField]);
+  }, [formData, editingFlight?.id, manualOverrides]);
 
-  const handleAircraftPickerSelect = useCallback((registration: string, type: string) => {
-    updateField("aircraftReg", registration);
-    updateField("aircraftType", type);
-  }, [updateField]);
+  // Navigate to full pages for aircraft/airport/crew selection
+  const returnTo = isDesktop ? "/logbook" : `/flights/${formData.id}`;
 
-  const handleCrewPickerSelect = useCallback((crewId: string, crewName: string) => {
-    if (crewPickerField === "picId") {
-      updateField("picId", crewId);
-      updateField("picName", crewName);
-    } else {
-      updateField("sicId", crewId);
-      updateField("sicName", crewName);
-    }
-  }, [crewPickerField, updateField]);
+  const openAirportPicker = async (field: "departureIcao" | "arrivalIcao") => {
+    if (!formData.id) return;
+    await forceSave();
+    if (isDesktop) pinDetailContent();
+    const params = new URLSearchParams();
+    params.set("field", field);
+    params.set("returnTo", returnTo);
+    params.set("flightId", formData.id);
+    router.push(`/airports?${params.toString()}`);
+  };
+
+  const openAircraftPicker = async () => {
+    if (!formData.id) return;
+    await forceSave();
+    if (isDesktop) pinDetailContent();
+    const params = new URLSearchParams();
+    params.set("select", "true");
+    params.set("field", "aircraftReg");
+    params.set("returnTo", returnTo);
+    params.set("flightId", formData.id);
+    router.push(`/aircraft?${params.toString()}`);
+  };
+
+  const openCrewPicker = async (field: "picId" | "sicId") => {
+    if (!formData.id) return;
+    await forceSave();
+    if (isDesktop) pinDetailContent();
+    const params = new URLSearchParams();
+    params.set("field", field);
+    params.set("return", returnTo);
+    params.set("flightId", formData.id);
+    router.push(`/crew?${params.toString()}`);
+  };
 
   const swapCrew = useCallback(() => {
     setFormData((prev) => ({
@@ -1876,22 +1895,6 @@ export function FlightForm({
       </div>
       </div>
 
-      {/* Picker overlays — positioned within the relative wrapper, above the scroll area */}
-      <AirportPicker
-        open={airportPickerOpen}
-        onClose={() => setAirportPickerOpen(false)}
-        onSelect={handleAirportPickerSelect}
-      />
-      <AircraftPicker
-        open={aircraftPickerOpen}
-        onClose={() => setAircraftPickerOpen(false)}
-        onSelect={handleAircraftPickerSelect}
-      />
-      <CrewPicker
-        open={crewPickerOpen}
-        onClose={() => setCrewPickerOpen(false)}
-        onSelect={handleCrewPickerSelect}
-      />
     </div>
   );
 }

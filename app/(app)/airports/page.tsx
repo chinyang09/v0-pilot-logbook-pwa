@@ -97,6 +97,7 @@ export default function AirportsPage() {
   const fieldType = searchParams.get("field");
   const returnUrl =
     searchParams.get("return") || searchParams.get("returnTo") || "/new-flight";
+  const flightId = searchParams.get("flightId");
   const selectedFromUrl = searchParams.get("selected");
   const isDesktop = useIsDesktop();
 
@@ -346,13 +347,14 @@ export default function AirportsPage() {
       const params = new URLSearchParams();
       params.set("field", fieldType);
       params.set("airport", icao);
+      if (flightId) params.set("flightId", flightId);
       router.push(`${returnUrl}?${params.toString()}`);
     } else if (isDesktop) {
       setSelectedAirportIcao(icao);
     } else {
       router.push(`/airports/${icao}`);
     }
-  }, [fieldType, isDesktop, router, returnUrl, setSelectedAirportIcao]);
+  }, [fieldType, flightId, isDesktop, router, returnUrl, setSelectedAirportIcao]);
 
   const handleToggleFavorite = useCallback(async (e: React.MouseEvent, icao: string) => {
     e.preventDefault();
@@ -380,6 +382,12 @@ export default function AirportsPage() {
         <StandardPageHeader
           title={pageTitle}
           showBack={!!fieldType}
+          onBack={fieldType ? () => {
+            const params = new URLSearchParams()
+            if (flightId) params.set("flightId", flightId)
+            const query = params.toString()
+            router.push(query ? `${returnUrl}?${query}` : returnUrl)
+          } : undefined}
         />
       }
       rightContent={
