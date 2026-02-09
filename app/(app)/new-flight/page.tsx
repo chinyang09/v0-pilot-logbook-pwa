@@ -9,7 +9,6 @@ import { syncService } from "@/lib/sync";
 import { refreshAllData, useDBReady } from "@/hooks/data";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Card, CardContent } from "@/components/ui/card";
 import { createEmptyFlightLog } from "@/lib/utils/flight-calculations";
 
 const FORM_STORAGE_KEY = "flight-form-draft";
@@ -19,15 +18,8 @@ function NewFlightContent() {
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
 
-  const selectedField = searchParams.get("field");
-  const selectedAirport = searchParams.get("airport");
-  const selectedAircraftReg = searchParams.get("aircraftReg");
-  const selectedAircraftType = searchParams.get("aircraftType");
-  const selectedCrewId = searchParams.get("crewId");
-  const selectedCrewName = searchParams.get("crewName");
-
   const { isReady: dbReady } = useDBReady();
-  const [editingFlight, setEditingFlight] = useState<FlightLog | null>(null);
+  const [flightId, setFlightId] = useState<string | null>(null);
   const [isLoadingFlight, setIsLoadingFlight] = useState(true);
 
   const flightLoadedRef = useRef(false);
@@ -54,7 +46,7 @@ function NewFlightContent() {
         try {
           const flight = await getFlightById(editId);
           if (flight) {
-            setEditingFlight(flight);
+            setFlightId(flight.id);
             currentFlightIdRef.current = editId;
             flightLoadedRef.current = true;
           }
@@ -66,7 +58,7 @@ function NewFlightContent() {
         return;
       }
 
-      if (flightLoadedRef.current && editingFlight) {
+      if (flightLoadedRef.current && flightId) {
         setIsLoadingFlight(false);
         return;
       }
@@ -78,7 +70,7 @@ function NewFlightContent() {
           if (draftData.id) {
             const existingDraft = await getFlightById(draftData.id);
             if (existingDraft) {
-              setEditingFlight(existingDraft);
+              setFlightId(existingDraft.id);
               currentFlightIdRef.current = draftData.id;
               flightLoadedRef.current = true;
               setIsLoadingFlight(false);
@@ -93,7 +85,7 @@ function NewFlightContent() {
       try {
         const emptyFlight = createEmptyFlightLog();
         const newDraft = await addFlight(emptyFlight);
-        setEditingFlight(newDraft);
+        setFlightId(newDraft.id);
         currentFlightIdRef.current = newDraft.id;
         flightLoadedRef.current = true;
         sessionStorage.setItem(
@@ -123,76 +115,46 @@ function NewFlightContent() {
     router.back();
   };
 
-  const isAirportField =
-    selectedField === "departureIcao" || selectedField === "arrivalIcao";
-  const isAircraftField = selectedField === "aircraftReg";
-  const isCrewField =
-    selectedField === "pic" ||
-    selectedField === "sic" ||
-    selectedField === "picId" ||
-    selectedField === "sicId";
-
-  const crewFieldMapped =
-    selectedField === "pic"
-      ? "picId"
-      : selectedField === "sic"
-      ? "sicId"
-      : selectedField;
-
   return (
-    /* 1. Viewport Lock: flex-col + h-[100dvh] */
     <PageContainer>
-      {/* 2. Scrollable Content Area */}
-      {
-        <div className="pb-safe">
-          {isLoadingFlight ? (
-            <div className="h-full">
-              {/* Skeleton matching FlightForm header */}
-              <div className="h-12 bg-background/30 backdrop-blur-xl border-b border-border/50 px-4 flex items-center justify-between">
-                <Skeleton className="h-5 w-24" />
-                <Skeleton className="h-8 w-20" />
-              </div>
-              {/* Skeleton matching form sections */}
-              <div className="space-y-4 px-2 py-4">
-                <div className="rounded-xl bg-card border border-border p-4 space-y-3">
-                  <Skeleton className="h-4 w-20" />
-                  <div className="grid grid-cols-3 gap-3">
-                    <Skeleton className="h-10" />
-                    <Skeleton className="h-10" />
-                    <Skeleton className="h-10" />
-                  </div>
+      <div className="pb-safe">
+        {isLoadingFlight || !flightId ? (
+          <div className="h-full">
+            <div className="h-12 bg-background/30 backdrop-blur-xl border-b border-border/50 px-4 flex items-center justify-between">
+              <Skeleton className="h-5 w-24" />
+              <Skeleton className="h-8 w-20" />
+            </div>
+            <div className="space-y-4 px-2 py-4">
+              <div className="rounded-xl bg-card border border-border p-4 space-y-3">
+                <Skeleton className="h-4 w-20" />
+                <div className="grid grid-cols-3 gap-3">
+                  <Skeleton className="h-10" />
+                  <Skeleton className="h-10" />
+                  <Skeleton className="h-10" />
                 </div>
-                <div className="rounded-xl bg-card border border-border p-4 space-y-3">
-                  <Skeleton className="h-4 w-16" />
-                  <div className="grid grid-cols-2 gap-3">
-                    <Skeleton className="h-10" />
-                    <Skeleton className="h-10" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Skeleton className="h-10" />
-                    <Skeleton className="h-10" />
-                  </div>
+              </div>
+              <div className="rounded-xl bg-card border border-border p-4 space-y-3">
+                <Skeleton className="h-4 w-16" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Skeleton className="h-10" />
+                  <Skeleton className="h-10" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Skeleton className="h-10" />
+                  <Skeleton className="h-10" />
                 </div>
               </div>
             </div>
-          ) : (
-            <FlightForm
-              onFlightAdded={handleFlightAdded}
-              onClose={handleClose}
-              editingFlight={editingFlight}
-              selectedAirportField={isAirportField ? selectedField : null}
-              selectedAirportCode={isAirportField ? selectedAirport : null}
-              selectedAircraftReg={isAircraftField ? selectedAircraftReg : null}
-              selectedAircraftType={
-                isAircraftField ? selectedAircraftType : null
-              }
-              selectedCrewField={isCrewField ? crewFieldMapped : null}
-              selectedCrewId={isCrewField ? selectedCrewId : null}
-              selectedCrewName={isCrewField ? selectedCrewName : null}
-            />
-          )}
-        </div>
-      }
+          </div>
+        ) : (
+          <FlightForm
+            key={flightId}
+            flightId={flightId}
+            onFlightAdded={handleFlightAdded}
+            onClose={handleClose}
+          />
+        )}
+      </div>
     </PageContainer>
   );
 }

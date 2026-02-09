@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { usePathname } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 import { SidebarNav, SidebarToggle } from "@/components/sidebar-nav"
 import { SidebarProvider } from "@/hooks/use-sidebar-context"
 import { DetailPanelProvider, useDetailPanel } from "@/hooks/use-detail-panel"
@@ -23,24 +23,30 @@ interface DesktopLayoutProps {
  * Smart Switcher: renders the correct detail component based on
  * the current route and selected ID.
  *
- * For /logbook the FlightForm is a permanent resident of the layout
- * (keyed by selectedId). This means it stays mounted when pickers
- * open as inline sheets, eliminating the flash caused by
- * pushing ReactNodes through context.
+ * The FlightForm is shown in the detail panel when:
+ * 1. On /logbook with a selected flight (normal editing)
+ * 2. On picker pages (/aircraft, /airports, /crew) with a flightId param
+ *    (user navigated to pick a value — form stays visible, picker shows in main panel)
  *
  * Other pages fall back to the legacy detailContent from context.
  */
 function DetailPanelContent() {
   const { selectedId, detailContent } = useDetailPanel()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
 
-  // Logbook path: render FlightForm as a stable resident
-  if (pathname?.includes("/logbook") && selectedId) {
+  // Determine flightId: either from detail panel selection (logbook) or URL param (picker pages)
+  const pickerFlightId = searchParams.get("flightId")
+  const isPickerPage = pathname?.includes("/aircraft") || pathname?.includes("/airports") || pathname?.includes("/crew")
+  const flightId = (pathname?.includes("/logbook") && selectedId) ? selectedId : (isPickerPage && pickerFlightId) ? pickerFlightId : null
+
+  // Show FlightForm when we have a flight to edit (either on logbook or during picker navigation)
+  if (flightId) {
     return (
       <div className="h-full overflow-auto bg-background">
         <FlightForm
-          key={selectedId}
-          flightId={selectedId}
+          key={flightId}
+          flightId={flightId}
           isDesktop
           onFlightAdded={async () => {
             await mutate(CACHE_KEYS.flights)

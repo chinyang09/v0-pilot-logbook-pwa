@@ -18,7 +18,9 @@ import {
   saveUserPreferences,
   toggleFavoriteAircraft,
   getFavoriteAircraft,
+  updateFlight,
 } from "@/lib/db"
+import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
 import { StandardPageHeader } from "@/components/standard-page-header"
@@ -114,8 +116,6 @@ export default function AircraftPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const selectMode = searchParams.get("select") === "true"
-  const returnTo = searchParams.get("returnTo") || "/new-flight"
-  const fieldName = searchParams.get("field") || "aircraftReg"
   const flightId = searchParams.get("flightId")
   const selectedFromUrl = searchParams.get("selected")
   const isDesktop = useIsDesktop()
@@ -449,20 +449,24 @@ export default function AircraftPage() {
         const updated = [aircraft.registration, ...filtered].slice(0, 10)
         await saveUserPreferences({ recentlyUsedAircraft: updated })
       }
-      if (selectMode) {
-        const params = new URLSearchParams()
-        params.set("field", fieldName)
-        params.set("aircraftReg", aircraft.registration)
-        params.set("aircraftType", aircraft.typecode)
-        if (flightId) params.set("flightId", flightId)
-        router.push(`${returnTo}?${params.toString()}`)
+      if (selectMode && flightId) {
+        try {
+          await updateFlight(flightId, {
+            aircraftReg: aircraft.registration,
+            aircraftType: aircraft.typecode,
+          })
+          syncService.notifyDataChange()
+        } catch (error) {
+          console.error("Failed to update flight with aircraft:", error)
+        }
+        router.back()
       } else if (isDesktop) {
         setSelectedAircraftReg(aircraft.registration || aircraft.icao24)
       } else {
         router.push(`/aircraft/${encodeURIComponent(aircraft.registration || aircraft.icao24)}`)
       }
     },
-    [selectMode, returnTo, fieldName, flightId, router, isDesktop, setSelectedAircraftReg],
+    [selectMode, flightId, router, isDesktop, setSelectedAircraftReg],
   )
 
   const showFavorites = !debouncedSearchQuery && favoriteAircraft.length > 0
@@ -476,12 +480,7 @@ export default function AircraftPage() {
           <StandardPageHeader
             title={selectMode ? "Select Aircraft" : "Aircraft"}
             showBack={selectMode}
-            onBack={selectMode ? () => {
-              const params = new URLSearchParams()
-              if (flightId) params.set("flightId", flightId)
-              const query = params.toString()
-              router.push(query ? `${returnTo}?${query}` : returnTo)
-            } : undefined}
+            onBack={selectMode ? () => router.back() : undefined}
           />
           {loadingProgress.stage && isLoading && (
             <div className="bg-background/30 backdrop-blur-xl border-b border-border/50 px-3 pb-2">
