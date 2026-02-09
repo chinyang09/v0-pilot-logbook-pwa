@@ -477,8 +477,6 @@ export function FlightForm({
 
     if (hasExternalChange) {
       setFormData((prev) => ({ ...prev, ...updates }));
-      // Restore scroll position if returning from picker
-      requestAnimationFrame(() => restoreScrollPosition());
     }
   }, [liveFlight, flightIdProp]);
 
@@ -857,27 +855,44 @@ export function FlightForm({
 
   const SCROLL_STORAGE_KEY = "flight-form-scroll";
 
+  // Track whether we need to restore scroll after returning from picker
+  const pendingScrollRestoreRef = useRef(false);
+
   // Save scroll position before navigating to picker
   const saveScrollPosition = useCallback(() => {
     if (scrollContainerRef.current) {
       sessionStorage.setItem(SCROLL_STORAGE_KEY, String(scrollContainerRef.current.scrollTop));
+      pendingScrollRestoreRef.current = true;
     }
   }, []);
 
-  // Restore scroll position after returning from picker
+  // Restore scroll position after returning from picker.
+  // Uses double-rAF to ensure the DOM has painted with updated content.
   const restoreScrollPosition = useCallback(() => {
     const saved = sessionStorage.getItem(SCROLL_STORAGE_KEY);
     if (saved && scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = Number(saved);
-      sessionStorage.removeItem(SCROLL_STORAGE_KEY);
+      const scrollVal = Number(saved);
+      // Double rAF: first waits for React commit, second waits for browser paint
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = scrollVal;
+          }
+          sessionStorage.removeItem(SCROLL_STORAGE_KEY);
+          pendingScrollRestoreRef.current = false;
+        });
+      });
     }
   }, []);
 
-  // Restore scroll on mount if saved position exists (returning from picker)
+  // Check for saved scroll on mount (mobile: form remounts after picker)
+  // and also whenever liveFlight arrives/updates (data ready → content rendered)
   useEffect(() => {
-    requestAnimationFrame(() => restoreScrollPosition());
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only on mount
+    if (!pendingScrollRestoreRef.current && !sessionStorage.getItem(SCROLL_STORAGE_KEY)) return;
+    if (!liveFlight) return; // Wait for data to be ready before restoring
+    pendingScrollRestoreRef.current = true;
+    restoreScrollPosition();
+  }, [liveFlight, restoreScrollPosition]);
 
   // Force-save current form data before navigating away (bypasses debounce)
   // Skips save if nothing changed from last saved state to avoid sync queue bloat
