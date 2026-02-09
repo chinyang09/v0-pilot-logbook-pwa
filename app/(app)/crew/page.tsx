@@ -8,7 +8,8 @@ import { useDebounce } from "@/hooks/use-debounce";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { usePersonnel } from "@/hooks/data";
-import { deletePersonnel } from "@/lib/db";
+import { deletePersonnel, updateFlight } from "@/lib/db";
+import { syncService } from "@/lib/sync";
 import {
   Search,
   Loader2,
@@ -341,20 +342,30 @@ export default function CrewPage() {
     }
   }, [selectedFromUrl, isDesktop, isLoading, sortedPersonnel, rowVirtualizer]);
 
-  const handleCrewSelect = useCallback((crew: (typeof personnel)[0]) => {
-    if (fieldType) {
-      const params = new URLSearchParams();
-      params.set("field", fieldType);
-      params.set("crewId", crew.id);
-      params.set("crewName", crew.isMe ? "Self" : crew.name);
-      if (flightId) params.set("flightId", flightId);
-      router.push(`${returnUrl}?${params.toString()}`);
+  const handleCrewSelect = useCallback(async (crew: (typeof personnel)[0]) => {
+    if (fieldType && flightId) {
+      const crewName = crew.isMe ? "Self" : crew.name;
+      const updates: Partial<{ picId: string; picName: string; sicId: string; sicName: string }> = {};
+      if (fieldType === "picId" || fieldType === "pic") {
+        updates.picId = crew.id;
+        updates.picName = crewName;
+      } else if (fieldType === "sicId" || fieldType === "sic") {
+        updates.sicId = crew.id;
+        updates.sicName = crewName;
+      }
+      try {
+        await updateFlight(flightId, updates);
+        syncService.notifyDataChange();
+      } catch (error) {
+        console.error("Failed to update flight with crew:", error);
+      }
+      router.back();
     } else if (isDesktop) {
       setSelectedCrewId(crew.id);
     } else {
       router.push(`/crew/${crew.id}`);
     }
-  }, [fieldType, flightId, isDesktop, router, returnUrl, setSelectedCrewId]);
+  }, [fieldType, flightId, isDesktop, router, setSelectedCrewId]);
 
   const handleAddCrew = () => {
     const params = new URLSearchParams();
@@ -390,12 +401,7 @@ export default function CrewPage() {
         <StandardPageHeader
           title={pageTitle}
           showBack={!!fieldType}
-          onBack={fieldType ? () => {
-            const params = new URLSearchParams()
-            if (flightId) params.set("flightId", flightId)
-            const query = params.toString()
-            router.push(query ? `${returnUrl}?${query}` : returnUrl)
-          } : undefined}
+          onBack={fieldType ? () => router.back() : undefined}
         />
       }
       rightContent={

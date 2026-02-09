@@ -13,8 +13,10 @@ import {
   getRecentlyUsedAirports,
   addRecentlyUsedAirport,
   getAirportByIcao,
+  updateFlight,
   type Airport,
 } from "@/lib/db";
+import { syncService } from "@/lib/sync";
 import { Star, Search } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -95,8 +97,6 @@ export default function AirportsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const fieldType = searchParams.get("field");
-  const returnUrl =
-    searchParams.get("return") || searchParams.get("returnTo") || "/new-flight";
   const flightId = searchParams.get("flightId");
   const selectedFromUrl = searchParams.get("selected");
   const isDesktop = useIsDesktop();
@@ -342,19 +342,29 @@ export default function AirportsPage() {
   }, []);
 
   const handleAirportSelect = useCallback(async (icao: string) => {
-    if (fieldType) {
+    if (fieldType && flightId) {
       await addRecentlyUsedAirport(icao);
-      const params = new URLSearchParams();
-      params.set("field", fieldType);
-      params.set("airport", icao);
-      if (flightId) params.set("flightId", flightId);
-      router.push(`${returnUrl}?${params.toString()}`);
+      const updates: Partial<{ departureIcao: string; departureIata: string; arrivalIcao: string; arrivalIata: string }> = {};
+      if (fieldType === "departureIcao") {
+        updates.departureIcao = icao;
+        updates.departureIata = "";
+      } else if (fieldType === "arrivalIcao") {
+        updates.arrivalIcao = icao;
+        updates.arrivalIata = "";
+      }
+      try {
+        await updateFlight(flightId, updates);
+        syncService.notifyDataChange();
+      } catch (error) {
+        console.error("Failed to update flight with airport:", error);
+      }
+      router.back();
     } else if (isDesktop) {
       setSelectedAirportIcao(icao);
     } else {
       router.push(`/airports/${icao}`);
     }
-  }, [fieldType, flightId, isDesktop, router, returnUrl, setSelectedAirportIcao]);
+  }, [fieldType, flightId, isDesktop, router, setSelectedAirportIcao]);
 
   const handleToggleFavorite = useCallback(async (e: React.MouseEvent, icao: string) => {
     e.preventDefault();
@@ -382,12 +392,7 @@ export default function AirportsPage() {
         <StandardPageHeader
           title={pageTitle}
           showBack={!!fieldType}
-          onBack={fieldType ? () => {
-            const params = new URLSearchParams()
-            if (flightId) params.set("flightId", flightId)
-            const query = params.toString()
-            router.push(query ? `${returnUrl}?${query}` : returnUrl)
-          } : undefined}
+          onBack={fieldType ? () => router.back() : undefined}
         />
       }
       rightContent={
