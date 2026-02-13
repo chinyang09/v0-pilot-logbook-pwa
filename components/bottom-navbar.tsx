@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Home, Book, Plus, Calendar, Plane, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useCreateFlight } from "@/hooks/use-create-flight";
 
 interface BottomNavbarProps {
   className?: string;
@@ -12,6 +13,8 @@ interface BottomNavbarProps {
 
 export function BottomNavbar({ className }: BottomNavbarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const createFlight = useCreateFlight();
 
   const activeTab =
     pathname === "/"
@@ -64,11 +67,16 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
             </Button>
           </Link>
 
-          <Link href="/new-flight">
-            <Button size="lg" className="h-12 w-12 rounded-full shadow-lg">
-              <Plus className="h-6 w-6" />
-            </Button>
-          </Link>
+          <Button
+            size="lg"
+            className="h-12 w-12 rounded-full shadow-lg"
+            onClick={async () => {
+              const draft = await createFlight();
+              router.push(`/flights/${draft.id}`);
+            }}
+          >
+            <Plus className="h-6 w-6" />
+          </Button>
 
           <Link href="/roster">
             <Button
