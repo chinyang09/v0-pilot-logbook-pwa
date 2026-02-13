@@ -26,6 +26,17 @@ const CDN_PATTERNS = ["cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic
 // Routes that should be cached when visited (runtime caching)
 const CACHEABLE_ROUTES = ["/", "/logbook", "/new-flight", "/aircraft", "/airports", "/crew", "/data", "/roster", "/fdp", "/currencies", "/discrepancies"]
 
+// Dynamic routes whose page shell is identical for all IDs (client-rendered).
+// We cache one shell instance and serve it for any matching request.
+const DYNAMIC_SHELL_ROUTES = [
+  {
+    prefix: "/flights/",
+    shellUrl: "/flights/_",
+    htmlCacheKey: "/_shells/flights/html",
+    rscCacheKey: "/_shells/flights/rsc",
+  },
+]
+
 // Install event - precache static assets only (not protected routes)
 self.addEventListener("install", (event) => {
   console.log("[SW] Installing version:", CACHE_VERSION)
@@ -127,6 +138,85 @@ function isCacheableRoute(url) {
   const urlObj = new URL(url)
   const pathname = urlObj.pathname
   return CACHEABLE_ROUTES.includes(pathname) || CACHEABLE_ROUTES.some((route) => pathname.startsWith(route + "/"))
+}
+
+// Helper: Check if request is an RSC (React Server Component) payload request
+function isRSCRequest(request) {
+  return request.headers.get("RSC") === "1"
+}
+
+// Helper: Check if URL matches a dynamic shell route
+function getDynamicShellRoute(url) {
+  const urlObj = new URL(url)
+  const pathname = urlObj.pathname
+  for (const route of DYNAMIC_SHELL_ROUTES) {
+    if (pathname.startsWith(route.prefix) && pathname.length > route.prefix.length) {
+      return route
+    }
+  }
+  return null
+}
+
+// Helper: Clone a response without the Vary header (so cached shells match any request)
+async function cloneWithoutVary(response) {
+  const headers = new Headers(response.headers)
+  headers.delete("Vary")
+  const body = await response.arrayBuffer()
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
+}
+
+// Handler for dynamic shell routes (e.g. /flights/[id])
+// Network-first with fallback to a generic cached shell
+async function handleDynamicShellRequest(request, shellRoute) {
+  const isRSC = isRSCRequest(request)
+  const staticCache = await caches.open(STATIC_CACHE)
+  const dynamicCache = await caches.open(DYNAMIC_CACHE)
+  const shellKey = isRSC ? shellRoute.rscCacheKey : shellRoute.htmlCacheKey
+
+  // 1. Check DYNAMIC_CACHE for exact URL match (previously visited this specific flight)
+  const exactMatch = await dynamicCache.match(request)
+  if (exactMatch) {
+    // Stale-while-revalidate: return cached, update in background
+    fetch(request)
+      .then((r) => {
+        if (r.ok) dynamicCache.put(request, r)
+      })
+      .catch(() => {})
+    return exactMatch
+  }
+
+  // 2. Try network
+  try {
+    const networkResponse = await fetch(request)
+    if (networkResponse.ok) {
+      // Cache exact URL for future revisits
+      dynamicCache.put(request, networkResponse.clone())
+      // Also update the generic shell cache (strip Vary for universal matching)
+      cloneWithoutVary(networkResponse.clone()).then((clean) => {
+        staticCache.put(shellKey, clean)
+      })
+    }
+    return networkResponse
+  } catch (e) {
+    // 3. Offline — serve cached generic shell
+    const shellResponse = await staticCache.match(shellKey)
+    if (shellResponse) {
+      console.log("[SW] Serving dynamic shell for:", new URL(request.url).pathname)
+      return shellResponse.clone()
+    }
+
+    // 4. No shell cached — fallback
+    if (!isRSC) {
+      const rootCache = await staticCache.match("/")
+      if (rootCache) return rootCache
+      return getOfflineFallback()
+    }
+    return new Response("Offline", { status: 503 })
+  }
 }
 
 // Helper: Get the offline fallback page
@@ -318,6 +408,15 @@ self.addEventListener("fetch", (event) => {
         }
       })()
     )
+    return
+  }
+
+  // Strategy 4.5: Dynamic route shells (e.g. /flights/[id])
+  // These are "use client" pages where the shell is identical for all IDs.
+  // Handles both navigation requests (full page load) and RSC requests (router.push).
+  const dynamicShellRoute = getDynamicShellRoute(url)
+  if (dynamicShellRoute && (isNavigationRequest(request) || isRSCRequest(request))) {
+    event.respondWith(handleDynamicShellRequest(request, dynamicShellRoute))
     return
   }
 
@@ -523,6 +622,37 @@ async function cachePages(pages) {
       }
     } catch (e) {
       console.warn("[SW] Failed to cache:", page, e)
+    }
+  }
+
+  // Pre-cache dynamic route shells (HTML + RSC versions)
+  for (const route of DYNAMIC_SHELL_ROUTES) {
+    // HTML shell (for full page navigations / refresh while offline)
+    try {
+      const htmlResp = await fetch(route.shellUrl, {
+        credentials: "same-origin",
+        headers: { Accept: "text/html" },
+      })
+      if (htmlResp.ok && !htmlResp.redirected) {
+        await cache.put(route.htmlCacheKey, await cloneWithoutVary(htmlResp))
+        console.log("[SW] Cached dynamic HTML shell:", route.prefix)
+      }
+    } catch (e) {
+      console.warn("[SW] Failed to cache HTML shell:", route.prefix, e)
+    }
+
+    // RSC shell (for client-side navigations via router.push while offline)
+    try {
+      const rscResp = await fetch(route.shellUrl, {
+        credentials: "same-origin",
+        headers: { RSC: "1", "Next-Router-Prefetch": "1" },
+      })
+      if (rscResp.ok) {
+        await cache.put(route.rscCacheKey, await cloneWithoutVary(rscResp))
+        console.log("[SW] Cached dynamic RSC shell:", route.prefix)
+      }
+    } catch (e) {
+      console.warn("[SW] Failed to cache RSC shell:", route.prefix, e)
     }
   }
 }

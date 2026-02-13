@@ -7,9 +7,9 @@ import { useDebounce } from "@/hooks/use-debounce"
 import { LogbookCalendar, type CalendarHandle } from "@/components/logbook-calendar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { addFlight, type FlightLog } from "@/lib/db"
+import { type FlightLog } from "@/lib/db"
 import { syncService } from "@/lib/sync"
-import { createEmptyFlightLog } from "@/lib/utils/flight-calculations"
+import { useCreateFlight } from "@/hooks/use-create-flight"
 import {
   useFlights,
   refreshAllData,
@@ -67,6 +67,7 @@ export default function LogbookPage() {
   const { aircraft } = useAircraft()
   const { airports } = useAirportDatabase()
   const { personnel } = usePersonnel()
+  const createFlight = useCreateFlight()
 
   // Initialize calendar state from URL (preserves state when switching layouts)
   const [showCalendar, setShowCalendar] = useState(() => {
@@ -383,22 +384,12 @@ export default function LogbookPage() {
               <Button
                 size="icon-sm"
                 onClick={async () => {
-                  // Create a draft flight first
-                  const emptyFlight = createEmptyFlightLog()
-                  const draftFlight = await addFlight({
-                    ...emptyFlight,
-                    isDraft: true,
-                    date: new Date().toISOString().split("T")[0],
-                  })
-
-                  // Refresh the flight list to show the new draft
+                  const draftFlight = await createFlight()
                   await refreshFlights()
 
                   if (isDesktop) {
-                    // On desktop: select the draft - layout renders FlightForm via Smart Switcher
                     setSelectedFlightId(draftFlight.id)
                   } else {
-                    // On mobile: navigate to the flight edit page
                     router.push(`/flights/${draftFlight.id}`)
                   }
                 }}
