@@ -31,7 +31,8 @@ const CACHEABLE_ROUTES = ["/", "/logbook", "/new-flight", "/aircraft", "/airport
 const DYNAMIC_SHELL_ROUTES = [
   {
     prefix: "/flights/",
-    shellUrl: "/flights/_",
+    shellUrl: "/flights/__SHELL__",
+    placeholderId: "__SHELL__",
     htmlCacheKey: "/_shells/flights/html",
     rscCacheKey: "/_shells/flights/rsc",
   },
@@ -169,8 +170,22 @@ async function cloneWithoutVary(response) {
   })
 }
 
+// Helper: Rewrite placeholder ID in a cached shell response to the actual ID from the URL.
+// Only used in the offline fallback path (step 3) — a simple replaceAll, format-agnostic.
+async function rewriteShellResponse(cachedResponse, shellRoute, requestUrl) {
+  const urlObj = new URL(requestUrl)
+  const actualId = urlObj.pathname.slice(shellRoute.prefix.length)
+  const body = await cachedResponse.text()
+  const rewritten = body.replaceAll(shellRoute.placeholderId, actualId)
+  return new Response(rewritten, {
+    status: cachedResponse.status,
+    statusText: cachedResponse.statusText,
+    headers: cachedResponse.headers,
+  })
+}
+
 // Handler for dynamic shell routes (e.g. /flights/[id])
-// Network-first with fallback to a generic cached shell
+// Network-first with fallback to a generic cached shell (with param rewrite)
 async function handleDynamicShellRequest(request, shellRoute) {
   const isRSC = isRSCRequest(request)
   const staticCache = await caches.open(STATIC_CACHE)
@@ -202,11 +217,11 @@ async function handleDynamicShellRequest(request, shellRoute) {
     }
     return networkResponse
   } catch (e) {
-    // 3. Offline — serve cached generic shell
+    // 3. Offline — serve cached shell with placeholder ID rewritten to actual ID
     const shellResponse = await staticCache.match(shellKey)
     if (shellResponse) {
-      console.log("[SW] Serving dynamic shell for:", new URL(request.url).pathname)
-      return shellResponse.clone()
+      console.log("[SW] Serving rewritten dynamic shell for:", new URL(request.url).pathname)
+      return rewriteShellResponse(shellResponse, shellRoute, request.url)
     }
 
     // 4. No shell cached — fallback
