@@ -1,6 +1,6 @@
 "use client"
 
-import { useParams, useRouter } from "next/navigation"
+import { useParams, usePathname, useRouter } from "next/navigation"
 import { FlightForm } from "@/components/flight-form"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
@@ -11,8 +11,11 @@ import type { FlightLog } from "@/lib/db"
 
 export default function FlightDetailPage() {
   const params = useParams()
+  const pathname = usePathname()
   const router = useRouter()
-  const id = params.id as string
+  // Derive ID from URL pathname (always correct) with useParams() fallback.
+  // Safety net: if SW serves a cached shell with stale params, pathname still has the real ID.
+  const id = pathname?.split("/").pop() || (params.id as string)
   const isDesktop = useIsDesktop()
 
   // When switching to desktop view, redirect to logbook with the flight selected
