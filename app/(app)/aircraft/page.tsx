@@ -508,15 +508,35 @@ export default function AircraftPage() {
   const handleSelectFr24 = useCallback(
     async (record: AircraftRecord) => {
       await addCustomAircraftToDatabase(record)
+
+      // Update local state so the aircraft appears in the list immediately
+      const newAircraftData: AircraftData = {
+        icao24: record.icao24,
+        reg: record.registration,
+        icaotype: record.typecode || null,
+        short_type: record.operator || null,
+      }
+      setAllAircraft((prev) => [...prev, newAircraftData])
+
       const normalized: NormalizedAircraft = {
         registration: record.registration,
         icao24: record.icao24,
         typecode: record.typecode,
         shortType: record.operator || "",
       }
-      handleSelectAircraft(normalized)
+
+      if (selectMode && flightId) {
+        handleSelectAircraft(normalized)
+      } else {
+        // Clear search to reveal the newly added aircraft in the browse list
+        setSearchQuery("")
+        setFr24Results([])
+        if (isDesktop) {
+          setSelectedAircraftReg(normalized.registration || normalized.icao24)
+        }
+      }
     },
-    [handleSelectAircraft],
+    [selectMode, flightId, isDesktop, handleSelectAircraft, setSelectedAircraftReg],
   )
 
   const addAircraftUrl = selectMode
@@ -572,7 +592,7 @@ export default function AircraftPage() {
           <div className="px-4 pt-4 pb-safe">
             {/* Sticky search bar - outside aboveVirtualRef so it stays visible during scroll */}
             <div className="sticky top-0 z-40 pb-3 bg-background/30 backdrop-blur-xl -mx-3 px-3">
-              <div className="flex items-center gap-2">
+              <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -584,10 +604,9 @@ export default function AircraftPage() {
                   />
                 </div>
                 <Button
-                  variant="ghost"
+                  onClick={() => router.push(addAircraftUrl)}
                   size="icon"
                   className="h-10 w-10 flex-shrink-0"
-                  onClick={() => router.push(addAircraftUrl)}
                 >
                   <Plus className="h-5 w-5" />
                 </Button>
