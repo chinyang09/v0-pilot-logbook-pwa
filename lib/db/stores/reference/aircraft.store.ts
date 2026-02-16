@@ -3,7 +3,7 @@
  */
 
 import { referenceDb } from "../../reference-db";
-import type { AircraftReference } from "@/types/entities/aircraft.types";
+import type { AircraftReference, AircraftRecord } from "@/types/entities/aircraft.types";
 
 // ============================================
 // Types
@@ -344,8 +344,11 @@ async function loadAndStoreAircraftFromCDN(): Promise<number> {
     allRecords = parseNDJSON(ndjsonText);
   }
 
-  // Store in IndexedDB
+  // Store in IndexedDB (preserving custom entries)
   reportProgress("Storing", 90);
+
+  // Preserve custom entries before clearing
+  const customRecords = await getCustomAircraftRecords();
 
   await referenceDb.transaction(
     "rw",
@@ -361,6 +364,11 @@ async function loadAndStoreAircraftFromCDN(): Promise<number> {
         const percent =
           90 + Math.round(((i + batch.length) / allRecords.length) * 10);
         reportProgress("Storing", percent, i + batch.length);
+      }
+
+      // Re-insert custom entries
+      if (customRecords.length > 0) {
+        await referenceDb.aircraftDatabase.bulkPut(customRecords);
       }
     }
   );
@@ -443,9 +451,17 @@ export async function clearAircraftCache(): Promise<void> {
   metadata = null;
   aircraftCache = null;
   searchCache.clear();
+  clearRegistrationLookupMap();
   localStorage.removeItem(CACHE_VERSION_KEY);
   localStorage.removeItem(CACHE_ETAG_KEY);
+
+  // Preserve custom entries before clearing
+  const customRecords = await getCustomAircraftRecords();
   await referenceDb.aircraftDatabase.clear();
+  // Re-insert custom entries
+  if (customRecords.length > 0) {
+    await referenceDb.aircraftDatabase.bulkPut(customRecords);
+  }
 }
 
 // ============================================
@@ -801,8 +817,53 @@ export function clearRegistrationLookupMap(): void {
   lookupMapBuildPromise = null;
 }
 
-// Add to clearAircraftCache():
-// clearRegistrationLookupMap()
+// ============================================
+// Custom Aircraft Entry
+// ============================================
+
+/**
+ * Get all custom aircraft records from IndexedDB
+ */
+async function getCustomAircraftRecords(): Promise<AircraftReference[]> {
+  const allRecords = await referenceDb.aircraftDatabase.toArray();
+  return allRecords.filter((record) => {
+    try {
+      const data = JSON.parse(record.data);
+      return data.source === "custom" || data.source === "fr24";
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * Add a custom aircraft to the reference database
+ * Used when adding aircraft from FR24 search or manual entry
+ */
+export async function addCustomAircraftToDatabase(
+  record: AircraftRecord
+): Promise<void> {
+  const reg = record.registration.toUpperCase();
+  const data: AircraftData & { source?: string; operator?: string; submissionId?: string } = {
+    icao24: record.icao24 || "",
+    reg: reg,
+    icaotype: record.typecode || null,
+    short_type: null,
+    source: record.source || "custom",
+    operator: record.operator,
+    submissionId: record.submissionId,
+  };
+
+  await referenceDb.aircraftDatabase.put({
+    registration: reg,
+    data: JSON.stringify(data),
+  });
+
+  // Clear caches so the new entry is discoverable
+  searchCache.clear();
+  clearRegistrationLookupMap();
+  aircraftCache = null;
+}
 
 // ============================================
 // Fast Single Lookup (uses map)

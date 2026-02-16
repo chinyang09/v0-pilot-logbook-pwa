@@ -16,6 +16,8 @@ export interface Airport {
   elevation: number
   tz: string // IANA timezone string
   isFavorite?: boolean
+  isCustom?: boolean // Marks user-submitted entries
+  submissionId?: string // Links to MongoDB submission for reconciliation
 }
 
 export type AirportCreate = Omit<Airport, "id">

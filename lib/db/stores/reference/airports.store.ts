@@ -61,9 +61,10 @@ export async function getAirportDatabase(): Promise<Airport[]> {
 
     const rawData: Record<string, any> = await response.json()
 
-    // Get current favorites first
+    // Preserve favorites and custom airports before clearing
     const existingFavorites = await referenceDb.airports.where("isFavorite").equals(1).toArray()
     const favoriteIcaos = new Set(existingFavorites.map((a) => a.icao))
+    const customAirports = await getCustomAirports()
 
     // Map Object to Array and normalize keys
     const airports: Airport[] = Object.values(rawData)
@@ -83,10 +84,18 @@ export async function getAirportDatabase(): Promise<Airport[]> {
       }))
       .filter((a) => a.icao)
 
+    // Determine which custom airports are NOT in the new dataset
+    const newIcaos = new Set(airports.map((a) => a.icao))
+    const customToPreserve = customAirports.filter((a) => !newIcaos.has(a.icao))
+
     // Update database
     await referenceDb.transaction("rw", referenceDb.airports, referenceDb.metadata, async () => {
       await referenceDb.airports.clear()
       await referenceDb.airports.bulkPut(airports)
+      // Re-insert custom airports that aren't in the new dataset
+      if (customToPreserve.length > 0) {
+        await referenceDb.airports.bulkPut(customToPreserve)
+      }
       await referenceDb.setMetadata("airport_version", DATA_VERSION)
     })
 
@@ -172,9 +181,10 @@ export async function getAirportById(id: number): Promise<Airport | undefined> {
  * Bulk load airports from JSON data
  */
 export async function bulkLoadAirports(rawData: Record<string, any>): Promise<void> {
-  // Get current favorites first
+  // Preserve favorites and custom airports before clearing
   const existingFavorites = await referenceDb.airports.where("isFavorite").equals(1).toArray()
   const favoriteIcaos = new Set(existingFavorites.map((a) => a.icao))
+  const customAirports = await getCustomAirports()
 
   const airports: Airport[] = Object.values(rawData)
     .map((airport: any, index: number) => ({
@@ -193,22 +203,39 @@ export async function bulkLoadAirports(rawData: Record<string, any>): Promise<vo
     }))
     .filter((a) => a.icao)
 
+  const newIcaos = new Set(airports.map((a) => a.icao))
+  const customToPreserve = customAirports.filter((a) => !newIcaos.has(a.icao))
+
   await referenceDb.transaction("rw", referenceDb.airports, referenceDb.metadata, async () => {
     await referenceDb.airports.clear()
     await referenceDb.airports.bulkPut(airports)
+    if (customToPreserve.length > 0) {
+      await referenceDb.airports.bulkPut(customToPreserve)
+    }
     await referenceDb.setMetadata("airport_version", DATA_VERSION)
   })
 }
 
 /**
+ * Get all custom airports from the database
+ */
+async function getCustomAirports(): Promise<Airport[]> {
+  const allAirports = await referenceDb.airports.toArray()
+  return allAirports.filter((a) => a.isCustom === true)
+}
+
+/**
  * Add custom airport
  */
-export async function addCustomAirport(airport: Omit<Airport, "id"> & { icao: string }): Promise<void> {
+export async function addCustomAirport(airport: Omit<Airport, "id"> & { icao: string }): Promise<Airport> {
   const existingCount = await referenceDb.airports.count()
-  await referenceDb.airports.put({
+  const newAirport: Airport = {
     ...airport,
     id: existingCount + 1,
-  } as Airport)
+    isCustom: true,
+  }
+  await referenceDb.airports.put(newAirport)
+  return newAirport
 }
 
 // ============================================
