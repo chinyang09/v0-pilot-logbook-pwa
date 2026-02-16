@@ -163,36 +163,6 @@ export default function AircraftPage() {
   const [fr24Results, setFr24Results] = useState<AircraftRecord[]>([])
   const [isFr24Loading, setIsFr24Loading] = useState(false)
 
-  // FR24 online search: fires when local results are empty and query is non-empty
-  useEffect(() => {
-    if (!debouncedSearchQuery.trim() || filteredAircraft.length > 0) {
-      setFr24Results([])
-      setIsFr24Loading(false)
-      return
-    }
-
-    let cancelled = false
-    setIsFr24Loading(true)
-
-    const searchFr24 = async () => {
-      try {
-        const res = await fetch(`/api/search/aircraft?q=${encodeURIComponent(debouncedSearchQuery)}`)
-        if (!res.ok) throw new Error("FR24 search failed")
-        const data = await res.json()
-        if (!cancelled) {
-          setFr24Results(data.results || [])
-        }
-      } catch {
-        if (!cancelled) setFr24Results([])
-      } finally {
-        if (!cancelled) setIsFr24Loading(false)
-      }
-    }
-
-    searchFr24()
-    return () => { cancelled = true }
-  }, [debouncedSearchQuery, filteredAircraft.length])
-
   useEffect(() => {
     let mounted = true
     setProgressCallback((progress) => {
@@ -258,6 +228,36 @@ export default function AircraftPage() {
       return regA.localeCompare(regB)
     })
   }, [allAircraft, allSortedAircraft, debouncedSearchQuery])
+
+  // FR24 online search: fires when local results are empty and query is non-empty
+  useEffect(() => {
+    if (!debouncedSearchQuery.trim() || filteredAircraft.length > 0) {
+      setFr24Results([])
+      setIsFr24Loading(false)
+      return
+    }
+
+    let cancelled = false
+    setIsFr24Loading(true)
+
+    const searchFr24 = async () => {
+      try {
+        const res = await fetch(`/api/search/aircraft?q=${encodeURIComponent(debouncedSearchQuery)}`)
+        if (!res.ok) throw new Error("FR24 search failed")
+        const data = await res.json()
+        if (!cancelled) {
+          setFr24Results(data.results || [])
+        }
+      } catch {
+        if (!cancelled) setFr24Results([])
+      } finally {
+        if (!cancelled) setIsFr24Loading(false)
+      }
+    }
+
+    searchFr24()
+    return () => { cancelled = true }
+  }, [debouncedSearchQuery, filteredAircraft.length])
 
   // Favorite aircraft from the sorted list
   const favoriteAircraft = useMemo(() => {
