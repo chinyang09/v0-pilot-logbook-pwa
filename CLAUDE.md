@@ -22,16 +22,20 @@ Deployed on **Vercel** and synced from [v0.app](https://v0.app/chat/eXgJay4h1Jy)
 | Forms | React Hook Form + Zod validation |
 | OCR | @gutenye/ocr-browser with ONNX Runtime |
 | Charts | Recharts |
+| Package Manager | pnpm (not npm) |
 | Bundler | Webpack (not Turbopack) |
 
 ## Commands
 
 ```bash
-npm run dev       # Start dev server (Next.js with Webpack)
-npm run build     # Production build (8GB heap for OCR models)
-npm run lint      # Run ESLint
-npm start         # Run production server
+pnpm dev          # Start dev server (Next.js with Webpack)
+pnpm build        # Production build (8GB heap for OCR models)
+pnpm lint         # Run ESLint
+pnpm start        # Run production server
+pnpm install      # Install dependencies (MUST use pnpm, not npm)
 ```
+
+**Important:** This project uses **pnpm** as its package manager. Vercel deploys with `frozen-lockfile`, so the `pnpm-lock.yaml` must stay in sync with `package.json`. **Never use `npm install`** to add dependencies — always use `pnpm add <package>` (or `pnpm add -D <package>` for dev deps). Using npm will only update `package-lock.json` and the Vercel build will fail.
 
 There is no test framework configured. No Jest, Vitest, or Playwright.
 
@@ -264,3 +268,4 @@ When making changes, be aware of these high-impact files:
 - Do not change sync conflict resolution strategy without understanding the tombstone system
 - Do not remove `"use client"` directives — server/client boundary is intentionally designed
 - Do not commit `.env` files or MongoDB credentials
+- Do not use `npm install` or `npm add` — always use `pnpm` to keep `pnpm-lock.yaml` in sync (Vercel uses frozen-lockfile)
