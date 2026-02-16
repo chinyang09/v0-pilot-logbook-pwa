@@ -11,6 +11,7 @@ import {
   updateFlight,
 } from "@/lib/db";
 import { syncService } from "@/lib/sync";
+import { submitAircraftToServer } from "@/lib/submissions/submit";
 import { searchAircraftTypes } from "@/lib/db/stores/reference/aircraft-types.store";
 import type { AircraftType } from "@/types/entities/aircraft-type.types";
 import type { AircraftRecord } from "@/types/entities/aircraft.types";
@@ -106,7 +107,14 @@ export default function NewAircraftPage() {
         source: "custom",
       };
 
-      await addCustomAircraftToDatabase(record);
+      const submissionId = await addCustomAircraftToDatabase(record);
+
+      // Fire-and-forget server submission for enrichment
+      submitAircraftToServer({
+        submissionId,
+        registration: reg,
+        typecode: record.typecode,
+      });
 
       if (selectMode && flightId) {
         await updateFlight(flightId, {

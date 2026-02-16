@@ -839,11 +839,14 @@ async function getCustomAircraftRecords(): Promise<AircraftReference[]> {
 /**
  * Add a custom aircraft to the reference database
  * Used when adding aircraft from FR24 search or manual entry
+ * Returns the submissionId for server-side submission
  */
 export async function addCustomAircraftToDatabase(
   record: AircraftRecord
-): Promise<void> {
+): Promise<string> {
   const reg = record.registration.toUpperCase();
+  const { createId } = await import("@/lib/auth/shared/cuid");
+  const submissionId = record.submissionId || createId();
   const data: AircraftData & { source?: string; operator?: string; submissionId?: string } = {
     icao24: record.icao24 || "",
     reg: reg,
@@ -851,7 +854,7 @@ export async function addCustomAircraftToDatabase(
     short_type: null,
     source: record.source || "custom",
     operator: record.operator,
-    submissionId: record.submissionId,
+    submissionId,
   };
 
   await referenceDb.aircraftDatabase.put({
@@ -863,6 +866,8 @@ export async function addCustomAircraftToDatabase(
   searchCache.clear();
   clearRegistrationLookupMap();
   aircraftCache = null;
+
+  return submissionId;
 }
 
 // ============================================

@@ -31,6 +31,7 @@ import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { AircraftDetailPanel } from "@/components/aircraft-detail-panel"
 import { cn } from "@/lib/utils"
+import { submitAircraftToServer } from "@/lib/submissions/submit"
 
 // Memoized aircraft card to prevent unnecessary re-renders during virtualization
 interface AircraftCardProps {
@@ -507,7 +508,16 @@ export default function AircraftPage() {
 
   const handleSelectFr24 = useCallback(
     async (record: AircraftRecord) => {
-      await addCustomAircraftToDatabase(record)
+      const submissionId = await addCustomAircraftToDatabase(record)
+
+      // Fire-and-forget server submission for shared enrichment
+      submitAircraftToServer({
+        submissionId,
+        registration: record.registration,
+        typecode: record.typecode,
+        icao24: record.icao24,
+        operator: record.operator,
+      })
 
       // Update local state so the aircraft appears in the list immediately
       const newAircraftData: AircraftData = {

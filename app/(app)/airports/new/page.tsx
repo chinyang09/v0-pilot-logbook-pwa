@@ -8,6 +8,7 @@ import { Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { addCustomAirport, updateFlight } from "@/lib/db";
 import { syncService } from "@/lib/sync";
+import { submitAirportToServer } from "@/lib/submissions/submit";
 
 // --- Reusable Row (matches crew page pattern) ---
 function SettingsRow({
@@ -125,7 +126,7 @@ export default function NewAirportPage() {
       const lng = parseFloat(longitude) || 0;
       const elev = parseFloat(elevation) || 0;
 
-      await addCustomAirport({
+      const newAirport = await addCustomAirport({
         icao: icaoCode,
         iata: iata.trim().toUpperCase(),
         name: name.trim(),
@@ -138,6 +139,22 @@ export default function NewAirportPage() {
         tz: timezone.trim() || "UTC",
         isCustom: true,
       });
+
+      // Fire-and-forget server submission for enrichment
+      if (newAirport.submissionId) {
+        submitAirportToServer({
+          submissionId: newAirport.submissionId,
+          icao: icaoCode,
+          name: name.trim(),
+          iata: iata.trim().toUpperCase(),
+          city: city.trim(),
+          country: country.trim().toUpperCase(),
+          timezone: timezone.trim(),
+          latitude: lat,
+          longitude: lng,
+          elevation: elev,
+        });
+      }
 
       if (fieldType && flightId) {
         const updates: Record<string, string> = {};

@@ -226,13 +226,17 @@ async function getCustomAirports(): Promise<Airport[]> {
 
 /**
  * Add custom airport
+ * Returns the airport with a generated submissionId for server submission
  */
 export async function addCustomAirport(airport: Omit<Airport, "id"> & { icao: string }): Promise<Airport> {
+  const { createId } = await import("@/lib/auth/shared/cuid")
   const existingCount = await referenceDb.airports.count()
+  const submissionId = airport.submissionId || createId()
   const newAirport: Airport = {
     ...airport,
     id: existingCount + 1,
     isCustom: true,
+    submissionId,
   }
   await referenceDb.airports.put(newAirport)
   return newAirport
