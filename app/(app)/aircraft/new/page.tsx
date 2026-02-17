@@ -71,6 +71,50 @@ export default function NewAircraftPage() {
   const [selectedType, setSelectedType] = useState<AircraftType | null>(null);
   const [showTypeSearch, setShowTypeSearch] = useState(false);
 
+  // FR24 inline search state
+  const [fr24Result, setFr24Result] = useState<{
+    registration: string;
+    typecode: string;
+    icao24: string;
+    operator: string;
+  } | null>(null);
+  const [isFr24Loading, setIsFr24Loading] = useState(false);
+  const [fr24Searched, setFr24Searched] = useState(false);
+
+  // Auto-search FR24 when registration changes (debounced)
+  useEffect(() => {
+    const reg = registration.trim();
+    if (reg.length < 3) {
+      setFr24Result(null);
+      setFr24Searched(false);
+      return;
+    }
+
+    setFr24Searched(false);
+    const timer = setTimeout(async () => {
+      setIsFr24Loading(true);
+      try {
+        const res = await fetch(
+          `/api/search/aircraft?q=${encodeURIComponent(reg)}`,
+          { signal: AbortSignal.timeout(5000) }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const match = data.results?.[0] || null;
+          setFr24Result(match);
+        } else {
+          setFr24Result(null);
+        }
+      } catch {
+        setFr24Result(null);
+      } finally {
+        setIsFr24Loading(false);
+        setFr24Searched(true);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [registration]);
+
   // Search aircraft types when typecode changes
   useEffect(() => {
     if (!typeSearchQuery || typeSearchQuery.length < 1) {
@@ -85,6 +129,17 @@ export default function NewAircraftPage() {
     const timer = setTimeout(search, 200);
     return () => clearTimeout(timer);
   }, [typeSearchQuery]);
+
+  const handleUseFr24 = useCallback(() => {
+    if (!fr24Result) return;
+    setRegistration(fr24Result.registration);
+    if (fr24Result.typecode) {
+      setTypecode(fr24Result.typecode);
+      setTypeSearchQuery(fr24Result.typecode);
+    }
+    setFr24Result(null);
+    setFr24Searched(false);
+  }, [fr24Result]);
 
   const handleSelectType = useCallback((type: AircraftType) => {
     setSelectedType(type);
@@ -102,9 +157,10 @@ export default function NewAircraftPage() {
     try {
       const record: AircraftRecord = {
         registration: reg,
-        icao24: "",
+        icao24: fr24Result?.icao24 || "",
         typecode: typecode.trim().toUpperCase(),
-        source: "custom",
+        operator: fr24Result?.operator || "",
+        source: fr24Result ? "fr24" : "custom",
       };
 
       const submissionId = await addCustomAircraftToDatabase(record);
@@ -183,6 +239,43 @@ export default function NewAircraftPage() {
               placeholder="e.g. 9V-TNK"
               required
             />
+
+            {/* FR24 auto-search result banner */}
+            {isFr24Loading && registration.trim().length >= 3 && (
+              <div className="flex items-center gap-2 px-0 py-2.5 border-b border-border text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Searching FlightRadar24...
+              </div>
+            )}
+            {!isFr24Loading && fr24Result && (
+              <div className="py-2.5 border-b border-border">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs">
+                    <span className="text-primary font-medium">Found: </span>
+                    <span className="text-foreground font-semibold">{fr24Result.registration}</span>
+                    {fr24Result.typecode && (
+                      <span className="text-muted-foreground"> ({fr24Result.typecode})</span>
+                    )}
+                    {fr24Result.operator && (
+                      <span className="text-muted-foreground"> — {fr24Result.operator}</span>
+                    )}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleUseFr24}
+                    className="text-primary h-6 px-2 text-xs font-semibold"
+                  >
+                    Use
+                  </Button>
+                </div>
+              </div>
+            )}
+            {!isFr24Loading && !fr24Result && fr24Searched && registration.trim().length >= 3 && (
+              <div className="py-2.5 border-b border-border text-xs text-muted-foreground">
+                Not found on FlightRadar24 — enter details manually below.
+              </div>
+            )}
 
             <div className="py-3 border-b border-border">
               <div className="flex items-center justify-between">
