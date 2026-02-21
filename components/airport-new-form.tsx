@@ -90,6 +90,23 @@ export function AirportNewForm({
   const [tzLoading, setTzLoading] = useState(false)
   const tzAbortRef = useRef<AbortController | null>(null)
 
+  // FR24 airport search state
+  const [fr24Data, setFr24Data] = useState<{
+    icao: string
+    iata: string
+    name: string
+    city: string
+    country: string
+    countryCode: string
+    latitude: number
+    longitude: number
+    elevation: number
+    timezone: string
+  } | null>(null)
+  const [isFr24Loading, setIsFr24Loading] = useState(false)
+  const [fr24Searched, setFr24Searched] = useState(false)
+  const [fr24Found, setFr24Found] = useState(false)
+
   // Duplicate detection state
   const [existingAirport, setExistingAirport] = useState<{
     icao: string
@@ -99,8 +116,94 @@ export function AirportNewForm({
 
   const hasValidCode = icao.trim().length > 0 || iata.trim().length > 0
 
-  // Auto-derive timezone from lat/lng via geo-tz API
+  // Auto-search FR24 + check duplicates when ICAO changes (debounced)
   useEffect(() => {
+    const code = icao.trim().toUpperCase()
+    if (code.length < 3) {
+      setFr24Data(null)
+      setFr24Searched(false)
+      setFr24Found(false)
+      setExistingAirport(null)
+      return
+    }
+
+    // Reset state when ICAO changes
+    setFr24Data(null)
+    setFr24Searched(false)
+    setFr24Found(false)
+    setExistingAirport(null)
+
+    const timer = setTimeout(async () => {
+      // 1. Check for duplicates in local DB
+      setIsDuplicateChecking(true)
+      try {
+        const existing = await getAirportByIcao(code)
+        if (existing) {
+          setExistingAirport({
+            icao: existing.icao,
+            name: existing.name || "",
+          })
+          setIsDuplicateChecking(false)
+          setFr24Searched(true)
+          setIsFr24Loading(false)
+          return
+        }
+      } catch {
+        // Ignore duplicate check errors
+      } finally {
+        setIsDuplicateChecking(false)
+      }
+
+      // 2. No duplicate found — search FR24 (only for 4-char ICAO codes)
+      if (code.length >= 4) {
+        setIsFr24Loading(true)
+        try {
+          const res = await fetch(
+            `/api/search/airport?q=${encodeURIComponent(code)}`,
+            { signal: AbortSignal.timeout(5000) }
+          )
+          if (res.ok) {
+            const data = await res.json()
+            if (data.result) {
+              setFr24Data(data.result)
+              setFr24Found(true)
+              // Auto-populate all fields from FR24
+              if (data.result.iata) setIata(data.result.iata)
+              if (data.result.name) setName(data.result.name)
+              if (data.result.city) setCity(data.result.city)
+              if (data.result.country) setCountry(data.result.country)
+              if (data.result.latitude) setLatitude(String(data.result.latitude))
+              if (data.result.longitude) setLongitude(String(data.result.longitude))
+              if (data.result.elevation) setElevation(String(data.result.elevation))
+              if (data.result.timezone) setTimezone(data.result.timezone)
+            } else {
+              setFr24Data(null)
+              setFr24Found(false)
+            }
+          } else {
+            setFr24Data(null)
+            setFr24Found(false)
+          }
+        } catch {
+          setFr24Data(null)
+          setFr24Found(false)
+        } finally {
+          setIsFr24Loading(false)
+          setFr24Searched(true)
+        }
+      } else {
+        setFr24Searched(true)
+      }
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [icao])
+
+  // Auto-derive timezone from lat/lng via geo-tz API (only when FR24 didn't provide timezone)
+  useEffect(() => {
+    // Skip if FR24 already provided timezone
+    if (fr24Found && fr24Data?.timezone) return
+
     const lat = parseFloat(latitude)
     const lng = parseFloat(longitude)
     if (isNaN(lat) || isNaN(lng)) return
@@ -135,37 +238,7 @@ export function AirportNewForm({
       clearTimeout(timer)
       controller.abort()
     }
-  }, [latitude, longitude])
-
-  // Duplicate detection: check when ICAO changes
-  useEffect(() => {
-    const code = icao.trim().toUpperCase()
-    if (code.length < 3) {
-      setExistingAirport(null)
-      return
-    }
-
-    setIsDuplicateChecking(true)
-    const timer = setTimeout(async () => {
-      try {
-        const existing = await getAirportByIcao(code)
-        if (existing) {
-          setExistingAirport({
-            icao: existing.icao,
-            name: existing.name || "",
-          })
-        } else {
-          setExistingAirport(null)
-        }
-      } catch {
-        setExistingAirport(null)
-      } finally {
-        setIsDuplicateChecking(false)
-      }
-    }, 500)
-
-    return () => clearTimeout(timer)
-  }, [icao])
+  }, [latitude, longitude, fr24Found, fr24Data?.timezone])
 
   const handleSave = async () => {
     if (!hasValidCode || existingAirport) return
@@ -183,7 +256,7 @@ export function AirportNewForm({
         name: name.trim(),
         city: city.trim(),
         state: "",
-        country: country.trim().toUpperCase(),
+        country: country.trim(),
         latitude: lat,
         longitude: lng,
         elevation: elev,
@@ -199,7 +272,7 @@ export function AirportNewForm({
           name: name.trim(),
           iata: iata.trim().toUpperCase(),
           city: city.trim(),
-          country: country.trim().toUpperCase(),
+          country: country.trim(),
           timezone: timezone.trim(),
           latitude: lat,
           longitude: lng,
@@ -248,6 +321,8 @@ export function AirportNewForm({
 
   const isDuplicate = !!existingAirport
   const canSave = hasValidCode && !isDuplicate && !isSaving
+  // Show manual fields only when FR24 didn't provide data
+  const showManualFields = fr24Searched && !fr24Found && !existingAirport
 
   const formContent = (
     <div className="container mx-auto px-3 pt-4 pb-safe">
@@ -260,6 +335,7 @@ export function AirportNewForm({
             onChange={setIcao}
             placeholder="e.g. WSSL"
             uppercase
+            required
           />
 
           {/* Duplicate detection banner */}
@@ -296,84 +372,120 @@ export function AirportNewForm({
             </div>
           )}
 
-          <SettingsRow
-            label="IATA Code"
-            value={iata}
-            onChange={setIata}
-            placeholder="e.g. XSP"
-            uppercase
-          />
-          <SettingsRow
-            label="Name"
-            value={name}
-            onChange={setName}
-            placeholder="Airport name"
-          />
-          <SettingsRow
-            label="City"
-            value={city}
-            onChange={setCity}
-            placeholder="City"
-          />
-          <SettingsRow
-            label="Country"
-            value={country}
-            onChange={setCountry}
-            placeholder="e.g. SG"
-            uppercase
-          />
+          {/* FR24 auto-search status */}
+          {!existingAirport && isFr24Loading && icao.trim().length >= 4 && (
+            <div className="flex items-center gap-2 px-0 py-2.5 border-b border-border text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Searching...
+            </div>
+          )}
+
+          {/* FR24 match found — show summary */}
+          {!existingAirport && !isFr24Loading && fr24Found && fr24Data && (
+            <div className="py-2.5 border-b border-border">
+              <div className="text-xs">
+                <span className="text-primary font-medium">Found: </span>
+                <span className="text-foreground font-semibold">{fr24Data.name}</span>
+                {fr24Data.city && (
+                  <span className="text-muted-foreground"> — {fr24Data.city}, {fr24Data.country}</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* FR24 no results — will show manual fields below */}
+          {!existingAirport && !isFr24Loading && !fr24Found && fr24Searched && icao.trim().length >= 4 && (
+            <div className="py-2.5 border-b border-border text-xs text-muted-foreground">
+              Not found online — enter details manually below.
+            </div>
+          )}
+
+          {/* Manual fields — only visible when FR24 failed/offline */}
+          {showManualFields && (
+            <>
+              <SettingsRow
+                label="IATA Code"
+                value={iata}
+                onChange={setIata}
+                placeholder="e.g. XSP"
+                uppercase
+              />
+              <SettingsRow
+                label="Name"
+                value={name}
+                onChange={setName}
+                placeholder="Airport name"
+              />
+              <SettingsRow
+                label="City"
+                value={city}
+                onChange={setCity}
+                placeholder="City"
+              />
+              <SettingsRow
+                label="Country"
+                value={country}
+                onChange={setCountry}
+                placeholder="e.g. Singapore"
+              />
+            </>
+          )}
         </div>
       </div>
 
-      {/* Location Card */}
-      <div className="bg-card rounded-xl overflow-hidden mb-6 border border-border">
-        <div className="px-4">
-          <SettingsRow
-            label="Latitude"
-            value={latitude}
-            onChange={setLatitude}
-            placeholder="e.g. 1.3644"
-            inputMode="decimal"
-          />
-          <SettingsRow
-            label="Longitude"
-            value={longitude}
-            onChange={setLongitude}
-            placeholder="e.g. 103.9915"
-            inputMode="decimal"
-          />
-          <SettingsRow
-            label="Elevation (ft)"
-            value={elevation}
-            onChange={setElevation}
-            placeholder="e.g. 40"
-            inputMode="numeric"
-          />
-          <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
-            <span className="text-foreground">Timezone</span>
-            <div className="flex items-center gap-2">
-              {tzLoading && (
-                <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-              )}
-              <Input
-                value={timezone}
-                readOnly
-                tabIndex={-1}
-                placeholder={
-                  latitude && longitude
-                    ? "Calculating..."
-                    : "Enter coordinates above"
-                }
-                className="text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 cursor-default"
-              />
+      {/* Location Card — only visible when FR24 failed/offline */}
+      {showManualFields && (
+        <div className="bg-card rounded-xl overflow-hidden mb-6 border border-border">
+          <div className="px-4">
+            <SettingsRow
+              label="Latitude"
+              value={latitude}
+              onChange={setLatitude}
+              placeholder="e.g. 1.3644"
+              inputMode="decimal"
+            />
+            <SettingsRow
+              label="Longitude"
+              value={longitude}
+              onChange={setLongitude}
+              placeholder="e.g. 103.9915"
+              inputMode="decimal"
+            />
+            <SettingsRow
+              label="Elevation (ft)"
+              value={elevation}
+              onChange={setElevation}
+              placeholder="e.g. 40"
+              inputMode="numeric"
+            />
+            <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
+              <span className="text-foreground">Timezone</span>
+              <div className="flex items-center gap-2">
+                {tzLoading && (
+                  <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                )}
+                <Input
+                  value={timezone}
+                  readOnly
+                  tabIndex={-1}
+                  placeholder={
+                    latitude && longitude
+                      ? "Calculating..."
+                      : "Enter coordinates above"
+                  }
+                  className="text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 cursor-default"
+                />
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       <p className="text-xs text-muted-foreground px-4">
-        Enter at least an ICAO or IATA code. Timezone is auto-calculated from
-        coordinates when latitude and longitude are provided.
+        {fr24Found
+          ? "Airport details found and will be saved automatically."
+          : "Enter the ICAO code. Additional details can be entered manually if not found online."
+        }
       </p>
     </div>
   )

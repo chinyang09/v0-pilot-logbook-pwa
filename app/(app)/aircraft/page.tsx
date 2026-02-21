@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react"
 import type React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { Search, Plane, Loader2, Star, Plus, Globe } from "lucide-react"
+import { Search, Plane, Loader2, Star, Plus } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import { Input } from "@/components/ui/input"
 import {
@@ -720,40 +720,34 @@ export default function AircraftPage() {
                   {filteredAircraft.length === 0 && isFr24Loading && (
                     <div className="flex items-center gap-2 py-4 justify-center">
                       <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                      <span className="text-sm text-muted-foreground">Searching online...</span>
+                      <span className="text-sm text-muted-foreground">Searching...</span>
                     </div>
                   )}
 
                   {filteredAircraft.length === 0 && !isFr24Loading && fr24Results.length > 0 && (
-                    <div className="space-y-1.5">
-                      <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1 flex items-center gap-1">
-                        <Globe className="h-3 w-3" /> Online Results
-                      </h2>
-                      <div className="space-y-1">
-                        {fr24Results.map((record) => (
-                          <div
-                            key={record.registration || record.icao24}
-                            onClick={() => handleSelectFr24(record)}
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={(e: React.KeyboardEvent) => {
-                              if (e.key === "Enter" || e.key === " ") handleSelectFr24(record)
-                            }}
-                            className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer active:scale-[0.98] bg-card border border-border hover:bg-accent"
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-foreground">{record.registration || record.icao24}</span>
-                              {record.typecode && (
-                                <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">{record.typecode}</span>
-                              )}
-                              <Globe className="h-3 w-3 text-muted-foreground/50 ml-auto flex-shrink-0" />
-                            </div>
-                            {record.operator && (
-                              <div className="text-sm text-muted-foreground truncate mt-0.5">{record.operator}</div>
+                    <div className="space-y-1">
+                      {fr24Results.map((record) => (
+                        <div
+                          key={record.registration || record.icao24}
+                          onClick={() => handleSelectFr24(record)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e: React.KeyboardEvent) => {
+                            if (e.key === "Enter" || e.key === " ") handleSelectFr24(record)
+                          }}
+                          className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer active:scale-[0.98] bg-card border border-border hover:bg-accent"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground">{record.registration || record.icao24}</span>
+                            {record.typecode && (
+                              <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">{record.typecode}</span>
                             )}
                           </div>
-                        ))}
-                      </div>
+                          {record.operator && (
+                            <div className="text-sm text-muted-foreground truncate mt-0.5">{record.operator}</div>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   )}
 

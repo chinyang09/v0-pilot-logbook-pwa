@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PageContainer } from "@/components/page-container"
-import { ArrowLeft, Loader2, Search, AlertCircle } from "lucide-react"
+import { Loader2, Search, AlertCircle } from "lucide-react"
 import { useRouter } from "next/navigation"
 import {
   addCustomAircraftToDatabase,
@@ -88,7 +88,7 @@ export function AircraftNewForm({
   const [showTypeSearch, setShowTypeSearch] = useState(false)
 
   // FR24 inline search state
-  const [fr24Result, setFr24Result] = useState<{
+  const [fr24Data, setFr24Data] = useState<{
     registration: string
     typecode: string
     icao24: string
@@ -96,13 +96,8 @@ export function AircraftNewForm({
   } | null>(null)
   const [isFr24Loading, setIsFr24Loading] = useState(false)
   const [fr24Searched, setFr24Searched] = useState(false)
-
-  // Persisted FR24 data (survives "Use" button clearing fr24Result)
-  const [usedFr24Data, setUsedFr24Data] = useState<{
-    icao24: string
-    operator: string
-    typecode: string
-  } | null>(null)
+  // Whether FR24 returned a result (drives whether type code field is shown)
+  const [fr24Found, setFr24Found] = useState(false)
 
   // Duplicate detection state
   const [existingAircraft, setExistingAircraft] = useState<{
@@ -115,17 +110,20 @@ export function AircraftNewForm({
   useEffect(() => {
     const reg = registration.trim()
     if (reg.length < 3) {
-      setFr24Result(null)
+      setFr24Data(null)
       setFr24Searched(false)
+      setFr24Found(false)
       setExistingAircraft(null)
-      setUsedFr24Data(null)
       return
     }
 
-    // Reset used FR24 data when registration changes
-    setUsedFr24Data(null)
+    // Reset state when registration changes
+    setFr24Data(null)
     setFr24Searched(false)
+    setFr24Found(false)
     setExistingAircraft(null)
+    setTypecode("")
+    setSelectedType(null)
 
     const timer = setTimeout(async () => {
       // 1. Check for duplicates in local DB
@@ -139,7 +137,6 @@ export function AircraftNewForm({
           })
           setIsDuplicateChecking(false)
           // Skip FR24 search if already in DB
-          setFr24Result(null)
           setFr24Searched(true)
           setIsFr24Loading(false)
           return
@@ -160,12 +157,24 @@ export function AircraftNewForm({
         if (res.ok) {
           const data = await res.json()
           const match = data.results?.[0] || null
-          setFr24Result(match)
+          if (match) {
+            setFr24Data(match)
+            setFr24Found(true)
+            // Auto-populate typecode from FR24
+            if (match.typecode) {
+              setTypecode(match.typecode)
+            }
+          } else {
+            setFr24Data(null)
+            setFr24Found(false)
+          }
         } else {
-          setFr24Result(null)
+          setFr24Data(null)
+          setFr24Found(false)
         }
       } catch {
-        setFr24Result(null)
+        setFr24Data(null)
+        setFr24Found(false)
       } finally {
         setIsFr24Loading(false)
         setFr24Searched(true)
@@ -174,7 +183,7 @@ export function AircraftNewForm({
     return () => clearTimeout(timer)
   }, [registration])
 
-  // Search aircraft types when typecode changes
+  // Search aircraft types when typecode changes (only when type field is visible)
   useEffect(() => {
     if (!typeSearchQuery || typeSearchQuery.length < 1) {
       setTypeSearchResults([])
@@ -188,23 +197,6 @@ export function AircraftNewForm({
     const timer = setTimeout(search, 200)
     return () => clearTimeout(timer)
   }, [typeSearchQuery])
-
-  const handleUseFr24 = useCallback(() => {
-    if (!fr24Result) return
-    // Persist FR24 data before clearing the result display
-    setUsedFr24Data({
-      icao24: fr24Result.icao24,
-      operator: fr24Result.operator,
-      typecode: fr24Result.typecode,
-    })
-    setRegistration(fr24Result.registration)
-    if (fr24Result.typecode) {
-      setTypecode(fr24Result.typecode)
-      setTypeSearchQuery(fr24Result.typecode)
-    }
-    setFr24Result(null)
-    setFr24Searched(false)
-  }, [fr24Result])
 
   const handleSelectType = useCallback((type: AircraftType) => {
     setSelectedType(type)
@@ -220,12 +212,14 @@ export function AircraftNewForm({
 
     setIsSaving(true)
     try {
+      // Use FR24 data to populate if available, otherwise manual entry
+      const finalReg = fr24Data?.registration || reg
       const record: AircraftRecord = {
-        registration: reg,
-        icao24: usedFr24Data?.icao24 || "",
+        registration: finalReg,
+        icao24: fr24Data?.icao24 || "",
         typecode: typecode.trim().toUpperCase(),
-        operator: usedFr24Data?.operator || "",
-        source: usedFr24Data ? "fr24" : "custom",
+        operator: fr24Data?.operator || "",
+        source: fr24Data ? "fr24" : "custom",
       }
 
       const submissionId = await addCustomAircraftToDatabase(record)
@@ -233,7 +227,7 @@ export function AircraftNewForm({
       // Fire-and-forget server submission for enrichment
       submitAircraftToServer({
         submissionId,
-        registration: reg,
+        registration: finalReg,
         typecode: record.typecode,
         icao24: record.icao24,
         operator: record.operator,
@@ -241,14 +235,14 @@ export function AircraftNewForm({
 
       if (selectMode && flightId) {
         await updateFlight(flightId, {
-          aircraftReg: reg,
+          aircraftReg: finalReg,
           aircraftType: record.typecode || "",
         })
         syncService.notifyDataChange()
       }
 
       if (onSave) {
-        onSave(reg)
+        onSave(finalReg)
       } else {
         router.back()
       }
@@ -275,6 +269,8 @@ export function AircraftNewForm({
 
   const isDuplicate = !!existingAircraft
   const canSave = registration.trim().length > 0 && !isDuplicate && !isSaving
+  // Show type code field only when FR24 search failed or returned no results
+  const showManualTypeField = fr24Searched && !fr24Found && !existingAircraft
 
   const formContent = (
     <div className="container mx-auto px-3 pt-4 pb-safe">
@@ -323,121 +319,122 @@ export function AircraftNewForm({
             </div>
           )}
 
-          {/* FR24 auto-search result banner */}
+          {/* FR24 auto-search status */}
           {!existingAircraft && isFr24Loading && registration.trim().length >= 3 && (
             <div className="flex items-center gap-2 px-0 py-2.5 border-b border-border text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
-              Searching FlightRadar24...
+              Searching...
             </div>
           )}
-          {!existingAircraft && !isFr24Loading && fr24Result && (
+
+          {/* FR24 match found — show summary (auto-populated, no "Use" button needed) */}
+          {!existingAircraft && !isFr24Loading && fr24Found && fr24Data && (
             <div className="py-2.5 border-b border-border">
-              <div className="flex items-center justify-between">
-                <div className="text-xs">
-                  <span className="text-primary font-medium">Found: </span>
-                  <span className="text-foreground font-semibold">{fr24Result.registration}</span>
-                  {fr24Result.typecode && (
-                    <span className="text-muted-foreground"> ({fr24Result.typecode})</span>
-                  )}
-                  {fr24Result.operator && (
-                    <span className="text-muted-foreground"> — {fr24Result.operator}</span>
-                  )}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleUseFr24}
-                  className="text-primary h-6 px-2 text-xs font-semibold"
-                >
-                  Use
-                </Button>
+              <div className="text-xs">
+                <span className="text-primary font-medium">Found: </span>
+                <span className="text-foreground font-semibold">{fr24Data.registration}</span>
+                {fr24Data.typecode && (
+                  <span className="text-muted-foreground"> ({fr24Data.typecode})</span>
+                )}
+                {fr24Data.operator && (
+                  <span className="text-muted-foreground"> — {fr24Data.operator}</span>
+                )}
               </div>
             </div>
           )}
-          {!existingAircraft && !isFr24Loading && !fr24Result && fr24Searched && registration.trim().length >= 3 && (
+
+          {/* FR24 no results — will show manual type field below */}
+          {!existingAircraft && !isFr24Loading && !fr24Found && fr24Searched && registration.trim().length >= 3 && (
             <div className="py-2.5 border-b border-border text-xs text-muted-foreground">
-              Not found on FlightRadar24 — enter details manually below.
+              Not found online — enter type code manually below.
             </div>
           )}
 
-          <div className="py-3 border-b border-border">
-            <div className="flex items-center justify-between">
-              <span className="text-foreground">Type Code</span>
-              <div className="flex items-center gap-2">
-                <Input
-                  value={typecode}
-                  onChange={(e) => {
-                    const val = e.target.value.toUpperCase()
-                    setTypecode(val)
-                    setTypeSearchQuery(val)
-                    setShowTypeSearch(true)
-                    if (!val) setSelectedType(null)
-                  }}
-                  onFocus={() => {
-                    if (typecode) {
-                      setTypeSearchQuery(typecode)
-                      setShowTypeSearch(true)
-                    }
-                  }}
-                  placeholder="e.g. A359"
-                  className="text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[150px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 uppercase"
-                />
-              </div>
-            </div>
-
-            {/* Type search results dropdown */}
-            {showTypeSearch && typeSearchResults.length > 0 && (
-              <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-border bg-background">
-                {typeSearchResults.map((type) => (
-                  <button
-                    key={type.designator}
-                    type="button"
-                    onClick={() => handleSelectType(type)}
-                    className="w-full text-left px-3 py-2 hover:bg-accent border-b border-border last:border-b-0 transition-colors"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm text-foreground">
-                        {type.designator}
-                      </span>
-                      <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-                        {type.description}
-                      </span>
-                      {type.wtc && (
-                        <span className="text-xs text-muted-foreground">
-                          WTC: {type.wtc}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      {formatAircraftType(type)}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Auto-populated type info */}
-          {selectedType && (
+          {/* Type Code field — only visible when FR24 failed/offline */}
+          {showManualTypeField && (
             <>
-              <ReadOnlyRow
-                label="Manufacturer"
-                value={selectedType.manufacturer}
-              />
-              <ReadOnlyRow label="Model" value={selectedType.model} />
-              <ReadOnlyRow
-                label="Category"
-                value={`${selectedType.category} · ${selectedType.engineCount} × ${selectedType.engineType}`}
-              />
-              <ReadOnlyRow label="WTC" value={selectedType.wtc} />
+              <div className="py-3 border-b border-border">
+                <div className="flex items-center justify-between">
+                  <span className="text-foreground">Type Code</span>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={typecode}
+                      onChange={(e) => {
+                        const val = e.target.value.toUpperCase()
+                        setTypecode(val)
+                        setTypeSearchQuery(val)
+                        setShowTypeSearch(true)
+                        if (!val) setSelectedType(null)
+                      }}
+                      onFocus={() => {
+                        if (typecode) {
+                          setTypeSearchQuery(typecode)
+                          setShowTypeSearch(true)
+                        }
+                      }}
+                      placeholder="e.g. A359"
+                      className="text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[150px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 uppercase"
+                    />
+                  </div>
+                </div>
+
+                {/* Type search results dropdown */}
+                {showTypeSearch && typeSearchResults.length > 0 && (
+                  <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-border bg-background">
+                    {typeSearchResults.map((type) => (
+                      <button
+                        key={type.designator}
+                        type="button"
+                        onClick={() => handleSelectType(type)}
+                        className="w-full text-left px-3 py-2 hover:bg-accent border-b border-border last:border-b-0 transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm text-foreground">
+                            {type.designator}
+                          </span>
+                          <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                            {type.description}
+                          </span>
+                          {type.wtc && (
+                            <span className="text-xs text-muted-foreground">
+                              WTC: {type.wtc}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {formatAircraftType(type)}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Auto-populated type info */}
+              {selectedType && (
+                <>
+                  <ReadOnlyRow
+                    label="Manufacturer"
+                    value={selectedType.manufacturer}
+                  />
+                  <ReadOnlyRow label="Model" value={selectedType.model} />
+                  <ReadOnlyRow
+                    label="Category"
+                    value={`${selectedType.category} · ${selectedType.engineCount} × ${selectedType.engineType}`}
+                  />
+                  <ReadOnlyRow label="WTC" value={selectedType.wtc} />
+                </>
+              )}
             </>
           )}
         </div>
       </div>
 
       <p className="text-xs text-muted-foreground px-4">
-        Enter the aircraft registration. Optionally, search for the ICAO type
-        code to auto-populate aircraft details.
+        {fr24Found
+          ? "Aircraft details found and will be saved automatically."
+          : "Enter the aircraft registration. Type code can be entered manually if not found online."
+        }
       </p>
     </div>
   )
