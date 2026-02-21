@@ -25,6 +25,7 @@ import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { AirportDetailPanel } from "@/components/airport-detail-panel";
+import { AirportNewForm } from "@/components/airport-new-form";
 import { useDebounce } from "@/hooks/use-debounce";
 
 // Memoized airport card to prevent unnecessary re-renders during virtualization
@@ -382,6 +383,33 @@ export default function AirportsPage() {
     ? `/airports/new?field=${fieldType}&flightId=${flightId}${searchQuery ? `&code=${encodeURIComponent(searchQuery)}` : ""}`
     : `/airports/new${searchQuery ? `?code=${encodeURIComponent(searchQuery)}` : ""}`;
 
+  const handleAddClick = useCallback(() => {
+    if (isDesktop && !fieldType) {
+      setDetailContent(
+        <AirportNewForm
+          prefilledCode={searchQuery}
+          isDetailPanel
+          onSave={(icao) => {
+            mutateAirports();
+            setSelectedAirportIcao(icao);
+          }}
+          onCancel={() => {
+            if (selectedAirportIcao) {
+              setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} />);
+            } else {
+              setDetailContent(null);
+            }
+          }}
+          onViewExisting={(icao) => {
+            setSelectedAirportIcao(icao);
+          }}
+        />
+      );
+    } else {
+      router.push(addAirportUrl);
+    }
+  }, [isDesktop, fieldType, searchQuery, router, addAirportUrl, selectedAirportIcao, mutateAirports, setDetailContent, setSelectedAirportIcao]);
+
   const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim();
 
   const pageTitle = !fieldType
@@ -427,7 +455,7 @@ export default function AirportsPage() {
                 />
               </div>
               <Button
-                onClick={() => router.push(addAirportUrl)}
+                onClick={handleAddClick}
                 size="icon"
                 className="h-10 w-10 flex-shrink-0"
               >
@@ -503,7 +531,7 @@ export default function AirportsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => router.push(addAirportUrl)}
+                      onClick={handleAddClick}
                     >
                       <Plus className="h-4 w-4 mr-1" />
                       Add Airport

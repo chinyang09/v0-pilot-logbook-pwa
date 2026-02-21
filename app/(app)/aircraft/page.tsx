@@ -30,6 +30,7 @@ import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { AircraftDetailPanel } from "@/components/aircraft-detail-panel"
+import { AircraftNewForm } from "@/components/aircraft-new-form"
 import { cn } from "@/lib/utils"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
 
@@ -553,6 +554,43 @@ export default function AircraftPage() {
     ? `/aircraft/new?select=true${flightId ? `&flightId=${flightId}` : ""}${searchQuery ? `&reg=${encodeURIComponent(searchQuery)}` : ""}`
     : `/aircraft/new${searchQuery ? `?reg=${encodeURIComponent(searchQuery)}` : ""}`
 
+  const handleAddClick = useCallback(() => {
+    if (isDesktop && !selectMode) {
+      setDetailContent(
+        <AircraftNewForm
+          prefilledReg={searchQuery}
+          isDetailPanel
+          onSave={async (registration) => {
+            // Optimistically add to list
+            const found = await import("@/lib/db").then(m => m.getAircraftByRegistrationFromDB(registration))
+            if (found) {
+              const newData: AircraftData = {
+                icao24: found.icao24,
+                reg: found.registration,
+                icaotype: found.typecode || null,
+                short_type: found.shortType || null,
+              }
+              setAllAircraft((prev) => [...prev, newData])
+            }
+            setSelectedAircraftReg(registration)
+          }}
+          onCancel={() => {
+            if (selectedAircraftReg) {
+              setDetailContent(<AircraftDetailPanel registration={selectedAircraftReg} />)
+            } else {
+              setDetailContent(null)
+            }
+          }}
+          onViewExisting={(registration) => {
+            setSelectedAircraftReg(registration)
+          }}
+        />
+      )
+    } else {
+      router.push(addAircraftUrl)
+    }
+  }, [isDesktop, selectMode, searchQuery, router, addAircraftUrl, selectedAircraftReg, setDetailContent, setSelectedAircraftReg])
+
   const showFavorites = !debouncedSearchQuery && favoriteAircraft.length > 0
   const showRecentlyUsed = !debouncedSearchQuery && recentNonFavorites.length > 0
   const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim()
@@ -614,7 +652,7 @@ export default function AircraftPage() {
                   />
                 </div>
                 <Button
-                  onClick={() => router.push(addAircraftUrl)}
+                  onClick={handleAddClick}
                   size="icon"
                   className="h-10 w-10 flex-shrink-0"
                 >
@@ -727,7 +765,7 @@ export default function AircraftPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => router.push(addAircraftUrl)}
+                        onClick={handleAddClick}
                       >
                         <Plus className="h-4 w-4 mr-1" />
                         Add Aircraft
