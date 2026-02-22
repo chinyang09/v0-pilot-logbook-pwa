@@ -1,9 +1,8 @@
 "use client"
 
-import { useMemo } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
-import { useAirportDatabase } from "@/hooks/data"
-import { getAirportByICAO, getAirportLocalTime } from "@/lib/db"
+import { getAirportByIcao, getAirportLocalTime, type Airport } from "@/lib/db"
 import {
   MapPin,
   Globe,
@@ -18,12 +17,21 @@ interface AirportDetailPanelProps {
 }
 
 export function AirportDetailPanel({ icao }: AirportDetailPanelProps) {
-  const { airports, isLoading } = useAirportDatabase()
+  const [airport, setAirport] = useState<Airport | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
-  const airport = useMemo(() => {
-    if (!airports.length) return null
-    return getAirportByICAO(airports, icao)
-  }, [airports, icao])
+  // Direct IndexedDB lookup by primary key (O(1), always fresh)
+  useEffect(() => {
+    let mounted = true
+    setIsLoading(true)
+    getAirportByIcao(icao).then((found) => {
+      if (mounted) {
+        setAirport(found ?? null)
+        setIsLoading(false)
+      }
+    })
+    return () => { mounted = false }
+  }, [icao])
 
   // Dynamic local time calculation
   const timeInfo = useMemo(() => {
