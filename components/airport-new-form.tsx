@@ -52,6 +52,15 @@ function SettingsRow({
   )
 }
 
+function ReadOnlyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
+      <span className="text-foreground">{label}</span>
+      <span className="text-muted-foreground">{value || "-"}</span>
+    </div>
+  )
+}
+
 export interface AirportNewFormProps {
   prefilledCode?: string
   fieldType?: string | null
@@ -393,11 +402,21 @@ export function AirportNewForm({
             </div>
           )}
 
-          {/* FR24 no results — will show manual fields below */}
+          {/* FR24 no results — editable fields below */}
           {!existingAirport && !isFr24Loading && !fr24Found && fr24Searched && icao.trim().length >= 4 && (
             <div className="py-2.5 border-b border-border text-xs text-muted-foreground">
               Not found online — enter details manually below.
             </div>
+          )}
+
+          {/* FR24 found — show read-only fields */}
+          {fr24Found && fr24Data && (
+            <>
+              <ReadOnlyRow label="IATA Code" value={fr24Data.iata || "-"} />
+              <ReadOnlyRow label="Name" value={fr24Data.name || "-"} />
+              <ReadOnlyRow label="City" value={fr24Data.city || "-"} />
+              <ReadOnlyRow label="Country" value={fr24Data.country || "-"} />
+            </>
           )}
 
           {/* Manual fields — only visible when FR24 failed/offline */}
@@ -433,7 +452,18 @@ export function AirportNewForm({
         </div>
       </div>
 
-      {/* Location Card — only visible when FR24 failed/offline */}
+      {/* Location Card — read-only when FR24 found, editable when FR24 failed */}
+      {fr24Found && fr24Data && (
+        <div className="bg-card rounded-xl overflow-hidden mb-6 border border-border">
+          <div className="px-4">
+            <ReadOnlyRow label="Latitude" value={fr24Data.latitude ? String(fr24Data.latitude) : "-"} />
+            <ReadOnlyRow label="Longitude" value={fr24Data.longitude ? String(fr24Data.longitude) : "-"} />
+            <ReadOnlyRow label="Elevation (ft)" value={fr24Data.elevation ? String(fr24Data.elevation) : "-"} />
+            <ReadOnlyRow label="Timezone" value={fr24Data.timezone || "-"} />
+          </div>
+        </div>
+      )}
+
       {showManualFields && (
         <div className="bg-card rounded-xl overflow-hidden mb-6 border border-border">
           <div className="px-4">

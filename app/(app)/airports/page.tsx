@@ -17,7 +17,11 @@ import {
   type Airport,
 } from "@/lib/db";
 import { syncService } from "@/lib/sync";
-import { Star, Search, Plus, MapPin } from "lucide-react";
+import {
+  addCustomAirport,
+} from "@/lib/db";
+import { submitAirportToServer } from "@/lib/submissions/submit";
+import { Star, Search, Plus, MapPin, Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -116,6 +120,22 @@ export default function AirportsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebounce(searchQuery, 150);
 
+  // FR24 online search state
+  interface Fr24AirportResult {
+    icao: string;
+    iata: string;
+    name: string;
+    city: string;
+    country: string;
+    countryCode: string;
+    latitude: number;
+    longitude: number;
+    elevation: number;
+    timezone: string;
+  }
+  const [fr24Result, setFr24Result] = useState<Fr24AirportResult | null>(null);
+  const [isFr24Loading, setIsFr24Loading] = useState(false);
+
   // Detail panel integration
   const {
     selectedId: selectedAirportIcao,
@@ -152,6 +172,37 @@ export default function AirportsPage() {
       return a.icao.localeCompare(b.icao);
     });
   }, [airports, allSortedAirports, debouncedSearchQuery]);
+
+  // FR24 online search: fires when local results are empty and query is >= 4 chars (ICAO)
+  useEffect(() => {
+    const query = debouncedSearchQuery.trim().toUpperCase();
+    if (!query || query.length < 4 || filteredAirports.length > 0) {
+      setFr24Result(null);
+      setIsFr24Loading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsFr24Loading(true);
+
+    const searchFr24 = async () => {
+      try {
+        const res = await fetch(`/api/search/airport?q=${encodeURIComponent(query)}`);
+        if (!res.ok) throw new Error("FR24 airport search failed");
+        const data = await res.json();
+        if (!cancelled) {
+          setFr24Result(data.result || null);
+        }
+      } catch {
+        if (!cancelled) setFr24Result(null);
+      } finally {
+        if (!cancelled) setIsFr24Loading(false);
+      }
+    };
+
+    searchFr24();
+    return () => { cancelled = true; };
+  }, [debouncedSearchQuery, filteredAirports.length]);
 
   // Set of recent ICAO codes for fast lookup
   const recentIcaos = useMemo(() => {
@@ -379,6 +430,68 @@ export default function AirportsPage() {
     );
   }, [mutateAirports]);
 
+  const handleSelectFr24Airport = useCallback(
+    async (result: Fr24AirportResult) => {
+      // Save to local DB
+      const newAirport = await addCustomAirport({
+        icao: result.icao,
+        iata: result.iata,
+        name: result.name,
+        city: result.city,
+        state: "",
+        country: result.country,
+        latitude: result.latitude,
+        longitude: result.longitude,
+        elevation: result.elevation,
+        tz: result.timezone || "UTC",
+        isCustom: true,
+      });
+
+      // Fire-and-forget server submission
+      if (newAirport.submissionId) {
+        submitAirportToServer({
+          submissionId: newAirport.submissionId,
+          icao: result.icao,
+          name: result.name,
+          iata: result.iata,
+          city: result.city,
+          country: result.country,
+          timezone: result.timezone,
+          latitude: result.latitude,
+          longitude: result.longitude,
+          elevation: result.elevation,
+        });
+      }
+
+      // Refresh list and select
+      mutateAirports();
+      setSearchQuery("");
+      setFr24Result(null);
+
+      if (fieldType && flightId) {
+        await addRecentlyUsedAirport(result.icao);
+        const updates: Partial<{ departureIcao: string; departureIata: string; arrivalIcao: string; arrivalIata: string }> = {};
+        if (fieldType === "departureIcao") {
+          updates.departureIcao = result.icao;
+          updates.departureIata = result.iata;
+        } else if (fieldType === "arrivalIcao") {
+          updates.arrivalIcao = result.icao;
+          updates.arrivalIata = result.iata;
+        }
+        try {
+          await updateFlight(flightId, updates);
+          syncService.notifyDataChange();
+        } catch (error) {
+          console.error("Failed to update flight with airport:", error);
+        }
+        router.back();
+      } else if (isDesktop) {
+        setSelectedAirportIcao(result.icao);
+      }
+    },
+    [fieldType, flightId, isDesktop, router, mutateAirports, setSelectedAirportIcao],
+  );
+
   const addAirportUrl = fieldType && flightId
     ? `/airports/new?field=${fieldType}&flightId=${flightId}${searchQuery ? `&code=${encodeURIComponent(searchQuery)}` : ""}`
     : `/airports/new${searchQuery ? `?code=${encodeURIComponent(searchQuery)}` : ""}`;
@@ -519,12 +632,40 @@ export default function AirportsPage() {
 
             {debouncedSearchQuery.trim() && (
               <div className="space-y-3">
-                <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
-                  {filteredAirports.length} results
-                </h2>
+                {/* FR24 fallback — shown when no local results */}
+                {filteredAirports.length === 0 && isFr24Loading && (
+                  <div className="flex items-center gap-2 py-4 justify-center">
+                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    <span className="text-sm text-muted-foreground">Searching...</span>
+                  </div>
+                )}
 
-                {/* Empty state — no results */}
-                {filteredAirports.length === 0 && (
+                {filteredAirports.length === 0 && !isFr24Loading && fr24Result && (
+                  <div className="space-y-1">
+                    <div
+                      onClick={() => handleSelectFr24Airport(fr24Result)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e: React.KeyboardEvent) => {
+                        if (e.key === "Enter" || e.key === " ") handleSelectFr24Airport(fr24Result);
+                      }}
+                      className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer active:scale-[0.98] bg-card border border-border hover:bg-accent"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-foreground">{fr24Result.icao}</span>
+                        <span className="text-sm text-foreground truncate">{fr24Result.name}</span>
+                      </div>
+                      {fr24Result.city && (
+                        <div className="text-sm text-muted-foreground truncate mt-0.5">
+                          {fr24Result.city}, {fr24Result.country}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Empty state — no local or online results */}
+                {filteredAirports.length === 0 && !isFr24Loading && !fr24Result && (
                   <div className="flex flex-col items-center gap-3 py-8">
                     <MapPin className="h-8 w-8 text-muted-foreground/50" />
                     <p className="text-sm text-muted-foreground">No airports found</p>
