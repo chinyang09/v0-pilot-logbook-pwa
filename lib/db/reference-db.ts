@@ -10,6 +10,7 @@
 import Dexie, { type Table } from "dexie"
 import type { Airport } from "@/types/entities/airport.types"
 import type { AircraftReference } from "@/types/entities/aircraft.types"
+import type { AircraftTypeRaw } from "@/types/entities/aircraft-type.types"
 
 interface ReferenceMetadata {
   key: string
@@ -20,6 +21,7 @@ interface ReferenceMetadata {
 class ReferenceDatabase extends Dexie {
   airports!: Table<Airport, string>
   aircraftDatabase!: Table<AircraftReference, string>
+  aircraftTypes!: Table<AircraftTypeRaw, string>
   metadata!: Table<ReferenceMetadata, string>
 
   constructor() {
@@ -28,6 +30,13 @@ class ReferenceDatabase extends Dexie {
     this.version(1).stores({
       airports: "icao, iata, name, id, isFavorite",
       aircraftDatabase: "registration",
+      metadata: "key",
+    })
+
+    this.version(2).stores({
+      airports: "icao, iata, name, id, isFavorite",
+      aircraftDatabase: "registration",
+      aircraftTypes: "d, m, n",
       metadata: "key",
     })
   }

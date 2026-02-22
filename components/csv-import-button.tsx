@@ -44,14 +44,17 @@ export function CSVImportButton({ onComplete }: { onComplete: () => void }) {
       });
 
       // Show success briefly
+      const detailParts = [`${result.flightsImported} flights`];
+      if (result.personnelCreated > 0) {
+        detailParts.push(`${result.personnelCreated} new crew`);
+      }
+      if (result.aircraftEnriched > 0) {
+        detailParts.push(`${result.aircraftEnriched} aircraft enriched`);
+      }
       setProgress({
         percent: 100,
         stage: "Complete!",
-        detail: `Imported ${result.flightsImported} flights${
-          result.personnelCreated > 0
-            ? `, ${result.personnelCreated} new crew`
-            : ""
-        }`,
+        detail: `Imported ${detailParts.join(", ")}`,
       });
 
       // Wait a moment to show success message

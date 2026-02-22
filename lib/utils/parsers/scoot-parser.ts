@@ -23,8 +23,11 @@ import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time";
 // Import the new batch function (add to aircraft.store.ts exports)
 import {
   batchGetAircraftByRegistrations,
+  addCustomAircraftToDatabase,
   type NormalizedAircraft,
 } from "@/lib/db/stores/reference/aircraft.store";
+import { submitAircraftToServer } from "@/lib/submissions/submit";
+import type { AircraftRecord } from "@/types/entities/aircraft.types";
 
 // ============================================
 // Types
@@ -48,6 +51,8 @@ interface ParseResult {
   flightsImported: number;
   personnelCreated: number;
   errors: string[];
+  aircraftEnriched: number;
+  unmatchedRegistrations: string[];
 }
 
 // ============================================
@@ -158,6 +163,54 @@ export async function processScootCSV(
   console.log(
     `[Scoot Parser] Loaded ${airportMap.size} airports, ${aircraftMap.size} aircraft`
   );
+
+  // ========== ENRICHMENT: Resolve unmatched aircraft via server + FR24 ==========
+  const unmatchedRegs = Array.from(uniqueRegs).filter(
+    (reg) => !aircraftMap.has(reg)
+  );
+
+  let aircraftEnriched = 0;
+  let unmatchedRegistrations: string[] = [];
+  const serverSubmissionQueue: Array<{
+    submissionId: string;
+    registration: string;
+    typecode?: string;
+    icao24?: string;
+    operator?: string;
+  }> = [];
+
+  if (unmatchedRegs.length > 0) {
+    onProgress?.(
+      30,
+      "Enriching aircraft",
+      `Looking up ${unmatchedRegs.length} aircraft online...`
+    );
+
+    const enrichResult = await enrichUnmatchedAircraft(
+      unmatchedRegs,
+      (current, total, reg) => {
+        const percent = 30 + Math.floor((current / total) * 10);
+        onProgress?.(percent, "Enriching aircraft", `${current}/${total}: ${reg}`);
+      }
+    );
+
+    // Merge enriched results into aircraftMap for the second pass
+    for (const [reg, aircraft] of enrichResult.enriched) {
+      aircraftMap.set(reg, aircraft);
+    }
+
+    aircraftEnriched = enrichResult.enriched.size;
+    unmatchedRegistrations = enrichResult.failedRegs;
+
+    // Queue server submissions for FR24-found aircraft
+    for (const sub of enrichResult.submissionQueue) {
+      serverSubmissionQueue.push(sub);
+    }
+
+    console.log(
+      `[Scoot Parser] Enrichment: ${aircraftEnriched} found, ${unmatchedRegistrations.length} unresolved`
+    );
+  }
 
   // ========== SECOND PASS: Process flights ==========
   onProgress?.(40, "Processing", "Creating/Hydrating flight records...");
@@ -357,17 +410,174 @@ export async function processScootCSV(
     }
   );
 
+  // Fire-and-forget: submit FR24-enriched aircraft to server
+  if (serverSubmissionQueue.length > 0) {
+    for (const submission of serverSubmissionQueue) {
+      submitAircraftToServer(submission);
+    }
+    console.log(
+      `[Scoot Parser] Queued ${serverSubmissionQueue.length} aircraft for server submission`
+    );
+  }
+
   onProgress?.(100, "Complete", `Imported ${flightsToSave.length} flights`);
 
   console.log(
-    `[Scoot Parser] Successfully imported ${flightsToSave.length} flights, ${personnelToSave.length} new crew`
+    `[Scoot Parser] Successfully imported ${flightsToSave.length} flights, ${personnelToSave.length} new crew, ${aircraftEnriched} aircraft enriched`
   );
 
   return {
     flightsImported: flightsToSave.length,
     personnelCreated: personnelToSave.length,
     errors,
+    aircraftEnriched,
+    unmatchedRegistrations,
   };
+}
+
+// ============================================
+// Helper: Batch fetch airports
+// ============================================
+
+// ============================================
+// Helper: 3-tier aircraft enrichment (server → FR24 → fail)
+// ============================================
+
+function normalizeReg(reg: string): string {
+  return reg.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+}
+
+async function enrichUnmatchedAircraft(
+  unmatchedRegs: string[],
+  onProgress?: (current: number, total: number, reg: string) => void
+): Promise<{
+  enriched: Map<string, NormalizedAircraft>;
+  submissionQueue: Array<{
+    submissionId: string;
+    registration: string;
+    typecode?: string;
+    icao24?: string;
+    operator?: string;
+  }>;
+  failedRegs: string[];
+}> {
+  const enriched = new Map<string, NormalizedAircraft>();
+  const submissionQueue: Array<{
+    submissionId: string;
+    registration: string;
+    typecode?: string;
+    icao24?: string;
+    operator?: string;
+  }> = [];
+  const failedRegs: string[] = [];
+
+  if (unmatchedRegs.length === 0) {
+    return { enriched, submissionQueue, failedRegs };
+  }
+
+  // --- Step 1: Batch check MongoDB enriched submissions ---
+  let remainingRegs = [...unmatchedRegs];
+  try {
+    const batchRes = await fetch("/api/search/aircraft/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ registrations: unmatchedRegs }),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (batchRes.ok) {
+      const { results } = await batchRes.json();
+      const normalizedMap = results as Record<
+        string,
+        { registration: string; typecode: string; icao24: string; operator: string }
+      >;
+
+      for (const reg of unmatchedRegs) {
+        const normalized = normalizeReg(reg);
+        const match = normalizedMap[normalized];
+        if (match) {
+          enriched.set(reg, {
+            registration: match.registration,
+            icao24: match.icao24 || "",
+            typecode: match.typecode || "",
+            shortType: "",
+          });
+
+          // Also persist to local DB for future lookups
+          const record: AircraftRecord = {
+            registration: match.registration,
+            icao24: match.icao24 || "",
+            typecode: match.typecode || "",
+            operator: match.operator || "",
+            source: "fr24",
+          };
+          addCustomAircraftToDatabase(record).catch(() => {});
+        }
+      }
+
+      remainingRegs = unmatchedRegs.filter(
+        (reg) => !enriched.has(reg)
+      );
+    }
+  } catch {
+    // Server unreachable — continue to FR24
+  }
+
+  // --- Step 2: FR24 individual lookups for remaining ---
+  if (remainingRegs.length > 0) {
+    const fr24Results = await Promise.allSettled(
+      remainingRegs.map(async (reg, index) => {
+        try {
+          const res = await fetch(
+            `/api/search/aircraft?q=${encodeURIComponent(reg)}`,
+            { signal: AbortSignal.timeout(5000) }
+          );
+
+          if (!res.ok) {
+            failedRegs.push(reg);
+            return;
+          }
+
+          const data = await res.json();
+          const match = data.results?.[0];
+
+          if (match && match.registration) {
+            const record: AircraftRecord = {
+              registration: match.registration,
+              icao24: match.icao24 || "",
+              typecode: match.typecode || "",
+              operator: match.operator || "",
+              source: "fr24",
+            };
+            const submissionId = await addCustomAircraftToDatabase(record);
+
+            enriched.set(reg, {
+              registration: match.registration,
+              icao24: match.icao24 || "",
+              typecode: match.typecode || "",
+              shortType: "",
+            });
+
+            submissionQueue.push({
+              submissionId,
+              registration: match.registration,
+              typecode: match.typecode,
+              icao24: match.icao24,
+              operator: match.operator,
+            });
+          } else {
+            failedRegs.push(reg);
+          }
+        } catch {
+          failedRegs.push(reg);
+        }
+
+        onProgress?.(index + 1, remainingRegs.length, reg);
+      })
+    );
+  }
+
+  return { enriched, submissionQueue, failedRegs };
 }
 
 // ============================================

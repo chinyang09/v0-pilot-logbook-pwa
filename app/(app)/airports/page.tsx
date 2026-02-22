@@ -17,7 +17,7 @@ import {
   type Airport,
 } from "@/lib/db";
 import { syncService } from "@/lib/sync";
-import { Star, Search } from "lucide-react";
+import { Star, Search, Plus, MapPin } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,7 @@ import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { AirportDetailPanel } from "@/components/airport-detail-panel";
+import { AirportNewForm } from "@/components/airport-new-form";
 import { useDebounce } from "@/hooks/use-debounce";
 
 // Memoized airport card to prevent unnecessary re-renders during virtualization
@@ -378,6 +379,37 @@ export default function AirportsPage() {
     );
   }, [mutateAirports]);
 
+  const addAirportUrl = fieldType && flightId
+    ? `/airports/new?field=${fieldType}&flightId=${flightId}${searchQuery ? `&code=${encodeURIComponent(searchQuery)}` : ""}`
+    : `/airports/new${searchQuery ? `?code=${encodeURIComponent(searchQuery)}` : ""}`;
+
+  const handleAddClick = useCallback(() => {
+    if (isDesktop && !fieldType) {
+      setDetailContent(
+        <AirportNewForm
+          prefilledCode={searchQuery}
+          isDetailPanel
+          onSave={(icao) => {
+            mutateAirports();
+            setSelectedAirportIcao(icao);
+          }}
+          onCancel={() => {
+            if (selectedAirportIcao) {
+              setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} />);
+            } else {
+              setDetailContent(null);
+            }
+          }}
+          onViewExisting={(icao) => {
+            setSelectedAirportIcao(icao);
+          }}
+        />
+      );
+    } else {
+      router.push(addAirportUrl);
+    }
+  }, [isDesktop, fieldType, searchQuery, router, addAirportUrl, selectedAirportIcao, mutateAirports, setDetailContent, setSelectedAirportIcao]);
+
   const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim();
 
   const pageTitle = !fieldType
@@ -411,15 +443,24 @@ export default function AirportsPage() {
         <div className="px-4 pt-4 pb-safe">
           {/* Sticky search bar - outside aboveVirtualRef so it stays visible during scroll */}
           <div className="sticky top-0 z-40 pb-3 bg-background/30 backdrop-blur-xl -mx-3 px-3">
-            <div className="relative">
-              <Input
-                type="text"
-                placeholder="Search airports..."
-                value={searchQuery}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-                className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-              />
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Search airports..."
+                  value={searchQuery}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
+                />
+              </div>
+              <Button
+                onClick={handleAddClick}
+                size="icon"
+                className="h-10 w-10 flex-shrink-0"
+              >
+                <Plus className="h-5 w-5" />
+              </Button>
             </div>
           </div>
 
@@ -477,10 +518,26 @@ export default function AirportsPage() {
             )}
 
             {debouncedSearchQuery.trim() && (
-              <div className={`space-y-3 `}>
+              <div className="space-y-3">
                 <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
                   {filteredAirports.length} results
                 </h2>
+
+                {/* Empty state — no results */}
+                {filteredAirports.length === 0 && (
+                  <div className="flex flex-col items-center gap-3 py-8">
+                    <MapPin className="h-8 w-8 text-muted-foreground/50" />
+                    <p className="text-sm text-muted-foreground">No airports found</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAddClick}
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add Airport
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>

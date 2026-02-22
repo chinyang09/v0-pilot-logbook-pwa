@@ -26,8 +26,13 @@ export type {
   Aircraft,
   AircraftCreate,
   AircraftReference,
+  AircraftRecord,
 } from "@/types/entities/aircraft.types";
 export type { Airport } from "@/types/entities/airport.types";
+export type {
+  AircraftTypeRaw,
+  AircraftType,
+} from "@/types/entities/aircraft-type.types";
 export type { Personnel, PersonnelCreate } from "@/types/entities/crew.types";
 export type { UserSession } from "@/types/entities/user.types";
 export type { UserPreferences } from "@/types/db/stores.types";
@@ -226,7 +231,20 @@ export {
   deleteAircraftFromDatabase,
   getAllAircraftFromDatabase,
   hasAircraftInDatabase,
+  // Custom entries
+  addCustomAircraftToDatabase,
+  clearRegistrationLookupMap,
 } from "./stores/reference/aircraft.store";
+
+// Re-export reference stores - aircraft types
+export {
+  loadAircraftTypes,
+  getAircraftType,
+  getAircraftTypeRaw,
+  searchAircraftTypes,
+  getAllAircraftTypes,
+  clearAircraftTypesCache,
+} from "./stores/reference/aircraft-types.store";
 
 // Re-export metadata stores
 export {
