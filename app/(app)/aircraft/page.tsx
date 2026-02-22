@@ -712,11 +712,7 @@ export default function AircraftPage() {
 
               {debouncedSearchQuery.trim() && (
                 <div className="space-y-3">
-                  <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
-                    {filteredAircraft.length} results
-                  </h2>
-
-                  {/* FR24 Online Results — shown when no local results */}
+                  {/* FR24 fallback — shown when no local results */}
                   {filteredAircraft.length === 0 && isFr24Loading && (
                     <div className="flex items-center gap-2 py-4 justify-center">
                       <Loader2 className="h-4 w-4 animate-spin text-primary" />

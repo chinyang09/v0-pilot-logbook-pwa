@@ -343,14 +343,24 @@ export function AircraftNewForm({
             </div>
           )}
 
-          {/* FR24 no results — will show manual type field below */}
+          {/* FR24 no results — editable type code field below */}
           {!existingAircraft && !isFr24Loading && !fr24Found && fr24Searched && registration.trim().length >= 3 && (
             <div className="py-2.5 border-b border-border text-xs text-muted-foreground">
               Not found online — enter type code manually below.
             </div>
           )}
 
-          {/* Type Code field — only visible when FR24 failed/offline */}
+          {/* Type Code field — editable when FR24 failed, read-only when FR24 found */}
+          {fr24Found && fr24Data && (
+            <ReadOnlyRow label="Type Code" value={fr24Data.typecode || "-"} />
+          )}
+          {fr24Found && fr24Data && (
+            <ReadOnlyRow label="ICAO24" value={fr24Data.icao24 || "-"} />
+          )}
+          {fr24Found && fr24Data && (
+            <ReadOnlyRow label="Operator" value={fr24Data.operator || "-"} />
+          )}
+
           {showManualTypeField && (
             <>
               <div className="py-3 border-b border-border">
