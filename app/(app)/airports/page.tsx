@@ -9,17 +9,16 @@ import { useAirportDatabase } from "@/hooks/data";
 import { StandardPageHeader } from "@/components/standard-page-header";
 import {
   searchAirports,
+  hasExactAirportCodeMatch,
   toggleAirportFavorite,
   getRecentlyUsedAirports,
   addRecentlyUsedAirport,
   getAirportByIcao,
   updateFlight,
+  addCustomAirport,
   type Airport,
 } from "@/lib/db";
 import { syncService } from "@/lib/sync";
-import {
-  addCustomAirport,
-} from "@/lib/db";
 import { submitAirportToServer } from "@/lib/submissions/submit";
 import { Star, Search, Plus, MapPin, Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -162,21 +161,23 @@ export default function AirportsPage() {
     });
   }, [airports]);
 
-  // Filtered airports for search mode
+  // Filtered airports for search mode — preserves score order from searchAirports
   const filteredAirports = useMemo(() => {
     if (!debouncedSearchQuery.trim()) return allSortedAirports;
-    const results = searchAirports(airports, debouncedSearchQuery, airports.length);
-    return [...results].sort((a, b) => {
-      if (a.isFavorite && !b.isFavorite) return -1;
-      if (!a.isFavorite && b.isFavorite) return 1;
-      return a.icao.localeCompare(b.icao);
-    });
+    return searchAirports(airports, debouncedSearchQuery, airports.length);
   }, [airports, allSortedAirports, debouncedSearchQuery]);
 
-  // FR24 online search: fires when local results are empty and query is >= 4 chars (ICAO)
+  // Whether there's an exact ICAO/IATA code match in local DB (drives FR24 trigger)
+  const hasExactMatch = useMemo(() => {
+    if (!debouncedSearchQuery.trim()) return false;
+    return hasExactAirportCodeMatch(airports, debouncedSearchQuery);
+  }, [airports, debouncedSearchQuery]);
+
+  // FR24 online search: fires when no exact ICAO/IATA match in local DB and query is >= 4 chars
+  // This ensures fuzzy name matches (e.g. "WARR" matching "Warren" city) don't prevent FR24 lookup
   useEffect(() => {
     const query = debouncedSearchQuery.trim().toUpperCase();
-    if (!query || query.length < 4 || filteredAirports.length > 0) {
+    if (!query || query.length < 4 || hasExactMatch) {
       setFr24Result(null);
       setIsFr24Loading(false);
       return;
@@ -202,7 +203,7 @@ export default function AirportsPage() {
 
     searchFr24();
     return () => { cancelled = true; };
-  }, [debouncedSearchQuery, filteredAirports.length]);
+  }, [debouncedSearchQuery, hasExactMatch]);
 
   // Set of recent ICAO codes for fast lookup
   const recentIcaos = useMemo(() => {
@@ -463,9 +464,8 @@ export default function AirportsPage() {
         });
       }
 
-      // Refresh list and select
+      // Refresh list and select — keep search query visible
       mutateAirports();
-      setSearchQuery("");
       setFr24Result(null);
 
       if (fieldType && flightId) {
@@ -632,15 +632,15 @@ export default function AirportsPage() {
 
             {debouncedSearchQuery.trim() && (
               <div className="space-y-3">
-                {/* FR24 fallback — shown when no local results */}
-                {filteredAirports.length === 0 && isFr24Loading && (
+                {/* FR24 result — shown at top when no exact ICAO/IATA match in local DB */}
+                {!hasExactMatch && isFr24Loading && (
                   <div className="flex items-center gap-2 py-4 justify-center">
                     <Loader2 className="h-4 w-4 animate-spin text-primary" />
                     <span className="text-sm text-muted-foreground">Searching...</span>
                   </div>
                 )}
 
-                {filteredAirports.length === 0 && !isFr24Loading && fr24Result && (
+                {!hasExactMatch && !isFr24Loading && fr24Result && (
                   <div className="space-y-1">
                     <div
                       onClick={() => handleSelectFr24Airport(fr24Result)}
