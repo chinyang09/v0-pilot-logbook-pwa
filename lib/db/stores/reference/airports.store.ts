@@ -126,22 +126,35 @@ export function searchAirports(airports: Airport[], query: string, limit = 10): 
     const name = airport.name.toLowerCase()
     const city = airport.city.toLowerCase()
 
+    // Code matches (ICAO/IATA) — highest priority
     if (icao === q) score = 1000
+    else if (iata === q) score = 950
     else if (icao.startsWith(q)) score = 900
-    else if (iata === q) score = 850
-    else if (iata.startsWith(q)) score = 750
-    else if (name.startsWith(q)) score = 600
-    else if (city.startsWith(q)) score = 500
-    else if (name.includes(q)) score = 300
-    else if (city.includes(q)) score = 200
+    else if (iata.startsWith(q)) score = 800
+    // Name/city matches — lower priority
+    else if (name.startsWith(q)) score = 300
+    else if (city.startsWith(q)) score = 250
+    else if (q.length >= 3 && name.includes(q)) score = 100
+    else if (q.length >= 3 && city.includes(q)) score = 50
 
     if (score > 0) matches.push({ airport, score })
   }
 
+  // Sort by score descending — preserves ICAO/IATA matches above name matches
   return matches
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
     .map((m) => m.airport)
+}
+
+/**
+ * Check if any airport has an exact ICAO or IATA code match for the query.
+ * Used to determine if FR24 online search should be triggered.
+ */
+export function hasExactAirportCodeMatch(airports: Airport[], query: string): boolean {
+  if (!query) return false
+  const q = query.toUpperCase().trim()
+  return airports.some((a) => a.icao === q || (a.iata && a.iata === q))
 }
 
 // ============================================

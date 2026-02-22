@@ -192,6 +192,7 @@ export {
   getAirportLocalTime,
   getAirportDatabase,
   searchAirports,
+  hasExactAirportCodeMatch,
   getAirportTimeInfo,
   formatAirport,
   getAirportByICAO,

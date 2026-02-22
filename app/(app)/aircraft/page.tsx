@@ -539,8 +539,7 @@ export default function AircraftPage() {
       if (selectMode && flightId) {
         handleSelectAircraft(normalized)
       } else {
-        // Clear search to reveal the newly added aircraft in the browse list
-        setSearchQuery("")
+        // Keep search query and FR24 results visible; just select in detail panel
         setFr24Results([])
         if (isDesktop) {
           setSelectedAircraftReg(normalized.registration || normalized.icao24)
