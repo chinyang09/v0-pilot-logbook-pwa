@@ -464,8 +464,8 @@ export default function AirportsPage() {
         });
       }
 
-      // Refresh list and select — keep search query visible
-      mutateAirports();
+      // Optimistically add to local state (sync, like aircraft page does)
+      mutateAirports((prev) => [...prev, newAirport]);
       setFr24Result(null);
 
       if (fieldType && flightId) {
@@ -502,8 +502,11 @@ export default function AirportsPage() {
         <AirportNewForm
           prefilledCode={searchQuery}
           isDetailPanel
-          onSave={(icao) => {
-            mutateAirports();
+          onSave={async (icao) => {
+            const airport = await getAirportByIcao(icao);
+            if (airport) {
+              mutateAirports((prev) => [...prev, airport]);
+            }
             setSelectedAirportIcao(icao);
           }}
           onCancel={() => {
