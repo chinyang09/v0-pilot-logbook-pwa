@@ -49,7 +49,16 @@ app/                              # Next.js App Router
 │   ├── auth/                     #   Registration, login, passkey, session
 │   ├── sync/                     #   Bulk sync, per-collection sync, TTL setup
 │   ├── flights/                  #   Flight CRUD
-│   └── ocr/                      #   Image OCR processing
+│   ├── ocr/                      #   Image OCR processing
+│   ├── search/                   #   FR24 proxy routes
+│   │   ├── aircraft/             #     Aircraft search + batch lookup
+│   │   └── airport/              #     Airport search
+│   ├── submissions/              #   User-submitted reference data
+│   │   ├── aircraft/             #     Custom aircraft → enrichment
+│   │   └── airport/              #     Custom airport → enrichment
+│   ├── enrichment/               #   Background enrichment pipeline
+│   │   └── batch/                #     Cron-triggered batch enrichment
+│   └── timezone/                 #   Coordinate → timezone lookup
 └── (app)/                        # Authenticated app pages (route group)
     ├── layout.tsx                #   App layout with nav
     ├── logbook/                  #   Main flight logbook
@@ -74,20 +83,33 @@ components/                       # React components
 ├── logbook-calendar.tsx          # Calendar view
 ├── desktop-layout.tsx            # Sidebar + detail panel (desktop)
 ├── bottom-navbar.tsx             # Mobile navigation
+├── aircraft-new-form.tsx         # New aircraft form (FR24 auto-populate)
+├── airport-new-form.tsx          # New airport form (FR24 auto-populate)
+├── aircraft-detail-panel.tsx     # Aircraft detail view (desktop panel)
+├── airport-detail-panel.tsx      # Airport detail view (desktop panel)
+├── aircraft-preloader.tsx        # Background aircraft DB preloader
 ├── service-worker-register.tsx   # SW registration
 └── pwa-install-prompt.tsx        # PWA install prompts
 
 hooks/                            # Custom React hooks
 ├── data/                         # Data fetching (useFlights, useAircraft, etc.)
 ├── auth/                         # Authentication hooks
-└── sync/                         # Sync status hooks
+├── sync/                         # Sync status hooks
+├── use-detail-panel.ts           # Desktop detail panel state
+└── use-is-desktop.ts             # Responsive breakpoint hook
 
 lib/                              # Core utilities and services
 ├── db/                           # Database layer
 │   ├── user-db.ts                #   Dexie schema & initialization
-│   ├── reference-db.ts           #   Static data (airports)
+│   ├── reference-db.ts           #   Reference data DB (airports, aircraft, types)
 │   └── stores/                   #   CRUD operations by collection
-│       └── user/                 #     flights.store, aircraft.store, etc.
+│       ├── user/                 #     flights.store, aircraft.store, etc.
+│       └── reference/            #     Reference data stores
+│           ├── aircraft.store.ts #       CDN aircraft DB (615k records)
+│           ├── airports.store.ts #       Airport reference data
+│           └── aircraft-types.store.ts # ICAO DOC 8643 type designators
+├── submissions/                  # Client-side submission helpers
+│   └── submit.ts                 #   Fire-and-forget aircraft/airport submissions
 ├── sync/                         # Cloud sync engine
 │   ├── sync-service.ts           #   Main sync orchestration
 │   └── sync-trigger-manager.ts   #   Intelligent sync scheduling
@@ -100,11 +122,15 @@ lib/                              # Core utilities and services
     ├── flight-calculations.ts    #   Time calculations
     ├── night-time.ts             #   Night time rules
     ├── time.ts                   #   Time formatting
+    ├── aircraft-type-utils.ts    #   ICAO type code parsing & display
     ├── roster/                   #   FDP calculator, draft generator
     └── parsers/                  #   CSV schedule parsers
 
 types/                            # TypeScript type definitions
 ├── entities/                     # Domain types (flight, aircraft, crew, roster)
+│   ├── aircraft.types.ts         #   AircraftRecord, AircraftReference
+│   ├── aircraft-type.types.ts    #   AircraftType (DOC 8643)
+│   └── airport.types.ts          #   Airport entity with submission support
 ├── db/                           # Database schema types
 ├── sync/                         # Sync queue & conflict types
 ├── auth/                         # Session & WebAuthn types
@@ -113,9 +139,10 @@ types/                            # TypeScript type definitions
 public/
 ├── manifest.json                 # PWA manifest
 ├── sw.js                         # Service worker
-├── airports.min.json             # Airport database
+├── airports.min.json             # Airport reference database
+├── aircraft-types.json           # ICAO DOC 8643 type designators
 ├── models/                       # OCR ONNX models (~16MB)
-└── workers/                      # Web workers
+└── workers/                      # Web workers (aircraft DB decompression)
 ```
 
 ## Architecture
@@ -141,6 +168,50 @@ Sync runs automatically on: app focus, network online, debounced data changes (2
 3. **Silent reauth**: On page load, checks session → if expired, attempts passkey silent auth
 
 Sessions are stored in MongoDB (with TTL) and mirrored to IndexedDB. Cookies are HttpOnly + Secure + SameSite=Lax.
+
+### Shared Reference Data System
+
+Aircraft and airport reference data is managed through a multi-tier lookup and enrichment pipeline:
+
+**Data Sources:**
+- **CDN Aircraft Database** (~615k records): Loaded from `chinyang09/Aircraft-Database` via gzip-compressed chunks, decompressed in a web worker, stored in IndexedDB (`referenceDb.aircraftDatabase`)
+- **Airport Database**: Loaded from `public/airports.min.json` into IndexedDB
+- **ICAO DOC 8643 Aircraft Types**: Loaded from `public/aircraft-types.json` with memory + IndexedDB two-level caching
+- **FR24 APIs** (live): Aircraft search via `/v1/search/web/find`, airport lookup via `/airports/traffic-stats/`
+- **Server Enrichment DB** (MongoDB): User-submitted aircraft/airports enriched and shared across users
+
+**Lookup Chain (aircraft):**
+1. Local IndexedDB (`referenceDb.aircraftDatabase`) — includes CDN + FR24 + custom records in one unified table
+2. Server batch lookup (`/api/search/aircraft/batch`) — checks enriched submissions from other users
+3. FR24 live search (`/api/search/aircraft`) — server-side proxy to bypass CORS
+4. Manual entry (user types registration + type code)
+
+**Lookup Chain (airport):**
+1. Local IndexedDB (`referenceDb.airports`) — includes static + custom airports
+2. FR24 live search (`/api/search/airport`) — server-side proxy for airport details
+3. Manual entry (user types ICAO + details)
+
+**Enrichment Pipeline:**
+- Custom aircraft/airports are submitted fire-and-forget to `/api/submissions/aircraft` or `/api/submissions/airport`
+- Server attempts real-time enrichment (FR24 for aircraft, geo-tz for airports)
+- Failed enrichments are retried by `/api/enrichment/batch` (cron, max 3 retries)
+- Enriched data is shared across all users via batch lookup API
+
+**Form UX Pattern:**
+- User enters registration (aircraft) or ICAO code (airport)
+- Debounced search (500ms) checks: local DB → FR24
+- If found: auto-populates all fields, hides manual input fields (transparent to user)
+- If not found: reveals manual input fields for user entry
+- Duplicate detection prevents re-adding existing records
+
+**Key Functions:**
+- `addCustomAircraftToDatabase(record)` — writes to unified IndexedDB table
+- `getAircraftByRegistrationFromDB(reg)` — O(1) lookup via registration map
+- `batchGetAircraftByRegistrations(regs)` — bulk lookup for CSV imports
+- `submitAircraftToServer()` / `submitAirportToServer()` — fire-and-forget enrichment
+- `searchAircraftTypes(query, limit)` — ICAO DOC 8643 type code search
+- `normalizeReg(reg)` — strips dashes, uppercases for consistent matching
+- `recalculateFlightFields()` — respects `manualOverrides`, won't overwrite user's manual entries
 
 ### Component Architecture
 
@@ -208,6 +279,18 @@ Forms use React Hook Form with Zod schemas for runtime validation. Schemas are d
 
 Server-side routes in `app/api/` follow Next.js App Router conventions with `route.ts` files exporting HTTP method handlers (`GET`, `POST`, `DELETE`).
 
+Notable route groups:
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/search/aircraft?q=` | GET | No | FR24 aircraft search proxy |
+| `/api/search/aircraft/batch` | POST | No | Batch lookup from enriched MongoDB |
+| `/api/search/airport?q=` | GET | No | FR24 airport lookup proxy |
+| `/api/submissions/aircraft` | POST | Yes | Submit custom aircraft for enrichment |
+| `/api/submissions/airport` | POST | Yes | Submit custom airport for enrichment |
+| `/api/enrichment/batch` | GET | CRON_SECRET | Background enrichment of pending submissions |
+| `/api/timezone?lat=&lng=` | GET | No | Coordinate → IANA timezone via geo-tz |
+
 ### Console Logging
 
 Debug logs use prefixed format: `[v0]`, `[Auth]`, `[SW]`, `[UserDB]`, `[Sync]`, etc.
@@ -232,7 +315,9 @@ Debug logs use prefixed format: `[v0]`, `[Auth]`, `[SW]`, `[UserDB]`, `[Sync]`, 
 - **Offline fallback**: full offline operation with cached data; `offline.html` as last resort
 - **OCR models** (~16MB): cached by service worker after first load
 
-## Database Schema (Dexie Tables)
+## Database Schema
+
+### User Database (Dexie — `userDb`)
 
 | Table | Purpose | Key Indexes |
 |---|---|---|
@@ -247,18 +332,48 @@ Debug logs use prefixed format: `[v0]`, `[Auth]`, `[SW]`, `[UserDB]`, `[Sync]`, 
 | `currencies` | Certificate tracking | id, code, expiryDate, syncStatus |
 | `discrepancies` | Schedule conflicts | id, type, resolved |
 
+### Reference Database (Dexie — `referenceDb`)
+
+| Table | Purpose | Key Indexes |
+|---|---|---|
+| `airports` | Airport reference data (~10k) | icao, iata, [icao+iata] |
+| `aircraftDatabase` | Unified aircraft DB (~615k CDN + FR24 + custom) | icao24, registration |
+| `aircraftTypes` | ICAO DOC 8643 type designators | designator |
+| `metadata` | Version tracking for cache invalidation | key |
+
+### MongoDB Collections (server-side)
+
+| Collection | Purpose |
+|---|---|
+| `aircraftSubmissions` | User-submitted aircraft with enrichment status (pending/enriched/failed) |
+| `airportSubmissions` | User-submitted airports with enrichment status |
+| `sessions` | User sessions with TTL |
+| `flights`, `aircraft`, `personnel`, etc. | Synced user data collections |
+
 ## Critical Files
 
 When making changes, be aware of these high-impact files:
 
+**Core Infrastructure:**
 - `app/layout.tsx` — Root layout, provider hierarchy, PWA preloaders
 - `app/(app)/layout.tsx` — Authenticated app layout, responsive nav
-- `lib/db/user-db.ts` — Dexie database schema (schema changes affect migrations)
+- `lib/db/user-db.ts` — Dexie user database schema (schema changes affect migrations)
 - `lib/sync/sync-service.ts` — Core sync logic (changes affect data integrity)
 - `components/providers/auth-provider.tsx` — Auth context, login/logout flows
 - `components/providers/sync-provider.tsx` — Sync initialization
 - `public/sw.js` — Service worker caching strategies
 - `lib/mongodb/client.ts` — MongoDB connection pool (shared across API routes)
+
+**Reference Data System:**
+- `lib/db/reference-db.ts` — Dexie reference database schema (airports, aircraft, types)
+- `lib/db/stores/reference/aircraft.store.ts` — CDN aircraft DB loader (615k records, web worker decompression)
+- `lib/db/stores/reference/airports.store.ts` — Airport reference data, favorites, timezone utilities
+- `lib/db/stores/reference/aircraft-types.store.ts` — ICAO DOC 8643 type designator lookup
+- `lib/submissions/submit.ts` — Fire-and-forget client→server submission with flight reconciliation
+- `lib/utils/aircraft-type-utils.ts` — ICAO type code parsing (description → category/engines)
+- `components/aircraft-new-form.tsx` — Aircraft creation form with FR24 auto-populate
+- `components/airport-new-form.tsx` — Airport creation form with FR24 auto-populate
+- `components/aircraft-preloader.tsx` — Background aircraft DB initializer (in root layout)
 
 ## Things to Avoid
 
@@ -269,3 +384,6 @@ When making changes, be aware of these high-impact files:
 - Do not remove `"use client"` directives — server/client boundary is intentionally designed
 - Do not commit `.env` files or MongoDB credentials
 - Do not use `npm install` or `npm add` — always use `pnpm` to keep `pnpm-lock.yaml` in sync (Vercel uses frozen-lockfile)
+- Do not expose FR24 as the data source in UI — the user explicitly requires online lookups to be transparent (no "Online Results" labels, no Globe icons, no "FlightRadar24" branding)
+- Do not add hexdb.io fallback for aircraft lookup — if FR24 fails, manual entry is the only option
+- Do not bypass `recalculateFlightFields()` `manualOverrides` — users' manually entered field values must never be overwritten by enrichment
