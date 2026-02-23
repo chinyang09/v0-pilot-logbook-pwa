@@ -8,20 +8,16 @@ import { Search, Plane, Loader2, Star, Plus } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import { Input } from "@/components/ui/input"
 import {
-  getAircraftDatabase,
-  searchAircraft,
-  type AircraftData,
+  searchAircraftFromDB,
   type NormalizedAircraft,
   type AircraftRecord,
-  normalizeAircraft,
-  setProgressCallback,
   getUserPreferences,
-  saveUserPreferences,
   toggleFavoriteAircraft,
-  getFavoriteAircraft,
   updateFlight,
   addCustomAircraftToDatabase,
 } from "@/lib/db"
+import { useReferenceAircraft, useFlights } from "@/hooks/data"
+import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
@@ -40,7 +36,6 @@ interface AircraftCardProps {
   isRecent?: boolean
   isSelected?: boolean
   isFavorite?: boolean
-  compact?: boolean
   onSelect: (aircraft: NormalizedAircraft) => void
   onToggleFavorite?: (e: React.MouseEvent, registration: string) => void
 }
@@ -50,7 +45,6 @@ const AircraftCard = memo(function AircraftCard({
   isRecent = false,
   isSelected = false,
   isFavorite = false,
-  compact = false,
   onSelect,
   onToggleFavorite,
 }: AircraftCardProps) {
@@ -66,8 +60,7 @@ const AircraftCard = memo(function AircraftCard({
         }
       }}
       className={cn(
-        "w-full text-left rounded-lg transition-all cursor-pointer active:scale-[0.98]",
-        compact ? "py-1.5 pl-3 pr-6" : "py-2 pl-3 pr-6",
+        "w-full text-left rounded-lg transition-all cursor-pointer active:scale-[0.98] py-2 pl-3 pr-6",
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
           : "bg-card border border-border hover:bg-accent",
@@ -81,14 +74,17 @@ const AircraftCard = memo(function AircraftCard({
             {aircraft.typecode && (
               <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">{aircraft.typecode}</span>
             )}
+            {aircraft.shortDescription && (
+              <span className="text-xs text-muted-foreground font-mono">{aircraft.shortDescription}</span>
+            )}
           </div>
-          {!compact && (
-            <div className="text-sm text-muted-foreground truncate mt-0.5">
-              {aircraft.icao24 && <span className="font-mono">{aircraft.icao24}</span>}
-              {aircraft.icao24 && aircraft.shortType && <span> · </span>}
-              {aircraft.shortType && <span>{aircraft.shortType}</span>}
-            </div>
-          )}
+          <div className="text-sm text-muted-foreground truncate mt-0.5">
+            {[
+              aircraft.wtc && `WTC:${aircraft.wtc}`,
+              aircraft.wtg && `WTG:${aircraft.wtg}`,
+              aircraft.operator,
+            ].filter(Boolean).join(" · ") || "\u00A0"}
+          </div>
         </div>
         <Button
           variant="ghost"
@@ -148,15 +144,12 @@ export default function AircraftPage() {
 
   const [searchQuery, setSearchQuery] = useState("")
   const debouncedSearchQuery = useDebounce(searchQuery, 150)
-  const [allAircraft, setAllAircraft] = useState<AircraftData[]>([])
-  const [recentlyUsed, setRecentlyUsed] = useState<NormalizedAircraft[]>([])
+
+  // SWR hook for reference aircraft (same pattern as useFlights in logbook)
+  const { aircraft: allAircraft, isLoading, refresh: refreshAircraft } = useReferenceAircraft()
+  const { flights } = useFlights()
+
   const [favoriteRegs, setFavoriteRegs] = useState<Set<string>>(new Set())
-  const [isLoading, setIsLoading] = useState(true)
-  const [loadingProgress, setLoadingProgress] = useState({
-    stage: "",
-    percent: 0,
-    count: 0,
-  })
 
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined)
   const isFastScrollingRef = useRef(false)
@@ -165,71 +158,68 @@ export default function AircraftPage() {
   const [fr24Results, setFr24Results] = useState<AircraftRecord[]>([])
   const [isFr24Loading, setIsFr24Loading] = useState(false)
 
-  useEffect(() => {
-    let mounted = true
-    setProgressCallback((progress) => {
-      if (mounted) {
-        setLoadingProgress({
-          stage: progress.stage,
-          percent: progress.percent,
-          count: progress.count || 0,
-        })
-      }
-    })
+  // Counter to re-trigger local search after adding aircraft
+  const [searchVersion, setSearchVersion] = useState(0)
 
-    async function loadDatabase() {
-      setIsLoading(true)
-      try {
-        const aircraft = await getAircraftDatabase()
-        if (mounted) {
-          setAllAircraft(aircraft)
-          const prefs = await getUserPreferences()
-          const recentRegs = prefs?.recentlyUsedAircraft || []
-          const recentAc: NormalizedAircraft[] = []
-          for (const reg of recentRegs) {
-            const found = aircraft.find((ac) => ac.reg?.toUpperCase() === reg.toUpperCase())
-            if (found) recentAc.push(normalizeAircraft(found))
-          }
-          setRecentlyUsed(recentAc)
-          const favRegs = prefs?.favoriteAircraft || []
-          setFavoriteRegs(new Set(favRegs.map((r) => r.toUpperCase())))
-        }
-      } catch (error) {
-        console.error("[Aircraft Page] Failed to load database:", error)
-      } finally {
-        if (mounted) setIsLoading(false)
-        setProgressCallback(null)
-      }
-    }
-    loadDatabase()
-    return () => {
-      mounted = false
-      setProgressCallback(null)
-    }
+  // Load preferences (favorites only) on mount
+  useEffect(() => {
+    getUserPreferences().then((prefs) => {
+      const favs = prefs?.favoriteAircraft || []
+      setFavoriteRegs(new Set(favs.map((r) => r.toUpperCase())))
+    })
   }, [])
 
-  // Normalize and sort aircraft with registrations alphabetically.
-  // Only include aircraft that have an actual registration for the browse list;
-  // the full dataset (~615k records) exceeds browser max scroll height (~33M px).
-  // Aircraft without registrations (ICAO24-only) are still findable via search.
+  // Derive recently used from actual flights (most recent first) — stable, no jump on click
+  const recentlyUsed = useMemo(() => {
+    if (flights.length === 0 || allAircraft.length === 0) return []
+    const seen = new Set<string>()
+    const recentRegs: string[] = []
+    for (const flight of flights) {
+      if (flight.aircraftReg && !seen.has(flight.aircraftReg.toUpperCase())) {
+        seen.add(flight.aircraftReg.toUpperCase())
+        recentRegs.push(flight.aircraftReg.toUpperCase())
+        if (recentRegs.length >= 10) break
+      }
+    }
+    const recent: NormalizedAircraft[] = []
+    for (const reg of recentRegs) {
+      const found = allAircraft.find((ac) => ac.registration?.toUpperCase() === reg)
+      if (found) recent.push(found)
+    }
+    return recent
+  }, [flights, allAircraft])
+
+  // Sort aircraft with registrations alphabetically
   const allSortedAircraft = useMemo(() => {
     if (allAircraft.length === 0) return []
-    return allAircraft
-      .filter((a) => a.reg)
-      .map(normalizeAircraft)
+    return [...allAircraft]
+      .filter((a) => a.registration)
       .sort((a, b) => a.registration.localeCompare(b.registration))
   }, [allAircraft])
 
-  // Filtered aircraft for search mode
-  const filteredAircraft = useMemo(() => {
-    if (!debouncedSearchQuery.trim()) return allSortedAircraft
-    const results = searchAircraft(allAircraft, debouncedSearchQuery, 500)
-    return [...results].sort((a, b) => {
-      const regA = a.registration || a.icao24
-      const regB = b.registration || b.icao24
-      return regA.localeCompare(regB)
+  // Filtered aircraft for search mode (async via IndexedDB search)
+  const [searchResults, setSearchResults] = useState<NormalizedAircraft[]>([])
+  useEffect(() => {
+    if (!debouncedSearchQuery.trim()) {
+      setSearchResults([])
+      return
+    }
+    let cancelled = false
+    searchAircraftFromDB(debouncedSearchQuery, 500).then((results) => {
+      if (!cancelled) {
+        setSearchResults(
+          [...results].sort((a, b) => {
+            const regA = a.registration || a.icao24
+            const regB = b.registration || b.icao24
+            return regA.localeCompare(regB)
+          })
+        )
+      }
     })
-  }, [allAircraft, allSortedAircraft, debouncedSearchQuery])
+    return () => { cancelled = true }
+  }, [debouncedSearchQuery, searchVersion])
+
+  const filteredAircraft = debouncedSearchQuery.trim() ? searchResults : allSortedAircraft
 
   // FR24 online search: fires when local results are empty and query is non-empty
   useEffect(() => {
@@ -340,12 +330,22 @@ export default function AircraftPage() {
   const rowVirtualizer = useVirtualizer({
     count: displayAircraft.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 40, // Compact single-line card (py-1.5 + content + pb-1 gap)
+    estimateSize: () => 60,
     overscan: 10,
     scrollMargin,
   })
 
   const virtualItems = rowVirtualizer.getVirtualItems()
+
+  // Find selected aircraft from SWR data for the detail panel
+  const selectedAircraft = useMemo(() => {
+    if (!selectedAircraftReg) return null
+    const regUpper = selectedAircraftReg.toUpperCase()
+    return allAircraft.find((a) =>
+      a.registration.toUpperCase() === regUpper ||
+      a.registration.toUpperCase().replace(/-/g, "") === regUpper.replace(/-/g, "")
+    ) || null
+  }, [selectedAircraftReg, allAircraft])
 
   // Auto-select first aircraft when loading (desktop only, not in select mode)
   useEffect(() => {
@@ -355,7 +355,7 @@ export default function AircraftPage() {
     }
   }, [isDesktop, selectMode, isLoading, allSortedAircraft, selectedAircraftReg, setSelectedAircraftReg])
 
-  // Update detail content when selection changes (desktop only)
+  // Update detail content when selection or data changes (desktop only)
   useEffect(() => {
     if (!isDesktop || selectMode) return
 
@@ -378,15 +378,19 @@ export default function AircraftPage() {
       return
     }
 
-    if (selectedAircraftReg) {
+    if (selectedAircraft) {
       setDetailContent(
-        <AircraftDetailPanel registration={selectedAircraftReg} />
+        <AircraftDetailPanel
+          key={selectedAircraft.registration}
+          aircraft={selectedAircraft}
+          onUpdated={refreshAircraft}
+        />
       )
     } else if (allSortedAircraft.length > 0) {
       const first = allSortedAircraft[0]
       setSelectedAircraftReg(first.registration || first.icao24)
     }
-  }, [isDesktop, selectMode, selectedAircraftReg, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg])
+  }, [isDesktop, selectMode, selectedAircraft, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg, refreshAircraft])
 
   // Track active letter from virtualizer scroll position
   useEffect(() => {
@@ -480,13 +484,6 @@ export default function AircraftPage() {
 
   const handleSelectAircraft = useCallback(
     async (aircraft: NormalizedAircraft) => {
-      if (aircraft.registration) {
-        const prefs = await getUserPreferences()
-        const recentRegs = prefs?.recentlyUsedAircraft || []
-        const filtered = recentRegs.filter((r) => r.toUpperCase() !== aircraft.registration.toUpperCase())
-        const updated = [aircraft.registration, ...filtered].slice(0, 10)
-        await saveUserPreferences({ recentlyUsedAircraft: updated })
-      }
       if (selectMode && flightId) {
         try {
           await updateFlight(flightId, {
@@ -509,7 +506,22 @@ export default function AircraftPage() {
 
   const handleSelectFr24 = useCallback(
     async (record: AircraftRecord) => {
-      const submissionId = await addCustomAircraftToDatabase(record)
+      // Enrich with ICAO type data from Dexie before storing
+      let enrichedRecord = { ...record }
+      if (record.typecode) {
+        const typeInfo = await getAircraftType(record.typecode)
+        if (typeInfo) {
+          enrichedRecord = {
+            ...enrichedRecord,
+            shortDescription: typeInfo.description,
+            wtc: typeInfo.wtc,
+            wtg: typeInfo.wtg,
+            manufacturerCode: typeInfo.manufacturer,
+          }
+        }
+      }
+
+      const submissionId = await addCustomAircraftToDatabase(enrichedRecord)
 
       // Fire-and-forget server submission for shared enrichment
       submitAircraftToServer({
@@ -520,33 +532,25 @@ export default function AircraftPage() {
         operator: record.operator,
       })
 
-      // Update local state so the aircraft appears in the list immediately
-      const newAircraftData: AircraftData = {
-        icao24: record.icao24,
-        reg: record.registration,
-        icaotype: record.typecode || null,
-        short_type: record.operator || null,
-      }
-      setAllAircraft((prev) => [...prev, newAircraftData])
+      // Refresh SWR cache so the new aircraft appears in the list
+      await refreshAircraft()
 
-      const normalized: NormalizedAircraft = {
-        registration: record.registration,
-        icao24: record.icao24,
-        typecode: record.typecode,
-        shortType: record.operator || "",
-      }
+      const reg = record.registration?.toUpperCase() || record.icao24 || ""
 
       if (selectMode && flightId) {
+        const normalized = allAircraft.find((a) => a.registration.toUpperCase() === reg) ||
+          { registration: record.registration || "", icao24: record.icao24 || "", typecode: record.typecode || "", shortDescription: enrichedRecord.shortDescription || "", wtc: enrichedRecord.wtc || "", wtg: enrichedRecord.wtg || "", manufacturerCode: enrichedRecord.manufacturerCode || "", operator: record.operator || "" }
         handleSelectAircraft(normalized)
       } else {
-        // Keep search query and FR24 results visible; just select in detail panel
+        // Keep search bar filled, clear FR24 results, re-trigger local search
         setFr24Results([])
+        setSearchVersion((v) => v + 1)
         if (isDesktop) {
-          setSelectedAircraftReg(normalized.registration || normalized.icao24)
+          setSelectedAircraftReg(reg)
         }
       }
     },
-    [selectMode, flightId, isDesktop, handleSelectAircraft, setSelectedAircraftReg],
+    [selectMode, flightId, isDesktop, handleSelectAircraft, setSelectedAircraftReg, refreshAircraft, allAircraft],
   )
 
   const addAircraftUrl = selectMode
@@ -560,22 +564,15 @@ export default function AircraftPage() {
           prefilledReg={searchQuery}
           isDetailPanel
           onSave={async (registration) => {
-            // Optimistically add to list
-            const found = await import("@/lib/db").then(m => m.getAircraftByRegistrationFromDB(registration))
-            if (found) {
-              const newData: AircraftData = {
-                icao24: found.icao24,
-                reg: found.registration,
-                icaotype: found.typecode || null,
-                short_type: found.shortType || null,
-              }
-              setAllAircraft((prev) => [...prev, newData])
-            }
+            // Refresh SWR cache so the new aircraft appears in the list
+            await refreshAircraft()
             setSelectedAircraftReg(registration)
           }}
           onCancel={() => {
-            if (selectedAircraftReg) {
-              setDetailContent(<AircraftDetailPanel registration={selectedAircraftReg} />)
+            if (selectedAircraft) {
+              setDetailContent(
+                <AircraftDetailPanel aircraft={selectedAircraft} onUpdated={refreshAircraft} />
+              )
             } else {
               setDetailContent(null)
             }
@@ -588,7 +585,7 @@ export default function AircraftPage() {
     } else {
       router.push(addAircraftUrl)
     }
-  }, [isDesktop, selectMode, searchQuery, router, addAircraftUrl, selectedAircraftReg, setDetailContent, setSelectedAircraftReg])
+  }, [isDesktop, selectMode, searchQuery, router, addAircraftUrl, selectedAircraft, setDetailContent, setSelectedAircraftReg, refreshAircraft])
 
   const showFavorites = !debouncedSearchQuery && favoriteAircraft.length > 0
   const showRecentlyUsed = !debouncedSearchQuery && recentNonFavorites.length > 0
@@ -597,25 +594,11 @@ export default function AircraftPage() {
   return (
     <PageContainer
       header={
-        <>
-          <StandardPageHeader
-            title={selectMode ? "Select Aircraft" : "Aircraft"}
-            showBack={selectMode}
-            onBack={selectMode ? () => router.back() : undefined}
-          />
-          {loadingProgress.stage && isLoading && (
-            <div className="bg-background/30 backdrop-blur-xl border-b border-border/50 px-3 pb-2">
-              <div className="container mx-auto">
-                <div className="h-1 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary transition-all duration-300"
-                    style={{ width: `${loadingProgress.percent}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-        </>
+        <StandardPageHeader
+          title={selectMode ? "Select Aircraft" : "Aircraft"}
+          showBack={selectMode}
+          onBack={selectMode ? () => router.back() : undefined}
+        />
       }
       rightContent={
         showFastScroll ? (
@@ -630,9 +613,9 @@ export default function AircraftPage() {
       mainRef={scrollContainerCallbackRef}
     >
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center h-full gap-3 p-4">
+        <div className="flex flex-col items-center justify-center py-24 gap-3 p-4">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-muted-foreground text-sm">{loadingProgress.stage || "Loading..."}</p>
+          <p className="text-muted-foreground text-sm">Loading...</p>
         </div>
       ) : (
         <div>
@@ -663,7 +646,7 @@ export default function AircraftPage() {
             {/* Non-virtualized content above the virtual list */}
             <div ref={aboveVirtualRef}>
               {!debouncedSearchQuery.trim() && (
-                <div className={`space-y-3 `}>
+                <div className="space-y-3">
                   {/* Favorites Section */}
                   {showFavorites && (
                     <div className="space-y-1.5">
@@ -797,7 +780,6 @@ export default function AircraftPage() {
                           isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
                           onToggleFavorite={handleToggleFavorite}
                           isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
-                          compact
                         />
                       </div>
                     </div>

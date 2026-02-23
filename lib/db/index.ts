@@ -203,26 +203,12 @@ export {
 // Re-export reference stores - aircraft database
 export {
   // Types
-  type AircraftData,
   type NormalizedAircraft,
-  // Initialization
-  initializeAircraftDatabase,
-  quickInit,
-  isAircraftDatabaseReady,
-  isAircraftDatabaseLoaded,
-  getAircraftMetadata,
-  clearAircraftCache,
-  setProgressCallback,
-  // Search (DB-based - recommended)
+  // Search
   searchAircraftFromDB,
   getAircraftByRegistrationFromDB,
   getAircraftByIcao24FromDB,
-  // Legacy search (in-memory)
-  getAircraftDatabase,
-  searchAircraft,
-  getAircraftByRegistration,
-  getAircraftByIcao24,
-  loadIntoMemory,
+  batchGetAircraftByRegistrations,
   // Helpers
   normalizeAircraft,
   formatAircraft,
@@ -232,9 +218,10 @@ export {
   deleteAircraftFromDatabase,
   getAllAircraftFromDatabase,
   hasAircraftInDatabase,
-  // Custom entries
+  // Custom entries & sync
   addCustomAircraftToDatabase,
-  clearRegistrationLookupMap,
+  bulkUpsertAircraftReferences,
+  clearAircraftCache,
 } from "./stores/reference/aircraft.store";
 
 // Re-export reference stores - aircraft types

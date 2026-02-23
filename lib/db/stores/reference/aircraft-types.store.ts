@@ -2,7 +2,7 @@
  * Aircraft types store operations (reference data)
  *
  * Loads and caches ICAO DOC 8643 aircraft type designators
- * from public/aircraft-types.json
+ * from public/icao-types.min.json
  */
 
 import { referenceDb } from "../../reference-db"
@@ -13,9 +13,9 @@ import { expandAircraftType } from "@/lib/utils/aircraft-type-utils"
 // Configuration
 // ============================================
 
-const AIRCRAFT_TYPES_URL = "/aircraft-types.json"
+const AIRCRAFT_TYPES_URL = "/icao-types.min.json"
 const CACHE_VERSION_KEY = "aircraft-types-version"
-const CACHE_VERSION = "2026.02.15-v1"
+const CACHE_VERSION = "2026.02.22-v1"
 
 // ============================================
 // State
@@ -134,7 +134,7 @@ export async function getAircraftTypeRaw(designator: string): Promise<AircraftTy
 // ============================================
 
 /**
- * Search aircraft types by designator, manufacturer, or model
+ * Search aircraft types by designator or manufacturer
  */
 export async function searchAircraftTypes(query: string, limit = 50): Promise<AircraftType[]> {
   if (!query || query.length < 1) return []
@@ -148,7 +148,6 @@ export async function searchAircraftTypes(query: string, limit = 50): Promise<Ai
     let score = 0
     const designator = raw.d.toUpperCase()
     const manufacturer = raw.m.toUpperCase()
-    const model = raw.n.toUpperCase()
 
     if (designator === q) {
       score = 1000
@@ -158,10 +157,6 @@ export async function searchAircraftTypes(query: string, limit = 50): Promise<Ai
       score = 800
     } else if (manufacturer.startsWith(q)) {
       score = 700
-    } else if (model.toUpperCase().startsWith(q)) {
-      score = 600
-    } else if (model.toUpperCase().includes(q)) {
-      score = 400
     } else if (manufacturer.includes(q)) {
       score = 300
     }

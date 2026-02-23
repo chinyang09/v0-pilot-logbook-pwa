@@ -10,6 +10,7 @@ export { CACHE_KEYS, useDBReady, refreshAllData, checkDBReady } from "./use-db"
 // Domain hooks
 export { useFlights, useFlightStats } from "./use-flights"
 export { useAircraft } from "./use-aircraft"
+export { useReferenceAircraft } from "./use-reference-aircraft"
 export { useAirports, useAirportDatabase } from "./use-airports"
 export { usePersonnel } from "./use-crew"
 

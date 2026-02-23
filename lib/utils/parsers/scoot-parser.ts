@@ -489,7 +489,10 @@ async function enrichUnmatchedAircraft(
       const { results } = await batchRes.json();
       const normalizedMap = results as Record<
         string,
-        { registration: string; typecode: string; icao24: string; operator: string }
+        {
+          registration: string; typecode: string; icao24: string; operator: string;
+          shortDescription: string; wtc: string; wtg: string; manufacturerCode: string;
+        }
       >;
 
       for (const reg of unmatchedRegs) {
@@ -500,7 +503,11 @@ async function enrichUnmatchedAircraft(
             registration: match.registration,
             icao24: match.icao24 || "",
             typecode: match.typecode || "",
-            shortType: "",
+            shortDescription: match.shortDescription || "",
+            wtc: match.wtc || "",
+            wtg: match.wtg || "",
+            manufacturerCode: match.manufacturerCode || "",
+            operator: match.operator || "",
           });
 
           // Also persist to local DB for future lookups
@@ -509,6 +516,10 @@ async function enrichUnmatchedAircraft(
             icao24: match.icao24 || "",
             typecode: match.typecode || "",
             operator: match.operator || "",
+            shortDescription: match.shortDescription || "",
+            wtc: match.wtc || "",
+            wtg: match.wtg || "",
+            manufacturerCode: match.manufacturerCode || "",
             source: "fr24",
           };
           addCustomAircraftToDatabase(record).catch(() => {});
@@ -555,7 +566,11 @@ async function enrichUnmatchedAircraft(
               registration: match.registration,
               icao24: match.icao24 || "",
               typecode: match.typecode || "",
-              shortType: "",
+              shortDescription: "",
+              wtc: "",
+              wtg: "",
+              manufacturerCode: "",
+              operator: match.operator || "",
             });
 
             submissionQueue.push({

@@ -6,10 +6,7 @@
  *
  * Checks aircraftSubmissions (status: "enriched") for matching registrations.
  * Returns all matches in a single response — no auth required (reference data).
- *
- * This allows the CSV import (and any other consumer) to check the shared
- * enriched database for aircraft that other users have already submitted
- * and had enriched via FR24.
+ * Includes ICAO type hydration fields (shortDescription, WTC, WTG).
  */
 
 import { NextResponse } from "next/server"
@@ -52,6 +49,10 @@ export async function POST(request: Request) {
         typecode: 1,
         icao24: 1,
         operator: 1,
+        shortDescription: 1,
+        wtc: 1,
+        wtg: 1,
+        manufacturerCode: 1,
       })
       .toArray()
 
@@ -61,6 +62,10 @@ export async function POST(request: Request) {
       typecode: string
       icao24: string
       operator: string
+      shortDescription: string
+      wtc: string
+      wtg: string
+      manufacturerCode: string
     }> = {}
 
     for (const doc of enrichedDocs) {
@@ -69,6 +74,10 @@ export async function POST(request: Request) {
         typecode: doc.typecode || "",
         icao24: doc.icao24 || "",
         operator: doc.operator || "",
+        shortDescription: doc.shortDescription || "",
+        wtc: doc.wtc || "",
+        wtg: doc.wtg || "",
+        manufacturerCode: doc.manufacturerCode || "",
       }
     }
 

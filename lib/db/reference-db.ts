@@ -2,8 +2,9 @@
  * Reference database (persists across sessions)
  *
  * Contains read-only reference data that doesn't sync:
- * - Airports (from CDN/public JSON)
- * - Aircraft database (CDN aircraft lookup cache)
+ * - Airports (from public JSON)
+ * - Aircraft database (MongoDB-synced aircraft references)
+ * - Aircraft types (ICAO DOC 8643 type designators)
  * - Metadata (version info, cache timestamps)
  */
 
@@ -37,6 +38,14 @@ class ReferenceDatabase extends Dexie {
       airports: "icao, iata, name, id, isFavorite",
       aircraftDatabase: "registration",
       aircraftTypes: "d, m, n",
+      metadata: "key",
+    })
+
+    // v3: Remove model name index from aircraftTypes (compact format no longer has `n`)
+    this.version(3).stores({
+      airports: "icao, iata, name, id, isFavorite",
+      aircraftDatabase: "registration",
+      aircraftTypes: "d, m",
       metadata: "key",
     })
   }
