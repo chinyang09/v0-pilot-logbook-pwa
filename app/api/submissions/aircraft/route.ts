@@ -7,6 +7,7 @@
  * - Validates session (authenticated users only)
  * - Deduplicates by normalized registration
  * - If new: inserts as pending, then immediately attempts FR24 enrichment
+ * - Hydrates with ICAO DOC 8643 type data (shortDescription, WTC, WTG)
  * - Returns enriched data if available
  */
 
@@ -14,6 +15,7 @@ import { NextResponse } from "next/server"
 import { getMongoClient } from "@/lib/mongodb"
 import { validateSessionFromHeader } from "@/lib/auth/server/session"
 import { enrichAircraftFromFR24 } from "@/lib/enrichment/aircraft-enrichment"
+import { getICAOTypeByDesignator } from "@/lib/icao-types/icao-types-server"
 
 function normalizeRegistration(reg: string): string {
   return reg.replace(/[^A-Z0-9]/gi, "").toUpperCase()
@@ -59,11 +61,18 @@ export async function POST(request: Request) {
               icao24: existing.icao24 || "",
               typecode: existing.typecode || "",
               operator: existing.operator || "",
+              shortDescription: existing.shortDescription || "",
+              wtc: existing.wtc || "",
+              wtg: existing.wtg || "",
+              manufacturerCode: existing.manufacturerCode || "",
             }
           : null,
       },
     })
   }
+
+  // Hydrate typecode with ICAO type data if available
+  const typeInfo = typecode ? getICAOTypeByDesignator(typecode) : null
 
   // Insert new submission
   const now = Date.now()
@@ -74,6 +83,10 @@ export async function POST(request: Request) {
     typecode: typecode || "",
     icao24: icao24 || "",
     operator: operator || "",
+    shortDescription: typeInfo?.description || "",
+    wtc: typeInfo?.wtc || "",
+    wtg: typeInfo?.wtg || "",
+    manufacturerCode: typeInfo?.manufacturerCode || "",
     status: "pending" as const,
     submittedBy: session.userId,
     submittedAt: now,
@@ -81,17 +94,23 @@ export async function POST(request: Request) {
 
   await collection.insertOne(doc)
 
-  // Attempt real-time FR24 enrichment
+  // Attempt real-time FR24 enrichment (includes ICAO type hydration)
   const enriched = await enrichAircraftFromFR24(registration)
   if (enriched) {
+    const finalTypecode = enriched.typecode || typecode || ""
+
     await collection.updateOne(
       { submissionId },
       {
         $set: {
           registration: enriched.registration,
           icao24: enriched.icao24,
-          typecode: enriched.typecode || typecode || "",
+          typecode: finalTypecode,
           operator: enriched.operator,
+          shortDescription: enriched.shortDescription || typeInfo?.description || "",
+          wtc: enriched.wtc || typeInfo?.wtc || "",
+          wtg: enriched.wtg || typeInfo?.wtg || "",
+          manufacturerCode: enriched.manufacturerCode || typeInfo?.manufacturerCode || "",
           status: "enriched",
           enrichedAt: Date.now(),
           enrichmentSource: "fr24",
@@ -107,8 +126,12 @@ export async function POST(request: Request) {
         enrichedData: {
           registration: enriched.registration,
           icao24: enriched.icao24,
-          typecode: enriched.typecode || typecode || "",
+          typecode: finalTypecode,
           operator: enriched.operator,
+          shortDescription: enriched.shortDescription || typeInfo?.description || "",
+          wtc: enriched.wtc || typeInfo?.wtc || "",
+          wtg: enriched.wtg || typeInfo?.wtg || "",
+          manufacturerCode: enriched.manufacturerCode || typeInfo?.manufacturerCode || "",
         },
       },
     })

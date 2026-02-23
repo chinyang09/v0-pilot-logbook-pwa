@@ -48,9 +48,9 @@ export function expandAircraftType(raw: AircraftTypeRaw): AircraftType {
   return {
     designator: raw.d,
     manufacturer: raw.m,
-    model: raw.n,
     description: raw.t,
     wtc: raw.w,
+    wtg: raw.g || "",
     category: parsed.category,
     engineCount: parsed.engineCount,
     engineType: parsed.engineType,
@@ -58,10 +58,8 @@ export function expandAircraftType(raw: AircraftTypeRaw): AircraftType {
 }
 
 /**
- * Format aircraft type for display (e.g., "AIRBUS A-350-900")
+ * Format aircraft type for display (e.g., "AIRBUS")
  */
 export function formatAircraftType(type: AircraftType | AircraftTypeRaw): string {
-  const manufacturer = "m" in type ? type.m : type.manufacturer
-  const model = "n" in type ? type.n : type.model
-  return `${manufacturer} ${model}`
+  return "m" in type ? type.m : type.manufacturer
 }
