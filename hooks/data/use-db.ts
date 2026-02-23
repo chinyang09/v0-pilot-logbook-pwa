@@ -10,6 +10,7 @@ import { initializeDB } from "@/lib/db"
 export const CACHE_KEYS = {
   flights: "idb:flights",
   aircraft: "idb:aircraft",
+  referenceAircraft: "idb:referenceAircraft",
   airports: "idb:airports",
   personnel: "idb:personnel",
   stats: "idb:stats",
