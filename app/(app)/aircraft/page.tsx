@@ -36,7 +36,6 @@ interface AircraftCardProps {
   isRecent?: boolean
   isSelected?: boolean
   isFavorite?: boolean
-  compact?: boolean
   onSelect: (aircraft: NormalizedAircraft) => void
   onToggleFavorite?: (e: React.MouseEvent, registration: string) => void
 }
@@ -46,7 +45,6 @@ const AircraftCard = memo(function AircraftCard({
   isRecent = false,
   isSelected = false,
   isFavorite = false,
-  compact = false,
   onSelect,
   onToggleFavorite,
 }: AircraftCardProps) {
@@ -62,8 +60,7 @@ const AircraftCard = memo(function AircraftCard({
         }
       }}
       className={cn(
-        "w-full text-left rounded-lg transition-all cursor-pointer active:scale-[0.98]",
-        compact ? "py-1.5 pl-3 pr-6" : "py-2 pl-3 pr-6",
+        "w-full text-left rounded-lg transition-all cursor-pointer active:scale-[0.98] py-2 pl-3 pr-6",
         isRecent
           ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
           : "bg-card border border-border hover:bg-accent",
@@ -77,14 +74,17 @@ const AircraftCard = memo(function AircraftCard({
             {aircraft.typecode && (
               <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">{aircraft.typecode}</span>
             )}
+            {aircraft.shortDescription && (
+              <span className="text-xs text-muted-foreground font-mono">{aircraft.shortDescription}</span>
+            )}
           </div>
-          {!compact && (
-            <div className="text-sm text-muted-foreground truncate mt-0.5">
-              {aircraft.icao24 && <span className="font-mono">{aircraft.icao24}</span>}
-              {aircraft.icao24 && aircraft.operator && <span> · </span>}
-              {aircraft.operator && <span>{aircraft.operator}</span>}
-            </div>
-          )}
+          <div className="text-sm text-muted-foreground truncate mt-0.5">
+            {[
+              aircraft.wtc && `WTC:${aircraft.wtc}`,
+              aircraft.wtg && `WTG:${aircraft.wtg}`,
+              aircraft.operator,
+            ].filter(Boolean).join(" · ") || "\u00A0"}
+          </div>
         </div>
         <Button
           variant="ghost"
@@ -330,12 +330,22 @@ export default function AircraftPage() {
   const rowVirtualizer = useVirtualizer({
     count: displayAircraft.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 40, // Compact single-line card (py-1.5 + content + pb-1 gap)
+    estimateSize: () => 60,
     overscan: 10,
     scrollMargin,
   })
 
   const virtualItems = rowVirtualizer.getVirtualItems()
+
+  // Find selected aircraft from SWR data for the detail panel
+  const selectedAircraft = useMemo(() => {
+    if (!selectedAircraftReg) return null
+    const regUpper = selectedAircraftReg.toUpperCase()
+    return allAircraft.find((a) =>
+      a.registration.toUpperCase() === regUpper ||
+      a.registration.toUpperCase().replace(/-/g, "") === regUpper.replace(/-/g, "")
+    ) || null
+  }, [selectedAircraftReg, allAircraft])
 
   // Auto-select first aircraft when loading (desktop only, not in select mode)
   useEffect(() => {
@@ -345,7 +355,7 @@ export default function AircraftPage() {
     }
   }, [isDesktop, selectMode, isLoading, allSortedAircraft, selectedAircraftReg, setSelectedAircraftReg])
 
-  // Update detail content when selection changes (desktop only)
+  // Update detail content when selection or data changes (desktop only)
   useEffect(() => {
     if (!isDesktop || selectMode) return
 
@@ -368,15 +378,19 @@ export default function AircraftPage() {
       return
     }
 
-    if (selectedAircraftReg) {
+    if (selectedAircraft) {
       setDetailContent(
-        <AircraftDetailPanel registration={selectedAircraftReg} />
+        <AircraftDetailPanel
+          key={selectedAircraft.registration}
+          aircraft={selectedAircraft}
+          onUpdated={refreshAircraft}
+        />
       )
     } else if (allSortedAircraft.length > 0) {
       const first = allSortedAircraft[0]
       setSelectedAircraftReg(first.registration || first.icao24)
     }
-  }, [isDesktop, selectMode, selectedAircraftReg, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg])
+  }, [isDesktop, selectMode, selectedAircraft, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg, refreshAircraft])
 
   // Track active letter from virtualizer scroll position
   useEffect(() => {
@@ -555,8 +569,10 @@ export default function AircraftPage() {
             setSelectedAircraftReg(registration)
           }}
           onCancel={() => {
-            if (selectedAircraftReg) {
-              setDetailContent(<AircraftDetailPanel registration={selectedAircraftReg} />)
+            if (selectedAircraft) {
+              setDetailContent(
+                <AircraftDetailPanel aircraft={selectedAircraft} onUpdated={refreshAircraft} />
+              )
             } else {
               setDetailContent(null)
             }
@@ -569,7 +585,7 @@ export default function AircraftPage() {
     } else {
       router.push(addAircraftUrl)
     }
-  }, [isDesktop, selectMode, searchQuery, router, addAircraftUrl, selectedAircraftReg, setDetailContent, setSelectedAircraftReg, refreshAircraft])
+  }, [isDesktop, selectMode, searchQuery, router, addAircraftUrl, selectedAircraft, setDetailContent, setSelectedAircraftReg, refreshAircraft])
 
   const showFavorites = !debouncedSearchQuery && favoriteAircraft.length > 0
   const showRecentlyUsed = !debouncedSearchQuery && recentNonFavorites.length > 0
@@ -597,7 +613,7 @@ export default function AircraftPage() {
       mainRef={scrollContainerCallbackRef}
     >
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center h-full gap-3 p-4">
+        <div className="flex flex-col items-center justify-center py-24 gap-3 p-4">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
           <p className="text-muted-foreground text-sm">Loading...</p>
         </div>
@@ -630,7 +646,7 @@ export default function AircraftPage() {
             {/* Non-virtualized content above the virtual list */}
             <div ref={aboveVirtualRef}>
               {!debouncedSearchQuery.trim() && (
-                <div className={`space-y-3 `}>
+                <div className="space-y-3">
                   {/* Favorites Section */}
                   {showFavorites && (
                     <div className="space-y-1.5">
@@ -764,7 +780,6 @@ export default function AircraftPage() {
                           isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
                           onToggleFavorite={handleToggleFavorite}
                           isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
-                          compact
                         />
                       </div>
                     </div>

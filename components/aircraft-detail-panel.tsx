@@ -4,10 +4,9 @@ import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
-  getAircraftByRegistrationFromDB,
   addCustomAircraftToDatabase,
   type NormalizedAircraft,
-} from "@/lib/db"
+} from "@/lib/db/stores/reference/aircraft.store"
 import { Loader2 } from "lucide-react"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
 import { getAircraftType, searchAircraftTypes } from "@/lib/db/stores/reference/aircraft-types.store"
@@ -45,22 +44,22 @@ function SettingsRow({
 }
 
 interface AircraftDetailPanelProps {
-  registration: string
+  /** Aircraft data from the parent's SWR hook (reactive) */
+  aircraft: NormalizedAircraft
+  /** Called after saving changes — parent should refresh SWR cache */
   onUpdated?: () => void
 }
 
-export function AircraftDetailPanel({ registration, onUpdated }: AircraftDetailPanelProps) {
-  const [aircraft, setAircraft] = useState<NormalizedAircraft | null>(null)
+export function AircraftDetailPanel({ aircraft, onUpdated }: AircraftDetailPanelProps) {
   const [typeInfo, setTypeInfo] = useState<AircraftType | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
   const [formData, setFormData] = useState({
-    registration: "",
-    typecode: "",
-    icao24: "",
-    operator: "",
+    registration: aircraft.registration,
+    typecode: aircraft.typecode || "",
+    icao24: aircraft.icao24 || "",
+    operator: aircraft.operator || "",
   })
 
   const [typeSearchQuery, setTypeSearchQuery] = useState("")
@@ -68,38 +67,27 @@ export function AircraftDetailPanel({ registration, onUpdated }: AircraftDetailP
   const [selectedType, setSelectedType] = useState<AircraftType | null>(null)
   const [showTypeSearch, setShowTypeSearch] = useState(false)
 
+  // Update form data from props when not editing (reactive from SWR)
   useEffect(() => {
-    const loadAircraft = async () => {
-      setIsLoading(true)
-      setIsEditing(false)
-      try {
-        const found = await getAircraftByRegistrationFromDB(registration)
-        if (found) {
-          setAircraft(found)
-          setFormData({
-            registration: found.registration,
-            typecode: found.typecode || "",
-            icao24: found.icao24 || "",
-            operator: found.operator || "",
-          })
-          if (found.typecode) {
-            const info = await getAircraftType(found.typecode)
-            setTypeInfo(info)
-          } else {
-            setTypeInfo(null)
-          }
-        } else {
-          setAircraft(null)
-          setTypeInfo(null)
-        }
-      } catch (error) {
-        console.error("[Aircraft Detail Panel] Failed to load:", error)
-      } finally {
-        setIsLoading(false)
-      }
+    if (!isEditing) {
+      setFormData({
+        registration: aircraft.registration,
+        typecode: aircraft.typecode || "",
+        icao24: aircraft.icao24 || "",
+        operator: aircraft.operator || "",
+      })
     }
-    loadAircraft()
-  }, [registration])
+  }, [aircraft, isEditing])
+
+  // Look up ICAO type info from Dexie
+  useEffect(() => {
+    const typecode = aircraft.typecode
+    if (typecode) {
+      getAircraftType(typecode).then(setTypeInfo)
+    } else {
+      setTypeInfo(null)
+    }
+  }, [aircraft.typecode])
 
   const updateField = useCallback(
     (field: string, value: string) => {
@@ -140,10 +128,10 @@ export function AircraftDetailPanel({ registration, onUpdated }: AircraftDetailP
         icao24: formData.icao24.trim(),
         typecode: formData.typecode.trim().toUpperCase(),
         operator: formData.operator.trim(),
-        shortDescription: finalTypeInfo?.description || aircraft?.shortDescription || "",
-        wtc: finalTypeInfo?.wtc || aircraft?.wtc || "",
-        wtg: finalTypeInfo?.wtg || aircraft?.wtg || "",
-        manufacturerCode: finalTypeInfo?.manufacturer || aircraft?.manufacturerCode || "",
+        shortDescription: finalTypeInfo?.description || aircraft.shortDescription || "",
+        wtc: finalTypeInfo?.wtc || aircraft.wtc || "",
+        wtg: finalTypeInfo?.wtg || aircraft.wtg || "",
+        manufacturerCode: finalTypeInfo?.manufacturer || aircraft.manufacturerCode || "",
         source: "fr24",
       })
 
@@ -154,15 +142,6 @@ export function AircraftDetailPanel({ registration, onUpdated }: AircraftDetailP
         icao24: formData.icao24.trim(),
         operator: formData.operator.trim(),
       })
-
-      const found = await getAircraftByRegistrationFromDB(formData.registration)
-      if (found) {
-        setAircraft(found)
-        if (found.typecode) {
-          const info = await getAircraftType(found.typecode)
-          setTypeInfo(info)
-        }
-      }
 
       setSelectedType(null)
       setIsEditing(false)
@@ -175,35 +154,17 @@ export function AircraftDetailPanel({ registration, onUpdated }: AircraftDetailP
   }
 
   const handleCancel = () => {
-    if (aircraft) {
-      setFormData({
-        registration: aircraft.registration,
-        typecode: aircraft.typecode || "",
-        icao24: aircraft.icao24 || "",
-        operator: aircraft.operator || "",
-      })
-    }
+    setFormData({
+      registration: aircraft.registration,
+      typecode: aircraft.typecode || "",
+      icao24: aircraft.icao24 || "",
+      operator: aircraft.operator || "",
+    })
     setSelectedType(null)
     setIsEditing(false)
   }
 
   const displayType = selectedType || typeInfo
-
-  if (isLoading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
-
-  if (!aircraft) {
-    return (
-      <div className="h-full flex items-center justify-center text-muted-foreground">
-        Aircraft not found: {registration}
-      </div>
-    )
-  }
 
   return (
     <div className="h-full relative flex flex-col">
@@ -245,7 +206,7 @@ export function AircraftDetailPanel({ registration, onUpdated }: AircraftDetailP
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto pt-12">
+      <div className="flex-1 overflow-y-auto pt-12">
         <div className="px-4 pt-4 pb-safe">
           <div className="bg-card rounded-xl overflow-hidden mb-6 border border-border">
             <div className="px-4">
