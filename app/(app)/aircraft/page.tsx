@@ -12,12 +12,12 @@ import {
   type NormalizedAircraft,
   type AircraftRecord,
   getUserPreferences,
-  saveUserPreferences,
   toggleFavoriteAircraft,
   updateFlight,
   addCustomAircraftToDatabase,
 } from "@/lib/db"
-import { useReferenceAircraft } from "@/hooks/data"
+import { useReferenceAircraft, useFlights } from "@/hooks/data"
+import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
@@ -147,8 +147,8 @@ export default function AircraftPage() {
 
   // SWR hook for reference aircraft (same pattern as useFlights in logbook)
   const { aircraft: allAircraft, isLoading, refresh: refreshAircraft } = useReferenceAircraft()
+  const { flights } = useFlights()
 
-  const [recentRegs, setRecentRegs] = useState<string[]>([])
   const [favoriteRegs, setFavoriteRegs] = useState<Set<string>>(new Set())
 
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined)
@@ -158,25 +158,36 @@ export default function AircraftPage() {
   const [fr24Results, setFr24Results] = useState<AircraftRecord[]>([])
   const [isFr24Loading, setIsFr24Loading] = useState(false)
 
-  // Load preferences (recently used + favorites) on mount
+  // Counter to re-trigger local search after adding aircraft
+  const [searchVersion, setSearchVersion] = useState(0)
+
+  // Load preferences (favorites only) on mount
   useEffect(() => {
     getUserPreferences().then((prefs) => {
-      setRecentRegs(prefs?.recentlyUsedAircraft || [])
       const favs = prefs?.favoriteAircraft || []
       setFavoriteRegs(new Set(favs.map((r) => r.toUpperCase())))
     })
   }, [])
 
-  // Compute recently used from allAircraft + preference regs
+  // Derive recently used from actual flights (most recent first) — stable, no jump on click
   const recentlyUsed = useMemo(() => {
-    if (recentRegs.length === 0 || allAircraft.length === 0) return []
+    if (flights.length === 0 || allAircraft.length === 0) return []
+    const seen = new Set<string>()
+    const recentRegs: string[] = []
+    for (const flight of flights) {
+      if (flight.aircraftReg && !seen.has(flight.aircraftReg.toUpperCase())) {
+        seen.add(flight.aircraftReg.toUpperCase())
+        recentRegs.push(flight.aircraftReg.toUpperCase())
+        if (recentRegs.length >= 10) break
+      }
+    }
     const recent: NormalizedAircraft[] = []
     for (const reg of recentRegs) {
-      const found = allAircraft.find((ac) => ac.registration?.toUpperCase() === reg.toUpperCase())
+      const found = allAircraft.find((ac) => ac.registration?.toUpperCase() === reg)
       if (found) recent.push(found)
     }
     return recent
-  }, [allAircraft, recentRegs])
+  }, [flights, allAircraft])
 
   // Sort aircraft with registrations alphabetically
   const allSortedAircraft = useMemo(() => {
@@ -206,7 +217,7 @@ export default function AircraftPage() {
       }
     })
     return () => { cancelled = true }
-  }, [debouncedSearchQuery])
+  }, [debouncedSearchQuery, searchVersion])
 
   const filteredAircraft = debouncedSearchQuery.trim() ? searchResults : allSortedAircraft
 
@@ -459,14 +470,6 @@ export default function AircraftPage() {
 
   const handleSelectAircraft = useCallback(
     async (aircraft: NormalizedAircraft) => {
-      if (aircraft.registration) {
-        const prefs = await getUserPreferences()
-        const prevRegs = prefs?.recentlyUsedAircraft || []
-        const filtered = prevRegs.filter((r) => r.toUpperCase() !== aircraft.registration.toUpperCase())
-        const updated = [aircraft.registration, ...filtered].slice(0, 10)
-        await saveUserPreferences({ recentlyUsedAircraft: updated })
-        setRecentRegs(updated)
-      }
       if (selectMode && flightId) {
         try {
           await updateFlight(flightId, {
@@ -489,7 +492,22 @@ export default function AircraftPage() {
 
   const handleSelectFr24 = useCallback(
     async (record: AircraftRecord) => {
-      const submissionId = await addCustomAircraftToDatabase(record)
+      // Enrich with ICAO type data from Dexie before storing
+      let enrichedRecord = { ...record }
+      if (record.typecode) {
+        const typeInfo = await getAircraftType(record.typecode)
+        if (typeInfo) {
+          enrichedRecord = {
+            ...enrichedRecord,
+            shortDescription: typeInfo.description,
+            wtc: typeInfo.wtc,
+            wtg: typeInfo.wtg,
+            manufacturerCode: typeInfo.manufacturer,
+          }
+        }
+      }
+
+      const submissionId = await addCustomAircraftToDatabase(enrichedRecord)
 
       // Fire-and-forget server submission for shared enrichment
       submitAircraftToServer({
@@ -507,12 +525,12 @@ export default function AircraftPage() {
 
       if (selectMode && flightId) {
         const normalized = allAircraft.find((a) => a.registration.toUpperCase() === reg) ||
-          { registration: record.registration || "", icao24: record.icao24 || "", typecode: record.typecode || "", shortDescription: "", wtc: "", wtg: "", manufacturerCode: "", operator: record.operator || "" }
+          { registration: record.registration || "", icao24: record.icao24 || "", typecode: record.typecode || "", shortDescription: enrichedRecord.shortDescription || "", wtc: enrichedRecord.wtc || "", wtg: enrichedRecord.wtg || "", manufacturerCode: enrichedRecord.manufacturerCode || "", operator: record.operator || "" }
         handleSelectAircraft(normalized)
       } else {
-        // Clear search and FR24 results so the full list (with new aircraft) shows
-        setSearchQuery("")
+        // Keep search bar filled, clear FR24 results, re-trigger local search
         setFr24Results([])
+        setSearchVersion((v) => v + 1)
         if (isDesktop) {
           setSelectedAircraftReg(reg)
         }
