@@ -12,11 +12,13 @@ import {
   silentDeleteFlight,
   silentDeleteAircraft,
   silentDeletePersonnel,
+  bulkUpsertAircraftReferences,
   userDb,
   type FlightLog,
   type Aircraft,
   type Personnel,
 } from "@/lib/db"
+import { referenceDb } from "@/lib/db/reference-db"
 import type { SyncQueueItem } from "@/types/sync/sync.types"
 import { getSyncTriggerManager } from "./sync-trigger-manager"
 
@@ -176,6 +178,13 @@ class SyncService {
       }
 
       console.log("[v0] Pulled", pulled, "records from server")
+
+      // Step 3: Pull shared aircraft reference data from MongoDB
+      console.log("[v0] Step 3: Pulling aircraft reference data...")
+      const refPulled = await this.pullAircraftReference()
+      if (refPulled > 0) {
+        console.log("[v0] Pulled", refPulled, "aircraft references")
+      }
 
       await setLastSyncTime(Date.now())
 
@@ -456,6 +465,38 @@ class SyncService {
 
     console.log("[v0] Pull complete - total records:", count)
     return { count }
+  }
+
+  /**
+   * Pull shared aircraft reference data from MongoDB
+   * Uses a separate sync timestamp (not tied to user data sync)
+   */
+  private async pullAircraftReference(): Promise<number> {
+    if (!navigator.onLine) return 0
+
+    try {
+      const lastRefSync = await referenceDb.getMetadata("aircraft-ref-last-sync")
+      const since = lastRefSync ? Number(lastRefSync) : 0
+
+      const response = await fetch(`/api/sync/aircraft-reference?since=${since}`)
+      if (!response.ok) {
+        console.error("[v0] Aircraft reference sync failed:", response.status)
+        return 0
+      }
+
+      const data = await response.json()
+      const records = data.records || []
+
+      if (records.length === 0) return 0
+
+      const count = await bulkUpsertAircraftReferences(records)
+      await referenceDb.setMetadata("aircraft-ref-last-sync", data.lastUpdated || Date.now())
+
+      return count
+    } catch (error) {
+      console.error("[v0] Aircraft reference sync error:", error)
+      return 0
+    }
   }
 
   async syncPendingChanges(): Promise<{ success: number; failed: number }> {

@@ -8,17 +8,14 @@ import { Search, Plane, Loader2, Star, Plus } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import { Input } from "@/components/ui/input"
 import {
-  getAircraftDatabase,
-  searchAircraft,
-  type AircraftData,
+  searchAircraftFromDB,
+  getAllAircraftFromDatabase,
   type NormalizedAircraft,
   type AircraftRecord,
   normalizeAircraft,
-  setProgressCallback,
   getUserPreferences,
   saveUserPreferences,
   toggleFavoriteAircraft,
-  getFavoriteAircraft,
   updateFlight,
   addCustomAircraftToDatabase,
 } from "@/lib/db"
@@ -85,8 +82,8 @@ const AircraftCard = memo(function AircraftCard({
           {!compact && (
             <div className="text-sm text-muted-foreground truncate mt-0.5">
               {aircraft.icao24 && <span className="font-mono">{aircraft.icao24}</span>}
-              {aircraft.icao24 && aircraft.shortType && <span> · </span>}
-              {aircraft.shortType && <span>{aircraft.shortType}</span>}
+              {aircraft.icao24 && aircraft.operator && <span> · </span>}
+              {aircraft.operator && <span>{aircraft.operator}</span>}
             </div>
           )}
         </div>
@@ -148,15 +145,10 @@ export default function AircraftPage() {
 
   const [searchQuery, setSearchQuery] = useState("")
   const debouncedSearchQuery = useDebounce(searchQuery, 150)
-  const [allAircraft, setAllAircraft] = useState<AircraftData[]>([])
+  const [allAircraft, setAllAircraft] = useState<NormalizedAircraft[]>([])
   const [recentlyUsed, setRecentlyUsed] = useState<NormalizedAircraft[]>([])
   const [favoriteRegs, setFavoriteRegs] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(true)
-  const [loadingProgress, setLoadingProgress] = useState({
-    stage: "",
-    percent: 0,
-    count: 0,
-  })
 
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined)
   const isFastScrollingRef = useRef(false)
@@ -167,28 +159,26 @@ export default function AircraftPage() {
 
   useEffect(() => {
     let mounted = true
-    setProgressCallback((progress) => {
-      if (mounted) {
-        setLoadingProgress({
-          stage: progress.stage,
-          percent: progress.percent,
-          count: progress.count || 0,
-        })
-      }
-    })
 
     async function loadDatabase() {
       setIsLoading(true)
       try {
-        const aircraft = await getAircraftDatabase()
+        const allRecords = await getAllAircraftFromDatabase()
         if (mounted) {
-          setAllAircraft(aircraft)
+          const parsed: NormalizedAircraft[] = []
+          for (const record of allRecords) {
+            try {
+              const data = JSON.parse(record.data)
+              parsed.push(normalizeAircraft(data))
+            } catch { /* skip invalid records */ }
+          }
+          setAllAircraft(parsed)
           const prefs = await getUserPreferences()
           const recentRegs = prefs?.recentlyUsedAircraft || []
           const recentAc: NormalizedAircraft[] = []
           for (const reg of recentRegs) {
-            const found = aircraft.find((ac) => ac.reg?.toUpperCase() === reg.toUpperCase())
-            if (found) recentAc.push(normalizeAircraft(found))
+            const found = parsed.find((ac) => ac.registration?.toUpperCase() === reg.toUpperCase())
+            if (found) recentAc.push(found)
           }
           setRecentlyUsed(recentAc)
           const favRegs = prefs?.favoriteAircraft || []
@@ -198,38 +188,43 @@ export default function AircraftPage() {
         console.error("[Aircraft Page] Failed to load database:", error)
       } finally {
         if (mounted) setIsLoading(false)
-        setProgressCallback(null)
       }
     }
     loadDatabase()
-    return () => {
-      mounted = false
-      setProgressCallback(null)
-    }
+    return () => { mounted = false }
   }, [])
 
-  // Normalize and sort aircraft with registrations alphabetically.
-  // Only include aircraft that have an actual registration for the browse list;
-  // the full dataset (~615k records) exceeds browser max scroll height (~33M px).
-  // Aircraft without registrations (ICAO24-only) are still findable via search.
+  // Sort aircraft with registrations alphabetically
   const allSortedAircraft = useMemo(() => {
     if (allAircraft.length === 0) return []
-    return allAircraft
-      .filter((a) => a.reg)
-      .map(normalizeAircraft)
+    return [...allAircraft]
+      .filter((a) => a.registration)
       .sort((a, b) => a.registration.localeCompare(b.registration))
   }, [allAircraft])
 
-  // Filtered aircraft for search mode
-  const filteredAircraft = useMemo(() => {
-    if (!debouncedSearchQuery.trim()) return allSortedAircraft
-    const results = searchAircraft(allAircraft, debouncedSearchQuery, 500)
-    return [...results].sort((a, b) => {
-      const regA = a.registration || a.icao24
-      const regB = b.registration || b.icao24
-      return regA.localeCompare(regB)
+  // Filtered aircraft for search mode (async via IndexedDB search)
+  const [searchResults, setSearchResults] = useState<NormalizedAircraft[]>([])
+  useEffect(() => {
+    if (!debouncedSearchQuery.trim()) {
+      setSearchResults([])
+      return
+    }
+    let cancelled = false
+    searchAircraftFromDB(debouncedSearchQuery, 500).then((results) => {
+      if (!cancelled) {
+        setSearchResults(
+          [...results].sort((a, b) => {
+            const regA = a.registration || a.icao24
+            const regB = b.registration || b.icao24
+            return regA.localeCompare(regB)
+          })
+        )
+      }
     })
-  }, [allAircraft, allSortedAircraft, debouncedSearchQuery])
+    return () => { cancelled = true }
+  }, [debouncedSearchQuery])
+
+  const filteredAircraft = debouncedSearchQuery.trim() ? searchResults : allSortedAircraft
 
   // FR24 online search: fires when local results are empty and query is non-empty
   useEffect(() => {
@@ -521,20 +516,8 @@ export default function AircraftPage() {
       })
 
       // Update local state so the aircraft appears in the list immediately
-      const newAircraftData: AircraftData = {
-        icao24: record.icao24,
-        reg: record.registration,
-        icaotype: record.typecode || null,
-        short_type: record.operator || null,
-      }
-      setAllAircraft((prev) => [...prev, newAircraftData])
-
-      const normalized: NormalizedAircraft = {
-        registration: record.registration,
-        icao24: record.icao24,
-        typecode: record.typecode,
-        shortType: record.operator || "",
-      }
+      const normalized: NormalizedAircraft = normalizeAircraft(record)
+      setAllAircraft((prev) => [...prev, normalized])
 
       if (selectMode && flightId) {
         handleSelectAircraft(normalized)
@@ -563,13 +546,7 @@ export default function AircraftPage() {
             // Optimistically add to list
             const found = await import("@/lib/db").then(m => m.getAircraftByRegistrationFromDB(registration))
             if (found) {
-              const newData: AircraftData = {
-                icao24: found.icao24,
-                reg: found.registration,
-                icaotype: found.typecode || null,
-                short_type: found.shortType || null,
-              }
-              setAllAircraft((prev) => [...prev, newData])
+              setAllAircraft((prev) => [...prev, found])
             }
             setSelectedAircraftReg(registration)
           }}
@@ -597,25 +574,11 @@ export default function AircraftPage() {
   return (
     <PageContainer
       header={
-        <>
-          <StandardPageHeader
-            title={selectMode ? "Select Aircraft" : "Aircraft"}
-            showBack={selectMode}
-            onBack={selectMode ? () => router.back() : undefined}
-          />
-          {loadingProgress.stage && isLoading && (
-            <div className="bg-background/30 backdrop-blur-xl border-b border-border/50 px-3 pb-2">
-              <div className="container mx-auto">
-                <div className="h-1 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary transition-all duration-300"
-                    style={{ width: `${loadingProgress.percent}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-        </>
+        <StandardPageHeader
+          title={selectMode ? "Select Aircraft" : "Aircraft"}
+          showBack={selectMode}
+          onBack={selectMode ? () => router.back() : undefined}
+        />
       }
       rightContent={
         showFastScroll ? (
@@ -632,7 +595,7 @@ export default function AircraftPage() {
       {isLoading ? (
         <div className="flex flex-col items-center justify-center h-full gap-3 p-4">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-muted-foreground text-sm">{loadingProgress.stage || "Loading..."}</p>
+          <p className="text-muted-foreground text-sm">Loading...</p>
         </div>
       ) : (
         <div>

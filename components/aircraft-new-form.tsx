@@ -9,12 +9,11 @@ import { useRouter } from "next/navigation"
 import {
   addCustomAircraftToDatabase,
   getAircraftByRegistrationFromDB,
-  getAircraftDatabase,
   updateFlight,
 } from "@/lib/db"
 import { syncService } from "@/lib/sync"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
-import { searchAircraftTypes } from "@/lib/db/stores/reference/aircraft-types.store"
+import { searchAircraftTypes, getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import type { AircraftType } from "@/types/entities/aircraft-type.types"
 import type { AircraftRecord } from "@/types/entities/aircraft.types"
 import { formatAircraftType } from "@/lib/utils/aircraft-type-utils"
@@ -86,6 +85,9 @@ export function AircraftNewForm({
   const [typeSearchResults, setTypeSearchResults] = useState<AircraftType[]>([])
   const [selectedType, setSelectedType] = useState<AircraftType | null>(null)
   const [showTypeSearch, setShowTypeSearch] = useState(false)
+
+  // Type info looked up from Dexie for FR24 results
+  const [fr24TypeInfo, setFr24TypeInfo] = useState<AircraftType | null>(null)
 
   // FR24 inline search state
   const [fr24Data, setFr24Data] = useState<{
@@ -183,6 +185,15 @@ export function AircraftNewForm({
     return () => clearTimeout(timer)
   }, [registration])
 
+  // Look up ICAO type info when FR24 returns a typecode
+  useEffect(() => {
+    if (!fr24Data?.typecode) {
+      setFr24TypeInfo(null)
+      return
+    }
+    getAircraftType(fr24Data.typecode).then((info) => setFr24TypeInfo(info))
+  }, [fr24Data?.typecode])
+
   // Search aircraft types when typecode changes (only when type field is visible)
   useEffect(() => {
     if (!typeSearchQuery || typeSearchQuery.length < 1) {
@@ -214,11 +225,16 @@ export function AircraftNewForm({
     try {
       // Use FR24 data to populate if available, otherwise manual entry
       const finalReg = fr24Data?.registration || reg
+      const typeInfo = fr24TypeInfo || selectedType
       const record: AircraftRecord = {
         registration: finalReg,
         icao24: fr24Data?.icao24 || "",
         typecode: typecode.trim().toUpperCase(),
         operator: fr24Data?.operator || "",
+        shortDescription: typeInfo?.description || "",
+        wtc: typeInfo?.wtc || "",
+        wtg: typeInfo?.wtg || "",
+        manufacturerCode: typeInfo?.manufacturer || "",
         source: fr24Data ? "fr24" : "custom",
       }
 
@@ -360,6 +376,17 @@ export function AircraftNewForm({
           {fr24Found && fr24Data && (
             <ReadOnlyRow label="Operator" value={fr24Data.operator || "-"} />
           )}
+          {fr24Found && fr24TypeInfo && (
+            <>
+              <ReadOnlyRow label="Manufacturer" value={fr24TypeInfo.manufacturer} />
+              <ReadOnlyRow
+                label="Category"
+                value={`${fr24TypeInfo.category} · ${fr24TypeInfo.engineCount} × ${fr24TypeInfo.engineType}`}
+              />
+              <ReadOnlyRow label="WTC" value={fr24TypeInfo.wtc} />
+              <ReadOnlyRow label="WTG" value={fr24TypeInfo.wtg} />
+            </>
+          )}
 
           {showManualTypeField && (
             <>
@@ -407,7 +434,12 @@ export function AircraftNewForm({
                           </span>
                           {type.wtc && (
                             <span className="text-xs text-muted-foreground">
-                              WTC: {type.wtc}
+                              WTC:{type.wtc}
+                            </span>
+                          )}
+                          {type.wtg && (
+                            <span className="text-xs text-muted-foreground">
+                              WTG:{type.wtg}
                             </span>
                           )}
                         </div>
@@ -427,12 +459,12 @@ export function AircraftNewForm({
                     label="Manufacturer"
                     value={selectedType.manufacturer}
                   />
-                  <ReadOnlyRow label="Model" value={selectedType.model} />
                   <ReadOnlyRow
                     label="Category"
                     value={`${selectedType.category} · ${selectedType.engineCount} × ${selectedType.engineType}`}
                   />
                   <ReadOnlyRow label="WTC" value={selectedType.wtc} />
+                  <ReadOnlyRow label="WTG" value={selectedType.wtg} />
                 </>
               )}
             </>
