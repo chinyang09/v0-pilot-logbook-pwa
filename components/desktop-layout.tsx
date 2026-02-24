@@ -3,19 +3,22 @@
 import type React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { SidebarNav, SidebarToggle } from "@/components/sidebar-nav"
-import { SidebarProvider } from "@/hooks/use-sidebar-context"
-import { DetailPanelProvider, useDetailPanel } from "@/hooks/use-detail-panel"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable"
 import { FlightForm } from "@/components/flight-form"
+import { BottomNavbar } from "@/components/bottom-navbar"
+import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
 import { syncService } from "@/lib/sync"
+import { cn } from "@/lib/utils"
 
-interface DesktopLayoutProps {
+interface AppShellProps {
   children: React.ReactNode
 }
 
@@ -75,39 +78,61 @@ function DetailPanelContent() {
   )
 }
 
-function DesktopLayoutContent({ children }: DesktopLayoutProps) {
+/**
+ * Unified responsive shell — renders both mobile and desktop elements
+ * in a single React tree. CSS visibility classes (`hidden lg:flex`, `lg:hidden`)
+ * handle the responsive switch instead of conditional rendering, so the
+ * component tree is never destroyed when crossing the 1024px breakpoint.
+ */
+function AppShellContent({ children }: AppShellProps) {
+  const { hideNavbar } = useScrollNavbarContext()
+
   return (
     <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden pt-safe">
-      {/* Sidebar */}
-      <SidebarNav />
+      {/* Sidebar — desktop only */}
+      <div className="hidden lg:flex flex-shrink-0 h-full">
+        <SidebarNav />
+      </div>
 
-      {/* Main content area - always show with detail panel */}
-      <div className="flex-1 flex min-w-0 overflow-x-auto">
-        <ResizablePanelGroup direction="horizontal" autoSaveId="desktop-panel-layout" className="h-full min-w-[750px]">
-          <ResizablePanel defaultSize={35} minSize={30} style={{ minWidth: "375px" }}>
+      {/* Main content area with resizable panels */}
+      <div className="flex-1 flex min-w-0 lg:overflow-x-auto">
+        <ResizablePanelGroup
+          direction="horizontal"
+          autoSaveId="desktop-panel-layout"
+          className="h-full lg:min-w-[750px]"
+        >
+          <ResizablePanel defaultSize={35} minSize={30} className="lg:min-w-[375px]">
             <div className="h-full flex flex-col overflow-hidden relative">{children}</div>
           </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={65} minSize={25}>
+
+          {/* Resize handle — desktop only */}
+          <ResizableHandle withHandle className="hidden lg:flex" />
+
+          {/* Detail panel — desktop only */}
+          <ResizablePanel defaultSize={65} minSize={25} className="hidden lg:block">
             <DetailPanelContent />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
 
-      {/* Sidebar toggle button - positioned to align with sidebar header */}
-      <div className="absolute left-3 z-[100] top-[calc(env(safe-area-inset-top)+0.875rem)]">
+      {/* Sidebar toggle — desktop only */}
+      <div className="hidden lg:block absolute left-3 z-[100] top-[calc(env(safe-area-inset-top)+0.875rem)]">
         <SidebarToggle />
       </div>
+
+      {/* Bottom navbar — mobile only */}
+      <div className={cn(
+        "fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out lg:hidden",
+        hideNavbar ? "translate-y-full" : "translate-y-0"
+      )}>
+        <BottomNavbar />
+      </div>
+
+      <PWAInstallPrompt />
     </div>
   )
 }
 
-export function DesktopLayout({ children }: DesktopLayoutProps) {
-  return (
-    <SidebarProvider defaultOpen={true}>
-      <DetailPanelProvider>
-        <DesktopLayoutContent>{children}</DesktopLayoutContent>
-      </DetailPanelProvider>
-    </SidebarProvider>
-  )
+export function AppShell({ children }: AppShellProps) {
+  return <AppShellContent>{children}</AppShellContent>
 }
