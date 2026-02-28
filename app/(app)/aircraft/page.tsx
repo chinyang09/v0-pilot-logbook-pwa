@@ -386,7 +386,7 @@ export default function AircraftPage() {
           onUpdated={refreshAircraft}
         />
       )
-    } else if (allSortedAircraft.length > 0) {
+    } else if (isDesktop && allSortedAircraft.length > 0) {
       const first = allSortedAircraft[0]
       setSelectedAircraftReg(first.registration || first.icao24)
     }

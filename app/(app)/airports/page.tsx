@@ -306,7 +306,7 @@ export default function AirportsPage() {
 
     if (selectedAirportIcao) {
       setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} />);
-    } else if (allSortedAirports.length > 0) {
+    } else if (isDesktop && allSortedAirports.length > 0) {
       setSelectedAirportIcao(allSortedAirports[0].icao);
     }
   }, [isDesktop, fieldType, selectedAirportIcao, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao]);

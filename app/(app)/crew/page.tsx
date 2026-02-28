@@ -265,7 +265,7 @@ export default function CrewPage() {
           onUpdated={() => mutate(CACHE_KEYS.personnel)}
         />
       );
-    } else if (sortedPersonnel.length > 0) {
+    } else if (isDesktop && sortedPersonnel.length > 0) {
       setSelectedCrewId(sortedPersonnel[0].id);
     }
   }, [isDesktop, fieldType, selectedCrewId, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);

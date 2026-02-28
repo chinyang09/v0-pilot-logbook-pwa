@@ -111,9 +111,12 @@ function AppShellContent({ children }: AppShellProps) {
   const { hideNavbar } = useScrollNavbarContext()
   const { selectedId } = useDetailPanel()
   const isDesktop = useIsDesktop()
+  const searchParams = useSearchParams()
 
-  // On mobile, show the overlay when an item is selected
-  const showMobileOverlay = !isDesktop && !!selectedId
+  // Only show mobile overlay when the selection is explicit (in URL via ?selected=).
+  // SessionStorage-restored selections set state but don't update the URL,
+  // so this prevents the overlay from auto-showing on page navigation.
+  const showMobileOverlay = !isDesktop && !!selectedId && searchParams.has("selected")
 
   return (
     <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden pt-safe">
@@ -143,9 +146,12 @@ function AppShellContent({ children }: AppShellProps) {
         </ResizablePanelGroup>
       </div>
 
-      {/* Mobile detail overlay — shown when item is selected on mobile */}
+      {/* Mobile detail overlay — sits above the main content, below the bottom navbar */}
       {showMobileOverlay && (
-        <div className="fixed inset-0 z-[60] bg-background lg:hidden pt-safe">
+        <div
+          className="fixed inset-x-0 top-0 z-[60] bg-background lg:hidden pt-safe"
+          style={{ bottom: "calc(4rem + env(safe-area-inset-bottom))" }}
+        >
           <DetailPanelContent />
         </div>
       )}
@@ -155,10 +161,10 @@ function AppShellContent({ children }: AppShellProps) {
         <SidebarToggle />
       </div>
 
-      {/* Bottom navbar — mobile only, hidden when overlay is active */}
+      {/* Bottom navbar — mobile only, stays visible even when overlay is shown */}
       <div className={cn(
         "fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out lg:hidden",
-        (hideNavbar || showMobileOverlay) ? "translate-y-full" : "translate-y-0"
+        (hideNavbar && !showMobileOverlay) ? "translate-y-full" : "translate-y-0"
       )}>
         <BottomNavbar />
       </div>
