@@ -483,11 +483,11 @@ export default function AirportsPage() {
           console.error("Failed to update flight with airport:", error);
         }
         router.back();
-      } else if (isDesktop) {
+      } else {
         setSelectedAirportIcao(result.icao);
       }
     },
-    [fieldType, flightId, isDesktop, router, mutateAirports, setSelectedAirportIcao],
+    [fieldType, flightId, router, mutateAirports, setSelectedAirportIcao],
   );
 
   const addAirportUrl = fieldType && flightId

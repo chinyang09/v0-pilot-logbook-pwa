@@ -76,19 +76,17 @@ function DetailPanelContent() {
   return (
     <div className="h-full overflow-auto bg-background">
       {detailContent ? (
-        <div className="h-full flex flex-col">
-          {/* Mobile-only back button header */}
-          <div className="flex-shrink-0 flex items-center h-12 px-2 border-b border-border lg:hidden">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => setSelectedId(null)}
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </div>
-          <div className="flex-1 overflow-auto">
+        <div className="h-full relative">
+          {/* Mobile-only floating close button — top-right over detail content */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute top-2 right-2 z-10 h-8 w-8 lg:hidden"
+            onClick={() => setSelectedId(null)}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="h-full overflow-auto">
             {detailContent}
           </div>
         </div>
@@ -164,7 +162,7 @@ function AppShellContent({ children }: AppShellProps) {
       {/* Bottom navbar — mobile only, stays visible even when overlay is shown */}
       <div className={cn(
         "fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out lg:hidden",
-        (hideNavbar && !showMobileOverlay) ? "translate-y-full" : "translate-y-0"
+        hideNavbar ? "translate-y-full" : "translate-y-0"
       )}>
         <BottomNavbar />
       </div>

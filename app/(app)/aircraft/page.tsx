@@ -543,12 +543,10 @@ export default function AircraftPage() {
         // Keep search bar filled, clear FR24 results, re-trigger local search
         setFr24Results([])
         setSearchVersion((v) => v + 1)
-        if (isDesktop) {
-          setSelectedAircraftReg(reg)
-        }
+        setSelectedAircraftReg(reg)
       }
     },
-    [selectMode, flightId, isDesktop, handleSelectAircraft, setSelectedAircraftReg, refreshAircraft, allAircraft],
+    [selectMode, flightId, handleSelectAircraft, setSelectedAircraftReg, refreshAircraft, allAircraft],
   )
 
   const addAircraftUrl = selectMode

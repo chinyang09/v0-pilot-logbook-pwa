@@ -43,10 +43,10 @@ const navSections: NavSection[] = [
     label: "Logbook",
     defaultOpen: true,
     items: [
-      { label: "Flights & Duties", href: "/logbook", icon: <Book className="h-4 w-4" /> },
+      { label: "Logbook", href: "/logbook", icon: <Book className="h-4 w-4" /> },
       { label: "Aircraft", href: "/aircraft", icon: <Plane className="h-4 w-4" /> },
-      { label: "Places", href: "/airports", icon: <MapPin className="h-4 w-4" /> },
-      { label: "People", href: "/crew", icon: <Users className="h-4 w-4" /> },
+      { label: "Airports", href: "/airports", icon: <MapPin className="h-4 w-4" /> },
+      { label: "Crew", href: "/crew", icon: <Users className="h-4 w-4" /> },
       { label: "Currencies", href: "/currencies", icon: <Award className="h-4 w-4" /> },
     ],
   },
