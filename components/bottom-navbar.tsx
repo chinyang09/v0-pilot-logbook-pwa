@@ -72,7 +72,7 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
             className="h-12 w-12 rounded-full shadow-lg"
             onClick={async () => {
               const draft = await createFlight();
-              router.push(`/flights/${draft.id}`);
+              router.push(`/logbook?selected=${draft.id}`);
             }}
           >
             <Plus className="h-6 w-6" />

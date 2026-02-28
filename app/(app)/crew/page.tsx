@@ -235,9 +235,9 @@ export default function CrewPage() {
     }
   }, [isDesktop, fieldType, isLoading, sortedPersonnel, selectedCrewId, setSelectedCrewId]);
 
-  // Update detail content when selection changes (desktop only)
+  // Update detail content when selection changes
   useEffect(() => {
-    if (!isDesktop || fieldType) return;
+    if (fieldType) return;
 
     if (isLoading) {
       setDetailContent(
@@ -360,10 +360,8 @@ export default function CrewPage() {
         console.error("Failed to update flight with crew:", error);
       }
       router.back();
-    } else if (isDesktop) {
-      setSelectedCrewId(crew.id);
     } else {
-      router.push(`/crew/${crew.id}`);
+      setSelectedCrewId(crew.id);
     }
   }, [fieldType, flightId, isDesktop, router, setSelectedCrewId]);
 

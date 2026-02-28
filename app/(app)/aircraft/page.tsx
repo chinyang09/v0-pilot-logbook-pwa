@@ -355,9 +355,9 @@ export default function AircraftPage() {
     }
   }, [isDesktop, selectMode, isLoading, allSortedAircraft, selectedAircraftReg, setSelectedAircraftReg])
 
-  // Update detail content when selection or data changes (desktop only)
+  // Update detail content when selection or data changes
   useEffect(() => {
-    if (!isDesktop || selectMode) return
+    if (selectMode) return
 
     if (isLoading) {
       setDetailContent(
@@ -495,10 +495,8 @@ export default function AircraftPage() {
           console.error("Failed to update flight with aircraft:", error)
         }
         router.back()
-      } else if (isDesktop) {
-        setSelectedAircraftReg(aircraft.registration || aircraft.icao24)
       } else {
-        router.push(`/aircraft/${encodeURIComponent(aircraft.registration || aircraft.icao24)}`)
+        setSelectedAircraftReg(aircraft.registration || aircraft.icao24)
       }
     },
     [selectMode, flightId, router, isDesktop, setSelectedAircraftReg],

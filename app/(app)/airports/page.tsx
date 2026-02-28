@@ -282,9 +282,9 @@ export default function AirportsPage() {
     }
   }, [isDesktop, fieldType, isLoading, allSortedAirports, selectedAirportIcao, setSelectedAirportIcao]);
 
-  // Update detail content when selection changes (desktop only)
+  // Update detail content when selection changes
   useEffect(() => {
-    if (!isDesktop || fieldType) return;
+    if (fieldType) return;
 
     if (isLoading) {
       setDetailContent(
@@ -412,10 +412,8 @@ export default function AirportsPage() {
         console.error("Failed to update flight with airport:", error);
       }
       router.back();
-    } else if (isDesktop) {
-      setSelectedAirportIcao(icao);
     } else {
-      router.push(`/airports/${icao}`);
+      setSelectedAirportIcao(icao);
     }
   }, [fieldType, flightId, isDesktop, router, setSelectedAirportIcao]);
 
