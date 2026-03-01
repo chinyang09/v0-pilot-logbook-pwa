@@ -18,8 +18,6 @@ import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
 import { syncService } from "@/lib/sync"
 import { cn } from "@/lib/utils"
-import { ArrowLeft } from "lucide-react"
-import { Button } from "@/components/ui/button"
 
 interface AppShellProps {
   children: React.ReactNode
@@ -72,23 +70,11 @@ function DetailPanelContent() {
   }
 
   // Other pages: fall back to context-provided content
-  // On mobile, add a back button header when detail content is shown
   return (
     <div className="h-full overflow-auto bg-background">
       {detailContent ? (
-        <div className="h-full relative">
-          {/* Mobile-only floating close button — top-right over detail content */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute top-2 right-2 z-10 h-8 w-8 lg:hidden"
-            onClick={() => setSelectedId(null)}
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div className="h-full overflow-auto">
-            {detailContent}
-          </div>
+        <div className="h-full overflow-auto">
+          {detailContent}
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -161,7 +147,7 @@ function AppShellContent({ children }: AppShellProps) {
 
       {/* Bottom navbar — mobile only, stays visible even when overlay is shown */}
       <div className={cn(
-        "fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out lg:hidden",
+        "fixed bottom-0 left-0 right-0 z-50 transition-[translate] duration-300 ease-in-out lg:hidden",
         hideNavbar ? "translate-y-full" : "translate-y-0"
       )}>
         <BottomNavbar />

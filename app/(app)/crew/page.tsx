@@ -263,6 +263,7 @@ export default function CrewPage() {
           key={selectedCrewId}
           crewId={selectedCrewId}
           onUpdated={() => mutate(CACHE_KEYS.personnel)}
+          onBack={() => setSelectedCrewId(null)}
         />
       );
     } else if (isDesktop && sortedPersonnel.length > 0) {

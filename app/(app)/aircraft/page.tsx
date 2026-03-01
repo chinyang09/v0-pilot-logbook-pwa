@@ -384,6 +384,7 @@ export default function AircraftPage() {
           key={selectedAircraft.registration}
           aircraft={selectedAircraft}
           onUpdated={refreshAircraft}
+          onBack={() => setSelectedAircraftReg(null)}
         />
       )
     } else if (isDesktop && allSortedAircraft.length > 0) {
@@ -567,7 +568,7 @@ export default function AircraftPage() {
           onCancel={() => {
             if (selectedAircraft) {
               setDetailContent(
-                <AircraftDetailPanel aircraft={selectedAircraft} onUpdated={refreshAircraft} />
+                <AircraftDetailPanel aircraft={selectedAircraft} onUpdated={refreshAircraft} onBack={() => setSelectedAircraftReg(null)} />
               )
             } else {
               setDetailContent(null)

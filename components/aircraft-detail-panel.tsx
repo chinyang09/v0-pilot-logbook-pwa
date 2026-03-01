@@ -7,7 +7,7 @@ import {
   addCustomAircraftToDatabase,
   type NormalizedAircraft,
 } from "@/lib/db/stores/reference/aircraft.store"
-import { Loader2 } from "lucide-react"
+import { Loader2, ChevronLeft } from "lucide-react"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
 import { getAircraftType, searchAircraftTypes } from "@/lib/db/stores/reference/aircraft-types.store"
 import type { AircraftType } from "@/types/entities/aircraft-type.types"
@@ -48,9 +48,11 @@ interface AircraftDetailPanelProps {
   aircraft: NormalizedAircraft
   /** Called after saving changes — parent should refresh SWR cache */
   onUpdated?: () => void
+  /** Called when back button is pressed (mobile overlay dismiss) */
+  onBack?: () => void
 }
 
-export function AircraftDetailPanel({ aircraft, onUpdated }: AircraftDetailPanelProps) {
+export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDetailPanelProps) {
   const [typeInfo, setTypeInfo] = useState<AircraftType | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -173,6 +175,10 @@ export function AircraftDetailPanel({ aircraft, onUpdated }: AircraftDetailPanel
           {isEditing ? (
             <Button variant="ghost" size="sm" onClick={handleCancel} className="text-primary h-8 px-2">
               Cancel
+            </Button>
+          ) : onBack ? (
+            <Button variant="ghost" size="icon-sm" onClick={onBack} className="lg:hidden">
+              <ChevronLeft className="h-4 w-4" />
             </Button>
           ) : (
             <span />

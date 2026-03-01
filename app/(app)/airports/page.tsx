@@ -305,7 +305,7 @@ export default function AirportsPage() {
     }
 
     if (selectedAirportIcao) {
-      setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} />);
+      setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} onBack={() => setSelectedAirportIcao(null)} />);
     } else if (isDesktop && allSortedAirports.length > 0) {
       setSelectedAirportIcao(allSortedAirports[0].icao);
     }
@@ -509,7 +509,7 @@ export default function AirportsPage() {
           }}
           onCancel={() => {
             if (selectedAirportIcao) {
-              setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} />);
+              setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} onBack={() => setSelectedAirportIcao(null)} />);
             } else {
               setDetailContent(null);
             }

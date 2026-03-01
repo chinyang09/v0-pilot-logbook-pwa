@@ -10,7 +10,7 @@ import {
   getAllPersonnel,
   type Personnel,
 } from "@/lib/db"
-import { Loader2, ChevronRight } from "lucide-react"
+import { Loader2, ChevronRight, ChevronLeft } from "lucide-react"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
 
@@ -79,9 +79,11 @@ function ToggleRow({
 interface CrewDetailPanelProps {
   crewId: string
   onUpdated?: () => void
+  /** Called when back button is pressed (mobile overlay dismiss) */
+  onBack?: () => void
 }
 
-export function CrewDetailPanel({ crewId, onUpdated }: CrewDetailPanelProps) {
+export function CrewDetailPanel({ crewId, onUpdated, onBack }: CrewDetailPanelProps) {
   const [crew, setCrew] = useState<Personnel | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -256,6 +258,10 @@ export function CrewDetailPanel({ crewId, onUpdated }: CrewDetailPanelProps) {
               className="text-primary h-8 px-2"
             >
               Cancel
+            </Button>
+          ) : onBack ? (
+            <Button variant="ghost" size="icon-sm" onClick={onBack} className="lg:hidden">
+              <ChevronLeft className="h-4 w-4" />
             </Button>
           ) : (
             <span />
