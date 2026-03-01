@@ -62,16 +62,16 @@ export function AirportDetailPanel({ icao, onBack }: AirportDetailPanelProps) {
     <div className="h-full relative flex flex-col">
       {/* Header - absolute overlay for frosted glass */}
       <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
-        <div className="px-4 h-12 flex items-center justify-between">
-          {onBack ? (
-            <Button variant="ghost" size="icon-sm" onClick={onBack} className="lg:hidden">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-          ) : (
-            <span />
-          )}
-          <h1 className="text-lg font-semibold uppercase">{airport.icao}</h1>
-          <span />
+        <div className="px-2 h-12 flex items-center">
+          <div className="w-16 flex-shrink-0">
+            {onBack ? (
+              <Button variant="ghost" size="icon-sm" onClick={onBack} className="lg:hidden">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            ) : null}
+          </div>
+          <h1 className="flex-1 text-center text-lg font-semibold uppercase">{airport.icao}</h1>
+          <div className="w-16 flex-shrink-0" />
         </div>
       </header>
 

@@ -331,18 +331,6 @@ export default function CrewPage() {
     }
   }, [letterIndexMap, rowVirtualizer]);
 
-  // Scroll to selected crew from URL after data loads
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop && !isLoading && sortedPersonnel.length > 0) {
-      const index = sortedPersonnel.findIndex((p) => p.id === selectedFromUrl);
-      if (index !== -1) {
-        setTimeout(() => {
-          rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "auto" });
-        }, 100);
-      }
-    }
-  }, [selectedFromUrl, isDesktop, isLoading, sortedPersonnel, rowVirtualizer]);
-
   const handleCrewSelect = useCallback(async (crew: (typeof personnel)[0]) => {
     if (fieldType && flightId) {
       const crewName = crew.isMe ? "Self" : crew.name;

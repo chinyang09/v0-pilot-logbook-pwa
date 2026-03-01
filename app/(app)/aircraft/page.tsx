@@ -453,19 +453,7 @@ export default function AircraftPage() {
     }
   }, [letterIndexMap, rowVirtualizer])
 
-  // Scroll to selected aircraft from URL after data loads
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop && !isLoading && allSortedAircraft.length > 0) {
-      const index = allSortedAircraft.findIndex(
-        (a) => (a.registration || a.icao24) === selectedFromUrl
-      )
-      if (index !== -1) {
-        setTimeout(() => {
-          rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "auto" })
-        }, 100)
-      }
-    }
-  }, [selectedFromUrl, isDesktop, isLoading, allSortedAircraft, rowVirtualizer])
+
 
   const handleToggleFavorite = useCallback(async (e: React.MouseEvent, registration: string) => {
     e.preventDefault()

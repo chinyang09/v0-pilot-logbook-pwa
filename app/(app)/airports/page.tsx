@@ -371,17 +371,7 @@ export default function AirportsPage() {
     }
   }, [letterIndexMap, rowVirtualizer]);
 
-  // Scroll to selected airport from URL after data loads
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop && !isLoading && allSortedAirports.length > 0) {
-      const index = allSortedAirports.findIndex(a => a.icao === selectedFromUrl);
-      if (index !== -1) {
-        setTimeout(() => {
-          rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "auto" });
-        }, 100);
-      }
-    }
-  }, [selectedFromUrl, isDesktop, isLoading, allSortedAirports, rowVirtualizer]);
+
 
   useEffect(() => {
     const loadRecentAirports = async () => {

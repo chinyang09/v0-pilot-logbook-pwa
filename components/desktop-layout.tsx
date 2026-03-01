@@ -92,7 +92,7 @@ function DetailPanelContent() {
  * component tree is never destroyed when crossing the 1024px breakpoint.
  */
 function AppShellContent({ children }: AppShellProps) {
-  const { hideNavbar } = useScrollNavbarContext()
+  const { hideNavbar, handleScroll } = useScrollNavbarContext()
   const { selectedId } = useDetailPanel()
   const isDesktop = useIsDesktop()
   const searchParams = useSearchParams()
@@ -130,11 +130,19 @@ function AppShellContent({ children }: AppShellProps) {
         </ResizablePanelGroup>
       </div>
 
-      {/* Mobile detail overlay — sits above the main content, below the bottom navbar */}
+      {/* Mobile detail overlay — sits above the main content, below the bottom navbar.
+          onScrollCapture intercepts scroll events from child scroll containers
+          (scroll events don't bubble, so capture phase is required). */}
       {showMobileOverlay && (
         <div
           className="fixed inset-x-0 top-0 z-[60] bg-background lg:hidden pt-safe"
           style={{ bottom: "calc(4rem + env(safe-area-inset-bottom))" }}
+          onScrollCapture={(e) => {
+            const target = e.target as HTMLElement
+            if (target !== e.currentTarget) {
+              handleScroll({ currentTarget: target } as React.UIEvent<HTMLElement>)
+            }
+          }}
         >
           <DetailPanelContent />
         </div>
