@@ -130,13 +130,13 @@ function AppShellContent({ children }: AppShellProps) {
         </ResizablePanelGroup>
       </div>
 
-      {/* Mobile detail overlay — sits above the main content, below the bottom navbar.
-          onScrollCapture intercepts scroll events from child scroll containers
-          (scroll events don't bubble, so capture phase is required). */}
+      {/* Mobile detail overlay — sits above the main content, above the bottom navbar.
+          Bottom tracks navbar visibility: stops above navbar when visible, extends
+          to screen edge when navbar hides on scroll. Transition syncs with navbar. */}
       {showMobileOverlay && (
         <div
-          className="fixed inset-x-0 top-0 z-[60] bg-background lg:hidden pt-safe"
-          style={{ bottom: "calc(4rem + env(safe-area-inset-bottom))" }}
+          className="fixed inset-x-0 top-0 z-[60] bg-background lg:hidden pt-safe transition-[bottom] duration-300 ease-in-out"
+          style={{ bottom: hideNavbar ? "0px" : "calc(4rem + env(safe-area-inset-bottom))" }}
           onScrollCapture={(e) => {
             const target = e.target as HTMLElement
             if (target !== e.currentTarget) {

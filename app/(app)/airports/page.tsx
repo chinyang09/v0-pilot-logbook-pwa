@@ -102,7 +102,6 @@ export default function AirportsPage() {
   const searchParams = useSearchParams();
   const fieldType = searchParams.get("field");
   const flightId = searchParams.get("flightId");
-  const selectedFromUrl = searchParams.get("selected");
   const isDesktop = useIsDesktop();
 
   const scrollContainerRef = useRef<HTMLElement | null>(null);
@@ -141,16 +140,6 @@ export default function AirportsPage() {
     setSelectedId: setSelectedAirportIcao,
     setDetailContent,
   } = useDetailPanel();
-
-  // Handle selection from URL (when redirected from mobile detail view)
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop) {
-      setSelectedAirportIcao(selectedFromUrl);
-      const url = new URL(window.location.href);
-      url.searchParams.delete("selected");
-      window.history.replaceState({}, "", url.toString());
-    }
-  }, [selectedFromUrl, isDesktop, setSelectedAirportIcao]);
 
   // Sort all airports: favorites first, then alphabetical by ICAO
   const allSortedAirports = useMemo(() => {
@@ -405,7 +394,7 @@ export default function AirportsPage() {
     } else {
       setSelectedAirportIcao(icao);
     }
-  }, [fieldType, flightId, isDesktop, router, setSelectedAirportIcao]);
+  }, [fieldType, flightId, router, setSelectedAirportIcao]);
 
   const handleToggleFavorite = useCallback(async (e: React.MouseEvent, icao: string) => {
     e.preventDefault();

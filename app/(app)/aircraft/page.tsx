@@ -117,7 +117,6 @@ export default function AircraftPage() {
   const searchParams = useSearchParams()
   const selectMode = searchParams.get("select") === "true"
   const flightId = searchParams.get("flightId")
-  const selectedFromUrl = searchParams.get("selected")
   const isDesktop = useIsDesktop()
 
   const scrollContainerRef = useRef<HTMLElement | null>(null)
@@ -131,16 +130,6 @@ export default function AircraftPage() {
     setSelectedId: setSelectedAircraftReg,
     setDetailContent,
   } = useDetailPanel()
-
-  // Handle selection from URL (when redirected from mobile detail view)
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop) {
-      setSelectedAircraftReg(selectedFromUrl)
-      const url = new URL(window.location.href)
-      url.searchParams.delete("selected")
-      window.history.replaceState({}, "", url.toString())
-    }
-  }, [selectedFromUrl, isDesktop, setSelectedAircraftReg])
 
   const [searchQuery, setSearchQuery] = useState("")
   const debouncedSearchQuery = useDebounce(searchQuery, 150)
@@ -488,7 +477,7 @@ export default function AircraftPage() {
         setSelectedAircraftReg(aircraft.registration || aircraft.icao24)
       }
     },
-    [selectMode, flightId, router, isDesktop, setSelectedAircraftReg],
+    [selectMode, flightId, router, setSelectedAircraftReg],
   )
 
   const handleSelectFr24 = useCallback(

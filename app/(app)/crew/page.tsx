@@ -109,7 +109,6 @@ export default function CrewPage() {
   const fieldType = searchParams.get("field");
   const returnUrl = searchParams.get("return") || "/new-flight";
   const flightId = searchParams.get("flightId");
-  const selectedFromUrl = searchParams.get("selected");
   const isDesktop = useIsDesktop();
 
   const scrollContainerRef = useRef<HTMLElement | null>(null);
@@ -132,16 +131,6 @@ export default function CrewPage() {
   // FastScroll state
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
   const isFastScrollingRef = useRef(false);
-
-  // Handle selection from URL (when redirected from mobile detail view)
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop) {
-      setSelectedCrewId(selectedFromUrl);
-      const url = new URL(window.location.href);
-      url.searchParams.delete("selected");
-      window.history.replaceState({}, "", url.toString());
-    }
-  }, [selectedFromUrl, isDesktop, setSelectedCrewId]);
 
   const sortedPersonnel = useMemo(() => {
     return [...personnel].sort((a, b) => {
@@ -352,7 +341,7 @@ export default function CrewPage() {
     } else {
       setSelectedCrewId(crew.id);
     }
-  }, [fieldType, flightId, isDesktop, router, setSelectedCrewId]);
+  }, [fieldType, flightId, router, setSelectedCrewId]);
 
   const handleAddCrew = () => {
     const params = new URLSearchParams();
