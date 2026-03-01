@@ -158,14 +158,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return
         }
 
-        // No local session - try silent re-auth with passkey
+        // No local session - redirect to login (passkey prompt only on explicit user action)
         if (pathname !== "/login") {
-          const reauthSuccess = await silentReauth()
-          if (!reauthSuccess) {
-            // No valid session and re-auth failed - redirect to login
-            console.log("[v0] No valid session - redirecting to login")
-            router.push("/login")
-          }
+          console.log("[v0] No valid session - redirecting to login")
+          router.push("/login")
         }
       } catch (error) {
         console.error("[v0] Auth check error:", error)
@@ -178,7 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     checkAuth()
-  }, [pathname, router, silentReauth])
+  }, [pathname, router])
 
   // Protect routes
   useEffect(() => {
