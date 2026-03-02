@@ -98,6 +98,7 @@ export function useSwipeGesture(
 
   const startX = useRef(0)
   const startY = useRef(0)
+  const startSwipeX = useRef(0)
   const isHorizontalSwipe = useRef<boolean | null>(null)
 
   const isOpen = Math.abs(swipeX) >= threshold
@@ -128,10 +129,11 @@ export function useSwipeGesture(
 
       startX.current = e.touches[0].clientX
       startY.current = e.touches[0].clientY
+      startSwipeX.current = swipeX
       isHorizontalSwipe.current = null
       setIsSwiping(true)
     },
-    [disabled]
+    [disabled, swipeX]
   )
 
   const handleTouchMove = useCallback(
@@ -155,29 +157,19 @@ export function useSwipeGesture(
       // Only handle horizontal swipes
       if (!isHorizontalSwipe.current) return
 
-      // Handle swipe based on direction option
+      // New position = starting position + drag distance
+      const newX = startSwipeX.current + diffX
+
+      // Clamp based on direction
       if (direction === "left") {
-        // Left swipe only (diffX negative)
-        if (diffX < 0) {
-          setSwipeX(Math.max(diffX, -maxSwipe))
-        } else if (swipeX < 0) {
-          // Allow dragging back to closed
-          setSwipeX(Math.min(0, swipeX + diffX))
-        }
+        setSwipeX(Math.max(-maxSwipe, Math.min(0, newX)))
       } else if (direction === "right") {
-        // Right swipe only (diffX positive)
-        if (diffX > 0) {
-          setSwipeX(Math.min(diffX, maxSwipe))
-        } else if (swipeX > 0) {
-          // Allow dragging back to closed
-          setSwipeX(Math.max(0, swipeX + diffX))
-        }
+        setSwipeX(Math.min(maxSwipe, Math.max(0, newX)))
       } else {
-        // Both directions
-        setSwipeX(Math.max(-maxSwipe, Math.min(diffX, maxSwipe)))
+        setSwipeX(Math.max(-maxSwipe, Math.min(maxSwipe, newX)))
       }
     },
-    [isSwiping, disabled, direction, maxSwipe, swipeX]
+    [isSwiping, disabled, direction, maxSwipe]
   )
 
   const handleTouchEnd = useCallback(() => {
