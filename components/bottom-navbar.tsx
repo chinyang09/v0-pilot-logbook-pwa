@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Home, Book, Plus, Calendar, Plane, Users } from "lucide-react";
+import { LayoutDashboard, Book, Plus, Calendar, Plane, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -49,8 +49,8 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
                 activeTab === "dashboard" && "text-primary"
               )}
             >
-              <Home className="h-5 w-5" />
-              <span className="text-[9px]">Home</span>
+              <LayoutDashboard className="h-5 w-5" />
+              <span className="text-[9px]">Dashboard</span>
             </Button>
           </Link>
 

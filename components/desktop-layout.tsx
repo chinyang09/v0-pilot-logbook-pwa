@@ -130,11 +130,12 @@ function AppShellContent({ children }: AppShellProps) {
         </ResizablePanelGroup>
       </div>
 
-      {/* Mobile detail overlay — sits behind the bottom navbar so content
-          scrolls under the frosted-glass bar, identical to the main page. */}
+      {/* Mobile detail overlay — sits above main content but behind the bottom
+          navbar so content scrolls under the frosted-glass bar, identical to
+          the main page. z-[55] beats page headers (z-50), navbar z-[60] wins. */}
       {showMobileOverlay && (
         <div
-          className="fixed inset-0 z-[45] bg-background lg:hidden pt-safe"
+          className="fixed inset-0 z-[55] bg-background lg:hidden pt-safe"
           onScrollCapture={(e) => {
             const target = e.target as HTMLElement
             if (target !== e.currentTarget) {
@@ -151,9 +152,9 @@ function AppShellContent({ children }: AppShellProps) {
         <SidebarToggle />
       </div>
 
-      {/* Bottom navbar — mobile only, stays visible even when overlay is shown */}
+      {/* Bottom navbar — mobile only, z-[60] sits above the detail overlay */}
       <div className={cn(
-        "fixed bottom-0 left-0 right-0 z-50 transition-[translate] duration-300 ease-in-out lg:hidden",
+        "fixed bottom-0 left-0 right-0 z-[60] transition-[translate] duration-300 ease-in-out lg:hidden",
         hideNavbar ? "translate-y-full" : "translate-y-0"
       )}>
         <BottomNavbar />
