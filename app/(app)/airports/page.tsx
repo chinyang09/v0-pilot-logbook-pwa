@@ -264,13 +264,6 @@ export default function AirportsPage() {
 
   const virtualItems = rowVirtualizer.getVirtualItems();
 
-  // Auto-select first airport when loading (desktop only, not in select mode)
-  useEffect(() => {
-    if (isDesktop && !fieldType && !isLoading && allSortedAirports.length > 0 && !selectedAirportIcao) {
-      setSelectedAirportIcao(allSortedAirports[0].icao);
-    }
-  }, [isDesktop, fieldType, isLoading, allSortedAirports, selectedAirportIcao, setSelectedAirportIcao]);
-
   // Update detail content when selection changes
   useEffect(() => {
     if (fieldType) return;
@@ -295,10 +288,10 @@ export default function AirportsPage() {
 
     if (selectedAirportIcao) {
       setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} onBack={() => setSelectedAirportIcao(null)} />);
-    } else if (isDesktop && allSortedAirports.length > 0) {
-      setSelectedAirportIcao(allSortedAirports[0].icao);
+    } else {
+      setDetailContent(null);
     }
-  }, [isDesktop, fieldType, selectedAirportIcao, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao]);
+  }, [fieldType, selectedAirportIcao, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao]);
 
   // Track active letter from virtualizer scroll position (replaces expensive DOM query)
   useEffect(() => {

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react"
 import type React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { Search, Plane, Loader2, Star, Plus } from "lucide-react"
+import { Search, Plane, Loader2, Star, Plus, Trash2, ChevronRight } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import { Input } from "@/components/ui/input"
 import {
@@ -15,6 +15,7 @@ import {
   toggleFavoriteAircraft,
   updateFlight,
   addCustomAircraftToDatabase,
+  deleteAircraftFromDatabase,
 } from "@/lib/db"
 import { useReferenceAircraft, useFlights } from "@/hooks/data"
 import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
@@ -29,8 +30,10 @@ import { AircraftDetailPanel } from "@/components/aircraft-detail-panel"
 import { AircraftNewForm } from "@/components/aircraft-new-form"
 import { cn } from "@/lib/utils"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
+import { SwipeableCard } from "@/components/swipeable-card"
+import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog"
 
-// Memoized aircraft card to prevent unnecessary re-renders during virtualization
+// Memoized swipeable aircraft card (matches crew card pattern)
 interface AircraftCardProps {
   aircraft: NormalizedAircraft
   isRecent?: boolean
@@ -38,77 +41,85 @@ interface AircraftCardProps {
   isFavorite?: boolean
   onSelect: (aircraft: NormalizedAircraft) => void
   onToggleFavorite?: (e: React.MouseEvent, registration: string) => void
+  onDelete: () => void
 }
 
-const AircraftCard = memo(function AircraftCard({
+const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
   aircraft,
   isRecent = false,
   isSelected = false,
   isFavorite = false,
   onSelect,
   onToggleFavorite,
+  onDelete,
 }: AircraftCardProps) {
   return (
-    <div
+    <SwipeableCard
       id={`aircraft-${aircraft.registration || aircraft.icao24}`}
       onClick={() => onSelect(aircraft)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e: React.KeyboardEvent) => {
-        if (e.key === "Enter" || e.key === " ") {
-          onSelect(aircraft)
-        }
-      }}
-      className={cn(
-        "w-full text-left rounded-lg transition-all cursor-pointer active:scale-[0.98] py-2 pl-3 pr-6",
-        isRecent
-          ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
-          : "bg-card border border-border hover:bg-accent",
-        isSelected && "bg-primary/20 border-primary"
-      )}
+      actions={[
+        {
+          icon: <Trash2 className="h-5 w-5" />,
+          onClick: onDelete,
+          variant: "destructive",
+        },
+      ]}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-foreground">{aircraft.registration || aircraft.icao24}</span>
-            {aircraft.typecode && (
-              <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">{aircraft.typecode}</span>
-            )}
-            {aircraft.shortDescription && (
-              <span className="text-xs text-muted-foreground font-mono">{aircraft.shortDescription}</span>
-            )}
+      <button
+        className={cn(
+          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all active:scale-[0.98]",
+          isRecent &&
+            "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20",
+          isSelected && "bg-primary/20 border-primary"
+        )}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-foreground">{aircraft.registration || aircraft.icao24}</span>
+              {aircraft.typecode && (
+                <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">{aircraft.typecode}</span>
+              )}
+              {aircraft.shortDescription && (
+                <span className="text-xs text-muted-foreground font-mono">{aircraft.shortDescription}</span>
+              )}
+            </div>
+            <div className="text-sm text-muted-foreground truncate mt-0.5">
+              {[
+                aircraft.wtc && `WTC:${aircraft.wtc}`,
+                aircraft.wtg && `WTG:${aircraft.wtg}`,
+                aircraft.operator,
+              ].filter(Boolean).join(" · ") || "\u00A0"}
+            </div>
           </div>
-          <div className="text-sm text-muted-foreground truncate mt-0.5">
-            {[
-              aircraft.wtc && `WTC:${aircraft.wtc}`,
-              aircraft.wtg && `WTG:${aircraft.wtg}`,
-              aircraft.operator,
-            ].filter(Boolean).join(" · ") || "\u00A0"}
-          </div>
+          {onToggleFavorite ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
+              onClick={(e: React.MouseEvent) => {
+                e.preventDefault()
+                e.stopPropagation()
+                if (aircraft.registration) {
+                  onToggleFavorite(e, aircraft.registration)
+                }
+              }}
+            >
+              <Star
+                className={cn(
+                  "h-4 w-4",
+                  isFavorite
+                    ? "fill-yellow-400 text-yellow-400"
+                    : "text-muted-foreground/40"
+                )}
+              />
+            </Button>
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+          )}
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
-          onClick={(e: React.MouseEvent) => {
-            e.preventDefault()
-            e.stopPropagation()
-            if (onToggleFavorite && aircraft.registration) {
-              onToggleFavorite(e, aircraft.registration)
-            }
-          }}
-        >
-          <Star
-            className={cn(
-              "h-4 w-4",
-              isFavorite
-                ? "fill-yellow-400 text-yellow-400"
-                : "text-muted-foreground/40"
-            )}
-          />
-        </Button>
-      </div>
-    </div>
+      </button>
+    </SwipeableCard>
   )
 })
 
@@ -139,6 +150,7 @@ export default function AircraftPage() {
   const { flights } = useFlights()
 
   const [favoriteRegs, setFavoriteRegs] = useState<Set<string>>(new Set())
+  const { confirmDelete, handleDelete, DeleteDialog } = useDeleteConfirmation<NormalizedAircraft>()
 
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined)
   const isFastScrollingRef = useRef(false)
@@ -336,14 +348,6 @@ export default function AircraftPage() {
     ) || null
   }, [selectedAircraftReg, allAircraft])
 
-  // Auto-select first aircraft when loading (desktop only, not in select mode)
-  useEffect(() => {
-    if (isDesktop && !selectMode && !isLoading && allSortedAircraft.length > 0 && !selectedAircraftReg) {
-      const first = allSortedAircraft[0]
-      setSelectedAircraftReg(first.registration || first.icao24)
-    }
-  }, [isDesktop, selectMode, isLoading, allSortedAircraft, selectedAircraftReg, setSelectedAircraftReg])
-
   // Update detail content when selection or data changes
   useEffect(() => {
     if (selectMode) return
@@ -376,11 +380,10 @@ export default function AircraftPage() {
           onBack={() => setSelectedAircraftReg(null)}
         />
       )
-    } else if (isDesktop && allSortedAircraft.length > 0) {
-      const first = allSortedAircraft[0]
-      setSelectedAircraftReg(first.registration || first.icao24)
+    } else {
+      setDetailContent(null)
     }
-  }, [isDesktop, selectMode, selectedAircraft, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg, refreshAircraft])
+  }, [selectMode, selectedAircraft, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg, refreshAircraft])
 
   // Track active letter from virtualizer scroll position
   useEffect(() => {
@@ -459,6 +462,13 @@ export default function AircraftPage() {
       return next
     })
   }, [])
+
+  const performDelete = async (aircraft: NormalizedAircraft) => {
+    if (aircraft.registration) {
+      await deleteAircraftFromDatabase(aircraft.registration)
+      await refreshAircraft()
+    }
+  }
 
   const handleSelectAircraft = useCallback(
     async (aircraft: NormalizedAircraft) => {
@@ -629,10 +639,11 @@ export default function AircraftPage() {
                       </h2>
                       <div className="space-y-1">
                         {favoriteAircraft.map((aircraft) => (
-                          <AircraftCard
+                          <SwipeableAircraftCard
                             key={`fav-${aircraft.registration}`}
                             aircraft={aircraft}
                             onSelect={handleSelectAircraft}
+                            onDelete={() => confirmDelete(aircraft)}
                             isFavorite
                             onToggleFavorite={handleToggleFavorite}
                             isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
@@ -649,10 +660,11 @@ export default function AircraftPage() {
                       <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">Recently Used</h2>
                       <div className="space-y-1">
                         {recentNonFavorites.map((aircraft) => (
-                          <AircraftCard
+                          <SwipeableAircraftCard
                             key={`recent-${aircraft.registration || aircraft.icao24}`}
                             aircraft={aircraft}
                             onSelect={handleSelectAircraft}
+                            onDelete={() => confirmDelete(aircraft)}
                             isRecent
                             isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
                             onToggleFavorite={handleToggleFavorite}
@@ -748,9 +760,10 @@ export default function AircraftPage() {
                       ref={rowVirtualizer.measureElement}
                     >
                       <div className="pb-1">
-                        <AircraftCard
+                        <SwipeableAircraftCard
                           aircraft={aircraft}
                           onSelect={handleSelectAircraft}
+                          onDelete={() => confirmDelete(aircraft)}
                           isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
                           onToggleFavorite={handleToggleFavorite}
                           isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
@@ -764,6 +777,12 @@ export default function AircraftPage() {
           </div>
         </div>
       )}
+
+      <DeleteDialog
+        title="Delete Aircraft"
+        description="Are you sure you want to remove this aircraft from your database? This action cannot be undone."
+        onConfirm={() => handleDelete(performDelete)}
+      />
     </PageContainer>
   )
 }

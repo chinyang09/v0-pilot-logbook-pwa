@@ -9,8 +9,10 @@ import type React from "react"
 export interface UseSwipeGestureOptions {
   /** Threshold in pixels before swipe action triggers (default: 80) */
   threshold?: number
-  /** Maximum swipe distance (default: threshold * 2 + 20) */
+  /** Maximum swipe distance (default: openPosition + 20) */
   maxSwipe?: number
+  /** Snap-open position in pixels (default: threshold * 2) */
+  openPosition?: number
   /** Direction of swipe: 'left' | 'right' | 'both' (default: 'left') */
   direction?: "left" | "right" | "both"
   /** Callback when swipe is completed (past threshold) */
@@ -84,11 +86,12 @@ export function useSwipeGesture(
 ): UseSwipeGestureReturn {
   const {
     threshold = DEFAULT_THRESHOLD,
-    maxSwipe = threshold * 2 + 20,
     direction = "left",
     onSwipeComplete,
     disabled = false,
   } = options
+  const openPos = options.openPosition ?? threshold * 2
+  const maxSwipe = options.maxSwipe ?? openPos + 20
 
   const [swipeX, setSwipeX] = useState(0)
   const [isSwiping, setIsSwiping] = useState(false)
@@ -105,11 +108,11 @@ export function useSwipeGesture(
 
   const open = useCallback(() => {
     if (direction === "left" || direction === "both") {
-      setSwipeX(-threshold * 2)
+      setSwipeX(-openPos)
     } else {
-      setSwipeX(threshold * 2)
+      setSwipeX(openPos)
     }
-  }, [direction, threshold])
+  }, [direction, openPos])
 
   const toggle = useCallback(() => {
     if (isOpen) {
@@ -185,7 +188,7 @@ export function useSwipeGesture(
     // Snap to open or closed position
     if (Math.abs(swipeX) >= threshold) {
       // Snap to open position
-      setSwipeX(swipeX < 0 ? -threshold * 2 : threshold * 2)
+      setSwipeX(swipeX < 0 ? -openPos : openPos)
       onSwipeComplete?.()
     } else {
       // Snap to closed

@@ -115,19 +115,6 @@ export default function LogbookPage() {
     return () => setHasDetailSupport(false)
   }, [setHasDetailSupport])
 
-  // Auto-select first flight when flights load, or when selected flight no longer exists
-  // Desktop only — on mobile, auto-select would trigger the detail overlay
-  useEffect(() => {
-    if (!isDesktop) return
-    if (!flightsLoading && flights.length > 0) {
-      // Check if selected flight still exists
-      const selectedExists = selectedFlightId && flights.some(f => f.id === selectedFlightId)
-      if (!selectedExists) {
-        setSelectedFlightId(flights[0].id)
-      }
-    }
-  }, [isDesktop, flightsLoading, flights, selectedFlightId, setSelectedFlightId])
-
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)
   const calendarContainerRef = useRef<HTMLDivElement>(null)
