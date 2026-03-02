@@ -40,7 +40,6 @@ export interface FlightListRef {
 
 interface FlightListProps {
   flights: FlightLog[];
-  allFlights?: FlightLog[]; // Added to know all available flights for loading
   isLoading?: boolean;
   onEdit?: (flight: FlightLog) => void;
   onDeleted?: () => void;
@@ -291,7 +290,6 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
   function FlightList(
     {
       flights,
-      allFlights,
       isLoading,
       onEdit,
       onDeleted,

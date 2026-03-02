@@ -405,7 +405,6 @@ export default function LogbookPage() {
         <FlightList
           ref={flightListRef}
           flights={filteredFlights}
-          allFlights={flights}
           isLoading={flightsLoading || isLoading}
           onEdit={handleEditFlight}
           onDeleted={handleFlightDeleted}

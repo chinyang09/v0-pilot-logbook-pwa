@@ -39,7 +39,7 @@ export function SwipeableCard({
 
   const { swipeX, isSwiping, close, swipeProps } = useSwipeGesture({
     threshold: Math.min(80, totalActionsWidth),
-    openPosition: totalActionsWidth + OVERLAP,
+    openPosition: totalActionsWidth,
     direction: "left",
     disabled,
   })
@@ -88,12 +88,11 @@ export function SwipeableCard({
         ))}
       </div>
 
-      {/* Main swipeable content — z-[1] ensures card paints above actions */}
+      {/* Main swipeable content — DOM order paints above actions, clipPath handles visibility */}
       <div
         {...swipeProps}
         onClick={handleClick}
         className={cn(
-          "relative z-[1]",
           getSwipeTransitionClass(isSwiping),
           className
         )}
