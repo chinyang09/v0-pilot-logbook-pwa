@@ -194,7 +194,7 @@ export function useSwipeGesture(
       // Snap to closed
       setSwipeX(0)
     }
-  }, [disabled, swipeX, threshold, onSwipeComplete])
+  }, [disabled, swipeX, threshold, openPos, onSwipeComplete])
 
   const swipeProps = useMemo(
     () => ({

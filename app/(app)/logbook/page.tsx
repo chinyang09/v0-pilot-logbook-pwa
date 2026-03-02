@@ -389,7 +389,7 @@ export default function LogbookPage() {
         >
           <LogbookCalendar
             ref={calendarRef}
-            className="bg-transparent shadow-none border-none max-w-[300px] mx-auto"
+            className="bg-transparent shadow-none border-none"
             flights={flights}
             selectedMonth={selectedMonth}
             onMonthChange={handleCalendarMonthChange}

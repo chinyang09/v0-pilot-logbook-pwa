@@ -147,8 +147,8 @@ function AppShellContent({ children }: AppShellProps) {
         </div>
       )}
 
-      {/* Sidebar toggle — desktop only */}
-      <div className="hidden lg:block absolute left-3 z-[100] top-[calc(env(safe-area-inset-top)+0.875rem)]">
+      {/* Sidebar toggle — desktop only, centered in h-12 header and aligned with sidebar nav icons */}
+      <div className="hidden lg:block absolute left-4 z-[100] top-[calc(env(safe-area-inset-top)+0.5rem)]">
         <SidebarToggle />
       </div>
 

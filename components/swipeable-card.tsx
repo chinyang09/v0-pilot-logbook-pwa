@@ -50,12 +50,9 @@ export function SwipeableCard({
 
   return (
     <div id={id} className="relative overflow-hidden rounded-lg">
-      {/* Action buttons revealed on swipe */}
+      {/* Action buttons — positioned behind the card, revealed naturally as card slides left */}
       <div
-        className={cn(
-          "absolute inset-y-0 right-0 flex items-center transition-opacity",
-          swipeX < 0 ? "opacity-100" : "opacity-0"
-        )}
+        className="absolute inset-y-0 right-0 flex items-center"
         style={{ width: totalActionsWidth }}
       >
         {actions.map((action, index) => (
