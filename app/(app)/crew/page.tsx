@@ -109,7 +109,6 @@ export default function CrewPage() {
   const fieldType = searchParams.get("field");
   const returnUrl = searchParams.get("return") || "/new-flight";
   const flightId = searchParams.get("flightId");
-  const selectedFromUrl = searchParams.get("selected");
   const isDesktop = useIsDesktop();
 
   const scrollContainerRef = useRef<HTMLElement | null>(null);
@@ -132,16 +131,6 @@ export default function CrewPage() {
   // FastScroll state
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
   const isFastScrollingRef = useRef(false);
-
-  // Handle selection from URL (when redirected from mobile detail view)
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop) {
-      setSelectedCrewId(selectedFromUrl);
-      const url = new URL(window.location.href);
-      url.searchParams.delete("selected");
-      window.history.replaceState({}, "", url.toString());
-    }
-  }, [selectedFromUrl, isDesktop, setSelectedCrewId]);
 
   const sortedPersonnel = useMemo(() => {
     return [...personnel].sort((a, b) => {
@@ -235,9 +224,9 @@ export default function CrewPage() {
     }
   }, [isDesktop, fieldType, isLoading, sortedPersonnel, selectedCrewId, setSelectedCrewId]);
 
-  // Update detail content when selection changes (desktop only)
+  // Update detail content when selection changes
   useEffect(() => {
-    if (!isDesktop || fieldType) return;
+    if (fieldType) return;
 
     if (isLoading) {
       setDetailContent(
@@ -263,9 +252,10 @@ export default function CrewPage() {
           key={selectedCrewId}
           crewId={selectedCrewId}
           onUpdated={() => mutate(CACHE_KEYS.personnel)}
+          onBack={() => setSelectedCrewId(null)}
         />
       );
-    } else if (sortedPersonnel.length > 0) {
+    } else if (isDesktop && sortedPersonnel.length > 0) {
       setSelectedCrewId(sortedPersonnel[0].id);
     }
   }, [isDesktop, fieldType, selectedCrewId, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
@@ -330,18 +320,6 @@ export default function CrewPage() {
     }
   }, [letterIndexMap, rowVirtualizer]);
 
-  // Scroll to selected crew from URL after data loads
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop && !isLoading && sortedPersonnel.length > 0) {
-      const index = sortedPersonnel.findIndex((p) => p.id === selectedFromUrl);
-      if (index !== -1) {
-        setTimeout(() => {
-          rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "auto" });
-        }, 100);
-      }
-    }
-  }, [selectedFromUrl, isDesktop, isLoading, sortedPersonnel, rowVirtualizer]);
-
   const handleCrewSelect = useCallback(async (crew: (typeof personnel)[0]) => {
     if (fieldType && flightId) {
       const crewName = crew.isMe ? "Self" : crew.name;
@@ -360,12 +338,10 @@ export default function CrewPage() {
         console.error("Failed to update flight with crew:", error);
       }
       router.back();
-    } else if (isDesktop) {
-      setSelectedCrewId(crew.id);
     } else {
-      router.push(`/crew/${crew.id}`);
+      setSelectedCrewId(crew.id);
     }
-  }, [fieldType, flightId, isDesktop, router, setSelectedCrewId]);
+  }, [fieldType, flightId, router, setSelectedCrewId]);
 
   const handleAddCrew = () => {
     const params = new URLSearchParams();

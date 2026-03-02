@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import { PageContainer } from "@/components/page-container"
 import { StandardPageHeader } from "@/components/standard-page-header"
 import { StatsDashboard } from "@/components/stats-dashboard"
@@ -13,7 +13,7 @@ import { UserMenu } from "@/components/user-menu"
 import { useFlights, useFlightStats, refreshAllData, useDBReady, useExpiringCurrencies } from "@/hooks/data"
 import { useUnresolvedDiscrepancies } from "@/hooks/data/use-discrepancies"
 import { useScheduleEntries } from "@/hooks/data/use-schedule"
-import { RefreshCw, AlertCircle, Plane, Calendar, TrendingUp, Loader2, ShieldAlert } from "lucide-react"
+import { AlertCircle, Plane, Calendar, TrendingUp, Loader2, ShieldAlert } from "lucide-react"
 import { getDutyPeriodsFromSchedule, calculateCumulativeLimits, getComplianceStatus } from "@/lib/utils/roster/fdp-calculator"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
@@ -57,34 +57,12 @@ export default function Dashboard() {
     }
   }, [scheduleEntries])
 
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [syncError, setSyncError] = useState<string | null>(null)
-
   useEffect(() => {
     const unsubscribe = syncService.onDataChanged(() => {
       refreshAllData()
     })
     return unsubscribe
   }, [])
-
-  const handleManualSync = async () => {
-    if (!navigator.onLine) {
-      setSyncError("You are offline. Sync will happen when connection is restored.")
-      return
-    }
-
-    setIsSyncing(true)
-    setSyncError(null)
-    try {
-      await syncService.fullSync()
-      await refreshAllData()
-    } catch (error) {
-      console.error("Manual sync failed:", error)
-      setSyncError("Sync failed. Please try again.")
-    } finally {
-      setIsSyncing(false)
-    }
-  }
 
   // Show loading state while checking auth
   if (authLoading) {
@@ -113,33 +91,12 @@ export default function Dashboard() {
       header={
         <StandardPageHeader
           title="Dashboard"
-          actions={
-            <>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={handleManualSync}
-                disabled={isSyncing || isLoading}
-              >
-                <RefreshCw className={cn("h-4 w-4", isSyncing && "animate-spin")} />
-              </Button>
-              <UserMenu />
-            </>
-          }
+          actions={<UserMenu />}
         />
       }
     >
       {
         <div className="px-4 pt-4 pb-safe space-y-6">
-          {syncError && (
-            <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
-              <AlertCircle className="h-4 w-4 flex-shrink-0" />
-              <span className="flex-1">{syncError}</span>
-              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setSyncError(null)}>
-                Dismiss
-              </Button>
-            </div>
-          )}
           {/* Welcome Message */}
           {user && (
             <div className="text-muted-foreground">
@@ -148,19 +105,7 @@ export default function Dashboard() {
           )}
           {/* Overview Section */}
           <section>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-foreground">Overview</h2>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleManualSync}
-                disabled={isSyncing || isLoading}
-                className="gap-2"
-              >
-                <RefreshCw className={cn("h-4 w-4", isSyncing && "animate-spin")} />
-                {isSyncing ? "Syncing..." : "Sync"}
-              </Button>
-            </div>
+            <h2 className="text-lg font-semibold text-foreground mb-4">Overview</h2>
             {statsLoading || isLoading ? (
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 {Array.from({ length: 10 }).map((_, i) => (

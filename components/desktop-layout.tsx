@@ -3,19 +3,23 @@
 import type React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { SidebarNav, SidebarToggle } from "@/components/sidebar-nav"
-import { SidebarProvider } from "@/hooks/use-sidebar-context"
-import { DetailPanelProvider, useDetailPanel } from "@/hooks/use-detail-panel"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
 import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable"
 import { FlightForm } from "@/components/flight-form"
+import { BottomNavbar } from "@/components/bottom-navbar"
+import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
 import { syncService } from "@/lib/sync"
+import { cn } from "@/lib/utils"
 
-interface DesktopLayoutProps {
+interface AppShellProps {
   children: React.ReactNode
 }
 
@@ -31,7 +35,8 @@ interface DesktopLayoutProps {
  * Other pages fall back to the legacy detailContent from context.
  */
 function DetailPanelContent() {
-  const { selectedId, detailContent } = useDetailPanel()
+  const { selectedId, setSelectedId, detailContent } = useDetailPanel()
+  const isDesktop = useIsDesktop()
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
@@ -47,7 +52,7 @@ function DetailPanelContent() {
         <FlightForm
           key={flightId}
           flightId={flightId}
-          isDesktop
+          isDesktop={isDesktop}
           onFlightAdded={async () => {
             await mutate(CACHE_KEYS.flights)
             await mutate(CACHE_KEYS.stats)
@@ -57,6 +62,7 @@ function DetailPanelContent() {
           }}
           onClose={async () => {
             await mutate(CACHE_KEYS.flights)
+            setSelectedId(null)
           }}
         />
       </div>
@@ -66,7 +72,11 @@ function DetailPanelContent() {
   // Other pages: fall back to context-provided content
   return (
     <div className="h-full overflow-auto bg-background">
-      {detailContent || (
+      {detailContent ? (
+        <div className="h-full overflow-auto">
+          {detailContent}
+        </div>
+      ) : (
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
           <p>Select an item to view details</p>
         </div>
@@ -75,39 +85,86 @@ function DetailPanelContent() {
   )
 }
 
-function DesktopLayoutContent({ children }: DesktopLayoutProps) {
+/**
+ * Unified responsive shell — renders both mobile and desktop elements
+ * in a single React tree. CSS visibility classes (`hidden lg:flex`, `lg:hidden`)
+ * handle the responsive switch instead of conditional rendering, so the
+ * component tree is never destroyed when crossing the 1024px breakpoint.
+ */
+function AppShellContent({ children }: AppShellProps) {
+  const { hideNavbar, handleScroll } = useScrollNavbarContext()
+  const { selectedId } = useDetailPanel()
+  const isDesktop = useIsDesktop()
+  const searchParams = useSearchParams()
+
+  // Only show mobile overlay when the selection is explicit (in URL via ?selected=).
+  // SessionStorage-restored selections set state but don't update the URL,
+  // so this prevents the overlay from auto-showing on page navigation.
+  const showMobileOverlay = !isDesktop && !!selectedId && searchParams.has("selected")
+
   return (
     <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden pt-safe">
-      {/* Sidebar */}
-      <SidebarNav />
+      {/* Sidebar — desktop only */}
+      <div className="hidden lg:flex flex-shrink-0 h-full">
+        <SidebarNav />
+      </div>
 
-      {/* Main content area - always show with detail panel */}
-      <div className="flex-1 flex min-w-0 overflow-x-auto">
-        <ResizablePanelGroup direction="horizontal" autoSaveId="desktop-panel-layout" className="h-full min-w-[750px]">
-          <ResizablePanel defaultSize={35} minSize={30} style={{ minWidth: "375px" }}>
+      {/* Main content area with resizable panels */}
+      <div className="flex-1 flex min-w-0 lg:overflow-x-auto">
+        <ResizablePanelGroup
+          direction="horizontal"
+          autoSaveId="desktop-panel-layout"
+          className="h-full lg:min-w-[750px]"
+        >
+          <ResizablePanel defaultSize={35} minSize={30} className="lg:min-w-[375px]">
             <div className="h-full flex flex-col overflow-hidden relative">{children}</div>
           </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={65} minSize={25}>
+
+          {/* Resize handle — desktop only */}
+          <ResizableHandle withHandle className="hidden lg:flex" />
+
+          {/* Detail panel — desktop only */}
+          <ResizablePanel defaultSize={65} minSize={25} className="hidden lg:block">
             <DetailPanelContent />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
 
-      {/* Sidebar toggle button - positioned to align with sidebar header */}
-      <div className="absolute left-3 z-[100] top-[calc(env(safe-area-inset-top)+0.875rem)]">
+      {/* Mobile detail overlay — sits above main content but behind the bottom
+          navbar so content scrolls under the frosted-glass bar, identical to
+          the main page. z-[55] beats page headers (z-50), navbar z-[60] wins. */}
+      {showMobileOverlay && (
+        <div
+          className="fixed inset-0 z-[55] bg-background lg:hidden pt-safe"
+          onScrollCapture={(e) => {
+            const target = e.target as HTMLElement
+            if (target !== e.currentTarget) {
+              handleScroll({ currentTarget: target } as React.UIEvent<HTMLElement>)
+            }
+          }}
+        >
+          <DetailPanelContent />
+        </div>
+      )}
+
+      {/* Sidebar toggle — desktop only */}
+      <div className="hidden lg:block absolute left-3 z-[100] top-[calc(env(safe-area-inset-top)+0.875rem)]">
         <SidebarToggle />
       </div>
+
+      {/* Bottom navbar — mobile only, z-[60] sits above the detail overlay */}
+      <div className={cn(
+        "fixed bottom-0 left-0 right-0 z-[60] transition-[translate] duration-300 ease-in-out lg:hidden",
+        hideNavbar ? "translate-y-full" : "translate-y-0"
+      )}>
+        <BottomNavbar />
+      </div>
+
+      <PWAInstallPrompt />
     </div>
   )
 }
 
-export function DesktopLayout({ children }: DesktopLayoutProps) {
-  return (
-    <SidebarProvider defaultOpen={true}>
-      <DetailPanelProvider>
-        <DesktopLayoutContent>{children}</DesktopLayoutContent>
-      </DetailPanelProvider>
-    </SidebarProvider>
-  )
+export function AppShell({ children }: AppShellProps) {
+  return <AppShellContent>{children}</AppShellContent>
 }

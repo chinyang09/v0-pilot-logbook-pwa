@@ -116,7 +116,9 @@ export default function LogbookPage() {
   }, [setHasDetailSupport])
 
   // Auto-select first flight when flights load, or when selected flight no longer exists
+  // Desktop only — on mobile, auto-select would trigger the detail overlay
   useEffect(() => {
+    if (!isDesktop) return
     if (!flightsLoading && flights.length > 0) {
       // Check if selected flight still exists
       const selectedExists = selectedFlightId && flights.some(f => f.id === selectedFlightId)
@@ -124,7 +126,7 @@ export default function LogbookPage() {
         setSelectedFlightId(flights[0].id)
       }
     }
-  }, [flightsLoading, flights, selectedFlightId, setSelectedFlightId])
+  }, [isDesktop, flightsLoading, flights, selectedFlightId, setSelectedFlightId])
 
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)
@@ -251,17 +253,12 @@ export default function LogbookPage() {
   }, [flights])
 
   // Handle flight selection from list
-  // On desktop: Select flight to show FlightForm in detail panel (rendered by layout)
-  // On mobile: Navigate to edit page
+  // Sets selectedId which the AppShell renders as:
+  // - Desktop: FlightForm in right detail panel
+  // - Mobile: FlightForm in full-screen overlay
   const handleEditFlight = useCallback((flight: FlightLog) => {
-    if (isDesktop) {
-      // On desktop, select the flight - layout's Smart Switcher renders FlightForm
-      setSelectedFlightId(flight.id)
-    } else {
-      // On mobile, navigate to edit page
-      router.push(`/flights/${flight.id}`)
-    }
-  }, [isDesktop, setSelectedFlightId, router])
+    setSelectedFlightId(flight.id)
+  }, [setSelectedFlightId])
 
   const handleFlightDeleted = async () => {
     await refreshFlights()
@@ -386,12 +383,7 @@ export default function LogbookPage() {
                 onClick={async () => {
                   const draftFlight = await createFlight()
                   await refreshFlights()
-
-                  if (isDesktop) {
-                    setSelectedFlightId(draftFlight.id)
-                  } else {
-                    router.push(`/flights/${draftFlight.id}`)
-                  }
+                  setSelectedFlightId(draftFlight.id)
                 }}
               >
                 <Plus className="h-4 w-4" />

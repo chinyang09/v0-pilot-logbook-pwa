@@ -117,7 +117,6 @@ export default function AircraftPage() {
   const searchParams = useSearchParams()
   const selectMode = searchParams.get("select") === "true"
   const flightId = searchParams.get("flightId")
-  const selectedFromUrl = searchParams.get("selected")
   const isDesktop = useIsDesktop()
 
   const scrollContainerRef = useRef<HTMLElement | null>(null)
@@ -131,16 +130,6 @@ export default function AircraftPage() {
     setSelectedId: setSelectedAircraftReg,
     setDetailContent,
   } = useDetailPanel()
-
-  // Handle selection from URL (when redirected from mobile detail view)
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop) {
-      setSelectedAircraftReg(selectedFromUrl)
-      const url = new URL(window.location.href)
-      url.searchParams.delete("selected")
-      window.history.replaceState({}, "", url.toString())
-    }
-  }, [selectedFromUrl, isDesktop, setSelectedAircraftReg])
 
   const [searchQuery, setSearchQuery] = useState("")
   const debouncedSearchQuery = useDebounce(searchQuery, 150)
@@ -355,9 +344,9 @@ export default function AircraftPage() {
     }
   }, [isDesktop, selectMode, isLoading, allSortedAircraft, selectedAircraftReg, setSelectedAircraftReg])
 
-  // Update detail content when selection or data changes (desktop only)
+  // Update detail content when selection or data changes
   useEffect(() => {
-    if (!isDesktop || selectMode) return
+    if (selectMode) return
 
     if (isLoading) {
       setDetailContent(
@@ -384,9 +373,10 @@ export default function AircraftPage() {
           key={selectedAircraft.registration}
           aircraft={selectedAircraft}
           onUpdated={refreshAircraft}
+          onBack={() => setSelectedAircraftReg(null)}
         />
       )
-    } else if (allSortedAircraft.length > 0) {
+    } else if (isDesktop && allSortedAircraft.length > 0) {
       const first = allSortedAircraft[0]
       setSelectedAircraftReg(first.registration || first.icao24)
     }
@@ -452,19 +442,7 @@ export default function AircraftPage() {
     }
   }, [letterIndexMap, rowVirtualizer])
 
-  // Scroll to selected aircraft from URL after data loads
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop && !isLoading && allSortedAircraft.length > 0) {
-      const index = allSortedAircraft.findIndex(
-        (a) => (a.registration || a.icao24) === selectedFromUrl
-      )
-      if (index !== -1) {
-        setTimeout(() => {
-          rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "auto" })
-        }, 100)
-      }
-    }
-  }, [selectedFromUrl, isDesktop, isLoading, allSortedAircraft, rowVirtualizer])
+
 
   const handleToggleFavorite = useCallback(async (e: React.MouseEvent, registration: string) => {
     e.preventDefault()
@@ -495,13 +473,11 @@ export default function AircraftPage() {
           console.error("Failed to update flight with aircraft:", error)
         }
         router.back()
-      } else if (isDesktop) {
-        setSelectedAircraftReg(aircraft.registration || aircraft.icao24)
       } else {
-        router.push(`/aircraft/${encodeURIComponent(aircraft.registration || aircraft.icao24)}`)
+        setSelectedAircraftReg(aircraft.registration || aircraft.icao24)
       }
     },
-    [selectMode, flightId, router, isDesktop, setSelectedAircraftReg],
+    [selectMode, flightId, router, setSelectedAircraftReg],
   )
 
   const handleSelectFr24 = useCallback(
@@ -545,12 +521,10 @@ export default function AircraftPage() {
         // Keep search bar filled, clear FR24 results, re-trigger local search
         setFr24Results([])
         setSearchVersion((v) => v + 1)
-        if (isDesktop) {
-          setSelectedAircraftReg(reg)
-        }
+        setSelectedAircraftReg(reg)
       }
     },
-    [selectMode, flightId, isDesktop, handleSelectAircraft, setSelectedAircraftReg, refreshAircraft, allAircraft],
+    [selectMode, flightId, handleSelectAircraft, setSelectedAircraftReg, refreshAircraft, allAircraft],
   )
 
   const addAircraftUrl = selectMode
@@ -571,7 +545,7 @@ export default function AircraftPage() {
           onCancel={() => {
             if (selectedAircraft) {
               setDetailContent(
-                <AircraftDetailPanel aircraft={selectedAircraft} onUpdated={refreshAircraft} />
+                <AircraftDetailPanel aircraft={selectedAircraft} onUpdated={refreshAircraft} onBack={() => setSelectedAircraftReg(null)} />
               )
             } else {
               setDetailContent(null)

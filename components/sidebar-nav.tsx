@@ -5,6 +5,7 @@ import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import {
+  LayoutDashboard,
   Book,
   Plane,
   MapPin,
@@ -43,10 +44,10 @@ const navSections: NavSection[] = [
     label: "Logbook",
     defaultOpen: true,
     items: [
-      { label: "Flights & Duties", href: "/logbook", icon: <Book className="h-4 w-4" /> },
+      { label: "Logbook", href: "/logbook", icon: <Book className="h-4 w-4" /> },
       { label: "Aircraft", href: "/aircraft", icon: <Plane className="h-4 w-4" /> },
-      { label: "Places", href: "/airports", icon: <MapPin className="h-4 w-4" /> },
-      { label: "People", href: "/crew", icon: <Users className="h-4 w-4" /> },
+      { label: "Airports", href: "/airports", icon: <MapPin className="h-4 w-4" /> },
+      { label: "Crew", href: "/crew", icon: <Users className="h-4 w-4" /> },
       { label: "Currencies", href: "/currencies", icon: <Award className="h-4 w-4" /> },
     ],
   },
@@ -141,6 +142,7 @@ export function SidebarToggle() {
 
 export function SidebarNav() {
   const { isOpen } = useSidebar()
+  const pathname = usePathname()
 
   return (
     <aside
@@ -161,6 +163,13 @@ export function SidebarNav() {
 
         {/* Navigation sections */}
         <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-4">
+          {/* Dashboard — standalone link above sections */}
+          <div className="px-1">
+            <NavItemLink
+              item={{ label: "Dashboard", href: "/", icon: <LayoutDashboard className="h-4 w-4" /> }}
+              isActive={pathname === "/"}
+            />
+          </div>
           {navSections.map((section) => (
             <NavSectionGroup key={section.label} section={section} />
           ))}

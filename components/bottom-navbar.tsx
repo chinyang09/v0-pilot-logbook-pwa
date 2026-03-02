@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Home, Book, Plus, Calendar, Plane, Users } from "lucide-react";
+import { LayoutDashboard, Book, Plus, Calendar, Plane, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -49,8 +49,8 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
                 activeTab === "dashboard" && "text-primary"
               )}
             >
-              <Home className="h-5 w-5" />
-              <span className="text-[9px]">Home</span>
+              <LayoutDashboard className="h-5 w-5" />
+              <span className="text-[9px]">Dashboard</span>
             </Button>
           </Link>
 
@@ -72,7 +72,7 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
             className="h-12 w-12 rounded-full shadow-lg"
             onClick={async () => {
               const draft = await createFlight();
-              router.push(`/flights/${draft.id}`);
+              router.push(`/logbook?selected=${draft.id}`);
             }}
           >
             <Plus className="h-6 w-6" />

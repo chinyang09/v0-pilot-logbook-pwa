@@ -7,7 +7,7 @@ import {
   addCustomAircraftToDatabase,
   type NormalizedAircraft,
 } from "@/lib/db/stores/reference/aircraft.store"
-import { Loader2 } from "lucide-react"
+import { Loader2, ChevronLeft } from "lucide-react"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
 import { getAircraftType, searchAircraftTypes } from "@/lib/db/stores/reference/aircraft-types.store"
 import type { AircraftType } from "@/types/entities/aircraft-type.types"
@@ -48,9 +48,11 @@ interface AircraftDetailPanelProps {
   aircraft: NormalizedAircraft
   /** Called after saving changes — parent should refresh SWR cache */
   onUpdated?: () => void
+  /** Called when back button is pressed (mobile overlay dismiss) */
+  onBack?: () => void
 }
 
-export function AircraftDetailPanel({ aircraft, onUpdated }: AircraftDetailPanelProps) {
+export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDetailPanelProps) {
   const [typeInfo, setTypeInfo] = useState<AircraftType | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -169,40 +171,46 @@ export function AircraftDetailPanel({ aircraft, onUpdated }: AircraftDetailPanel
   return (
     <div className="h-full relative flex flex-col">
       <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
-        <div className="px-4 h-12 flex items-center justify-between">
-          {isEditing ? (
-            <Button variant="ghost" size="sm" onClick={handleCancel} className="text-primary h-8 px-2">
-              Cancel
-            </Button>
-          ) : (
-            <span />
-          )}
-          <h1 className="text-lg font-semibold truncate px-2">
+        <div className="px-2 h-12 flex items-center">
+          <div className="w-16 flex-shrink-0">
+            {isEditing ? (
+              <Button variant="ghost" size="sm" onClick={handleCancel} className="text-primary h-8 px-2">
+                Cancel
+              </Button>
+            ) : onBack ? (
+              <Button variant="ghost" size="icon-sm" onClick={onBack} className="lg:hidden">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            ) : null}
+          </div>
+          <h1 className="flex-1 text-center text-lg font-semibold truncate px-2">
             {formData.registration || "Aircraft"}
             {formData.typecode && (
               <span className="text-muted-foreground text-sm ml-1">({formData.typecode})</span>
             )}
           </h1>
-          {isEditing ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleSave}
-              disabled={!formData.registration.trim() || isSaving}
-              className="text-primary h-8 px-2 font-semibold"
-            >
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsEditing(true)}
-              className="text-primary h-8 px-2 font-semibold"
-            >
+          <div className="w-16 flex-shrink-0 flex justify-end">
+            {isEditing ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleSave}
+                disabled={!formData.registration.trim() || isSaving}
+                className="text-primary h-8 px-2 font-semibold"
+              >
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsEditing(true)}
+                className="text-primary h-8 px-2 font-semibold"
+              >
               Edit
             </Button>
-          )}
+            )}
+          </div>
         </div>
       </header>
 

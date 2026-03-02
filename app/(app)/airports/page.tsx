@@ -102,7 +102,6 @@ export default function AirportsPage() {
   const searchParams = useSearchParams();
   const fieldType = searchParams.get("field");
   const flightId = searchParams.get("flightId");
-  const selectedFromUrl = searchParams.get("selected");
   const isDesktop = useIsDesktop();
 
   const scrollContainerRef = useRef<HTMLElement | null>(null);
@@ -141,16 +140,6 @@ export default function AirportsPage() {
     setSelectedId: setSelectedAirportIcao,
     setDetailContent,
   } = useDetailPanel();
-
-  // Handle selection from URL (when redirected from mobile detail view)
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop) {
-      setSelectedAirportIcao(selectedFromUrl);
-      const url = new URL(window.location.href);
-      url.searchParams.delete("selected");
-      window.history.replaceState({}, "", url.toString());
-    }
-  }, [selectedFromUrl, isDesktop, setSelectedAirportIcao]);
 
   // Sort all airports: favorites first, then alphabetical by ICAO
   const allSortedAirports = useMemo(() => {
@@ -282,9 +271,9 @@ export default function AirportsPage() {
     }
   }, [isDesktop, fieldType, isLoading, allSortedAirports, selectedAirportIcao, setSelectedAirportIcao]);
 
-  // Update detail content when selection changes (desktop only)
+  // Update detail content when selection changes
   useEffect(() => {
-    if (!isDesktop || fieldType) return;
+    if (fieldType) return;
 
     if (isLoading) {
       setDetailContent(
@@ -305,8 +294,8 @@ export default function AirportsPage() {
     }
 
     if (selectedAirportIcao) {
-      setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} />);
-    } else if (allSortedAirports.length > 0) {
+      setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} onBack={() => setSelectedAirportIcao(null)} />);
+    } else if (isDesktop && allSortedAirports.length > 0) {
       setSelectedAirportIcao(allSortedAirports[0].icao);
     }
   }, [isDesktop, fieldType, selectedAirportIcao, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao]);
@@ -371,17 +360,7 @@ export default function AirportsPage() {
     }
   }, [letterIndexMap, rowVirtualizer]);
 
-  // Scroll to selected airport from URL after data loads
-  useEffect(() => {
-    if (selectedFromUrl && isDesktop && !isLoading && allSortedAirports.length > 0) {
-      const index = allSortedAirports.findIndex(a => a.icao === selectedFromUrl);
-      if (index !== -1) {
-        setTimeout(() => {
-          rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "auto" });
-        }, 100);
-      }
-    }
-  }, [selectedFromUrl, isDesktop, isLoading, allSortedAirports, rowVirtualizer]);
+
 
   useEffect(() => {
     const loadRecentAirports = async () => {
@@ -412,12 +391,10 @@ export default function AirportsPage() {
         console.error("Failed to update flight with airport:", error);
       }
       router.back();
-    } else if (isDesktop) {
-      setSelectedAirportIcao(icao);
     } else {
-      router.push(`/airports/${icao}`);
+      setSelectedAirportIcao(icao);
     }
-  }, [fieldType, flightId, isDesktop, router, setSelectedAirportIcao]);
+  }, [fieldType, flightId, router, setSelectedAirportIcao]);
 
   const handleToggleFavorite = useCallback(async (e: React.MouseEvent, icao: string) => {
     e.preventDefault();
@@ -485,11 +462,11 @@ export default function AirportsPage() {
           console.error("Failed to update flight with airport:", error);
         }
         router.back();
-      } else if (isDesktop) {
+      } else {
         setSelectedAirportIcao(result.icao);
       }
     },
-    [fieldType, flightId, isDesktop, router, mutateAirports, setSelectedAirportIcao],
+    [fieldType, flightId, router, mutateAirports, setSelectedAirportIcao],
   );
 
   const addAirportUrl = fieldType && flightId
@@ -511,7 +488,7 @@ export default function AirportsPage() {
           }}
           onCancel={() => {
             if (selectedAirportIcao) {
-              setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} />);
+              setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} onBack={() => setSelectedAirportIcao(null)} />);
             } else {
               setDetailContent(null);
             }

@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
 
 interface DetailPanelContextType {
   // The currently rendered detail content
@@ -186,6 +187,7 @@ export function useDetailPanelPage<T extends { id: string }>(options: {
 }) {
   const { items, isLoading, renderDetail, emptyMessage = "No entries" } = options
   const { selectedId, setSelectedId, setDetailContent, setHasDetailSupport } = useDetailPanel()
+  const isDesktop = useIsDesktop()
 
   // Register that this page supports detail panel
   useEffect(() => {
@@ -194,11 +196,13 @@ export function useDetailPanelPage<T extends { id: string }>(options: {
   }, [setHasDetailSupport])
 
   // Auto-select first item if nothing selected and items loaded
+  // Desktop only — on mobile, auto-select would trigger the detail overlay
   useEffect(() => {
+    if (!isDesktop) return
     if (!isLoading && items.length > 0 && !selectedId) {
       setSelectedId(items[0].id)
     }
-  }, [isLoading, items, selectedId, setSelectedId])
+  }, [isDesktop, isLoading, items, selectedId, setSelectedId])
 
   // Update detail content when selection changes
   useEffect(() => {
@@ -223,11 +227,11 @@ export function useDetailPanelPage<T extends { id: string }>(options: {
     const selectedItem = items.find(item => item.id === selectedId)
     if (selectedItem) {
       setDetailContent(renderDetail(selectedItem))
-    } else if (items.length > 0) {
-      // Selection not found, select first item
+    } else if (isDesktop && items.length > 0) {
+      // Selection not found, select first item (desktop only)
       setSelectedId(items[0].id)
     }
-  }, [selectedId, items, isLoading, renderDetail, setDetailContent, setSelectedId, emptyMessage])
+  }, [isDesktop, selectedId, items, isLoading, renderDetail, setDetailContent, setSelectedId, emptyMessage])
 
   return {
     selectedId,
