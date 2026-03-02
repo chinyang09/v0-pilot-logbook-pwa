@@ -53,7 +53,7 @@ export function SwipeableCard({
   }
 
   return (
-    <div id={id} className="relative overflow-hidden rounded-lg">
+    <div id={id} className="relative overflow-hidden rounded-lg bg-card">
       {/* Action buttons — clip-path progressively reveals as card slides */}
       <div
         className="absolute inset-y-0 right-0 flex items-center"

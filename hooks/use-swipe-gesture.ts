@@ -49,7 +49,6 @@ export interface UseSwipeGestureReturn {
     onTouchMove: (e: React.TouchEvent) => void
     onTouchEnd: () => void
     style: { transform: string }
-    className?: string
   }
 }
 
