@@ -30,8 +30,13 @@ export function SwipeableCard({
   disabled = false,
   id,
 }: SwipeableCardProps) {
+  const actionWidth = 80
+  const totalActionsWidth = actions.length * actionWidth
+  const OVERLAP = 8
+
   const { swipeX, isSwiping, close, swipeProps } = useSwipeGesture({
-    threshold: 80,
+    threshold: Math.min(80, totalActionsWidth),
+    openPosition: totalActionsWidth - OVERLAP,
     direction: "left",
     disabled,
   })
@@ -43,9 +48,6 @@ export function SwipeableCard({
       onClick?.()
     }
   }
-
-  const actionWidth = 80
-  const totalActionsWidth = actions.length * actionWidth
 
   return (
     <div id={id} className="relative overflow-hidden rounded-lg">
@@ -92,7 +94,9 @@ export function SwipeableCard({
           className
         )}
       >
-        {children}
+        <div className="bg-card rounded-lg">
+          {children}
+        </div>
       </div>
     </div>
   )

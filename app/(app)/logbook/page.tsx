@@ -115,19 +115,6 @@ export default function LogbookPage() {
     return () => setHasDetailSupport(false)
   }, [setHasDetailSupport])
 
-  // Auto-select first flight when flights load, or when selected flight no longer exists
-  // Desktop only — on mobile, auto-select would trigger the detail overlay
-  useEffect(() => {
-    if (!isDesktop) return
-    if (!flightsLoading && flights.length > 0) {
-      // Check if selected flight still exists
-      const selectedExists = selectedFlightId && flights.some(f => f.id === selectedFlightId)
-      if (!selectedExists) {
-        setSelectedFlightId(flights[0].id)
-      }
-    }
-  }, [isDesktop, flightsLoading, flights, selectedFlightId, setSelectedFlightId])
-
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)
   const calendarContainerRef = useRef<HTMLDivElement>(null)
@@ -402,7 +389,7 @@ export default function LogbookPage() {
         >
           <LogbookCalendar
             ref={calendarRef}
-            className="bg-transparent shadow-none border-none max-w-[300px] mx-auto"
+            className="bg-transparent shadow-none border-none"
             flights={flights}
             selectedMonth={selectedMonth}
             onMonthChange={handleCalendarMonthChange}
@@ -418,7 +405,6 @@ export default function LogbookPage() {
         <FlightList
           ref={flightListRef}
           flights={filteredFlights}
-          allFlights={flights}
           isLoading={flightsLoading || isLoading}
           onEdit={handleEditFlight}
           onDeleted={handleFlightDeleted}

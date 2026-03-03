@@ -217,13 +217,6 @@ export default function CrewPage() {
 
   const virtualItems = rowVirtualizer.getVirtualItems();
 
-  // Auto-select first crew when loading (desktop only, not in select mode)
-  useEffect(() => {
-    if (isDesktop && !fieldType && !isLoading && sortedPersonnel.length > 0 && !selectedCrewId) {
-      setSelectedCrewId(sortedPersonnel[0].id);
-    }
-  }, [isDesktop, fieldType, isLoading, sortedPersonnel, selectedCrewId, setSelectedCrewId]);
-
   // Update detail content when selection changes
   useEffect(() => {
     if (fieldType) return;
@@ -255,10 +248,10 @@ export default function CrewPage() {
           onBack={() => setSelectedCrewId(null)}
         />
       );
-    } else if (isDesktop && sortedPersonnel.length > 0) {
-      setSelectedCrewId(sortedPersonnel[0].id);
+    } else {
+      setDetailContent(null);
     }
-  }, [isDesktop, fieldType, selectedCrewId, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
+  }, [fieldType, selectedCrewId, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
 
   // Track active letter from virtualizer scroll position
   useEffect(() => {

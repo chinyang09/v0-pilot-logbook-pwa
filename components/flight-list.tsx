@@ -40,7 +40,6 @@ export interface FlightListRef {
 
 interface FlightListProps {
   flights: FlightLog[];
-  allFlights?: FlightLog[]; // Added to know all available flights for loading
   isLoading?: boolean;
   onEdit?: (flight: FlightLog) => void;
   onDeleted?: () => void;
@@ -130,8 +129,8 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
 
   const crewNames = useMemo(() => {
     const names: string[] = [];
-    names.push(flight.picName);
-    names.push(flight.sicName);
+    if (flight.picName) names.push(flight.picName);
+    if (flight.sicName) names.push(flight.sicName);
     if (flight.additionalCrew && Array.isArray(flight.additionalCrew)) {
       flight.additionalCrew.forEach((crew) => {
         if (crew.name) names.push(crew.name);
@@ -214,8 +213,12 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
               </div>
 
               <div className="flex items-center justify-between mt-0.5">
-                <div className="text-xs text-muted-foreground truncate flex-1 leading-tight">
-                  {crewNames.length > 0 ? crewNames.join(", ") : ""}
+                <div className="flex flex-1 min-w-0 text-xs text-muted-foreground leading-tight">
+                  {crewNames.map((name, i) => (
+                    <span key={i} className="flex-1 min-w-0 truncate">
+                      {i > 0 ? ", " : ""}{name}
+                    </span>
+                  ))}
                 </div>
 
                 <div className="flex items-center gap-1.5 text-xs font-medium shrink-0 ml-2">
@@ -287,7 +290,6 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
   function FlightList(
     {
       flights,
-      allFlights,
       isLoading,
       onEdit,
       onDeleted,
