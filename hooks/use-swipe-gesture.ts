@@ -192,7 +192,7 @@ export function useSwipeGesture(
       onTouchStart: handleTouchStart,
       onTouchMove: handleTouchMove,
       onTouchEnd: handleTouchEnd,
-      style: { transform: `translateX(${swipeX}px)` },
+      style: { transform: swipeX !== 0 ? `translateX(${swipeX}px)` : 'none' },
     }),
     [handleTouchStart, handleTouchMove, handleTouchEnd, swipeX]
   )
