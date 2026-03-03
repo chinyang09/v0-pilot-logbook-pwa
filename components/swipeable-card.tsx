@@ -32,10 +32,11 @@ export function SwipeableCard({
 }: SwipeableCardProps) {
   const actionWidth = 80
   const totalActionsWidth = actions.length * actionWidth
+  const OVERLAP = 8
 
   const { swipeX, isSwiping, close, swipeProps } = useSwipeGesture({
     threshold: Math.min(80, totalActionsWidth),
-    openPosition: totalActionsWidth,
+    openPosition: totalActionsWidth - OVERLAP,
     direction: "left",
     disabled,
   })
@@ -93,7 +94,9 @@ export function SwipeableCard({
           className
         )}
       >
-        {children}
+        <div className="bg-card rounded-lg">
+          {children}
+        </div>
       </div>
     </div>
   )
