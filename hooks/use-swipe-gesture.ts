@@ -49,6 +49,7 @@ export interface UseSwipeGestureReturn {
     onTouchMove: (e: React.TouchEvent) => void
     onTouchEnd: () => void
     style: { transform: string }
+    className?: string
   }
 }
 
@@ -156,7 +157,7 @@ export function useSwipeGesture(
       // Only handle horizontal swipes
       if (!isHorizontalSwipe.current) return
 
-      // New position = starting position + drag distance
+      // New position = starting position + drag distance (no jump on re-swipe)
       const newX = startSwipeX.current + diffX
 
       // Clamp based on direction

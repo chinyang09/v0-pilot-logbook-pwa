@@ -22,10 +22,6 @@ interface SwipeableCardProps {
   id?: string
 }
 
-// Card overlaps action buttons by this many pixels (matches rounded-lg radius)
-// so the card's rounded edge covers the action buttons' sharp left edge.
-const OVERLAP = 8
-
 export function SwipeableCard({
   children,
   actions = [],
@@ -54,13 +50,13 @@ export function SwipeableCard({
 
   return (
     <div id={id} className="relative overflow-hidden rounded-lg">
-      {/* Action buttons — clip-path progressively reveals as card slides */}
+      {/* Action buttons revealed on swipe */}
       <div
-        className="absolute inset-y-0 right-0 flex items-center"
-        style={{
-          width: totalActionsWidth,
-          clipPath: `inset(0 0 0 ${Math.max(0, totalActionsWidth + swipeX + OVERLAP)}px)`,
-        }}
+        className={cn(
+          "absolute inset-y-0 right-0 flex items-center transition-opacity",
+          swipeX < 0 ? "opacity-100" : "opacity-0"
+        )}
+        style={{ width: totalActionsWidth }}
       >
         {actions.map((action, index) => (
           <button
@@ -88,7 +84,7 @@ export function SwipeableCard({
         ))}
       </div>
 
-      {/* Main swipeable content — DOM order paints above actions, clipPath handles visibility */}
+      {/* Main swipeable content */}
       <div
         {...swipeProps}
         onClick={handleClick}
@@ -97,9 +93,7 @@ export function SwipeableCard({
           className
         )}
       >
-        <div className="bg-card rounded-lg">
-          {children}
-        </div>
+        {children}
       </div>
     </div>
   )
