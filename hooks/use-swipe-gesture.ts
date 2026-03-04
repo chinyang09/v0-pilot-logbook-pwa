@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback, useMemo } from "react"
+import { useState, useRef, useCallback, useMemo, useEffect } from "react"
 import type React from "react"
 
 /**
@@ -45,11 +45,11 @@ export interface UseSwipeGestureReturn {
   toggle: () => void
   /** Props object to spread on the swipeable element */
   swipeProps: {
+    ref: (node: HTMLElement | null) => void
     onTouchStart: (e: React.TouchEvent) => void
     onTouchMove: (e: React.TouchEvent) => void
     onTouchEnd: () => void
-    style: { transform: string }
-    className?: string
+    style: { transform: string; touchAction: string }
   }
 }
 
@@ -58,28 +58,6 @@ const DIRECTION_DETECT_THRESHOLD = 10
 
 /**
  * Hook for handling swipe gestures on touchable elements
- *
- * @example
- * ```tsx
- * const { swipeX, isSwiping, swipeProps, close } = useSwipeGesture({
- *   threshold: 80,
- *   direction: 'left',
- * })
- *
- * return (
- *   <div className="relative overflow-hidden">
- *     <div className="absolute right-0">
- *       <Button onClick={() => { onDelete(); close(); }}>Delete</Button>
- *     </div>
- *     <Card
- *       {...swipeProps}
- *       className={cn(!isSwiping && "transition-transform duration-200")}
- *     >
- *       Content
- *     </Card>
- *   </div>
- * )
- * ```
  */
 export function useSwipeGesture(
   options: UseSwipeGestureOptions = {}
@@ -100,6 +78,7 @@ export function useSwipeGesture(
   const startY = useRef(0)
   const startSwipeX = useRef(0)
   const isHorizontalSwipe = useRef<boolean | null>(null)
+  const elementRef = useRef<HTMLElement | null>(null)
 
   const isOpen = Math.abs(swipeX) >= threshold
 
@@ -122,6 +101,36 @@ export function useSwipeGesture(
       open()
     }
   }, [isOpen, close, open])
+
+  // Non-passive native touchmove to prevent scrolling during horizontal swipe
+  const preventScrollHandler = useCallback((e: TouchEvent) => {
+    if (isHorizontalSwipe.current) {
+      e.preventDefault()
+    }
+  }, [])
+
+  // Ref callback to attach/detach native non-passive listener
+  const swipeRef = useCallback(
+    (node: HTMLElement | null) => {
+      if (elementRef.current) {
+        elementRef.current.removeEventListener("touchmove", preventScrollHandler)
+      }
+      elementRef.current = node
+      if (node) {
+        node.addEventListener("touchmove", preventScrollHandler, { passive: false })
+      }
+    },
+    [preventScrollHandler]
+  )
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (elementRef.current) {
+        elementRef.current.removeEventListener("touchmove", preventScrollHandler)
+      }
+    }
+  }, [preventScrollHandler])
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
@@ -190,12 +199,16 @@ export function useSwipeGesture(
 
   const swipeProps = useMemo(
     () => ({
+      ref: swipeRef,
       onTouchStart: handleTouchStart,
       onTouchMove: handleTouchMove,
       onTouchEnd: handleTouchEnd,
-      style: { transform: swipeX !== 0 ? `translateX(${swipeX}px)` : 'none' },
+      style: {
+        transform: swipeX !== 0 ? `translateX(${swipeX}px)` : 'none',
+        touchAction: 'pan-y',
+      },
     }),
-    [handleTouchStart, handleTouchMove, handleTouchEnd, swipeX]
+    [swipeRef, handleTouchStart, handleTouchMove, handleTouchEnd, swipeX]
   )
 
   return {

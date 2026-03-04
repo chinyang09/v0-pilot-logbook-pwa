@@ -71,7 +71,7 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
     >
       <button
         className={cn(
-          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all active:scale-[0.98]",
+          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all",
           crew.isMe &&
             "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20",
           isSelected && "bg-primary/20 border-primary"

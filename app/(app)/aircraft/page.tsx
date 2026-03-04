@@ -67,7 +67,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
     >
       <button
         className={cn(
-          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all active:scale-[0.98]",
+          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all",
           isRecent &&
             "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20",
           isSelected && "bg-primary/20 border-primary"
@@ -699,7 +699,7 @@ export default function AircraftPage() {
                           onKeyDown={(e: React.KeyboardEvent) => {
                             if (e.key === "Enter" || e.key === " ") handleSelectFr24(record)
                           }}
-                          className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer active:scale-[0.98] bg-card border border-border hover:bg-accent"
+                          className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer bg-card border border-border hover:bg-accent"
                         >
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-foreground">{record.registration || record.icao24}</span>
