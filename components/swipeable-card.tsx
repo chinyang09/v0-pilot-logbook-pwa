@@ -71,8 +71,9 @@ export function SwipeableCard({
       window.dispatchEvent(
         new CustomEvent(SWIPE_CLOSE_EVENT, { detail: { id: cardId.current } })
       )
-      onClick?.()
     }
+    // Always select/navigate on tap, whether closing or fresh tap
+    onClick?.()
   }
 
   return (
@@ -81,7 +82,7 @@ export function SwipeableCard({
       <div
         className={cn(
           "absolute inset-0 flex items-center transition-opacity",
-          swipeX < 0 ? "opacity-100" : "opacity-0"
+          swipeX < 0 ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
       >
         {actions.map((action, index) => {
