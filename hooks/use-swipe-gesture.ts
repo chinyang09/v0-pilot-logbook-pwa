@@ -48,7 +48,7 @@ export interface UseSwipeGestureReturn {
     onTouchStart: (e: React.TouchEvent) => void
     onTouchMove: (e: React.TouchEvent) => void
     onTouchEnd: () => void
-    style: { transform: string }
+    style: { transform: string; touchAction: string }
     className?: string
   }
 }
@@ -193,7 +193,10 @@ export function useSwipeGesture(
       onTouchStart: handleTouchStart,
       onTouchMove: handleTouchMove,
       onTouchEnd: handleTouchEnd,
-      style: { transform: swipeX !== 0 ? `translateX(${swipeX}px)` : 'none' },
+      style: {
+        transform: swipeX !== 0 ? `translateX(${swipeX}px)` : 'none',
+        touchAction: 'pan-y',
+      },
     }),
     [handleTouchStart, handleTouchMove, handleTouchEnd, swipeX]
   )

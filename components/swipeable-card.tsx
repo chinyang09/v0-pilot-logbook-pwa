@@ -1,8 +1,11 @@
 "use client"
 
 import type React from "react"
+import { useEffect, useRef } from "react"
 import { useSwipeGesture, getSwipeTransitionClass } from "@/hooks/use-swipe-gesture"
 import { cn } from "@/lib/utils"
+
+const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
 
 export interface SwipeAction {
   label?: string
@@ -33,13 +36,32 @@ export function SwipeableCard({
   const actionWidth = 80
   const totalActionsWidth = actions.length * actionWidth
   const OVERLAP = 8
+  const cardId = useRef(id || Math.random().toString(36).slice(2))
 
   const { swipeX, isSwiping, close, swipeProps } = useSwipeGesture({
     threshold: Math.min(80, totalActionsWidth),
     openPosition: totalActionsWidth - OVERLAP,
     direction: "left",
     disabled,
+    onSwipeComplete: () => {
+      // Close all other swiped cards
+      window.dispatchEvent(
+        new CustomEvent(SWIPE_CLOSE_EVENT, { detail: { id: cardId.current } })
+      )
+    },
   })
+
+  // Listen for other cards opening and close this one
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail.id !== cardId.current) {
+        close()
+      }
+    }
+    window.addEventListener(SWIPE_CLOSE_EVENT, handler)
+    return () => window.removeEventListener(SWIPE_CLOSE_EVENT, handler)
+  }, [close])
 
   const handleClick = () => {
     if (swipeX < 0) {
@@ -49,6 +71,11 @@ export function SwipeableCard({
     }
   }
 
+  // Dynamic width for closest button to fill gap during over-drag
+  const absSwipeX = Math.abs(swipeX)
+  const extraWidth = Math.max(0, absSwipeX - totalActionsWidth)
+  const containerWidth = totalActionsWidth + extraWidth
+
   return (
     <div id={id} className="relative overflow-hidden rounded-lg">
       {/* Action buttons revealed on swipe */}
@@ -57,32 +84,41 @@ export function SwipeableCard({
           "absolute inset-y-0 right-0 flex items-center transition-opacity",
           swipeX < 0 ? "opacity-100" : "opacity-0"
         )}
-        style={{ width: totalActionsWidth }}
+        style={{ width: containerWidth }}
       >
-        {actions.map((action, index) => (
-          <button
-            key={index}
-            onClick={(e: React.MouseEvent) => {
-              e.stopPropagation()
-              action.onClick()
-              close()
-            }}
-            disabled={action.disabled}
-            className={cn(
-              "h-full flex items-center justify-center",
-              action.variant === "destructive" &&
-                "bg-destructive text-destructive-foreground",
-              action.variant === "secondary" &&
-                "bg-secondary text-foreground",
-              !action.variant &&
-                "bg-muted text-muted-foreground",
-              action.className
-            )}
-            style={{ width: actionWidth }}
-          >
-            {action.icon}
-          </button>
-        ))}
+        {actions.map((action, index) => {
+          // First button (closest to card) expands to fill dead space
+          const isClosestToCard = index === 0
+          const buttonWidth = isClosestToCard ? actionWidth + extraWidth : actionWidth
+
+          return (
+            <button
+              key={index}
+              onClick={(e: React.MouseEvent) => {
+                e.stopPropagation()
+                action.onClick()
+                close()
+              }}
+              disabled={action.disabled}
+              className={cn(
+                "h-full flex items-center justify-center",
+                action.variant === "destructive" &&
+                  "bg-destructive text-destructive-foreground",
+                action.variant === "secondary" &&
+                  "bg-secondary text-foreground",
+                !action.variant &&
+                  "bg-muted text-muted-foreground",
+                action.className
+              )}
+              style={{
+                width: buttonWidth,
+                paddingLeft: isClosestToCard ? extraWidth : 0,
+              }}
+            >
+              {action.icon}
+            </button>
+          )
+        })}
       </div>
 
       {/* Main swipeable content */}
