@@ -51,7 +51,7 @@ export function SwipeableCard({
     },
   })
 
-  // Listen for other cards opening and close this one
+  // Listen for other cards opening/clicking and close this one
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail
@@ -67,29 +67,26 @@ export function SwipeableCard({
     if (swipeX < 0) {
       close()
     } else {
+      // Close any other open cards when this card is tapped
+      window.dispatchEvent(
+        new CustomEvent(SWIPE_CLOSE_EVENT, { detail: { id: cardId.current } })
+      )
       onClick?.()
     }
   }
 
-  // Dynamic width for closest button to fill gap during over-drag
-  const absSwipeX = Math.abs(swipeX)
-  const extraWidth = Math.max(0, absSwipeX - totalActionsWidth)
-  const containerWidth = totalActionsWidth + extraWidth
-
   return (
     <div id={id} className="relative overflow-hidden rounded-lg">
-      {/* Action buttons revealed on swipe */}
+      {/* Action buttons — fills entire container, clipped to rounded corners */}
       <div
         className={cn(
-          "absolute inset-y-0 right-0 flex items-center transition-opacity",
+          "absolute inset-0 flex items-center transition-opacity",
           swipeX < 0 ? "opacity-100" : "opacity-0"
         )}
-        style={{ width: containerWidth }}
       >
         {actions.map((action, index) => {
-          // First button (closest to card) expands to fill dead space
-          const isClosestToCard = index === 0
-          const buttonWidth = isClosestToCard ? actionWidth + extraWidth : actionWidth
+          // First button (closest to card) fills remaining space
+          const isFirst = index === 0
 
           return (
             <button
@@ -101,7 +98,8 @@ export function SwipeableCard({
               }}
               disabled={action.disabled}
               className={cn(
-                "h-full flex items-center justify-center",
+                "h-full flex items-center",
+                isFirst ? "flex-1 justify-end" : "justify-center",
                 action.variant === "destructive" &&
                   "bg-destructive text-destructive-foreground",
                 action.variant === "secondary" &&
@@ -110,12 +108,15 @@ export function SwipeableCard({
                   "bg-muted text-muted-foreground",
                 action.className
               )}
-              style={{
-                width: buttonWidth,
-                paddingLeft: isClosestToCard ? extraWidth : 0,
-              }}
+              style={isFirst ? { minWidth: actionWidth } : { width: actionWidth }}
             >
-              {action.icon}
+              {isFirst ? (
+                <div className="flex items-center justify-center" style={{ width: actionWidth }}>
+                  {action.icon}
+                </div>
+              ) : (
+                action.icon
+              )}
             </button>
           )
         })}
