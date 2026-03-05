@@ -33,7 +33,7 @@ export function PageContainer({ children, header, className, rightContent, mainR
 
         {/* Right content (e.g., FastScroll) positioned relative to viewport, not scrolling content */}
         {rightContent && (
-          <div className="absolute right-1 top-0 bottom-0 z-40 flex items-center pointer-events-none">
+          <div className={cn("absolute right-1 bottom-0 z-40 flex items-center pointer-events-none", header ? "top-12" : "top-0")}>
             <div className="pointer-events-auto">
               {rightContent}
             </div>

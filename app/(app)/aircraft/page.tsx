@@ -280,14 +280,14 @@ export default function AircraftPage() {
   // The list to virtualize: search results or browse list (excluding recently used)
   const displayAircraft = debouncedSearchQuery.trim() ? filteredAircraft : browseAircraft
 
-  // Generate FastScroll alphabet items from the browse list
+  // Generate FastScroll alphabet items from the full sorted list (including favorites/recently used)
   const fastScrollItems = useMemo(() => {
-    if (browseAircraft.length === 0) return []
+    if (allSortedAircraft.length === 0) return []
     return generateAlphabetItemsFromList(
-      browseAircraft.map((a) => a.registration),
+      allSortedAircraft.map((a) => a.registration),
       { numberPosition: "start" }
     )
-  }, [browseAircraft])
+  }, [allSortedAircraft])
 
   // Pre-compute letter -> virtual list index mapping for fast scroll
   const letterIndexMap = useMemo(() => {

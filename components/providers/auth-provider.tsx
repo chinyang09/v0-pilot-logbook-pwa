@@ -158,16 +158,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return
         }
 
-        // No local session - redirect to login (passkey prompt only on explicit user action)
-        if (pathname !== "/login") {
-          console.log("[v0] No valid session - redirecting to login")
-          router.push("/login")
-        }
+        // No local session found — route protection effect will handle redirect
+        console.log("[v0] No valid session found")
       } catch (error) {
         console.error("[v0] Auth check error:", error)
-        if (pathname !== "/login") {
-          router.push("/login")
-        }
       } finally {
         setIsLoading(false)
       }
