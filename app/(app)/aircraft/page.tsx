@@ -280,14 +280,14 @@ export default function AircraftPage() {
   // The list to virtualize: search results or browse list (excluding recently used)
   const displayAircraft = debouncedSearchQuery.trim() ? filteredAircraft : browseAircraft
 
-  // Generate FastScroll alphabet items from the browse list
+  // Generate FastScroll alphabet items from the full sorted list (including favorites/recently used)
   const fastScrollItems = useMemo(() => {
-    if (browseAircraft.length === 0) return []
+    if (allSortedAircraft.length === 0) return []
     return generateAlphabetItemsFromList(
-      browseAircraft.map((a) => a.registration),
+      allSortedAircraft.map((a) => a.registration),
       { numberPosition: "start" }
     )
-  }, [browseAircraft])
+  }, [allSortedAircraft])
 
   // Pre-compute letter -> virtual list index mapping for fast scroll
   const letterIndexMap = useMemo(() => {
@@ -654,10 +654,10 @@ export default function AircraftPage() {
                     </div>
                   )}
 
-                  {/* Recently Used Section (excluding favorites) */}
+                  {/* Recent Section (excluding favorites) */}
                   {showRecentlyUsed && (
                     <div className="space-y-1.5">
-                      <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">Recently Used</h2>
+                      <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">Recent</h2>
                       <div className="space-y-1">
                         {recentNonFavorites.map((aircraft) => (
                           <SwipeableAircraftCard

@@ -222,6 +222,30 @@ export default function LogbookPage() {
     [],
   )
 
+  // Sync calendar to current top flight whenever calendar becomes visible
+  const calendarSyncedRef = useRef(false)
+  useEffect(() => {
+    if (!showCalendar) {
+      calendarSyncedRef.current = false
+      return
+    }
+    if (calendarSyncedRef.current || flights.length === 0 || flightsLoading) return
+    calendarSyncedRef.current = true
+
+    const targetFlight = savedTopFlightId
+      ? flights.find(f => f.id === savedTopFlightId)
+      : flights[0]
+    if (targetFlight) {
+      const date = parseDateLocal(targetFlight.date)
+      const year = date.getFullYear()
+      const month = date.getMonth()
+      setSelectedMonth({ year, month })
+      selectedMonthRef.current = { year, month }
+      calendarRef.current?.scrollToMonth(year, month)
+      syncSourceRef.current = "flights"
+    }
+  }, [showCalendar, flights, flightsLoading])
+
   const handleCalendarScrollStart = useCallback(() => {
     syncSourceRef.current = "calendar"
   }, [])

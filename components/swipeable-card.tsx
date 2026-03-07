@@ -81,7 +81,7 @@ export function SwipeableCard({
       {/* Action buttons — fills entire container, clipped to rounded corners */}
       <div
         className={cn(
-          "absolute inset-0 flex items-center transition-opacity",
+          "absolute inset-0 flex items-center",
           swipeX < 0 ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
       >
