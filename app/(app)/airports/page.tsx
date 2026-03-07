@@ -192,6 +192,26 @@ export default function AirportsPage() {
     return () => { cancelled = true; };
   }, [debouncedSearchQuery, hasExactMatch]);
 
+  // Derive recently used airports from flights (most recent first)
+  const recentAirports = useMemo(() => {
+    if (flights.length === 0 || airports.length === 0) return [];
+    const seen = new Set<string>();
+    const recentIcaoList: string[] = [];
+    for (const flight of flights) {
+      for (const icao of [flight.departureIcao, flight.arrivalIcao]) {
+        if (icao && !seen.has(icao.toUpperCase())) {
+          seen.add(icao.toUpperCase());
+          recentIcaoList.push(icao.toUpperCase());
+          if (recentIcaoList.length >= 10) break;
+        }
+      }
+      if (recentIcaoList.length >= 10) break;
+    }
+    return recentIcaoList
+      .map((icao) => airports.find((a) => a.icao.toUpperCase() === icao))
+      .filter((a): a is Airport => !!a && !a.isFavorite);
+  }, [flights, airports]);
+
   // Set of recent ICAO codes for fast lookup
   const recentIcaos = useMemo(() => {
     return new Set(recentAirports.map((a) => a.icao));
@@ -351,27 +371,6 @@ export default function AirportsPage() {
     }
   }, [letterIndexMap, rowVirtualizer]);
 
-
-
-  // Derive recently used airports from flights (most recent first)
-  const recentAirports = useMemo(() => {
-    if (flights.length === 0 || airports.length === 0) return [];
-    const seen = new Set<string>();
-    const recentIcaoList: string[] = [];
-    for (const flight of flights) {
-      for (const icao of [flight.departureIcao, flight.arrivalIcao]) {
-        if (icao && !seen.has(icao.toUpperCase())) {
-          seen.add(icao.toUpperCase());
-          recentIcaoList.push(icao.toUpperCase());
-          if (recentIcaoList.length >= 10) break;
-        }
-      }
-      if (recentIcaoList.length >= 10) break;
-    }
-    return recentIcaoList
-      .map((icao) => airports.find((a) => a.icao.toUpperCase() === icao))
-      .filter((a): a is Airport => !!a && !a.isFavorite);
-  }, [flights, airports]);
 
   const handleAirportSelect = useCallback(async (icao: string) => {
     if (fieldType && flightId) {

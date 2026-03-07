@@ -1228,13 +1228,10 @@ export function FlightForm({
 
   const isDraft = resolvedFlight?.isDraft ?? true;
 
-  // Show loading state when using useLiveQuery and data hasn't arrived yet
+  // Wait silently for useLiveQuery to resolve — returning null keeps the
+  // previous panel content visible, avoiding a flash/spinner on selection change.
   if (flightIdProp && !resolvedFlight && !formData.id) {
-    return (
-      <div className="h-full flex items-center justify-center bg-background">
-        <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
-      </div>
-    );
+    return null;
   }
 
   return (
