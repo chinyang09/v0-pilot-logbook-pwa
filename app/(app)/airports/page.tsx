@@ -5,14 +5,12 @@ import type React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Input } from "@/components/ui/input";
 import { PageContainer } from "@/components/page-container";
-import { useAirportDatabase } from "@/hooks/data";
+import { useAirportDatabase, useFlights } from "@/hooks/data";
 import { StandardPageHeader } from "@/components/standard-page-header";
 import {
   searchAirports,
   hasExactAirportCodeMatch,
   toggleAirportFavorite,
-  getRecentlyUsedAirports,
-  addRecentlyUsedAirport,
   getAirportByIcao,
   updateFlight,
   addCustomAirport,
@@ -110,7 +108,7 @@ export default function AirportsPage() {
   }, []);
 
   const { airports, isLoading, mutate: mutateAirports } = useAirportDatabase();
-  const [recentAirports, setRecentAirports] = useState<typeof airports>([]);
+  const { flights } = useFlights();
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
   const isFastScrollingRef = useRef(false);
 
@@ -355,20 +353,28 @@ export default function AirportsPage() {
 
 
 
-  useEffect(() => {
-    const loadRecentAirports = async () => {
-      const recentCodes = await getRecentlyUsedAirports();
-      const recentList = await Promise.all(
-        recentCodes.map((code) => getAirportByIcao(code))
-      );
-      setRecentAirports(recentList.filter(Boolean) as typeof recentAirports);
-    };
-    loadRecentAirports();
-  }, []);
+  // Derive recently used airports from flights (most recent first)
+  const recentAirports = useMemo(() => {
+    if (flights.length === 0 || airports.length === 0) return [];
+    const seen = new Set<string>();
+    const recentIcaoList: string[] = [];
+    for (const flight of flights) {
+      for (const icao of [flight.departureIcao, flight.arrivalIcao]) {
+        if (icao && !seen.has(icao.toUpperCase())) {
+          seen.add(icao.toUpperCase());
+          recentIcaoList.push(icao.toUpperCase());
+          if (recentIcaoList.length >= 10) break;
+        }
+      }
+      if (recentIcaoList.length >= 10) break;
+    }
+    return recentIcaoList
+      .map((icao) => airports.find((a) => a.icao.toUpperCase() === icao))
+      .filter((a): a is Airport => !!a && !a.isFavorite);
+  }, [flights, airports]);
 
   const handleAirportSelect = useCallback(async (icao: string) => {
     if (fieldType && flightId) {
-      await addRecentlyUsedAirport(icao);
       const updates: Partial<{ departureIcao: string; departureIata: string; arrivalIcao: string; arrivalIata: string }> = {};
       if (fieldType === "departureIcao") {
         updates.departureIcao = icao;
@@ -439,7 +445,6 @@ export default function AirportsPage() {
       setFr24Result(null);
 
       if (fieldType && flightId) {
-        await addRecentlyUsedAirport(result.icao);
         const updates: Partial<{ departureIcao: string; departureIata: string; arrivalIcao: string; arrivalIata: string }> = {};
         if (fieldType === "departureIcao") {
           updates.departureIcao = result.icao;
@@ -578,15 +583,13 @@ export default function AirportsPage() {
                 )}
 
                 {/* Recent Section (excluding favorites, which are shown above) */}
-                {recentAirports.filter((a) => !a.isFavorite).length > 0 && (
+                {recentAirports.length > 0 && (
                   <div className="space-y-1.5">
                     <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
                       Recent
                     </h2>
                     <div className="space-y-1">
-                      {recentAirports
-                        .filter((a: Airport) => !a.isFavorite)
-                        .map((a: Airport) => (
+                      {recentAirports.map((a: Airport) => (
                           <AirportCard
                             key={a.icao}
                             airport={a}

@@ -272,11 +272,18 @@ function parseDutiesColumn(
     const flightMatch = dutyLine.match(/^(\w*\d+)\s*\[(\w+)\]$/);
     if (!flightMatch) continue;
 
+    // Normalize flight number: ensure airline prefix is present
+    let flightNumber = flightMatch[1];
+    const hasPrefix = /[A-Za-z]/.test(flightNumber.replace(/\d/g, ""));
+    if (!hasPrefix) {
+      flightNumber = "TR" + flightNumber; // Scoot ICAO code
+    }
+
     const routeMatch = detailLine.match(/^(\w{3})\s*-\s*(\w{3})/);
     if (!routeMatch) continue;
 
     sectors.push({
-      flightNumber: flightMatch[1],
+      flightNumber,
       aircraftType: flightMatch[2],
       departureIata: routeMatch[1].toUpperCase(),
       arrivalIata: routeMatch[2].toUpperCase(),
