@@ -6,7 +6,7 @@ import { Cloud, CloudOff, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export function SyncStatus() {
-  const [status, setStatus] = useState<"online" | "offline" | "syncing">("offline")
+  const [status, setStatus] = useState<"online" | "offline" | "syncing">(() => syncService.getStatus())
   const [pendingCount, setPendingCount] = useState(0)
 
   useEffect(() => {

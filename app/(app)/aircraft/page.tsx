@@ -654,10 +654,10 @@ export default function AircraftPage() {
                     </div>
                   )}
 
-                  {/* Recently Used Section (excluding favorites) */}
+                  {/* Recent Section (excluding favorites) */}
                   {showRecentlyUsed && (
                     <div className="space-y-1.5">
-                      <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">Recently Used</h2>
+                      <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">Recent</h2>
                       <div className="space-y-1">
                         {recentNonFavorites.map((aircraft) => (
                           <SwipeableAircraftCard

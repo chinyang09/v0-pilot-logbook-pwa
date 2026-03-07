@@ -7,7 +7,7 @@ import { PageContainer } from "@/components/page-container";
 import { useDebounce } from "@/hooks/use-debounce";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { usePersonnel } from "@/hooks/data";
+import { usePersonnel, useFlights } from "@/hooks/data";
 import { deletePersonnel, updateFlight } from "@/lib/db";
 import { syncService } from "@/lib/sync";
 import {
@@ -17,6 +17,7 @@ import {
   Plus,
   Trash2,
   ChevronRight,
+  Star,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -117,6 +118,7 @@ export default function CrewPage() {
   }, []);
 
   const { personnel, isLoading } = usePersonnel();
+  const { flights } = useFlights();
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebounce(searchQuery, 150);
   const { confirmDelete, handleDelete, DeleteDialog } = useDeleteConfirmation<(typeof personnel)[0]>();
@@ -142,6 +144,34 @@ export default function CrewPage() {
     });
   }, [personnel]);
 
+  // Derive recently used crew from flights (most recent first)
+  const recentlyUsedCrew = useMemo(() => {
+    if (flights.length === 0 || personnel.length === 0) return [];
+    const seen = new Set<string>();
+    const recentIds: string[] = [];
+    for (const flight of flights) {
+      for (const crewId of [flight.picId, flight.sicId]) {
+        if (crewId && !seen.has(crewId)) {
+          seen.add(crewId);
+          recentIds.push(crewId);
+          if (recentIds.length >= 10) break;
+        }
+      }
+      if (recentIds.length >= 10) break;
+    }
+    const recent: (typeof personnel)[0][] = [];
+    for (const id of recentIds) {
+      const found = personnel.find((p) => p.id === id);
+      if (found && !found.isMe && !found.favorite) recent.push(found);
+    }
+    return recent;
+  }, [flights, personnel]);
+
+  // Set of recent crew IDs for fast lookup
+  const recentCrewIds = useMemo(() => {
+    return new Set(recentlyUsedCrew.map((p) => p.id));
+  }, [recentlyUsedCrew]);
+
   // Filtered personnel for search mode
   const filteredPersonnel = useMemo(() => {
     const query = debouncedSearchQuery.toLowerCase().trim();
@@ -155,22 +185,26 @@ export default function CrewPage() {
     );
   }, [sortedPersonnel, debouncedSearchQuery]);
 
-  // The list to virtualize
-  const displayPersonnel = debouncedSearchQuery.trim() ? filteredPersonnel : sortedPersonnel;
+  // Browse list excludes self, favorites, and recently used (shown in their own sections)
+  const browsePersonnel = useMemo(() => {
+    return sortedPersonnel.filter((p) => !p.isMe && !p.favorite && !recentCrewIds.has(p.id));
+  }, [sortedPersonnel, recentCrewIds]);
 
-  // Generate FastScroll items from crew names (excluding self and favorites)
+  // The list to virtualize
+  const displayPersonnel = debouncedSearchQuery.trim() ? filteredPersonnel : browsePersonnel;
+
+  // Generate FastScroll items from crew names (all personnel for full alphabet coverage)
   const fastScrollItems = useMemo(() => {
-    const regularCrew = sortedPersonnel.filter((p) => !p.isMe && !p.favorite);
-    return generateAlphabetItemsFromList(regularCrew.map((p) => p.name || ""), {
+    const allCrew = sortedPersonnel.filter((p) => !p.isMe && !p.favorite);
+    return generateAlphabetItemsFromList(allCrew.map((p) => p.name || ""), {
       numberPosition: "end",
     });
   }, [sortedPersonnel]);
 
-  // Pre-compute letter -> virtual list index mapping for fast scroll
+  // Pre-compute letter -> virtual list index mapping for fast scroll (based on browsePersonnel)
   const letterIndexMap = useMemo(() => {
     const map = new Map<string, number>();
-    sortedPersonnel.forEach((crew, index) => {
-      if (crew.isMe || crew.favorite) return;
+    browsePersonnel.forEach((crew, index) => {
       const name = crew.name || "";
       const firstChar = name[0]?.toUpperCase();
       const letter = firstChar && /[A-Z]/.test(firstChar) ? firstChar : "#";
@@ -179,7 +213,7 @@ export default function CrewPage() {
       }
     });
     return map;
-  }, [sortedPersonnel]);
+  }, [browsePersonnel]);
 
   // Measure scroll margin: height of non-virtualized content above the virtual list
   const aboveVirtualRef = useRef<HTMLDivElement>(null);
@@ -204,7 +238,7 @@ export default function CrewPage() {
     const observer = new ResizeObserver(updateMargin);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [debouncedSearchQuery, personnel]);
+  }, [debouncedSearchQuery, personnel, recentlyUsedCrew]);
 
   // Virtual list
   const rowVirtualizer = useVirtualizer({
@@ -277,7 +311,7 @@ export default function CrewPage() {
             }
           }
           const crew = displayPersonnel[topItem.index];
-          if (crew && !crew.isMe && !crew.favorite) {
+          if (crew) {
             const name = crew.name || "";
             const firstChar = name[0]?.toUpperCase();
             if (firstChar && /[A-Z]/.test(firstChar)) {
@@ -412,6 +446,74 @@ export default function CrewPage() {
 
           {/* Non-virtualized content above the virtual list */}
           <div ref={aboveVirtualRef}>
+            {!debouncedSearchQuery.trim() && (
+              <div className="space-y-3">
+                {/* Self Section */}
+                {sortedPersonnel.filter((p) => p.isMe).length > 0 && (
+                  <div className="space-y-1">
+                    {sortedPersonnel
+                      .filter((p) => p.isMe)
+                      .map((crew) => (
+                        <SwipeableCrewCard
+                          key={crew.id}
+                          crew={crew}
+                          onSelect={() => handleCrewSelect(crew)}
+                          onDelete={() => confirmDelete(crew)}
+                          isSelectMode={!!fieldType}
+                          isSelected={!fieldType && selectedCrewId === crew.id}
+                        />
+                      ))}
+                  </div>
+                )}
+
+                {/* Favorites Section */}
+                {sortedPersonnel.filter((p) => p.favorite && !p.isMe).length > 0 && (
+                  <div className="space-y-1.5">
+                    <h2 className="text-xs font-semibold text-primary uppercase px-1 flex items-center gap-1">
+                      <Star className="h-3 w-3 fill-primary" /> Favorites
+                    </h2>
+                    <div className="space-y-1">
+                      {sortedPersonnel
+                        .filter((p) => p.favorite && !p.isMe)
+                        .map((crew) => (
+                          <SwipeableCrewCard
+                            key={crew.id}
+                            crew={crew}
+                            onSelect={() => handleCrewSelect(crew)}
+                            onDelete={() => confirmDelete(crew)}
+                            isSelectMode={!!fieldType}
+                            isSelected={!fieldType && selectedCrewId === crew.id}
+                          />
+                        ))}
+                    </div>
+                    <div className="border-t border-border/50 my-4" />
+                  </div>
+                )}
+
+                {/* Recent Section (excluding self and favorites) */}
+                {recentlyUsedCrew.length > 0 && (
+                  <div className="space-y-1.5">
+                    <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
+                      Recent
+                    </h2>
+                    <div className="space-y-1">
+                      {recentlyUsedCrew.map((crew) => (
+                        <SwipeableCrewCard
+                          key={`recent-${crew.id}`}
+                          crew={crew}
+                          onSelect={() => handleCrewSelect(crew)}
+                          onDelete={() => confirmDelete(crew)}
+                          isSelectMode={!!fieldType}
+                          isSelected={!fieldType && selectedCrewId === crew.id}
+                        />
+                      ))}
+                    </div>
+                    <div className="border-t border-border my-4" />
+                  </div>
+                )}
+              </div>
+            )}
+
             {debouncedSearchQuery.trim() && (
               <div className="space-y-3">
                 <h2 className="text-xs font-semibold text-muted-foreground uppercase px-1">
