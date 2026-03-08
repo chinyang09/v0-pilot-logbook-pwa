@@ -276,7 +276,6 @@ export default function CrewPage() {
     if (selectedCrewId) {
       setDetailContent(
         <CrewDetailPanel
-          key={selectedCrewId}
           crewId={selectedCrewId}
           onUpdated={() => mutate(CACHE_KEYS.personnel)}
           onBack={() => setSelectedCrewId(null)}

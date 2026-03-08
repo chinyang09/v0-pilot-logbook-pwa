@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -104,17 +104,28 @@ export function CrewDetailPanel({ crewId, onUpdated, onBack }: CrewDetailPanelPr
     defaultSIC: false,
   })
 
+  const prevCrewIdRef = useRef(crewId);
   useEffect(() => {
-    const loadData = async () => {
-      setIsLoading(true)
-      setIsEditing(false)
+    let mounted = true
+    const isIdChange = crewId !== prevCrewIdRef.current;
+    prevCrewIdRef.current = crewId;
 
+    // Only show loading on first mount, not on subsequent ID changes
+    if (!crew) setIsLoading(true)
+    if (isIdChange) {
+      setIsEditing(false)
+      setIsSaving(false)
+    }
+
+    const loadData = async () => {
       const allPersonnel = await getAllPersonnel()
+      if (!mounted) return
       const selfCrew = allPersonnel.find((p) => p.isMe && p.id !== crewId)
       setExistingSelfId(selfCrew?.id || null)
 
       try {
         const data = await getPersonnelById(crewId)
+        if (!mounted) return
         if (data) {
           setCrew(data)
           setFormData({
@@ -135,10 +146,11 @@ export function CrewDetailPanel({ crewId, onUpdated, onBack }: CrewDetailPanelPr
       } catch (error) {
         console.error("Failed to load crew:", error)
       } finally {
-        setIsLoading(false)
+        if (mounted) setIsLoading(false)
       }
     }
     loadData()
+    return () => { mounted = false }
   }, [crewId])
 
   const updateField = useCallback(
@@ -229,12 +241,9 @@ export function CrewDetailPanel({ crewId, onUpdated, onBack }: CrewDetailPanelPr
     }))
   }, [])
 
-  if (isLoading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    )
+  // Silent wait: return null to keep previous panel content visible (no flash)
+  if (isLoading && !crew) {
+    return null
   }
 
   if (!crew) {

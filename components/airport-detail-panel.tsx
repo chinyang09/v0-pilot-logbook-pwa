@@ -8,7 +8,6 @@ import {
   Globe,
   Mountain,
   Clock,
-  Loader2,
   Star,
   ChevronLeft,
 } from "lucide-react"
@@ -26,7 +25,8 @@ export function AirportDetailPanel({ icao, onBack }: AirportDetailPanelProps) {
   // Direct IndexedDB lookup by primary key (O(1), always fresh)
   useEffect(() => {
     let mounted = true
-    setIsLoading(true)
+    // Only show loading on first mount, not on subsequent icao changes
+    if (!airport) setIsLoading(true)
     getAirportByIcao(icao).then((found) => {
       if (mounted) {
         setAirport(found ?? null)
@@ -42,12 +42,9 @@ export function AirportDetailPanel({ icao, onBack }: AirportDetailPanelProps) {
     return getAirportLocalTime(airport.tz)
   }, [airport])
 
-  if (isLoading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    )
+  // Silent wait: return null to keep previous panel content visible (no flash)
+  if (isLoading && !airport) {
+    return null
   }
 
   if (!airport) {

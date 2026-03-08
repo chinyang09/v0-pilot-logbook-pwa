@@ -50,7 +50,6 @@ function DetailPanelContent() {
     return (
       <div className="h-full overflow-auto bg-background">
         <FlightForm
-          key={flightId}
           flightId={flightId}
           isDesktop={isDesktop}
           onFlightAdded={async () => {

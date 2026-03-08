@@ -374,7 +374,6 @@ export default function AircraftPage() {
     if (selectedAircraft) {
       setDetailContent(
         <AircraftDetailPanel
-          key={selectedAircraft.registration}
           aircraft={selectedAircraft}
           onUpdated={refreshAircraft}
           onBack={() => setSelectedAircraftReg(null)}

@@ -39,7 +39,6 @@ export default function FlightDetailPage() {
 
   return (
     <FlightForm
-      key={id}
       flightId={id}
       onFlightAdded={handleFlightSaved}
       onClose={handleClose}
