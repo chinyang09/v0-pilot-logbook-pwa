@@ -1,77 +1,69 @@
 "use client"
 
-import { useRef, useEffect, type ReactNode } from "react"
+import { useState, useEffect, useRef, Suspense, lazy, type ReactNode } from "react"
 import { usePathname } from "next/navigation"
 import { ActiveRouteProvider } from "@/hooks/use-page-active"
 
 /**
- * Routes whose page components stay mounted across navigation.
- * These have virtualized lists, expensive IndexedDB queries, or complex
- * state that would flash/reset on remount.
- *
- * All other routes (currencies, settings, new-flight, etc.) unmount normally.
+ * Lazy-imported page components — we manage their lifecycle directly,
+ * bypassing Next.js's internal LayoutRouter which would unmount them
+ * on navigation even if we cached the `children` prop.
  */
-const PERSISTENT_ROUTES = new Set([
-  "/logbook",
-  "/aircraft",
-  "/airports",
-  "/crew",
-])
+const PERSISTENT_PAGES: Record<string, React.LazyExoticComponent<React.ComponentType>> = {
+  "/logbook": lazy(() => import("@/app/(app)/logbook/page")),
+  "/aircraft": lazy(() => import("@/app/(app)/aircraft/page")),
+  "/airports": lazy(() => import("@/app/(app)/airports/page")),
+  "/crew": lazy(() => import("@/app/(app)/crew/page")),
+}
 
 /**
  * Normalise pathname → route key.
- * "/logbook" stays "/logbook", "/aircraft/new?select=true" → "/aircraft/new" (not persistent).
- * Only exact matches of top-level persistent routes are kept alive.
+ * Only exact top-level matches are persistent.
  */
 function routeKeyFromPathname(pathname: string | null): string {
   if (!pathname) return "/"
-  // Strip query string if present in pathname (shouldn't be, but safety)
-  const clean = pathname.split("?")[0]
-  // Match top-level route: "/logbook", "/aircraft", etc.
-  // Sub-routes like "/aircraft/new" or "/flights/abc123" are NOT persistent.
-  const segments = clean.split("/").filter(Boolean)
+  const segments = pathname.split("?")[0].split("/").filter(Boolean)
   return segments.length > 0 ? `/${segments[0]}` : "/"
 }
 
-interface CachedPage {
-  element: ReactNode
-}
-
 /**
- * KeepAlivePages — intercepts the Next.js App Router `{children}` slot
- * and keeps heavy pages mounted with `display: none` when inactive.
+ * KeepAlivePages — renders heavy pages via lazy imports and keeps them
+ * mounted across navigations using visibility:hidden + absolute positioning.
  *
- * On first visit to a persistent route, the page component is mounted.
- * On subsequent navigations away, it's hidden (not unmounted).
- * On return, it becomes visible instantly — all state preserved.
+ * Why not cache Next.js `children`?
+ * Next.js wraps pages in internal LayoutRouter components that detect
+ * navigation and unmount their contents — so caching the element tree
+ * from `children` doesn't prevent remounting.
  *
- * Non-persistent routes render normally and unmount on navigation.
+ * Why visibility:hidden instead of display:none?
+ * display:none removes elements from layout, resetting scrollTop to 0
+ * and breaking virtualizer measurements. visibility:hidden keeps elements
+ * in the layout tree, preserving scroll positions and container dimensions.
  */
 export function KeepAlivePages({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const routeKey = routeKeyFromPathname(pathname)
-  const isPersistent = PERSISTENT_ROUTES.has(routeKey)
+  const isPersistent = routeKey in PERSISTENT_PAGES
 
-  // Stable Map of cached persistent pages (survives re-renders)
-  const cacheRef = useRef<Map<string, CachedPage>>(new Map())
+  // Track which persistent routes have been visited (mount on first visit)
+  const [visited, setVisited] = useState<Set<string>>(() =>
+    isPersistent ? new Set([routeKey]) : new Set()
+  )
 
-  // Always update the cache with latest children for the current persistent route
-  if (isPersistent) {
-    cacheRef.current.set(routeKey, { element: children })
-  }
+  useEffect(() => {
+    if (routeKey in PERSISTENT_PAGES && !visited.has(routeKey)) {
+      setVisited(prev => new Set(prev).add(routeKey))
+    }
+  }, [routeKey, visited])
 
-  // Focus management: when switching to a keep-alive page, blur any
-  // focused element that might be inside a now-hidden page
+  // Focus management: blur elements inside hidden pages on route change
   const prevRouteRef = useRef(routeKey)
   useEffect(() => {
     if (routeKey !== prevRouteRef.current) {
       const active = document.activeElement as HTMLElement | null
       if (active && active !== document.body) {
-        // Check if the focused element is inside a hidden page container
-        const hiddenContainer = active.closest('[data-keepalive-hidden="true"]')
-        if (hiddenContainer) {
-          active.blur()
-        }
+        const hidden = active.closest('[data-keepalive-hidden="true"]')
+        if (hidden) active.blur()
       }
       prevRouteRef.current = routeKey
     }
@@ -79,28 +71,37 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
 
   return (
     <ActiveRouteProvider activeRoute={routeKey}>
-      {/* Render all cached persistent pages */}
-      {Array.from(cacheRef.current.entries()).map(([key, cached]) => {
-        const isActive = key === routeKey
-        return (
-          <div
-            key={key}
-            data-keepalive-hidden={!isActive ? "true" : undefined}
-            style={{
-              display: isActive ? "contents" : "none",
-            }}
-          >
-            {cached.element}
-          </div>
-        )
-      })}
+      {/* Stacking container — persistent pages are absolutely positioned inside */}
+      <div className="flex-1 relative overflow-hidden">
+        {/* Persistent pages: lazy-mounted on first visit, never unmounted */}
+        {Array.from(visited).map(key => {
+          const PageComponent = PERSISTENT_PAGES[key]
+          const isActive = key === routeKey
+          return (
+            <div
+              key={key}
+              data-keepalive-hidden={!isActive ? "true" : undefined}
+              className="absolute inset-0 flex flex-col"
+              style={{
+                visibility: isActive ? "visible" : "hidden",
+                pointerEvents: isActive ? "auto" : "none",
+                zIndex: isActive ? 1 : 0,
+              }}
+            >
+              <Suspense>
+                <PageComponent />
+              </Suspense>
+            </div>
+          )
+        })}
 
-      {/* Non-persistent routes render normally (will unmount on navigation) */}
-      {!isPersistent && (
-        <div style={{ display: "contents" }}>
-          {children}
-        </div>
-      )}
+        {/* Non-persistent routes: render Next.js children normally */}
+        {!isPersistent && (
+          <div className="absolute inset-0 flex flex-col" style={{ zIndex: 1 }}>
+            {children}
+          </div>
+        )}
+      </div>
     </ActiveRouteProvider>
   )
 }
