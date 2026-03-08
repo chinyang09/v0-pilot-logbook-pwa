@@ -272,11 +272,18 @@ function parseDutiesColumn(
     const flightMatch = dutyLine.match(/^(\w*\d+)\s*\[(\w+)\]$/);
     if (!flightMatch) continue;
 
+    // Normalize flight number: ensure airline prefix is present
+    let flightNumber = flightMatch[1];
+    const hasPrefix = /[A-Za-z]/.test(flightNumber.replace(/\d/g, ""));
+    if (!hasPrefix) {
+      flightNumber = "TR" + flightNumber; // Scoot ICAO code
+    }
+
     const routeMatch = detailLine.match(/^(\w{3})\s*-\s*(\w{3})/);
     if (!routeMatch) continue;
 
     sectors.push({
-      flightNumber: flightMatch[1],
+      flightNumber,
       aircraftType: flightMatch[2],
       departureIata: routeMatch[1].toUpperCase(),
       arrivalIata: routeMatch[2].toUpperCase(),
@@ -704,49 +711,47 @@ export async function parseScheduleCSV(
       }
 
       // ============================================
-      // SMART FLIGHT MATCHING (when actual times exist)
+      // SMART FLIGHT MATCHING
       // ============================================
       for (const sector of duty.sectors) {
-        if (sector.actualOut && sector.actualIn) {
-          // Flight has actual times - try to match with existing flight
-          let flightDate = date;
-
-          // Apply UTC day shift captured earlier
-          if (header.timeReference === "LOCAL_BASE") {
-            const dayOffset = (sector as any)._utcDateOffset ?? 0;
-          
-            if (dayOffset !== 0) {
-              const d = new Date(date + "T00:00:00Z");
-              d.setUTCDate(d.getUTCDate() + dayOffset);
-              flightDate = d.toISOString().slice(0, 10);
-            }
-          
-            delete (sector as any)._utcDateOffset;
+        // Apply UTC day shift for LOCAL_BASE schedules
+        let flightDate = date;
+        if (header.timeReference === "LOCAL_BASE") {
+          const dayOffset = (sector as any)._utcDateOffset ?? 0;
+          if (dayOffset !== 0) {
+            const d = new Date(date + "T00:00:00Z");
+            d.setUTCDate(d.getUTCDate() + dayOffset);
+            flightDate = d.toISOString().slice(0, 10);
           }
-          // 1. NORMALIZE FLIGHT NUMBER (Fixes "128" vs "TR128")
-          const csvFlightNum = sector.flightNumber.replace(/\D/g, "");
+          delete (sector as any)._utcDateOffset;
+        }
 
-          // 2. Create the standardized versions
-          const fullFlightNumber = `TR${csvFlightNum}`; // Always "TR128"
+        // 1. NORMALIZE FLIGHT NUMBER (Fixes "128" vs "TR128")
+        const csvFlightNum = sector.flightNumber.replace(/\D/g, "");
+        const fullFlightNumber = `TR${csvFlightNum}`;
 
-          // 2. QUERY DATABASE
-          const existingFlight = await userDb.flights
-            .where("date")
-            .equals(flightDate)
-            .filter((f: FlightLog) => {
-              const dbFlightNum = f.flightNumber.replace(/\D/g, "");
-              return dbFlightNum === csvFlightNum;
-            })
-            .first();
+        // 2. QUERY DATABASE — match by date + flight number OR date + route
+        const existingFlight = await userDb.flights
+          .where("date")
+          .equals(flightDate)
+          .filter((f: FlightLog) => {
+            const dbFlightNum = f.flightNumber.replace(/\D/g, "");
+            if (dbFlightNum === csvFlightNum) return true;
+            // Also match by route (handles drafts with different flight number format)
+            if (f.departureIata === sector.departureIata && f.arrivalIata === sector.arrivalIata) return true;
+            return false;
+          })
+          .first();
 
-          if (existingFlight) {
-            // Flight exists - compare times
+        if (existingFlight) {
+          // Flight exists — hydrate with actual times if available
+          if (sector.actualOut && sector.actualIn) {
             const timesMatch =
               existingFlight.outTime === sector.actualOut &&
               existingFlight.inTime === sector.actualIn;
 
-            if (!timesMatch) {
-              // Times differ - add to discrepancies for user review
+            if (!timesMatch && (existingFlight.outTime || existingFlight.inTime)) {
+              // Times differ and flight already has times - add discrepancy
               result.discrepancies.push({
                 id: crypto.randomUUID(),
                 type: "time_mismatch",
@@ -760,11 +765,12 @@ export async function parseScheduleCSV(
                 createdAt: Date.now(),
               });
             }
+          }
 
-            // Link this sector to existing flight
-            sector.linkedFlightId = existingFlight.id;
-          } else {
-            // Flight doesn't exist - create it with available data
+          // Link this sector to existing flight
+          sector.linkedFlightId = existingFlight.id;
+        } else if (sector.actualOut && sector.actualIn) {
+            // Flight doesn't exist and we have actual times - create it
             const depAirport = await getAirportByIata(sector.departureIata);
             const arrAirport = await getAirportByIata(sector.arrivalIata);
             const depOffset = depAirport
@@ -828,9 +834,9 @@ export async function parseScheduleCSV(
                 Math.max(0, hhmmToMinutes(blockTime) - hhmmToMinutes(nightTime))
               ),
               picId: isUserPic ? currentUser.id : picMember?.personnelId || "",
-              picName: isUserPic ? currentUser.name : picMember?.name || "",
+              picName: isUserPic ? "Self" : picMember?.name || "",
               sicId: !isUserPic ? currentUser.id : "",
-              sicName: !isUserPic ? currentUser.name : "",
+              sicName: !isUserPic ? "Self" : "",
               additionalCrew: [],
               pilotFlying: true,
               pilotRole: isUserPic ? "PIC" : "SIC",
@@ -870,9 +876,8 @@ export async function parseScheduleCSV(
               data: newFlight,
               timestamp: Date.now(),
             });
-          }
         }
-      }
+      }  // end for (sector)
 
       const entry: ScheduleEntry = {
         id: crypto.randomUUID(),

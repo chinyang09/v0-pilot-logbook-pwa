@@ -46,12 +46,17 @@ export function ImageImportButton({
   const processImage = async (file: File) => {
     setLoading(true)
     setShowDialog(true)
-    setProgress({ percent: 10, stage: "Initializing", detail: "Loading OCR..." })
+    setProgress({ percent: 5, stage: "Compressing", detail: "Resizing image..." })
 
     try {
+      // Compress before OCR to prevent memory crashes on iPad/mobile
+      const { compressImage } = await import("@/lib/utils/image-compress")
+      const compressed = await compressImage(file, 2048, 0.8)
+
       // Extract with geometry
+      setProgress({ percent: 10, stage: "Initializing", detail: "Loading OCR..." })
       setProgress({ percent: 40, stage: "Processing", detail: "Reading image..." })
-      const ocrResults = await extractTextFromImage(file)
+      const ocrResults = await extractTextFromImage(compressed)
 
       // Parse layout
       setProgress({ percent: 70, stage: "Analyzing", detail: "Extracting times..." })
@@ -101,6 +106,7 @@ export function ImageImportButton({
     <>
       <input
         type="file"
+        id="ocr-file-input"
         ref={fileInputRef}
         className="hidden"
         accept="image/*"
@@ -108,6 +114,7 @@ export function ImageImportButton({
       />
       <input
         type="file"
+        id="ocr-camera-input"
         ref={cameraInputRef}
         className="hidden"
         accept="image/*"
@@ -115,7 +122,7 @@ export function ImageImportButton({
         onChange={handleFileChange}
       />
 
-      <DropdownMenu>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button
             variant={variant}
@@ -126,14 +133,18 @@ export function ImageImportButton({
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => cameraInputRef.current?.click()}>
-            <Camera className="mr-2 h-4 w-4" />
-            Take Photo
+        <DropdownMenuContent align="end" className="z-[60]">
+          <DropdownMenuItem asChild>
+            <label htmlFor="ocr-camera-input" className="flex items-center cursor-pointer">
+              <Camera className="mr-2 h-4 w-4" />
+              Take Photo
+            </label>
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
-            <ImageIcon className="mr-2 h-4 w-4" />
-            Choose from Gallery
+          <DropdownMenuItem asChild>
+            <label htmlFor="ocr-file-input" className="flex items-center cursor-pointer">
+              <ImageIcon className="mr-2 h-4 w-4" />
+              Choose from Gallery
+            </label>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
