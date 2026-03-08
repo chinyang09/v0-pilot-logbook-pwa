@@ -122,7 +122,7 @@ export function ImageImportButton({
         onChange={handleFileChange}
       />
 
-      <DropdownMenu>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button
             variant={variant}
@@ -133,7 +133,7 @@ export function ImageImportButton({
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent align="end" className="z-[60]">
           <DropdownMenuItem asChild>
             <label htmlFor="ocr-camera-input" className="flex items-center cursor-pointer">
               <Camera className="mr-2 h-4 w-4" />
