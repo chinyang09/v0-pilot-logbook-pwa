@@ -133,13 +133,32 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     }
   }, [pathname, router, searchParams])
 
+  // Routes that use KeepAlivePages — their detail content survives navigation
+  // because the page stays mounted and will re-sync via usePageActive callback.
+  const KEEPALIVE_ROUTES = ["/logbook", "/aircraft", "/airports", "/crew"]
+
   // Reset state when pathname changes (different page)
-  // If pinned, skip one reset so detail content survives picker navigation
+  // If pinned, skip one reset so detail content survives picker navigation.
+  // If navigating BETWEEN keep-alive routes, don't clear — the activated page
+  // will re-set its detail content via its own usePageActive callback.
+  const prevPathnameRef = useRef(pathname)
   useEffect(() => {
     if (pinnedRef.current) {
       pinnedRef.current = false
+      prevPathnameRef.current = pathname
       return
     }
+
+    const prevBase = "/" + (prevPathnameRef.current?.split("/").filter(Boolean)[0] || "")
+    const currBase = "/" + (pathname?.split("/").filter(Boolean)[0] || "")
+    prevPathnameRef.current = pathname
+
+    // If navigating between two keep-alive routes, let the activated page
+    // re-sync detail content — don't clear it (prevents flash).
+    if (KEEPALIVE_ROUTES.includes(prevBase) && KEEPALIVE_ROUTES.includes(currBase)) {
+      return
+    }
+
     setDetailContent(null)
     setHasDetailSupport(false)
   }, [pathname])

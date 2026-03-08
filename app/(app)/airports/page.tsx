@@ -28,6 +28,7 @@ import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { AirportDetailPanel } from "@/components/airport-detail-panel";
 import { AirportNewForm } from "@/components/airport-new-form";
 import { useDebounce } from "@/hooks/use-debounce";
+import { usePageActive } from "@/hooks/use-page-active";
 
 // Memoized airport card to prevent unnecessary re-renders during virtualization
 interface AirportCardProps {
@@ -282,8 +283,8 @@ export default function AirportsPage() {
 
   const virtualItems = rowVirtualizer.getVirtualItems();
 
-  // Update detail content when selection changes
-  useEffect(() => {
+  // Sync detail panel content — extracted so usePageActive can re-trigger it
+  const syncDetailPanel = useCallback(() => {
     if (fieldType) return;
 
     if (isLoading) {
@@ -310,6 +311,14 @@ export default function AirportsPage() {
       setDetailContent(null);
     }
   }, [fieldType, selectedAirportIcao, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao]);
+
+  // Update detail content when selection changes
+  useEffect(() => {
+    syncDetailPanel();
+  }, [syncDetailPanel]);
+
+  // Re-sync detail panel when this keep-alive page becomes active again
+  usePageActive("/airports", syncDetailPanel);
 
   // Track active letter from virtualizer scroll position (replaces expensive DOM query)
   useEffect(() => {
