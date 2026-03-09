@@ -745,6 +745,10 @@ export function FlightForm({
       // Only auto-save if we have an existing flight with an ID
       const effectiveId = resolvedFlight?.id || flightIdProp;
       if (!debouncedFormData?.id || !effectiveId) return;
+      // Guard: don't auto-save if the flight has been deleted from Dexie.
+      // Without this, auto-save would re-create the deleted record via updateFlight,
+      // causing useLiveQuery to fire and driving a render/re-save cycle (Error #185).
+      if (!resolvedFlight) return;
 
       // Create a serializable state to compare
       const currentState = JSON.stringify({

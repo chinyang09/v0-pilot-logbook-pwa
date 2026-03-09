@@ -77,7 +77,9 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
   // Track when we're updating URL to avoid sync race condition
   const pendingUpdateRef = useRef<string | null | undefined>(undefined)
 
-  // Sync selectedId with URL params (only when URL changes externally)
+  // Sync selectedId with URL params (only when URL changes externally).
+  // Uses a functional setState so `selectedId` does NOT need to be in deps —
+  // removing it prevents an extra re-run after our own setSelectedIdState call.
   useEffect(() => {
     const urlSelected = searchParams.get("selected")
     // Skip sync if we have a pending update that matches (our own update)
@@ -89,15 +91,25 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
       // Skip syncing while we have a pending update
       return
     }
-    if (urlSelected !== selectedId) {
-      setSelectedIdState(urlSelected)
-    }
-  }, [searchParams, selectedId])
+    // Functional update: React bails out (no re-render) if the value is unchanged,
+    // so calling this even when urlSelected === selectedId is safe and avoids
+    // needing selectedId in the dep array.
+    setSelectedIdState(prev => (prev === urlSelected ? prev : urlSelected))
+  }, [searchParams])
+
+  // Track previous pathname so we only clear pendingUpdateRef on real page changes,
+  // not on every searchParams update (which would break race-condition protection).
+  const prevPathnameForPendingRef = useRef(pathname)
 
   // On pathname change, restore selection from sessionStorage if not in URL
   useEffect(() => {
-    // Clear pending update on pathname change
-    pendingUpdateRef.current = undefined
+    // Clear pending update only when the actual page changes, not on every URL update.
+    // If we cleared on every searchParams change, every setSelectedId → router.replace
+    // would destroy the pending guard before the URL-sync effect above can use it.
+    if (prevPathnameForPendingRef.current !== pathname) {
+      prevPathnameForPendingRef.current = pathname
+      pendingUpdateRef.current = undefined
+    }
 
     const urlSelected = searchParams.get("selected")
     if (!urlSelected) {

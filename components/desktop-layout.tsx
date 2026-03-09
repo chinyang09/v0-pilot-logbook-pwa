@@ -52,15 +52,16 @@ function DetailPanelContent() {
         <FlightForm
           flightId={flightId}
           isDesktop={isDesktop}
-          onFlightAdded={async () => {
-            await mutate(CACHE_KEYS.flights)
-            await mutate(CACHE_KEYS.stats)
+          onFlightAdded={() => {
+            // Background revalidation — no await so the UI isn't blocked
+            mutate(CACHE_KEYS.flights)
+            mutate(CACHE_KEYS.stats)
             if (navigator.onLine) {
               syncService.fullSync()
             }
           }}
-          onClose={async () => {
-            await mutate(CACHE_KEYS.flights)
+          onClose={() => {
+            mutate(CACHE_KEYS.flights) // background revalidation
             setSelectedId(null)
           }}
         />

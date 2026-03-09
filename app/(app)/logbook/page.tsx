@@ -265,7 +265,10 @@ export default function LogbookPage() {
   }, [setSelectedFlightId])
 
   const handleFlightDeleted = async () => {
-    // Flight already removed optimistically from SWR cache in FlightList.
+    // Clear the detail panel — the deleted flight's form must not remain open.
+    // This also prevents FlightForm's auto-save from re-creating the deleted record in Dexie.
+    setSelectedFlightId(null)
+    // Flights already removed optimistically from SWR cache in FlightList.
     // Only revalidate stats so totals reflect the deletion.
     await mutate(CACHE_KEYS.stats, undefined, { revalidate: true })
   }
