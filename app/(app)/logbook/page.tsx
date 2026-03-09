@@ -17,7 +17,9 @@ import {
   useAircraft,
   useAirportDatabase,
   usePersonnel,
+  CACHE_KEYS,
 } from "@/hooks/data"
+import { mutate } from "swr"
 import { Calendar, Plus, Search, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { StandardPageHeader } from "@/components/standard-page-header"
@@ -263,7 +265,9 @@ export default function LogbookPage() {
   }, [setSelectedFlightId])
 
   const handleFlightDeleted = async () => {
-    await refreshFlights()
+    // Flight already removed optimistically from SWR cache in FlightList.
+    // Only revalidate stats so totals reflect the deletion.
+    await mutate(CACHE_KEYS.stats, undefined, { revalidate: true })
   }
 
   const filterOptions = useMemo(() => {
@@ -384,7 +388,12 @@ export default function LogbookPage() {
                 size="icon-sm"
                 onClick={async () => {
                   const draftFlight = await createFlight()
-                  await refreshFlights()
+                  // Optimistic: prepend new draft to the SWR cache immediately.
+                  mutate(
+                    CACHE_KEYS.flights,
+                    (prev: FlightLog[] | undefined) => [draftFlight, ...(prev ?? [])],
+                    { revalidate: false }
+                  )
                   setSelectedFlightId(draftFlight.id)
                 }}
               >

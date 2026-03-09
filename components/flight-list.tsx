@@ -17,6 +17,8 @@ import type { FlightLog, Aircraft, Airport, Personnel } from "@/lib/db";
 import { deleteFlight } from "@/lib/db";
 import { formatHHMMDisplay } from "@/lib/utils/time";
 import { syncService } from "@/lib/sync";
+import { mutate } from "swr";
+import { CACHE_KEYS } from "@/hooks/data";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -460,6 +462,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     }, [handleScroll, onScroll]);
 
     const performDelete = async (flight: FlightLog) => {
+      // Optimistic: remove from SWR cache immediately so the list updates
+      // without waiting for the Dexie write or a full revalidation.
+      mutate(
+        CACHE_KEYS.flights,
+        (prev: FlightLog[] | undefined) => prev?.filter((f) => f.id !== flight.id),
+        { revalidate: false }
+      );
       await deleteFlight(flight.id);
       if (navigator.onLine) syncService.fullSync();
       onDeleted?.();
@@ -467,6 +476,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
     const handleToggleLock = async (flight: FlightLog) => {
       const { updateFlight } = await import("@/lib/db");
+      // Optimistic: flip lock state in SWR cache immediately.
+      mutate(
+        CACHE_KEYS.flights,
+        (prev: FlightLog[] | undefined) =>
+          prev?.map((f) => (f.id === flight.id ? { ...f, isLocked: !f.isLocked } : f)),
+        { revalidate: false }
+      );
       await updateFlight(flight.id, { isLocked: !flight.isLocked });
       onDeleted?.();
     };

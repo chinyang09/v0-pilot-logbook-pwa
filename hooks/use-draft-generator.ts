@@ -5,19 +5,21 @@
 
 "use client"
 
-import { useEffect, useCallback, useState } from "react"
+import { useEffect, useCallback, useState, useRef } from "react"
 import { useDBReady } from "./data/use-db"
 import { getDraftGenerationConfig } from "@/lib/db"
 import { processPendingDrafts } from "@/lib/utils/roster/draft-generator"
 
 export function useDraftGenerator() {
   const { isReady } = useDBReady()
-  const [isProcessing, setIsProcessing] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false) // UI feedback only
+  const isProcessingRef = useRef(false) // Guard: stable ref, not a dep
   const [lastProcessed, setLastProcessed] = useState<Date | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const processDrafts = useCallback(async () => {
-    if (!isReady || isProcessing) return
+    if (!isReady || isProcessingRef.current) return
+    isProcessingRef.current = true
 
     try {
       setIsProcessing(true)
@@ -43,9 +45,10 @@ export function useDraftGenerator() {
       console.error("[Draft Generator] Error processing drafts:", err)
       setError(err instanceof Error ? err.message : "Unknown error")
     } finally {
+      isProcessingRef.current = false
       setIsProcessing(false)
     }
-  }, [isReady, isProcessing])
+  }, [isReady])
 
   // Process drafts on mount and when DB becomes ready
   useEffect(() => {
