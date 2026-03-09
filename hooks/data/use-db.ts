@@ -66,11 +66,15 @@ export function useDBReady() {
  */
 export async function refreshAllData() {
   console.log("[Data] Refreshing all data from IndexedDB...")
+  // Call mutate(key) with no data argument — background revalidation that keeps
+  // existing SWR cache data visible during the re-fetch. Passing `undefined` as
+  // data would temporarily clear the cache, causing isLoading=true and a skeleton
+  // flash while the Dexie re-fetch resolves.
   await Promise.all([
-    mutate(CACHE_KEYS.flights, undefined, { revalidate: true }),
-    mutate(CACHE_KEYS.aircraft, undefined, { revalidate: true }),
-    mutate(CACHE_KEYS.personnel, undefined, { revalidate: true }),
-    mutate(CACHE_KEYS.stats, undefined, { revalidate: true }),
+    mutate(CACHE_KEYS.flights),
+    mutate(CACHE_KEYS.aircraft),
+    mutate(CACHE_KEYS.personnel),
+    mutate(CACHE_KEYS.stats),
   ])
   console.log("[Data] All data refreshed")
 }

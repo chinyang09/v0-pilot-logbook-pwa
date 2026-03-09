@@ -316,6 +316,8 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     const lastDetectedFlightRef = useRef<string | null>(null);
     const [activeYearKey, setActiveYearKey] = useState<string | undefined>(undefined);
     const isFastScrollingRef = useRef(false);
+    // Map of flight ID → height-animator div element for imperative delete animations
+    const heightAnimatorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
     // Generate FastScroll items from flights (year-based)
     const fastScrollItems = useMemo(() => generateFlightYearItems(flights), [flights]);
@@ -462,8 +464,34 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     }, [handleScroll, onScroll]);
 
     const performDelete = async (flight: FlightLog) => {
-      // Optimistic: remove from SWR cache immediately so the list updates
-      // without waiting for the Dexie write or a full revalidation.
+      // Animate the card out before removing it from the SWR cache.
+      // The height-animator div collapses to 0, triggering the virtualizer's
+      // ResizeObserver on each frame so cards below shift up smoothly.
+      const animatorEl = heightAnimatorRefs.current.get(flight.id);
+      if (animatorEl) {
+        const currentHeight = animatorEl.getBoundingClientRect().height;
+        // Pin to explicit pixel height — CSS can't transition from `auto` to 0
+        animatorEl.style.height = `${currentHeight}px`;
+        animatorEl.style.overflow = "hidden";
+        // Force a layout recalc so the browser registers the explicit height
+        // before the transition starts (otherwise transition is skipped)
+        void animatorEl.offsetHeight;
+        // Fade + slide the card content out
+        const cardEl = animatorEl.firstElementChild as HTMLElement | null;
+        if (cardEl) {
+          cardEl.style.transition = "opacity 150ms ease-out, transform 150ms ease-out";
+          cardEl.style.opacity = "0";
+          cardEl.style.transform = "translateX(-40px)";
+        }
+        // Collapse height → ResizeObserver fires each frame → virtualizer
+        // recalculates `start` for cards below → smooth upward shift
+        animatorEl.style.transition = "height 200ms ease-out";
+        animatorEl.style.height = "0px";
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+
+      // Optimistic: remove from SWR cache after animation — card is already
+      // invisible and occupies zero height, so no visual jump occurs.
       mutate(
         CACHE_KEYS.flights,
         (prev: FlightLog[] | undefined) => prev?.filter((f) => f.id !== flight.id),
@@ -618,19 +646,29 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                       left: 0,
                       width: "100%",
                       transform: `translateY(${virtualRow.start}px)`,
-                      padding: "0 8px 8px 8px",
                     }}
                     data-index={virtualRow.index}
                     ref={rowVirtualizer.measureElement}
                   >
-                    <SwipeableFlightCard
-                      flight={flight}
-                      onEdit={() => onEdit?.(flight)}
-                      onDelete={() => confirmDelete(flight)}
-                      onToggleLock={() => handleToggleLock(flight)}
-                      personnel={personnel}
-                      isSelected={selectedFlightId === flight.id}
-                    />
+                    {/* Height-animator: padding lives here so the outer div
+                        (measured by ResizeObserver) collapses fully to 0 when
+                        we animate height → 0 during deletion */}
+                    <div
+                      ref={(el) => {
+                        if (el) heightAnimatorRefs.current.set(flight.id, el);
+                        else heightAnimatorRefs.current.delete(flight.id);
+                      }}
+                      style={{ padding: "0 8px 8px 8px" }}
+                    >
+                      <SwipeableFlightCard
+                        flight={flight}
+                        onEdit={() => onEdit?.(flight)}
+                        onDelete={() => confirmDelete(flight)}
+                        onToggleLock={() => handleToggleLock(flight)}
+                        personnel={personnel}
+                        isSelected={selectedFlightId === flight.id}
+                      />
+                    </div>
                   </div>
                 );
               })}
