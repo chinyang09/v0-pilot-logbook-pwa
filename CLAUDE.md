@@ -81,7 +81,8 @@ components/                       # React components
 ├── login/                        # Authentication UI
 ├── flight-list.tsx               # List view with search
 ├── logbook-calendar.tsx          # Calendar view
-├── desktop-layout.tsx            # Sidebar + detail panel (desktop)
+├── keep-alive-pages.tsx           # Persistent page shell (keeps heavy pages mounted)
+├── desktop-layout.tsx            # Responsive app shell (sidebar + detail panel)
 ├── bottom-navbar.tsx             # Mobile navigation
 ├── aircraft-new-form.tsx         # New aircraft form (FR24 auto-populate)
 ├── airport-new-form.tsx          # New airport form (FR24 auto-populate)
@@ -95,7 +96,8 @@ hooks/                            # Custom React hooks
 ├── data/                         # Data fetching (useFlights, useAircraft, etc.)
 ├── auth/                         # Authentication hooks
 ├── sync/                         # Sync status hooks
-├── use-detail-panel.ts           # Desktop detail panel state
+├── use-detail-panel.tsx           # Detail panel state (keep-alive route aware)
+├── use-page-active.tsx           # Active route context + usePageActive hook
 └── use-is-desktop.ts             # Responsive breakpoint hook
 
 lib/                              # Core utilities and services
@@ -217,9 +219,51 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 
 - Root layout is server-rendered; app content uses `"use client"`
 - Context providers: Auth, Sync, Theme (root level), ScrollNavbar (app level)
+- `KeepAlivePages` wraps page content in `app/(app)/layout.tsx`, keeping heavy list pages mounted across navigations (see below)
 - Desktop uses split-panel layout (sidebar + detail panel via `react-resizable-panels`)
 - Mobile uses bottom navbar with swipeable interactions
 - Responsive switching via `useIsDesktop()` hook
+
+### KeepAlive Navigation
+
+Four heavy pages are kept mounted across navigations for instant tab-switching and scroll preservation:
+
+**Persistent pages** (`components/keep-alive-pages.tsx`):
+- `/logbook`, `/aircraft`, `/airports`, `/crew` — lazy-imported via `React.lazy()`, mounted on first visit, never unmounted
+- All other pages (new-flight, currencies, roster, etc.) unmount normally via Next.js `children`
+
+**How it works:**
+- `KeepAlivePages` wraps `children` in `app/(app)/layout.tsx`
+- Persistent pages are stacked with `position: absolute; inset: 0` inside a relative container
+- Active page: `visibility: visible`, `pointer-events: auto`, `z-index: 1`
+- Inactive pages: `visibility: hidden`, `pointer-events: none`, `z-index: 0`
+- `bg-background` on each container prevents one-frame overlap flash during transitions
+- Focus management: blurs any focused element inside a hidden page on route change
+
+**Why `visibility:hidden` not `display:none`:**
+`display:none` removes elements from layout, resetting `scrollTop` to 0 and breaking `@tanstack/react-virtual` measurements. `visibility:hidden` keeps elements in the layout tree, preserving scroll positions and container dimensions.
+
+**Why not cache Next.js `children`:**
+Next.js wraps pages in internal `LayoutRouter` components that unmount contents on navigation — caching the element tree doesn't prevent remounting.
+
+**`usePageActive(routeKey, onActivated?)` hook** (`hooks/use-page-active.tsx`):
+- Each persistent page calls this to detect when it becomes the active route
+- Returns `isActive` boolean
+- Fires `onActivated()` callback only on inactive→active transitions (not initial mount)
+- Used to re-sync detail panel content when returning to a page
+
+**Detail panel integration** (`hooks/use-detail-panel.tsx`):
+- `DetailPanelProvider` tracks `KEEPALIVE_ROUTES` — does NOT clear `detailContent` when navigating between two keep-alive routes
+- Each persistent page re-syncs its detail panel via its `usePageActive` callback (`syncDetailPanel`)
+- Selections stored in `sessionStorage` for restoration across full page reloads
+
+**Provider hierarchy:**
+```
+AppLayout → ScrollNavbarProvider → SidebarProvider → DetailPanelProvider
+  → AppShell → KeepAlivePages
+    ├── /logbook, /aircraft, /airports, /crew (lazy, persistent)
+    └── children (other routes, normal unmount)
+```
 
 ### State Management
 
@@ -364,6 +408,12 @@ When making changes, be aware of these high-impact files:
 - `public/sw.js` — Service worker caching strategies
 - `lib/mongodb/client.ts` — MongoDB connection pool (shared across API routes)
 
+**Navigation & Keep-Alive:**
+- `components/keep-alive-pages.tsx` — Persistent page shell (changes affect all four main pages)
+- `hooks/use-page-active.tsx` — Active route context and `usePageActive` hook
+- `hooks/use-detail-panel.tsx` — Detail panel provider (keep-alive route awareness)
+- `components/desktop-layout.tsx` — Responsive app shell (sidebar + detail panel)
+
 **Reference Data System:**
 - `lib/db/reference-db.ts` — Dexie reference database schema (airports, aircraft, types)
 - `lib/db/stores/reference/aircraft.store.ts` — CDN aircraft DB loader (615k records, web worker decompression)
@@ -387,3 +437,5 @@ When making changes, be aware of these high-impact files:
 - Do not expose FR24 as the data source in UI — the user explicitly requires online lookups to be transparent (no "Online Results" labels, no Globe icons, no "FlightRadar24" branding)
 - Do not add hexdb.io fallback for aircraft lookup — if FR24 fails, manual entry is the only option
 - Do not bypass `recalculateFlightFields()` `manualOverrides` — users' manually entered field values must never be overwritten by enrichment
+- Do not add pages to `PERSISTENT_PAGES` in `keep-alive-pages.tsx` without considering memory impact — only heavy virtualized pages should be persistent
+- Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
