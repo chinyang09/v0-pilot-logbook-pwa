@@ -554,7 +554,10 @@ export function FlightForm({
         }));
       }
     }
-  }, [resolvedFlight, personnel]);
+  // Use resolvedFlight?.id (not the full object) so this effect only re-runs when
+  // the flight identity changes, not on every useLiveQuery reactive update.
+  // Avoids spurious self-crew default applications during sync Dexie writes.
+  }, [resolvedFlight?.id, personnel]);
 
   // Calculate derived fields
   const calculatedFields = useMemo(() => {
@@ -688,44 +691,48 @@ export function FlightForm({
     arrAirport,
   ]);
 
-  // Update form with calculated values (respecting manual overrides)
+  // Update form with calculated values (respecting manual overrides).
+  // Only update fields whose values actually changed — returning prev when nothing
+  // changed lets React bail out of the re-render entirely (Object.is short-circuit).
   useEffect(() => {
     setFormData((prev) => {
-      const updates: Partial<FlightLog> = {
-        blockTime: calculatedFields.blockTime,
-        flightTime: calculatedFields.flightTime,
-      };
+      const updates: Partial<FlightLog> = {};
+
+      if (prev.blockTime !== calculatedFields.blockTime) updates.blockTime = calculatedFields.blockTime;
+      if (prev.flightTime !== calculatedFields.flightTime) updates.flightTime = calculatedFields.flightTime;
 
       if (!manualOverrides.nightTime) {
-        updates.nightTime = calculatedFields.nightTime;
-        updates.dayTime = calculatedFields.dayTime;
+        if (prev.nightTime !== calculatedFields.nightTime) updates.nightTime = calculatedFields.nightTime;
+        if (prev.dayTime !== calculatedFields.dayTime) updates.dayTime = calculatedFields.dayTime;
       }
 
       if (!manualOverrides.dayTakeoffs && !manualOverrides.nightTakeoffs) {
-        updates.dayTakeoffs = calculatedFields.dayTakeoffs;
-        updates.nightTakeoffs = calculatedFields.nightTakeoffs;
+        if (prev.dayTakeoffs !== calculatedFields.dayTakeoffs) updates.dayTakeoffs = calculatedFields.dayTakeoffs;
+        if (prev.nightTakeoffs !== calculatedFields.nightTakeoffs) updates.nightTakeoffs = calculatedFields.nightTakeoffs;
       }
       if (!manualOverrides.dayLandings && !manualOverrides.nightLandings) {
-        updates.dayLandings = calculatedFields.dayLandings;
-        updates.nightLandings = calculatedFields.nightLandings;
+        if (prev.dayLandings !== calculatedFields.dayLandings) updates.dayLandings = calculatedFields.dayLandings;
+        if (prev.nightLandings !== calculatedFields.nightLandings) updates.nightLandings = calculatedFields.nightLandings;
       }
 
       if (!manualOverrides.picTime) {
-        updates.picTime = calculatedFields.picTime;
+        if (prev.picTime !== calculatedFields.picTime) updates.picTime = calculatedFields.picTime;
       }
       if (!manualOverrides.sicTime) {
-        updates.sicTime = calculatedFields.sicTime;
+        if (prev.sicTime !== calculatedFields.sicTime) updates.sicTime = calculatedFields.sicTime;
       }
       if (!manualOverrides.picusTime) {
-        updates.picusTime = calculatedFields.picusTime;
+        if (prev.picusTime !== calculatedFields.picusTime) updates.picusTime = calculatedFields.picusTime;
       }
       if (!manualOverrides.dualTime) {
-        updates.dualTime = calculatedFields.dualTime;
+        if (prev.dualTime !== calculatedFields.dualTime) updates.dualTime = calculatedFields.dualTime;
       }
       if (!manualOverrides.instructorTime) {
-        updates.instructorTime = calculatedFields.instructorTime;
+        if (prev.instructorTime !== calculatedFields.instructorTime) updates.instructorTime = calculatedFields.instructorTime;
       }
 
+      // Nothing changed — return same reference so React skips the re-render
+      if (Object.keys(updates).length === 0) return prev;
       return { ...prev, ...updates };
     });
   }, [calculatedFields, manualOverrides]);
