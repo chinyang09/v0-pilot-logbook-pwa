@@ -316,8 +316,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     const lastDetectedFlightRef = useRef<string | null>(null);
     const [activeYearKey, setActiveYearKey] = useState<string | undefined>(undefined);
     const isFastScrollingRef = useRef(false);
-    // Map of flight ID → height-animator div element for imperative delete animations
-    const heightAnimatorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+    // Tracks the card currently being deleted + its measured height.
+    // Cards below use a CSS translateY(-height) transition to shift up smoothly
+    // without touching the virtualizer's ResizeObserver measurements (which would
+    // cause the index-stale-size bug that makes cards B and C overlap).
+    const [deletingInfo, setDeletingInfo] = useState<{ id: string; height: number } | null>(null);
 
     // Generate FastScroll items from flights (year-based)
     const fastScrollItems = useMemo(() => generateFlightYearItems(flights), [flights]);
@@ -464,34 +467,28 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     }, [handleScroll, onScroll]);
 
     const performDelete = async (flight: FlightLog) => {
-      // Animate the card out before removing it from the SWR cache.
-      // The height-animator div collapses to 0, triggering the virtualizer's
-      // ResizeObserver on each frame so cards below shift up smoothly.
-      const animatorEl = heightAnimatorRefs.current.get(flight.id);
-      if (animatorEl) {
-        const currentHeight = animatorEl.getBoundingClientRect().height;
-        // Pin to explicit pixel height — CSS can't transition from `auto` to 0
-        animatorEl.style.height = `${currentHeight}px`;
-        animatorEl.style.overflow = "hidden";
-        // Force a layout recalc so the browser registers the explicit height
-        // before the transition starts (otherwise transition is skipped)
-        void animatorEl.offsetHeight;
-        // Fade + slide the card content out
-        const cardEl = animatorEl.firstElementChild as HTMLElement | null;
-        if (cardEl) {
-          cardEl.style.transition = "opacity 150ms ease-out, transform 150ms ease-out";
-          cardEl.style.opacity = "0";
-          cardEl.style.transform = "translateX(-40px)";
-        }
-        // Collapse height → ResizeObserver fires each frame → virtualizer
-        // recalculates `start` for cards below → smooth upward shift
-        animatorEl.style.transition = "height 200ms ease-out";
-        animatorEl.style.height = "0px";
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
+      // Measure the card's current rendered height from the outer wrapper div.
+      // This height is used to shift cards below upward by the exact right amount.
+      const outerEl = document.getElementById(`flight-${flight.id}`);
+      const height = outerEl?.getBoundingClientRect().height ?? 104;
 
-      // Optimistic: remove from SWR cache after animation — card is already
-      // invisible and occupies zero height, so no visual jump occurs.
+      // Declaratively trigger two simultaneous CSS animations:
+      // 1. The deleting card fades + slides left (matched by isDeleting below).
+      // 2. Cards below shift up by `height` px (matched by isBelow below).
+      // The virtualizer's ResizeObserver is never involved — no measured heights
+      // change — so sizesRef[N] stays correct and the B/C overlap bug cannot occur.
+      setDeletingInfo({ id: flight.id, height });
+
+      // Wait for CSS transitions to complete (longest is 200ms shift-up).
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Clear animation state and remove from SWR cache. React 18 batches these
+      // into a single render: deletingIndex becomes -1 → isBelow becomes false for
+      // all cards → shift divs remove their translateY(-height). At the same time
+      // the virtualizer recalculates new_start[B] = old_start[B] - height.
+      // Net position: translateY(new_start) + translateY(0) = translateY(old_start - height).
+      // This is exactly where the CSS animation left the cards → no jump.
+      setDeletingInfo(null);
       mutate(
         CACHE_KEYS.flights,
         (prev: FlightLog[] | undefined) => prev?.filter((f) => f.id !== flight.id),
@@ -634,44 +631,68 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                 position: "relative",
               }}
             >
-              {virtualItems.map((virtualRow) => {
-                const flight = flights[virtualRow.index];
-                return (
-                  <div
-                    key={flight.id}
-                    id={`flight-${flight.id}`}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      transform: `translateY(${virtualRow.start}px)`,
-                    }}
-                    data-index={virtualRow.index}
-                    ref={rowVirtualizer.measureElement}
-                  >
-                    {/* Height-animator: padding lives here so the outer div
-                        (measured by ResizeObserver) collapses fully to 0 when
-                        we animate height → 0 during deletion */}
+              {(() => {
+                // Index of the card currently animating out. Computed once here
+                // (not inside the map) to avoid redundant findIndex calls per item.
+                const deletingIndex = deletingInfo
+                  ? flights.findIndex((f) => f.id === deletingInfo.id)
+                  : -1;
+                return virtualItems.map((virtualRow) => {
+                  const flight = flights[virtualRow.index];
+                  const isDeleting = deletingInfo?.id === flight.id;
+                  // Cards strictly below the deleting card shift upward via CSS.
+                  const isBelow = deletingIndex !== -1 && virtualRow.index > deletingIndex;
+                  return (
                     <div
-                      ref={(el) => {
-                        if (el) heightAnimatorRefs.current.set(flight.id, el);
-                        else heightAnimatorRefs.current.delete(flight.id);
+                      key={flight.id}
+                      id={`flight-${flight.id}`}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${virtualRow.start}px)`,
                       }}
-                      style={{ padding: "0 8px 8px 8px" }}
+                      data-index={virtualRow.index}
+                      ref={rowVirtualizer.measureElement}
                     >
-                      <SwipeableFlightCard
-                        flight={flight}
-                        onEdit={() => onEdit?.(flight)}
-                        onDelete={() => confirmDelete(flight)}
-                        onToggleLock={() => handleToggleLock(flight)}
-                        personnel={personnel}
-                        isSelected={selectedFlightId === flight.id}
-                      />
+                      {/* Shift div: slides cards below the deleting card upward
+                          using a CSS translateY transition. This keeps the
+                          virtualizer's ResizeObserver measurements untouched —
+                          only layout height changes trigger remeasure, not CSS
+                          transforms. Avoids the stale sizesRef[N]=0 overlap bug. */}
+                      <div
+                        style={isBelow ? {
+                          transform: `translateY(-${deletingInfo!.height}px)`,
+                          transition: "transform 200ms ease-out",
+                        } : undefined}
+                      >
+                        {/* Content wrapper: padding + fade-out for the deleting card */}
+                        <div
+                          style={{
+                            padding: "0 8px 8px 8px",
+                            ...(isDeleting && {
+                              opacity: 0,
+                              transform: "translateX(-40px)",
+                              transition: "opacity 150ms ease-out, transform 150ms ease-out",
+                              pointerEvents: "none",
+                            }),
+                          }}
+                        >
+                          <SwipeableFlightCard
+                            flight={flight}
+                            onEdit={() => onEdit?.(flight)}
+                            onDelete={() => confirmDelete(flight)}
+                            onToggleLock={() => handleToggleLock(flight)}
+                            personnel={personnel}
+                            isSelected={selectedFlightId === flight.id}
+                          />
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
 
             {/* Bottom padding */}
