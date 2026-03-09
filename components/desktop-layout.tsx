@@ -125,7 +125,7 @@ function AppShellContent({ children }: AppShellProps) {
 
           {/* Detail panel — desktop only */}
           <ResizablePanel defaultSize={65} minSize={25} className="hidden lg:block">
-            <DetailPanelContent />
+            {isDesktop && <DetailPanelContent />}
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
