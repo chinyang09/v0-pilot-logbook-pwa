@@ -35,6 +35,12 @@ export function usePageActive(routeKey: string, onActivated?: () => void) {
 
   const wasActiveRef = useRef(isActive)
   const isFirstMountRef = useRef(true)
+  // Store onActivated in a ref so the effect does not need it as a dep.
+  // This prevents callers that forget useCallback from causing an infinite loop.
+  const onActivatedRef = useRef(onActivated)
+  useEffect(() => {
+    onActivatedRef.current = onActivated
+  })
 
   useEffect(() => {
     if (isFirstMountRef.current) {
@@ -45,11 +51,11 @@ export function usePageActive(routeKey: string, onActivated?: () => void) {
 
     // Became active (was previously inactive)
     if (isActive && !wasActiveRef.current) {
-      onActivated?.()
+      onActivatedRef.current?.()
     }
 
     wasActiveRef.current = isActive
-  }, [isActive, onActivated])
+  }, [isActive])
 
   return isActive
 }

@@ -99,7 +99,9 @@ export function useFlights() {
 
   return {
     flights: data ?? [],
-    isLoading: isLoading || isValidating,
+    // isLoading (no data yet) shows skeleton; isValidating (revalidating with existing data)
+    // is excluded so revalidations keep the list visible instead of flashing a skeleton.
+    isLoading: isLoading,
     error,
     refresh,
   }
@@ -129,7 +131,7 @@ export function useFlightStats() {
 
   return {
     stats: data ?? DEFAULT_STATS,
-    isLoading: isLoading || isValidating,
+    isLoading: isLoading,
     error,
     refresh,
   }

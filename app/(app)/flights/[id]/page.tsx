@@ -26,7 +26,26 @@ export default function FlightDetailPage() {
   }, [isDesktop, id, router])
 
   const handleFlightSaved = async (savedFlight: FlightLog) => {
-    await mutate(CACHE_KEYS.flights)
+    // Optimistic: upsert the saved flight in the SWR cache before navigating.
+    // The logbook list will reflect the change instantly with no skeleton flash.
+    // revalidate: true runs a background confirm from Dexie.
+    mutate(
+      CACHE_KEYS.flights,
+      (prev: FlightLog[] | undefined) => {
+        const existing = prev ?? []
+        const idx = existing.findIndex((f) => f.id === savedFlight.id)
+        const updated =
+          idx >= 0
+            ? existing.map((f) => (f.id === savedFlight.id ? savedFlight : f))
+            : [savedFlight, ...existing]
+        // Re-sort: newest date first, then latest outTime within the same date
+        return [...updated].sort((a, b) => {
+          const d = b.date.localeCompare(a.date)
+          return d !== 0 ? d : (b.outTime ?? "").localeCompare(a.outTime ?? "")
+        })
+      },
+      { revalidate: true }
+    )
     if (navigator.onLine) {
       syncService.fullSync()
     }

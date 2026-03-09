@@ -52,15 +52,16 @@ function DetailPanelContent() {
         <FlightForm
           flightId={flightId}
           isDesktop={isDesktop}
-          onFlightAdded={async () => {
-            await mutate(CACHE_KEYS.flights)
-            await mutate(CACHE_KEYS.stats)
+          onFlightAdded={() => {
+            // Background revalidation — no await so the UI isn't blocked
+            mutate(CACHE_KEYS.flights)
+            mutate(CACHE_KEYS.stats)
             if (navigator.onLine) {
               syncService.fullSync()
             }
           }}
-          onClose={async () => {
-            await mutate(CACHE_KEYS.flights)
+          onClose={() => {
+            mutate(CACHE_KEYS.flights) // background revalidation
             setSelectedId(null)
           }}
         />
@@ -124,7 +125,7 @@ function AppShellContent({ children }: AppShellProps) {
 
           {/* Detail panel — desktop only */}
           <ResizablePanel defaultSize={65} minSize={25} className="hidden lg:block">
-            <DetailPanelContent />
+            {isDesktop && <DetailPanelContent />}
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
