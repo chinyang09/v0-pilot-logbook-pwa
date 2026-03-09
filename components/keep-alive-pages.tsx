@@ -81,7 +81,7 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
             <div
               key={key}
               data-keepalive-hidden={!isActive ? "true" : undefined}
-              className="absolute inset-0 flex flex-col"
+              className="absolute inset-0 flex flex-col bg-background"
               style={{
                 visibility: isActive ? "visible" : "hidden",
                 pointerEvents: isActive ? "auto" : "none",
@@ -97,7 +97,7 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
 
         {/* Non-persistent routes: render Next.js children normally */}
         {!isPersistent && (
-          <div className="absolute inset-0 flex flex-col" style={{ zIndex: 1 }}>
+          <div className="absolute inset-0 flex flex-col bg-background" style={{ zIndex: 1 }}>
             {children}
           </div>
         )}
