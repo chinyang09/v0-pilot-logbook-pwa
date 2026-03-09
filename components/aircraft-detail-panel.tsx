@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -68,6 +68,19 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
   const [typeSearchResults, setTypeSearchResults] = useState<AircraftType[]>([])
   const [selectedType, setSelectedType] = useState<AircraftType | null>(null)
   const [showTypeSearch, setShowTypeSearch] = useState(false)
+
+  // Reset all transient state when aircraft identity changes (hot-swap)
+  const prevRegRef = useRef(aircraft.registration);
+  useEffect(() => {
+    if (aircraft.registration === prevRegRef.current) return;
+    prevRegRef.current = aircraft.registration;
+    setIsEditing(false);
+    setIsSaving(false);
+    setSelectedType(null);
+    setShowTypeSearch(false);
+    setTypeSearchQuery("");
+    setTypeSearchResults([]);
+  }, [aircraft.registration]);
 
   // Update form data from props when not editing (reactive from SWR)
   useEffect(() => {

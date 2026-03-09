@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog"
+import { usePageActive } from "@/hooks/use-page-active"
 
 // Memoized swipeable aircraft card (matches crew card pattern)
 interface AircraftCardProps {
@@ -348,8 +349,8 @@ export default function AircraftPage() {
     ) || null
   }, [selectedAircraftReg, allAircraft])
 
-  // Update detail content when selection or data changes
-  useEffect(() => {
+  // Sync detail panel content — extracted so usePageActive can re-trigger it
+  const syncDetailPanel = useCallback(() => {
     if (selectMode) return
 
     if (isLoading) {
@@ -374,7 +375,6 @@ export default function AircraftPage() {
     if (selectedAircraft) {
       setDetailContent(
         <AircraftDetailPanel
-          key={selectedAircraft.registration}
           aircraft={selectedAircraft}
           onUpdated={refreshAircraft}
           onBack={() => setSelectedAircraftReg(null)}
@@ -384,6 +384,14 @@ export default function AircraftPage() {
       setDetailContent(null)
     }
   }, [selectMode, selectedAircraft, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg, refreshAircraft])
+
+  // Update detail content when selection or data changes
+  useEffect(() => {
+    syncDetailPanel()
+  }, [syncDetailPanel])
+
+  // Re-sync detail panel when this keep-alive page becomes active again
+  usePageActive("/aircraft", syncDetailPanel)
 
   // Track active letter from virtualizer scroll position
   useEffect(() => {

@@ -429,6 +429,23 @@ export function FlightForm({
     () => getNumericOffset(arrAirport?.tz),
     [arrAirport]
   );
+  // Reset all transient state when flightIdProp changes (hot-swap instead of remount)
+  const prevFlightIdRef = useRef(flightIdProp);
+  useEffect(() => {
+    if (flightIdProp === prevFlightIdRef.current) return;
+    prevFlightIdRef.current = flightIdProp;
+
+    // Reset transient UI state
+    setIsSubmitting(false);
+    setActiveTimePicker(null);
+    setDatePickerOpen(false);
+    editingFlightInitializedRef.current = null;
+    prevLiveFlightRef.current = undefined;
+
+    // Scroll to top on ID switch
+    scrollContainerRef.current?.scrollTo(0, 0);
+  }, [flightIdProp]);
+
   // Update form data when resolvedFlight changes (e.g., after refresh or live query)
   useEffect(() => {
     if (!resolvedFlight) return;

@@ -30,6 +30,7 @@ import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { CrewDetailPanel } from "@/components/crew-detail-panel";
+import { usePageActive } from "@/hooks/use-page-active";
 
 // Memoized crew card to prevent unnecessary re-renders during virtualization
 const SwipeableCrewCard = memo(function SwipeableCrewCard({
@@ -251,8 +252,8 @@ export default function CrewPage() {
 
   const virtualItems = rowVirtualizer.getVirtualItems();
 
-  // Update detail content when selection changes
-  useEffect(() => {
+  // Sync detail panel content — extracted so usePageActive can re-trigger it
+  const syncDetailPanel = useCallback(() => {
     if (fieldType) return;
 
     if (isLoading) {
@@ -276,7 +277,6 @@ export default function CrewPage() {
     if (selectedCrewId) {
       setDetailContent(
         <CrewDetailPanel
-          key={selectedCrewId}
           crewId={selectedCrewId}
           onUpdated={() => mutate(CACHE_KEYS.personnel)}
           onBack={() => setSelectedCrewId(null)}
@@ -286,6 +286,14 @@ export default function CrewPage() {
       setDetailContent(null);
     }
   }, [fieldType, selectedCrewId, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
+
+  // Update detail content when selection changes
+  useEffect(() => {
+    syncDetailPanel();
+  }, [syncDetailPanel]);
+
+  // Re-sync detail panel when this keep-alive page becomes active again
+  usePageActive("/crew", syncDetailPanel);
 
   // Track active letter from virtualizer scroll position
   useEffect(() => {

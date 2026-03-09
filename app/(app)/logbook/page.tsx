@@ -26,6 +26,7 @@ import { CSVImportButton } from "@/components/csv-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useSearchParams } from "next/navigation"
+import { usePageActive } from "@/hooks/use-page-active"
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -53,9 +54,6 @@ function parseDateLocal(dateStr: string): Date {
 
   return new Date(year, month - 1, day)
 }
-
-// Persists top flight ID across layout switches (mobile ↔ desktop remounts)
-let savedTopFlightId: string | null = null
 
 export default function LogbookPage() {
   const router = useRouter()
@@ -115,6 +113,11 @@ export default function LogbookPage() {
     return () => setHasDetailSupport(false)
   }, [setHasDetailSupport])
 
+  // Re-assert detail panel ownership when this keep-alive page becomes active again
+  usePageActive("/logbook", useCallback(() => {
+    setHasDetailSupport(true)
+  }, [setHasDetailSupport]))
+
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)
   const calendarContainerRef = useRef<HTMLDivElement>(null)
@@ -137,19 +140,8 @@ export default function LogbookPage() {
     return () => observer.disconnect()
   }, [])
 
-  // Restore scroll position after layout switch (mobile ↔ desktop remount)
-  const hasRestoredScrollRef = useRef(false)
-  useEffect(() => {
-    if (hasRestoredScrollRef.current) return
-    if (!flights.length || flightsLoading) return
-    hasRestoredScrollRef.current = true
-
-    if (savedTopFlightId && flights.some(f => f.id === savedTopFlightId)) {
-      requestAnimationFrame(() => {
-        flightListRef.current?.scrollToFlight(savedTopFlightId!, true)
-      })
-    }
-  }, [flights, flightsLoading])
+  // Track the topmost visible flight for calendar sync
+  const topFlightIdRef = useRef<string | null>(null)
 
   const syncSourceRef = useRef<"calendar" | "flights" | null>(null)
   const selectedMonthRef = useRef(selectedMonth)
@@ -203,8 +195,7 @@ export default function LogbookPage() {
   const handleFlightScroll = useCallback(
     (topFlight: FlightLog | null) => {
       if (!topFlight) return
-      // Always persist for scroll restoration across layout switches
-      savedTopFlightId = topFlight.id
+      topFlightIdRef.current = topFlight.id
 
       if (!showCalendarRef.current) return
       if (syncSourceRef.current !== "flights") return
@@ -232,8 +223,8 @@ export default function LogbookPage() {
     if (calendarSyncedRef.current || flights.length === 0 || flightsLoading) return
     calendarSyncedRef.current = true
 
-    const targetFlight = savedTopFlightId
-      ? flights.find(f => f.id === savedTopFlightId)
+    const targetFlight = topFlightIdRef.current
+      ? flights.find(f => f.id === topFlightIdRef.current)
       : flights[0]
     if (targetFlight) {
       const date = parseDateLocal(targetFlight.date)
