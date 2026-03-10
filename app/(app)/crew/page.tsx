@@ -135,6 +135,10 @@ export default function CrewPage() {
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
   const isFastScrollingRef = useRef(false);
 
+  // Only sync detail panel when this page is active — prevents hidden pages from
+  // overwriting the active page's detail content when shared selectedId changes.
+  const isActive = usePageActive("/crew")
+
   const sortedPersonnel = useMemo(() => {
     return [...personnel].sort((a, b) => {
       if (a.isMe && !b.isMe) return -1;
@@ -144,6 +148,13 @@ export default function CrewPage() {
       return (a.name || "").localeCompare(b.name || "");
     });
   }, [personnel]);
+
+  // Validate that selectedCrewId maps to a real crew member in our store.
+  // This prevents stale cross-route selectedId values from being passed to CrewDetailPanel.
+  const selectedCrew = useMemo(
+    () => sortedPersonnel.find(p => p.id === selectedCrewId) || null,
+    [selectedCrewId, sortedPersonnel]
+  );
 
   // Derive recently used crew from flights (most recent first)
   const recentlyUsedCrew = useMemo(() => {
@@ -252,8 +263,9 @@ export default function CrewPage() {
 
   const virtualItems = rowVirtualizer.getVirtualItems();
 
-  // Sync detail panel content — extracted so usePageActive can re-trigger it
+  // Sync detail panel content — re-runs whenever selection, data, or active state changes
   const syncDetailPanel = useCallback(() => {
+    if (!isActive) return;
     if (fieldType) return;
 
     if (isLoading) {
@@ -274,10 +286,10 @@ export default function CrewPage() {
       return;
     }
 
-    if (selectedCrewId) {
+    if (selectedCrew) {
       setDetailContent(
         <CrewDetailPanel
-          crewId={selectedCrewId}
+          crewId={selectedCrew.id}
           onUpdated={() => mutate(CACHE_KEYS.personnel)}
           onBack={() => setSelectedCrewId(null)}
         />
@@ -285,15 +297,12 @@ export default function CrewPage() {
     } else {
       setDetailContent(null);
     }
-  }, [fieldType, selectedCrewId, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
+  }, [isActive, fieldType, selectedCrew, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
 
-  // Update detail content when selection changes
+  // Update detail content when selection, data, or active state changes
   useEffect(() => {
     syncDetailPanel();
   }, [syncDetailPanel]);
-
-  // Re-sync detail panel when this keep-alive page becomes active again
-  usePageActive("/crew", syncDetailPanel);
 
   // Track active letter from virtualizer scroll position
   useEffect(() => {

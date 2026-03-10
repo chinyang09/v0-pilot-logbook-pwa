@@ -140,6 +140,10 @@ export default function AirportsPage() {
     setDetailContent,
   } = useDetailPanel();
 
+  // Only sync detail panel when this page is active — prevents hidden pages from
+  // overwriting the active page's detail content when shared selectedId changes.
+  const isActive = usePageActive("/airports")
+
   // Sort all airports: favorites first, then alphabetical by ICAO
   const allSortedAirports = useMemo(() => {
     return [...airports].sort((a, b) => {
@@ -148,6 +152,14 @@ export default function AirportsPage() {
       return a.icao.localeCompare(b.icao);
     });
   }, [airports]);
+
+  // Validate that selectedAirportIcao maps to a real airport in our store.
+  // This prevents stale cross-route selectedId values (e.g. an aircraft registration
+  // left over from the /aircraft page) from being passed to AirportDetailPanel.
+  const selectedAirport = useMemo(
+    () => allSortedAirports.find(a => a.icao === selectedAirportIcao) || null,
+    [selectedAirportIcao, allSortedAirports]
+  );
 
   // Filtered airports for search mode — preserves score order from searchAirports
   const filteredAirports = useMemo(() => {
@@ -283,8 +295,9 @@ export default function AirportsPage() {
 
   const virtualItems = rowVirtualizer.getVirtualItems();
 
-  // Sync detail panel content — extracted so usePageActive can re-trigger it
+  // Sync detail panel content — re-runs whenever selection, data, or active state changes
   const syncDetailPanel = useCallback(() => {
+    if (!isActive) return;
     if (fieldType) return;
 
     if (isLoading) {
@@ -305,20 +318,17 @@ export default function AirportsPage() {
       return;
     }
 
-    if (selectedAirportIcao) {
-      setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} onBack={() => setSelectedAirportIcao(null)} />);
+    if (selectedAirport) {
+      setDetailContent(<AirportDetailPanel icao={selectedAirport.icao} onBack={() => setSelectedAirportIcao(null)} />);
     } else {
       setDetailContent(null);
     }
-  }, [fieldType, selectedAirportIcao, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao]);
+  }, [isActive, fieldType, selectedAirport, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao]);
 
-  // Update detail content when selection changes
+  // Update detail content when selection, data, or active state changes
   useEffect(() => {
     syncDetailPanel();
   }, [syncDetailPanel]);
-
-  // Re-sync detail panel when this keep-alive page becomes active again
-  usePageActive("/airports", syncDetailPanel);
 
   // Track active letter from virtualizer scroll position (replaces expensive DOM query)
   useEffect(() => {

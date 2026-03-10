@@ -349,8 +349,13 @@ export default function AircraftPage() {
     ) || null
   }, [selectedAircraftReg, allAircraft])
 
+  // Only sync detail panel when this page is active — prevents hidden pages from
+  // overwriting the active page's detail content when shared selectedId changes.
+  const isActive = usePageActive("/aircraft")
+
   // Sync detail panel content — extracted so usePageActive can re-trigger it
   const syncDetailPanel = useCallback(() => {
+    if (!isActive) return
     if (selectMode) return
 
     if (isLoading) {
@@ -383,15 +388,12 @@ export default function AircraftPage() {
     } else {
       setDetailContent(null)
     }
-  }, [selectMode, selectedAircraft, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg, refreshAircraft])
+  }, [isActive, selectMode, selectedAircraft, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg, refreshAircraft])
 
-  // Update detail content when selection or data changes
+  // Update detail content when selection, data, or active state changes
   useEffect(() => {
     syncDetailPanel()
   }, [syncDetailPanel])
-
-  // Re-sync detail panel when this keep-alive page becomes active again
-  usePageActive("/aircraft", syncDetailPanel)
 
   // Track active letter from virtualizer scroll position
   useEffect(() => {
