@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from "react"
+import React, { createContext, useContext, useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, type ReactNode } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 
@@ -75,9 +75,11 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     () => "/" + (pathname?.split("/").filter(Boolean)[0] || ""),
     [pathname]
   )
-  // Ref so effects can read current base without adding it to deps
+  // Ref so effects can read current base without adding it to deps.
+  // useLayoutEffect ensures the ref is updated before the sessionStorage restoration
+  // layout effect (below) reads it, since layout effects fire in declaration order.
   const currentBaseRef = useRef(currentBase)
-  useEffect(() => { currentBaseRef.current = currentBase })
+  useLayoutEffect(() => { currentBaseRef.current = currentBase })
 
   // Get selected ID from URL or sessionStorage
   const selectedIdFromUrl = searchParams.get("selected")
@@ -121,8 +123,11 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
   // not on every searchParams update (which would break race-condition protection).
   const prevPathnameForPendingRef = useRef(pathname)
 
-  // On pathname change, restore selection from sessionStorage if not in URL
-  useEffect(() => {
+  // On pathname change, restore selection from sessionStorage if not in URL.
+  // useLayoutEffect ensures selectedId is restored synchronously before paint and before
+  // any child useEffect (e.g. syncDetailPanel) fires, preventing the flash of null content
+  // that would otherwise appear while waiting for the async state update.
+  useLayoutEffect(() => {
     // Clear pending update only when the actual page changes, not on every URL update.
     // If we cleared on every searchParams change, every setSelectedId → router.replace
     // would destroy the pending guard before the URL-sync effect above can use it.
