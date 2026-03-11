@@ -5,13 +5,11 @@ import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { PageContainer } from "@/components/page-container";
 import { useDebounce } from "@/hooks/use-debounce";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { usePersonnel, useFlights } from "@/hooks/data";
-import { deletePersonnel, updateFlight } from "@/lib/db";
+import { deletePersonnel, updateFlight, updatePersonnel } from "@/lib/db";
 import { syncService } from "@/lib/sync";
 import {
-  Search,
   Loader2,
   User,
   Plus,
@@ -25,7 +23,7 @@ import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
-import { StandardPageHeader } from "@/components/standard-page-header";
+import { SearchablePageHeader } from "@/components/searchable-page-header";
 import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
@@ -39,6 +37,9 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
   onDelete,
   isSelectMode,
   isSelected = false,
+  isRecent = false,
+  isFavorite = false,
+  onToggleFavorite,
 }: {
   crew: {
     id: string;
@@ -52,6 +53,9 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
   onDelete: () => void;
   isSelectMode: boolean;
   isSelected?: boolean;
+  isRecent?: boolean;
+  isFavorite?: boolean;
+  onToggleFavorite?: (crewId: string) => void;
 }) {
   const displayName = crew.isMe ? "Self" : crew.name;
   const secondaryParts: string[] = [];
@@ -73,10 +77,10 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
     >
       <button
         className={cn(
-          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all",
-          crew.isMe &&
-            "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20",
-          isSelected && "bg-primary/20 border-primary"
+          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all hover:bg-accent",
+          isRecent &&
+            "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20 hover:bg-transparent",
+          isSelected && "bg-primary/20 border-primary hover:bg-primary/20"
         )}
       >
         <div className="flex items-center justify-between gap-2">
@@ -97,7 +101,29 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
               </div>
             )}
           </div>
-          <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+          {onToggleFavorite ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
+              onClick={(e: React.MouseEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onToggleFavorite(crew.id);
+              }}
+            >
+              <Star
+                className={cn(
+                  "h-4 w-4",
+                  isFavorite
+                    ? "fill-yellow-400 text-yellow-400"
+                    : "text-muted-foreground/40"
+                )}
+              />
+            </Button>
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+          )}
         </div>
       </button>
     </SwipeableCard>
@@ -135,6 +161,10 @@ export default function CrewPage() {
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
   const isFastScrollingRef = useRef(false);
 
+  // Only sync detail panel when this page is active — prevents hidden pages from
+  // overwriting the active page's detail content when shared selectedId changes.
+  const isActive = usePageActive("/crew")
+
   const sortedPersonnel = useMemo(() => {
     return [...personnel].sort((a, b) => {
       if (a.isMe && !b.isMe) return -1;
@@ -144,6 +174,13 @@ export default function CrewPage() {
       return (a.name || "").localeCompare(b.name || "");
     });
   }, [personnel]);
+
+  // Validate that selectedCrewId maps to a real crew member in our store.
+  // This prevents stale cross-route selectedId values from being passed to CrewDetailPanel.
+  const selectedCrew = useMemo(
+    () => sortedPersonnel.find(p => p.id === selectedCrewId) || null,
+    [selectedCrewId, sortedPersonnel]
+  );
 
   // Derive recently used crew from flights (most recent first)
   const recentlyUsedCrew = useMemo(() => {
@@ -252,8 +289,9 @@ export default function CrewPage() {
 
   const virtualItems = rowVirtualizer.getVirtualItems();
 
-  // Sync detail panel content — extracted so usePageActive can re-trigger it
+  // Sync detail panel content — re-runs whenever selection, data, or active state changes
   const syncDetailPanel = useCallback(() => {
+    if (!isActive) return;
     if (fieldType) return;
 
     if (isLoading) {
@@ -274,10 +312,10 @@ export default function CrewPage() {
       return;
     }
 
-    if (selectedCrewId) {
+    if (selectedCrew) {
       setDetailContent(
         <CrewDetailPanel
-          crewId={selectedCrewId}
+          crewId={selectedCrew.id}
           onUpdated={() => mutate(CACHE_KEYS.personnel)}
           onBack={() => setSelectedCrewId(null)}
         />
@@ -285,15 +323,12 @@ export default function CrewPage() {
     } else {
       setDetailContent(null);
     }
-  }, [fieldType, selectedCrewId, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
+  }, [isActive, fieldType, selectedCrew, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
 
-  // Update detail content when selection changes
+  // Update detail content when selection, data, or active state changes
   useEffect(() => {
     syncDetailPanel();
   }, [syncDetailPanel]);
-
-  // Re-sync detail panel when this keep-alive page becomes active again
-  usePageActive("/crew", syncDetailPanel);
 
   // Track active letter from virtualizer scroll position
   useEffect(() => {
@@ -389,6 +424,13 @@ export default function CrewPage() {
     router.push(query ? `/crew/new?${query}` : "/crew/new");
   };
 
+  const handleToggleFavorite = useCallback(async (crewId: string) => {
+    const crew = personnel.find((p) => p.id === crewId);
+    if (!crew) return;
+    await updatePersonnel(crewId, { favorite: !crew.favorite });
+    await mutate(CACHE_KEYS.personnel);
+  }, [personnel]);
+
   const performDelete = async (crew: (typeof personnel)[0]) => {
     await deletePersonnel(crew.id);
     await mutate(CACHE_KEYS.personnel);
@@ -409,10 +451,14 @@ export default function CrewPage() {
   return (
     <PageContainer
       header={
-        <StandardPageHeader
+        <SearchablePageHeader
           title={pageTitle}
           showBack={!!fieldType}
           onBack={fieldType ? () => router.back() : undefined}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onAdd={handleAddCrew}
+          searchPlaceholder="Search crew..."
         />
       }
       rightContent={
@@ -429,29 +475,6 @@ export default function CrewPage() {
     >
       <div>
         <div className="px-4 pt-4 pb-safe">
-          {/* Sticky search bar - outside aboveVirtualRef so it stays visible during scroll */}
-          <div className="sticky top-0 z-40 pb-3 bg-background/30 backdrop-blur-xl -mx-3 px-3">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Input
-                  type="text"
-                  placeholder="Search crew..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-                />
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              </div>
-              <Button
-                onClick={handleAddCrew}
-                size="icon"
-                className="h-10 w-10 flex-shrink-0"
-              >
-                <Plus className="h-5 w-5" />
-              </Button>
-            </div>
-          </div>
-
           {/* Non-virtualized content above the virtual list */}
           <div ref={aboveVirtualRef}>
             {!debouncedSearchQuery.trim() && (
@@ -469,6 +492,8 @@ export default function CrewPage() {
                           onDelete={() => confirmDelete(crew)}
                           isSelectMode={!!fieldType}
                           isSelected={!fieldType && selectedCrewId === crew.id}
+                          isFavorite={!!crew.favorite}
+                          onToggleFavorite={handleToggleFavorite}
                         />
                       ))}
                   </div>
@@ -491,6 +516,8 @@ export default function CrewPage() {
                             onDelete={() => confirmDelete(crew)}
                             isSelectMode={!!fieldType}
                             isSelected={!fieldType && selectedCrewId === crew.id}
+                            isFavorite
+                            onToggleFavorite={handleToggleFavorite}
                           />
                         ))}
                     </div>
@@ -513,6 +540,9 @@ export default function CrewPage() {
                           onDelete={() => confirmDelete(crew)}
                           isSelectMode={!!fieldType}
                           isSelected={!fieldType && selectedCrewId === crew.id}
+                          isRecent
+                          isFavorite={!!crew.favorite}
+                          onToggleFavorite={handleToggleFavorite}
                         />
                       ))}
                     </div>
@@ -578,6 +608,9 @@ export default function CrewPage() {
                           onDelete={() => confirmDelete(crew)}
                           isSelectMode={!!fieldType}
                           isSelected={!fieldType && selectedCrewId === crew.id}
+                          isRecent={recentCrewIds.has(crew.id)}
+                          isFavorite={!!crew.favorite}
+                          onToggleFavorite={handleToggleFavorite}
                         />
                       </div>
                     </div>

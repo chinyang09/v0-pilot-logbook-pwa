@@ -42,13 +42,14 @@ function DetailPanelContent() {
 
   // Determine flightId: either from detail panel selection (logbook) or URL param (picker pages)
   const pickerFlightId = searchParams.get("flightId")
+  const isLogbook = pathname?.includes("/logbook")
   const isPickerPage = pathname?.includes("/aircraft") || pathname?.includes("/airports") || pathname?.includes("/crew")
-  const flightId = (pathname?.includes("/logbook") && selectedId) ? selectedId : (isPickerPage && pickerFlightId) ? pickerFlightId : null
+  const flightId = (isLogbook && selectedId) ? selectedId : (isPickerPage && pickerFlightId) ? pickerFlightId : null
 
   // Show FlightForm when we have a flight to edit (either on logbook or during picker navigation)
   if (flightId) {
     return (
-      <div className="h-full overflow-auto bg-background">
+      <div className="h-full overflow-hidden bg-background">
         <FlightForm
           flightId={flightId}
           isDesktop={isDesktop}
@@ -69,16 +70,18 @@ function DetailPanelContent() {
     )
   }
 
-  // Other pages: fall back to context-provided content
+  // Other pages: fall back to context-provided content.
+  // Logbook uses the Smart Switcher pattern and never sets detailContent, so skip the
+  // fallback for logbook to prevent stale aircraft/airport/crew panels from bleeding in.
   return (
     <div className="h-full overflow-auto bg-background">
-      {detailContent ? (
+      {!isLogbook && detailContent ? (
         <div className="h-full overflow-auto">
           {detailContent}
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <p>Select an item to view details</p>
+          <p>{isLogbook ? "Select a flight to view details" : "Select an item to view details"}</p>
         </div>
       )}
     </div>

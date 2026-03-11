@@ -4,9 +4,8 @@ import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react"
 import type React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { Search, Plane, Loader2, Star, Plus, Trash2, ChevronRight } from "lucide-react"
+import { Plane, Loader2, Star, Plus, Trash2, ChevronRight } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
-import { Input } from "@/components/ui/input"
 import {
   searchAircraftFromDB,
   type NormalizedAircraft,
@@ -22,7 +21,7 @@ import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
-import { StandardPageHeader } from "@/components/standard-page-header"
+import { SearchablePageHeader } from "@/components/searchable-page-header"
 import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
@@ -68,10 +67,10 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
     >
       <button
         className={cn(
-          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all",
+          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all hover:bg-accent",
           isRecent &&
-            "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20",
-          isSelected && "bg-primary/20 border-primary"
+            "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20 hover:bg-transparent",
+          isSelected && "bg-primary/20 border-primary hover:bg-primary/20"
         )}
       >
         <div className="flex items-center justify-between gap-2">
@@ -349,8 +348,13 @@ export default function AircraftPage() {
     ) || null
   }, [selectedAircraftReg, allAircraft])
 
+  // Only sync detail panel when this page is active — prevents hidden pages from
+  // overwriting the active page's detail content when shared selectedId changes.
+  const isActive = usePageActive("/aircraft")
+
   // Sync detail panel content — extracted so usePageActive can re-trigger it
   const syncDetailPanel = useCallback(() => {
+    if (!isActive) return
     if (selectMode) return
 
     if (isLoading) {
@@ -383,15 +387,12 @@ export default function AircraftPage() {
     } else {
       setDetailContent(null)
     }
-  }, [selectMode, selectedAircraft, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg, refreshAircraft])
+  }, [isActive, selectMode, selectedAircraft, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg, refreshAircraft])
 
-  // Update detail content when selection or data changes
+  // Update detail content when selection, data, or active state changes
   useEffect(() => {
     syncDetailPanel()
   }, [syncDetailPanel])
-
-  // Re-sync detail panel when this keep-alive page becomes active again
-  usePageActive("/aircraft", syncDetailPanel)
 
   // Track active letter from virtualizer scroll position
   useEffect(() => {
@@ -586,10 +587,14 @@ export default function AircraftPage() {
   return (
     <PageContainer
       header={
-        <StandardPageHeader
+        <SearchablePageHeader
           title={selectMode ? "Select Aircraft" : "Aircraft"}
           showBack={selectMode}
           onBack={selectMode ? () => router.back() : undefined}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onAdd={handleAddClick}
+          searchPlaceholder="Search registration, type code..."
         />
       }
       rightContent={
@@ -612,29 +617,6 @@ export default function AircraftPage() {
       ) : (
         <div>
           <div className="px-4 pt-4 pb-safe">
-            {/* Sticky search bar - outside aboveVirtualRef so it stays visible during scroll */}
-            <div className="sticky top-0 z-40 pb-3 bg-background/30 backdrop-blur-xl -mx-3 px-3">
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    type="text"
-                    placeholder="Search registration, type code..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-                  />
-                </div>
-                <Button
-                  onClick={handleAddClick}
-                  size="icon"
-                  className="h-10 w-10 flex-shrink-0"
-                >
-                  <Plus className="h-5 w-5" />
-                </Button>
-              </div>
-            </div>
-
             {/* Non-virtualized content above the virtual list */}
             <div ref={aboveVirtualRef}>
               {!debouncedSearchQuery.trim() && (

@@ -168,14 +168,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     checkAuth()
-  }, [pathname, router])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- intentional: run once on mount; authCheckDone.current guards against double execution
 
   // Protect routes
   useEffect(() => {
     if (!isLoading && !user && pathname !== "/login") {
       router.push("/login")
     }
-  }, [user, isLoading, pathname, router])
+  }, [user, isLoading, pathname])
 
   return (
     <AuthContext.Provider

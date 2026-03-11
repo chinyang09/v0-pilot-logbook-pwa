@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react"
+import React, { createContext, useContext, useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, type ReactNode } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 
@@ -70,9 +70,28 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     pinnedRef.current = true
   }, [])
 
+  // Derive current base route (e.g. "/aircraft", "/airports") from pathname
+  const currentBase = useMemo(
+    () => "/" + (pathname?.split("/").filter(Boolean)[0] || ""),
+    [pathname]
+  )
+  // Ref so effects can read current base without adding it to deps.
+  // useLayoutEffect ensures the ref is updated before the sessionStorage restoration
+  // layout effect (below) reads it, since layout effects fire in declaration order.
+  const currentBaseRef = useRef(currentBase)
+  useLayoutEffect(() => { currentBaseRef.current = currentBase })
+
   // Get selected ID from URL or sessionStorage
   const selectedIdFromUrl = searchParams.get("selected")
-  const [selectedId, setSelectedIdState] = useState<string | null>(selectedIdFromUrl)
+  const [selectedIdState, setSelectedIdState] = useState<string | null>(selectedIdFromUrl)
+
+  // Track which base route "owns" the current selectedId.
+  // Exposed selectedId is null when the current route doesn't match the owner,
+  // preventing stale cross-route IDs from leaking into another page's detail panel.
+  const [selectedIdOwner, setSelectedIdOwner] = useState<string | null>(currentBase)
+
+  // Effective selectedId: derived synchronously during render (not in an effect)
+  const selectedId = selectedIdOwner === currentBase ? selectedIdState : null
 
   // Track when we're updating URL to avoid sync race condition
   const pendingUpdateRef = useRef<string | null | undefined>(undefined)
@@ -92,17 +111,23 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
       return
     }
     // Functional update: React bails out (no re-render) if the value is unchanged,
-    // so calling this even when urlSelected === selectedId is safe and avoids
-    // needing selectedId in the dep array.
+    // so calling this even when urlSelected === selectedIdState is safe and avoids
+    // needing selectedIdState in the dep array.
     setSelectedIdState(prev => (prev === urlSelected ? prev : urlSelected))
+    if (urlSelected !== null) {
+      setSelectedIdOwner(currentBaseRef.current)
+    }
   }, [searchParams])
 
   // Track previous pathname so we only clear pendingUpdateRef on real page changes,
   // not on every searchParams update (which would break race-condition protection).
   const prevPathnameForPendingRef = useRef(pathname)
 
-  // On pathname change, restore selection from sessionStorage if not in URL
-  useEffect(() => {
+  // On pathname change, restore selection from sessionStorage if not in URL.
+  // useLayoutEffect ensures selectedId is restored synchronously before paint and before
+  // any child useEffect (e.g. syncDetailPanel) fires, preventing the flash of null content
+  // that would otherwise appear while waiting for the async state update.
+  useLayoutEffect(() => {
     // Clear pending update only when the actual page changes, not on every URL update.
     // If we cleared on every searchParams change, every setSelectedId → router.replace
     // would destroy the pending guard before the URL-sync effect above can use it.
@@ -117,6 +142,7 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
       const basePath = pathname?.split("?")[0] || ""
       if (stored[basePath]) {
         setSelectedIdState(stored[basePath])
+        setSelectedIdOwner(currentBaseRef.current)
         // Don't auto-update URL here - let the page decide
       }
     }
@@ -126,6 +152,7 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     // Mark that we're updating to this value (prevents sync effect from reverting)
     pendingUpdateRef.current = id
     setSelectedIdState(id)
+    setSelectedIdOwner(currentBaseRef.current)
 
     // Update URL
     const params = new URLSearchParams(searchParams.toString())
