@@ -49,7 +49,7 @@ function DetailPanelContent() {
   // Show FlightForm when we have a flight to edit (either on logbook or during picker navigation)
   if (flightId) {
     return (
-      <div className="h-full overflow-auto bg-background">
+      <div className="h-full overflow-hidden bg-background">
         <FlightForm
           flightId={flightId}
           isDesktop={isDesktop}

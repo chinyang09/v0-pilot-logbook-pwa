@@ -1264,10 +1264,8 @@ export function FlightForm({
 
   return (
     <div className="h-full relative">
-    <div ref={scrollContainerRef} className="h-full overflow-y-auto bg-background">
-      <div className="min-h-full pb-20">
-      {/* Fixed Header */}
-      <div className="sticky top-0 z-50 h-12 bg-background/30 backdrop-blur-xl border-b border-border/50 px-4 flex items-center justify-between">
+      {/* Header — absolute so iOS overscroll bounce on the scroll container below doesn't move it */}
+      <div className="absolute top-0 left-0 right-0 z-50 h-12 bg-background/30 backdrop-blur-xl border-b border-border/50 px-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           {!isDesktop && (
             <Button variant="ghost" size="icon-sm" onClick={handleKeepAsDraft}>
@@ -1299,6 +1297,8 @@ export function FlightForm({
           </Button>
         </div>
       </div>
+    <div ref={scrollContainerRef} className="h-full overflow-y-auto bg-background">
+      <div className="min-h-full pt-12 pb-20">
 
       {/* Form Content */}
       <div className="space-y-4 px-2 py-4">

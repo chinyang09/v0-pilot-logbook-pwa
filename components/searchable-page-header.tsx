@@ -3,9 +3,8 @@
 import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { SyncStatus } from "@/components/sync-status"
-import { ArrowLeft, Search, Plus } from "lucide-react"
+import { ArrowLeft, Search, Plus, X } from "lucide-react"
 import type React from "react"
 import { cn } from "@/lib/utils"
 
@@ -17,7 +16,7 @@ export interface SearchablePageHeaderProps {
   onAdd?: () => void
   showBack?: boolean
   onBack?: () => void
-  /** Extra action buttons rendered between title area and search icon (normal mode only) */
+  /** Extra action buttons rendered between title and search (normal mode only) */
   actions?: React.ReactNode
   showSyncStatus?: boolean
   className?: string
@@ -65,69 +64,93 @@ export function SearchablePageHeader({
   return (
     <header
       className={cn(
-        "h-12 bg-background/30 backdrop-blur-xl border-b border-border/50 z-50 overflow-hidden",
+        "h-12 bg-background/30 backdrop-blur-xl border-b border-border/50 z-50",
         className
       )}
     >
-      <div className="relative h-full">
-        {/* Normal mode */}
+      <div className="flex items-center h-full gap-1.5 px-4 pl-12">
+        {showBack && (
+          <Button variant="ghost" size="icon-sm" onClick={handleBack} className="flex-shrink-0">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        )}
+
+        {/* Title — collapses via max-width + fades out when search active */}
         <div
+          style={{ maxWidth: isSearchActive ? 0 : 9999 }}
           className={cn(
-            "absolute inset-0 flex items-center justify-between px-4 pl-12 transition-opacity duration-200",
-            isSearchActive ? "opacity-0 pointer-events-none" : "opacity-100"
+            "flex-1 min-w-0 overflow-hidden transition-all duration-300 ease-out",
+            isSearchActive ? "opacity-0" : "opacity-100"
           )}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            {showBack && (
-              <Button variant="ghost" size="icon-sm" onClick={handleBack}>
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            )}
-            <h1 className="text-lg font-semibold text-foreground truncate">{title}</h1>
-          </div>
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            {actions}
-            <Button variant="ghost" size="icon-sm" onClick={activateSearch}>
-              <Search className="h-4 w-4" />
-            </Button>
-            {onAdd && (
-              <Button size="icon-sm" onClick={onAdd}>
-                <Plus className="h-4 w-4" />
-              </Button>
-            )}
-            {showSyncStatus && <SyncStatus />}
-          </div>
+          <h1 className="text-lg font-semibold whitespace-nowrap truncate">{title}</h1>
         </div>
 
-        {/* Search mode */}
+        {/* Extra actions (normal mode only) */}
+        {actions && (
+          <div
+            className={cn(
+              "flex items-center transition-opacity duration-200",
+              isSearchActive ? "opacity-0 w-0 overflow-hidden pointer-events-none" : "opacity-100"
+            )}
+          >
+            {actions}
+          </div>
+        )}
+
+        {/* Search bar — expands from w-8 icon to full flex-1 */}
         <div
           className={cn(
-            "absolute inset-0 flex items-center gap-2 px-3 transition-opacity duration-200",
-            isSearchActive ? "opacity-100" : "opacity-0 pointer-events-none"
+            "flex items-center gap-2 rounded-lg border overflow-hidden transition-all duration-300 ease-out cursor-pointer",
+            isSearchActive
+              ? "flex-1 border-border/50 bg-background/50 px-2 h-8 cursor-default"
+              : "w-8 h-8 border-transparent justify-center flex-shrink-0"
           )}
+          onClick={!isSearchActive ? activateSearch : undefined}
         >
-          <Button
-            variant="ghost"
-            size="sm"
-            className="flex-shrink-0 text-primary px-2"
-            onClick={deactivateSearch}
-          >
-            Cancel
-          </Button>
-          <Input
+          <Search className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+          <input
             ref={inputRef}
             type="text"
-            placeholder={searchPlaceholder}
             value={searchQuery}
             onChange={handleInputChange}
-            className="flex-1 h-8 bg-background/30"
+            placeholder={searchPlaceholder}
+            className={cn(
+              "bg-transparent text-sm outline-none flex-1 min-w-0 transition-opacity",
+              isSearchActive
+                ? "opacity-100 duration-150 delay-150"
+                : "opacity-0 w-0 pointer-events-none"
+            )}
           />
-          {onAdd && (
-            <Button size="icon-sm" onClick={onAdd} className="flex-shrink-0">
-              <Plus className="h-4 w-4" />
-            </Button>
+          {isSearchActive && (
+            <X
+              className="h-4 w-4 flex-shrink-0 text-muted-foreground cursor-pointer"
+              onClick={(e: React.MouseEvent) => {
+                e.stopPropagation()
+                deactivateSearch()
+              }}
+            />
           )}
         </div>
+
+        {/* + button — always visible */}
+        {onAdd && (
+          <Button size="icon-sm" onClick={onAdd} className="flex-shrink-0">
+            <Plus className="h-4 w-4" />
+          </Button>
+        )}
+
+        {/* Sync status — hidden during search */}
+        {showSyncStatus && (
+          <div
+            className={cn(
+              "transition-all duration-200 overflow-hidden flex-shrink-0",
+              isSearchActive ? "opacity-0 w-0" : "opacity-100"
+            )}
+          >
+            <SyncStatus />
+          </div>
+        )}
       </div>
     </header>
   )
