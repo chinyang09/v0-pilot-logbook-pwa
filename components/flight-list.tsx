@@ -581,7 +581,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
         <>
           <div
             ref={scrollContainerRef}
-            className="h-full overflow-y-auto overscroll-contain"
+            className="h-full overflow-y-auto overscroll-none"
             onTouchStart={handleTouchStart}
             onMouseDown={handleTouchStart}
           >
@@ -610,7 +610,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           {/* Main scrollable container */}
           <div
             ref={scrollContainerRef}
-            className="h-full overflow-y-auto flex-1 overscroll-contain"
+            className="h-full overflow-y-auto flex-1 overscroll-none"
             style={{ contain: "strict" }}
             onTouchStart={handleTouchStart}
             onMouseDown={handleTouchStart}

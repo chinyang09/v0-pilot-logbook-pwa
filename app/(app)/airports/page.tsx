@@ -3,10 +3,9 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import type React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Input } from "@/components/ui/input";
 import { PageContainer } from "@/components/page-container";
 import { useAirportDatabase, useFlights } from "@/hooks/data";
-import { StandardPageHeader } from "@/components/standard-page-header";
+import { SearchablePageHeader } from "@/components/searchable-page-header";
 import {
   searchAirports,
   hasExactAirportCodeMatch,
@@ -18,7 +17,7 @@ import {
 } from "@/lib/db";
 import { syncService } from "@/lib/sync";
 import { submitAirportToServer } from "@/lib/submissions/submit";
-import { Star, Search, Plus, MapPin, Loader2 } from "lucide-react";
+import { Star, Plus, MapPin, Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -530,10 +529,14 @@ export default function AirportsPage() {
   return (
     <PageContainer
       header={
-        <StandardPageHeader
+        <SearchablePageHeader
           title={pageTitle}
           showBack={!!fieldType}
           onBack={fieldType ? () => router.back() : undefined}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onAdd={handleAddClick}
+          searchPlaceholder="Search airports..."
         />
       }
       rightContent={
@@ -550,29 +553,6 @@ export default function AirportsPage() {
     >
       <div>
         <div className="px-4 pt-4 pb-safe">
-          {/* Sticky search bar - outside aboveVirtualRef so it stays visible during scroll */}
-          <div className="sticky top-0 z-40 pb-3 bg-background/30 backdrop-blur-xl -mx-3 px-3">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="text"
-                  placeholder="Search airports..."
-                  value={searchQuery}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl"
-                />
-              </div>
-              <Button
-                onClick={handleAddClick}
-                size="icon"
-                className="h-10 w-10 flex-shrink-0"
-              >
-                <Plus className="h-5 w-5" />
-              </Button>
-            </div>
-          </div>
-
           {/* Non-virtualized content above the virtual list */}
           <div ref={aboveVirtualRef}>
             {!debouncedSearchQuery.trim() && (
