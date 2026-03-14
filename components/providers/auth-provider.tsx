@@ -13,6 +13,7 @@ interface AuthContextType {
   login: (session: Omit<UserSession, "id" | "createdAt">) => Promise<void>
   logout: () => Promise<void>
   silentReauth: () => Promise<boolean>
+  updateCallsign: (newCallsign: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -56,6 +57,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null)
     router.push("/login")
   }, [router])
+
+  const updateCallsign = useCallback(async (newCallsign: string) => {
+    const currentSession = await getUserSession()
+    if (!currentSession) return
+
+    await saveUserSession({
+      userId: currentSession.userId,
+      callsign: newCallsign,
+      sessionToken: currentSession.sessionToken,
+      expiresAt: currentSession.expiresAt,
+    })
+
+    const updatedSession = await getUserSession()
+    setUser(updatedSession || null)
+  }, [])
 
   // Silent re-authentication using discoverable credentials (passkey)
   const silentReauth = useCallback(async (): Promise<boolean> => {
@@ -186,6 +202,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         logout,
         silentReauth,
+        updateCallsign,
       }}
     >
       {children}

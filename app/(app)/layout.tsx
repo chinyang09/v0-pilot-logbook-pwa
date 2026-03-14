@@ -5,6 +5,7 @@ import { Suspense } from "react"
 import { ScrollNavbarProvider } from "@/hooks/use-scroll-navbar-context"
 import { SidebarProvider } from "@/hooks/use-sidebar-context"
 import { DetailPanelProvider } from "@/hooks/use-detail-panel"
+import { PreferencesProvider } from "@/components/providers/preferences-provider"
 import { useDraftGenerator } from "@/hooks/use-draft-generator"
 import { AppShell } from "@/components/desktop-layout"
 import { KeepAlivePages } from "@/components/keep-alive-pages"
@@ -35,14 +36,16 @@ export default function AppLayout({
   children: React.ReactNode
 }) {
   return (
-    <ScrollNavbarProvider>
-      <SidebarProvider defaultOpen={true}>
-        <Suspense>
-          <DetailPanelProvider>
-            <AppLayoutContent>{children}</AppLayoutContent>
-          </DetailPanelProvider>
-        </Suspense>
-      </SidebarProvider>
-    </ScrollNavbarProvider>
+    <PreferencesProvider>
+      <ScrollNavbarProvider>
+        <SidebarProvider defaultOpen={true}>
+          <Suspense>
+            <DetailPanelProvider>
+              <AppLayoutContent>{children}</AppLayoutContent>
+            </DetailPanelProvider>
+          </Suspense>
+        </SidebarProvider>
+      </ScrollNavbarProvider>
+    </PreferencesProvider>
   )
 }

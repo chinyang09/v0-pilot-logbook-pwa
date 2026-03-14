@@ -13,6 +13,68 @@ export interface FieldOrder {
   notes: string[]
 }
 
+export interface DisplayPreferences {
+  timeFormat: "24h" | "24h-padded" | "12h"
+  useZuluTime: boolean
+  airportIdentifier: "icao" | "iata" | "both"
+  coordinateFormat: "decimal" | "dms"
+}
+
+export interface AutoFillPreferences {
+  night: boolean
+  pic: boolean
+  sic: boolean
+  p1us: boolean
+  dualRcvd: boolean
+  dualGiven: boolean
+  xc: boolean
+  ifr: boolean
+  actualInst: boolean
+  simInst: boolean
+  multiPilot: boolean
+  solo: boolean
+  ground: boolean
+  nvg: boolean
+  sfe: boolean
+  flightEngineer: boolean
+}
+
+export interface DutyTimeDefaults {
+  minutesBeforeOut: number
+  minutesAfterIn: number
+}
+
+export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
+  timeFormat: "24h",
+  useZuluTime: true,
+  airportIdentifier: "icao",
+  coordinateFormat: "decimal",
+}
+
+export const DEFAULT_AUTO_FILL_PREFERENCES: AutoFillPreferences = {
+  night: true,
+  pic: true,
+  sic: true,
+  p1us: true,
+  dualRcvd: true,
+  dualGiven: true,
+  xc: true,
+  ifr: false,
+  actualInst: false,
+  simInst: false,
+  multiPilot: false,
+  solo: false,
+  ground: false,
+  nvg: false,
+  sfe: false,
+  flightEngineer: false,
+}
+
+export const DEFAULT_DUTY_TIME_DEFAULTS: DutyTimeDefaults = {
+  minutesBeforeOut: 60,
+  minutesAfterIn: 30,
+}
+
 export interface UserPreferences {
   key: string
   fieldOrder: FieldOrder
@@ -21,6 +83,9 @@ export interface UserPreferences {
   recentlyUsedAircraft?: string[]
   favoriteAircraft?: string[]
   draftGenerationConfig?: DraftGenerationConfig
+  display?: DisplayPreferences
+  autoFill?: AutoFillPreferences
+  dutyTimeDefaults?: DutyTimeDefaults
   createdAt: number
   updatedAt: number
 }

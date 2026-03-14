@@ -7,6 +7,7 @@ import { calculateDuration, subtractHHMM, minutesToHHMM, isValidHHMM } from "./t
 import { isNight } from "./night-time"
 import type { Airport } from "@/types/entities/airport.types"
 import type { FlightLog, Approach, PilotRole, ManualOverrides } from "@/types/entities/flight.types"
+import type { AutoFillPreferences } from "@/types/db/stores.types"
 
 /**
  * Calculate block time from out/in times
@@ -313,12 +314,13 @@ export function isManuallyOverridden(
 
 /**
  * Recalculate all derived fields for a flight
- * Respects manual overrides
+ * Respects manual overrides and auto-fill preferences
  */
 export function recalculateFlightFields(
   flight: Partial<FlightLog>,
   depAirport: Airport | null,
-  arrAirport: Airport | null
+  arrAirport: Airport | null,
+  autoFill?: AutoFillPreferences
 ): Partial<FlightLog> {
   const updates: Partial<FlightLog> = {}
   const overrides = flight.manualOverrides || {}
@@ -333,7 +335,10 @@ export function recalculateFlightFields(
     updates.flightTime = calculateFlightTime(flight.offTime, flight.onTime)
   }
 
+  // Night time — gated by autoFill.night (defaults to true if no prefs)
+  const shouldCalcNight = autoFill?.night !== false
   if (
+    shouldCalcNight &&
     !overrides.nightTime &&
     flight.date &&
     flight.outTime &&
@@ -351,6 +356,7 @@ export function recalculateFlightFields(
   }
 
   const blockTime = updates.blockTime || flight.blockTime || "00:00"
+  const flightTime = updates.flightTime || flight.flightTime || "00:00"
   const nightTime = updates.nightTime || flight.nightTime || "00:00"
   updates.dayTime = calculateDayTime(blockTime, nightTime)
 
@@ -379,13 +385,48 @@ export function recalculateFlightFields(
   }
 
   // Role times - use BLOCK TIME not flight time
+  // Gated by individual auto-fill preferences
   if (!overrides.picTime && !overrides.sicTime && !overrides.picusTime) {
-    const roleTimes = calculateRoleTimes(blockTime, flight.pilotRole || "PIC")
-    updates.picTime = roleTimes.picTime
-    updates.sicTime = roleTimes.sicTime
-    updates.picusTime = roleTimes.picusTime
-    updates.dualTime = roleTimes.dualTime
-    updates.instructorTime = roleTimes.instructorTime
+    const shouldAutoFillRoles =
+      autoFill?.pic !== false ||
+      autoFill?.sic !== false ||
+      autoFill?.p1us !== false ||
+      autoFill?.dualRcvd !== false ||
+      autoFill?.dualGiven !== false
+
+    if (shouldAutoFillRoles) {
+      const roleTimes = calculateRoleTimes(blockTime, flight.pilotRole || "PIC")
+
+      if (autoFill?.pic !== false) updates.picTime = roleTimes.picTime
+      if (autoFill?.sic !== false) updates.sicTime = roleTimes.sicTime
+      if (autoFill?.p1us !== false) updates.picusTime = roleTimes.picusTime
+      if (autoFill?.dualRcvd !== false) updates.dualTime = roleTimes.dualTime
+      if (autoFill?.dualGiven !== false) updates.instructorTime = roleTimes.instructorTime
+    }
+  }
+
+  // Cross-country time — auto-fill when departure differs from arrival
+  if (autoFill?.xc !== false && !overrides.crossCountryTime) {
+    const depIcao = flight.departureIcao || depAirport?.icao
+    const arrIcao = flight.arrivalIcao || arrAirport?.icao
+    if (depIcao && arrIcao && depIcao !== arrIcao) {
+      updates.crossCountryTime = blockTime
+    }
+  }
+
+  // IFR time — auto-fill from flight time
+  if (autoFill?.ifr === true && !overrides.ifrTime) {
+    updates.ifrTime = flightTime
+  }
+
+  // Actual instrument time
+  if (autoFill?.actualInst === true && !overrides.actualInstrumentTime) {
+    updates.actualInstrumentTime = flightTime
+  }
+
+  // Simulated instrument time
+  if (autoFill?.simInst === true && !overrides.simulatedInstrumentTime) {
+    updates.simulatedInstrumentTime = flightTime
   }
 
   return updates
