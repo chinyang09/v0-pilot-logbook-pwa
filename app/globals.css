@@ -134,6 +134,7 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    -webkit-tap-highlight-color: transparent;
   }
   /* Force background color on html for Android PWA */
   html {

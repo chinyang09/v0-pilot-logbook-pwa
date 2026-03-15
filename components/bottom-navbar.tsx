@@ -106,7 +106,7 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
   return (
     <nav
       className={cn(
-        "flex-shrink-0 bg-background/30 backdrop-blur-xl border-t border-border/50 pb-[env(safe-area-inset-bottom)]",
+        "flex-shrink-0 bg-background/30 backdrop-blur-xl pb-[env(safe-area-inset-bottom)]",
         className
       )}
     >
@@ -121,8 +121,8 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
                 <Button
                   variant="ghost"
                   className={cn(
-                    "flex flex-col items-center gap-0.5 h-14 px-2",
-                    tab.isActive(pathname) && "text-primary"
+                    "flex flex-col items-center gap-0.5 h-14 px-3 active:scale-90",
+                    tab.isActive(pathname) ? "text-primary bg-primary/10 rounded-xl" : ""
                   )}
                 >
                   <Icon className="h-5 w-5" />
@@ -134,7 +134,7 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
 
           <Button
             size="lg"
-            className="h-12 w-12 rounded-full shadow-lg"
+            className="h-12 w-12 rounded-full shadow-lg active:scale-90"
             onClick={async () => {
               const draft = await createFlight();
               router.push(`/logbook?selected=${draft.id}`);
@@ -152,8 +152,8 @@ export function BottomNavbar({ className }: BottomNavbarProps) {
                 <Button
                   variant="ghost"
                   className={cn(
-                    "flex flex-col items-center gap-0.5 h-14 px-2",
-                    tab.isActive(pathname) && "text-primary"
+                    "flex flex-col items-center gap-0.5 h-14 px-3 active:scale-90",
+                    tab.isActive(pathname) ? "text-primary bg-primary/10 rounded-xl" : ""
                   )}
                 >
                   <Icon className="h-5 w-5" />

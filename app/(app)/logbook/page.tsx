@@ -261,8 +261,12 @@ export default function LogbookPage() {
   // - Desktop: FlightForm in right detail panel
   // - Mobile: FlightForm in full-screen overlay
   const handleEditFlight = useCallback((flight: FlightLog) => {
-    setSelectedFlightId(flight.id)
-  }, [setSelectedFlightId])
+    if (selectedFlightId === flight.id) {
+      setSelectedFlightId(null)
+    } else {
+      setSelectedFlightId(flight.id)
+    }
+  }, [selectedFlightId, setSelectedFlightId])
 
   const handleFlightDeleted = async () => {
     // Clear the detail panel — the deleted flight's form must not remain open.
@@ -363,7 +367,7 @@ export default function LogbookPage() {
   return (
     <div className="h-full relative flex flex-col">
       {/* Combined header + calendar overlay - single continuous frosted glass */}
-      <div className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
+      <div className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl">
         <StandardPageHeader
           title={showCalendar ? `${MONTHS[selectedMonth.month]} ${selectedMonth.year}` : "Logbook"}
           className="bg-transparent backdrop-blur-none border-b-0"

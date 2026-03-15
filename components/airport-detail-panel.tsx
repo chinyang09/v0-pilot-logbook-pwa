@@ -58,7 +58,7 @@ export function AirportDetailPanel({ icao, onBack }: AirportDetailPanelProps) {
   return (
     <div className="h-full relative flex flex-col">
       {/* Header - absolute overlay for frosted glass */}
-      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
+      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl">
         <div className="px-2 h-12 flex items-center">
           <div className="w-16 flex-shrink-0">
             {onBack ? (

@@ -521,7 +521,7 @@ export function AirportNewForm({
   )
 
   const headerContent = (
-    <header className="bg-background/30 backdrop-blur-xl border-b border-border/50 z-50">
+    <header className="bg-background/30 backdrop-blur-xl z-50">
       <div className="container mx-auto px-3">
         <div className="flex items-center justify-between h-12">
           <Button

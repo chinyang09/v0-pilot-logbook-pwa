@@ -67,10 +67,11 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
     >
       <button
         className={cn(
-          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all hover:bg-accent",
-          isRecent &&
-            "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20 hover:bg-transparent",
-          isSelected && "bg-primary/20 border-primary hover:bg-primary/20"
+          "w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all",
+          isRecent
+            ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
+            : "bg-card border border-border hover:bg-accent",
+          isSelected && "bg-primary/20 border-primary"
         )}
       >
         <div className="flex items-center justify-between gap-2">
@@ -616,7 +617,7 @@ export default function AircraftPage() {
         </div>
       ) : (
         <div>
-          <div className="px-4 pt-4 pb-safe">
+          <div className="px-2 pt-2 pb-safe">
             {/* Non-virtualized content above the virtual list */}
             <div ref={aboveVirtualRef}>
               {!debouncedSearchQuery.trim() && (

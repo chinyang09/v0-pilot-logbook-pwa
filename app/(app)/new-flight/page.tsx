@@ -36,7 +36,7 @@ export default function NewFlightPage() {
   return (
     <PageContainer>
       <div className="h-full">
-        <div className="h-12 bg-background/30 backdrop-blur-xl border-b border-border/50 px-4 flex items-center justify-between">
+        <div className="h-12 bg-background/30 backdrop-blur-xl px-4 flex items-center justify-between">
           <Skeleton className="h-5 w-24" />
           <Skeleton className="h-8 w-20" />
         </div>

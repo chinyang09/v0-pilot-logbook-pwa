@@ -138,7 +138,7 @@ function AppShellContent({ children }: AppShellProps) {
           the main page. z-[55] beats page headers (z-50), navbar z-[60] wins. */}
       {showMobileOverlay && (
         <div
-          className="fixed inset-0 z-[55] bg-background lg:hidden pt-safe"
+          className="fixed inset-0 z-[55] bg-background lg:hidden pt-safe animate-in slide-in-from-bottom-4 fade-in duration-200"
           onScrollCapture={(e) => {
             const target = e.target as HTMLElement
             if (target !== e.currentTarget) {

@@ -85,7 +85,7 @@ function SettingsDetailPanel({ title, onBack, children }: {
 }) {
   return (
     <div className="h-full relative">
-      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
+      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl">
         <div className="px-2 h-12 flex items-center">
           <div className="w-16 flex-shrink-0">
             <Button variant="ghost" size="icon" onClick={onBack} className="lg:hidden h-8 w-8">

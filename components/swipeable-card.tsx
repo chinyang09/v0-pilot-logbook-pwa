@@ -132,7 +132,7 @@ export function SwipeableCard({
           className
         )}
       >
-        <div className="bg-card rounded-lg">
+        <div className="bg-card rounded-lg transition-transform active:scale-[0.98]">
           {children}
         </div>
       </div>

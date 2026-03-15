@@ -149,7 +149,7 @@ export function SidebarNav() {
   return (
     <aside
       className={cn(
-        "flex-shrink-0 flex flex-col h-full bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out overflow-hidden",
+        "flex-shrink-0 flex flex-col h-full bg-sidebar transition-all duration-300 ease-in-out overflow-hidden",
         isOpen ? "w-64" : "w-0"
       )}
     >
@@ -161,7 +161,7 @@ export function SidebarNav() {
         )}
       >
         {/* Spacer aligned with page header h-12 + safe area */}
-        <div className="h-12 flex-shrink-0 border-b border-sidebar-border mt-safe" />
+        <div className="h-12 flex-shrink-0 mt-safe" />
 
         {/* Navigation sections */}
         <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-4">

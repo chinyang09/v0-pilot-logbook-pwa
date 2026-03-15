@@ -64,7 +64,7 @@ export function SearchablePageHeader({
   return (
     <header
       className={cn(
-        "h-12 bg-background/30 backdrop-blur-xl border-b border-border/50 z-50",
+        "h-12 bg-background/30 backdrop-blur-xl z-50",
         className
       )}
     >
@@ -79,7 +79,7 @@ export function SearchablePageHeader({
         <div
           style={{ maxWidth: isSearchActive ? 0 : 9999 }}
           className={cn(
-            "flex-1 min-w-0 overflow-hidden transition-all duration-300 ease-out",
+            "flex-1 min-w-0 overflow-hidden transition-all duration-200 ease-in",
             isSearchActive ? "opacity-0" : "opacity-100"
           )}
         >
@@ -90,7 +90,7 @@ export function SearchablePageHeader({
         {actions && (
           <div
             className={cn(
-              "flex items-center transition-opacity duration-200",
+              "flex items-center transition-opacity duration-150",
               isSearchActive ? "opacity-0 w-0 overflow-hidden pointer-events-none" : "opacity-100"
             )}
           >
@@ -98,14 +98,15 @@ export function SearchablePageHeader({
           </div>
         )}
 
-        {/* Search bar — expands from w-8 icon to full flex-1 */}
+        {/* Search bar — expands from w-8 icon to full flex-1 with spring feel */}
         <div
           className={cn(
-            "flex items-center gap-2 rounded-lg border overflow-hidden transition-all duration-300 ease-out cursor-pointer",
+            "flex items-center gap-2 rounded-lg border overflow-hidden cursor-pointer",
             isSearchActive
               ? "flex-1 border-border/50 bg-background/50 px-2 h-8 cursor-default"
               : "w-8 h-8 border-transparent justify-center flex-shrink-0"
           )}
+          style={{ transition: "all 400ms cubic-bezier(0.175, 0.885, 0.32, 1.275)" }}
           onClick={!isSearchActive ? activateSearch : undefined}
         >
           <Search className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
