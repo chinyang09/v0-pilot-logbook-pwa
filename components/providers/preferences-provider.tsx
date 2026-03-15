@@ -73,6 +73,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
         display: updated.display,
         autoFill: updated.autoFill,
         dutyTimeDefaults: updated.dutyTimeDefaults,
+        navigation: updated.navigation,
       })
     }, 500)
   }, [])

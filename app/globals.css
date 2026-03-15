@@ -11,42 +11,44 @@
 }
 
 /* Light theme (default) */
+/* Foreground uses 0.25 lightness (soft dark gray) instead of 0.15 (near-black)
+   to reduce eye strain on white backgrounds — similar to Apple HIG approach */
 :root {
-  --background: oklch(0.98 0.005 240);
-  --foreground: oklch(0.15 0.01 240);
-  --card: oklch(0.96 0.005 240);
-  --card-foreground: oklch(0.15 0.01 240);
-  --popover: oklch(0.98 0.005 240);
-  --popover-foreground: oklch(0.15 0.01 240);
+  --background: oklch(0.985 0.003 240);
+  --foreground: oklch(0.25 0.01 240);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.25 0.01 240);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.25 0.01 240);
   --primary-foreground: oklch(0.98 0.005 240);
-  --secondary: oklch(0.93 0.005 240);
-  --secondary-foreground: oklch(0.2 0.01 240);
-  --muted: oklch(0.93 0.005 240);
-  --muted-foreground: oklch(0.45 0.01 240);
-  --accent: oklch(0.93 0.005 240);
-  --accent-foreground: oklch(0.2 0.01 240);
+  --secondary: oklch(0.94 0.003 240);
+  --secondary-foreground: oklch(0.3 0.01 240);
+  --muted: oklch(0.94 0.003 240);
+  --muted-foreground: oklch(0.5 0.01 240);
+  --accent: oklch(0.94 0.003 240);
+  --accent-foreground: oklch(0.3 0.01 240);
   --destructive: oklch(0.55 0.2 25);
   --destructive-foreground: oklch(0.98 0.005 240);
-  --border: oklch(0.88 0.005 240);
-  --input: oklch(0.93 0.005 240);
-  --chart-1: oklch(0.65 0.15 195);
-  --chart-2: oklch(0.55 0.18 165);
-  --chart-3: oklch(0.6 0.15 280);
-  --chart-4: oklch(0.7 0.15 85);
-  --chart-5: oklch(0.6 0.18 25);
-  --sidebar: oklch(0.96 0.005 240);
-  --sidebar-foreground: oklch(0.15 0.01 240);
-  --sidebar-primary: oklch(0.65 0.15 195);
+  --border: oklch(0.9 0.003 240);
+  --input: oklch(0.94 0.003 240);
+  --chart-1: oklch(0.55 0.15 195);
+  --chart-2: oklch(0.45 0.18 165);
+  --chart-3: oklch(0.5 0.15 280);
+  --chart-4: oklch(0.6 0.15 85);
+  --chart-5: oklch(0.5 0.18 25);
+  --sidebar: oklch(0.975 0.003 240);
+  --sidebar-foreground: oklch(0.25 0.01 240);
+  --sidebar-primary: oklch(0.55 0.15 195);
   --sidebar-primary-foreground: oklch(0.98 0.005 240);
-  --sidebar-accent: oklch(0.93 0.005 240);
-  --sidebar-accent-foreground: oklch(0.15 0.01 240);
-  --sidebar-border: oklch(0.88 0.005 240);
-  --sidebar-ring: oklch(0.65 0.15 195);
+  --sidebar-accent: oklch(0.94 0.003 240);
+  --sidebar-accent-foreground: oklch(0.25 0.01 240);
+  --sidebar-border: oklch(0.9 0.003 240);
+  --sidebar-ring: oklch(0.55 0.15 195);
 
   /* Status colors for sync */
-  --status-synced: oklch(0.55 0.18 145);
-  --status-pending: oklch(0.6 0.15 85);
-  --status-offline: oklch(0.5 0.15 25);
+  --status-synced: oklch(0.5 0.18 145);
+  --status-pending: oklch(0.55 0.15 85);
+  --status-offline: oklch(0.45 0.15 25);
 }
 
 /* Aviation-themed dark color palette */
