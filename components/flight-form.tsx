@@ -1353,14 +1353,15 @@ export function FlightForm({
           </SwipeableRow>
 
           <SwipeableRow onClear={() => clearField("flightNumber")}>
-            <SettingsRow
-              label="Flight #"
-              value={formData.flightNumber}
-              onClick={() => {
-                const num = prompt("Flight Number:", formData.flightNumber);
-                if (num !== null) updateField("flightNumber", num);
-              }}
-            />
+            <SettingsRow label="Flight #">
+              <input
+                type="text"
+                className="text-right bg-transparent outline-none text-foreground w-32 placeholder:text-muted-foreground"
+                placeholder="-"
+                value={formData.flightNumber || ""}
+                onChange={(e) => updateField("flightNumber", e.target.value.toUpperCase())}
+              />
+            </SettingsRow>
           </SwipeableRow>
 
           <SwipeableRow

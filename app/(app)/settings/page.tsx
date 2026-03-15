@@ -15,8 +15,9 @@ import { useIsDesktop } from "@/hooks/use-is-desktop"
 import {
   Monitor, Clock, Plane, Loader2, Sun, Moon, Laptop,
   LayoutDashboard, Book, Calendar, Users, MapPin, Award,
-  Settings, UserCircle, Navigation, ChevronRight,
+  Settings, UserCircle, Navigation, ChevronRight, ChevronLeft,
 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 import type { DisplayPreferences, AutoFillPreferences, ThemePreference, BottomNavTab } from "@/types/db/stores.types"
@@ -74,6 +75,33 @@ const SECTIONS: SectionDef[] = [
   { key: "autofill", label: "Auto-Fill Fields", icon: Clock, description: "Auto-populate time fields" },
   { key: "duty", label: "Duty Time Defaults", icon: Plane, description: "Report and debrief times" },
 ]
+
+// ─── Detail panel wrapper with frosted header ───────────────
+
+function SettingsDetailPanel({ title, onBack, children }: {
+  title: string
+  onBack: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <div className="h-full relative">
+      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
+        <div className="px-2 h-12 flex items-center">
+          <div className="w-16 flex-shrink-0">
+            <Button variant="ghost" size="icon" onClick={onBack} className="lg:hidden h-8 w-8">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+          </div>
+          <h1 className="flex-1 text-center text-lg font-semibold truncate px-2">{title}</h1>
+          <div className="w-16 flex-shrink-0" />
+        </div>
+      </header>
+      <div className="h-full overflow-auto pt-12">
+        {children}
+      </div>
+    </div>
+  )
+}
 
 // ─── Detail panel content for each section ──────────────────
 
@@ -319,33 +347,38 @@ export default function SettingsPage() {
     return () => setHasDetailSupport(false)
   }, [setHasDetailSupport])
 
+  const handleBack = useCallback(() => setSelectedId(null), [setSelectedId])
+
   // Build detail content for a given section
   const renderSection = useCallback((key: SectionKey) => {
+    const section = SECTIONS.find((s) => s.key === key)
+    if (!section) return null
+    const wrap = (content: React.ReactNode) => (
+      <SettingsDetailPanel title={section.label} onBack={handleBack}>
+        {content}
+      </SettingsDetailPanel>
+    )
     switch (key) {
       case "appearance":
-        return <AppearanceSection preferences={preferences} updateDisplay={prefs.updateDisplay} />
+        return wrap(<AppearanceSection preferences={preferences} updateDisplay={prefs.updateDisplay} />)
       case "navigation":
-        return <NavigationSection preferences={preferences} updateNavigation={prefs.updateNavigation} />
+        return wrap(<NavigationSection preferences={preferences} updateNavigation={prefs.updateNavigation} />)
       case "display":
-        return <DisplaySection preferences={preferences} updateDisplay={prefs.updateDisplay} />
+        return wrap(<DisplaySection preferences={preferences} updateDisplay={prefs.updateDisplay} />)
       case "autofill":
-        return <AutoFillSection preferences={preferences} updateAutoFill={prefs.updateAutoFill} />
+        return wrap(<AutoFillSection preferences={preferences} updateAutoFill={prefs.updateAutoFill} />)
       case "duty":
-        return <DutyTimeSection preferences={preferences} updateDutyTimeDefaults={prefs.updateDutyTimeDefaults} />
+        return wrap(<DutyTimeSection preferences={preferences} updateDutyTimeDefaults={prefs.updateDutyTimeDefaults} />)
       default:
         return null
     }
-  }, [preferences, prefs])
+  }, [preferences, prefs, handleBack])
 
   // Sync detail panel when selection or preferences change
   useEffect(() => {
     const sectionKey = (selectedId as SectionKey) || null
     if (sectionKey && SECTIONS.find((s) => s.key === sectionKey)) {
-      setDetailContent(
-        <div className="h-full overflow-auto">
-          {renderSection(sectionKey)}
-        </div>
-      )
+      setDetailContent(renderSection(sectionKey))
     } else if (!sectionKey && isDesktop) {
       // Auto-select first section on desktop
       setSelectedId("appearance")

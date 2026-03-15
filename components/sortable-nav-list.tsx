@@ -29,13 +29,13 @@ export function SortableNavList({ tabs, selectedTabs, onUpdate }: SortableNavLis
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [overIndex, setOverIndex] = useState<number | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [dragOffset, setDragOffset] = useState(0)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dragItemRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const startYRef = useRef(0)
   const currentYRef = useRef(0)
-  const dragElRef = useRef<HTMLDivElement | null>(null)
 
   const clearLongPress = useCallback(() => {
     if (longPressTimer.current) {
@@ -131,11 +131,8 @@ export function SortableNavList({ tabs, selectedTabs, onUpdate }: SortableNavLis
       setOverIndex(newOver)
     }
 
-    // Move the ghost element
-    if (dragElRef.current) {
-      const delta = e.clientY - startYRef.current
-      dragElRef.current.style.transform = `translateY(${delta}px)`
-    }
+    // Move the dragged element via React state
+    setDragOffset(e.clientY - startYRef.current)
   }
 
   const handlePointerUp = () => {
@@ -151,6 +148,7 @@ export function SortableNavList({ tabs, selectedTabs, onUpdate }: SortableNavLis
       })
     }
 
+    setDragOffset(0)
     setDragIndex(null)
     setOverIndex(null)
     setIsDragging(false)
@@ -158,7 +156,7 @@ export function SortableNavList({ tabs, selectedTabs, onUpdate }: SortableNavLis
   }
 
   return (
-    <div ref={containerRef} className="space-y-1">
+    <div ref={containerRef} className="space-y-1 select-none">
       {/* Selected tabs — draggable */}
       {selectedItems.map((tab, index) => {
         const Icon = tab.icon
@@ -171,14 +169,14 @@ export function SortableNavList({ tabs, selectedTabs, onUpdate }: SortableNavLis
             ref={(el) => {
               if (el) itemRefs.current.set(index, el)
               else itemRefs.current.delete(index)
-              if (isBeingDragged) dragElRef.current = el
             }}
             className={cn(
-              "flex items-center h-11 rounded-lg transition-colors",
+              "flex items-center h-11 rounded-lg transition-colors select-none",
               isBeingDragged && "opacity-70 bg-primary/10 shadow-lg z-50 relative",
               isOverTarget && "border-t-2 border-primary",
               !isBeingDragged && !isOverTarget && "border-t-2 border-transparent"
             )}
+            style={isBeingDragged ? { transform: `translateY(${dragOffset}px)` } : undefined}
           >
             <button
               type="button"
