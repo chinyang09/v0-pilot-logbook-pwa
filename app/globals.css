@@ -3,16 +3,62 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Aviation-themed dark color palette */
-/* Updated background to use hex that matches theme-color exactly */
+/* Shared values */
 :root {
+  --radius: 0.5rem;
+  --primary: oklch(0.65 0.15 195);
+  --ring: oklch(0.65 0.15 195);
+}
+
+/* Light theme (default) */
+/* Foreground uses 0.25 lightness (soft dark gray) instead of 0.15 (near-black)
+   to reduce eye strain on white backgrounds — similar to Apple HIG approach */
+:root {
+  --background: oklch(0.985 0.003 240);
+  --foreground: oklch(0.35 0.015 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.35 0.015 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.35 0.015 250);
+  --primary-foreground: oklch(0.98 0.005 240);
+  --secondary: oklch(0.94 0.003 240);
+  --secondary-foreground: oklch(0.4 0.015 250);
+  --muted: oklch(0.94 0.003 240);
+  --muted-foreground: oklch(0.5 0.01 240);
+  --accent: oklch(0.94 0.003 240);
+  --accent-foreground: oklch(0.4 0.015 250);
+  --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: oklch(0.98 0.005 240);
+  --border: oklch(0.9 0.003 240);
+  --input: oklch(0.94 0.003 240);
+  --chart-1: oklch(0.55 0.15 195);
+  --chart-2: oklch(0.45 0.18 165);
+  --chart-3: oklch(0.5 0.15 280);
+  --chart-4: oklch(0.6 0.15 85);
+  --chart-5: oklch(0.5 0.18 25);
+  --sidebar: oklch(0.975 0.003 240);
+  --sidebar-foreground: oklch(0.35 0.015 250);
+  --sidebar-primary: oklch(0.55 0.15 195);
+  --sidebar-primary-foreground: oklch(0.98 0.005 240);
+  --sidebar-accent: oklch(0.94 0.003 240);
+  --sidebar-accent-foreground: oklch(0.35 0.015 250);
+  --sidebar-border: oklch(0.9 0.003 240);
+  --sidebar-ring: oklch(0.55 0.15 195);
+
+  /* Status colors for sync */
+  --status-synced: oklch(0.5 0.18 145);
+  --status-pending: oklch(0.55 0.15 85);
+  --status-offline: oklch(0.45 0.15 25);
+}
+
+/* Aviation-themed dark color palette */
+.dark {
   --background: #05080B;
   --foreground: oklch(0.95 0.01 240);
   --card: oklch(0.17 0.01 240);
   --card-foreground: oklch(0.95 0.01 240);
   --popover: oklch(0.17 0.01 240);
   --popover-foreground: oklch(0.95 0.01 240);
-  --primary: oklch(0.65 0.15 195);
   --primary-foreground: oklch(0.13 0.01 240);
   --secondary: oklch(0.22 0.01 240);
   --secondary-foreground: oklch(0.85 0.01 240);
@@ -24,13 +70,11 @@
   --destructive-foreground: oklch(0.95 0.01 240);
   --border: oklch(0.28 0.01 240);
   --input: oklch(0.22 0.01 240);
-  --ring: oklch(0.65 0.15 195);
   --chart-1: oklch(0.65 0.15 195);
   --chart-2: oklch(0.55 0.18 165);
   --chart-3: oklch(0.6 0.15 280);
   --chart-4: oklch(0.7 0.15 85);
   --chart-5: oklch(0.6 0.18 25);
-  --radius: 0.5rem;
   --sidebar: oklch(0.15 0.01 240);
   --sidebar-foreground: oklch(0.95 0.01 240);
   --sidebar-primary: oklch(0.65 0.15 195);
@@ -47,7 +91,7 @@
 }
 
 @theme inline {
-  --font-sans: "Inter", "Geist", "Geist Fallback";
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", "Geist Mono Fallback";
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -93,14 +137,14 @@
   }
   /* Force background color on html for Android PWA */
   html {
-    background-color: #05080B;
+    background-color: var(--background);
     height: 100%;
     overflow: hidden;
   }
   body {
     @apply bg-background text-foreground;
     height: 100dvh;
-    background-color: #05080B;
+    background-color: var(--background);
     overflow: hidden;
     position: fixed;
     width: 100%;
@@ -113,7 +157,7 @@
 @media (display-mode: standalone) {
   html,
   body {
-    background-color: #05080B !important;
+    background-color: var(--background) !important;
   }
 }
 

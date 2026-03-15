@@ -2,6 +2,7 @@
 
 import { Card, CardContent } from "@/components/ui/card";
 import { formatHHMMDisplay } from "@/lib/utils/time";
+import { usePreferences } from "@/components/providers/preferences-provider";
 import {
   Clock,
   Plane,
@@ -34,40 +35,42 @@ interface StatsDashboardProps {
 }
 
 export function StatsDashboard({ stats }: StatsDashboardProps) {
+  const { preferences } = usePreferences();
+  const tf = preferences.display.timeFormat;
   const statCards = [
     {
       label: "Block Time",
-      value: formatHHMMDisplay(stats.blockTime),
+      value: formatHHMMDisplay(stats.blockTime, tf),
       icon: Timer,
       color: "text-primary",
     },
     {
       label: "Flight Time",
-      value: formatHHMMDisplay(stats.flightTime),
+      value: formatHHMMDisplay(stats.flightTime, tf),
       icon: Clock,
       color: "text-accent",
     },
     {
       label: "P1 (PIC)",
-      value: formatHHMMDisplay(stats.p1Time),
+      value: formatHHMMDisplay(stats.p1Time, tf),
       icon: Navigation,
       color: "text-chart-4",
     },
     {
       label: "P2 (SIC)",
-      value: formatHHMMDisplay(stats.p2Time),
+      value: formatHHMMDisplay(stats.p2Time, tf),
       icon: Users,
       color: "text-chart-2",
     },
     {
       label: "Night Time",
-      value: formatHHMMDisplay(stats.nightTime),
+      value: formatHHMMDisplay(stats.nightTime, tf),
       icon: Moon,
       color: "text-chart-3",
     },
     {
       label: "IFR Time",
-      value: formatHHMMDisplay(stats.ifrTime),
+      value: formatHHMMDisplay(stats.ifrTime, tf),
       icon: Navigation,
       color: "text-chart-5",
     },

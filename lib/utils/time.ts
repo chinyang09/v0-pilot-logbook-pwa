@@ -90,16 +90,31 @@ export function calculateDuration(
 }
 
 /**
- * Format HH:MM for display (e.g., "2:30" or "12:45")
- * No leading zero on hours
+ * Format HH:MM for display
+ * @param hhmm - Time in HH:MM format
+ * @param format - Display format: "24h" (2:30), "24h-padded" (02:30), "12h" (2:30 PM)
  */
-export function formatHHMMDisplay(hhmm: string | undefined | null): string {
+export function formatHHMMDisplay(
+  hhmm: string | undefined | null,
+  format: "24h" | "24h-padded" | "12h" = "24h"
+): string {
   if (!hhmm || typeof hhmm !== "string") return "0:00"
   const parts = hhmm.split(":")
   if (parts.length !== 2) return "0:00"
   const hours = Number.parseInt(parts[0], 10)
   const minutes = parts[1]
   if (Number.isNaN(hours)) return "0:00"
+
+  if (format === "24h-padded") {
+    return `${hours.toString().padStart(2, "0")}:${minutes}`
+  }
+
+  if (format === "12h") {
+    const period = hours >= 12 ? "PM" : "AM"
+    const h12 = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours
+    return `${h12}:${minutes} ${period}`
+  }
+
   return `${hours}:${minutes}`
 }
 

@@ -57,6 +57,7 @@ import {
   isValidHHMM,
 } from "@/lib/utils/time";
 import { usePersonnel } from "@/hooks/data";
+import { usePreferences } from "@/components/providers/preferences-provider";
 import { ImageImportButton } from "@/components/image-import-button";
 import type { ExtractedFlightData } from "@/lib/ocr";
 
@@ -352,6 +353,7 @@ export function FlightForm({
   const router = useRouter();
   const { airports } = useAirportDatabase();
   const { personnel } = usePersonnel();
+  const { preferences } = usePreferences();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
 
@@ -579,6 +581,7 @@ export function FlightForm({
 
     let nightTime = "00:00";
     let dayTime = "00:00";
+    const af = preferences.autoFill;
 
     // FALLBACK LOGIC: Create effective times for calculation
     // If OFF/ON are missing or invalid, fallback to OUT/IN to ensure we have a valid timeline
@@ -597,6 +600,7 @@ export function FlightForm({
         : formData.inTime;
 
     if (
+      af.night !== false &&
       formData.date &&
       formData.outTime &&
       formData.inTime && // We only STRICTLY need Out and In for the calculation to proceed
@@ -671,13 +675,28 @@ export function FlightForm({
       formData.pilotRole || "PIC"
     );
 
+    // Gate role times by auto-fill preferences
+    const gatedRoleTimes = {
+      picTime: af.pic !== false ? roleTimes.picTime : "00:00",
+      sicTime: af.sic !== false ? roleTimes.sicTime : "00:00",
+      picusTime: af.p1us !== false ? roleTimes.picusTime : "00:00",
+      dualTime: af.dualRcvd !== false ? roleTimes.dualTime : "00:00",
+      instructorTime: af.dualGiven !== false ? roleTimes.instructorTime : "00:00",
+    };
+
+    // Auto-fill cross-country time
+    const crossCountryTime = af.xc !== false && formData.departureIcao && formData.arrivalIcao && formData.departureIcao !== formData.arrivalIcao
+      ? blockTime
+      : "00:00";
+
     return {
       blockTime,
       flightTime,
       nightTime,
       dayTime,
       ...toLdg,
-      ...roleTimes,
+      ...gatedRoleTimes,
+      crossCountryTime,
     };
   }, [
     formData.date,
@@ -687,8 +706,11 @@ export function FlightForm({
     formData.inTime,
     formData.pilotFlying,
     formData.pilotRole,
+    formData.departureIcao,
+    formData.arrivalIcao,
     depAirport,
     arrAirport,
+    preferences.autoFill,
   ]);
 
   // Update form with calculated values (respecting manual overrides).
@@ -1331,14 +1353,15 @@ export function FlightForm({
           </SwipeableRow>
 
           <SwipeableRow onClear={() => clearField("flightNumber")}>
-            <SettingsRow
-              label="Flight #"
-              value={formData.flightNumber}
-              onClick={() => {
-                const num = prompt("Flight Number:", formData.flightNumber);
-                if (num !== null) updateField("flightNumber", num);
-              }}
-            />
+            <SettingsRow label="Flight #">
+              <input
+                type="text"
+                className="text-right bg-transparent outline-none text-foreground w-32 placeholder:text-muted-foreground"
+                placeholder="-"
+                value={formData.flightNumber || ""}
+                onChange={(e) => updateField("flightNumber", e.target.value.toUpperCase())}
+              />
+            </SettingsRow>
           </SwipeableRow>
 
           <SwipeableRow

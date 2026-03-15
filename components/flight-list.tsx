@@ -16,6 +16,9 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { FlightLog, Aircraft, Airport, Personnel } from "@/lib/db";
 import { deleteFlight } from "@/lib/db";
 import { formatHHMMDisplay } from "@/lib/utils/time";
+import { getDepartureDisplay, getArrivalDisplay } from "@/lib/utils/airport-display";
+import { usePreferences } from "@/components/providers/preferences-provider";
+import type { DisplayPreferences } from "@/types/db/stores.types";
 import { syncService } from "@/lib/sync";
 import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
@@ -108,6 +111,7 @@ interface SwipeableFlightCardProps {
   onToggleLock: () => void;
   personnel?: Personnel[];
   isSelected?: boolean;
+  displayPrefs?: DisplayPreferences;
 }
 
 const SwipeableFlightCard = memo(function SwipeableFlightCard({
@@ -117,6 +121,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   onToggleLock,
   personnel = [],
   isSelected = false,
+  displayPrefs,
 }: SwipeableFlightCardProps) {
   const isLocked = flight.isLocked || false;
   const isDraft = flight.isDraft || false;
@@ -187,7 +192,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
                   <div className="flex items-center gap-1 flex-1 justify-center">
                     <div className="h-px flex-1 bg-border " />
                     <span className="text-base font-medium whitespace-nowrap px-1">
-                      {formatHHMMDisplay(flight.blockTime)} hrs
+                      {formatHHMMDisplay(flight.blockTime, displayPrefs?.timeFormat)} hrs
                     </span>
                     <div className="h-px flex-1 bg-border " />
                   </div>
@@ -198,10 +203,10 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
 
                 <div className="flex items-center justify-between mt-0">
                   <span className="text-2xl font-bold leading-tight tracking-tight">
-                    {flight.departureIcao || ""}
+                    {getDepartureDisplay(flight, displayPrefs?.airportIdentifier)}
                   </span>
                   <span className="text-2xl font-bold leading-tight tracking-tight">
-                    {flight.arrivalIcao || ""}
+                    {getArrivalDisplay(flight, displayPrefs?.airportIdentifier)}
                   </span>
                 </div>
               </div>
@@ -309,6 +314,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     },
     ref
   ) {
+    const { preferences } = usePreferences();
     const { confirmDelete, handleDelete, DeleteDialog } = useDeleteConfirmation<FlightLog>();
 
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -686,6 +692,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                             onToggleLock={() => handleToggleLock(flight)}
                             personnel={personnel}
                             isSelected={selectedFlightId === flight.id}
+                            displayPrefs={preferences.display}
                           />
                         </div>
                       </div>

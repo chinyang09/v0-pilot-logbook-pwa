@@ -9,7 +9,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent } from "@/components/ui/card"
 import { syncService } from "@/lib/sync"
 import { useAuth } from "@/components/providers/auth-provider"
-import { UserMenu } from "@/components/user-menu"
 import { useFlights, useFlightStats, refreshAllData, useDBReady, useExpiringCurrencies } from "@/hooks/data"
 import { useUnresolvedDiscrepancies } from "@/hooks/data/use-discrepancies"
 import { useScheduleEntries } from "@/hooks/data/use-schedule"
@@ -17,11 +16,14 @@ import { AlertCircle, Plane, Calendar, TrendingUp, Loader2, ShieldAlert } from "
 import { getDutyPeriodsFromSchedule, calculateCumulativeLimits, getComplianceStatus } from "@/lib/utils/roster/fdp-calculator"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
+import { getDepartureDisplay, getArrivalDisplay } from "@/lib/utils/airport-display"
+import { usePreferences } from "@/components/providers/preferences-provider"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 
 export default function Dashboard() {
   const { user, isLoading: authLoading, isAuthenticated } = useAuth()
+  const { preferences } = usePreferences()
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
   const { flights, isLoading: flightsLoading } = useFlights()
   const { stats, isLoading: statsLoading, refresh: refreshStats } = useFlightStats()
@@ -91,7 +93,6 @@ export default function Dashboard() {
       header={
         <StandardPageHeader
           title="Dashboard"
-          actions={<UserMenu />}
         />
       }
     >
@@ -418,16 +419,16 @@ export default function Dashboard() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="text-sm">
-                            <span className="font-semibold text-foreground">{flight.departureIcao}</span>
+                            <span className="font-semibold text-foreground">{getDepartureDisplay(flight, preferences.display.airportIdentifier)}</span>
                             <span className="text-muted-foreground mx-2">→</span>
-                            <span className="font-semibold text-foreground">{flight.arrivalIcao}</span>
+                            <span className="font-semibold text-foreground">{getArrivalDisplay(flight, preferences.display.airportIdentifier)}</span>
                           </div>
                           {flight.flightNumber && (
                             <span className="text-xs text-muted-foreground">{flight.flightNumber}</span>
                           )}
                         </div>
                         <div className="text-right">
-                          <p className="text-sm font-mono text-foreground">{formatHHMMDisplay(flight.flightTime)}</p>
+                          <p className="text-sm font-mono text-foreground">{formatHHMMDisplay(flight.flightTime, preferences.display.timeFormat)}</p>
                           <p className="text-xs text-muted-foreground">
                             {new Date(flight.date).toLocaleDateString(undefined, {
                               month: "short",
