@@ -9,7 +9,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent } from "@/components/ui/card"
 import { syncService } from "@/lib/sync"
 import { useAuth } from "@/components/providers/auth-provider"
-import { UserMenu } from "@/components/user-menu"
 import { useFlights, useFlightStats, refreshAllData, useDBReady, useExpiringCurrencies } from "@/hooks/data"
 import { useUnresolvedDiscrepancies } from "@/hooks/data/use-discrepancies"
 import { useScheduleEntries } from "@/hooks/data/use-schedule"
@@ -94,7 +93,6 @@ export default function Dashboard() {
       header={
         <StandardPageHeader
           title="Dashboard"
-          actions={<UserMenu />}
         />
       }
     >

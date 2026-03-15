@@ -13,11 +13,14 @@ export interface FieldOrder {
   notes: string[]
 }
 
+export type ThemePreference = "light" | "dark" | "system"
+
 export interface DisplayPreferences {
   timeFormat: "24h" | "24h-padded" | "12h"
   useZuluTime: boolean
   airportIdentifier: "icao" | "iata" | "both"
   coordinateFormat: "decimal" | "dms"
+  theme: ThemePreference
 }
 
 export interface AutoFillPreferences {
@@ -49,6 +52,7 @@ export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   useZuluTime: true,
   airportIdentifier: "icao",
   coordinateFormat: "decimal",
+  theme: "dark",
 }
 
 export const DEFAULT_AUTO_FILL_PREFERENCES: AutoFillPreferences = {
@@ -75,6 +79,18 @@ export const DEFAULT_DUTY_TIME_DEFAULTS: DutyTimeDefaults = {
   minutesAfterIn: 30,
 }
 
+export type BottomNavTab =
+  | "dashboard" | "logbook" | "roster" | "aircraft"
+  | "crew" | "airports" | "currencies" | "settings" | "account"
+
+export interface NavigationPreferences {
+  bottomNavTabs: [BottomNavTab, BottomNavTab, BottomNavTab, BottomNavTab]
+}
+
+export const DEFAULT_NAVIGATION_PREFERENCES: NavigationPreferences = {
+  bottomNavTabs: ["dashboard", "logbook", "roster", "aircraft"],
+}
+
 export interface UserPreferences {
   key: string
   fieldOrder: FieldOrder
@@ -86,6 +102,7 @@ export interface UserPreferences {
   display?: DisplayPreferences
   autoFill?: AutoFillPreferences
   dutyTimeDefaults?: DutyTimeDefaults
+  navigation?: NavigationPreferences
   createdAt: number
   updatedAt: number
 }

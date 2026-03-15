@@ -14,7 +14,6 @@ import {
   Calendar,
   AlertTriangle,
   Clock,
-  Database,
   UserCircle,
   Settings,
   ChevronDown,
@@ -68,7 +67,6 @@ const navSections: NavSection[] = [
     items: [
       { label: "Account", href: "/account", icon: <UserCircle className="h-4 w-4" /> },
       { label: "Settings", href: "/settings", icon: <Settings className="h-4 w-4" /> },
-      { label: "Data", href: "/data", icon: <Database className="h-4 w-4" /> },
     ],
   },
 ]

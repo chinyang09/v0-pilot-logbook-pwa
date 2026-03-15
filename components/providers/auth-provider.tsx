@@ -36,7 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (registration.active) {
           registration.active.postMessage({
             type: "CACHE_PAGES",
-            pages: ["/", "/logbook", "/new-flight", "/aircraft", "/airports", "/crew", "/data"],
+            pages: ["/", "/logbook", "/new-flight", "/aircraft", "/airports", "/crew"],
           })
           console.log("[Auth] Triggered proactive page caching after login")
         }
@@ -166,7 +166,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               if (registration.active) {
                 registration.active.postMessage({
                   type: "CACHE_PAGES",
-                  pages: ["/", "/logbook", "/new-flight", "/aircraft", "/airports", "/crew", "/data"],
+                  pages: ["/", "/logbook", "/new-flight", "/aircraft", "/airports", "/crew"],
                 })
               }
             })

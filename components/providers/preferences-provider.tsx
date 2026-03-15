@@ -2,18 +2,21 @@
 
 import type React from "react"
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
+import { useTheme } from "next-themes"
 import { getUserPreferences, saveUserPreferences } from "@/lib/db"
-import type { DisplayPreferences, AutoFillPreferences, DutyTimeDefaults } from "@/types/db/stores.types"
+import type { DisplayPreferences, AutoFillPreferences, DutyTimeDefaults, NavigationPreferences } from "@/types/db/stores.types"
 import {
   DEFAULT_DISPLAY_PREFERENCES,
   DEFAULT_AUTO_FILL_PREFERENCES,
   DEFAULT_DUTY_TIME_DEFAULTS,
+  DEFAULT_NAVIGATION_PREFERENCES,
 } from "@/types/db/stores.types"
 
 export interface ResolvedPreferences {
   display: DisplayPreferences
   autoFill: AutoFillPreferences
   dutyTimeDefaults: DutyTimeDefaults
+  navigation: NavigationPreferences
 }
 
 interface PreferencesContextType {
@@ -22,12 +25,14 @@ interface PreferencesContextType {
   updateDisplay: (partial: Partial<DisplayPreferences>) => Promise<void>
   updateAutoFill: (partial: Partial<AutoFillPreferences>) => Promise<void>
   updateDutyTimeDefaults: (partial: Partial<DutyTimeDefaults>) => Promise<void>
+  updateNavigation: (nav: NavigationPreferences) => Promise<void>
 }
 
 const defaultResolved: ResolvedPreferences = {
   display: DEFAULT_DISPLAY_PREFERENCES,
   autoFill: DEFAULT_AUTO_FILL_PREFERENCES,
   dutyTimeDefaults: DEFAULT_DUTY_TIME_DEFAULTS,
+  navigation: DEFAULT_NAVIGATION_PREFERENCES,
 }
 
 const PreferencesContext = createContext<PreferencesContextType | undefined>(undefined)
@@ -36,20 +41,29 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   const [preferences, setPreferences] = useState<ResolvedPreferences>(defaultResolved)
   const [isLoading, setIsLoading] = useState(true)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { setTheme } = useTheme()
 
   useEffect(() => {
     getUserPreferences().then((prefs) => {
       if (prefs) {
-        setPreferences({
+        const resolved = {
           display: { ...DEFAULT_DISPLAY_PREFERENCES, ...prefs.display },
           autoFill: { ...DEFAULT_AUTO_FILL_PREFERENCES, ...prefs.autoFill },
           dutyTimeDefaults: { ...DEFAULT_DUTY_TIME_DEFAULTS, ...prefs.dutyTimeDefaults },
-        })
+          navigation: { ...DEFAULT_NAVIGATION_PREFERENCES, ...prefs.navigation },
+        }
+        setPreferences(resolved)
+
+        // Sync persisted theme preference with next-themes on mount
+        if (resolved.display.theme) {
+          setTheme(resolved.display.theme)
+        }
       }
       setIsLoading(false)
     }).catch(() => {
       setIsLoading(false)
     })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const persistPreferences = useCallback((updated: ResolvedPreferences) => {
@@ -96,6 +110,17 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     })
   }, [persistPreferences])
 
+  const updateNavigation = useCallback(async (nav: NavigationPreferences) => {
+    setPreferences((prev) => {
+      const updated = {
+        ...prev,
+        navigation: nav,
+      }
+      persistPreferences(updated)
+      return updated
+    })
+  }, [persistPreferences])
+
   return (
     <PreferencesContext.Provider
       value={{
@@ -104,6 +129,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
         updateDisplay,
         updateAutoFill,
         updateDutyTimeDefaults,
+        updateNavigation,
       }}
     >
       {children}

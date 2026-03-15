@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
 import { SyncProvider } from "@/components/providers/sync-provider"
 import { AuthProvider } from "@/components/providers/auth-provider"
+import { ThemeProvider } from "@/components/providers/theme-provider"
 
 import { OCRModelsPreloader } from "@/components/ocr-models-preloader"
 import "./globals.css"
@@ -30,9 +31,9 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: [
     { media: "(prefers-color-scheme: dark)", color: "#05080B" },
-    { media: "(prefers-color-scheme: light)", color: "#05080B" },
+    { media: "(prefers-color-scheme: light)", color: "#f5f5f7" },
   ],
-  colorScheme: "dark",
+  colorScheme: "dark light",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -46,21 +47,19 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark" style={{ backgroundColor: "#05080B" }}>
+    <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Android status bar color */}
-        <meta name="theme-color" content="#05080B" />
         {/* Windows tile color */}
         <meta name="msapplication-TileColor" content="#05080B" />
-        {/* Android navbar color */}
-        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05080B" />
       </head>
-      <body className="bg-background font-sans antialiased" style={{ backgroundColor: "#05080B" }}>
-        <ServiceWorkerRegister />
-        <OCRModelsPreloader />
-        <AuthProvider>
-          <SyncProvider>{children}</SyncProvider>
-        </AuthProvider>
+      <body className="bg-background font-sans antialiased">
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+          <ServiceWorkerRegister />
+          <OCRModelsPreloader />
+          <AuthProvider>
+            <SyncProvider>{children}</SyncProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   )

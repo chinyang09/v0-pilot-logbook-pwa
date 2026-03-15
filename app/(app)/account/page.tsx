@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { useAuth } from "@/components/providers/auth-provider"
+import { PageContainer } from "@/components/page-container"
+import { StandardPageHeader } from "@/components/standard-page-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -198,15 +200,17 @@ export default function AccountPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
+      <PageContainer header={<StandardPageHeader title="Account" />}>
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      </PageContainer>
     )
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-6 pb-safe">
-      <h1 className="text-2xl font-bold">Account</h1>
+    <PageContainer header={<StandardPageHeader title="Account" />}>
+      <div className="px-4 pt-4 pb-safe space-y-6">
 
       {/* Profile Section */}
       <Card>
@@ -445,6 +449,7 @@ export default function AccountPage() {
           </AlertDialog>
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </PageContainer>
   )
 }
