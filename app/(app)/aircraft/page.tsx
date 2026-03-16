@@ -32,6 +32,7 @@ import { submitAircraftToServer } from "@/lib/submissions/submit"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog"
 import { usePageActive } from "@/hooks/use-page-active"
+import { useRegisterMainActions } from "@/hooks/use-page-actions"
 
 // Memoized swipeable aircraft card (matches crew card pattern)
 interface AircraftCardProps {
@@ -584,18 +585,29 @@ export default function AircraftPage() {
   const showRecentlyUsed = !debouncedSearchQuery && recentNonFavorites.length > 0
   const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim()
 
+  // Desktop floating glass bar actions — add button only (search is inline in content)
+  const aircraftActions = useMemo(() => (
+    <Button size="icon-sm" onClick={handleAddClick}>
+      <Plus className="h-4 w-4" />
+    </Button>
+  ), [handleAddClick])
+
+  useRegisterMainActions(aircraftActions, isActive)
+
   return (
     <PageContainer
       header={
-        <SearchablePageHeader
-          title={selectMode ? "Select Aircraft" : "Aircraft"}
-          showBack={selectMode}
-          onBack={selectMode ? () => router.back() : undefined}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          onAdd={handleAddClick}
-          searchPlaceholder="Search registration, type code..."
-        />
+        isDesktop ? undefined : (
+          <SearchablePageHeader
+            title={selectMode ? "Select Aircraft" : "Aircraft"}
+            showBack={selectMode}
+            onBack={selectMode ? () => router.back() : undefined}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            onAdd={handleAddClick}
+            searchPlaceholder="Search registration, type code..."
+          />
+        )
       }
       rightContent={
         showFastScroll ? (

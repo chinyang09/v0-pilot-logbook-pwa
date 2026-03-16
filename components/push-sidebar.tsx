@@ -59,22 +59,20 @@ export function PushSidebar() {
           style={{ borderRadius: "0px 20px 20px 0px" }}
         >
           <div className="flex flex-col h-full pt-safe">
-            {/* Header */}
-            <div className="h-14 flex-shrink-0 flex items-center justify-between px-4">
-              <span className="text-sm font-semibold text-foreground/70">Navigation</span>
+            {/* Close button — top right */}
+            <div className="h-12 flex-shrink-0 flex items-center justify-end px-3">
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={close}
-                className="h-9 w-9 text-foreground/70 hover:text-foreground"
+                className="h-9 w-9 text-foreground/60 hover:text-foreground"
               >
                 <PanelLeft className="h-4 w-4" />
               </Button>
             </div>
 
-            {/* Flat nav list — GitHub Mobile style */}
-            <nav className="flex-1 overflow-y-auto px-3 pb-4">
-              {/* Dashboard */}
+            {/* Flat nav list — GitHub Mobile style, no section headers */}
+            <nav className="flex-1 overflow-y-auto px-3 pb-4 space-y-0.5">
               <SidebarNavItem
                 href={dashboardNavItem.href}
                 icon={dashboardNavItem.icon}
@@ -82,24 +80,17 @@ export function PushSidebar() {
                 isActive={isItemActive("/")}
               />
 
-              {/* Sections with flat items */}
-              {navSections.map((section) => (
-                <div key={section.label}>
-                  <div className="h-px bg-border/30 my-2 mx-1" />
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground/40 px-3 py-2">
-                    {section.label}
-                  </p>
-                  {section.items.map((item) => (
-                    <SidebarNavItem
-                      key={item.href}
-                      href={item.href}
-                      icon={item.icon}
-                      label={item.label}
-                      isActive={isItemActive(item.href)}
-                    />
-                  ))}
-                </div>
-              ))}
+              {navSections.flatMap((section) =>
+                section.items.map((item) => (
+                  <SidebarNavItem
+                    key={item.href}
+                    href={item.href}
+                    icon={item.icon}
+                    label={item.label}
+                    isActive={isItemActive(item.href)}
+                  />
+                ))
+              )}
             </nav>
           </div>
         </GlassContainer>

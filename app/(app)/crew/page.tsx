@@ -29,6 +29,7 @@ import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { CrewDetailPanel } from "@/components/crew-detail-panel";
 import { usePageActive } from "@/hooks/use-page-active";
+import { useRegisterMainActions } from "@/hooks/use-page-actions";
 
 // Memoized crew card to prevent unnecessary re-renders during virtualization
 const SwipeableCrewCard = memo(function SwipeableCrewCard({
@@ -448,18 +449,29 @@ export default function CrewPage() {
 
   const showFastScroll = !debouncedSearchQuery && fastScrollItems.length > 1;
 
+  // Desktop floating glass bar actions
+  const crewActions = useMemo(() => (
+    <Button size="icon-sm" onClick={handleAddCrew}>
+      <Plus className="h-4 w-4" />
+    </Button>
+  ), [handleAddCrew]);
+
+  useRegisterMainActions(crewActions, isActive);
+
   return (
     <PageContainer
       header={
-        <SearchablePageHeader
-          title={pageTitle}
-          showBack={!!fieldType}
-          onBack={fieldType ? () => router.back() : undefined}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          onAdd={handleAddCrew}
-          searchPlaceholder="Search crew..."
-        />
+        isDesktop ? undefined : (
+          <SearchablePageHeader
+            title={pageTitle}
+            showBack={!!fieldType}
+            onBack={fieldType ? () => router.back() : undefined}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            onAdd={handleAddCrew}
+            searchPlaceholder="Search crew..."
+          />
+        )
       }
       rightContent={
         showFastScroll ? (

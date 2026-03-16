@@ -21,6 +21,7 @@ import {
 } from "@/hooks/data"
 import { mutate } from "swr"
 import { Calendar, Plus, Search, X } from "lucide-react"
+import { AnimatePresence, motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { StandardPageHeader } from "@/components/standard-page-header"
 import { cn } from "@/lib/utils"
@@ -29,6 +30,7 @@ import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useSearchParams } from "next/navigation"
 import { usePageActive } from "@/hooks/use-page-active"
+import { useRegisterMainActions } from "@/hooks/use-page-actions"
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -116,7 +118,7 @@ export default function LogbookPage() {
   }, [setHasDetailSupport])
 
   // Re-assert detail panel ownership when this keep-alive page becomes active again
-  usePageActive("/logbook", useCallback(() => {
+  const isActive = usePageActive("/logbook", useCallback(() => {
     setHasDetailSupport(true)
   }, [setHasDetailSupport]))
 
@@ -360,71 +362,86 @@ export default function LogbookPage() {
   const hasActiveFilters = selectedFilters.length > 0
   const isLoading = dbLoading || !dbReady
 
+  // Action buttons for the desktop floating glass bar
+  const logbookActions = useMemo(() => (
+    <>
+      <Button
+        variant={showCalendar ? "default" : "ghost"}
+        size="icon-sm"
+        onClick={() => {
+          toggleCalendar(!showCalendar)
+          setSelectedDate(null)
+          setSearchFocused(false)
+        }}
+      >
+        <Calendar className="h-4 w-4" />
+      </Button>
+
+      <CSVImportButton
+        onComplete={() => {
+          refreshAllData()
+        }}
+      />
+
+      <Button
+        size="icon-sm"
+        onClick={async () => {
+          const draftFlight = await createFlight()
+          mutate(
+            CACHE_KEYS.flights,
+            (prev: FlightLog[] | undefined) => [draftFlight, ...(prev ?? [])],
+            { revalidate: false }
+          )
+          setSelectedFlightId(draftFlight.id)
+        }}
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+    </>
+  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId])
+
+  // Register actions for the desktop floating bar
+  useRegisterMainActions(logbookActions, isActive)
+
   return (
     <div className="h-full relative flex flex-col">
-      {/* Combined header + calendar overlay - single continuous frosted glass */}
-      <div className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
-        <StandardPageHeader
-          title={showCalendar ? `${MONTHS[selectedMonth.month]} ${selectedMonth.year}` : "Logbook"}
-          className="bg-transparent backdrop-blur-none border-b-0"
-          actions={
-            <>
-              <Button
-                variant={showCalendar ? "default" : "ghost"}
-                size="icon-sm"
-                onClick={() => {
-                  toggleCalendar(!showCalendar)
-                  setSelectedDate(null)
-                  setSearchFocused(false)
-                }}
-              >
-                <Calendar className="h-4 w-4" />
-              </Button>
-
-              <CSVImportButton
-                onComplete={() => {
-                  refreshAllData()
-                }}
-              />
-
-              <Button
-                size="icon-sm"
-                onClick={async () => {
-                  const draftFlight = await createFlight()
-                  // Optimistic: prepend new draft to the SWR cache immediately.
-                  mutate(
-                    CACHE_KEYS.flights,
-                    (prev: FlightLog[] | undefined) => [draftFlight, ...(prev ?? [])],
-                    { revalidate: false }
-                  )
-                  setSelectedFlightId(draftFlight.id)
-                }}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </>
-          }
-        />
-        {/* Calendar collapse section */}
-        <div
-          ref={calendarContainerRef}
-          className={cn(
-            "transition-[max-height,opacity] duration-300 ease-in-out overflow-hidden",
-            showCalendar ? "opacity-100" : "max-h-0 opacity-0 pointer-events-none",
-          )}
-          style={showCalendar ? { maxHeight: `${calendarNaturalHeight}px` } : undefined}
-        >
-          <LogbookCalendar
-            ref={calendarRef}
-            className="bg-transparent shadow-none border-none"
-            flights={flights}
-            selectedMonth={selectedMonth}
-            onMonthChange={handleCalendarMonthChange}
-            onDateSelect={handleDateSelect}
-            selectedDate={selectedDate}
-            onScrollStart={handleCalendarScrollStart}
+      {/* Mobile header — hidden on desktop where actions appear in floating glass bar */}
+      {!isDesktop && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
+          <StandardPageHeader
+            title={showCalendar ? `${MONTHS[selectedMonth.month]} ${selectedMonth.year}` : "Logbook"}
+            className="bg-transparent backdrop-blur-none border-b-0"
+            actions={logbookActions}
           />
         </div>
+      )}
+
+      {/* Calendar collapse section — expands from button with spring animation */}
+      <div ref={calendarContainerRef} className={cn("z-40", !isDesktop && "mt-12")}>
+        <AnimatePresence initial={false}>
+          {showCalendar && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 400, damping: 35 }}
+              className="overflow-hidden"
+            >
+              <div className="bg-background/30 backdrop-blur-xl border-b border-border/50">
+                <LogbookCalendar
+                  ref={calendarRef}
+                  className="bg-transparent shadow-none border-none"
+                  flights={flights}
+                  selectedMonth={selectedMonth}
+                  onMonthChange={handleCalendarMonthChange}
+                  onDateSelect={handleDateSelect}
+                  selectedDate={selectedDate}
+                  onScrollStart={handleCalendarScrollStart}
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* FLIGHT LIST */}
@@ -438,7 +455,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={48 + (showCalendar ? calendarNaturalHeight : 0)}
+          topSpacerHeight={isDesktop ? (showCalendar ? calendarNaturalHeight : 0) : 48 + (showCalendar ? calendarNaturalHeight : 0)}
           selectedFlightId={selectedFlightId}
           headerContent={
             <div className="flex-shrink-0 top-0 z-40 px-2 py-1">

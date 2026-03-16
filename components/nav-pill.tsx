@@ -3,7 +3,7 @@
 import type React from "react"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
-import { motion, useReducedMotion } from "framer-motion"
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
 import {
   LayoutDashboard,
   Book,
@@ -116,7 +116,7 @@ const instantTransition = {
  */
 export function NavPill() {
   const isDesktop = useIsDesktop()
-  const { toggle: toggleSidebar } = useSidebar()
+  const { isOpen: sidebarOpen, toggle: toggleSidebar } = useSidebar()
   const { hideNavbar } = useScrollNavbarContext()
   const pathname = usePathname()
   const router = useRouter()
@@ -136,6 +136,7 @@ export function NavPill() {
     <DesktopPill
       tabs={tabs}
       pathname={pathname}
+      sidebarOpen={sidebarOpen}
       onToggleSidebar={toggleSidebar}
       onCreateFlight={handleCreateFlight}
       transition={transition}
@@ -151,79 +152,87 @@ export function NavPill() {
   )
 }
 
-/** Desktop: top floating pill with sidebar toggle — 1.2x scaled */
+/** Desktop: top floating pill with sidebar toggle.
+ * Morphs to the left when sidebar opens, returns to center when closed. */
 function DesktopPill({
   tabs,
   pathname,
+  sidebarOpen,
   onToggleSidebar,
   onCreateFlight,
   transition,
 }: {
   tabs: readonly BottomNavTab[]
   pathname: string
+  sidebarOpen: boolean
   onToggleSidebar: () => void
   onCreateFlight: () => void
   transition: typeof springTransition | typeof instantTransition
 }) {
   return (
-    <motion.div
-      className="fixed z-[100] top-[calc(env(safe-area-inset-top,0px)+0.5rem)] left-1/2"
-      initial={{ x: "-50%", opacity: 0, scale: 0.95 }}
-      animate={{ x: "-50%", opacity: 1, scale: 1 }}
-      transition={transition}
-    >
-      <GlassContainer cornerRadius={28}>
-        <nav className="flex items-center gap-1.5 px-3 h-14">
-          {/* Sidebar toggle */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleSidebar}
-            className="h-11 w-11 text-foreground/70 hover:text-foreground flex-shrink-0"
-          >
-            <PanelLeft className="h-5 w-5" />
-          </Button>
+    <AnimatePresence>
+      {!sidebarOpen && (
+        <motion.div
+          className="fixed z-[100] top-[calc(env(safe-area-inset-top,0px)+0.5rem)] left-1/2"
+          initial={{ x: "-50%", opacity: 0, scale: 0.95 }}
+          animate={{ x: "-50%", opacity: 1, scale: 1 }}
+          exit={{ x: "-80%", opacity: 0, scale: 0.9 }}
+          transition={transition}
+        >
+          <GlassContainer cornerRadius={28}>
+            <nav className="flex items-center gap-1.5 px-3 h-14">
+              {/* Sidebar toggle */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onToggleSidebar}
+                className="h-11 w-11 text-foreground/70 hover:text-foreground flex-shrink-0"
+              >
+                <PanelLeft className="h-5 w-5" />
+              </Button>
 
-          <div className="w-px h-7 bg-border/50 mx-0.5" />
+              <div className="w-px h-7 bg-border/50 mx-0.5" />
 
-          {/* Nav tabs */}
-          {tabs.map((tabKey) => {
-            const tab = TAB_CONFIG[tabKey]
-            if (!tab) return null
-            const Icon = tab.icon
-            const active = tab.isActive(pathname)
-            return (
-              <Link key={tabKey} href={tab.href}>
+              {/* Nav tabs */}
+              {tabs.map((tabKey) => {
+                const tab = TAB_CONFIG[tabKey]
+                if (!tab) return null
+                const Icon = tab.icon
+                const active = tab.isActive(pathname)
+                return (
+                  <Link key={tabKey} href={tab.href}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        "h-11 w-11",
+                        active ? "text-primary" : "text-foreground/60 hover:text-foreground"
+                      )}
+                    >
+                      <Icon className="h-6 w-6" />
+                    </Button>
+                  </Link>
+                )
+              })}
+
+              <div className="w-px h-7 bg-border/50 mx-0.5" />
+
+              {/* New flight FAB — glass with primary tint */}
+              <GlassContainer cornerRadius={999} tintColor="var(--primary)" tintOpacity={0.35}>
                 <Button
                   variant="ghost"
+                  className="h-11 w-11 text-primary-foreground hover:text-primary-foreground"
                   size="icon"
-                  className={cn(
-                    "h-11 w-11",
-                    active ? "text-primary" : "text-foreground/60 hover:text-foreground"
-                  )}
+                  onClick={onCreateFlight}
                 >
-                  <Icon className="h-6 w-6" />
+                  <Plus className="h-6 w-6" />
                 </Button>
-              </Link>
-            )
-          })}
-
-          <div className="w-px h-7 bg-border/50 mx-0.5" />
-
-          {/* New flight FAB — glass with primary tint */}
-          <GlassContainer cornerRadius={999} tintColor="var(--primary)" tintOpacity={0.35}>
-            <Button
-              variant="ghost"
-              className="h-11 w-11 text-primary-foreground hover:text-primary-foreground"
-              size="icon"
-              onClick={onCreateFlight}
-            >
-              <Plus className="h-6 w-6" />
-            </Button>
+              </GlassContainer>
+            </nav>
           </GlassContainer>
-        </nav>
-      </GlassContainer>
-    </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }
 

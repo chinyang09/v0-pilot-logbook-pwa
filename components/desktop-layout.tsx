@@ -14,6 +14,8 @@ import { FlightForm } from "@/components/flight-form"
 import { NavPill } from "@/components/nav-pill"
 import { PushSidebar } from "@/components/push-sidebar"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
+import { GlassContainer } from "@/components/ui/glass-container"
+import { usePageActions } from "@/hooks/use-page-actions"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
 import { syncService } from "@/lib/sync"
@@ -98,6 +100,7 @@ function AppShellContent({ children }: AppShellProps) {
   const { selectedId } = useDetailPanel()
   const isDesktop = useIsDesktop()
   const searchParams = useSearchParams()
+  const { mainActions, detailActions } = usePageActions()
 
   // Only show mobile overlay when the selection is explicit (in URL via ?selected=).
   // SessionStorage-restored selections set state but don't update the URL,
@@ -117,8 +120,7 @@ function AppShellContent({ children }: AppShellProps) {
           className="h-full md:min-w-[750px]"
         >
           <ResizablePanel defaultSize={35} minSize={30} className="md:min-w-[375px]">
-            {/* md:pt-16 clears the floating top pill on desktop (pill is h-14 + 0.5rem top) */}
-            <div className="h-full flex flex-col overflow-hidden relative md:pt-16">{children}</div>
+            <div className="h-full flex flex-col overflow-hidden relative">{children}</div>
           </ResizablePanel>
 
           {/* Resize handle — desktop only */}
@@ -144,6 +146,35 @@ function AppShellContent({ children }: AppShellProps) {
           }}
         >
           <DetailPanelContent />
+        </div>
+      )}
+
+      {/* Floating action bar — desktop only.
+          Main panel actions flush-left, detail panel actions flush-right,
+          both inline with the centered nav pill. */}
+      {isDesktop && (mainActions || detailActions) && (
+        <div className="fixed z-[99] top-[calc(env(safe-area-inset-top,0px)+0.5rem)] left-0 right-0 pointer-events-none hidden md:flex items-start justify-between px-4">
+          {/* Main panel actions — flush left */}
+          <div className="pointer-events-auto">
+            {mainActions && (
+              <GlassContainer cornerRadius={22}>
+                <div className="flex items-center gap-1 px-2 h-11">
+                  {mainActions}
+                </div>
+              </GlassContainer>
+            )}
+          </div>
+
+          {/* Detail panel actions — flush right */}
+          <div className="pointer-events-auto">
+            {detailActions && (
+              <GlassContainer cornerRadius={22}>
+                <div className="flex items-center gap-1 px-2 h-11">
+                  {detailActions}
+                </div>
+              </GlassContainer>
+            )}
+          </div>
         </div>
       )}
 

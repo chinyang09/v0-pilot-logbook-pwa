@@ -28,6 +28,7 @@ import { AirportDetailPanel } from "@/components/airport-detail-panel";
 import { AirportNewForm } from "@/components/airport-new-form";
 import { useDebounce } from "@/hooks/use-debounce";
 import { usePageActive } from "@/hooks/use-page-active";
+import { useRegisterMainActions } from "@/hooks/use-page-actions";
 
 // Memoized airport card to prevent unnecessary re-renders during virtualization
 interface AirportCardProps {
@@ -526,18 +527,29 @@ export default function AirportsPage() {
     ? "Departure"
     : "Arrival";
 
+  // Desktop floating glass bar actions
+  const airportActions = useMemo(() => (
+    <Button size="icon-sm" onClick={handleAddClick}>
+      <Plus className="h-4 w-4" />
+    </Button>
+  ), [handleAddClick]);
+
+  useRegisterMainActions(airportActions, isActive);
+
   return (
     <PageContainer
       header={
-        <SearchablePageHeader
-          title={pageTitle}
-          showBack={!!fieldType}
-          onBack={fieldType ? () => router.back() : undefined}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          onAdd={handleAddClick}
-          searchPlaceholder="Search airports..."
-        />
+        isDesktop ? undefined : (
+          <SearchablePageHeader
+            title={pageTitle}
+            showBack={!!fieldType}
+            onBack={fieldType ? () => router.back() : undefined}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            onAdd={handleAddClick}
+            searchPlaceholder="Search airports..."
+          />
+        )
       }
       rightContent={
         showFastScroll ? (
