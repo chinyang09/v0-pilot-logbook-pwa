@@ -11,7 +11,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable"
 import { FlightForm } from "@/components/flight-form"
-import { NavPill, NavPillLayout } from "@/components/nav-pill"
+import { NavPill } from "@/components/nav-pill"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
@@ -90,7 +90,7 @@ function DetailPanelContent() {
  * Unified responsive shell.
  *
  * Mobile (<768px): Full-width content + floating bottom nav pill
- * Desktop (≥768px): Push sidebar (via NavPillLayout) + resizable split panels + floating top nav pill
+ * Desktop (≥768px): Resizable split panels + floating top nav pill + overlay sidebar
  */
 function AppShellContent({ children }: AppShellProps) {
   const { handleScroll } = useScrollNavbarContext()
@@ -105,30 +105,27 @@ function AppShellContent({ children }: AppShellProps) {
 
   return (
     <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden pt-safe">
-      {/* NavPillLayout wraps content — on desktop it provides the push sidebar */}
-      <NavPillLayout>
-        {/* Main content area with resizable panels */}
-        <div className="flex-1 flex min-w-0 md:overflow-x-auto h-full">
-          <ResizablePanelGroup
-            direction="horizontal"
-            autoSaveId="desktop-panel-layout"
-            className="h-full md:min-w-[750px]"
-          >
-            <ResizablePanel defaultSize={35} minSize={30} className="md:min-w-[375px]">
-              {/* md:pt-14 clears the floating top pill on desktop */}
-              <div className="h-full flex flex-col overflow-hidden relative md:pt-14">{children}</div>
-            </ResizablePanel>
+      {/* Main content area with resizable panels */}
+      <div className="flex-1 flex min-w-0 md:overflow-x-auto h-full">
+        <ResizablePanelGroup
+          direction="horizontal"
+          autoSaveId="desktop-panel-layout"
+          className="h-full md:min-w-[750px]"
+        >
+          <ResizablePanel defaultSize={35} minSize={30} className="md:min-w-[375px]">
+            {/* md:pt-16 clears the floating top pill on desktop (pill is h-14 + 0.5rem top) */}
+            <div className="h-full flex flex-col overflow-hidden relative md:pt-16">{children}</div>
+          </ResizablePanel>
 
-            {/* Resize handle — desktop only */}
-            <ResizableHandle withHandle className="hidden md:flex" />
+          {/* Resize handle — desktop only */}
+          <ResizableHandle withHandle className="hidden md:flex" />
 
-            {/* Detail panel — desktop only */}
-            <ResizablePanel defaultSize={65} minSize={25} className="hidden md:block">
-              {isDesktop && <DetailPanelContent />}
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </div>
-      </NavPillLayout>
+          {/* Detail panel — desktop only */}
+          <ResizablePanel defaultSize={65} minSize={25} className="hidden md:block">
+            {isDesktop && <DetailPanelContent />}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
 
       {/* Mobile detail overlay — sits above main content but behind the nav pill.
           z-[55] beats page headers (z-50), nav pill z-[60] wins. */}
@@ -146,7 +143,7 @@ function AppShellContent({ children }: AppShellProps) {
         </div>
       )}
 
-      {/* Floating nav pill — handles its own responsive positioning */}
+      {/* Floating nav pill — handles its own responsive positioning + sidebar overlay */}
       <NavPill />
 
       <PWAInstallPrompt />
