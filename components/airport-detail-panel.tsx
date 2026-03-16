@@ -62,7 +62,7 @@ export function AirportDetailPanel({ icao, onBack }: AirportDetailPanelProps) {
         <div className="px-2 h-12 flex items-center">
           <div className="w-16 flex-shrink-0">
             {onBack ? (
-              <Button variant="ghost" size="icon-sm" onClick={onBack} className="lg:hidden">
+              <Button variant="ghost" size="icon-sm" onClick={onBack} className="md:hidden">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
             ) : null}

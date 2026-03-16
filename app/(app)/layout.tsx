@@ -26,8 +26,8 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
  *
  * SidebarProvider and DetailPanelProvider are always mounted so that
  * state (selected flight, sidebar open/closed) survives breakpoint
- * transitions. The shell itself uses CSS visibility classes (hidden lg:flex,
- * lg:hidden) to show/hide desktop vs mobile elements without destroying
+ * transitions. The shell itself uses CSS visibility classes (hidden md:flex,
+ * md:hidden) to show/hide desktop vs mobile elements without destroying
  * the React tree.
  */
 export default function AppLayout({
@@ -38,7 +38,7 @@ export default function AppLayout({
   return (
     <PreferencesProvider>
       <ScrollNavbarProvider>
-        <SidebarProvider defaultOpen={true}>
+        <SidebarProvider defaultOpen={false}>
           <Suspense>
             <DetailPanelProvider>
               <AppLayoutContent>{children}</AppLayoutContent>

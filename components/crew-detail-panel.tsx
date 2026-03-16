@@ -270,7 +270,7 @@ export function CrewDetailPanel({ crewId, onUpdated, onBack }: CrewDetailPanelPr
                 Cancel
               </Button>
             ) : onBack ? (
-              <Button variant="ghost" size="icon-sm" onClick={onBack} className="lg:hidden">
+              <Button variant="ghost" size="icon-sm" onClick={onBack} className="md:hidden">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
             ) : null}

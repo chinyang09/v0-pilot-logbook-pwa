@@ -3,7 +3,6 @@
 import { usePathname } from "next/navigation"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
-import { useSidebar } from "@/hooks/use-sidebar-context"
 import {
   LayoutDashboard,
   Book,
@@ -17,10 +16,7 @@ import {
   UserCircle,
   Settings,
   ChevronDown,
-  PanelLeftClose,
-  PanelLeft,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import {
   Collapsible,
   CollapsibleContent,
@@ -28,19 +24,19 @@ import {
 } from "@/components/ui/collapsible"
 import { useState } from "react"
 
-interface NavItem {
+export interface NavItem {
   label: string
   href: string
   icon: React.ReactNode
 }
 
-interface NavSection {
+export interface NavSection {
   label: string
   items: NavItem[]
   defaultOpen?: boolean
 }
 
-const navSections: NavSection[] = [
+export const navSections: NavSection[] = [
   {
     label: "Logbook",
     defaultOpen: true,
@@ -71,7 +67,13 @@ const navSections: NavSection[] = [
   },
 ]
 
-function NavItemLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
+export const dashboardNavItem: NavItem = {
+  label: "Dashboard",
+  href: "/",
+  icon: <LayoutDashboard className="h-4 w-4" />,
+}
+
+export function NavItemLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
   return (
     <Link
       href={item.href}
@@ -90,7 +92,7 @@ function NavItemLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
   )
 }
 
-function NavSectionGroup({ section }: { section: NavSection }) {
+export function NavSectionGroup({ section }: { section: NavSection }) {
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(section.defaultOpen ?? true)
 
@@ -120,63 +122,5 @@ function NavSectionGroup({ section }: { section: NavSection }) {
         ))}
       </CollapsibleContent>
     </Collapsible>
-  )
-}
-
-export function SidebarToggle() {
-  const { isOpen, toggle } = useSidebar()
-
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      onClick={toggle}
-      className="h-8 w-8 text-foreground/70 hover:text-foreground hover:bg-muted"
-    >
-      {isOpen ? (
-        <PanelLeftClose className="h-4 w-4" />
-      ) : (
-        <PanelLeft className="h-4 w-4" />
-      )}
-    </Button>
-  )
-}
-
-export function SidebarNav() {
-  const { isOpen } = useSidebar()
-  const pathname = usePathname()
-
-  return (
-    <aside
-      className={cn(
-        "flex-shrink-0 flex flex-col h-full bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out overflow-hidden",
-        isOpen ? "w-64" : "w-0"
-      )}
-    >
-      {/* Sidebar content */}
-      <div
-        className={cn(
-          "flex flex-col flex-1 min-w-64 transition-opacity duration-200",
-          isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-        )}
-      >
-        {/* Spacer aligned with page header h-12 + safe area */}
-        <div className="h-12 flex-shrink-0 border-b border-sidebar-border mt-safe" />
-
-        {/* Navigation sections */}
-        <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-4">
-          {/* Dashboard — standalone link above sections */}
-          <div className="px-1">
-            <NavItemLink
-              item={{ label: "Dashboard", href: "/", icon: <LayoutDashboard className="h-4 w-4" /> }}
-              isActive={pathname === "/"}
-            />
-          </div>
-          {navSections.map((section) => (
-            <NavSectionGroup key={section.label} section={section} />
-          ))}
-        </nav>
-      </div>
-    </aside>
   )
 }

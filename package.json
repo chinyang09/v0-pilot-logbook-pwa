@@ -53,6 +53,7 @@
     "dexie": "4.2.1",
     "dexie-react-hooks": "^4.2.0",
     "embla-carousel-react": "8.5.1",
+    "framer-motion": "^12.36.0",
     "gcp-metadata": "latest",
     "geo-tz": "^8.1.5",
     "idb": "latest",
