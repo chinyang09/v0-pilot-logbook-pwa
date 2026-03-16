@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/resizable"
 import { FlightForm } from "@/components/flight-form"
 import { NavPill } from "@/components/nav-pill"
+import { PushSidebar } from "@/components/push-sidebar"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
@@ -90,7 +91,7 @@ function DetailPanelContent() {
  * Unified responsive shell.
  *
  * Mobile (<768px): Full-width content + floating bottom nav pill
- * Desktop (≥768px): Resizable split panels + floating top nav pill + overlay sidebar
+ * Desktop (≥768px): Push sidebar + resizable split panels + floating top nav pill
  */
 function AppShellContent({ children }: AppShellProps) {
   const { handleScroll } = useScrollNavbarContext()
@@ -105,6 +106,9 @@ function AppShellContent({ children }: AppShellProps) {
 
   return (
     <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden pt-safe">
+      {/* Push sidebar — desktop only, flex child that takes width and pushes panels right */}
+      {isDesktop && <PushSidebar />}
+
       {/* Main content area with resizable panels */}
       <div className="flex-1 flex min-w-0 md:overflow-x-auto h-full">
         <ResizablePanelGroup
@@ -143,7 +147,7 @@ function AppShellContent({ children }: AppShellProps) {
         </div>
       )}
 
-      {/* Floating nav pill — handles its own responsive positioning + sidebar overlay */}
+      {/* Floating nav pill — pill only, sidebar is PushSidebar above */}
       <NavPill />
 
       <PWAInstallPrompt />

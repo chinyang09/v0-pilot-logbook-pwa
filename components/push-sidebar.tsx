@@ -1,0 +1,139 @@
+"use client"
+
+import type React from "react"
+import { usePathname } from "next/navigation"
+import Link from "next/link"
+import { motion, useReducedMotion } from "framer-motion"
+import { PanelLeft } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { GlassContainer } from "@/components/ui/glass-container"
+import { useSidebar } from "@/hooks/use-sidebar-context"
+import { navSections, dashboardNavItem } from "@/components/nav-sections"
+
+const SIDEBAR_WIDTH = 288 // w-72
+
+const springTransition = {
+  type: "spring" as const,
+  stiffness: 400,
+  damping: 30,
+}
+
+const instantTransition = {
+  duration: 0,
+}
+
+/**
+ * Push sidebar — sits in the flex flow as a sibling before the main content.
+ * Animates width between 0 and 288px via framer-motion spring.
+ * Pushes both main panel and detail panel to the right.
+ *
+ * GitHub Mobile-style flat nav list with glass container.
+ * Desktop only — parent gates rendering with `isDesktop`.
+ */
+export function PushSidebar() {
+  const { isOpen, close } = useSidebar()
+  const pathname = usePathname()
+  const prefersReducedMotion = useReducedMotion()
+
+  const transition = prefersReducedMotion ? instantTransition : springTransition
+
+  const isItemActive = (href: string) => {
+    if (href === "/") return pathname === "/"
+    return pathname === href || pathname?.startsWith(href + "/")
+  }
+
+  return (
+    <motion.div
+      className="h-full flex-shrink-0 overflow-hidden"
+      animate={{ width: isOpen ? SIDEBAR_WIDTH : 0 }}
+      initial={false}
+      transition={transition}
+    >
+      {/* Inner container at fixed width — content never reflows during width animation */}
+      <div className="h-full" style={{ width: SIDEBAR_WIDTH }}>
+        <GlassContainer
+          cornerRadius={0}
+          className="h-full"
+          contentClassName="h-full"
+          style={{ borderRadius: "0px 20px 20px 0px" }}
+        >
+          <div className="flex flex-col h-full pt-safe">
+            {/* Header */}
+            <div className="h-14 flex-shrink-0 flex items-center justify-between px-4">
+              <span className="text-sm font-semibold text-foreground/70">Navigation</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={close}
+                className="h-9 w-9 text-foreground/70 hover:text-foreground"
+              >
+                <PanelLeft className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Flat nav list — GitHub Mobile style */}
+            <nav className="flex-1 overflow-y-auto px-3 pb-4">
+              {/* Dashboard */}
+              <SidebarNavItem
+                href={dashboardNavItem.href}
+                icon={dashboardNavItem.icon}
+                label={dashboardNavItem.label}
+                isActive={isItemActive("/")}
+              />
+
+              {/* Sections with flat items */}
+              {navSections.map((section) => (
+                <div key={section.label}>
+                  <div className="h-px bg-border/30 my-2 mx-1" />
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground/40 px-3 py-2">
+                    {section.label}
+                  </p>
+                  {section.items.map((item) => (
+                    <SidebarNavItem
+                      key={item.href}
+                      href={item.href}
+                      icon={item.icon}
+                      label={item.label}
+                      isActive={isItemActive(item.href)}
+                    />
+                  ))}
+                </div>
+              ))}
+            </nav>
+          </div>
+        </GlassContainer>
+      </div>
+    </motion.div>
+  )
+}
+
+/** Single sidebar nav item — flat, GitHub Mobile style */
+function SidebarNavItem({
+  href,
+  icon,
+  label,
+  isActive,
+}: {
+  href: string
+  icon: React.ReactNode
+  label: string
+  isActive: boolean
+}) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
+        isActive
+          ? "text-primary font-medium"
+          : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+      )}
+    >
+      <span className={cn("flex-shrink-0", isActive ? "text-primary" : "text-foreground/50")}>
+        {icon}
+      </span>
+      {label}
+    </Link>
+  )
+}

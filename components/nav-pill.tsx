@@ -3,7 +3,7 @@
 import type React from "react"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion"
+import { motion, useReducedMotion } from "framer-motion"
 import {
   LayoutDashboard,
   Book,
@@ -16,7 +16,6 @@ import {
   Settings,
   UserCircle,
   PanelLeft,
-  X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -26,7 +25,6 @@ import { useSidebar } from "@/hooks/use-sidebar-context"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useCreateFlight } from "@/hooks/use-create-flight"
 import { usePreferences } from "@/components/providers/preferences-provider"
-import { navSections, dashboardNavItem } from "@/components/nav-sections"
 import type { BottomNavTab } from "@/types/db/stores.types"
 
 const TAB_CONFIG: Record<
@@ -109,15 +107,16 @@ const instantTransition = {
 }
 
 /**
- * Unified floating nav pill component.
+ * Unified floating nav pill component — pill only, no sidebar.
  *
  * - Mobile (<768px): Bottom floating pill with 4 nav icons + center FAB
  * - Desktop (≥768px): Top floating pill with sidebar toggle + 4 nav icons + FAB
- *   Sidebar is a fixed overlay (GitHub Mobile style), not a push sidebar
+ *
+ * The push sidebar is a separate component (PushSidebar) rendered in desktop-layout.tsx.
  */
 export function NavPill() {
   const isDesktop = useIsDesktop()
-  const { isOpen: sidebarOpen, toggle: toggleSidebar, close: closeSidebar } = useSidebar()
+  const { toggle: toggleSidebar } = useSidebar()
   const { hideNavbar } = useScrollNavbarContext()
   const pathname = usePathname()
   const router = useRouter()
@@ -133,38 +132,22 @@ export function NavPill() {
     router.push(`/logbook?selected=${draft.id}`)
   }
 
-  return (
-    <>
-      {/* Nav pill — always rendered */}
-      {isDesktop ? (
-        <DesktopPill
-          tabs={tabs}
-          pathname={pathname}
-          onToggleSidebar={toggleSidebar}
-          onCreateFlight={handleCreateFlight}
-          transition={transition}
-        />
-      ) : (
-        <MobilePill
-          tabs={tabs}
-          pathname={pathname}
-          hideNavbar={hideNavbar}
-          onCreateFlight={handleCreateFlight}
-          transition={transition}
-        />
-      )}
-
-      {/* Sidebar overlay — desktop only, rendered as fixed overlay */}
-      <AnimatePresence>
-        {isDesktop && sidebarOpen && (
-          <SidebarOverlay
-            onClose={closeSidebar}
-            transition={transition}
-            prefersReducedMotion={!!prefersReducedMotion}
-          />
-        )}
-      </AnimatePresence>
-    </>
+  return isDesktop ? (
+    <DesktopPill
+      tabs={tabs}
+      pathname={pathname}
+      onToggleSidebar={toggleSidebar}
+      onCreateFlight={handleCreateFlight}
+      transition={transition}
+    />
+  ) : (
+    <MobilePill
+      tabs={tabs}
+      pathname={pathname}
+      hideNavbar={hideNavbar}
+      onCreateFlight={handleCreateFlight}
+      transition={transition}
+    />
   )
 }
 
@@ -323,133 +306,5 @@ function MobilePill({
         </nav>
       </GlassContainer>
     </motion.div>
-  )
-}
-
-/** GitHub Mobile-style sidebar overlay — fixed position, not push */
-function SidebarOverlay({
-  onClose,
-  transition,
-  prefersReducedMotion,
-}: {
-  onClose: () => void
-  transition: typeof springTransition | typeof instantTransition
-  prefersReducedMotion: boolean
-}) {
-  const pathname = usePathname()
-
-  const isItemActive = (href: string) => {
-    if (href === "/") return pathname === "/"
-    return pathname === href || pathname?.startsWith(href + "/")
-  }
-
-  return (
-    <>
-      {/* Scrim */}
-      <motion.div
-        className="fixed inset-0 z-[90] bg-black/40"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.2 }}
-        onClick={onClose}
-      />
-
-      {/* Sidebar panel */}
-      <motion.div
-        className="fixed top-0 left-0 bottom-0 z-[100] w-72 pt-safe"
-        initial={{ x: "-100%" }}
-        animate={{ x: 0 }}
-        exit={{ x: "-100%" }}
-        transition={transition}
-      >
-        <GlassContainer
-          cornerRadius={0}
-          className="h-full"
-          contentClassName="h-full"
-          style={{ "--corner-radius": "0px 20px 20px 0px" } as React.CSSProperties}
-        >
-          <div className="flex flex-col h-full">
-            {/* Header */}
-            <div className="h-14 flex-shrink-0 flex items-center justify-between px-4">
-              <span className="text-sm font-semibold text-foreground/70">Navigation</span>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onClose}
-                className="h-9 w-9 text-foreground/70 hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-
-            {/* Flat nav list — GitHub Mobile style */}
-            <nav className="flex-1 overflow-y-auto px-3 pb-4">
-              {/* Dashboard */}
-              <SidebarNavItem
-                href={dashboardNavItem.href}
-                icon={dashboardNavItem.icon}
-                label={dashboardNavItem.label}
-                isActive={isItemActive("/")}
-                onClick={onClose}
-              />
-
-              {/* Sections with flat items */}
-              {navSections.map((section) => (
-                <div key={section.label}>
-                  <div className="h-px bg-border/30 my-2 mx-1" />
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground/40 px-3 py-2">
-                    {section.label}
-                  </p>
-                  {section.items.map((item) => (
-                    <SidebarNavItem
-                      key={item.href}
-                      href={item.href}
-                      icon={item.icon}
-                      label={item.label}
-                      isActive={isItemActive(item.href)}
-                      onClick={onClose}
-                    />
-                  ))}
-                </div>
-              ))}
-            </nav>
-          </div>
-        </GlassContainer>
-      </motion.div>
-    </>
-  )
-}
-
-/** Single sidebar nav item — flat, GitHub Mobile style */
-function SidebarNavItem({
-  href,
-  icon,
-  label,
-  isActive,
-  onClick,
-}: {
-  href: string
-  icon: React.ReactNode
-  label: string
-  isActive: boolean
-  onClick: () => void
-}) {
-  return (
-    <Link
-      href={href}
-      onClick={onClick}
-      className={cn(
-        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
-        isActive
-          ? "text-primary font-medium"
-          : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
-      )}
-    >
-      <span className={cn("flex-shrink-0", isActive ? "text-primary" : "text-foreground/50")}>
-        {icon}
-      </span>
-      {label}
-    </Link>
   )
 }
