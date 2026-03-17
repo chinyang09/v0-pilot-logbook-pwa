@@ -19,10 +19,6 @@ export function PageContainer({ children, header, className, rightContent, mainR
   const { handleScroll } = useScrollNavbarContext()
   const isDesktop = useIsDesktop()
 
-  // On desktop without header, content needs top padding so initial items
-  // start below the floating nav pill / action bar, but content can scroll behind them.
-  const desktopNoPadding = isDesktop && !header
-
   return (
     <div className="h-full relative flex flex-col">
       {header && <div className="absolute top-0 left-0 right-0 z-50">{header}</div>}
@@ -32,7 +28,6 @@ export function PageContainer({ children, header, className, rightContent, mainR
         onScroll={handleScroll}
         className={cn("flex-1 overflow-y-auto overscroll-contain", header && "pt-12", className)}
       >
-        {desktopNoPadding && <div className="h-16 flex-shrink-0" />}
         <div className="pb-24">
           {children}
         </div>

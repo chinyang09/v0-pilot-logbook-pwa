@@ -462,9 +462,9 @@ export default function CrewPage() {
         onChange={setSearchQuery}
         placeholder="Search crew..."
       />
-      <GlassContainer cornerRadius={22}>
-        <Button variant="ghost" size="icon" onClick={handleAddCrew} className="h-10 w-10">
-          <Plus className="h-4 w-4" />
+      <GlassContainer cornerRadius={28}>
+        <Button variant="ghost" size="icon" onClick={handleAddCrew} className="h-14 w-14">
+          <Plus className="h-5 w-5" />
         </Button>
       </GlassContainer>
     </>

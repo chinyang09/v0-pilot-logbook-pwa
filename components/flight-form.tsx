@@ -1289,23 +1289,23 @@ export function FlightForm({
     if (!isDesktop) return null;
     return (
       <>
-        <GlassContainer cornerRadius={22}>
+        <GlassContainer cornerRadius={28}>
           <ImageImportButton
             onDataExtracted={handleOCRDataExtracted}
             variant="ghost"
             size="icon"
-            className="h-10 w-10"
+            className="h-14 w-14"
           />
         </GlassContainer>
-        <GlassContainer cornerRadius={22}>
+        <GlassContainer cornerRadius={28}>
           <Button
             onClick={() => syncHandlerRef.current()}
             disabled={isSubmitting}
             variant="ghost"
             size="icon"
-            className="h-10 w-10"
+            className="h-14 w-14"
           >
-            <RefreshCw className={`h-4 w-4 ${isSubmitting ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-5 w-5 ${isSubmitting ? "animate-spin" : ""}`} />
           </Button>
         </GlassContainer>
       </>

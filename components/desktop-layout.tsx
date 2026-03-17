@@ -128,37 +128,32 @@ function AppShellContent({ children }: AppShellProps) {
 
       {/* Main content area with resizable panels */}
       <div className="flex-1 flex flex-col min-w-0 h-full relative">
-        {/* Action bar + nav pill row — inside content area so sidebar push affects it.
-            Progressive darken gradient behind it. Tap zones flanking pill scroll to top. */}
+        {/* Fixed darkened header bar — houses action buttons, nav pill sits on top */}
         {isDesktop && (
-          <div className="absolute top-0 left-0 right-0 z-[99] pointer-events-none hidden md:block">
-            {/* Progressive darken gradient */}
-            <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-background/80 to-transparent pointer-events-none" />
-
-            {/* Action buttons — positioned within content flow, pushed by sidebar */}
-            <div className="relative flex items-start justify-between px-4 pt-[calc(env(safe-area-inset-top,0px)+0.5rem)]">
+          <div className="flex-shrink-0 z-[99] hidden md:block bg-background/60 backdrop-blur-xl border-b border-border/20">
+            <div className="flex items-center justify-between px-4 h-14 pt-[env(safe-area-inset-top,0px)]">
               {/* Main panel actions — flush left */}
-              <div className="pointer-events-auto flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 {mainActions}
               </div>
 
               {/* Tap zone left of pill — scrolls main panel to top */}
               <div
-                className="flex-1 h-14 pointer-events-auto cursor-pointer"
+                className="flex-1 h-14 cursor-pointer"
                 onClick={scrollMainToTop}
               />
 
-              {/* Nav pill placeholder — actual pill is fixed-positioned */}
+              {/* Nav pill placeholder — actual pill is fixed-positioned on top */}
               <div className="flex-shrink-0 w-0" />
 
               {/* Tap zone right of pill — scrolls detail panel to top */}
               <div
-                className="flex-1 h-14 pointer-events-auto cursor-pointer"
+                className="flex-1 h-14 cursor-pointer"
                 onClick={scrollDetailToTop}
               />
 
               {/* Detail panel actions — flush right */}
-              <div className="pointer-events-auto flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 {detailActions}
               </div>
             </div>
@@ -166,7 +161,7 @@ function AppShellContent({ children }: AppShellProps) {
         )}
 
         {/* Resizable panels */}
-        <div className="flex-1 md:overflow-x-auto h-full">
+        <div className="flex-1 md:overflow-x-auto min-h-0">
           <ResizablePanelGroup
             direction="horizontal"
             autoSaveId="desktop-panel-layout"

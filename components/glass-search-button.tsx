@@ -55,16 +55,16 @@ export function GlassSearchButton({
     <motion.div
       layout
       initial={false}
-      animate={{ width: isOpen ? 240 : 40 }}
+      animate={{ width: isOpen ? 240 : 56 }}
       transition={springTransition}
       className="overflow-hidden"
     >
-      <GlassContainer cornerRadius={22}>
-        <div className="flex items-center h-10">
+      <GlassContainer cornerRadius={28}>
+        <div className="flex items-center h-14">
           {isOpen ? (
             /* Expanded state: icon + input + close */
-            <div className="flex items-center gap-2 px-3 w-full">
-              <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <div className="flex items-center gap-2 px-4 w-full">
+              <Search className="h-5 w-5 text-muted-foreground flex-shrink-0" />
               <input
                 ref={inputRef}
                 type="text"
@@ -87,9 +87,9 @@ export function GlassSearchButton({
               variant="ghost"
               size="icon"
               onClick={onToggle}
-              className="h-10 w-10 text-foreground/60 hover:text-foreground"
+              className="h-14 w-14 text-foreground/60 hover:text-foreground"
             >
-              <Search className="h-4 w-4" />
+              <Search className="h-5 w-5" />
             </Button>
           )}
         </div>

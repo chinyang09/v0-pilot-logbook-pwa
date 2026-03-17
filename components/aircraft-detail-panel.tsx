@@ -1,8 +1,11 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { GlassContainer } from "@/components/ui/glass-container"
+import { useRegisterDetailActions } from "@/hooks/use-page-actions"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
 import {
   addCustomAircraftToDatabase,
   type NormalizedAircraft,
@@ -180,13 +183,56 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
   }
 
   const displayType = selectedType || typeInfo
+  const isDesktop = useIsDesktop()
+
+  // Stable refs for handlers to avoid re-render loops
+  const saveRef = useRef(handleSave)
+  saveRef.current = handleSave
+  const cancelRef = useRef(handleCancel)
+  cancelRef.current = handleCancel
+
+  // Register detail panel actions for the desktop floating glass bar
+  const detailActions = useMemo(() => {
+    if (!isDesktop) return null
+    return isEditing ? (
+      <>
+        <GlassContainer cornerRadius={28}>
+          <Button variant="ghost" className="h-14 px-4" onClick={() => cancelRef.current()}>
+            Cancel
+          </Button>
+        </GlassContainer>
+        <GlassContainer cornerRadius={28}>
+          <Button
+            variant="ghost"
+            className="h-14 px-4 text-primary font-semibold"
+            disabled={!formData.registration.trim() || isSaving}
+            onClick={() => saveRef.current()}
+          >
+            {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Save"}
+          </Button>
+        </GlassContainer>
+      </>
+    ) : (
+      <GlassContainer cornerRadius={28}>
+        <Button
+          variant="ghost"
+          className="h-14 px-4 text-primary font-semibold"
+          onClick={() => setIsEditing(true)}
+        >
+          Edit
+        </Button>
+      </GlassContainer>
+    )
+  }, [isDesktop, isEditing, isSaving, formData.registration])
+
+  useRegisterDetailActions(detailActions, isDesktop ?? false)
 
   return (
     <div className="h-full relative flex flex-col">
       <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
         <div className="px-2 h-12 flex items-center">
           <div className="w-16 flex-shrink-0">
-            {isEditing ? (
+            {isEditing && !isDesktop ? (
               <Button variant="ghost" size="sm" onClick={handleCancel} className="text-primary h-8 px-2">
                 Cancel
               </Button>
@@ -203,7 +249,7 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
             )}
           </h1>
           <div className="w-16 flex-shrink-0 flex justify-end">
-            {isEditing ? (
+            {!isDesktop && (isEditing ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -222,7 +268,7 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
               >
               Edit
             </Button>
-            )}
+            ))}
           </div>
         </div>
       </header>
