@@ -173,21 +173,23 @@ function DesktopPill({
   // When sidebar closes: pill fades in sliding from left back to center
   // Sidebar is 288px wide with 12px inset padding, so pill target is roughly x = -50% + offset
   return (
-    <div
+    <motion.div
       className={cn(
         "fixed z-[100] top-[calc(env(safe-area-inset-top,0px)+0.5rem)]",
-        sidebarOpen ? "pointer-events-none left-[156px]" : "left-1/2"
+        sidebarOpen ? "left-[156px]" : "left-1/2"
       )}
       style={{ transition: "left 0.35s cubic-bezier(0.4, 0, 0.2, 1)" }}
-    >
-    <motion.div
       initial={false}
       animate={{
         x: "-50%",
         opacity: sidebarOpen ? 0 : 1,
         scale: sidebarOpen ? 0.95 : 1,
+        visibility: sidebarOpen ? "hidden" as const : "visible" as const,
       }}
-      transition={transition}
+      transition={{
+        ...transition,
+        visibility: { delay: sidebarOpen ? 0.2 : 0 },
+      }}
     >
       <GlassContainer cornerRadius={28}>
         <nav className="flex items-center gap-1.5 px-3 h-14">
@@ -241,7 +243,6 @@ function DesktopPill({
         </nav>
       </GlassContainer>
     </motion.div>
-    </div>
   )
 }
 

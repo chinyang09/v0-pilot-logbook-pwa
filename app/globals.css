@@ -328,8 +328,8 @@ textarea:focus-within {
   --tint-amount: 0;
   --tint-saturation: 2;
   --tint-hue: 180deg;
-  --contrast: 0.61;
-  --brightness: 1.05;
+  --contrast: 0.69;
+  --brightness: 0.99;
   --invert: 10%;
   --total-strength: calc(var(--base-strength) + var(--extra-blur));
   --edge-width: calc(0.3px + (var(--softness) * 0.1));

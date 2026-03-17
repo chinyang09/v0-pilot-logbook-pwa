@@ -130,8 +130,8 @@ function AppShellContent({ children }: AppShellProps) {
       <div className="flex-1 flex flex-col min-w-0 h-full relative">
         {/* Fixed darkened header bar — houses action buttons, nav pill sits on top */}
         {isDesktop && (
-          <div className="flex-shrink-0 z-[99] hidden md:block bg-background/60 backdrop-blur-xl border-b border-border/20">
-            <div className="flex items-center justify-between px-4 h-14 pt-[env(safe-area-inset-top,0px)]">
+          <div className="flex-shrink-0 z-[99] hidden md:flex bg-background/60 backdrop-blur-xl border-b border-border/20">
+            <div className="flex items-center justify-between px-4 w-full" style={{ height: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.5rem)" }}>
               {/* Main panel actions — flush left */}
               <div className="flex items-center gap-2">
                 {mainActions}
@@ -139,7 +139,7 @@ function AppShellContent({ children }: AppShellProps) {
 
               {/* Tap zone left of pill — scrolls main panel to top */}
               <div
-                className="flex-1 h-14 cursor-pointer"
+                className="flex-1 h-full cursor-pointer"
                 onClick={scrollMainToTop}
               />
 
@@ -148,7 +148,7 @@ function AppShellContent({ children }: AppShellProps) {
 
               {/* Tap zone right of pill — scrolls detail panel to top */}
               <div
-                className="flex-1 h-14 cursor-pointer"
+                className="flex-1 h-full cursor-pointer"
                 onClick={scrollDetailToTop}
               />
 

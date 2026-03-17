@@ -430,7 +430,7 @@ export default function LogbookPage() {
       )}
 
       {/* Calendar collapse section — expands from button with spring animation */}
-      <div ref={calendarContainerRef} className={cn("z-[101] relative", !isDesktop && "mt-12")}>
+      <div ref={calendarContainerRef} className={cn("z-40 relative", !isDesktop && "mt-12")}>
         <AnimatePresence initial={false}>
           {showCalendar && (
             <motion.div
