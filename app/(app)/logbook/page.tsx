@@ -429,8 +429,13 @@ export default function LogbookPage() {
         </div>
       )}
 
-      {/* Calendar collapse section — expands from button with spring animation */}
-      <div ref={calendarContainerRef} className={cn("z-40 relative", !isDesktop && "mt-12")}>
+      {/* Calendar collapse section — absolute on desktop so flight list scrolls behind it
+          (required for glass see-through effect via backdrop-filter) */}
+      <div
+        ref={calendarContainerRef}
+        className={cn("z-40", isDesktop ? "absolute left-0 right-0" : "relative mt-12")}
+        style={isDesktop ? { top: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)" } : undefined}
+      >
         <AnimatePresence initial={false}>
           {showCalendar && (
             <motion.div
@@ -491,7 +496,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={isDesktop ? 0 : 48 + (showCalendar ? calendarNaturalHeight : 0)}
+          topSpacerHeight={isDesktop ? 64 + (showCalendar ? calendarNaturalHeight : 0) : 48 + (showCalendar ? calendarNaturalHeight : 0)}
           selectedFlightId={selectedFlightId}
           headerContent={
             <div className="flex-shrink-0 top-0 z-40 px-2 py-1">

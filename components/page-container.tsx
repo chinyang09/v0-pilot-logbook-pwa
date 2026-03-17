@@ -26,7 +26,7 @@ export function PageContainer({ children, header, className, rightContent, mainR
       <main
         ref={mainRef}
         onScroll={handleScroll}
-        className={cn("flex-1 overflow-y-auto overscroll-contain", header && "pt-12", className)}
+        className={cn("flex-1 overflow-y-auto overscroll-contain", header && "pt-12", isDesktop && "pt-16", className)}
       >
         <div className="pb-24">
           {children}
@@ -35,7 +35,7 @@ export function PageContainer({ children, header, className, rightContent, mainR
 
         {/* Right content (e.g., FastScroll) positioned relative to viewport, not scrolling content */}
         {rightContent && (
-          <div className={cn("absolute right-1 bottom-0 z-40 flex items-center pointer-events-none", header ? "top-12" : "top-0")}>
+          <div className={cn("absolute right-1 bottom-0 z-40 flex items-center pointer-events-none", header ? "top-12" : "top-0", isDesktop && "top-16")}>
             <div className="pointer-events-auto">
               {rightContent}
             </div>

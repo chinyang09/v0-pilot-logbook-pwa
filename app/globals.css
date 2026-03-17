@@ -347,6 +347,9 @@ textarea:focus-within {
   overflow: hidden;
   border-radius: var(--corner-radius);
   pointer-events: auto;
+  /* Invert effect moved here from GlassContainer::before pseudo-element
+     to eliminate white flash during visibility transitions */
+  backdrop-filter: invert(var(--invert, 0));
 }
 
 .GlassMaterial {
@@ -426,14 +429,18 @@ textarea:focus-within {
   backdrop-filter: blur(calc(var(--edge-width) * 0.4)) contrast(1.6) saturate(1.5);
 }
 
-.GlassContainer::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  display: block;
-  border-radius: var(--corner-radius);
-  backdrop-filter: invert(var(--invert));
+/* GlassContainer::before removed — invert effect moved to .GlassContent
+   backdrop-filter to prevent white flash during transitions */
+
+/* Apple liquid glass touch feedback — press to depress */
+.GlassContainer {
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.GlassContainer:has(> .GlassContent:active) {
+  transform: scale(0.97);
+  transition-duration: 0.12s;
+  transition-timing-function: ease-out;
 }
 
 .GlassMaterial::before {
@@ -446,7 +453,8 @@ textarea:focus-within {
   padding: 1px;
   border: 0 solid transparent;
   background: linear-gradient(155deg, hsla(0, 0%, 100%, 0.15) 0%, hsla(0, 0%, 0%, 0.2) 50%, hsla(0, 0%, 100%, 0.15) 100%);
-  backdrop-filter: invert(0.15) opacity(1);
+  /* backdrop-filter removed — invert(0.15) on pseudo-element border ring
+     caused white flash during visibility/opacity transitions */
   mask:
     linear-gradient(white 0 0) padding-box,
     linear-gradient(white 0 0) content-box;
@@ -476,13 +484,16 @@ textarea:focus-within {
   backdrop-filter: brightness(var(--brightness));
 }
 
-/* Reduced motion: disable heavy backdrop-filters */
+/* Reduced motion: disable heavy backdrop-filters and touch animations */
 @media (prefers-reduced-motion: reduce) {
+  .GlassContent,
   .GlassMaterial,
   .GlassMaterial > div,
   .GlassMaterial::before,
-  .GlassMaterial::after,
-  .GlassContainer::before {
+  .GlassMaterial::after {
     backdrop-filter: none !important;
+  }
+  .GlassContainer {
+    transition: none !important;
   }
 }

@@ -127,10 +127,11 @@ function AppShellContent({ children }: AppShellProps) {
       {isDesktop && <PushSidebar />}
 
       {/* Main content area with resizable panels */}
-      <div className="flex-1 flex flex-col min-w-0 h-full relative">
-        {/* Fixed darkened header bar — houses action buttons, nav pill sits on top */}
+      <div className="flex-1 min-w-0 h-full relative">
+        {/* Glass header bar — absolutely positioned so content scrolls behind it,
+            making backdrop-blur/glass effect visible through the bar */}
         {isDesktop && (
-          <div className="flex-shrink-0 z-[99] hidden md:flex bg-background/20 backdrop-blur-md border-b border-border/10">
+          <div className="absolute top-0 left-0 right-0 z-[99] hidden md:flex bg-background/20 backdrop-blur-md border-b border-border/10">
             <div className="flex items-center justify-between px-4 w-full" style={{ height: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.5rem)" }}>
               {/* Main panel actions — flush left */}
               <div className="flex items-center gap-2">
@@ -160,8 +161,8 @@ function AppShellContent({ children }: AppShellProps) {
           </div>
         )}
 
-        {/* Resizable panels */}
-        <div className="flex-1 md:overflow-x-auto min-h-0">
+        {/* Resizable panels — full height, content scrolls behind absolute header */}
+        <div className="h-full md:overflow-x-auto">
           <ResizablePanelGroup
             direction="horizontal"
             autoSaveId="desktop-panel-layout"
