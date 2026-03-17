@@ -441,7 +441,7 @@ export default function LogbookPage() {
               className="overflow-hidden"
             >
               {isDesktop ? (
-                <GlassContainer cornerRadius={20} className="mx-2 mb-2">
+                <div className="px-2 pb-2">
                   {/* Month/Year title */}
                   <div className="px-3 pt-2 pb-0 text-center">
                     <span className="text-sm font-medium text-foreground/80">
@@ -457,8 +457,10 @@ export default function LogbookPage() {
                     onDateSelect={handleDateSelect}
                     selectedDate={selectedDate || topFlightDate}
                     onScrollStart={handleCalendarScrollStart}
+                    glass
+                    cornerRadius={20}
                   />
-                </GlassContainer>
+                </div>
               ) : (
                 <div className="bg-background/30 backdrop-blur-xl border-b border-border/50">
                   <LogbookCalendar

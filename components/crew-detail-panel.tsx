@@ -244,11 +244,6 @@ export function CrewDetailPanel({ crewId, onUpdated, onBack }: CrewDetailPanelPr
     }))
   }, [])
 
-  // Silent wait: return null to keep previous panel content visible (no flash)
-  if (isLoading && !crew) {
-    return null
-  }
-
   const isDesktop = useIsDesktop()
 
   // Stable refs for handlers
@@ -292,6 +287,11 @@ export function CrewDetailPanel({ crewId, onUpdated, onBack }: CrewDetailPanelPr
   }, [isDesktop, isEditing, isSaving, formData.name])
 
   useRegisterDetailActions(detailActions, isDesktop ?? false)
+
+  // Silent wait: return null to keep previous panel content visible (no flash)
+  if (isLoading && !crew) {
+    return null
+  }
 
   if (!crew) {
     return (
