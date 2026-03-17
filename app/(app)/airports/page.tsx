@@ -17,7 +17,7 @@ import {
 } from "@/lib/db";
 import { syncService } from "@/lib/sync";
 import { submitAirportToServer } from "@/lib/submissions/submit";
-import { Star, Plus, MapPin, Loader2 } from "lucide-react";
+import { Star, Plus, MapPin, Loader2, Search } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -527,12 +527,25 @@ export default function AirportsPage() {
     ? "Departure"
     : "Arrival";
 
-  // Desktop floating glass bar actions
+  // Desktop floating glass bar actions — search + add
   const airportActions = useMemo(() => (
-    <Button size="icon-sm" onClick={handleAddClick}>
-      <Plus className="h-4 w-4" />
-    </Button>
-  ), [handleAddClick]);
+    <>
+      <div className="flex items-center gap-1.5 px-1">
+        <Search className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search airports..."
+          className="bg-transparent text-sm outline-none w-32 placeholder:text-muted-foreground/60"
+        />
+      </div>
+      <div className="w-px h-6 bg-border/50" />
+      <Button size="icon-sm" onClick={handleAddClick}>
+        <Plus className="h-4 w-4" />
+      </Button>
+    </>
+  ), [handleAddClick, searchQuery]);
 
   useRegisterMainActions(airportActions, isActive);
 

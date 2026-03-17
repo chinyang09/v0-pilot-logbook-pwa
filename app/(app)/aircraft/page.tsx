@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react"
 import type React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { Plane, Loader2, Star, Plus, Trash2, ChevronRight } from "lucide-react"
+import { Plane, Loader2, Star, Plus, Trash2, ChevronRight, Search } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import {
   searchAircraftFromDB,
@@ -585,12 +585,25 @@ export default function AircraftPage() {
   const showRecentlyUsed = !debouncedSearchQuery && recentNonFavorites.length > 0
   const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim()
 
-  // Desktop floating glass bar actions — add button only (search is inline in content)
+  // Desktop floating glass bar actions — search + add
   const aircraftActions = useMemo(() => (
-    <Button size="icon-sm" onClick={handleAddClick}>
-      <Plus className="h-4 w-4" />
-    </Button>
-  ), [handleAddClick])
+    <>
+      <div className="flex items-center gap-1.5 px-1">
+        <Search className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search aircraft..."
+          className="bg-transparent text-sm outline-none w-32 placeholder:text-muted-foreground/60"
+        />
+      </div>
+      <div className="w-px h-6 bg-border/50" />
+      <Button size="icon-sm" onClick={handleAddClick}>
+        <Plus className="h-4 w-4" />
+      </Button>
+    </>
+  ), [handleAddClick, searchQuery])
 
   useRegisterMainActions(aircraftActions, isActive)
 

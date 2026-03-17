@@ -16,6 +16,7 @@ import {
   Trash2,
   ChevronRight,
   Star,
+  Search,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -414,7 +415,7 @@ export default function CrewPage() {
     }
   }, [fieldType, flightId, router, setSelectedCrewId]);
 
-  const handleAddCrew = () => {
+  const handleAddCrew = useCallback(() => {
     const params = new URLSearchParams();
     if (fieldType) {
       params.set("field", fieldType);
@@ -423,7 +424,7 @@ export default function CrewPage() {
     }
     const query = params.toString();
     router.push(query ? `/crew/new?${query}` : "/crew/new");
-  };
+  }, [fieldType, returnUrl, flightId, router]);
 
   const handleToggleFavorite = useCallback(async (crewId: string) => {
     const crew = personnel.find((p) => p.id === crewId);
@@ -449,12 +450,25 @@ export default function CrewPage() {
 
   const showFastScroll = !debouncedSearchQuery && fastScrollItems.length > 1;
 
-  // Desktop floating glass bar actions
+  // Desktop floating glass bar actions — search + add
   const crewActions = useMemo(() => (
-    <Button size="icon-sm" onClick={handleAddCrew}>
-      <Plus className="h-4 w-4" />
-    </Button>
-  ), [handleAddCrew]);
+    <>
+      <div className="flex items-center gap-1.5 px-1">
+        <Search className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search crew..."
+          className="bg-transparent text-sm outline-none w-28 placeholder:text-muted-foreground/60"
+        />
+      </div>
+      <div className="w-px h-6 bg-border/50" />
+      <Button size="icon-sm" onClick={handleAddCrew}>
+        <Plus className="h-4 w-4" />
+      </Button>
+    </>
+  ), [handleAddCrew, searchQuery]);
 
   useRegisterMainActions(crewActions, isActive);
 

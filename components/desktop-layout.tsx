@@ -11,6 +11,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable"
 import { FlightForm } from "@/components/flight-form"
+import { useRef, useCallback } from "react"
 import { NavPill } from "@/components/nav-pill"
 import { PushSidebar } from "@/components/push-sidebar"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
@@ -102,6 +103,20 @@ function AppShellContent({ children }: AppShellProps) {
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
 
+  // Refs for scroll-to-top tap zones
+  const mainPanelRef = useRef<HTMLDivElement>(null)
+  const detailPanelRef = useRef<HTMLDivElement>(null)
+
+  const scrollMainToTop = useCallback(() => {
+    const el = mainPanelRef.current?.querySelector("[data-scroll-container], main, .overflow-y-auto, .overflow-auto")
+    if (el) el.scrollTop = 0
+  }, [])
+
+  const scrollDetailToTop = useCallback(() => {
+    const el = detailPanelRef.current?.querySelector("[data-scroll-container], main, .overflow-y-auto, .overflow-auto")
+    if (el) el.scrollTop = 0
+  }, [])
+
   // Only show mobile overlay when the selection is explicit (in URL via ?selected=).
   // SessionStorage-restored selections set state but don't update the URL,
   // so this prevents the overlay from auto-showing on page navigation.
@@ -113,24 +128,80 @@ function AppShellContent({ children }: AppShellProps) {
       {isDesktop && <PushSidebar />}
 
       {/* Main content area with resizable panels */}
-      <div className="flex-1 flex min-w-0 md:overflow-x-auto h-full">
-        <ResizablePanelGroup
-          direction="horizontal"
-          autoSaveId="desktop-panel-layout"
-          className="h-full md:min-w-[750px]"
-        >
-          <ResizablePanel defaultSize={35} minSize={30} className="md:min-w-[375px]">
-            <div className="h-full flex flex-col overflow-hidden relative">{children}</div>
-          </ResizablePanel>
+      <div className="flex-1 flex flex-col min-w-0 h-full relative">
+        {/* Action bar + nav pill row — inside content area so sidebar push affects it.
+            Progressive darken gradient behind it. Tap zones flanking pill scroll to top. */}
+        {isDesktop && (
+          <div className="absolute top-0 left-0 right-0 z-[99] pointer-events-none hidden md:block">
+            {/* Progressive darken gradient */}
+            <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-background/80 to-transparent pointer-events-none" />
 
-          {/* Resize handle — desktop only */}
-          <ResizableHandle withHandle className="hidden md:flex" />
+            {/* Action buttons — positioned within content flow, pushed by sidebar */}
+            <div className="relative flex items-start justify-between px-4 pt-[calc(env(safe-area-inset-top,0px)+0.5rem)]">
+              {/* Main panel actions — flush left */}
+              <div className="pointer-events-auto">
+                {mainActions && (
+                  <GlassContainer cornerRadius={22}>
+                    <div className="flex items-center gap-1 px-2 h-11">
+                      {mainActions}
+                    </div>
+                  </GlassContainer>
+                )}
+              </div>
 
-          {/* Detail panel — desktop only */}
-          <ResizablePanel defaultSize={65} minSize={25} className="hidden md:block">
-            {isDesktop && <DetailPanelContent />}
-          </ResizablePanel>
-        </ResizablePanelGroup>
+              {/* Tap zone left of pill — scrolls main panel to top */}
+              <div
+                className="flex-1 h-14 pointer-events-auto cursor-pointer"
+                onClick={scrollMainToTop}
+              />
+
+              {/* Nav pill placeholder — actual pill is fixed-positioned */}
+              <div className="flex-shrink-0 w-0" />
+
+              {/* Tap zone right of pill — scrolls detail panel to top */}
+              <div
+                className="flex-1 h-14 pointer-events-auto cursor-pointer"
+                onClick={scrollDetailToTop}
+              />
+
+              {/* Detail panel actions — flush right */}
+              <div className="pointer-events-auto">
+                {detailActions && (
+                  <GlassContainer cornerRadius={22}>
+                    <div className="flex items-center gap-1 px-2 h-11">
+                      {detailActions}
+                    </div>
+                  </GlassContainer>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Resizable panels */}
+        <div className="flex-1 md:overflow-x-auto h-full">
+          <ResizablePanelGroup
+            direction="horizontal"
+            autoSaveId="desktop-panel-layout"
+            className="h-full md:min-w-[750px]"
+          >
+            <ResizablePanel defaultSize={35} minSize={30} className="md:min-w-[375px]">
+              <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative md:pt-16">
+                {children}
+              </div>
+            </ResizablePanel>
+
+            {/* Resize handle — desktop only */}
+            <ResizableHandle withHandle className="hidden md:flex" />
+
+            {/* Detail panel — desktop only */}
+            <ResizablePanel defaultSize={65} minSize={25} className="hidden md:block">
+              <div ref={detailPanelRef} className="h-full md:pt-16">
+                {isDesktop && <DetailPanelContent />}
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
       </div>
 
       {/* Mobile detail overlay — sits above main content but behind the nav pill.
@@ -149,36 +220,7 @@ function AppShellContent({ children }: AppShellProps) {
         </div>
       )}
 
-      {/* Floating action bar — desktop only.
-          Main panel actions flush-left, detail panel actions flush-right,
-          both inline with the centered nav pill. */}
-      {isDesktop && (mainActions || detailActions) && (
-        <div className="fixed z-[99] top-[calc(env(safe-area-inset-top,0px)+0.5rem)] left-0 right-0 pointer-events-none hidden md:flex items-start justify-between px-4">
-          {/* Main panel actions — flush left */}
-          <div className="pointer-events-auto">
-            {mainActions && (
-              <GlassContainer cornerRadius={22}>
-                <div className="flex items-center gap-1 px-2 h-11">
-                  {mainActions}
-                </div>
-              </GlassContainer>
-            )}
-          </div>
-
-          {/* Detail panel actions — flush right */}
-          <div className="pointer-events-auto">
-            {detailActions && (
-              <GlassContainer cornerRadius={22}>
-                <div className="flex items-center gap-1 px-2 h-11">
-                  {detailActions}
-                </div>
-              </GlassContainer>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Floating nav pill — pill only, sidebar is PushSidebar above */}
+      {/* Floating nav pill — always mounted, animates opacity based on sidebar state */}
       <NavPill />
 
       <PWAInstallPrompt />
