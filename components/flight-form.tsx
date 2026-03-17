@@ -59,6 +59,8 @@ import {
 import { usePersonnel } from "@/hooks/data";
 import { usePreferences } from "@/components/providers/preferences-provider";
 import { ImageImportButton } from "@/components/image-import-button";
+import { GlassContainer } from "@/components/ui/glass-container";
+import { useRegisterDetailActions } from "@/hooks/use-page-actions";
 import type { ExtractedFlightData } from "@/lib/ocr";
 
 // Swipeable row component
@@ -1278,6 +1280,40 @@ export function FlightForm({
 
   const isDraft = resolvedFlight?.isDraft ?? true;
 
+  // Stable ref for sync handler to avoid re-renders in detail actions
+  const syncHandlerRef = useRef(handleSyncFlight);
+  syncHandlerRef.current = handleSyncFlight;
+
+  // Register detail panel actions for the desktop floating glass bar
+  const detailActions = useMemo(() => {
+    if (!isDesktop) return null;
+    return (
+      <>
+        <GlassContainer cornerRadius={22}>
+          <ImageImportButton
+            onDataExtracted={handleOCRDataExtracted}
+            variant="ghost"
+            size="icon"
+            className="h-10 w-10"
+          />
+        </GlassContainer>
+        <GlassContainer cornerRadius={22}>
+          <Button
+            onClick={() => syncHandlerRef.current()}
+            disabled={isSubmitting}
+            variant="ghost"
+            size="icon"
+            className="h-10 w-10"
+          >
+            <RefreshCw className={`h-4 w-4 ${isSubmitting ? "animate-spin" : ""}`} />
+          </Button>
+        </GlassContainer>
+      </>
+    );
+  }, [isDesktop, handleOCRDataExtracted, isSubmitting]);
+
+  useRegisterDetailActions(detailActions, isDesktop);
+
   // Wait silently for useLiveQuery to resolve — returning null keeps the
   // previous panel content visible, avoiding a flash/spinner on selection change.
   if (flightIdProp && !resolvedFlight && !formData.id) {
@@ -1303,21 +1339,24 @@ export function FlightForm({
             )}
           </h1>
         </div>
-        <div className="flex items-center gap-1.5">
-          <ImageImportButton
-            onDataExtracted={handleOCRDataExtracted}
-            variant="ghost"
-            size="icon-sm"
-          />
-          <Button
-            onClick={handleSyncFlight}
-            disabled={isSubmitting}
-            size="sm"
-          >
-            <RefreshCw className={`h-4 w-4 ${isSubmitting ? "animate-spin" : ""}`} />
-            {isSubmitting ? "Syncing..." : "Sync"}
-          </Button>
-        </div>
+        {/* Action buttons — hidden on desktop where they appear in the floating glass bar */}
+        {!isDesktop && (
+          <div className="flex items-center gap-1.5">
+            <ImageImportButton
+              onDataExtracted={handleOCRDataExtracted}
+              variant="ghost"
+              size="icon-sm"
+            />
+            <Button
+              onClick={handleSyncFlight}
+              disabled={isSubmitting}
+              size="sm"
+            >
+              <RefreshCw className={`h-4 w-4 ${isSubmitting ? "animate-spin" : ""}`} />
+              {isSubmitting ? "Syncing..." : "Sync"}
+            </Button>
+          </div>
+        )}
       </div>
     <div ref={scrollContainerRef} className="h-full overflow-y-auto bg-background">
       <div className="min-h-full pt-12 pb-20">

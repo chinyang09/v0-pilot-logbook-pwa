@@ -170,14 +170,13 @@ function DesktopPill({
   transition: typeof springTransition | typeof instantTransition
 }) {
   return (
+    <div className={cn("fixed z-[100] top-[calc(env(safe-area-inset-top,0px)+0.5rem)] left-1/2", sidebarOpen && "pointer-events-none")}>
     <motion.div
-      className="fixed z-[100] top-[calc(env(safe-area-inset-top,0px)+0.5rem)] left-1/2"
       initial={false}
       animate={{
         x: "-50%",
         opacity: sidebarOpen ? 0 : 1,
         scale: sidebarOpen ? 0.9 : 1,
-        pointerEvents: sidebarOpen ? "none" : "auto",
       }}
       transition={transition}
     >
@@ -233,6 +232,7 @@ function DesktopPill({
         </nav>
       </GlassContainer>
     </motion.div>
+    </div>
   )
 }
 

@@ -322,14 +322,14 @@ textarea:focus-within {
 /* ─── Liquid Glass UI ─── */
 .GlassContainer {
   --corner-radius: 24px;
-  --base-strength: 14px;
+  --base-strength: 24px;
   --extra-blur: 2px;
-  --softness: 12px;
+  --softness: 10px;
   --tint-amount: 0;
   --tint-saturation: 2;
   --tint-hue: 180deg;
-  --contrast: 1;
-  --brightness: 1;
+  --contrast: 0.54;
+  --brightness: 1.1;
   --invert: 10%;
   --total-strength: calc(var(--base-strength) + var(--extra-blur));
   --edge-width: calc(0.3px + (var(--softness) * 0.1));
@@ -365,7 +365,7 @@ textarea:focus-within {
   z-index: 3;
   overflow: hidden;
   border-radius: var(--corner-radius);
-  background-color: rgba(128, 128, 128, 0);
+  background-color: rgba(255, 255, 255, 0);
 }
 
 .GlassMaterial > div {
@@ -464,6 +464,16 @@ textarea:focus-within {
     linear-gradient(white 0 0) padding-box,
     linear-gradient(white 0 0) content-box;
   mask-composite: exclude, exclude;
+}
+
+.GlassMaterial .Contrast {
+  z-index: 12;
+  backdrop-filter: contrast(var(--contrast));
+}
+
+.GlassMaterial .Brightness {
+  z-index: 13;
+  backdrop-filter: brightness(var(--brightness));
 }
 
 /* Reduced motion: disable heavy backdrop-filters */

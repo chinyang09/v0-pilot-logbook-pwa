@@ -53,6 +53,8 @@ export function GlassContainer({
         <div className="BlendLayers" />
         <div className="BlendEdge" />
         <div className="Highlight" />
+        <div className="Contrast" />
+        <div className="Brightness" />
       </div>
     </div>
   )

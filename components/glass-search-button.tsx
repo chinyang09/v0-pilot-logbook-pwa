@@ -8,8 +8,9 @@ import { GlassContainer } from "@/components/ui/glass-container"
 
 const springTransition = {
   type: "spring" as const,
-  stiffness: 400,
-  damping: 30,
+  stiffness: 300,
+  damping: 28,
+  mass: 0.8,
 }
 
 interface GlassSearchButtonProps {

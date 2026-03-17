@@ -194,6 +194,26 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       onInteractionEnd?.();
     };
 
+    // Desktop mouse wheel navigation between months
+    const handleWheel = (e: React.WheelEvent) => {
+      if (Math.abs(e.deltaY) < 10) return;
+      if (isExternalScrollRef.current) return;
+      onScrollStart?.();
+
+      let newYear = selectedMonth.year;
+      let newMonth = selectedMonth.month;
+
+      if (e.deltaY > 0) {
+        newMonth = selectedMonth.month === 11 ? 0 : selectedMonth.month + 1;
+        newYear = selectedMonth.month === 11 ? selectedMonth.year + 1 : selectedMonth.year;
+      } else {
+        newMonth = selectedMonth.month === 0 ? 11 : selectedMonth.month - 1;
+        newYear = selectedMonth.month === 0 ? selectedMonth.year - 1 : selectedMonth.year;
+      }
+
+      onMonthChange(newYear, newMonth);
+    };
+
     const handleDateClick = (dateStr: string, hasFlights: boolean) => {
       if (hasFlights) {
         onDateSelect?.(dateStr);
@@ -226,6 +246,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
+          onWheel={handleWheel}
         >
           <div className="grid grid-cols-7 gap-0">
             {calendarDays.map((dayInfo, dayIndex) => {

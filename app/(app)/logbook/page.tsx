@@ -145,8 +145,9 @@ export default function LogbookPage() {
     return () => observer.disconnect()
   }, [])
 
-  // Track the topmost visible flight for calendar sync
+  // Track the topmost visible flight for calendar sync + date highlighting
   const topFlightIdRef = useRef<string | null>(null)
+  const [topFlightDate, setTopFlightDate] = useState<string | null>(null)
 
   const syncSourceRef = useRef<"calendar" | "flights" | null>(null)
   const selectedMonthRef = useRef(selectedMonth)
@@ -201,6 +202,7 @@ export default function LogbookPage() {
     (topFlight: FlightLog | null) => {
       if (!topFlight) return
       topFlightIdRef.current = topFlight.id
+      setTopFlightDate(topFlight.date)
 
       if (!showCalendarRef.current) return
       if (syncSourceRef.current !== "flights") return
@@ -426,7 +428,7 @@ export default function LogbookPage() {
       )}
 
       {/* Calendar collapse section — expands from button with spring animation */}
-      <div ref={calendarContainerRef} className={cn("z-40", !isDesktop && "mt-12")}>
+      <div ref={calendarContainerRef} className={cn("z-[101] relative", !isDesktop && "mt-12")}>
         <AnimatePresence initial={false}>
           {showCalendar && (
             <motion.div
@@ -437,6 +439,14 @@ export default function LogbookPage() {
               className="overflow-hidden"
             >
               <div className="bg-background/30 backdrop-blur-xl border-b border-border/50">
+                {/* Month/Year title — visible on desktop (mobile shows in header) */}
+                {isDesktop && (
+                  <div className="px-3 pt-2 pb-0 text-center">
+                    <span className="text-sm font-medium text-foreground/80">
+                      {MONTHS[selectedMonth.month]} {selectedMonth.year}
+                    </span>
+                  </div>
+                )}
                 <LogbookCalendar
                   ref={calendarRef}
                   className="bg-transparent shadow-none border-none"
@@ -444,7 +454,7 @@ export default function LogbookPage() {
                   selectedMonth={selectedMonth}
                   onMonthChange={handleCalendarMonthChange}
                   onDateSelect={handleDateSelect}
-                  selectedDate={selectedDate}
+                  selectedDate={selectedDate || topFlightDate}
                   onScrollStart={handleCalendarScrollStart}
                 />
               </div>
