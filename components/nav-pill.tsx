@@ -178,13 +178,12 @@ function DesktopPill({
       initial={false}
       animate={{
         x: sidebarOpen ? "calc(-50% - (50vw - 156px))" : "-50%",
-        opacity: sidebarOpen ? 0 : 1,
-        scale: sidebarOpen ? 0.95 : 1,
+        scale: sidebarOpen ? 0.9 : 1,
         visibility: sidebarOpen ? "hidden" as const : "visible" as const,
       }}
       transition={{
         ...transition,
-        visibility: { delay: sidebarOpen ? 0.2 : 0 },
+        visibility: { delay: sidebarOpen ? 0.15 : 0 },
       }}
     >
       <GlassContainer cornerRadius={28}>

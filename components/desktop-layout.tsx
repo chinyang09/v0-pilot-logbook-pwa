@@ -128,11 +128,15 @@ function AppShellContent({ children }: AppShellProps) {
 
       {/* Main content area with resizable panels */}
       <div className="flex-1 min-w-0 h-full relative">
-        {/* Glass header bar — absolutely positioned so content scrolls behind it,
-            making backdrop-blur/glass effect visible through the bar */}
+        {/* Header bar — progressive dark-to-transparent gradient so content fades in as it scrolls up */}
         {isDesktop && (
-          <div className="absolute top-0 left-0 right-0 z-[99] hidden md:flex bg-background/20 backdrop-blur-md border-b border-border/10">
-            <div className="flex items-center justify-between px-4 w-full" style={{ height: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.5rem)" }}>
+          <div
+            className="absolute top-0 left-0 right-0 z-[99] hidden md:flex pointer-events-none"
+            style={{
+              background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
+            }}
+          >
+            <div className="flex items-center justify-between px-4 w-full pointer-events-auto" style={{ height: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.5rem)" }}>
               {/* Main panel actions — flush left */}
               <div className="flex items-center gap-2">
                 {mainActions}

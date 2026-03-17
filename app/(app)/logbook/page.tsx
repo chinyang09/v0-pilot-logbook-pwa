@@ -439,9 +439,9 @@ export default function LogbookPage() {
         <AnimatePresence initial={false}>
           {showCalendar && (
             <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
+              initial={{ height: 0 }}
+              animate={{ height: "auto" }}
+              exit={{ height: 0 }}
               transition={{ type: "spring", stiffness: 400, damping: 35 }}
               className="overflow-hidden"
             >

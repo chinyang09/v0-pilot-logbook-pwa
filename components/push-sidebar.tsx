@@ -62,11 +62,9 @@ export function PushSidebar() {
             className="h-full"
             initial={false}
             animate={{
-              opacity: isOpen ? 1 : 0,
               visibility: isOpen ? "visible" as const : "hidden" as const,
             }}
             transition={{
-              opacity: { duration: prefersReducedMotion ? 0 : 0.15 },
               visibility: { delay: isOpen ? 0 : 0.15 },
             }}
           >
