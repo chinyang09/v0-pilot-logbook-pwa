@@ -15,7 +15,6 @@ import { useRef, useCallback } from "react"
 import { NavPill } from "@/components/nav-pill"
 import { PushSidebar } from "@/components/push-sidebar"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
-import { GlassContainer } from "@/components/ui/glass-container"
 import { usePageActions } from "@/hooks/use-page-actions"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
@@ -139,14 +138,8 @@ function AppShellContent({ children }: AppShellProps) {
             {/* Action buttons — positioned within content flow, pushed by sidebar */}
             <div className="relative flex items-start justify-between px-4 pt-[calc(env(safe-area-inset-top,0px)+0.5rem)]">
               {/* Main panel actions — flush left */}
-              <div className="pointer-events-auto">
-                {mainActions && (
-                  <GlassContainer cornerRadius={22}>
-                    <div className="flex items-center gap-1 px-2 h-11">
-                      {mainActions}
-                    </div>
-                  </GlassContainer>
-                )}
+              <div className="pointer-events-auto flex items-center gap-2">
+                {mainActions}
               </div>
 
               {/* Tap zone left of pill — scrolls main panel to top */}
@@ -165,14 +158,8 @@ function AppShellContent({ children }: AppShellProps) {
               />
 
               {/* Detail panel actions — flush right */}
-              <div className="pointer-events-auto">
-                {detailActions && (
-                  <GlassContainer cornerRadius={22}>
-                    <div className="flex items-center gap-1 px-2 h-11">
-                      {detailActions}
-                    </div>
-                  </GlassContainer>
-                )}
+              <div className="pointer-events-auto flex items-center gap-2">
+                {detailActions}
               </div>
             </div>
           </div>
@@ -186,7 +173,7 @@ function AppShellContent({ children }: AppShellProps) {
             className="h-full md:min-w-[750px]"
           >
             <ResizablePanel defaultSize={35} minSize={30} className="md:min-w-[375px]">
-              <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative md:pt-16">
+              <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative">
                 {children}
               </div>
             </ResizablePanel>
@@ -196,7 +183,7 @@ function AppShellContent({ children }: AppShellProps) {
 
             {/* Detail panel — desktop only */}
             <ResizablePanel defaultSize={65} minSize={25} className="hidden md:block">
-              <div ref={detailPanelRef} className="h-full md:pt-16">
+              <div ref={detailPanelRef} className="h-full">
                 {isDesktop && <DetailPanelContent />}
               </div>
             </ResizablePanel>

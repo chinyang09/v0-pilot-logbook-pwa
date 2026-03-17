@@ -17,7 +17,7 @@ import {
 } from "@/lib/db";
 import { syncService } from "@/lib/sync";
 import { submitAirportToServer } from "@/lib/submissions/submit";
-import { Star, Plus, MapPin, Loader2, Search } from "lucide-react";
+import { Star, Plus, MapPin, Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -29,6 +29,8 @@ import { AirportNewForm } from "@/components/airport-new-form";
 import { useDebounce } from "@/hooks/use-debounce";
 import { usePageActive } from "@/hooks/use-page-active";
 import { useRegisterMainActions } from "@/hooks/use-page-actions";
+import { GlassSearchButton } from "@/components/glass-search-button";
+import { GlassContainer } from "@/components/ui/glass-container";
 
 // Memoized airport card to prevent unnecessary re-renders during virtualization
 interface AirportCardProps {
@@ -115,6 +117,7 @@ export default function AirportsPage() {
 
   // Search state (replacing useSearchableList)
   const [searchQuery, setSearchQuery] = useState("");
+  const [desktopSearchOpen, setDesktopSearchOpen] = useState(false);
   const debouncedSearchQuery = useDebounce(searchQuery, 150);
 
   // FR24 online search state
@@ -527,25 +530,23 @@ export default function AirportsPage() {
     ? "Departure"
     : "Arrival";
 
-  // Desktop floating glass bar actions — search + add
+  // Desktop floating glass bar actions — expandable search + glass add button
   const airportActions = useMemo(() => (
     <>
-      <div className="flex items-center gap-1.5 px-1">
-        <Search className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search airports..."
-          className="bg-transparent text-sm outline-none w-32 placeholder:text-muted-foreground/60"
-        />
-      </div>
-      <div className="w-px h-6 bg-border/50" />
-      <Button size="icon-sm" onClick={handleAddClick}>
-        <Plus className="h-4 w-4" />
-      </Button>
+      <GlassSearchButton
+        isOpen={desktopSearchOpen}
+        onToggle={() => setDesktopSearchOpen(prev => !prev)}
+        value={searchQuery}
+        onChange={setSearchQuery}
+        placeholder="Search airports..."
+      />
+      <GlassContainer cornerRadius={22}>
+        <Button variant="ghost" size="icon" onClick={handleAddClick} className="h-10 w-10">
+          <Plus className="h-4 w-4" />
+        </Button>
+      </GlassContainer>
     </>
-  ), [handleAddClick, searchQuery]);
+  ), [handleAddClick, searchQuery, desktopSearchOpen]);
 
   useRegisterMainActions(airportActions, isActive);
 

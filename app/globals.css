@@ -365,7 +365,7 @@ textarea:focus-within {
   z-index: 3;
   overflow: hidden;
   border-radius: var(--corner-radius);
-  background-color: rgba(128, 128, 128, 0.38);
+  background-color: rgba(128, 128, 128, 0);
 }
 
 .GlassMaterial > div {

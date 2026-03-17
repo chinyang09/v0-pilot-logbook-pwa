@@ -16,7 +16,6 @@ import {
   Trash2,
   ChevronRight,
   Star,
-  Search,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -31,6 +30,8 @@ import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { CrewDetailPanel } from "@/components/crew-detail-panel";
 import { usePageActive } from "@/hooks/use-page-active";
 import { useRegisterMainActions } from "@/hooks/use-page-actions";
+import { GlassSearchButton } from "@/components/glass-search-button";
+import { GlassContainer } from "@/components/ui/glass-container";
 
 // Memoized crew card to prevent unnecessary re-renders during virtualization
 const SwipeableCrewCard = memo(function SwipeableCrewCard({
@@ -149,6 +150,7 @@ export default function CrewPage() {
   const { personnel, isLoading } = usePersonnel();
   const { flights } = useFlights();
   const [searchQuery, setSearchQuery] = useState("");
+  const [desktopSearchOpen, setDesktopSearchOpen] = useState(false);
   const debouncedSearchQuery = useDebounce(searchQuery, 150);
   const { confirmDelete, handleDelete, DeleteDialog } = useDeleteConfirmation<(typeof personnel)[0]>();
 
@@ -450,25 +452,23 @@ export default function CrewPage() {
 
   const showFastScroll = !debouncedSearchQuery && fastScrollItems.length > 1;
 
-  // Desktop floating glass bar actions — search + add
+  // Desktop floating glass bar actions — expandable search + glass add button
   const crewActions = useMemo(() => (
     <>
-      <div className="flex items-center gap-1.5 px-1">
-        <Search className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search crew..."
-          className="bg-transparent text-sm outline-none w-28 placeholder:text-muted-foreground/60"
-        />
-      </div>
-      <div className="w-px h-6 bg-border/50" />
-      <Button size="icon-sm" onClick={handleAddCrew}>
-        <Plus className="h-4 w-4" />
-      </Button>
+      <GlassSearchButton
+        isOpen={desktopSearchOpen}
+        onToggle={() => setDesktopSearchOpen(prev => !prev)}
+        value={searchQuery}
+        onChange={setSearchQuery}
+        placeholder="Search crew..."
+      />
+      <GlassContainer cornerRadius={22}>
+        <Button variant="ghost" size="icon" onClick={handleAddCrew} className="h-10 w-10">
+          <Plus className="h-4 w-4" />
+        </Button>
+      </GlassContainer>
     </>
-  ), [handleAddCrew, searchQuery]);
+  ), [handleAddCrew, searchQuery, desktopSearchOpen]);
 
   useRegisterMainActions(crewActions, isActive);
 

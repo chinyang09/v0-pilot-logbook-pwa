@@ -2,6 +2,7 @@
 
 import { ReactNode, type RefCallback } from "react"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { cn } from "@/lib/utils"
 
 interface PageContainerProps {
@@ -16,6 +17,11 @@ interface PageContainerProps {
 
 export function PageContainer({ children, header, className, rightContent, mainRef }: PageContainerProps) {
   const { handleScroll } = useScrollNavbarContext()
+  const isDesktop = useIsDesktop()
+
+  // On desktop without header, content needs top padding so initial items
+  // start below the floating nav pill / action bar, but content can scroll behind them.
+  const desktopNoPadding = isDesktop && !header
 
   return (
     <div className="h-full relative flex flex-col">
@@ -26,6 +32,7 @@ export function PageContainer({ children, header, className, rightContent, mainR
         onScroll={handleScroll}
         className={cn("flex-1 overflow-y-auto overscroll-contain", header && "pt-12", className)}
       >
+        {desktopNoPadding && <div className="h-16 flex-shrink-0" />}
         <div className="pb-24">
           {children}
         </div>

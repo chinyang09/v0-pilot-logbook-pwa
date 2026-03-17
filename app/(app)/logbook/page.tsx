@@ -31,6 +31,7 @@ import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useSearchParams } from "next/navigation"
 import { usePageActive } from "@/hooks/use-page-active"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
+import { GlassContainer } from "@/components/ui/glass-container"
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -362,41 +363,49 @@ export default function LogbookPage() {
   const hasActiveFilters = selectedFilters.length > 0
   const isLoading = dbLoading || !dbReady
 
-  // Action buttons for the desktop floating glass bar
+  // Action buttons for the desktop floating glass bar — each in its own glass container
   const logbookActions = useMemo(() => (
     <>
-      <Button
-        variant={showCalendar ? "default" : "ghost"}
-        size="icon-sm"
-        onClick={() => {
-          toggleCalendar(!showCalendar)
-          setSelectedDate(null)
-          setSearchFocused(false)
-        }}
-      >
-        <Calendar className="h-4 w-4" />
-      </Button>
+      <GlassContainer cornerRadius={22}>
+        <div className="flex items-center gap-1 px-1 h-10">
+          <Button
+            variant={showCalendar ? "default" : "ghost"}
+            size="icon-sm"
+            onClick={() => {
+              toggleCalendar(!showCalendar)
+              setSelectedDate(null)
+              setSearchFocused(false)
+            }}
+          >
+            <Calendar className="h-4 w-4" />
+          </Button>
 
-      <CSVImportButton
-        onComplete={() => {
-          refreshAllData()
-        }}
-      />
+          <CSVImportButton
+            onComplete={() => {
+              refreshAllData()
+            }}
+          />
+        </div>
+      </GlassContainer>
 
-      <Button
-        size="icon-sm"
-        onClick={async () => {
-          const draftFlight = await createFlight()
-          mutate(
-            CACHE_KEYS.flights,
-            (prev: FlightLog[] | undefined) => [draftFlight, ...(prev ?? [])],
-            { revalidate: false }
-          )
-          setSelectedFlightId(draftFlight.id)
-        }}
-      >
-        <Plus className="h-4 w-4" />
-      </Button>
+      <GlassContainer cornerRadius={22}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-10 w-10"
+          onClick={async () => {
+            const draftFlight = await createFlight()
+            mutate(
+              CACHE_KEYS.flights,
+              (prev: FlightLog[] | undefined) => [draftFlight, ...(prev ?? [])],
+              { revalidate: false }
+            )
+            setSelectedFlightId(draftFlight.id)
+          }}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </GlassContainer>
     </>
   ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId])
 
@@ -455,7 +464,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={isDesktop ? (showCalendar ? calendarNaturalHeight : 0) : 48 + (showCalendar ? calendarNaturalHeight : 0)}
+          topSpacerHeight={isDesktop ? 64 + (showCalendar ? calendarNaturalHeight : 0) : 48 + (showCalendar ? calendarNaturalHeight : 0)}
           selectedFlightId={selectedFlightId}
           headerContent={
             <div className="flex-shrink-0 top-0 z-40 px-2 py-1">
