@@ -85,10 +85,11 @@ function SettingsDetailPanel({ title, onBack, children }: {
 }) {
   return (
     <div className="h-full relative">
-      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
+      {/* Header — mobile only, desktop uses floating glass bar */}
+      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50 md:hidden">
         <div className="px-2 h-12 flex items-center">
           <div className="w-16 flex-shrink-0">
-            <Button variant="ghost" size="icon" onClick={onBack} className="md:hidden h-8 w-8">
+            <Button variant="ghost" size="icon" onClick={onBack} className="h-8 w-8">
               <ChevronLeft className="h-4 w-4" />
             </Button>
           </div>
@@ -96,7 +97,7 @@ function SettingsDetailPanel({ title, onBack, children }: {
           <div className="w-16 flex-shrink-0" />
         </div>
       </header>
-      <div className="h-full overflow-auto pt-12">
+      <div className="h-full overflow-auto pt-12 md:pt-16">
         {children}
       </div>
     </div>

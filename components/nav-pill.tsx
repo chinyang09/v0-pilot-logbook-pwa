@@ -169,21 +169,20 @@ function DesktopPill({
   onCreateFlight: () => void
   transition: typeof springTransition | typeof instantTransition
 }) {
-  // When sidebar opens: pill slides from center to left (sidebar position), then fades out
-  // When sidebar closes: pill fades in sliding from left back to center
-  // Sidebar is 288px wide with 12px inset padding, so pill target is roughly x = -50% + offset
+  // When sidebar opens: pill shrinks and disappears (fast, no slide)
+  // When sidebar closes: pill reappears after sidebar starts closing
   return (
     <motion.div
       className="fixed z-[100] top-[calc(env(safe-area-inset-top,0px)+0.5rem)] left-1/2"
+      style={{ x: "-50%" }}
       initial={false}
       animate={{
-        x: sidebarOpen ? "calc(-50% - (50vw - 156px))" : "-50%",
-        scale: sidebarOpen ? 0.9 : 1,
+        scale: sidebarOpen ? 0.85 : 1,
         visibility: sidebarOpen ? "hidden" as const : "visible" as const,
       }}
       transition={{
-        ...transition,
-        visibility: { delay: sidebarOpen ? 0.15 : 0 },
+        scale: { type: "spring", stiffness: 500, damping: 35, duration: 0.15 },
+        visibility: { delay: sidebarOpen ? 0.08 : 0.12 },
       }}
     >
       <GlassContainer cornerRadius={28}>

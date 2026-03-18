@@ -3,14 +3,12 @@
 import { useRef, useEffect } from "react"
 import { motion } from "framer-motion"
 import { Search, X } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { GlassContainer } from "@/components/ui/glass-container"
 
 const springTransition = {
   type: "spring" as const,
-  stiffness: 300,
-  damping: 28,
-  mass: 0.8,
+  stiffness: 400,
+  damping: 30,
 }
 
 interface GlassSearchButtonProps {
@@ -23,10 +21,11 @@ interface GlassSearchButtonProps {
 
 /**
  * Expandable glass search button — compact search icon that spring-animates
- * into a full search bar. GitHub desktop-style.
+ * into a full search bar.
  *
- * Closed: [🔍] (glass icon button)
- * Open:   [🔍 ---input--- ✕] (expanded glass search bar)
+ * Both states are always rendered (no conditional mount/unmount) to prevent
+ * two-stage jank. The outer width animates via spring, inner elements
+ * crossfade with opacity.
  */
 export function GlassSearchButton({
   isOpen,
@@ -40,8 +39,7 @@ export function GlassSearchButton({
   // Auto-focus input when opening
   useEffect(() => {
     if (isOpen) {
-      // Small delay to let the animation start before focusing
-      const timer = setTimeout(() => inputRef.current?.focus(), 100)
+      const timer = setTimeout(() => inputRef.current?.focus(), 80)
       return () => clearTimeout(timer)
     }
   }, [isOpen])
@@ -53,45 +51,49 @@ export function GlassSearchButton({
 
   return (
     <motion.div
-      layout
       initial={false}
       animate={{ width: isOpen ? 240 : 56 }}
       transition={springTransition}
       className="overflow-hidden"
     >
       <GlassContainer cornerRadius={28}>
-        <div className="flex items-center h-14">
-          {isOpen ? (
-            /* Expanded state: icon + input + close */
-            <div className="flex items-center gap-2 px-4 w-full">
-              <Search className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-              <input
-                ref={inputRef}
-                type="text"
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                placeholder={placeholder}
-                className="flex-1 bg-transparent text-sm outline-none min-w-0 placeholder:text-muted-foreground/60"
-              />
-              <button
-                type="button"
-                onClick={handleClose}
-                className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          ) : (
-            /* Collapsed state: icon button */
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onToggle}
-              className="h-14 w-14 text-foreground/60 hover:text-foreground"
+        <div className="flex items-center h-14 relative">
+          {/* Search icon — always visible, acts as button when collapsed */}
+          <button
+            type="button"
+            onClick={isOpen ? undefined : onToggle}
+            className="absolute left-0 top-0 h-14 w-14 flex items-center justify-center flex-shrink-0"
+            style={{ pointerEvents: isOpen ? "none" : "auto" }}
+          >
+            <Search className="h-5 w-5 text-foreground/60" />
+          </button>
+
+          {/* Expanded content — always rendered, fades in/out */}
+          <div
+            className="flex items-center gap-2 pl-12 pr-4 w-full transition-opacity duration-150"
+            style={{
+              opacity: isOpen ? 1 : 0,
+              pointerEvents: isOpen ? "auto" : "none",
+            }}
+          >
+            <input
+              ref={inputRef}
+              type="text"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder={placeholder}
+              tabIndex={isOpen ? 0 : -1}
+              className="flex-1 bg-transparent text-sm outline-none min-w-0 placeholder:text-muted-foreground/60"
+            />
+            <button
+              type="button"
+              onClick={handleClose}
+              tabIndex={isOpen ? 0 : -1}
+              className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors"
             >
-              <Search className="h-5 w-5" />
-            </Button>
-          )}
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </GlassContainer>
     </motion.div>

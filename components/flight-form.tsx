@@ -1322,14 +1322,12 @@ export function FlightForm({
 
   return (
     <div className="h-full relative">
-      {/* Header — absolute so iOS overscroll bounce on the scroll container below doesn't move it */}
-      <div className="absolute top-0 left-0 right-0 z-50 h-12 bg-background/30 backdrop-blur-xl border-b border-border/50 px-4 flex items-center justify-between">
+      {/* Header — mobile only, desktop uses floating glass bar */}
+      <div className="absolute top-0 left-0 right-0 z-50 h-12 bg-background/30 backdrop-blur-xl border-b border-border/50 px-4 flex items-center justify-between md:hidden">
         <div className="flex items-center gap-2">
-          {!isDesktop && (
-            <Button variant="ghost" size="icon-sm" onClick={handleKeepAsDraft}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-          )}
+          <Button variant="ghost" size="icon-sm" onClick={handleKeepAsDraft}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
           <h1 className="text-lg font-semibold flex items-center gap-2">
             {isDraft ? "Draft" : "Edit Flight"}
             {isDraft && (
@@ -1339,27 +1337,24 @@ export function FlightForm({
             )}
           </h1>
         </div>
-        {/* Action buttons — hidden on desktop where they appear in the floating glass bar */}
-        {!isDesktop && (
-          <div className="flex items-center gap-1.5">
-            <ImageImportButton
-              onDataExtracted={handleOCRDataExtracted}
-              variant="ghost"
-              size="icon-sm"
-            />
-            <Button
-              onClick={handleSyncFlight}
-              disabled={isSubmitting}
-              size="sm"
-            >
-              <RefreshCw className={`h-4 w-4 ${isSubmitting ? "animate-spin" : ""}`} />
-              {isSubmitting ? "Syncing..." : "Sync"}
-            </Button>
-          </div>
-        )}
+        <div className="flex items-center gap-1.5">
+          <ImageImportButton
+            onDataExtracted={handleOCRDataExtracted}
+            variant="ghost"
+            size="icon-sm"
+          />
+          <Button
+            onClick={handleSyncFlight}
+            disabled={isSubmitting}
+            size="sm"
+          >
+            <RefreshCw className={`h-4 w-4 ${isSubmitting ? "animate-spin" : ""}`} />
+            {isSubmitting ? "Syncing..." : "Sync"}
+          </Button>
+        </div>
       </div>
     <div ref={scrollContainerRef} className="h-full overflow-y-auto bg-background">
-      <div className="min-h-full pt-12 pb-20">
+      <div className="min-h-full pt-12 md:pt-16 pb-20">
 
       {/* Form Content */}
       <div className="space-y-4 px-2 py-4">

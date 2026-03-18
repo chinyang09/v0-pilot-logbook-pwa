@@ -57,12 +57,12 @@ export function AirportDetailPanel({ icao, onBack }: AirportDetailPanelProps) {
 
   return (
     <div className="h-full relative flex flex-col">
-      {/* Header - absolute overlay for frosted glass */}
-      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
+      {/* Header — mobile only, desktop uses floating glass bar */}
+      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50 md:hidden">
         <div className="px-2 h-12 flex items-center">
           <div className="w-16 flex-shrink-0">
             {onBack ? (
-              <Button variant="ghost" size="icon-sm" onClick={onBack} className="md:hidden">
+              <Button variant="ghost" size="icon-sm" onClick={onBack}>
                 <ChevronLeft className="h-4 w-4" />
               </Button>
             ) : null}
@@ -73,7 +73,7 @@ export function AirportDetailPanel({ icao, onBack }: AirportDetailPanelProps) {
       </header>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto pt-12">
+      <div className="flex-1 overflow-auto pt-12 md:pt-16">
         <div className="px-4 pt-4 pb-safe">
           {/* Airport header */}
           <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
