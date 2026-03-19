@@ -186,6 +186,7 @@ function DesktopPillMorph({
   const [scope, animate] = useAnimate()
   const isAnimatingRef = useRef(false)
   const prevOpenRef = useRef(sidebarOpen)
+  const initializedRef = useRef(false)
 
   // Track internal visual state for content visibility (pill tabs vs sidebar nav)
   const [isExpanded, setIsExpanded] = useState(sidebarOpen)
@@ -208,11 +209,11 @@ function DesktopPillMorph({
 
   const spring = prefersReducedMotion
     ? { duration: 0 }
-    : { type: "spring" as const, stiffness: 400, damping: 30 }
+    : { type: "spring" as const, stiffness: 500, damping: 32 }
 
   const heightSpring = prefersReducedMotion
     ? { duration: 0 }
-    : { type: "spring" as const, stiffness: 350, damping: 28 }
+    : { type: "spring" as const, stiffness: 450, damping: 30 }
 
   // Run sequential animation when sidebarOpen changes
   const runAnimation = useCallback(async (opening: boolean) => {
@@ -254,6 +255,27 @@ function DesktopPillMorph({
     }
   }, [scope, animate, spring, heightSpring, expandedHeight])
 
+  // Set initial position on mount (no animation)
+  useEffect(() => {
+    if (!scope.current || initializedRef.current) return
+    initializedRef.current = true
+    const el = scope.current
+    if (sidebarOpen) {
+      el.style.top = `${SIDEBAR_PADDING}px`
+      el.style.left = `${SIDEBAR_PADDING}px`
+      el.style.transform = "translateX(0)"
+      el.style.width = `${SIDEBAR_INNER_WIDTH}px`
+      el.style.height = `${expandedHeight}px`
+    } else {
+      el.style.top = `${COLLAPSED_TOP}px`
+      el.style.left = "50%"
+      el.style.transform = "translateX(-50%)"
+      el.style.width = "auto"
+      el.style.height = `${PILL_HEIGHT}px`
+    }
+  }, [scope, sidebarOpen, expandedHeight])
+
+  // Animate on state change (skip first render)
   useEffect(() => {
     if (prevOpenRef.current === sidebarOpen) return
     prevOpenRef.current = sidebarOpen
@@ -264,13 +286,6 @@ function DesktopPillMorph({
     <motion.div
       ref={scope}
       className="fixed z-[100]"
-      style={{
-        top: sidebarOpen ? SIDEBAR_PADDING : COLLAPSED_TOP,
-        left: sidebarOpen ? SIDEBAR_PADDING : "50%",
-        x: sidebarOpen ? 0 : "-50%",
-        width: sidebarOpen ? SIDEBAR_INNER_WIDTH : "auto",
-        height: sidebarOpen ? expandedHeight : PILL_HEIGHT,
-      }}
     >
       <GlassContainer
         cornerRadius={isExpanded ? 20 : 28}

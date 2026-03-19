@@ -12,6 +12,10 @@ import {
 } from "@/components/ui/resizable"
 import { FlightForm } from "@/components/flight-form"
 import { useRef, useCallback } from "react"
+import { ChevronLeft } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { GlassContainer } from "@/components/ui/glass-container"
+import { cn } from "@/lib/utils"
 import { NavPill } from "@/components/nav-pill"
 import { PushSidebar } from "@/components/push-sidebar"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
@@ -97,7 +101,7 @@ function DetailPanelContent() {
  */
 function AppShellContent({ children }: AppShellProps) {
   const { handleScroll } = useScrollNavbarContext()
-  const { selectedId } = useDetailPanel()
+  const { selectedId, setSelectedId } = useDetailPanel()
   const isDesktop = useIsDesktop()
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
@@ -128,9 +132,13 @@ function AppShellContent({ children }: AppShellProps) {
 
       {/* Main content area with resizable panels */}
       <div className="flex-1 min-w-0 h-full relative">
-        {/* Header bar — progressive gradient overlay, visible on both mobile and desktop */}
+        {/* Header bar — progressive gradient overlay, visible on both mobile and desktop.
+            Hidden on mobile when detail overlay is shown (detail overlay has its own header). */}
         <div
-          className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none"
+          className={cn(
+            "absolute top-0 left-0 right-0 z-[99] flex pointer-events-none",
+            showMobileOverlay && "hidden md:flex"
+          )}
           style={{
             background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
           }}
@@ -205,7 +213,7 @@ function AppShellContent({ children }: AppShellProps) {
             }
           }}
         >
-          {/* Mobile detail header bar — gradient overlay with detail actions */}
+          {/* Mobile detail header bar — gradient overlay with back button + detail actions */}
           <div
             className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none"
             style={{
@@ -213,10 +221,28 @@ function AppShellContent({ children }: AppShellProps) {
             }}
           >
             <div className="flex items-center justify-between px-4 w-full pointer-events-auto" style={{ height: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.5rem)" }}>
+              {/* Back button — flush left */}
+              <GlassContainer cornerRadius={28}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-14 w-14"
+                  onClick={() => {
+                    // Remove ?selected= from URL to dismiss overlay
+                    const url = new URL(window.location.href)
+                    url.searchParams.delete("selected")
+                    window.history.replaceState({}, "", url.toString())
+                    setSelectedId(null)
+                  }}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </Button>
+              </GlassContainer>
+              <div className="flex-1" />
+              {/* Detail actions — flush right */}
               <div className="flex items-center gap-2">
                 {detailActions}
               </div>
-              <div className="flex-1" />
             </div>
           </div>
           <DetailPanelContent />

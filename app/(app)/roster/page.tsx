@@ -13,7 +13,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import {
   Calendar as CalendarIcon,
@@ -248,22 +247,9 @@ export default function RosterPage() {
       </GlassContainer>
       <GlassContainer cornerRadius={28}>
         <div className="flex items-center gap-0.5 px-1 h-14">
-          <Dialog open={showSettings} onOpenChange={setShowSettings}>
-            <DialogTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-12 w-12">
-                <Settings className="h-5 w-5" />
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Draft Generation Settings</DialogTitle>
-                <DialogDescription>
-                  Configure automatic draft flight generation from your schedule
-                </DialogDescription>
-              </DialogHeader>
-              <DraftSettings onSave={() => setShowSettings(false)} />
-            </DialogContent>
-          </Dialog>
+          <Button variant="ghost" size="icon" className="h-12 w-12" onClick={() => setShowSettings(true)}>
+            <Settings className="h-5 w-5" />
+          </Button>
           <Button variant="ghost" size="icon" className="h-12 w-12" onClick={handleGenerateDrafts} disabled={isGeneratingDrafts}>
             <FileDown className={cn("h-5 w-5", isGeneratingDrafts && "animate-bounce")} />
           </Button>
@@ -273,13 +259,26 @@ export default function RosterPage() {
         </div>
       </GlassContainer>
     </>
-  ), [refreshEntries, entriesLoading, viewMode, showSettings, handleGenerateDrafts, isGeneratingDrafts, isImporting])
+  ), [refreshEntries, entriesLoading, viewMode, handleGenerateDrafts, isGeneratingDrafts, isImporting])
 
   useRegisterMainActions(rosterActions, true)
 
   return (
     <PageContainer
     >
+      {/* Settings dialog — rendered at page level, not inside glass actions */}
+      <Dialog open={showSettings} onOpenChange={setShowSettings}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Draft Generation Settings</DialogTitle>
+            <DialogDescription>
+              Configure automatic draft flight generation from your schedule
+            </DialogDescription>
+          </DialogHeader>
+          <DraftSettings onSave={() => setShowSettings(false)} />
+        </DialogContent>
+      </Dialog>
+
       <div className="px-4 pt-4 pb-safe space-y-4">
         <input
           type="file"
