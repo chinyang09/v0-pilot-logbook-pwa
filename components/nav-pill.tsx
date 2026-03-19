@@ -188,16 +188,28 @@ function DesktopPillMorph({
   const prevOpenRef = useRef(sidebarOpen)
   const safetyTimerRef = useRef<ReturnType<typeof setTimeout>>()
 
-  // Viewport height for expanded sidebar
+  // Viewport height and safe area for expanded sidebar
   const [vh, setVh] = useState(typeof window !== "undefined" ? window.innerHeight : 800)
+  const [safeAreaTop, setSafeAreaTop] = useState(0)
   useEffect(() => {
-    setVh(window.innerHeight)
-    const onResize = () => setVh(window.innerHeight)
-    window.addEventListener("resize", onResize)
-    return () => window.removeEventListener("resize", onResize)
+    const measure = () => {
+      setVh(window.innerHeight)
+      // Measure safe-area-inset-top via a temporary element
+      const el = document.createElement("div")
+      el.style.position = "fixed"
+      el.style.top = "env(safe-area-inset-top, 0px)"
+      el.style.visibility = "hidden"
+      document.body.appendChild(el)
+      const top = el.getBoundingClientRect().top
+      document.body.removeChild(el)
+      setSafeAreaTop(top)
+    }
+    measure()
+    window.addEventListener("resize", measure)
+    return () => window.removeEventListener("resize", measure)
   }, [])
 
-  const expandedHeight = vh - SIDEBAR_PADDING * 2
+  const expandedHeight = vh - SIDEBAR_PADDING * 2 - safeAreaTop
   const PHASE_DURATION = prefersReducedMotion ? 0 : 100 // ms per phase
 
   const isItemActive = (href: string) => {
@@ -268,7 +280,9 @@ function DesktopPillMorph({
   })()
 
   const style: React.CSSProperties = {
-    top: isAtSidebarPosition ? SIDEBAR_PADDING : COLLAPSED_TOP,
+    top: isAtSidebarPosition
+      ? `calc(${SIDEBAR_PADDING}px + env(safe-area-inset-top, 0px))`
+      : `calc(${COLLAPSED_TOP}px + env(safe-area-inset-top, 0px))`,
     left: isAtSidebarPosition ? SIDEBAR_PADDING : "50%",
     transform: isAtSidebarPosition ? "translateX(0)" : "translateX(-50%)",
     width: isAtSidebarPosition ? SIDEBAR_INNER_WIDTH : "auto",

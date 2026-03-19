@@ -143,7 +143,7 @@ function AppShellContent({ children }: AppShellProps) {
             background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
           }}
         >
-          <div className="flex items-center justify-between px-4 w-full pointer-events-auto" style={{ height: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.5rem)" }}>
+          <div className="flex items-center justify-between px-4 w-full pointer-events-auto h-16">
             {/* Main panel actions — flush left */}
             <div className="flex items-center gap-2">
               {mainActions}
@@ -220,7 +220,7 @@ function AppShellContent({ children }: AppShellProps) {
               background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
             }}
           >
-            <div className="flex items-center justify-between px-4 w-full pointer-events-auto" style={{ height: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.5rem)" }}>
+            <div className="flex items-center justify-between px-4 w-full pointer-events-auto h-16">
               {/* Back button — flush left */}
               <GlassContainer cornerRadius={28}>
                 <Button
