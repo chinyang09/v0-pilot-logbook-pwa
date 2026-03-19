@@ -66,6 +66,14 @@ export default function Dashboard() {
     return unsubscribe
   }, [])
 
+  // Clear stale keep-alive page actions
+  useRegisterMainActions(null, true)
+
+  const isLoading = dbLoading || !dbReady
+  const recentFlights = flights.slice(0, 5)
+  const thisMonth = new Date().toISOString().slice(0, 7)
+  const thisMonthFlights = flights.filter((f) => f.date.startsWith(thisMonth))
+
   // Show loading state while checking auth
   if (authLoading) {
     return (
@@ -82,14 +90,6 @@ export default function Dashboard() {
   if (!isAuthenticated) {
     return null
   }
-
-  // Clear stale keep-alive page actions
-  useRegisterMainActions(null, true)
-
-  const isLoading = dbLoading || !dbReady
-  const recentFlights = flights.slice(0, 5)
-  const thisMonth = new Date().toISOString().slice(0, 7)
-  const thisMonthFlights = flights.filter((f) => f.date.startsWith(thisMonth))
 
   return (
     <PageContainer
