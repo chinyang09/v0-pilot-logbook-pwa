@@ -2,7 +2,6 @@
 
 import type React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
-import { SidebarNav, SidebarToggle } from "@/components/sidebar-nav"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
@@ -12,12 +11,18 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable"
 import { FlightForm } from "@/components/flight-form"
-import { BottomNavbar } from "@/components/bottom-navbar"
+import { useRef, useCallback } from "react"
+import { ChevronLeft } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { GlassContainer } from "@/components/ui/glass-container"
+import { cn } from "@/lib/utils"
+import { NavPill } from "@/components/nav-pill"
+import { PushSidebar } from "@/components/push-sidebar"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
+import { usePageActions } from "@/hooks/use-page-actions"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
 import { syncService } from "@/lib/sync"
-import { cn } from "@/lib/utils"
 
 interface AppShellProps {
   children: React.ReactNode
@@ -89,16 +94,31 @@ function DetailPanelContent() {
 }
 
 /**
- * Unified responsive shell — renders both mobile and desktop elements
- * in a single React tree. CSS visibility classes (`hidden lg:flex`, `lg:hidden`)
- * handle the responsive switch instead of conditional rendering, so the
- * component tree is never destroyed when crossing the 1024px breakpoint.
+ * Unified responsive shell.
+ *
+ * Mobile (<768px): Full-width content + floating bottom nav pill
+ * Desktop (≥768px): Push sidebar + resizable split panels + floating top nav pill
  */
 function AppShellContent({ children }: AppShellProps) {
-  const { hideNavbar, handleScroll } = useScrollNavbarContext()
-  const { selectedId } = useDetailPanel()
+  const { handleScroll } = useScrollNavbarContext()
+  const { selectedId, setSelectedId } = useDetailPanel()
   const isDesktop = useIsDesktop()
   const searchParams = useSearchParams()
+  const { mainActions, detailActions } = usePageActions()
+
+  // Refs for scroll-to-top tap zones
+  const mainPanelRef = useRef<HTMLDivElement>(null)
+  const detailPanelRef = useRef<HTMLDivElement>(null)
+
+  const scrollMainToTop = useCallback(() => {
+    const el = mainPanelRef.current?.querySelector("[data-scroll-container], main, .overflow-y-auto, .overflow-auto")
+    if (el) el.scrollTop = 0
+  }, [])
+
+  const scrollDetailToTop = useCallback(() => {
+    const el = detailPanelRef.current?.querySelector("[data-scroll-container], main, .overflow-y-auto, .overflow-auto")
+    if (el) el.scrollTop = 0
+  }, [])
 
   // Only show mobile overlay when the selection is explicit (in URL via ?selected=).
   // SessionStorage-restored selections set state but don't update the URL,
@@ -107,38 +127,85 @@ function AppShellContent({ children }: AppShellProps) {
 
   return (
     <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden pt-safe">
-      {/* Sidebar — desktop only */}
-      <div className="hidden lg:flex flex-shrink-0 h-full">
-        <SidebarNav />
-      </div>
+      {/* Push sidebar — desktop only, flex child that takes width and pushes panels right */}
+      {isDesktop && <PushSidebar />}
 
       {/* Main content area with resizable panels */}
-      <div className="flex-1 flex min-w-0 lg:overflow-x-auto">
-        <ResizablePanelGroup
-          direction="horizontal"
-          autoSaveId="desktop-panel-layout"
-          className="h-full lg:min-w-[750px]"
+      <div className="flex-1 min-w-0 h-full relative">
+        {/* Header bar — progressive gradient overlay, visible on both mobile and desktop.
+            Hidden on mobile when detail overlay is shown (detail overlay has its own header). */}
+        <div
+          className={cn(
+            "absolute top-0 left-0 right-0 z-[99] flex pointer-events-none",
+            showMobileOverlay && "hidden md:flex"
+          )}
+          style={{
+            background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
+          }}
         >
-          <ResizablePanel defaultSize={35} minSize={30} className="lg:min-w-[375px]">
-            <div className="h-full flex flex-col overflow-hidden relative">{children}</div>
-          </ResizablePanel>
+          <div className="flex items-center justify-between px-4 w-full pointer-events-auto" style={{ height: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.5rem)" }}>
+            {/* Main panel actions — flush left */}
+            <div className="flex items-center gap-2">
+              {mainActions}
+            </div>
 
-          {/* Resize handle — desktop only */}
-          <ResizableHandle withHandle className="hidden lg:flex" />
+            {/* Tap zone left of pill — scrolls main panel to top */}
+            <div
+              className="flex-1 h-full cursor-pointer"
+              onClick={scrollMainToTop}
+            />
 
-          {/* Detail panel — desktop only */}
-          <ResizablePanel defaultSize={65} minSize={25} className="hidden lg:block">
-            {isDesktop && <DetailPanelContent />}
-          </ResizablePanel>
-        </ResizablePanelGroup>
+            {/* Nav pill placeholder — actual pill is fixed-positioned on top */}
+            <div className="flex-shrink-0 w-0" />
+
+            {/* Tap zone right of pill — scrolls detail panel to top (desktop only) */}
+            {isDesktop && (
+              <div
+                className="flex-1 h-full cursor-pointer"
+                onClick={scrollDetailToTop}
+              />
+            )}
+
+            {/* Detail panel actions — desktop only (mobile shows in overlay) */}
+            {isDesktop && (
+              <div className="flex items-center gap-2">
+                {detailActions}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Resizable panels — full height, content scrolls behind absolute header */}
+        <div className="h-full md:overflow-x-auto">
+          <ResizablePanelGroup
+            direction="horizontal"
+            autoSaveId="desktop-panel-layout"
+            className="h-full md:min-w-[750px]"
+          >
+            <ResizablePanel defaultSize={35} minSize={30} className="md:min-w-[375px]">
+              <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative">
+                {children}
+              </div>
+            </ResizablePanel>
+
+            {/* Resize handle — desktop only */}
+            <ResizableHandle withHandle className="hidden md:flex" />
+
+            {/* Detail panel — desktop only */}
+            <ResizablePanel defaultSize={65} minSize={25} className="hidden md:block">
+              <div ref={detailPanelRef} className="h-full">
+                {isDesktop && <DetailPanelContent />}
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
       </div>
 
-      {/* Mobile detail overlay — sits above main content but behind the bottom
-          navbar so content scrolls under the frosted-glass bar, identical to
-          the main page. z-[55] beats page headers (z-50), navbar z-[60] wins. */}
+      {/* Mobile detail overlay — sits above main content but behind the nav pill.
+          z-[55] beats page headers (z-50), nav pill z-[60] wins. */}
       {showMobileOverlay && (
         <div
-          className="fixed inset-0 z-[55] bg-background lg:hidden pt-safe"
+          className="fixed inset-0 z-[55] bg-background md:hidden pt-safe"
           onScrollCapture={(e) => {
             const target = e.target as HTMLElement
             if (target !== e.currentTarget) {
@@ -146,22 +213,44 @@ function AppShellContent({ children }: AppShellProps) {
             }
           }}
         >
+          {/* Mobile detail header bar — gradient overlay with back button + detail actions */}
+          <div
+            className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none"
+            style={{
+              background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
+            }}
+          >
+            <div className="flex items-center justify-between px-4 w-full pointer-events-auto" style={{ height: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.5rem)" }}>
+              {/* Back button — flush left */}
+              <GlassContainer cornerRadius={28}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-14 w-14"
+                  onClick={() => {
+                    // Remove ?selected= from URL to dismiss overlay
+                    const url = new URL(window.location.href)
+                    url.searchParams.delete("selected")
+                    window.history.replaceState({}, "", url.toString())
+                    setSelectedId(null)
+                  }}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </Button>
+              </GlassContainer>
+              <div className="flex-1" />
+              {/* Detail actions — flush right */}
+              <div className="flex items-center gap-2">
+                {detailActions}
+              </div>
+            </div>
+          </div>
           <DetailPanelContent />
         </div>
       )}
 
-      {/* Sidebar toggle — desktop only, centered in h-12 header and aligned with sidebar nav icons */}
-      <div className="hidden lg:block absolute left-4 z-[100] top-[calc(env(safe-area-inset-top)+0.5rem)]">
-        <SidebarToggle />
-      </div>
-
-      {/* Bottom navbar — mobile only, z-[60] sits above the detail overlay */}
-      <div className={cn(
-        "fixed bottom-0 left-0 right-0 z-[60] transition-[translate] duration-300 ease-in-out lg:hidden",
-        hideNavbar ? "translate-y-full" : "translate-y-0"
-      )}>
-        <BottomNavbar />
-      </div>
+      {/* Floating nav pill — always mounted, animates opacity based on sidebar state */}
+      <NavPill />
 
       <PWAInstallPrompt />
     </div>

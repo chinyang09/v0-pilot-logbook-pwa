@@ -437,8 +437,14 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       }
     }, [flights, onTopFlightChange, rowVirtualizer]);
 
-    // Handle user touch/interaction start on flight list
+    // Handle user touch/interaction/wheel start on flight list
     const handleTouchStart = useCallback(() => {
+      if (!isExternalScrollRef.current) {
+        onScrollStart?.();
+      }
+    }, [onScrollStart]);
+
+    const handleWheelStart = useCallback(() => {
       if (!isExternalScrollRef.current) {
         onScrollStart?.();
       }
@@ -590,6 +596,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             className="h-full overflow-y-auto overscroll-contain"
             onTouchStart={handleTouchStart}
             onMouseDown={handleTouchStart}
+            onWheel={handleWheelStart}
           >
             <div
               style={{ height: `${topSpacerHeight}px` }}
@@ -620,6 +627,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             style={{ contain: "strict" }}
             onTouchStart={handleTouchStart}
             onMouseDown={handleTouchStart}
+            onWheel={handleWheelStart}
           >
             {/* Top spacer for calendar */}
             <div

@@ -21,14 +21,15 @@ import {
 } from "@/hooks/data"
 import { mutate } from "swr"
 import { Calendar, Plus, Search, X } from "lucide-react"
+import { AnimatePresence, motion } from "framer-motion"
 import { useRouter } from "next/navigation"
-import { StandardPageHeader } from "@/components/standard-page-header"
 import { cn } from "@/lib/utils"
 import { CSVImportButton } from "@/components/csv-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
-import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useSearchParams } from "next/navigation"
 import { usePageActive } from "@/hooks/use-page-active"
+import { useRegisterMainActions } from "@/hooks/use-page-actions"
+import { GlassContainer } from "@/components/ui/glass-container"
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -60,7 +61,6 @@ function parseDateLocal(dateStr: string): Date {
 export default function LogbookPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const isDesktop = useIsDesktop()
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
 
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
@@ -116,7 +116,7 @@ export default function LogbookPage() {
   }, [setHasDetailSupport])
 
   // Re-assert detail panel ownership when this keep-alive page becomes active again
-  usePageActive("/logbook", useCallback(() => {
+  const isActive = usePageActive("/logbook", useCallback(() => {
     setHasDetailSupport(true)
   }, [setHasDetailSupport]))
 
@@ -142,8 +142,9 @@ export default function LogbookPage() {
     return () => observer.disconnect()
   }, [])
 
-  // Track the topmost visible flight for calendar sync
+  // Track the topmost visible flight for calendar sync + date highlighting
   const topFlightIdRef = useRef<string | null>(null)
+  const [topFlightDate, setTopFlightDate] = useState<string | null>(null)
 
   const syncSourceRef = useRef<"calendar" | "flights" | null>(null)
   const selectedMonthRef = useRef(selectedMonth)
@@ -198,6 +199,7 @@ export default function LogbookPage() {
     (topFlight: FlightLog | null) => {
       if (!topFlight) return
       topFlightIdRef.current = topFlight.id
+      setTopFlightDate(topFlight.date)
 
       if (!showCalendarRef.current) return
       if (syncSourceRef.current !== "flights") return
@@ -360,71 +362,98 @@ export default function LogbookPage() {
   const hasActiveFilters = selectedFilters.length > 0
   const isLoading = dbLoading || !dbReady
 
-  return (
-    <div className="h-full relative flex flex-col">
-      {/* Combined header + calendar overlay - single continuous frosted glass */}
-      <div className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
-        <StandardPageHeader
-          title={showCalendar ? `${MONTHS[selectedMonth.month]} ${selectedMonth.year}` : "Logbook"}
-          className="bg-transparent backdrop-blur-none border-b-0"
-          actions={
-            <>
-              <Button
-                variant={showCalendar ? "default" : "ghost"}
-                size="icon-sm"
-                onClick={() => {
-                  toggleCalendar(!showCalendar)
-                  setSelectedDate(null)
-                  setSearchFocused(false)
-                }}
-              >
-                <Calendar className="h-4 w-4" />
-              </Button>
+  // Action buttons for the desktop floating glass bar — each in its own glass container
+  // Height h-14 matches the nav pill
+  const logbookActions = useMemo(() => (
+    <>
+      <GlassContainer cornerRadius={28}>
+        <div className="flex items-center gap-1 px-1 h-14">
+          <Button
+            variant={showCalendar ? "default" : "ghost"}
+            size="icon"
+            className="h-12 w-12"
+            onClick={() => {
+              toggleCalendar(!showCalendar)
+              setSelectedDate(null)
+              setSearchFocused(false)
+            }}
+          >
+            <Calendar className="h-5 w-5" />
+          </Button>
 
-              <CSVImportButton
-                onComplete={() => {
-                  refreshAllData()
-                }}
-              />
-
-              <Button
-                size="icon-sm"
-                onClick={async () => {
-                  const draftFlight = await createFlight()
-                  // Optimistic: prepend new draft to the SWR cache immediately.
-                  mutate(
-                    CACHE_KEYS.flights,
-                    (prev: FlightLog[] | undefined) => [draftFlight, ...(prev ?? [])],
-                    { revalidate: false }
-                  )
-                  setSelectedFlightId(draftFlight.id)
-                }}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </>
-          }
-        />
-        {/* Calendar collapse section */}
-        <div
-          ref={calendarContainerRef}
-          className={cn(
-            "transition-[max-height,opacity] duration-300 ease-in-out overflow-hidden",
-            showCalendar ? "opacity-100" : "max-h-0 opacity-0 pointer-events-none",
-          )}
-          style={showCalendar ? { maxHeight: `${calendarNaturalHeight}px` } : undefined}
-        >
-          <LogbookCalendar
-            ref={calendarRef}
-            className="bg-transparent shadow-none border-none"
-            flights={flights}
-            selectedMonth={selectedMonth}
-            onMonthChange={handleCalendarMonthChange}
-            onDateSelect={handleDateSelect}
-            selectedDate={selectedDate}
-            onScrollStart={handleCalendarScrollStart}
+          <CSVImportButton
+            onComplete={() => {
+              refreshAllData()
+            }}
           />
         </div>
+      </GlassContainer>
+
+      <GlassContainer cornerRadius={28}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-14 w-14"
+          onClick={async () => {
+            const draftFlight = await createFlight()
+            mutate(
+              CACHE_KEYS.flights,
+              (prev: FlightLog[] | undefined) => [draftFlight, ...(prev ?? [])],
+              { revalidate: false }
+            )
+            setSelectedFlightId(draftFlight.id)
+          }}
+        >
+          <Plus className="h-5 w-5" />
+        </Button>
+      </GlassContainer>
+    </>
+  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId])
+
+  // Register actions for the desktop floating bar
+  useRegisterMainActions(logbookActions, isActive)
+
+  return (
+    <div className="h-full relative flex flex-col">
+      {/* Calendar collapse section — absolute so flight list scrolls behind it
+          (required for glass see-through effect via backdrop-filter) */}
+      <div
+        ref={calendarContainerRef}
+        className="z-40 absolute left-0 right-0"
+        style={{ top: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)" }}
+      >
+        <AnimatePresence initial={false}>
+          {showCalendar && (
+            <motion.div
+              initial={{ height: 0 }}
+              animate={{ height: "auto" }}
+              exit={{ height: 0 }}
+              transition={{ type: "spring", stiffness: 400, damping: 35 }}
+              className="overflow-hidden"
+            >
+              <div className="px-2 pb-2">
+                {/* Month/Year title */}
+                <div className="px-3 pt-2 pb-0 text-center">
+                  <span className="text-sm font-medium text-foreground/80">
+                    {MONTHS[selectedMonth.month]} {selectedMonth.year}
+                  </span>
+                </div>
+                <LogbookCalendar
+                  ref={calendarRef}
+                  className="bg-transparent shadow-none border-none"
+                  flights={flights}
+                  selectedMonth={selectedMonth}
+                  onMonthChange={handleCalendarMonthChange}
+                  onDateSelect={handleDateSelect}
+                  selectedDate={selectedDate || topFlightDate}
+                  onScrollStart={handleCalendarScrollStart}
+                  glass
+                  cornerRadius={20}
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* FLIGHT LIST */}
@@ -438,7 +467,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={48 + (showCalendar ? calendarNaturalHeight : 0)}
+          topSpacerHeight={64 + (showCalendar ? calendarNaturalHeight : 0)}
           selectedFlightId={selectedFlightId}
           headerContent={
             <div className="flex-shrink-0 top-0 z-40 px-2 py-1">

@@ -5,7 +5,6 @@ import type React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { PageContainer } from "@/components/page-container";
 import { useAirportDatabase, useFlights } from "@/hooks/data";
-import { SearchablePageHeader } from "@/components/searchable-page-header";
 import {
   searchAirports,
   hasExactAirportCodeMatch,
@@ -28,6 +27,9 @@ import { AirportDetailPanel } from "@/components/airport-detail-panel";
 import { AirportNewForm } from "@/components/airport-new-form";
 import { useDebounce } from "@/hooks/use-debounce";
 import { usePageActive } from "@/hooks/use-page-active";
+import { useRegisterMainActions } from "@/hooks/use-page-actions";
+import { GlassSearchButton } from "@/components/glass-search-button";
+import { GlassContainer } from "@/components/ui/glass-container";
 
 // Memoized airport card to prevent unnecessary re-renders during virtualization
 interface AirportCardProps {
@@ -114,6 +116,7 @@ export default function AirportsPage() {
 
   // Search state (replacing useSearchableList)
   const [searchQuery, setSearchQuery] = useState("");
+  const [desktopSearchOpen, setDesktopSearchOpen] = useState(false);
   const debouncedSearchQuery = useDebounce(searchQuery, 150);
 
   // FR24 online search state
@@ -526,19 +529,28 @@ export default function AirportsPage() {
     ? "Departure"
     : "Arrival";
 
+  // Desktop floating glass bar actions — expandable search + glass add button
+  const airportActions = useMemo(() => (
+    <>
+      <GlassSearchButton
+        isOpen={desktopSearchOpen}
+        onToggle={() => setDesktopSearchOpen(prev => !prev)}
+        value={searchQuery}
+        onChange={setSearchQuery}
+        placeholder="Search airports..."
+      />
+      <GlassContainer cornerRadius={28}>
+        <Button variant="ghost" size="icon" onClick={handleAddClick} className="h-14 w-14">
+          <Plus className="h-5 w-5" />
+        </Button>
+      </GlassContainer>
+    </>
+  ), [handleAddClick, searchQuery, desktopSearchOpen]);
+
+  useRegisterMainActions(airportActions, isActive);
+
   return (
     <PageContainer
-      header={
-        <SearchablePageHeader
-          title={pageTitle}
-          showBack={!!fieldType}
-          onBack={fieldType ? () => router.back() : undefined}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          onAdd={handleAddClick}
-          searchPlaceholder="Search airports..."
-        />
-      }
       rightContent={
         showFastScroll ? (
           <FastScroll

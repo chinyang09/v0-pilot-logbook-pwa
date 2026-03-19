@@ -1,8 +1,10 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { GlassContainer } from "@/components/ui/glass-container"
+import { useRegisterDetailActions } from "@/hooks/use-page-actions"
 import { Switch } from "@/components/ui/switch"
 import {
   getPersonnelById,
@@ -10,7 +12,7 @@ import {
   getAllPersonnel,
   type Personnel,
 } from "@/lib/db"
-import { Loader2, ChevronRight, ChevronLeft } from "lucide-react"
+import { Loader2, ChevronRight } from "lucide-react"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
 
@@ -241,6 +243,47 @@ export function CrewDetailPanel({ crewId, onUpdated, onBack }: CrewDetailPanelPr
     }))
   }, [])
 
+  // Stable refs for handlers
+  const saveRef = useRef(handleSave)
+  saveRef.current = handleSave
+  const cancelRef = useRef(handleCancel)
+  cancelRef.current = handleCancel
+
+  // Register detail panel actions for the floating glass bar
+  const detailActions = useMemo(() => {
+    return isEditing ? (
+      <>
+        <GlassContainer cornerRadius={28}>
+          <Button variant="ghost" className="h-14 px-4" onClick={() => cancelRef.current()}>
+            Cancel
+          </Button>
+        </GlassContainer>
+        <GlassContainer cornerRadius={28}>
+          <Button
+            variant="ghost"
+            className="h-14 px-4 text-primary font-semibold"
+            disabled={!formData.name.trim() || isSaving}
+            onClick={() => saveRef.current()}
+          >
+            {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Save"}
+          </Button>
+        </GlassContainer>
+      </>
+    ) : (
+      <GlassContainer cornerRadius={28}>
+        <Button
+          variant="ghost"
+          className="h-14 px-4 text-primary font-semibold"
+          onClick={() => setIsEditing(true)}
+        >
+          Edit
+        </Button>
+      </GlassContainer>
+    )
+  }, [isEditing, isSaving, formData.name])
+
+  useRegisterDetailActions(detailActions, true)
+
   // Silent wait: return null to keep previous panel content visible (no flash)
   if (isLoading && !crew) {
     return null
@@ -256,55 +299,8 @@ export function CrewDetailPanel({ crewId, onUpdated, onBack }: CrewDetailPanelPr
 
   return (
     <div className="h-full relative flex flex-col">
-      {/* Header - absolute overlay for frosted glass */}
-      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
-        <div className="px-2 h-12 flex items-center">
-          <div className="w-16 flex-shrink-0">
-            {isEditing ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleCancel}
-                className="text-primary h-8 px-2"
-              >
-                Cancel
-              </Button>
-            ) : onBack ? (
-              <Button variant="ghost" size="icon-sm" onClick={onBack} className="lg:hidden">
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-            ) : null}
-          </div>
-          <h1 className="flex-1 text-center text-lg font-semibold truncate px-2">
-            {formData.isMe ? "Self" : formData.name || "Crew Info"}
-          </h1>
-          <div className="w-16 flex-shrink-0 flex justify-end">
-            {isEditing ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleSave}
-                disabled={!formData.name.trim() || isSaving}
-                className="text-primary h-8 px-2 font-semibold"
-              >
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsEditing(true)}
-                className="text-primary h-8 px-2 font-semibold"
-              >
-                Edit
-              </Button>
-            )}
-          </div>
-        </div>
-      </header>
-
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto pt-12">
+      <div className="flex-1 overflow-auto pt-16">
         <div className="px-4 pt-4 pb-safe">
           {/* Main Info Card */}
           <div className="bg-card rounded-xl overflow-hidden mb-6 border border-border">

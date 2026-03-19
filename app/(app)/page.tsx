@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from "react"
 import { PageContainer } from "@/components/page-container"
-import { StandardPageHeader } from "@/components/standard-page-header"
+import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { StatsDashboard } from "@/components/stats-dashboard"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -66,6 +66,14 @@ export default function Dashboard() {
     return unsubscribe
   }, [])
 
+  // Clear stale keep-alive page actions
+  useRegisterMainActions(null, true)
+
+  const isLoading = dbLoading || !dbReady
+  const recentFlights = flights.slice(0, 5)
+  const thisMonth = new Date().toISOString().slice(0, 7)
+  const thisMonthFlights = flights.filter((f) => f.date.startsWith(thisMonth))
+
   // Show loading state while checking auth
   if (authLoading) {
     return (
@@ -83,18 +91,8 @@ export default function Dashboard() {
     return null
   }
 
-  const isLoading = dbLoading || !dbReady
-  const recentFlights = flights.slice(0, 5)
-  const thisMonth = new Date().toISOString().slice(0, 7)
-  const thisMonthFlights = flights.filter((f) => f.date.startsWith(thisMonth))
-
   return (
     <PageContainer
-      header={
-        <StandardPageHeader
-          title="Dashboard"
-        />
-      }
     >
       {
         <div className="px-4 pt-4 pb-safe space-y-6">

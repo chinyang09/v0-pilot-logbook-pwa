@@ -21,7 +21,6 @@ import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
-import { SearchablePageHeader } from "@/components/searchable-page-header"
 import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
@@ -32,6 +31,9 @@ import { submitAircraftToServer } from "@/lib/submissions/submit"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog"
 import { usePageActive } from "@/hooks/use-page-active"
+import { useRegisterMainActions } from "@/hooks/use-page-actions"
+import { GlassSearchButton } from "@/components/glass-search-button"
+import { GlassContainer } from "@/components/ui/glass-container"
 
 // Memoized swipeable aircraft card (matches crew card pattern)
 interface AircraftCardProps {
@@ -143,6 +145,7 @@ export default function AircraftPage() {
   } = useDetailPanel()
 
   const [searchQuery, setSearchQuery] = useState("")
+  const [desktopSearchOpen, setDesktopSearchOpen] = useState(false)
   const debouncedSearchQuery = useDebounce(searchQuery, 150)
 
   // SWR hook for reference aircraft (same pattern as useFlights in logbook)
@@ -584,19 +587,28 @@ export default function AircraftPage() {
   const showRecentlyUsed = !debouncedSearchQuery && recentNonFavorites.length > 0
   const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim()
 
+  // Desktop floating glass bar actions — expandable search + glass add button
+  const aircraftActions = useMemo(() => (
+    <>
+      <GlassSearchButton
+        isOpen={desktopSearchOpen}
+        onToggle={() => setDesktopSearchOpen(prev => !prev)}
+        value={searchQuery}
+        onChange={setSearchQuery}
+        placeholder="Search aircraft..."
+      />
+      <GlassContainer cornerRadius={28}>
+        <Button variant="ghost" size="icon" onClick={handleAddClick} className="h-14 w-14">
+          <Plus className="h-5 w-5" />
+        </Button>
+      </GlassContainer>
+    </>
+  ), [handleAddClick, searchQuery, desktopSearchOpen])
+
+  useRegisterMainActions(aircraftActions, isActive)
+
   return (
     <PageContainer
-      header={
-        <SearchablePageHeader
-          title={selectMode ? "Select Aircraft" : "Aircraft"}
-          showBack={selectMode}
-          onBack={selectMode ? () => router.back() : undefined}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          onAdd={handleAddClick}
-          searchPlaceholder="Search registration, type code..."
-        />
-      }
       rightContent={
         showFastScroll ? (
           <FastScroll

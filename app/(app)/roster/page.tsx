@@ -2,7 +2,8 @@
 
 import { useState, useRef, useMemo, useCallback } from "react"
 import { PageContainer } from "@/components/page-container"
-import { StandardPageHeader } from "@/components/standard-page-header"
+import { useRegisterMainActions } from "@/hooks/use-page-actions"
+import { GlassContainer } from "@/components/ui/glass-container"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
@@ -12,7 +13,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import {
   Calendar as CalendarIcon,
@@ -58,7 +58,7 @@ export default function RosterPage() {
   const { currencies, isLoading: currenciesLoading } = useCurrencies()
   const { counts: discrepancyCounts } = useDiscrepancyCounts()
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
 
@@ -140,7 +140,7 @@ export default function RosterPage() {
         fileInputRef.current.value = ""
       }
     }
-  }
+  }, [refreshEntries])
 
   // Group schedule entries by date
   const entriesByDate = scheduleEntries.reduce(
@@ -194,7 +194,7 @@ export default function RosterPage() {
     setSelectedEntries([])
   }
 
-  const handleGenerateDrafts = async () => {
+  const handleGenerateDrafts = useCallback(async () => {
     try {
       setIsGeneratingDrafts(true)
       setDraftResult(null)
@@ -217,61 +217,69 @@ export default function RosterPage() {
     } finally {
       setIsGeneratingDrafts(false)
     }
-  }
+  }, [])
+
+  // Glass action buttons for the floating header bar
+  const rosterActions = useMemo(() => (
+    <>
+      <GlassContainer cornerRadius={28}>
+        <div className="flex items-center gap-0.5 px-1 h-14">
+          <Button variant="ghost" size="icon" className="h-12 w-12" onClick={() => refreshEntries()} disabled={entriesLoading}>
+            <RefreshCw className={cn("h-5 w-5", entriesLoading && "animate-spin")} />
+          </Button>
+          <Button
+            variant={viewMode === "list" ? "secondary" : "ghost"}
+            size="icon"
+            className="h-12 w-12"
+            onClick={() => setViewMode("list")}
+          >
+            <List className="h-5 w-5" />
+          </Button>
+          <Button
+            variant={viewMode === "calendar" ? "secondary" : "ghost"}
+            size="icon"
+            className="h-12 w-12"
+            onClick={() => setViewMode("calendar")}
+          >
+            <CalendarDays className="h-5 w-5" />
+          </Button>
+        </div>
+      </GlassContainer>
+      <GlassContainer cornerRadius={28}>
+        <div className="flex items-center gap-0.5 px-1 h-14">
+          <Button variant="ghost" size="icon" className="h-12 w-12" onClick={() => setShowSettings(true)}>
+            <Settings className="h-5 w-5" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-12 w-12" onClick={handleGenerateDrafts} disabled={isGeneratingDrafts}>
+            <FileDown className={cn("h-5 w-5", isGeneratingDrafts && "animate-bounce")} />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-12 w-12" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
+            <Upload className="h-5 w-5" />
+          </Button>
+        </div>
+      </GlassContainer>
+    </>
+  ), [refreshEntries, entriesLoading, viewMode, isGeneratingDrafts, isImporting, handleGenerateDrafts])
+
+  useRegisterMainActions(rosterActions, true)
 
   return (
-    <PageContainer
-      header={
-        <StandardPageHeader
-          title="Roster"
-          actions={
-            <>
-              <Button variant="ghost" size="icon-sm" onClick={() => refreshEntries()} disabled={entriesLoading}>
-                <RefreshCw className={cn("h-4 w-4", entriesLoading && "animate-spin")} />
-              </Button>
-              <Button
-                variant={viewMode === "list" ? "secondary" : "ghost"}
-                size="icon-sm"
-                onClick={() => setViewMode("list")}
-              >
-                <List className="h-4 w-4" />
-              </Button>
-              <Button
-                variant={viewMode === "calendar" ? "secondary" : "ghost"}
-                size="icon-sm"
-                onClick={() => setViewMode("calendar")}
-              >
-                <CalendarDays className="h-4 w-4" />
-              </Button>
-              <Dialog open={showSettings} onOpenChange={setShowSettings}>
-                <DialogTrigger asChild>
-                  <Button variant="ghost" size="icon-sm">
-                    <Settings className="h-4 w-4" />
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle>Draft Generation Settings</DialogTitle>
-                    <DialogDescription>
-                      Configure automatic draft flight generation from your schedule
-                    </DialogDescription>
-                  </DialogHeader>
-                  <DraftSettings onSave={() => setShowSettings(false)} />
-                </DialogContent>
-              </Dialog>
-              <Button variant="ghost" size="icon-sm" onClick={handleGenerateDrafts} disabled={isGeneratingDrafts}>
-                <FileDown className={cn("h-4 w-4", isGeneratingDrafts && "animate-bounce")} />
-              </Button>
-              <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
-                <Upload className="h-4 w-4" />
-                Import
-              </Button>
-            </>
-          }
-        />
-      }
-    >
-      <div className="px-4 pt-4 pb-safe space-y-4">
+    <>
+      {/* Settings dialog — rendered outside PageContainer to avoid scroll container issues */}
+      <Dialog open={showSettings} onOpenChange={setShowSettings}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Draft Generation Settings</DialogTitle>
+            <DialogDescription>
+              Configure automatic draft flight generation from your schedule
+            </DialogDescription>
+          </DialogHeader>
+          <DraftSettings onSave={() => setShowSettings(false)} />
+        </DialogContent>
+      </Dialog>
+
+      <PageContainer>
+        <div className="px-4 pt-4 pb-safe space-y-4">
         <input
           type="file"
           ref={fileInputRef}
@@ -523,6 +531,7 @@ export default function RosterPage() {
           </div>
         )}
       </div>
-    </PageContainer>
+      </PageContainer>
+    </>
   )
 }

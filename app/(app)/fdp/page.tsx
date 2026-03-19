@@ -2,7 +2,8 @@
 
 import { useMemo } from "react"
 import { PageContainer } from "@/components/page-container"
-import { StandardPageHeader } from "@/components/standard-page-header"
+import { useRegisterMainActions } from "@/hooks/use-page-actions"
+import { GlassContainer } from "@/components/ui/glass-container"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -131,18 +132,19 @@ export default function FDPPage() {
     )
   }
 
+  // Glass action buttons for the floating header bar
+  const fdpActions = useMemo(() => (
+    <GlassContainer cornerRadius={28}>
+      <Button variant="ghost" size="icon" className="h-14 w-14" onClick={() => refresh()} disabled={isLoading}>
+        <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
+      </Button>
+    </GlassContainer>
+  ), [refresh, isLoading])
+
+  useRegisterMainActions(fdpActions, true)
+
   return (
     <PageContainer
-      header={
-        <StandardPageHeader
-          title="FDP Dashboard"
-          actions={
-            <Button variant="ghost" size="icon-sm" onClick={() => refresh()} disabled={isLoading}>
-              <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-            </Button>
-          }
-        />
-      }
     >
       <div className="px-4 pt-4 pb-safe space-y-4">
         {/* Overall Status Card */}

@@ -22,6 +22,10 @@ interface LogbookCalendarProps {
   onSwipeStart?: () => void;
   onInteractionEnd?: () => void;
   className?: string;
+  /** Render as a glass component with liquid glass layers */
+  glass?: boolean;
+  /** Corner radius for glass mode (default 20) */
+  cornerRadius?: number;
 }
 
 export interface CalendarHandle {
@@ -53,6 +57,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       onSwipeStart,
       onInteractionEnd,
       className,
+      glass = false,
+      cornerRadius = 20,
     },
     ref
   ) {
@@ -194,6 +200,26 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       onInteractionEnd?.();
     };
 
+    // Desktop mouse wheel navigation between months
+    const handleWheel = (e: React.WheelEvent) => {
+      if (Math.abs(e.deltaY) < 10) return;
+      if (isExternalScrollRef.current) return;
+      onScrollStart?.();
+
+      let newYear = selectedMonth.year;
+      let newMonth = selectedMonth.month;
+
+      if (e.deltaY > 0) {
+        newMonth = selectedMonth.month === 11 ? 0 : selectedMonth.month + 1;
+        newYear = selectedMonth.month === 11 ? selectedMonth.year + 1 : selectedMonth.year;
+      } else {
+        newMonth = selectedMonth.month === 0 ? 11 : selectedMonth.month - 1;
+        newYear = selectedMonth.month === 0 ? selectedMonth.year - 1 : selectedMonth.year;
+      }
+
+      onMonthChange(newYear, newMonth);
+    };
+
     const handleDateClick = (dateStr: string, hasFlights: boolean) => {
       if (hasFlights) {
         onDateSelect?.(dateStr);
@@ -202,10 +228,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
     const today = getTodayLocal();
 
-    return (
-      <div
-        className={cn("flex flex-col w-full pb-0 overflow-hidden", className)}
-      >
+    const calendarContent = (
+      <>
         {/* HEADER: Days of the week */}
         <div className="grid grid-cols-7 gap-0 px-1 pt-0.5 pb-0">
           {DAYS.map((day, i) => (
@@ -226,6 +250,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
+          onWheel={handleWheel}
         >
           <div className="grid grid-cols-7 gap-0">
             {calendarDays.map((dayInfo, dayIndex) => {
@@ -258,6 +283,38 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             })}
           </div>
         </div>
+      </>
+    );
+
+    if (glass) {
+      return (
+        <div
+          className={cn("GlassContainer", className)}
+          style={{ "--corner-radius": `${cornerRadius}px` } as React.CSSProperties}
+        >
+          <div className={cn("GlassContent", "flex flex-col w-full pb-0")}>
+            {calendarContent}
+          </div>
+          <div className="GlassMaterial">
+            <div className="GlassEdgeReflection" />
+            <div className="GlassEmbossReflection" />
+            <div className="GlassRefraction" />
+            <div className="GlassBlur" />
+            <div className="BlendLayers" />
+            <div className="BlendEdge" />
+            <div className="Highlight" />
+            <div className="Contrast" />
+            <div className="Brightness" />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        className={cn("flex flex-col w-full pb-0 overflow-hidden", className)}
+      >
+        {calendarContent}
       </div>
     );
   }

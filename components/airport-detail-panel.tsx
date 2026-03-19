@@ -9,7 +9,6 @@ import {
   Mountain,
   Clock,
   Star,
-  ChevronLeft,
 } from "lucide-react"
 
 interface AirportDetailPanelProps {
@@ -57,23 +56,8 @@ export function AirportDetailPanel({ icao, onBack }: AirportDetailPanelProps) {
 
   return (
     <div className="h-full relative flex flex-col">
-      {/* Header - absolute overlay for frosted glass */}
-      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
-        <div className="px-2 h-12 flex items-center">
-          <div className="w-16 flex-shrink-0">
-            {onBack ? (
-              <Button variant="ghost" size="icon-sm" onClick={onBack} className="lg:hidden">
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-            ) : null}
-          </div>
-          <h1 className="flex-1 text-center text-lg font-semibold uppercase">{airport.icao}</h1>
-          <div className="w-16 flex-shrink-0" />
-        </div>
-      </header>
-
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto pt-12">
+      <div className="flex-1 overflow-auto pt-16">
         <div className="px-4 pt-4 pb-safe">
           {/* Airport header */}
           <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
