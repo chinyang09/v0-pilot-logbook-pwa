@@ -58,7 +58,7 @@ export default function RosterPage() {
   const { currencies, isLoading: currenciesLoading } = useCurrencies()
   const { counts: discrepancyCounts } = useDiscrepancyCounts()
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
 
@@ -140,7 +140,7 @@ export default function RosterPage() {
         fileInputRef.current.value = ""
       }
     }
-  }
+  }, [refreshEntries])
 
   // Group schedule entries by date
   const entriesByDate = scheduleEntries.reduce(
@@ -194,7 +194,7 @@ export default function RosterPage() {
     setSelectedEntries([])
   }
 
-  const handleGenerateDrafts = async () => {
+  const handleGenerateDrafts = useCallback(async () => {
     try {
       setIsGeneratingDrafts(true)
       setDraftResult(null)
@@ -217,7 +217,7 @@ export default function RosterPage() {
     } finally {
       setIsGeneratingDrafts(false)
     }
-  }
+  }, [])
 
   // Glass action buttons for the floating header bar
   const rosterActions = useMemo(() => (
@@ -259,14 +259,13 @@ export default function RosterPage() {
         </div>
       </GlassContainer>
     </>
-  ), [refreshEntries, entriesLoading, viewMode, handleGenerateDrafts, isGeneratingDrafts, isImporting])
+  ), [refreshEntries, entriesLoading, viewMode, isGeneratingDrafts, isImporting, handleGenerateDrafts])
 
   useRegisterMainActions(rosterActions, true)
 
   return (
-    <PageContainer
-    >
-      {/* Settings dialog — rendered at page level, not inside glass actions */}
+    <>
+      {/* Settings dialog — rendered outside PageContainer to avoid scroll container issues */}
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -279,7 +278,8 @@ export default function RosterPage() {
         </DialogContent>
       </Dialog>
 
-      <div className="px-4 pt-4 pb-safe space-y-4">
+      <PageContainer>
+        <div className="px-4 pt-4 pb-safe space-y-4">
         <input
           type="file"
           ref={fileInputRef}
@@ -531,6 +531,7 @@ export default function RosterPage() {
           </div>
         )}
       </div>
-    </PageContainer>
+      </PageContainer>
+    </>
   )
 }

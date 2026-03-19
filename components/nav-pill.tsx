@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
-import { motion, useAnimate, useReducedMotion } from "framer-motion"
+import { motion, useReducedMotion } from "framer-motion"
 import {
   LayoutDashboard,
   Book,
@@ -160,16 +160,16 @@ const PILL_HEIGHT = 56 // h-14
 const COLLAPSED_TOP = 8 // 0.5rem
 
 /**
- * Desktop pill that morphs into a full-height sidebar via sequential spring animation.
+ * Desktop pill that morphs into a full-height sidebar via CSS transitions.
  *
- * Open sequence:
- *   1. Pill slides left + grows wider to sidebar width (waits until complete)
- *   2. Pill expands height top-down → becomes sidebar
+ * Uses a two-phase state machine with CSS transitions (0.1s each phase = 0.2s total).
+ * Phase states: "pill" | "sliding" | "expanding" | "sidebar" | "collapsing" | "returning"
  *
- * Close sequence:
- *   1. Sidebar collapses height to pill height (waits until complete)
- *   2. Pill slides right back to center
+ * Open: pill → sliding (left+widen, 0.1s) → expanding (height, 0.1s) → sidebar
+ * Close: sidebar → collapsing (height, 0.1s) → returning (right+shrink, 0.1s) → pill
  */
+type MorphPhase = "pill" | "sliding" | "expanding" | "sidebar" | "collapsing" | "returning"
+
 function DesktopPillMorph({
   tabs,
   pathname,
@@ -183,16 +183,13 @@ function DesktopPillMorph({
   onToggleSidebar: () => void
   prefersReducedMotion: boolean
 }) {
-  const [scope, animate] = useAnimate()
-  const isAnimatingRef = useRef(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const [phase, setPhase] = useState<MorphPhase>(sidebarOpen ? "sidebar" : "pill")
   const prevOpenRef = useRef(sidebarOpen)
-  const initializedRef = useRef(false)
+  const safetyTimerRef = useRef<ReturnType<typeof setTimeout>>()
 
-  // Track internal visual state for content visibility (pill tabs vs sidebar nav)
-  const [isExpanded, setIsExpanded] = useState(sidebarOpen)
-
-  // Viewport height for expanded sidebar height calculation
-  const [vh, setVh] = useState(800)
+  // Viewport height for expanded sidebar
+  const [vh, setVh] = useState(typeof window !== "undefined" ? window.innerHeight : 800)
   useEffect(() => {
     setVh(window.innerHeight)
     const onResize = () => setVh(window.innerHeight)
@@ -201,91 +198,92 @@ function DesktopPillMorph({
   }, [])
 
   const expandedHeight = vh - SIDEBAR_PADDING * 2
+  const PHASE_DURATION = prefersReducedMotion ? 0 : 100 // ms per phase
 
   const isItemActive = (href: string) => {
     if (href === "/") return pathname === "/"
     return pathname === href || pathname?.startsWith(href + "/")
   }
 
-  const spring = prefersReducedMotion
-    ? { duration: 0 }
-    : { type: "spring" as const, stiffness: 500, damping: 32 }
-
-  const heightSpring = prefersReducedMotion
-    ? { duration: 0 }
-    : { type: "spring" as const, stiffness: 450, damping: 30 }
-
-  // Run sequential animation when sidebarOpen changes
-  const runAnimation = useCallback(async (opening: boolean) => {
-    if (!scope.current || isAnimatingRef.current) return
-    isAnimatingRef.current = true
-
-    try {
-      if (opening) {
-        // Step 1: Slide left + widen (pill → sidebar position)
-        await animate(scope.current, {
-          top: SIDEBAR_PADDING,
-          left: SIDEBAR_PADDING,
-          x: 0,
-          width: SIDEBAR_INNER_WIDTH,
-        }, spring)
-
-        // Step 2: Expand height (pill → full sidebar)
-        setIsExpanded(true)
-        await animate(scope.current, {
-          height: expandedHeight,
-        }, heightSpring)
-      } else {
-        // Step 1: Collapse height (sidebar → pill height)
-        setIsExpanded(false)
-        await animate(scope.current, {
-          height: PILL_HEIGHT,
-        }, heightSpring)
-
-        // Step 2: Slide right back to center
-        await animate(scope.current, {
-          top: COLLAPSED_TOP,
-          left: "50%",
-          x: "-50%",
-          width: "auto",
-        }, spring)
-      }
-    } finally {
-      isAnimatingRef.current = false
-    }
-  }, [scope, animate, spring, heightSpring, expandedHeight])
-
-  // Set initial position on mount (no animation)
-  useEffect(() => {
-    if (!scope.current || initializedRef.current) return
-    initializedRef.current = true
-    const el = scope.current
-    if (sidebarOpen) {
-      el.style.top = `${SIDEBAR_PADDING}px`
-      el.style.left = `${SIDEBAR_PADDING}px`
-      el.style.transform = "translateX(0)"
-      el.style.width = `${SIDEBAR_INNER_WIDTH}px`
-      el.style.height = `${expandedHeight}px`
-    } else {
-      el.style.top = `${COLLAPSED_TOP}px`
-      el.style.left = "50%"
-      el.style.transform = "translateX(-50%)"
-      el.style.width = "auto"
-      el.style.height = `${PILL_HEIGHT}px`
-    }
-  }, [scope, sidebarOpen, expandedHeight])
-
-  // Animate on state change (skip first render)
+  // Drive the two-phase state machine
   useEffect(() => {
     if (prevOpenRef.current === sidebarOpen) return
     prevOpenRef.current = sidebarOpen
-    runAnimation(sidebarOpen)
-  }, [sidebarOpen, runAnimation])
+
+    if (sidebarOpen) {
+      // Start open sequence: pill → sliding
+      setPhase("sliding")
+    } else {
+      // Start close sequence: sidebar → collapsing
+      setPhase("collapsing")
+    }
+  }, [sidebarOpen])
+
+  // Advance to next phase in the state machine
+  const advancePhase = useCallback(() => {
+    clearTimeout(safetyTimerRef.current)
+    setPhase((current) => {
+      switch (current) {
+        case "sliding": return "expanding"
+        case "expanding": return "sidebar"
+        case "collapsing": return "returning"
+        case "returning": return "pill"
+        default: return current
+      }
+    })
+  }, [])
+
+  // Handle transitionend events (only advance on the last property to finish)
+  const handleTransitionEnd = useCallback((e: React.TransitionEvent) => {
+    // Only respond to transitions on this element, not children
+    if (e.target !== ref.current) return
+    advancePhase()
+  }, [advancePhase])
+
+  // Safety timeout: if transitionend doesn't fire (e.g. width:auto, no actual change),
+  // advance after PHASE_DURATION + 50ms buffer
+  useEffect(() => {
+    const isTransitioning = phase === "sliding" || phase === "expanding" || phase === "collapsing" || phase === "returning"
+    if (!isTransitioning) return
+
+    clearTimeout(safetyTimerRef.current)
+    safetyTimerRef.current = setTimeout(advancePhase, PHASE_DURATION + 50)
+    return () => clearTimeout(safetyTimerRef.current)
+  }, [phase, PHASE_DURATION, advancePhase])
+
+  // Compute styles based on current phase
+  const isAtSidebarPosition = phase === "sliding" || phase === "expanding" || phase === "sidebar" || phase === "collapsing"
+  const isAtFullHeight = phase === "expanding" || phase === "sidebar"
+  const isExpanded = phase === "sidebar" || phase === "expanding"
+
+  // Which properties are transitioning in this phase
+  const transitionProperty = (() => {
+    switch (phase) {
+      case "sliding": return "top, left, transform, width"
+      case "expanding": return "height"
+      case "collapsing": return "height"
+      case "returning": return "top, left, transform, width"
+      default: return "none"
+    }
+  })()
+
+  const style: React.CSSProperties = {
+    top: isAtSidebarPosition ? SIDEBAR_PADDING : COLLAPSED_TOP,
+    left: isAtSidebarPosition ? SIDEBAR_PADDING : "50%",
+    transform: isAtSidebarPosition ? "translateX(0)" : "translateX(-50%)",
+    width: isAtSidebarPosition ? SIDEBAR_INNER_WIDTH : "auto",
+    height: isAtFullHeight ? expandedHeight : PILL_HEIGHT,
+    transitionProperty,
+    transitionDuration: `${PHASE_DURATION}ms`,
+    transitionTimingFunction: "cubic-bezier(0.25, 0.1, 0.25, 1)",
+  }
 
   return (
-    <motion.div
-      ref={scope}
+    <div
+      ref={ref}
       className="fixed z-[100]"
+      style={style}
+      onTransitionEnd={handleTransitionEnd}
     >
       <GlassContainer
         cornerRadius={isExpanded ? 20 : 28}
@@ -365,7 +363,7 @@ function DesktopPillMorph({
           </nav>
         </div>
       </GlassContainer>
-    </motion.div>
+    </div>
   )
 }
 

@@ -1,19 +1,9 @@
 "use client"
 
-import { motion, useReducedMotion } from "framer-motion"
+import { useReducedMotion } from "framer-motion"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 
 const SIDEBAR_WIDTH = 288
-
-const springTransition = {
-  type: "spring" as const,
-  stiffness: 400,
-  damping: 30,
-}
-
-const instantTransition = {
-  duration: 0,
-}
 
 /**
  * Push sidebar spacer — invisible flex child that animates width
@@ -26,14 +16,13 @@ export function PushSidebar() {
   const { isOpen } = useSidebar()
   const prefersReducedMotion = useReducedMotion()
 
-  const transition = prefersReducedMotion ? instantTransition : springTransition
-
   return (
-    <motion.div
+    <div
       className="h-full flex-shrink-0"
-      animate={{ width: isOpen ? SIDEBAR_WIDTH : 0 }}
-      initial={false}
-      transition={transition}
+      style={{
+        width: isOpen ? SIDEBAR_WIDTH : 0,
+        transition: prefersReducedMotion ? "none" : "width 200ms cubic-bezier(0.25, 0.1, 0.25, 1)",
+      }}
     />
   )
 }
