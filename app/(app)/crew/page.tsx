@@ -23,10 +23,8 @@ import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
-import { SearchablePageHeader } from "@/components/searchable-page-header";
 import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
-import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { CrewDetailPanel } from "@/components/crew-detail-panel";
 import { usePageActive } from "@/hooks/use-page-active";
 import { useRegisterMainActions } from "@/hooks/use-page-actions";
@@ -140,8 +138,6 @@ export default function CrewPage() {
   const fieldType = searchParams.get("field");
   const returnUrl = searchParams.get("return") || "/new-flight";
   const flightId = searchParams.get("flightId");
-  const isDesktop = useIsDesktop();
-
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const scrollContainerCallbackRef = useCallback((el: HTMLElement | null) => {
     scrollContainerRef.current = el;
@@ -474,19 +470,6 @@ export default function CrewPage() {
 
   return (
     <PageContainer
-      header={
-        isDesktop ? undefined : (
-          <SearchablePageHeader
-            title={pageTitle}
-            showBack={!!fieldType}
-            onBack={fieldType ? () => router.back() : undefined}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            onAdd={handleAddCrew}
-            searchPlaceholder="Search crew..."
-          />
-        )
-      }
       rightContent={
         showFastScroll ? (
           <FastScroll

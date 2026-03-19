@@ -1,10 +1,10 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
-import { motion, useReducedMotion } from "framer-motion"
+import { motion, useAnimate, useReducedMotion } from "framer-motion"
 import {
   LayoutDashboard,
   Book,
@@ -160,14 +160,15 @@ const PILL_HEIGHT = 56 // h-14
 const COLLAPSED_TOP = 8 // 0.5rem
 
 /**
- * Desktop pill that morphs into a full-height sidebar via spring animation.
+ * Desktop pill that morphs into a full-height sidebar via sequential spring animation.
  *
  * Open sequence:
- *   1. Pill slides left + grows wider to sidebar width
- *   2. Panels push right (handled by PushSidebar spacer)
- *   3. Pill expands height top-down → becomes sidebar
+ *   1. Pill slides left + grows wider to sidebar width (waits until complete)
+ *   2. Pill expands height top-down → becomes sidebar
  *
- * Close is the reverse.
+ * Close sequence:
+ *   1. Sidebar collapses height to pill height (waits until complete)
+ *   2. Pill slides right back to center
  */
 function DesktopPillMorph({
   tabs,
@@ -182,6 +183,13 @@ function DesktopPillMorph({
   onToggleSidebar: () => void
   prefersReducedMotion: boolean
 }) {
+  const [scope, animate] = useAnimate()
+  const isAnimatingRef = useRef(false)
+  const prevOpenRef = useRef(sidebarOpen)
+
+  // Track internal visual state for content visibility (pill tabs vs sidebar nav)
+  const [isExpanded, setIsExpanded] = useState(sidebarOpen)
+
   // Viewport height for expanded sidebar height calculation
   const [vh, setVh] = useState(800)
   useEffect(() => {
@@ -206,32 +214,66 @@ function DesktopPillMorph({
     ? { duration: 0 }
     : { type: "spring" as const, stiffness: 350, damping: 28 }
 
+  // Run sequential animation when sidebarOpen changes
+  const runAnimation = useCallback(async (opening: boolean) => {
+    if (!scope.current || isAnimatingRef.current) return
+    isAnimatingRef.current = true
+
+    try {
+      if (opening) {
+        // Step 1: Slide left + widen (pill → sidebar position)
+        await animate(scope.current, {
+          top: SIDEBAR_PADDING,
+          left: SIDEBAR_PADDING,
+          x: 0,
+          width: SIDEBAR_INNER_WIDTH,
+        }, spring)
+
+        // Step 2: Expand height (pill → full sidebar)
+        setIsExpanded(true)
+        await animate(scope.current, {
+          height: expandedHeight,
+        }, heightSpring)
+      } else {
+        // Step 1: Collapse height (sidebar → pill height)
+        setIsExpanded(false)
+        await animate(scope.current, {
+          height: PILL_HEIGHT,
+        }, heightSpring)
+
+        // Step 2: Slide right back to center
+        await animate(scope.current, {
+          top: COLLAPSED_TOP,
+          left: "50%",
+          x: "-50%",
+          width: "auto",
+        }, spring)
+      }
+    } finally {
+      isAnimatingRef.current = false
+    }
+  }, [scope, animate, spring, heightSpring, expandedHeight])
+
+  useEffect(() => {
+    if (prevOpenRef.current === sidebarOpen) return
+    prevOpenRef.current = sidebarOpen
+    runAnimation(sidebarOpen)
+  }, [sidebarOpen, runAnimation])
+
   return (
     <motion.div
+      ref={scope}
       className="fixed z-[100]"
-      initial={false}
-      animate={{
+      style={{
         top: sidebarOpen ? SIDEBAR_PADDING : COLLAPSED_TOP,
         left: sidebarOpen ? SIDEBAR_PADDING : "50%",
         x: sidebarOpen ? 0 : "-50%",
         width: sidebarOpen ? SIDEBAR_INNER_WIDTH : "auto",
         height: sidebarOpen ? expandedHeight : PILL_HEIGHT,
       }}
-      transition={{
-        ...spring,
-        // Height expands AFTER horizontal slide (open), or shrinks FIRST (close)
-        height: {
-          ...heightSpring,
-          delay: sidebarOpen ? 0.06 : 0,
-        },
-        // Horizontal movement: immediate on open, slightly delayed on close
-        left: { ...spring, delay: sidebarOpen ? 0 : 0.04 },
-        x: { ...spring, delay: sidebarOpen ? 0 : 0.04 },
-        width: { ...spring, delay: sidebarOpen ? 0 : 0.04 },
-      }}
     >
       <GlassContainer
-        cornerRadius={sidebarOpen ? 20 : 28}
+        cornerRadius={isExpanded ? 20 : 28}
         className="h-full"
         contentClassName="h-full overflow-hidden"
       >
@@ -247,16 +289,13 @@ function DesktopPillMorph({
               <PanelLeft className="h-5 w-5" />
             </Button>
 
-            {/* Pill nav tabs — text labels, fade out when sidebar opens */}
-            <motion.div
-              className="flex items-center gap-0.5 overflow-hidden whitespace-nowrap"
-              animate={{
-                opacity: sidebarOpen ? 0 : 1,
-                visibility: sidebarOpen ? "hidden" as const : "visible" as const,
-              }}
-              transition={{
-                opacity: { duration: 0.1 },
-                visibility: { delay: sidebarOpen ? 0.1 : 0 },
+            {/* Pill nav tabs — text labels, hidden when expanded */}
+            <div
+              className="flex items-center gap-0.5 overflow-hidden whitespace-nowrap transition-opacity duration-100"
+              style={{
+                opacity: isExpanded ? 0 : 1,
+                visibility: isExpanded ? "hidden" : "visible",
+                pointerEvents: isExpanded ? "none" : "auto",
               }}
             >
               <div className="w-px h-7 bg-border/50 mx-1" />
@@ -279,19 +318,16 @@ function DesktopPillMorph({
                   </Link>
                 )
               })}
-            </motion.div>
+            </div>
           </div>
 
-          {/* Sidebar nav list — revealed as height expands top-down */}
-          <motion.nav
-            className="flex-1 overflow-y-auto px-3 pb-4 space-y-0.5"
-            animate={{
-              opacity: sidebarOpen ? 1 : 0,
-              visibility: sidebarOpen ? "visible" as const : "hidden" as const,
-            }}
-            transition={{
-              opacity: { duration: 0.15, delay: sidebarOpen ? 0.12 : 0 },
-              visibility: { delay: sidebarOpen ? 0 : 0.15 },
+          {/* Sidebar nav list — revealed when expanded */}
+          <nav
+            className="flex-1 overflow-y-auto px-3 pb-4 space-y-0.5 transition-opacity duration-150"
+            style={{
+              opacity: isExpanded ? 1 : 0,
+              visibility: isExpanded ? "visible" : "hidden",
+              pointerEvents: isExpanded ? "auto" : "none",
             }}
           >
             <SidebarNavItem
@@ -311,7 +347,7 @@ function DesktopPillMorph({
                 />
               ))
             )}
-          </motion.nav>
+          </nav>
         </div>
       </GlassContainer>
     </motion.div>

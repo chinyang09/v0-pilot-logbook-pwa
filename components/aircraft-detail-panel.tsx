@@ -5,12 +5,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { useRegisterDetailActions } from "@/hooks/use-page-actions"
-import { useIsDesktop } from "@/hooks/use-is-desktop"
 import {
   addCustomAircraftToDatabase,
   type NormalizedAircraft,
 } from "@/lib/db/stores/reference/aircraft.store"
-import { Loader2, ChevronLeft } from "lucide-react"
+import { Loader2 } from "lucide-react"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
 import { getAircraftType, searchAircraftTypes } from "@/lib/db/stores/reference/aircraft-types.store"
 import type { AircraftType } from "@/types/entities/aircraft-type.types"
@@ -183,7 +182,6 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
   }
 
   const displayType = selectedType || typeInfo
-  const isDesktop = useIsDesktop()
 
   // Stable refs for handlers to avoid re-render loops
   const saveRef = useRef(handleSave)
@@ -191,9 +189,8 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
   const cancelRef = useRef(handleCancel)
   cancelRef.current = handleCancel
 
-  // Register detail panel actions for the desktop floating glass bar
+  // Register detail panel actions for the floating glass bar
   const detailActions = useMemo(() => {
-    if (!isDesktop) return null
     return isEditing ? (
       <>
         <GlassContainer cornerRadius={28}>
@@ -223,58 +220,13 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
         </Button>
       </GlassContainer>
     )
-  }, [isDesktop, isEditing, isSaving, formData.registration])
+  }, [isEditing, isSaving, formData.registration])
 
-  useRegisterDetailActions(detailActions, isDesktop ?? false)
+  useRegisterDetailActions(detailActions, true)
 
   return (
     <div className="h-full relative flex flex-col">
-      {/* Header — mobile only, desktop uses floating glass bar */}
-      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50 md:hidden">
-        <div className="px-2 h-12 flex items-center">
-          <div className="w-16 flex-shrink-0">
-            {isEditing ? (
-              <Button variant="ghost" size="sm" onClick={handleCancel} className="text-primary h-8 px-2">
-                Cancel
-              </Button>
-            ) : onBack ? (
-              <Button variant="ghost" size="icon-sm" onClick={onBack}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-            ) : null}
-          </div>
-          <h1 className="flex-1 text-center text-lg font-semibold truncate px-2">
-            {formData.registration || "Aircraft"}
-            {formData.typecode && (
-              <span className="text-muted-foreground text-sm ml-1">({formData.typecode})</span>
-            )}
-          </h1>
-          <div className="w-16 flex-shrink-0 flex justify-end">
-            {isEditing ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleSave}
-                disabled={!formData.registration.trim() || isSaving}
-                className="text-primary h-8 px-2 font-semibold"
-              >
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsEditing(true)}
-                className="text-primary h-8 px-2 font-semibold"
-              >
-              Edit
-            </Button>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <div className="flex-1 overflow-y-auto pt-12 md:pt-16">
+      <div className="flex-1 overflow-y-auto pt-16">
         <div className="px-4 pt-4 pb-safe">
           <div className="bg-card rounded-xl overflow-hidden mb-6 border border-border">
             <div className="px-4">

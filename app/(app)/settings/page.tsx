@@ -4,7 +4,7 @@ import type React from "react"
 import { useCallback, useEffect, useMemo } from "react"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { PageContainer } from "@/components/page-container"
-import { StandardPageHeader } from "@/components/standard-page-header"
+import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -85,19 +85,7 @@ function SettingsDetailPanel({ title, onBack, children }: {
 }) {
   return (
     <div className="h-full relative">
-      {/* Header — mobile only, desktop uses floating glass bar */}
-      <header className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50 md:hidden">
-        <div className="px-2 h-12 flex items-center">
-          <div className="w-16 flex-shrink-0">
-            <Button variant="ghost" size="icon" onClick={onBack} className="h-8 w-8">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-          </div>
-          <h1 className="flex-1 text-center text-lg font-semibold truncate px-2">{title}</h1>
-          <div className="w-16 flex-shrink-0" />
-        </div>
-      </header>
-      <div className="h-full overflow-auto pt-12 md:pt-16">
+      <div className="h-full overflow-auto pt-16">
         {children}
       </div>
     </div>
@@ -342,6 +330,9 @@ export default function SettingsPage() {
   const { selectedId, setSelectedId, setDetailContent, setHasDetailSupport } = useDetailPanel()
   const isDesktop = useIsDesktop()
 
+  // Clear stale keep-alive page actions
+  useRegisterMainActions(null, true)
+
   // Register detail support
   useEffect(() => {
     setHasDetailSupport(true)
@@ -394,7 +385,7 @@ export default function SettingsPage() {
 
   if (isLoading) {
     return (
-      <PageContainer header={<StandardPageHeader title="Settings" />}>
+      <PageContainer>
         <div className="flex items-center justify-center min-h-[50vh]">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
@@ -403,7 +394,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <PageContainer header={<StandardPageHeader title="Settings" />}>
+    <PageContainer>
       <div className="pt-1">
         {SECTIONS.map((section) => {
           const Icon = section.icon

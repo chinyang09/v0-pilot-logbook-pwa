@@ -23,11 +23,9 @@ import { mutate } from "swr"
 import { Calendar, Plus, Search, X } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useRouter } from "next/navigation"
-import { StandardPageHeader } from "@/components/standard-page-header"
 import { cn } from "@/lib/utils"
 import { CSVImportButton } from "@/components/csv-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
-import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useSearchParams } from "next/navigation"
 import { usePageActive } from "@/hooks/use-page-active"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
@@ -63,7 +61,6 @@ function parseDateLocal(dateStr: string): Date {
 export default function LogbookPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const isDesktop = useIsDesktop()
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
 
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
@@ -418,23 +415,12 @@ export default function LogbookPage() {
 
   return (
     <div className="h-full relative flex flex-col">
-      {/* Mobile header — hidden on desktop where actions appear in floating glass bar */}
-      {!isDesktop && (
-        <div className="absolute top-0 left-0 right-0 z-50 bg-background/30 backdrop-blur-xl border-b border-border/50">
-          <StandardPageHeader
-            title={showCalendar ? `${MONTHS[selectedMonth.month]} ${selectedMonth.year}` : "Logbook"}
-            className="bg-transparent backdrop-blur-none border-b-0"
-            actions={logbookActions}
-          />
-        </div>
-      )}
-
-      {/* Calendar collapse section — absolute on desktop so flight list scrolls behind it
+      {/* Calendar collapse section — absolute so flight list scrolls behind it
           (required for glass see-through effect via backdrop-filter) */}
       <div
         ref={calendarContainerRef}
-        className={cn("z-40", isDesktop ? "absolute left-0 right-0" : "relative mt-12")}
-        style={isDesktop ? { top: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)" } : undefined}
+        className="z-40 absolute left-0 right-0"
+        style={{ top: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)" }}
       >
         <AnimatePresence initial={false}>
           {showCalendar && (
@@ -445,41 +431,26 @@ export default function LogbookPage() {
               transition={{ type: "spring", stiffness: 400, damping: 35 }}
               className="overflow-hidden"
             >
-              {isDesktop ? (
-                <div className="px-2 pb-2">
-                  {/* Month/Year title */}
-                  <div className="px-3 pt-2 pb-0 text-center">
-                    <span className="text-sm font-medium text-foreground/80">
-                      {MONTHS[selectedMonth.month]} {selectedMonth.year}
-                    </span>
-                  </div>
-                  <LogbookCalendar
-                    ref={calendarRef}
-                    className="bg-transparent shadow-none border-none"
-                    flights={flights}
-                    selectedMonth={selectedMonth}
-                    onMonthChange={handleCalendarMonthChange}
-                    onDateSelect={handleDateSelect}
-                    selectedDate={selectedDate || topFlightDate}
-                    onScrollStart={handleCalendarScrollStart}
-                    glass
-                    cornerRadius={20}
-                  />
+              <div className="px-2 pb-2">
+                {/* Month/Year title */}
+                <div className="px-3 pt-2 pb-0 text-center">
+                  <span className="text-sm font-medium text-foreground/80">
+                    {MONTHS[selectedMonth.month]} {selectedMonth.year}
+                  </span>
                 </div>
-              ) : (
-                <div className="bg-background/30 backdrop-blur-xl border-b border-border/50">
-                  <LogbookCalendar
-                    ref={calendarRef}
-                    className="bg-transparent shadow-none border-none"
-                    flights={flights}
-                    selectedMonth={selectedMonth}
-                    onMonthChange={handleCalendarMonthChange}
-                    onDateSelect={handleDateSelect}
-                    selectedDate={selectedDate || topFlightDate}
-                    onScrollStart={handleCalendarScrollStart}
-                  />
-                </div>
-              )}
+                <LogbookCalendar
+                  ref={calendarRef}
+                  className="bg-transparent shadow-none border-none"
+                  flights={flights}
+                  selectedMonth={selectedMonth}
+                  onMonthChange={handleCalendarMonthChange}
+                  onDateSelect={handleDateSelect}
+                  selectedDate={selectedDate || topFlightDate}
+                  onScrollStart={handleCalendarScrollStart}
+                  glass
+                  cornerRadius={20}
+                />
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -496,7 +467,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={isDesktop ? 64 + (showCalendar ? calendarNaturalHeight : 0) : 48 + (showCalendar ? calendarNaturalHeight : 0)}
+          topSpacerHeight={64 + (showCalendar ? calendarNaturalHeight : 0)}
           selectedFlightId={selectedFlightId}
           headerContent={
             <div className="flex-shrink-0 top-0 z-40 px-2 py-1">

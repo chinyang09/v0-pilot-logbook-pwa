@@ -128,42 +128,44 @@ function AppShellContent({ children }: AppShellProps) {
 
       {/* Main content area with resizable panels */}
       <div className="flex-1 min-w-0 h-full relative">
-        {/* Header bar — progressive dark-to-transparent gradient so content fades in as it scrolls up */}
-        {isDesktop && (
-          <div
-            className="absolute top-0 left-0 right-0 z-[99] hidden md:flex pointer-events-none"
-            style={{
-              background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
-            }}
-          >
-            <div className="flex items-center justify-between px-4 w-full pointer-events-auto" style={{ height: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.5rem)" }}>
-              {/* Main panel actions — flush left */}
-              <div className="flex items-center gap-2">
-                {mainActions}
-              </div>
+        {/* Header bar — progressive gradient overlay, visible on both mobile and desktop */}
+        <div
+          className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none"
+          style={{
+            background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
+          }}
+        >
+          <div className="flex items-center justify-between px-4 w-full pointer-events-auto" style={{ height: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.5rem)" }}>
+            {/* Main panel actions — flush left */}
+            <div className="flex items-center gap-2">
+              {mainActions}
+            </div>
 
-              {/* Tap zone left of pill — scrolls main panel to top */}
-              <div
-                className="flex-1 h-full cursor-pointer"
-                onClick={scrollMainToTop}
-              />
+            {/* Tap zone left of pill — scrolls main panel to top */}
+            <div
+              className="flex-1 h-full cursor-pointer"
+              onClick={scrollMainToTop}
+            />
 
-              {/* Nav pill placeholder — actual pill is fixed-positioned on top */}
-              <div className="flex-shrink-0 w-0" />
+            {/* Nav pill placeholder — actual pill is fixed-positioned on top */}
+            <div className="flex-shrink-0 w-0" />
 
-              {/* Tap zone right of pill — scrolls detail panel to top */}
+            {/* Tap zone right of pill — scrolls detail panel to top (desktop only) */}
+            {isDesktop && (
               <div
                 className="flex-1 h-full cursor-pointer"
                 onClick={scrollDetailToTop}
               />
+            )}
 
-              {/* Detail panel actions — flush right */}
+            {/* Detail panel actions — desktop only (mobile shows in overlay) */}
+            {isDesktop && (
               <div className="flex items-center gap-2">
                 {detailActions}
               </div>
-            </div>
+            )}
           </div>
-        )}
+        </div>
 
         {/* Resizable panels — full height, content scrolls behind absolute header */}
         <div className="h-full md:overflow-x-auto">
@@ -203,6 +205,20 @@ function AppShellContent({ children }: AppShellProps) {
             }
           }}
         >
+          {/* Mobile detail header bar — gradient overlay with detail actions */}
+          <div
+            className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none"
+            style={{
+              background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
+            }}
+          >
+            <div className="flex items-center justify-between px-4 w-full pointer-events-auto" style={{ height: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.5rem)" }}>
+              <div className="flex items-center gap-2">
+                {detailActions}
+              </div>
+              <div className="flex-1" />
+            </div>
+          </div>
           <DetailPanelContent />
         </div>
       )}

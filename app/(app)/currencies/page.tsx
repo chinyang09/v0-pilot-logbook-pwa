@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { PageContainer } from "@/components/page-container"
-import { StandardPageHeader } from "@/components/standard-page-header"
+import { useRegisterMainActions } from "@/hooks/use-page-actions"
+import { GlassContainer } from "@/components/ui/glass-container"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -77,24 +78,28 @@ export default function CurrenciesPage() {
     }
   }
 
+  // Glass action buttons for the floating header bar
+  const currencyActions = useMemo(() => (
+    <>
+      <GlassContainer cornerRadius={28}>
+        <div className="flex items-center gap-0.5 px-1 h-14">
+          <Button variant="ghost" size="icon" className="h-12 w-12" onClick={() => refresh()} disabled={isLoading}>
+            <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
+          </Button>
+        </div>
+      </GlassContainer>
+      <GlassContainer cornerRadius={28}>
+        <Button variant="ghost" size="icon" className="h-14 w-14" onClick={() => setShowAddDialog(true)}>
+          <Plus className="h-5 w-5" />
+        </Button>
+      </GlassContainer>
+    </>
+  ), [refresh, isLoading])
+
+  useRegisterMainActions(currencyActions, true)
+
   return (
     <PageContainer
-      header={
-        <StandardPageHeader
-          title="Currencies & Expiries"
-          actions={
-            <>
-              <Button variant="ghost" size="icon-sm" onClick={() => refresh()} disabled={isLoading}>
-                <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-              </Button>
-              <Button size="sm" onClick={() => setShowAddDialog(true)}>
-                <Plus className="h-4 w-4" />
-                Add
-              </Button>
-            </>
-          }
-        />
-      }
     >
       <div className="px-4 pt-4 pb-safe space-y-4">
         {/* Status Cards */}

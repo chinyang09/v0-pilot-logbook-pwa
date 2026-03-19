@@ -21,7 +21,6 @@ import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
-import { SearchablePageHeader } from "@/components/searchable-page-header"
 import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
@@ -610,19 +609,6 @@ export default function AircraftPage() {
 
   return (
     <PageContainer
-      header={
-        isDesktop ? undefined : (
-          <SearchablePageHeader
-            title={selectMode ? "Select Aircraft" : "Aircraft"}
-            showBack={selectMode}
-            onBack={selectMode ? () => router.back() : undefined}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            onAdd={handleAddClick}
-            searchPlaceholder="Search registration, type code..."
-          />
-        )
-      }
       rightContent={
         showFastScroll ? (
           <FastScroll

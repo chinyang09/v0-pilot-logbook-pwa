@@ -1286,7 +1286,6 @@ export function FlightForm({
 
   // Register detail panel actions for the desktop floating glass bar
   const detailActions = useMemo(() => {
-    if (!isDesktop) return null;
     return (
       <>
         <GlassContainer cornerRadius={28}>
@@ -1310,9 +1309,9 @@ export function FlightForm({
         </GlassContainer>
       </>
     );
-  }, [isDesktop, handleOCRDataExtracted, isSubmitting]);
+  }, [handleOCRDataExtracted, isSubmitting]);
 
-  useRegisterDetailActions(detailActions, isDesktop);
+  useRegisterDetailActions(detailActions, true);
 
   // Wait silently for useLiveQuery to resolve — returning null keeps the
   // previous panel content visible, avoiding a flash/spinner on selection change.
@@ -1322,39 +1321,8 @@ export function FlightForm({
 
   return (
     <div className="h-full relative">
-      {/* Header — mobile only, desktop uses floating glass bar */}
-      <div className="absolute top-0 left-0 right-0 z-50 h-12 bg-background/30 backdrop-blur-xl border-b border-border/50 px-4 flex items-center justify-between md:hidden">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon-sm" onClick={handleKeepAsDraft}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <h1 className="text-lg font-semibold flex items-center gap-2">
-            {isDraft ? "Draft" : "Edit Flight"}
-            {isDraft && (
-              <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full font-normal">
-                Auto-saved
-              </span>
-            )}
-          </h1>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <ImageImportButton
-            onDataExtracted={handleOCRDataExtracted}
-            variant="ghost"
-            size="icon-sm"
-          />
-          <Button
-            onClick={handleSyncFlight}
-            disabled={isSubmitting}
-            size="sm"
-          >
-            <RefreshCw className={`h-4 w-4 ${isSubmitting ? "animate-spin" : ""}`} />
-            {isSubmitting ? "Syncing..." : "Sync"}
-          </Button>
-        </div>
-      </div>
     <div ref={scrollContainerRef} className="h-full overflow-y-auto bg-background">
-      <div className="min-h-full pt-12 md:pt-16 pb-20">
+      <div className="min-h-full pt-16 pb-20">
 
       {/* Form Content */}
       <div className="space-y-4 px-2 py-4">

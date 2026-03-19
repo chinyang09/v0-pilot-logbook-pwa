@@ -5,7 +5,6 @@ import type React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { PageContainer } from "@/components/page-container";
 import { useAirportDatabase, useFlights } from "@/hooks/data";
-import { SearchablePageHeader } from "@/components/searchable-page-header";
 import {
   searchAirports,
   hasExactAirportCodeMatch,
@@ -552,19 +551,6 @@ export default function AirportsPage() {
 
   return (
     <PageContainer
-      header={
-        isDesktop ? undefined : (
-          <SearchablePageHeader
-            title={pageTitle}
-            showBack={!!fieldType}
-            onBack={fieldType ? () => router.back() : undefined}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            onAdd={handleAddClick}
-            searchPlaceholder="Search airports..."
-          />
-        )
-      }
       rightContent={
         showFastScroll ? (
           <FastScroll

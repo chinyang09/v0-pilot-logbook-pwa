@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { PageContainer } from "@/components/page-container"
-import { StandardPageHeader } from "@/components/standard-page-header"
+import { useRegisterMainActions } from "@/hooks/use-page-actions"
+import { GlassContainer } from "@/components/ui/glass-container"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -48,23 +49,19 @@ export default function DiscrepanciesPage() {
   const warningCount = unresolvedDiscrepancies.filter((d) => d.severity === "warning").length
   const infoCount = unresolvedDiscrepancies.filter((d) => d.severity === "info").length
 
+  // Glass action buttons for the floating header bar
+  const discrepancyActions = useMemo(() => (
+    <GlassContainer cornerRadius={28}>
+      <Button variant="ghost" size="icon" className="h-14 w-14" onClick={() => refresh()} disabled={isLoading}>
+        <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
+      </Button>
+    </GlassContainer>
+  ), [refresh, isLoading])
+
+  useRegisterMainActions(discrepancyActions, true)
+
   return (
     <PageContainer
-      header={
-        <StandardPageHeader
-          title="Discrepancies"
-          actions={
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => refresh()}
-              disabled={isLoading}
-            >
-              <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-            </Button>
-          }
-        />
-      }
     >
       <div className="px-4 pt-4 pb-safe space-y-4">
         {/* Status Cards */}

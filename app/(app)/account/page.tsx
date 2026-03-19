@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { useAuth } from "@/components/providers/auth-provider"
 import { PageContainer } from "@/components/page-container"
-import { StandardPageHeader } from "@/components/standard-page-header"
+import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -65,6 +65,9 @@ export default function AccountPage() {
   const [newCallsign, setNewCallsign] = useState("")
   const [totpCode, setTotpCode] = useState("")
   const [callsignError, setCallsignError] = useState("")
+
+  // Clear stale keep-alive page actions
+  useRegisterMainActions(null, true)
   const [callsignSuccess, setCallsignSuccess] = useState("")
   const [isChangingCallsign, setIsChangingCallsign] = useState(false)
 
@@ -200,7 +203,7 @@ export default function AccountPage() {
 
   if (isLoading) {
     return (
-      <PageContainer header={<StandardPageHeader title="Account" />}>
+      <PageContainer>
         <div className="flex items-center justify-center min-h-[50vh]">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
@@ -209,7 +212,7 @@ export default function AccountPage() {
   }
 
   return (
-    <PageContainer header={<StandardPageHeader title="Account" />}>
+    <PageContainer>
       <div className="px-4 pt-4 pb-safe space-y-6">
 
       {/* Profile Section */}

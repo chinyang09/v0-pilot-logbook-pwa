@@ -2,11 +2,11 @@
 
 import { ReactNode, type RefCallback } from "react"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
-import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { cn } from "@/lib/utils"
 
 interface PageContainerProps {
   children: ReactNode
+  /** Optional inline header (used by mobile-only record/form pages) */
   header?: ReactNode
   className?: string
   /** Content to render on the right side, positioned relative to the viewport (e.g., FastScroll) */
@@ -17,7 +17,6 @@ interface PageContainerProps {
 
 export function PageContainer({ children, header, className, rightContent, mainRef }: PageContainerProps) {
   const { handleScroll } = useScrollNavbarContext()
-  const isDesktop = useIsDesktop()
 
   return (
     <div className="h-full relative flex flex-col">
@@ -26,7 +25,7 @@ export function PageContainer({ children, header, className, rightContent, mainR
       <main
         ref={mainRef}
         onScroll={handleScroll}
-        className={cn("flex-1 overflow-y-auto overscroll-contain", header && "pt-12", isDesktop && "pt-16", className)}
+        className={cn("flex-1 overflow-y-auto overscroll-contain", header ? "pt-12" : "pt-16", className)}
       >
         <div className="pb-24">
           {children}
@@ -35,7 +34,7 @@ export function PageContainer({ children, header, className, rightContent, mainR
 
         {/* Right content (e.g., FastScroll) positioned relative to viewport, not scrolling content */}
         {rightContent && (
-          <div className={cn("absolute right-1 bottom-0 z-40 flex items-center pointer-events-none", header ? "top-12" : "top-0", isDesktop && "top-16")}>
+          <div className={cn("absolute right-1 bottom-0 z-40 flex items-center pointer-events-none", header ? "top-12" : "top-16")}>
             <div className="pointer-events-auto">
               {rightContent}
             </div>
