@@ -20,7 +20,7 @@ import {
   CACHE_KEYS,
 } from "@/hooks/data"
 import { mutate } from "swr"
-import { Calendar, Plus, Search, X } from "lucide-react"
+import { Calendar, Plus, Search, X, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -98,6 +98,7 @@ export default function LogbookPage() {
   const debouncedSearchQuery = useDebounce(searchQuery, 150)
   const [searchFocused, setSearchFocused] = useState(false)
   const [selectedFilters, setSelectedFilters] = useState<string[]>([])
+  const [showMonthPicker, setShowMonthPicker] = useState(false)
   const { handleScroll } = useScrollNavbarContext()
 
   // Detail panel integration
@@ -255,14 +256,18 @@ export default function LogbookPage() {
 
   const handleFlightScrollStart = useCallback(() => {
     syncSourceRef.current = "flights"
+    setSelectedDate(null) // Clear calendar selection so highlight follows top flight
   }, [])
 
   const handleDateSelect = useCallback((date: string) => {
-    // Scroll to the first flight on this date instead of filtering
-    const flight = flights.find(f => f.date === date)
-    if (flight) {
-      syncSourceRef.current = "calendar"
-      flightListRef.current?.scrollToFlight(flight.id)
+    setSelectedDate(date)
+    syncSourceRef.current = "calendar"
+
+    // Find the first flight on this date, or the nearest flight after this date
+    const targetFlight = flights.find(f => f.date === date)
+      ?? flights.find(f => f.date < date)
+    if (targetFlight) {
+      flightListRef.current?.scrollToFlight(targetFlight.id)
     }
   }, [flights])
 
@@ -384,6 +389,7 @@ export default function LogbookPage() {
               toggleCalendar(!showCalendar)
               setSelectedDate(null)
               setSearchFocused(false)
+              if (showCalendar) setShowMonthPicker(false)
             }}
           >
             <Calendar className="h-5 w-5" />
@@ -403,7 +409,7 @@ export default function LogbookPage() {
           size="icon"
           className="h-14 w-14"
           onClick={async () => {
-            const draftFlight = await createFlight()
+            const draftFlight = await createFlight(selectedDate || undefined)
             mutate(
               CACHE_KEYS.flights,
               (prev: FlightLog[] | undefined) => [draftFlight, ...(prev ?? [])],
@@ -415,8 +421,21 @@ export default function LogbookPage() {
           <Plus className="h-5 w-5" />
         </Button>
       </GlassContainer>
+
+      {showCalendar && (
+        <GlassContainer cornerRadius={28}>
+          <Button
+            variant="ghost"
+            className="h-14 px-4 text-sm font-medium"
+            onClick={() => setShowMonthPicker(prev => !prev)}
+          >
+            {MONTHS[selectedMonth.month]} {selectedMonth.year}
+            <ChevronDown className={cn("h-3.5 w-3.5 ml-1.5 opacity-60 transition-transform", showMonthPicker && "rotate-180")} />
+          </Button>
+        </GlassContainer>
+      )}
     </>
-  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId])
+  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId, selectedDate, selectedMonth, showMonthPicker])
 
   // Register actions for the desktop floating bar
   useRegisterMainActions(logbookActions, isActive)
@@ -430,6 +449,72 @@ export default function LogbookPage() {
         className="z-40 absolute left-0 right-0"
         style={{ top: "4rem", contain: "layout style paint" }}
       >
+        {/* Month/Year quick picker dropdown */}
+        <AnimatePresence initial={false}>
+          {showCalendar && showMonthPicker && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 500, damping: 35 }}
+              className="overflow-hidden px-2 pb-1"
+            >
+              <GlassContainer cornerRadius={16}>
+                <div className="p-3">
+                  {/* Year navigation */}
+                  <div className="flex items-center justify-between mb-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => {
+                        const newYear = selectedMonth.year - 1
+                        setSelectedMonth({ year: newYear, month: selectedMonth.month })
+                        selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
+                      }}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="text-sm font-semibold">{selectedMonth.year}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => {
+                        const newYear = selectedMonth.year + 1
+                        setSelectedMonth({ year: newYear, month: selectedMonth.month })
+                        selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
+                      }}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {/* Month grid */}
+                  <div className="grid grid-cols-4 gap-1">
+                    {MONTHS.map((month, i) => (
+                      <Button
+                        key={month}
+                        variant={i === selectedMonth.month ? "default" : "ghost"}
+                        size="sm"
+                        className="h-8 text-xs font-medium"
+                        onClick={() => {
+                          setSelectedMonth({ year: selectedMonth.year, month: i })
+                          selectedMonthRef.current = { year: selectedMonth.year, month: i }
+                          handleCalendarMonthChange(selectedMonth.year, i)
+                          setShowMonthPicker(false)
+                        }}
+                      >
+                        {month}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </GlassContainer>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Calendar grid */}
         <AnimatePresence initial={false}>
           {showCalendar && (
             <motion.div
@@ -441,12 +526,6 @@ export default function LogbookPage() {
               style={{ willChange: "height, transform" }}
             >
               <div className="px-2 pb-2">
-                {/* Month/Year title */}
-                <div className="px-3 pt-2 pb-0 text-center">
-                  <span className="text-sm font-medium text-foreground/80">
-                    {MONTHS[selectedMonth.month]} {selectedMonth.year}
-                  </span>
-                </div>
                 <LogbookCalendar
                   ref={calendarRef}
                   className="bg-transparent shadow-none border-none"
