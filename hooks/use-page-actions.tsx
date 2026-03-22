@@ -55,12 +55,10 @@ export function useRegisterMainActions(actions: ReactNode, isActive: boolean) {
     if (isActive) {
       setMainActions(actionsRef.current)
     }
-  }, [isActive, setMainActions, actions])
-
-  // Clear on unmount
-  useEffect(() => {
+    // Clears on unmount (non-keepalive) AND on inactive→active transition cleanup (keepalive).
+    // This prevents stale actions persisting when lazy-loaded pages race during navigation.
     return () => setMainActions(null)
-  }, [setMainActions])
+  }, [isActive, setMainActions, actions])
 }
 
 export function useRegisterDetailActions(actions: ReactNode, isActive: boolean) {
@@ -72,10 +70,6 @@ export function useRegisterDetailActions(actions: ReactNode, isActive: boolean) 
     if (isActive) {
       setDetailActions(actionsRef.current)
     }
-  }, [isActive, setDetailActions, actions])
-
-  // Clear on unmount
-  useEffect(() => {
     return () => setDetailActions(null)
-  }, [setDetailActions])
+  }, [isActive, setDetailActions, actions])
 }

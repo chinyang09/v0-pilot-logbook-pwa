@@ -130,16 +130,24 @@ export default function LogbookPage() {
   useEffect(() => {
     const el = calendarContainerRef.current
     if (!el) return
+    let rafId = 0
     // scrollHeight gives natural content height regardless of max-height constraint
     const measure = () => {
       const h = el.scrollHeight
       if (h > 0) setCalendarNaturalHeight(h)
     }
     measure()
-    // Re-measure on resize (panel width changes affect calendar height)
-    const observer = new ResizeObserver(() => measure())
+    // Re-measure on resize (panel width changes affect calendar height).
+    // Throttled via RAF to prevent rapid state updates during sidebar width animation.
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(measure)
+    })
     observer.observe(el)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(rafId)
+    }
   }, [])
 
   // Track the topmost visible flight for calendar sync + date highlighting
@@ -420,7 +428,7 @@ export default function LogbookPage() {
       <div
         ref={calendarContainerRef}
         className="z-40 absolute left-0 right-0"
-        style={{ top: "calc(3.5rem + env(safe-area-inset-top, 0px) + 0.5rem)" }}
+        style={{ top: "4rem", contain: "layout style paint" }}
       >
         <AnimatePresence initial={false}>
           {showCalendar && (
@@ -430,6 +438,7 @@ export default function LogbookPage() {
               exit={{ height: 0 }}
               transition={{ type: "spring", stiffness: 400, damping: 35 }}
               className="overflow-hidden"
+              style={{ willChange: "height, transform" }}
             >
               <div className="px-2 pb-2">
                 {/* Month/Year title */}
