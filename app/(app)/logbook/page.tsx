@@ -377,11 +377,10 @@ export default function LogbookPage() {
   const hasActiveFilters = selectedFilters.length > 0
   const isLoading = dbLoading || !dbReady
 
-  // Action buttons for the desktop floating glass bar — each in its own glass container
+  // Action buttons for the desktop floating glass bar — each in its own glass container.
   // Height h-14 matches the nav pill.
-  // IMPORTANT: only truly static buttons belong here. Month/year display is rendered
-  // directly in the page JSX to avoid expensive AppShell header re-renders on every
-  // month change (each GlassContainer = 9 glass layer divs).
+  // Month/year text is inside the first GlassContainer (not a separate one) so month
+  // changes only re-render the text node — the GlassContainer DOM stays untouched.
   const selectedDateRef = useRef(selectedDate)
   selectedDateRef.current = selectedDate
   const logbookActions = useMemo(() => (
@@ -391,7 +390,7 @@ export default function LogbookPage() {
           <Button
             variant="ghost"
             size="icon"
-            className={cn("h-12 w-12", showCalendar && "text-primary bg-primary/15")}
+            className={cn("h-12 w-12 rounded-full", showCalendar && "text-primary bg-primary/15")}
             onClick={() => {
               toggleCalendar(!showCalendar)
               setSelectedDate(null)
@@ -401,6 +400,16 @@ export default function LogbookPage() {
           >
             <Calendar className="h-5 w-5" />
           </Button>
+
+          {showCalendar && (
+            <button
+              onClick={() => setShowMonthPicker(prev => !prev)}
+              className="flex items-center gap-1 px-2 py-1 rounded-full text-sm font-medium text-foreground/80 hover:bg-foreground/5 transition-colors"
+            >
+              {MONTHS[selectedMonth.month]} {selectedMonth.year}
+              <ChevronDown className={cn("h-3 w-3 opacity-50 transition-transform", showMonthPicker && "rotate-180")} />
+            </button>
+          )}
 
           <CSVImportButton
             onComplete={() => {
@@ -414,7 +423,7 @@ export default function LogbookPage() {
         <Button
           variant="ghost"
           size="icon"
-          className="h-14 w-14"
+          className="h-14 w-14 rounded-full"
           onClick={async () => {
             const draftFlight = await createFlight(selectedDateRef.current || undefined)
             mutate(
@@ -429,7 +438,7 @@ export default function LogbookPage() {
         </Button>
       </GlassContainer>
     </>
-  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId])
+  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId, selectedMonth, showMonthPicker])
 
   // Register actions for the desktop floating bar
   useRegisterMainActions(logbookActions, isActive)
@@ -453,19 +462,8 @@ export default function LogbookPage() {
               className="overflow-hidden"
               style={{ willChange: "height, transform" }}
             >
-              {/* Month/Year button + picker — rendered here (not in logbookActions)
-                  so month changes only re-render this section, not the entire AppShell header */}
-              <div className="px-2 pt-1 pb-0.5 flex items-center">
-                <button
-                  onClick={() => setShowMonthPicker(prev => !prev)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium text-foreground/80 hover:bg-foreground/5 transition-colors"
-                >
-                  {MONTHS[selectedMonth.month]} {selectedMonth.year}
-                  <ChevronDown className={cn("h-3.5 w-3.5 opacity-50 transition-transform", showMonthPicker && "rotate-180")} />
-                </button>
-              </div>
-
-              {/* Month/Year quick picker dropdown — lightweight div, no GlassContainer */}
+              {/* Month/Year quick picker dropdown — lightweight div, no GlassContainer.
+                  Button is in logbookActions (header bar), dropdown appears here in calendar area. */}
               <AnimatePresence initial={false}>
                 {showMonthPicker && (
                   <motion.div
