@@ -263,12 +263,14 @@ export default function LogbookPage() {
     setSelectedDate(date)
     syncSourceRef.current = "calendar"
 
-    // Find the first flight on this date, or the nearest flight after this date
-    const targetFlight = flights.find(f => f.date === date)
-      ?? flights.find(f => f.date < date)
-    if (targetFlight) {
-      flightListRef.current?.scrollToFlight(targetFlight.id)
-    }
+    // Defer scroll to next frame so state updates settle first
+    requestAnimationFrame(() => {
+      const targetFlight = flights.find(f => f.date === date)
+        ?? flights.find(f => f.date < date)
+      if (targetFlight) {
+        flightListRef.current?.scrollToFlight(targetFlight.id)
+      }
+    })
   }, [flights])
 
   // Handle flight selection from list
@@ -376,15 +378,20 @@ export default function LogbookPage() {
   const isLoading = dbLoading || !dbReady
 
   // Action buttons for the desktop floating glass bar — each in its own glass container
-  // Height h-14 matches the nav pill
+  // Height h-14 matches the nav pill.
+  // IMPORTANT: only truly static buttons belong here. Month/year display is rendered
+  // directly in the page JSX to avoid expensive AppShell header re-renders on every
+  // month change (each GlassContainer = 9 glass layer divs).
+  const selectedDateRef = useRef(selectedDate)
+  selectedDateRef.current = selectedDate
   const logbookActions = useMemo(() => (
     <>
       <GlassContainer cornerRadius={28}>
         <div className="flex items-center gap-1 px-1 h-14">
           <Button
-            variant={showCalendar ? "default" : "ghost"}
+            variant="ghost"
             size="icon"
-            className="h-12 w-12"
+            className={cn("h-12 w-12", showCalendar && "text-primary bg-primary/15")}
             onClick={() => {
               toggleCalendar(!showCalendar)
               setSelectedDate(null)
@@ -409,7 +416,7 @@ export default function LogbookPage() {
           size="icon"
           className="h-14 w-14"
           onClick={async () => {
-            const draftFlight = await createFlight(selectedDate || undefined)
+            const draftFlight = await createFlight(selectedDateRef.current || undefined)
             mutate(
               CACHE_KEYS.flights,
               (prev: FlightLog[] | undefined) => [draftFlight, ...(prev ?? [])],
@@ -421,21 +428,8 @@ export default function LogbookPage() {
           <Plus className="h-5 w-5" />
         </Button>
       </GlassContainer>
-
-      {showCalendar && (
-        <GlassContainer cornerRadius={28}>
-          <Button
-            variant="ghost"
-            className="h-14 px-4 text-sm font-medium"
-            onClick={() => setShowMonthPicker(prev => !prev)}
-          >
-            {MONTHS[selectedMonth.month]} {selectedMonth.year}
-            <ChevronDown className={cn("h-3.5 w-3.5 ml-1.5 opacity-60 transition-transform", showMonthPicker && "rotate-180")} />
-          </Button>
-        </GlassContainer>
-      )}
     </>
-  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId, selectedDate, selectedMonth, showMonthPicker])
+  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId])
 
   // Register actions for the desktop floating bar
   useRegisterMainActions(logbookActions, isActive)
@@ -449,72 +443,6 @@ export default function LogbookPage() {
         className="z-40 absolute left-0 right-0"
         style={{ top: "4rem", contain: "layout style paint" }}
       >
-        {/* Month/Year quick picker dropdown */}
-        <AnimatePresence initial={false}>
-          {showCalendar && showMonthPicker && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ type: "spring", stiffness: 500, damping: 35 }}
-              className="overflow-hidden px-2 pb-1"
-            >
-              <GlassContainer cornerRadius={16}>
-                <div className="p-3">
-                  {/* Year navigation */}
-                  <div className="flex items-center justify-between mb-2">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => {
-                        const newYear = selectedMonth.year - 1
-                        setSelectedMonth({ year: newYear, month: selectedMonth.month })
-                        selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
-                      }}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <span className="text-sm font-semibold">{selectedMonth.year}</span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => {
-                        const newYear = selectedMonth.year + 1
-                        setSelectedMonth({ year: newYear, month: selectedMonth.month })
-                        selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
-                      }}
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  {/* Month grid */}
-                  <div className="grid grid-cols-4 gap-1">
-                    {MONTHS.map((month, i) => (
-                      <Button
-                        key={month}
-                        variant={i === selectedMonth.month ? "default" : "ghost"}
-                        size="sm"
-                        className="h-8 text-xs font-medium"
-                        onClick={() => {
-                          setSelectedMonth({ year: selectedMonth.year, month: i })
-                          selectedMonthRef.current = { year: selectedMonth.year, month: i }
-                          handleCalendarMonthChange(selectedMonth.year, i)
-                          setShowMonthPicker(false)
-                        }}
-                      >
-                        {month}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              </GlassContainer>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Calendar grid */}
         <AnimatePresence initial={false}>
           {showCalendar && (
             <motion.div
@@ -525,6 +453,86 @@ export default function LogbookPage() {
               className="overflow-hidden"
               style={{ willChange: "height, transform" }}
             >
+              {/* Month/Year button + picker — rendered here (not in logbookActions)
+                  so month changes only re-render this section, not the entire AppShell header */}
+              <div className="px-2 pt-1 pb-0.5 flex items-center">
+                <button
+                  onClick={() => setShowMonthPicker(prev => !prev)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium text-foreground/80 hover:bg-foreground/5 transition-colors"
+                >
+                  {MONTHS[selectedMonth.month]} {selectedMonth.year}
+                  <ChevronDown className={cn("h-3.5 w-3.5 opacity-50 transition-transform", showMonthPicker && "rotate-180")} />
+                </button>
+              </div>
+
+              {/* Month/Year quick picker dropdown — lightweight div, no GlassContainer */}
+              <AnimatePresence initial={false}>
+                {showMonthPicker && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="overflow-hidden px-2 pb-1"
+                  >
+                    <div className="bg-background/80 backdrop-blur-xl rounded-2xl border border-border/50 p-3">
+                      {/* Year navigation */}
+                      <div className="flex items-center justify-between mb-2">
+                        <button
+                          onClick={() => {
+                            const newYear = selectedMonth.year - 1
+                            setSelectedMonth({ year: newYear, month: selectedMonth.month })
+                            selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
+                            syncSourceRef.current = "calendar"
+                            handleCalendarMonthChange(newYear, selectedMonth.month)
+                          }}
+                          className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-foreground/10 transition-colors"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        <span className="text-sm font-semibold">{selectedMonth.year}</span>
+                        <button
+                          onClick={() => {
+                            const newYear = selectedMonth.year + 1
+                            setSelectedMonth({ year: newYear, month: selectedMonth.month })
+                            selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
+                            syncSourceRef.current = "calendar"
+                            handleCalendarMonthChange(newYear, selectedMonth.month)
+                          }}
+                          className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-foreground/10 transition-colors"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                      {/* Month grid */}
+                      <div className="grid grid-cols-4 gap-1">
+                        {MONTHS.map((month, i) => (
+                          <button
+                            key={month}
+                            onClick={() => {
+                              setSelectedMonth({ year: selectedMonth.year, month: i })
+                              selectedMonthRef.current = { year: selectedMonth.year, month: i }
+                              syncSourceRef.current = "calendar"
+                              handleCalendarMonthChange(selectedMonth.year, i)
+                              setShowMonthPicker(false)
+                            }}
+                            className={cn(
+                              "h-8 rounded-lg text-xs font-medium transition-colors",
+                              i === selectedMonth.month
+                                ? "bg-primary text-primary-foreground"
+                                : "hover:bg-foreground/10 text-foreground/80"
+                            )}
+                          >
+                            {month}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Calendar grid */}
               <div className="px-2 pb-2">
                 <LogbookCalendar
                   ref={calendarRef}
