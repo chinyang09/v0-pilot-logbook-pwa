@@ -5,6 +5,14 @@ import { Button } from "@/components/ui/button"
 import { X, Share, MoreVertical, ExternalLink } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 
+/**
+ * Set a CSS variable on :root so fixed-positioned elements (e.g. NavPill)
+ * can offset themselves below the install banner.
+ */
+function setInstallBannerHeight(height: number) {
+  document.documentElement.style.setProperty("--install-banner-height", `${height}px`)
+}
+
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>
@@ -53,6 +61,28 @@ export function PWAInstallPrompt() {
   const [showInstructions, setShowInstructions] = useState(false)
   const [platform, setPlatform] = useState<"ios" | "android" | "desktop" | null>(null)
   const [isInstalled, setIsInstalled] = useState(false)
+  const bannerRef = useRef<HTMLDivElement>(null)
+
+  // Measure banner height and expose via CSS variable
+  useEffect(() => {
+    if (!showBanner) {
+      setInstallBannerHeight(0)
+      return
+    }
+    const el = bannerRef.current
+    if (!el) return
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setInstallBannerHeight(entry.contentRect.height)
+      }
+    })
+    observer.observe(el)
+    setInstallBannerHeight(el.offsetHeight)
+    return () => {
+      observer.disconnect()
+      setInstallBannerHeight(0)
+    }
+  }, [showBanner])
 
   useEffect(() => {
     // Check if already running as PWA
@@ -121,7 +151,7 @@ export function PWAInstallPrompt() {
   if (!showBanner) return null
 
   return (
-    <div className="flex-shrink-0 bg-secondary border-b border-border">
+    <div ref={bannerRef} className="flex-shrink-0 bg-secondary border-b border-border">
       {/* Main banner row */}
       <div
         className="flex items-center gap-3 px-4 py-2"

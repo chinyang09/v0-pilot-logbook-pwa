@@ -29,6 +29,10 @@ import {
   Plus,
   Loader2,
   Shield,
+  Download,
+  CheckCircle2,
+  Share,
+  MoreVertical,
 } from "lucide-react"
 
 interface ProfileData {
@@ -76,6 +80,55 @@ export default function AccountPage() {
 
   // Passkey removal loading
   const [removingPasskey, setRemovingPasskey] = useState<string | null>(null)
+
+  // PWA install state
+  const [pwaInstalled, setPwaInstalled] = useState(false)
+  const [pwaPlatform, setPwaPlatform] = useState<"ios" | "android" | "desktop" | null>(null)
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<Event | null>(null)
+  const [showPwaInstructions, setShowPwaInstructions] = useState(false)
+
+  useEffect(() => {
+    // Check if already running as PWA
+    const standalone = typeof window !== "undefined" && (
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true
+    )
+    if (standalone) {
+      setPwaInstalled(true)
+      return
+    }
+
+    // Detect platform
+    const ua = navigator.userAgent
+    const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+    if (isIOS) {
+      setPwaPlatform("ios")
+      return
+    }
+
+    const isMobile = /Android|webOS/i.test(ua)
+    setPwaPlatform(isMobile ? "android" : "desktop")
+
+    const handler = (e: Event) => {
+      e.preventDefault()
+      setDeferredInstallPrompt(e)
+    }
+    window.addEventListener("beforeinstallprompt", handler)
+    window.addEventListener("appinstalled", () => setPwaInstalled(true))
+    return () => window.removeEventListener("beforeinstallprompt", handler)
+  }, [])
+
+  const handlePwaInstall = useCallback(async () => {
+    if (pwaPlatform === "ios") {
+      setShowPwaInstructions((v) => !v)
+      return
+    }
+    if (!deferredInstallPrompt) {
+      setShowPwaInstructions((v) => !v)
+      return
+    }
+    ;(deferredInstallPrompt as Event & { prompt: () => Promise<void> }).prompt()
+  }, [deferredInstallPrompt, pwaPlatform])
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -241,6 +294,66 @@ export default function AccountPage() {
               {profile?.totpEnabled ? "Enabled" : "Disabled"}
             </Badge>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Install App Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Download className="h-4 w-4" />
+            Install App
+          </CardTitle>
+          <CardDescription>
+            Install OOOI as a standalone app for offline access and a faster experience.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {pwaInstalled ? (
+            <Button disabled className="opacity-50">
+              <CheckCircle2 className="h-4 w-4 mr-2" />
+              Installed
+            </Button>
+          ) : (
+            <>
+              <Button onClick={handlePwaInstall}>
+                <Download className="h-4 w-4 mr-2" />
+                {pwaPlatform === "ios" ? "How to Install" : "Install App"}
+              </Button>
+              {showPwaInstructions && pwaPlatform === "ios" && (
+                <div className="space-y-2.5 text-sm pt-2 border-t border-border">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
+                    <p className="flex items-center gap-1.5">
+                      Tap the <Share className="h-4 w-4 inline text-muted-foreground" /> Share button in Safari
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
+                    <p>Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong></p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">3</div>
+                    <p>Tap <strong>&quot;Add&quot;</strong> to confirm</p>
+                  </div>
+                </div>
+              )}
+              {showPwaInstructions && pwaPlatform === "android" && (
+                <div className="space-y-2.5 text-sm pt-2 border-t border-border">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
+                    <p className="flex items-center gap-1.5">
+                      Tap the <MoreVertical className="h-4 w-4 inline text-muted-foreground" /> menu in your browser
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
+                    <p>Tap <strong>&quot;Install app&quot;</strong> or <strong>&quot;Add to Home Screen&quot;</strong></p>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
 

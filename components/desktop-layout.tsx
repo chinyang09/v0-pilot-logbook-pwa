@@ -131,9 +131,6 @@ function AppShellContent({ children }: AppShellProps) {
       <PWAInstallPrompt />
 
       <div className="flex-1 min-h-0 flex pt-safe">
-      {/* Push sidebar — desktop only, flex child that takes width and pushes panels right */}
-      {isDesktop && <PushSidebar />}
-
       {/* Main content area with resizable panels */}
       <div className="flex-1 min-w-0 h-full relative">
         {/* Header bar — progressive gradient overlay, visible on both mobile and desktop.
@@ -193,10 +190,15 @@ function AppShellContent({ children }: AppShellProps) {
             {/* Resize handle — desktop only */}
             <ResizableHandle withHandle className="hidden md:flex" />
 
-            {/* Detail panel — desktop only */}
+            {/* Detail panel — desktop only.
+                PushSidebar lives inside so only the detail panel absorbs
+                width changes, keeping the main panel stable. */}
             <ResizablePanel defaultSize={65} minSize={25} className="hidden md:block">
-              <div ref={detailPanelRef} className="h-full">
-                {isDesktop && <DetailPanelContent />}
+              <div ref={detailPanelRef} className="h-full flex">
+                {isDesktop && <PushSidebar />}
+                <div className="flex-1 min-w-0 h-full">
+                  {isDesktop && <DetailPanelContent />}
+                </div>
               </div>
             </ResizablePanel>
           </ResizablePanelGroup>
