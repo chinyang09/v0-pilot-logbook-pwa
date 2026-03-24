@@ -157,7 +157,7 @@ const SIDEBAR_WIDTH = 288
 const SIDEBAR_PADDING = 12
 const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_PADDING * 2 // 264
 const PILL_HEIGHT = 56 // h-14
-const COLLAPSED_TOP = 8 // 0.5rem
+const COLLAPSED_TOP = 4 // vertically center pill (56px) within header bar (64px)
 
 /**
  * Desktop pill that morphs into a full-height sidebar via CSS transitions.

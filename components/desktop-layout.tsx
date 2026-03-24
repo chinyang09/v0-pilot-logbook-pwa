@@ -126,7 +126,11 @@ function AppShellContent({ children }: AppShellProps) {
   const showMobileOverlay = !isDesktop && !!selectedId && searchParams.has("selected")
 
   return (
-    <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden pt-safe">
+    <div className="relative h-[100dvh] w-full flex flex-col bg-background overflow-hidden">
+      {/* PWA install banner — in layout flow, pushes content down when visible */}
+      <PWAInstallPrompt />
+
+      <div className="flex-1 min-h-0 flex pt-safe">
       {/* Push sidebar — desktop only, flex child that takes width and pushes panels right */}
       {isDesktop && <PushSidebar />}
 
@@ -249,8 +253,7 @@ function AppShellContent({ children }: AppShellProps) {
 
       {/* Floating nav pill — always mounted, animates opacity based on sidebar state */}
       <NavPill />
-
-      <PWAInstallPrompt />
+      </div>
     </div>
   )
 }
