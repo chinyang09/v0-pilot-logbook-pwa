@@ -157,7 +157,7 @@ const SIDEBAR_WIDTH = 288
 const SIDEBAR_PADDING = 12
 const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_PADDING * 2 // 264
 const PILL_HEIGHT = 56 // h-14
-const COLLAPSED_TOP = 8 // 0.5rem
+const COLLAPSED_TOP = 4 // vertically center pill (56px) within header bar (64px)
 
 /**
  * Desktop pill that morphs into a full-height sidebar via CSS transitions.
@@ -188,9 +188,10 @@ function DesktopPillMorph({
   const prevOpenRef = useRef(sidebarOpen)
   const safetyTimerRef = useRef<ReturnType<typeof setTimeout>>()
 
-  // Viewport height and safe area for expanded sidebar
+  // Viewport height, safe area, and install banner for expanded sidebar
   const [vh, setVh] = useState(typeof window !== "undefined" ? window.innerHeight : 800)
   const [safeAreaTop, setSafeAreaTop] = useState(0)
+  const [bannerHeight, setBannerHeight] = useState(0)
   useEffect(() => {
     const measure = () => {
       setVh(window.innerHeight)
@@ -203,13 +204,19 @@ function DesktopPillMorph({
       const top = el.getBoundingClientRect().top
       document.body.removeChild(el)
       setSafeAreaTop(top)
+      // Read install banner height from CSS variable
+      const bh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--install-banner-height") || "0")
+      setBannerHeight(bh || 0)
     }
     measure()
     window.addEventListener("resize", measure)
-    return () => window.removeEventListener("resize", measure)
+    // Re-measure when banner CSS var changes (via MutationObserver on style attr)
+    const obs = new MutationObserver(measure)
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] })
+    return () => { window.removeEventListener("resize", measure); obs.disconnect() }
   }, [])
 
-  const expandedHeight = vh - SIDEBAR_PADDING * 2 - safeAreaTop
+  const expandedHeight = vh - SIDEBAR_PADDING * 2 - safeAreaTop - bannerHeight
   const PHASE_DURATION = prefersReducedMotion ? 0 : 100 // ms per phase
 
   const isItemActive = (href: string) => {
@@ -279,10 +286,11 @@ function DesktopPillMorph({
     }
   })()
 
+  // --install-banner-height is set by PWAInstallPrompt when visible
   const style: React.CSSProperties = {
     top: isAtSidebarPosition
-      ? `calc(${SIDEBAR_PADDING}px + env(safe-area-inset-top, 0px))`
-      : `calc(${COLLAPSED_TOP}px + env(safe-area-inset-top, 0px))`,
+      ? `calc(${SIDEBAR_PADDING}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`
+      : `calc(${COLLAPSED_TOP}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
     left: isAtSidebarPosition ? SIDEBAR_PADDING : "50%",
     transform: isAtSidebarPosition ? "translateX(0)" : "translateX(-50%)",
     width: isAtSidebarPosition ? SIDEBAR_INNER_WIDTH : "auto",

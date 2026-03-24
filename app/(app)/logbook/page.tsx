@@ -473,9 +473,9 @@ export default function LogbookPage() {
                     transition={{ duration: 0.15 }}
                     className="overflow-hidden px-2 pb-1"
                   >
-                    <div className="bg-background/80 backdrop-blur-xl rounded-2xl border border-border/50 p-3">
+                    <div className="bg-card rounded-2xl border border-border shadow-sm p-3">
                       {/* Year navigation */}
-                      <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center justify-between mb-3">
                         <button
                           onClick={() => {
                             const newYear = selectedMonth.year - 1
@@ -484,11 +484,11 @@ export default function LogbookPage() {
                             syncSourceRef.current = "calendar"
                             handleCalendarMonthChange(newYear, selectedMonth.month)
                           }}
-                          className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-foreground/10 transition-colors"
+                          className="h-9 w-9 flex items-center justify-center rounded-xl bg-secondary hover:bg-secondary/80 active:scale-95 transition-all"
                         >
                           <ChevronLeft className="h-4 w-4" />
                         </button>
-                        <span className="text-sm font-semibold">{selectedMonth.year}</span>
+                        <span className="text-base font-semibold tabular-nums">{selectedMonth.year}</span>
                         <button
                           onClick={() => {
                             const newYear = selectedMonth.year + 1
@@ -497,33 +497,39 @@ export default function LogbookPage() {
                             syncSourceRef.current = "calendar"
                             handleCalendarMonthChange(newYear, selectedMonth.month)
                           }}
-                          className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-foreground/10 transition-colors"
+                          className="h-9 w-9 flex items-center justify-center rounded-xl bg-secondary hover:bg-secondary/80 active:scale-95 transition-all"
                         >
                           <ChevronRight className="h-4 w-4" />
                         </button>
                       </div>
                       {/* Month grid */}
-                      <div className="grid grid-cols-4 gap-1">
-                        {MONTHS.map((month, i) => (
-                          <button
-                            key={month}
-                            onClick={() => {
-                              setSelectedMonth({ year: selectedMonth.year, month: i })
-                              selectedMonthRef.current = { year: selectedMonth.year, month: i }
-                              syncSourceRef.current = "calendar"
-                              handleCalendarMonthChange(selectedMonth.year, i)
-                              setShowMonthPicker(false)
-                            }}
-                            className={cn(
-                              "h-8 rounded-lg text-xs font-medium transition-colors",
-                              i === selectedMonth.month
-                                ? "bg-primary text-primary-foreground"
-                                : "hover:bg-foreground/10 text-foreground/80"
-                            )}
-                          >
-                            {month}
-                          </button>
-                        ))}
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {MONTHS.map((month, i) => {
+                          const isSelected = i === selectedMonth.month
+                          const isCurrentMonth = i === new Date().getMonth() && selectedMonth.year === new Date().getFullYear()
+                          return (
+                            <button
+                              key={month}
+                              onClick={() => {
+                                setSelectedMonth({ year: selectedMonth.year, month: i })
+                                selectedMonthRef.current = { year: selectedMonth.year, month: i }
+                                syncSourceRef.current = "calendar"
+                                handleCalendarMonthChange(selectedMonth.year, i)
+                                setShowMonthPicker(false)
+                              }}
+                              className={cn(
+                                "h-9 rounded-xl text-xs font-medium transition-all active:scale-95",
+                                isSelected
+                                  ? "bg-primary text-primary-foreground shadow-sm"
+                                  : isCurrentMonth
+                                    ? "bg-primary/15 text-primary font-semibold"
+                                    : "hover:bg-secondary text-foreground/70"
+                              )}
+                            >
+                              {month}
+                            </button>
+                          )
+                        })}
                       </div>
                     </div>
                   </motion.div>

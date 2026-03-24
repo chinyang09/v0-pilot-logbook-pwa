@@ -7,10 +7,10 @@ const SIDEBAR_WIDTH = 288
 
 /**
  * Push sidebar spacer — invisible flex child that animates width
- * to push main content right when the sidebar is open.
+ * to push content when the sidebar is open.
  *
- * All visual content (glass, nav items) is rendered by the NavPill
- * morph component which overlays this spacer's area.
+ * Now placed INSIDE the detail panel so only the detail panel
+ * absorbs the width change, keeping the main panel stable.
  */
 export function PushSidebar() {
   const { isOpen } = useSidebar()

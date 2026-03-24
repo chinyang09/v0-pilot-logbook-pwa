@@ -5,13 +5,15 @@ import { usePathname, useSearchParams } from "next/navigation"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
+import { useSidebar } from "@/hooks/use-sidebar-context"
+import type { ImperativePanelHandle } from "react-resizable-panels"
 import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable"
 import { FlightForm } from "@/components/flight-form"
-import { useRef, useCallback } from "react"
+import { useRef, useCallback, useEffect } from "react"
 import { ChevronLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -103,6 +105,7 @@ function AppShellContent({ children }: AppShellProps) {
   const { handleScroll } = useScrollNavbarContext()
   const { selectedId, setSelectedId } = useDetailPanel()
   const isDesktop = useIsDesktop()
+  const { isOpen: sidebarOpen } = useSidebar()
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
 
@@ -110,14 +113,59 @@ function AppShellContent({ children }: AppShellProps) {
   const mainPanelRef = useRef<HTMLDivElement>(null)
   const detailPanelRef = useRef<HTMLDivElement>(null)
 
+  // Imperative panel handle — used to maintain main panel pixel width on sidebar toggle
+  const mainPanelHandleRef = useRef<ImperativePanelHandle>(null)
+  const panelGroupContainerRef = useRef<HTMLDivElement>(null)
+  const prevSidebarOpenRef = useRef(sidebarOpen)
+
+  // When sidebar opens/closes, recalculate main panel % to keep its pixel width constant
+  useEffect(() => {
+    if (!isDesktop) return
+    if (prevSidebarOpenRef.current === sidebarOpen) return
+
+    const handle = mainPanelHandleRef.current
+    const container = panelGroupContainerRef.current
+    if (!handle || !container) {
+      prevSidebarOpenRef.current = sidebarOpen
+      return
+    }
+
+    // Capture pixel width before the container resizes
+    const currentPercent = handle.getSize()
+    const currentContainerWidth = container.offsetWidth
+    const mainPixelWidth = currentContainerWidth * currentPercent / 100
+
+    prevSidebarOpenRef.current = sidebarOpen
+
+    // After sidebar animation completes (200ms), apply corrected percentage
+    const timer = setTimeout(() => {
+      const newContainerWidth = container.offsetWidth
+      if (newContainerWidth <= 0) return
+      const newPercent = (mainPixelWidth / newContainerWidth) * 100
+      // Clamp to valid range
+      handle.resize(Math.min(Math.max(newPercent, 30), 70))
+    }, 220)
+    return () => clearTimeout(timer)
+  }, [sidebarOpen, isDesktop])
+
   const scrollMainToTop = useCallback(() => {
-    const el = mainPanelRef.current?.querySelector("[data-scroll-container], main, .overflow-y-auto, .overflow-auto")
-    if (el) el.scrollTop = 0
+    // Find the first actually-scrollable element (scrollTop > 0 or has scroll overflow)
+    const candidates = mainPanelRef.current?.querySelectorAll("[data-scroll-container], .overflow-y-auto, .overflow-auto")
+    if (!candidates) return
+    for (const el of candidates) {
+      if (el.scrollTop > 0) { el.scrollTop = 0; return }
+    }
+    // If nothing is scrolled, scroll the first candidate anyway (resets position)
+    if (candidates.length > 0) candidates[0].scrollTop = 0
   }, [])
 
   const scrollDetailToTop = useCallback(() => {
-    const el = detailPanelRef.current?.querySelector("[data-scroll-container], main, .overflow-y-auto, .overflow-auto")
-    if (el) el.scrollTop = 0
+    const candidates = detailPanelRef.current?.querySelectorAll("[data-scroll-container], .overflow-y-auto, .overflow-auto")
+    if (!candidates) return
+    for (const el of candidates) {
+      if (el.scrollTop > 0) { el.scrollTop = 0; return }
+    }
+    if (candidates.length > 0) candidates[0].scrollTop = 0
   }, [])
 
   // Only show mobile overlay when the selection is explicit (in URL via ?selected=).
@@ -126,8 +174,12 @@ function AppShellContent({ children }: AppShellProps) {
   const showMobileOverlay = !isDesktop && !!selectedId && searchParams.has("selected")
 
   return (
-    <div className="relative h-[100dvh] w-full flex bg-background overflow-hidden pt-safe">
-      {/* Push sidebar — desktop only, flex child that takes width and pushes panels right */}
+    <div className="relative h-[100dvh] w-full flex flex-col bg-background overflow-hidden">
+      {/* PWA install banner — in layout flow, pushes content down when visible */}
+      <PWAInstallPrompt />
+
+      <div className="flex-1 min-h-0 flex pt-safe">
+      {/* Push sidebar — desktop only, pushes the whole panel group right */}
       {isDesktop && <PushSidebar />}
 
       {/* Main content area with resizable panels */}
@@ -174,13 +226,13 @@ function AppShellContent({ children }: AppShellProps) {
         </div>
 
         {/* Resizable panels — full height, content scrolls behind absolute header */}
-        <div className="h-full md:overflow-x-auto">
+        <div ref={panelGroupContainerRef} className="h-full md:overflow-x-auto">
           <ResizablePanelGroup
             direction="horizontal"
             autoSaveId="desktop-panel-layout"
             className="h-full md:min-w-[750px]"
           >
-            <ResizablePanel defaultSize={35} minSize={30} className="md:min-w-[375px]">
+            <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={30} className="md:min-w-[375px]">
               <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative">
                 {children}
               </div>
@@ -249,8 +301,7 @@ function AppShellContent({ children }: AppShellProps) {
 
       {/* Floating nav pill — always mounted, animates opacity based on sidebar state */}
       <NavPill />
-
-      <PWAInstallPrompt />
+      </div>
     </div>
   )
 }
