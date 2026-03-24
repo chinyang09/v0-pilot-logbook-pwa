@@ -220,8 +220,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       onMonthChange(newYear, newMonth);
     };
 
-    const handleDateClick = (dateStr: string, hasFlights: boolean) => {
-      if (hasFlights) {
+    const handleDateClick = (dateStr: string, isCurrentMonth: boolean) => {
+      if (isCurrentMonth) {
         onDateSelect?.(dateStr);
       }
     };
@@ -262,7 +262,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
               return (
                 <button
                   key={dayIndex}
-                  onClick={() => handleDateClick(dayInfo.dateStr, !!flightInfo)}
+                  onClick={() => handleDateClick(dayInfo.dateStr, isCurrentMonth)}
                   className="flex items-center justify-center aspect-square p-px"
                 >
                   <div
@@ -293,6 +293,15 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
           style={{ "--corner-radius": `${cornerRadius}px` } as React.CSSProperties}
         >
           <div className={cn("GlassContent", "flex flex-col w-full pb-0")}>
+            {/* Dark tint overlay for contrast against flight card text behind glass */}
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                background: "var(--background)",
+                opacity: 0.3,
+                borderRadius: "inherit",
+              }}
+            />
             {calendarContent}
           </div>
           <div className="GlassMaterial">

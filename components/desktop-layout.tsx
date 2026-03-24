@@ -136,39 +136,37 @@ function AppShellContent({ children }: AppShellProps) {
             Hidden on mobile when detail overlay is shown (detail overlay has its own header). */}
         <div
           className={cn(
-            "absolute top-0 left-0 right-0 z-[99] flex pointer-events-none",
+            "absolute top-0 left-0 right-0 z-[99] flex cursor-pointer",
             showMobileOverlay && "hidden md:flex"
           )}
           style={{
             background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
           }}
+          onClick={scrollMainToTop}
         >
-          <div className="flex items-center justify-between px-4 w-full pointer-events-auto h-16">
-            {/* Main panel actions — flush left */}
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between px-4 w-full h-16">
+            {/* Main panel actions — flush left, stop propagation so buttons work */}
+            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
               {mainActions}
             </div>
 
-            {/* Tap zone left of pill — scrolls main panel to top */}
-            <div
-              className="flex-1 h-full cursor-pointer"
-              onClick={scrollMainToTop}
-            />
+            {/* Spacer — taps fall through to parent scrollMainToTop */}
+            <div className="flex-1 h-full" />
 
             {/* Nav pill placeholder — actual pill is fixed-positioned on top */}
             <div className="flex-shrink-0 w-0" />
 
-            {/* Tap zone right of pill — scrolls detail panel to top (desktop only) */}
+            {/* Right spacer — desktop only, scrolls detail panel to top */}
             {isDesktop && (
               <div
-                className="flex-1 h-full cursor-pointer"
-                onClick={scrollDetailToTop}
+                className="flex-1 h-full"
+                onClick={(e) => { e.stopPropagation(); scrollDetailToTop() }}
               />
             )}
 
             {/* Detail panel actions — desktop only (mobile shows in overlay) */}
             {isDesktop && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                 {detailActions}
               </div>
             )}
