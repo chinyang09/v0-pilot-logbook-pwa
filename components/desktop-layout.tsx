@@ -117,8 +117,10 @@ function AppShellContent({ children }: AppShellProps) {
   const mainPanelHandleRef = useRef<ImperativePanelHandle>(null)
   const panelGroupContainerRef = useRef<HTMLDivElement>(null)
   const prevSidebarOpenRef = useRef(sidebarOpen)
+  const targetMainPixelWidthRef = useRef(0)
 
-  // When sidebar opens/closes, recalculate main panel % to keep its pixel width constant
+  // When sidebar opens/closes, lock the main panel's pixel width and continuously
+  // recalculate its percentage via ResizeObserver so it never visually shrinks/grows.
   useEffect(() => {
     if (!isDesktop) return
     if (prevSidebarOpenRef.current === sidebarOpen) return
@@ -130,22 +132,32 @@ function AppShellContent({ children }: AppShellProps) {
       return
     }
 
-    // Capture pixel width before the container resizes
+    // Capture pixel width before the container starts resizing
     const currentPercent = handle.getSize()
     const currentContainerWidth = container.offsetWidth
-    const mainPixelWidth = currentContainerWidth * currentPercent / 100
+    targetMainPixelWidthRef.current = currentContainerWidth * currentPercent / 100
 
     prevSidebarOpenRef.current = sidebarOpen
 
-    // After sidebar animation completes (200ms), apply corrected percentage
-    const timer = setTimeout(() => {
-      const newContainerWidth = container.offsetWidth
-      if (newContainerWidth <= 0) return
-      const newPercent = (mainPixelWidth / newContainerWidth) * 100
-      // Clamp to valid range
+    // Observe container width changes during the sidebar animation and
+    // recalculate main panel % on every frame to keep its pixel width constant.
+    const observer = new ResizeObserver(() => {
+      const target = targetMainPixelWidthRef.current
+      if (target <= 0) return
+      const newWidth = container.offsetWidth
+      if (newWidth <= 0) return
+      const newPercent = (target / newWidth) * 100
       handle.resize(Math.min(Math.max(newPercent, 30), 70))
-    }, 220)
-    return () => clearTimeout(timer)
+    })
+    observer.observe(container)
+
+    // Stop observing after animation settles (200ms sidebar + buffer)
+    const timer = setTimeout(() => {
+      observer.disconnect()
+      targetMainPixelWidthRef.current = 0
+    }, 300)
+
+    return () => { observer.disconnect(); clearTimeout(timer) }
   }, [sidebarOpen, isDesktop])
 
   const scrollMainToTop = useCallback(() => {
