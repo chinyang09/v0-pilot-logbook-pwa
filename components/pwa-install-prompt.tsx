@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { X, Share, MoreVertical, ExternalLink } from "lucide-react"
+import { X, Share, MoreVertical, ExternalLink, Download } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
+import { useServiceWorkerUpdate } from "@/hooks/use-service-worker"
 
 /**
  * Set a CSS variable on :root so fixed-positioned elements (e.g. NavPill)
@@ -62,10 +63,13 @@ export function PWAInstallPrompt() {
   const [platform, setPlatform] = useState<"ios" | "android" | "desktop" | null>(null)
   const [isInstalled, setIsInstalled] = useState(false)
   const bannerRef = useRef<HTMLDivElement>(null)
+  const { updateAvailable, applyUpdate } = useServiceWorkerUpdate()
+
+  const showAnything = showBanner || updateAvailable
 
   // Measure banner height and expose via CSS variable
   useEffect(() => {
-    if (!showBanner) {
+    if (!showAnything) {
       setInstallBannerHeight(0)
       return
     }
@@ -82,7 +86,7 @@ export function PWAInstallPrompt() {
       observer.disconnect()
       setInstallBannerHeight(0)
     }
-  }, [showBanner])
+  }, [showAnything])
 
   useEffect(() => {
     // Check if already running as PWA
@@ -148,119 +152,147 @@ export function PWAInstallPrompt() {
     try { localStorage.setItem(DISMISS_KEY, String(Date.now())) } catch {}
   }, [])
 
-  if (!showBanner) return null
+  if (!showAnything) return null
 
   return (
-    <div ref={bannerRef} className="flex-shrink-0 bg-secondary border-b border-border">
-      {/* Main banner row */}
-      <div
-        className="flex items-center gap-3 px-4 py-2"
-        style={{ paddingTop: "max(env(safe-area-inset-top, 0px), 0.5rem)" }}
-      >
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground">
-            OOOI is available as an app
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Offline access &amp; faster experience
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {/* Open button — launches installed PWA or navigates to start URL */}
-          {isInstalled && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-3 text-xs font-medium rounded-full"
-              onClick={handleOpen}
-            >
-              <ExternalLink className="h-3 w-3 mr-1" />
-              Open
-            </Button>
-          )}
-
-          {/* Install / How to Install button */}
-          {!isInstalled && (
+    <div ref={bannerRef} className="flex-shrink-0">
+      {/* Update available banner */}
+      {updateAvailable && (
+        <div className="bg-secondary border-b border-border">
+          <div
+            className="flex items-center gap-3 px-4 py-2"
+            style={{ paddingTop: "max(env(safe-area-inset-top, 0px), 0.5rem)" }}
+          >
+            <Download className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <p className="flex-1 text-sm font-medium text-foreground">
+              A new version is available
+            </p>
             <Button
               size="sm"
               variant="default"
               className="h-7 px-3 text-xs font-semibold rounded-full"
-              onClick={handleInstall}
+              onClick={applyUpdate}
             >
-              {platform === "ios" ? "How to Install" : "Install"}
+              Update
             </Button>
-          )}
-
-          <button
-            onClick={handleDismiss}
-            className="p-1 rounded-full hover:bg-foreground/10 transition-colors"
-            aria-label="Dismiss"
-          >
-            <X className="h-4 w-4 text-muted-foreground" />
-          </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* iOS install instructions — expandable */}
-      <AnimatePresence>
-        {showInstructions && platform === "ios" && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="overflow-hidden"
+      {/* Install banner */}
+      {showBanner && (
+        <div className="bg-secondary border-b border-border">
+          {/* Main banner row */}
+          <div
+            className="flex items-center gap-3 px-4 py-2"
+            style={!updateAvailable ? { paddingTop: "max(env(safe-area-inset-top, 0px), 0.5rem)" } : undefined}
           >
-            <div className="px-4 pb-3 pt-1 border-t border-border">
-              <div className="space-y-2.5 text-sm text-foreground">
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
-                  <p className="flex items-center gap-1.5">
-                    Tap the <Share className="h-4 w-4 inline text-muted-foreground" /> Share button in Safari
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
-                  <p>Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong></p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">3</div>
-                  <p>Tap <strong>&quot;Add&quot;</strong> to confirm</p>
-                </div>
-              </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-foreground">
+                OOOI is available as an app
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Offline access &amp; faster experience
+              </p>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      {/* Android instructions (via browser menu) */}
-      <AnimatePresence>
-        {showInstructions && platform === "android" && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="overflow-hidden"
-          >
-            <div className="px-4 pb-3 pt-1 border-t border-border">
-              <div className="space-y-2.5 text-sm text-foreground">
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
-                  <p className="flex items-center gap-1.5">
-                    Tap the <MoreVertical className="h-4 w-4 inline text-muted-foreground" /> menu in your browser
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
-                  <p>Tap <strong>&quot;Install app&quot;</strong> or <strong>&quot;Add to Home Screen&quot;</strong></p>
-                </div>
-              </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Open button — launches installed PWA or navigates to start URL */}
+              {isInstalled && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-3 text-xs font-medium rounded-full"
+                  onClick={handleOpen}
+                >
+                  <ExternalLink className="h-3 w-3 mr-1" />
+                  Open
+                </Button>
+              )}
+
+              {/* Install / How to Install button */}
+              {!isInstalled && (
+                <Button
+                  size="sm"
+                  variant="default"
+                  className="h-7 px-3 text-xs font-semibold rounded-full"
+                  onClick={handleInstall}
+                >
+                  {platform === "ios" ? "How to Install" : "Install"}
+                </Button>
+              )}
+
+              <button
+                onClick={handleDismiss}
+                className="p-1 rounded-full hover:bg-foreground/10 transition-colors"
+                aria-label="Dismiss"
+              >
+                <X className="h-4 w-4 text-muted-foreground" />
+              </button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+
+          {/* iOS install instructions — expandable */}
+          <AnimatePresence>
+            {showInstructions && platform === "ios" && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="overflow-hidden"
+              >
+                <div className="px-4 pb-3 pt-1 border-t border-border">
+                  <div className="space-y-2.5 text-sm text-foreground">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
+                      <p className="flex items-center gap-1.5">
+                        Tap the <Share className="h-4 w-4 inline text-muted-foreground" /> Share button in Safari
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
+                      <p>Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong></p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">3</div>
+                      <p>Tap <strong>&quot;Add&quot;</strong> to confirm</p>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Android instructions (via browser menu) */}
+          <AnimatePresence>
+            {showInstructions && platform === "android" && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="overflow-hidden"
+              >
+                <div className="px-4 pb-3 pt-1 border-t border-border">
+                  <div className="space-y-2.5 text-sm text-foreground">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
+                      <p className="flex items-center gap-1.5">
+                        Tap the <MoreVertical className="h-4 w-4 inline text-muted-foreground" /> menu in your browser
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
+                      <p>Tap <strong>&quot;Install app&quot;</strong> or <strong>&quot;Add to Home Screen&quot;</strong></p>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
     </div>
   )
 }

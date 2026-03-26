@@ -405,6 +405,21 @@ textarea:focus-within {
   }
 }
 
+/* ─── Squircle (iOS-style superellipse) Clipping ─── */
+.squircle {
+  --squircle-radius: 22%;
+  border-radius: var(--squircle-radius);
+  /* Continuous corners via mask for true superellipse on supporting browsers */
+  mask-image: paint(squircle);
+  -webkit-mask-image: paint(squircle);
+}
+
+/* Squircle size variants */
+.squircle-sm { --squircle-radius: 16%; }
+.squircle-md { --squircle-radius: 22%; }
+.squircle-lg { --squircle-radius: 28%; }
+.squircle-xl { --squircle-radius: 34%; }
+
 /* ─── Liquid Glass UI ─── */
 .GlassContainer {
   --corner-radius: 24px;

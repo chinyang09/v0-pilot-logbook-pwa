@@ -28,7 +28,7 @@ export default function AuthLayout({
           sizes="100vw"
         />
         {/* Dark gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/70 to-black/85" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/45 to-black/65" />
       </div>
 
       {/* Content */}
