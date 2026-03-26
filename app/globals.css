@@ -278,9 +278,15 @@ textarea:focus-within {
 }
 
 /* Login TOTP border feedback animations */
-@keyframes totp-border-pulse {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(255,255,255,0.12), 0 0 0 0 rgba(200,160,60,0); }
-  50% { box-shadow: 0 0 0 1px rgba(200,160,60,0.4), 0 0 20px 0 rgba(200,160,60,0.15); }
+@property --totp-beam-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes totp-beam-rotate {
+  from { --totp-beam-angle: 0deg; }
+  to { --totp-beam-angle: 360deg; }
 }
 
 @keyframes totp-border-shake {
@@ -290,24 +296,49 @@ textarea:focus-within {
 }
 
 .totp-loading {
-  animation: totp-border-pulse 1.5s ease-in-out infinite;
+  position: relative;
   border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.totp-loading::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--totp-beam-angle),
+    transparent 0deg,
+    transparent 260deg,
+    rgba(200, 160, 60, 0.8) 300deg,
+    rgba(255, 210, 80, 1) 330deg,
+    rgba(200, 160, 60, 0.8) 340deg,
+    transparent 360deg
+  );
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  animation: totp-beam-rotate 1.5s linear infinite;
+  pointer-events: none;
+  z-index: 10;
 }
 
 .totp-success {
-  box-shadow: 0 0 0 1px rgba(52,211,153,0.6), 0 0 20px 0 rgba(52,211,153,0.2);
+  box-shadow: 0 0 0 1.5px rgba(52,211,153,0.6), 0 0 20px 0 rgba(52,211,153,0.2);
   transition: box-shadow 0.3s ease-out;
   border-radius: 0.5rem;
 }
 
 .totp-error {
-  box-shadow: 0 0 0 1px rgba(248,113,113,0.6), 0 0 20px 0 rgba(248,113,113,0.2);
+  box-shadow: 0 0 0 1.5px rgba(248,113,113,0.6), 0 0 20px 0 rgba(248,113,113,0.2);
   animation: totp-border-shake 0.4s ease-out;
   border-radius: 0.5rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .totp-loading { animation: none; }
+  .totp-loading::before { animation: none; }
   .totp-error { animation: none; }
 }
 

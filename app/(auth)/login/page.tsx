@@ -713,7 +713,7 @@ export default function LoginPage() {
                     </p>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="flex justify-center">
                     <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
                       <InputOTPGroup className={totpInputClass}>
                         <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
@@ -900,16 +900,18 @@ export default function LoginPage() {
                     </div>
                   )}
 
-                  <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
-                    <InputOTPGroup className={totpInputClass}>
-                      <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                      <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                      <InputOTPSlot index={2} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                      <InputOTPSlot index={3} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                      <InputOTPSlot index={4} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                      <InputOTPSlot index={5} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                    </InputOTPGroup>
-                  </InputOTP>
+                  <div className="flex justify-center">
+                    <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
+                      <InputOTPGroup className={totpInputClass}>
+                        <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                        <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                        <InputOTPSlot index={2} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                        <InputOTPSlot index={3} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                        <InputOTPSlot index={4} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                        <InputOTPSlot index={5} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                      </InputOTPGroup>
+                    </InputOTP>
+                  </div>
                 </div>
               </div>
             </motion.div>
