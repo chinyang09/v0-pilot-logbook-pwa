@@ -209,13 +209,13 @@ function AppShellContent({ children }: AppShellProps) {
           onClick={scrollMainToTop}
         >
           <div className="flex items-center justify-between px-4 w-full h-16">
-            {/* Main panel actions — flush left, stop propagation so buttons work */}
-            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+            {/* Main panel actions — flush left on desktop, full-width on mobile for search expansion */}
+            <div className="flex items-center gap-2 md:flex-none flex-1 min-w-0" onClick={e => e.stopPropagation()}>
               {mainActions}
             </div>
 
-            {/* Spacer — taps fall through to parent scrollMainToTop */}
-            <div className="flex-1 h-full" />
+            {/* Spacer — taps fall through to parent scrollMainToTop (desktop only, mobile actions fill width) */}
+            <div className="hidden md:block flex-1 h-full" />
 
             {/* Nav pill placeholder — actual pill is fixed-positioned on top */}
             <div className="flex-shrink-0 w-0" />

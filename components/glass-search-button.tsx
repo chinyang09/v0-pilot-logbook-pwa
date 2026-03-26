@@ -1,9 +1,13 @@
 "use client"
 
-import { useRef, useEffect } from "react"
+import { useRef, useEffect, useCallback } from "react"
 import { motion } from "framer-motion"
 import { Search, X } from "lucide-react"
 import { GlassContainer } from "@/components/ui/glass-container"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
+
+const COLLAPSED_SIZE = 56
+const DESKTOP_EXPANDED = 240
 
 const springTransition = {
   type: "spring" as const,
@@ -23,9 +27,11 @@ interface GlassSearchButtonProps {
  * Expandable glass search button — compact search icon that spring-animates
  * into a full search bar.
  *
- * Both states are always rendered (no conditional mount/unmount) to prevent
- * two-stage jank. The outer width animates via spring, inner elements
- * crossfade with opacity.
+ * Mobile: expands to full available width (100% of parent).
+ * Desktop: expands to 240px (sits next to the [+] button).
+ *
+ * Focus is delayed until the spring animation settles to prevent
+ * iOS keyboard/layout jank during expansion.
  */
 export function GlassSearchButton({
   isOpen,
@@ -35,26 +41,35 @@ export function GlassSearchButton({
   placeholder = "Search...",
 }: GlassSearchButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const isDesktop = useIsDesktop()
 
-  // Auto-focus input when opening
+  // Auto-focus input after animation settles.
+  // iOS fires keyboard + layout shift during spring animation causing jank,
+  // so we wait for the spring to mostly settle (~250ms).
   useEffect(() => {
     if (isOpen) {
-      const timer = setTimeout(() => inputRef.current?.focus(), 80)
+      const delay = isDesktop ? 80 : 280
+      const timer = setTimeout(() => inputRef.current?.focus(), delay)
       return () => clearTimeout(timer)
     }
-  }, [isOpen])
+  }, [isOpen, isDesktop])
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
+    inputRef.current?.blur()
     onChange("")
     onToggle()
-  }
+  }, [onChange, onToggle])
+
+  // Mobile: animate to full width via CSS flex; Desktop: fixed 240px
+  const expandedWidth = isDesktop ? DESKTOP_EXPANDED : "100%"
 
   return (
     <motion.div
       initial={false}
-      animate={{ width: isOpen ? 240 : 56 }}
+      animate={{ width: isOpen ? expandedWidth : COLLAPSED_SIZE }}
       transition={springTransition}
       className="overflow-hidden"
+      style={!isDesktop && isOpen ? { flex: 1, minWidth: 0 } : undefined}
     >
       <GlassContainer cornerRadius={28}>
         <div className="flex items-center h-14 relative">

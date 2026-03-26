@@ -170,6 +170,42 @@
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* ─── Native touch feel ─── */
+
+/* Remove 300ms tap delay on all interactive elements */
+button,
+a,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+input,
+select,
+textarea,
+label {
+  touch-action: manipulation;
+}
+
+/* Prevent text selection on buttons, nav, and interactive chrome */
+button,
+a,
+nav,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+[role="navigation"],
+.GlassContent {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Re-enable selection for text inputs */
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: auto;
+  user-select: auto;
+}
+
 /* Scroll containment to prevent scroll chaining on iOS */
 .scroll-container {
   overscroll-behavior: contain;
