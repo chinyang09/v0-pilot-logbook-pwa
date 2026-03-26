@@ -1,5 +1,6 @@
 import type React from "react"
 import type { Metadata } from "next"
+import Image from "next/image"
 
 export const metadata: Metadata = {
   title: "Login - OOOI",
@@ -7,7 +8,7 @@ export const metadata: Metadata = {
 }
 
 /**
- * Auth layout - no navbar, minimal UI
+ * Auth layout - immersive cockpit background, always dark
  */
 export default function AuthLayout({
   children,
@@ -15,8 +16,25 @@ export default function AuthLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="h-[100dvh] w-full bg-background overflow-auto overscroll-contain pt-safe">
-      {children}
+    <div className="dark h-[100dvh] w-full overflow-auto overscroll-contain pt-safe relative">
+      {/* Cockpit background image */}
+      <div className="absolute inset-0 z-0">
+        <Image
+          src="/images/cockpit-bg.jpg"
+          alt=""
+          fill
+          priority
+          className="object-cover object-center animate-ken-burns"
+          sizes="100vw"
+        />
+        {/* Dark gradient overlay */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/70 to-black/85" />
+      </div>
+
+      {/* Content */}
+      <div className="relative z-10 h-full">
+        {children}
+      </div>
     </div>
   )
 }

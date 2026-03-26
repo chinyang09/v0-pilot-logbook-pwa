@@ -18,6 +18,7 @@ const PRECACHE_ASSETS = [
   "/icon-512.jpg",
   "/offline.html",
   "/login", // Login page can be cached during install
+  "/images/cockpit-bg.jpg", // Login page background
 ]
 
 // CDN URLs to cache (will be cached on first use)
