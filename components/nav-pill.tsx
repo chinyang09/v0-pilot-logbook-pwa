@@ -434,70 +434,159 @@ function MobilePill({
   onCreateFlight: () => void
   transition: typeof springTransition | typeof instantTransition
 }) {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const leftTabs = tabs.slice(0, 2)
   const rightTabs = tabs.slice(2, 4)
 
-  return (
-    <motion.div
-      className="fixed z-[60] bottom-0 left-0 right-0 px-4 pb-[env(safe-area-inset-bottom,0px)] mb-2"
-      animate={{ y: hideNavbar ? "100%" : "0%" }}
-      transition={transition}
-    >
-      <GlassContainer cornerRadius={28}>
-        <nav className="flex items-center justify-around h-16 px-1">
-          {leftTabs.map((tabKey) => {
-            const tab = TAB_CONFIG[tabKey]
-            if (!tab) return null
-            const Icon = tab.icon
-            return (
-              <Link key={tabKey} href={tab.href} className="flex-1">
-                <Button
-                  variant="ghost"
-                  className={cn(
-                    "flex flex-col items-center gap-0.5 h-14 w-full px-2",
-                    tab.isActive(pathname) && "text-primary"
-                  )}
-                >
-                  <Icon className="h-5 w-5" />
-                  <span className="text-[9px]">{tab.label}</span>
-                </Button>
-              </Link>
-            )
-          })}
+  const isItemActive = (href: string) => {
+    if (href === "/") return pathname === "/"
+    return pathname === href || pathname?.startsWith(href + "/")
+  }
 
-          {/* Center FAB — glass with primary tint */}
-          <GlassContainer cornerRadius={999} tintColor="var(--primary)" tintOpacity={0.35}>
+  // Close sidebar on route change
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [pathname])
+
+  return (
+    <>
+      {/* Overlay sidebar */}
+      <div
+        className="fixed inset-0 z-[59] transition-opacity duration-200"
+        style={{
+          opacity: sidebarOpen ? 1 : 0,
+          pointerEvents: sidebarOpen ? "auto" : "none",
+        }}
+      >
+        {/* Backdrop */}
+        <div
+          className="absolute inset-0 bg-black/50"
+          onClick={() => setSidebarOpen(false)}
+        />
+        {/* Sidebar panel */}
+        <div
+          className="absolute left-0 top-0 bottom-0 w-72 bg-background pt-safe transition-transform duration-200 ease-out overflow-y-auto overscroll-contain"
+          style={{
+            transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
+          }}
+        >
+          <div className="px-4 pt-4 pb-2">
+            <Button
+              className="w-full h-12 gap-2"
+              onClick={() => {
+                setSidebarOpen(false)
+                onCreateFlight()
+              }}
+            >
+              <Plus className="h-5 w-5" />
+              New Flight
+            </Button>
+          </div>
+
+          <nav className="px-3 pb-4">
+            <Link
+              href={dashboardNavItem.href}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
+                isItemActive("/")
+                  ? "bg-foreground/10 text-primary font-medium"
+                  : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+              )}
+            >
+              <span className={cn("flex-shrink-0", isItemActive("/") ? "text-primary" : "text-foreground/50")}>
+                {dashboardNavItem.icon}
+              </span>
+              {dashboardNavItem.label}
+            </Link>
+
+            {navSections.map((section) => (
+              <div key={section.label} className="mt-4">
+                <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                  {section.label}
+                </p>
+                {section.items.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
+                      isItemActive(item.href)
+                        ? "bg-foreground/10 text-primary font-medium"
+                        : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+                    )}
+                  >
+                    <span className={cn("flex-shrink-0", isItemActive(item.href) ? "text-primary" : "text-foreground/50")}>
+                      {item.icon}
+                    </span>
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+            ))}
+          </nav>
+        </div>
+      </div>
+
+      {/* Bottom pill */}
+      <motion.div
+        className="fixed z-[60] bottom-0 left-0 right-0 px-4 pb-[env(safe-area-inset-bottom,0px)] mb-2"
+        animate={{ y: hideNavbar ? "100%" : "0%" }}
+        transition={transition}
+      >
+        <GlassContainer cornerRadius={28}>
+          <nav className="flex items-center justify-around h-16 px-1">
+            {leftTabs.map((tabKey) => {
+              const tab = TAB_CONFIG[tabKey]
+              if (!tab) return null
+              const Icon = tab.icon
+              return (
+                <Link key={tabKey} href={tab.href} className="flex-1">
+                  <Button
+                    variant="ghost"
+                    className={cn(
+                      "flex flex-col items-center gap-0.5 h-14 w-full px-2",
+                      tab.isActive(pathname) && "text-primary"
+                    )}
+                  >
+                    <Icon className="h-5 w-5" />
+                    <span className="text-[9px]">{tab.label}</span>
+                  </Button>
+                </Link>
+              )
+            })}
+
+            {/* Center — sidebar toggle */}
             <Button
               variant="ghost"
-              className="h-12 w-12 text-primary-foreground hover:text-primary-foreground"
+              className="h-12 w-12 text-foreground/70 hover:text-foreground"
               size="icon"
-              onClick={onCreateFlight}
+              onClick={() => setSidebarOpen(true)}
             >
-              <Plus className="h-6 w-6" />
+              <PanelLeft className="h-5 w-5" />
             </Button>
-          </GlassContainer>
 
-          {rightTabs.map((tabKey) => {
-            const tab = TAB_CONFIG[tabKey]
-            if (!tab) return null
-            const Icon = tab.icon
-            return (
-              <Link key={tabKey} href={tab.href} className="flex-1">
-                <Button
-                  variant="ghost"
-                  className={cn(
-                    "flex flex-col items-center gap-0.5 h-14 w-full px-2",
-                    tab.isActive(pathname) && "text-primary"
-                  )}
-                >
-                  <Icon className="h-5 w-5" />
-                  <span className="text-[9px]">{tab.label}</span>
-                </Button>
-              </Link>
-            )
-          })}
-        </nav>
-      </GlassContainer>
-    </motion.div>
+            {rightTabs.map((tabKey) => {
+              const tab = TAB_CONFIG[tabKey]
+              if (!tab) return null
+              const Icon = tab.icon
+              return (
+                <Link key={tabKey} href={tab.href} className="flex-1">
+                  <Button
+                    variant="ghost"
+                    className={cn(
+                      "flex flex-col items-center gap-0.5 h-14 w-full px-2",
+                      tab.isActive(pathname) && "text-primary"
+                    )}
+                  >
+                    <Icon className="h-5 w-5" />
+                    <span className="text-[9px]">{tab.label}</span>
+                  </Button>
+                </Link>
+              )
+            })}
+          </nav>
+        </GlassContainer>
+      </motion.div>
+    </>
   )
 }

@@ -1,19 +1,9 @@
 "use client"
 
 import { useRef, useEffect, useCallback } from "react"
-import { motion } from "framer-motion"
 import { Search, X } from "lucide-react"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
-
-const COLLAPSED_SIZE = 56
-const DESKTOP_EXPANDED = 240
-
-const springTransition = {
-  type: "spring" as const,
-  stiffness: 400,
-  damping: 30,
-}
 
 interface GlassSearchButtonProps {
   isOpen: boolean
@@ -24,14 +14,15 @@ interface GlassSearchButtonProps {
 }
 
 /**
- * Expandable glass search button — compact search icon that spring-animates
+ * Expandable glass search button — compact search icon that CSS-transitions
  * into a full search bar.
  *
- * Mobile: expands to full available width (100% of parent).
- * Desktop: expands to 240px (sits next to the [+] button).
+ * Uses CSS max-width transition instead of JS-driven spring animation to avoid
+ * iOS layout reflow jank. The max-width change is GPU-friendly and doesn't
+ * trigger the continuous reflows that Framer Motion width animation does.
  *
- * Focus is delayed until the spring animation settles to prevent
- * iOS keyboard/layout jank during expansion.
+ * Mobile: expands to full available width (flex: 1 on parent).
+ * Desktop: expands to 240px (sits next to the [+] button).
  */
 export function GlassSearchButton({
   isOpen,
@@ -43,16 +34,29 @@ export function GlassSearchButton({
   const inputRef = useRef<HTMLInputElement>(null)
   const isDesktop = useIsDesktop()
 
-  // Auto-focus input after animation settles.
-  // iOS fires keyboard + layout shift during spring animation causing jank,
-  // so we wait for the spring to mostly settle (~250ms).
+  // Auto-focus input after CSS transition completes.
+  // Use transitionend listener for precise timing instead of arbitrary timeout.
+  const containerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (isOpen) {
-      const delay = isDesktop ? 80 : 280
-      const timer = setTimeout(() => inputRef.current?.focus(), delay)
-      return () => clearTimeout(timer)
+    if (!isOpen) return
+    const el = containerRef.current
+    if (!el) return
+
+    const onEnd = (e: TransitionEvent) => {
+      if (e.propertyName === "max-width") {
+        inputRef.current?.focus()
+      }
     }
-  }, [isOpen, isDesktop])
+    el.addEventListener("transitionend", onEnd)
+
+    // Safety fallback if transition doesn't fire (e.g. reduced motion)
+    const fallback = setTimeout(() => inputRef.current?.focus(), 350)
+
+    return () => {
+      el.removeEventListener("transitionend", onEnd)
+      clearTimeout(fallback)
+    }
+  }, [isOpen])
 
   const handleClose = useCallback(() => {
     inputRef.current?.blur()
@@ -60,16 +64,17 @@ export function GlassSearchButton({
     onToggle()
   }, [onChange, onToggle])
 
-  // Mobile: animate to full width via CSS flex; Desktop: fixed 240px
-  const expandedWidth = isDesktop ? DESKTOP_EXPANDED : "100%"
-
   return (
-    <motion.div
-      initial={false}
-      animate={{ width: isOpen ? expandedWidth : COLLAPSED_SIZE }}
-      transition={springTransition}
+    <div
+      ref={containerRef}
       className="overflow-hidden"
-      style={!isDesktop && isOpen ? { flex: 1, minWidth: 0 } : undefined}
+      style={{
+        maxWidth: isOpen ? (isDesktop ? 240 : "100vw") : 56,
+        transition: "max-width 0.28s cubic-bezier(0.25, 1, 0.5, 1)",
+        flex: !isDesktop && isOpen ? 1 : undefined,
+        minWidth: !isDesktop && isOpen ? 0 : 56,
+        willChange: isOpen ? "max-width" : undefined,
+      }}
     >
       <GlassContainer cornerRadius={28}>
         <div className="flex items-center h-14 relative">
@@ -111,6 +116,6 @@ export function GlassSearchButton({
           </div>
         </div>
       </GlassContainer>
-    </motion.div>
+    </div>
   )
 }
