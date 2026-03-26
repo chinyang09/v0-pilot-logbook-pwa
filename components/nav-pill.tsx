@@ -17,6 +17,10 @@ import {
   Settings,
   UserCircle,
   PanelLeft,
+  RefreshCw,
+  Cloud,
+  CloudOff,
+  Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -27,6 +31,7 @@ import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useCreateFlight } from "@/hooks/use-create-flight"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { navSections, dashboardNavItem } from "@/components/nav-sections"
+import { useSyncStatus, useSyncTrigger } from "@/hooks/sync/use-sync-status"
 import type { BottomNavTab } from "@/types/db/stores.types"
 
 const TAB_CONFIG: Record<
@@ -111,8 +116,10 @@ const instantTransition = {
 /**
  * Unified floating nav component.
  *
- * - Mobile (<768px): Bottom floating pill with 4 nav icons + center FAB
- * - Desktop (≥768px): Top floating pill that morphs into a full sidebar
+ * - Mobile (<768px): Bottom floating pill with sidebar toggle + 4 icon tabs
+ * - Desktop (≥768px): Top floating pill with sidebar toggle + text tabs
+ *
+ * Both share the same sidebar nav content (SidebarNav).
  */
 export function NavPill() {
   const isDesktop = useIsDesktop()
@@ -138,6 +145,7 @@ export function NavPill() {
       pathname={pathname}
       sidebarOpen={sidebarOpen}
       onToggleSidebar={toggleSidebar}
+      onCreateFlight={handleCreateFlight}
       prefersReducedMotion={!!prefersReducedMotion}
     />
   ) : (
@@ -148,6 +156,134 @@ export function NavPill() {
       onCreateFlight={handleCreateFlight}
       transition={transition}
     />
+  )
+}
+
+// ─── Shared sidebar nav content ──────────────────────────────
+
+function SyncStatusBar() {
+  const { status, isSyncing: statusSyncing } = useSyncStatus()
+  const { triggerSync, isSyncing: triggerSyncing } = useSyncTrigger()
+  const syncing = statusSyncing || triggerSyncing
+
+  const handleSync = () => {
+    if (!syncing) triggerSync()
+  }
+
+  return (
+    <button
+      onClick={handleSync}
+      disabled={syncing || status === "offline"}
+      className={cn(
+        "flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs transition-colors",
+        status === "offline"
+          ? "text-muted-foreground/50 cursor-not-allowed"
+          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground cursor-pointer"
+      )}
+    >
+      {syncing ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin flex-shrink-0" />
+      ) : status === "offline" ? (
+        <CloudOff className="h-3.5 w-3.5 flex-shrink-0" />
+      ) : (
+        <Cloud className="h-3.5 w-3.5 flex-shrink-0" />
+      )}
+      <span className="flex-1 text-left">
+        {syncing ? "Syncing..." : status === "offline" ? "Offline" : "Synced"}
+      </span>
+      {!syncing && status !== "offline" && (
+        <RefreshCw className="h-3 w-3 opacity-40" />
+      )}
+    </button>
+  )
+}
+
+/** Shared sidebar nav list — used by both desktop and mobile sidebars */
+function SidebarNav({
+  pathname,
+  onCreateFlight,
+  className,
+}: {
+  pathname: string
+  onCreateFlight: () => void
+  className?: string
+}) {
+  const isItemActive = (href: string) => {
+    if (href === "/") return pathname === "/"
+    return pathname === href || pathname?.startsWith(href + "/")
+  }
+
+  return (
+    <div className={cn("flex flex-col min-h-0", className)}>
+      {/* Sync status */}
+      <div className="px-3 pt-1 pb-2 flex-shrink-0">
+        <SyncStatusBar />
+      </div>
+
+      {/* New Flight button */}
+      <div className="px-3 pb-2 flex-shrink-0">
+        <Button className="w-full h-10 gap-2 text-sm" onClick={onCreateFlight}>
+          <Plus className="h-4 w-4" />
+          New Flight
+        </Button>
+      </div>
+
+      {/* Scrollable nav list */}
+      <nav className="flex-1 overflow-y-auto overscroll-contain px-3 pb-4">
+        <SidebarNavItem
+          href={dashboardNavItem.href}
+          icon={dashboardNavItem.icon}
+          label={dashboardNavItem.label}
+          isActive={isItemActive("/")}
+        />
+        {navSections.map((section) => (
+          <div key={section.label} className="mt-3">
+            <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+              {section.label}
+            </p>
+            {section.items.map((item) => (
+              <SidebarNavItem
+                key={item.href}
+                href={item.href}
+                icon={item.icon}
+                label={item.label}
+                isActive={isItemActive(item.href)}
+              />
+            ))}
+          </div>
+        ))}
+      </nav>
+    </div>
+  )
+}
+
+/** Single sidebar nav item */
+function SidebarNavItem({
+  href,
+  icon,
+  label,
+  isActive,
+}: {
+  href: string
+  icon: React.ReactNode
+  label: string
+  isActive: boolean
+}) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
+        isActive
+          ? "bg-foreground/10 text-primary font-medium"
+          : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+      )}
+    >
+      <span className={cn("flex-shrink-0", isActive ? "text-primary" : "text-foreground/50")}>
+        {icon}
+      </span>
+      {label}
+    </Link>
   )
 }
 
@@ -175,18 +311,20 @@ function DesktopPillMorph({
   pathname,
   sidebarOpen,
   onToggleSidebar,
+  onCreateFlight,
   prefersReducedMotion,
 }: {
   tabs: readonly BottomNavTab[]
   pathname: string
   sidebarOpen: boolean
   onToggleSidebar: () => void
+  onCreateFlight: () => void
   prefersReducedMotion: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [phase, setPhase] = useState<MorphPhase>(sidebarOpen ? "sidebar" : "pill")
   const prevOpenRef = useRef(sidebarOpen)
-  const safetyTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const safetyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   // Viewport height, safe area, and install banner for expanded sidebar
   const [vh, setVh] = useState(typeof window !== "undefined" ? window.innerHeight : 800)
@@ -218,11 +356,6 @@ function DesktopPillMorph({
 
   const expandedHeight = vh - SIDEBAR_PADDING * 2 - safeAreaTop - bannerHeight
   const PHASE_DURATION = prefersReducedMotion ? 0 : 100 // ms per phase
-
-  const isItemActive = (href: string) => {
-    if (href === "/") return pathname === "/"
-    return pathname === href || pathname?.startsWith(href + "/")
-  }
 
   // Drive the two-phase state machine
   useEffect(() => {
@@ -313,7 +446,7 @@ function DesktopPillMorph({
         contentClassName="h-full overflow-hidden"
       >
         <div className="flex flex-col h-full">
-          {/* Top row — sidebar toggle + pill nav items (when collapsed) */}
+          {/* Top row — sidebar toggle + pill nav tabs (text labels) */}
           <div className="flex items-center h-14 px-3 flex-shrink-0">
             <Button
               variant="ghost"
@@ -356,70 +489,28 @@ function DesktopPillMorph({
             </div>
           </div>
 
-          {/* Sidebar nav list — revealed when expanded */}
-          <nav
-            className="flex-1 overflow-y-auto px-3 pb-4 space-y-0.5 transition-opacity duration-150"
+          {/* Sidebar nav — revealed when expanded */}
+          <div
+            className="flex-1 min-h-0 transition-opacity duration-150"
             style={{
               opacity: isExpanded ? 1 : 0,
               visibility: isExpanded ? "visible" : "hidden",
               pointerEvents: isExpanded ? "auto" : "none",
             }}
           >
-            <SidebarNavItem
-              href={dashboardNavItem.href}
-              icon={dashboardNavItem.icon}
-              label={dashboardNavItem.label}
-              isActive={isItemActive("/")}
+            <SidebarNav
+              pathname={pathname}
+              onCreateFlight={onCreateFlight}
+              className="h-full"
             />
-            {navSections.flatMap((section) =>
-              section.items.map((item) => (
-                <SidebarNavItem
-                  key={item.href}
-                  href={item.href}
-                  icon={item.icon}
-                  label={item.label}
-                  isActive={isItemActive(item.href)}
-                />
-              ))
-            )}
-          </nav>
+          </div>
         </div>
       </GlassContainer>
     </div>
   )
 }
 
-/** Single sidebar nav item */
-function SidebarNavItem({
-  href,
-  icon,
-  label,
-  isActive,
-}: {
-  href: string
-  icon: React.ReactNode
-  label: string
-  isActive: boolean
-}) {
-  return (
-    <Link
-      href={href}
-      className={cn(
-        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
-        isActive
-          ? "bg-foreground/10 text-primary font-medium"
-          : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
-      )}
-    >
-      <span className={cn("flex-shrink-0", isActive ? "text-primary" : "text-foreground/50")}>
-        {icon}
-      </span>
-      {label}
-    </Link>
-  )
-}
-
-// ─── Mobile: bottom floating pill ────────────────────────────
+// ─── Mobile: bottom floating pill + overlay sidebar ──────────
 
 function MobilePill({
   tabs,
@@ -438,15 +529,15 @@ function MobilePill({
   const leftTabs = tabs.slice(0, 2)
   const rightTabs = tabs.slice(2, 4)
 
-  const isItemActive = (href: string) => {
-    if (href === "/") return pathname === "/"
-    return pathname === href || pathname?.startsWith(href + "/")
-  }
-
   // Close sidebar on route change
   useEffect(() => {
     setSidebarOpen(false)
   }, [pathname])
+
+  const handleCreateFlight = () => {
+    setSidebarOpen(false)
+    onCreateFlight()
+  }
 
   return (
     <>
@@ -463,78 +554,55 @@ function MobilePill({
           className="absolute inset-0 bg-black/50"
           onClick={() => setSidebarOpen(false)}
         />
-        {/* Sidebar panel */}
+        {/* Sidebar panel — same structure as desktop sidebar */}
         <div
-          className="absolute left-0 top-0 bottom-0 w-72 bg-background pt-safe transition-transform duration-200 ease-out overflow-y-auto overscroll-contain"
+          className="absolute left-0 top-0 bottom-0 w-72 bg-background pt-safe transition-transform duration-200 ease-out flex flex-col"
           style={{
             transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
           }}
         >
-          <div className="px-4 pt-4 pb-2">
+          {/* Top row — matches pill layout: toggle button */}
+          <div className="flex items-center h-14 px-3 flex-shrink-0">
             <Button
-              className="w-full h-12 gap-2"
-              onClick={() => {
-                setSidebarOpen(false)
-                onCreateFlight()
-              }}
+              variant="ghost"
+              size="icon"
+              onClick={() => setSidebarOpen(false)}
+              className="h-11 w-11 text-foreground/70 hover:text-foreground flex-shrink-0"
             >
-              <Plus className="h-5 w-5" />
-              New Flight
+              <PanelLeft className="h-5 w-5" />
             </Button>
           </div>
 
-          <nav className="px-3 pb-4">
-            <Link
-              href={dashboardNavItem.href}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
-                isItemActive("/")
-                  ? "bg-foreground/10 text-primary font-medium"
-                  : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
-              )}
-            >
-              <span className={cn("flex-shrink-0", isItemActive("/") ? "text-primary" : "text-foreground/50")}>
-                {dashboardNavItem.icon}
-              </span>
-              {dashboardNavItem.label}
-            </Link>
-
-            {navSections.map((section) => (
-              <div key={section.label} className="mt-4">
-                <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                  {section.label}
-                </p>
-                {section.items.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
-                      isItemActive(item.href)
-                        ? "bg-foreground/10 text-primary font-medium"
-                        : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
-                    )}
-                  >
-                    <span className={cn("flex-shrink-0", isItemActive(item.href) ? "text-primary" : "text-foreground/50")}>
-                      {item.icon}
-                    </span>
-                    {item.label}
-                  </Link>
-                ))}
-              </div>
-            ))}
-          </nav>
+          {/* Shared sidebar nav content */}
+          <SidebarNav
+            pathname={pathname}
+            onCreateFlight={handleCreateFlight}
+            className="flex-1 min-h-0"
+          />
         </div>
       </div>
 
-      {/* Bottom pill */}
+      {/* Bottom pill — sidebar toggle on left + icon tabs */}
       <motion.div
         className="fixed z-[60] bottom-0 left-0 right-0 px-4 pb-[env(safe-area-inset-bottom,0px)] mb-2"
         animate={{ y: hideNavbar ? "100%" : "0%" }}
         transition={transition}
       >
         <GlassContainer cornerRadius={28}>
-          <nav className="flex items-center justify-around h-16 px-1">
+          <nav className="flex items-center h-16 px-1">
+            {/* Sidebar toggle — left side, matching desktop pill */}
+            <Button
+              variant="ghost"
+              className="h-12 w-12 text-foreground/70 hover:text-foreground flex-shrink-0"
+              size="icon"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <PanelLeft className="h-5 w-5" />
+            </Button>
+
+            <div className="w-px h-7 bg-border/50 mx-0.5 flex-shrink-0" />
+
+            {/* Tab icons */}
             {leftTabs.map((tabKey) => {
               const tab = TAB_CONFIG[tabKey]
               if (!tab) return null
@@ -554,16 +622,6 @@ function MobilePill({
                 </Link>
               )
             })}
-
-            {/* Center — sidebar toggle */}
-            <Button
-              variant="ghost"
-              className="h-12 w-12 text-foreground/70 hover:text-foreground"
-              size="icon"
-              onClick={() => setSidebarOpen(true)}
-            >
-              <PanelLeft className="h-5 w-5" />
-            </Button>
 
             {rightTabs.map((tabKey) => {
               const tab = TAB_CONFIG[tabKey]
