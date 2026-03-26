@@ -102,7 +102,7 @@ export async function verifyTOTP(secret: string, token: string, window = 1, time
 }
 
 // Generate otpauth:// URI for QR codes
-export function generateTOTPUri(secret: string, accountName: string, issuer = "SkyLog"): string {
+export function generateTOTPUri(secret: string, accountName: string, issuer = "OOOI"): string {
   const encodedIssuer = encodeURIComponent(issuer)
   const encodedAccount = encodeURIComponent(accountName)
   return `otpauth://totp/${encodedIssuer}:${encodedAccount}?secret=${secret}&issuer=${encodedIssuer}&algorithm=SHA1&digits=6&period=30`

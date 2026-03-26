@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -58,6 +58,22 @@ export default function LoginPage() {
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // Auto-submit TOTP when all 6 digits are entered (typed or pasted)
+  const autoSubmitRef = useRef(false)
+  useEffect(() => {
+    if (totpCode.length === 6 && !isLoading && !autoSubmitRef.current) {
+      autoSubmitRef.current = true
+      if (step === "recovery") {
+        recoveryLogin()
+      } else if (step === "register-verify") {
+        verifyTotpSetup()
+      }
+    }
+    if (totpCode.length < 6) {
+      autoSubmitRef.current = false
+    }
+  }, [totpCode, step, isLoading])
 
   // Check passkey support on mount
   useEffect(() => {
@@ -556,7 +572,7 @@ export default function LoginPage() {
 
                   {passkeySupported && (
                     <Button
-                      className="w-full h-12 text-base bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all"
+                      className="w-full h-12 text-base bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]"
                       onClick={attemptPasskeyLogin}
                       disabled={isLoading}
                     >
@@ -576,7 +592,7 @@ export default function LoginPage() {
 
                   <Button
                     variant="outline"
-                    className="w-full h-12 text-base bg-transparent text-white/80 border-white/20 hover:bg-white/10 hover:text-white transition-all"
+                    className="w-full h-12 text-base bg-transparent text-white/80 border-white/20 hover:bg-white/10 hover:text-white transition-all active:scale-[0.97]"
                     onClick={() => {
                       setError("")
                       setStep("recovery")
@@ -588,7 +604,7 @@ export default function LoginPage() {
 
                   <Button
                     variant="ghost"
-                    className="w-full text-white/50 hover:text-white hover:bg-white/10"
+                    className="w-full text-white/50 hover:text-white hover:bg-white/10 active:scale-[0.97] transition-transform"
                     onClick={() => {
                       setError("")
                       setStep("register-callsign")
@@ -636,7 +652,7 @@ export default function LoginPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="w-fit -ml-2 mb-2 text-white/70 hover:text-white hover:bg-white/10"
+                    className="w-fit -ml-2 mb-2 text-white/70 hover:text-white hover:bg-white/10 active:scale-[0.97] transition-transform"
                     onClick={() => {
                       setStep("initial")
                       setError("")
@@ -667,7 +683,7 @@ export default function LoginPage() {
                       className="h-12 text-base bg-white/10 border-white/20 text-white placeholder:text-white/40 focus-visible:ring-white/30"
                     />
                     <p className="text-xs text-white/40">
-                      Check your authenticator app label: SkyLog:{"{callsign}"}
+                      Check your authenticator app label: OOOI:{"{callsign}"}
                     </p>
                   </div>
 
@@ -686,7 +702,7 @@ export default function LoginPage() {
                   </div>
 
                   <Button
-                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all"
+                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]"
                     onClick={recoveryLogin}
                     disabled={isLoading}
                   >
@@ -713,7 +729,7 @@ export default function LoginPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="w-fit -ml-2 mb-2 text-white/70 hover:text-white hover:bg-white/10"
+                    className="w-fit -ml-2 mb-2 text-white/70 hover:text-white hover:bg-white/10 active:scale-[0.97] transition-transform"
                     onClick={() => {
                       setStep("initial")
                       setError("")
@@ -747,7 +763,7 @@ export default function LoginPage() {
                   </div>
 
                   <Button
-                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all"
+                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]"
                     onClick={startRegistration}
                     disabled={isLoading || !callsign.trim()}
                   >
@@ -814,7 +830,7 @@ export default function LoginPage() {
                       This enables fast login with Face ID, Touch ID, or device PIN
                     </p>
                     <Button
-                      className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all"
+                      className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]"
                       onClick={registerPasskey}
                       disabled={isLoading}
                     >
@@ -866,7 +882,7 @@ export default function LoginPage() {
                   </InputOTP>
 
                   <Button
-                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all"
+                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]"
                     onClick={verifyTotpSetup}
                     disabled={isLoading || totpCode.length !== 6}
                   >
@@ -934,7 +950,7 @@ export default function LoginPage() {
                     </div>
                   )}
                   <Button
-                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all"
+                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]"
                     onClick={registerAdditionalPasskey}
                     disabled={isLoading}
                   >
@@ -943,7 +959,7 @@ export default function LoginPage() {
                   </Button>
                   <Button
                     variant="ghost"
-                    className="w-full text-white/50 hover:text-white hover:bg-white/10"
+                    className="w-full text-white/50 hover:text-white hover:bg-white/10 active:scale-[0.97] transition-transform"
                     onClick={() => router.push("/")}
                     disabled={isLoading}
                   >

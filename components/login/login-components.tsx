@@ -45,7 +45,7 @@ export function StepBackButton({
     <Button
       variant="ghost"
       size="sm"
-      className="w-fit -ml-2 mb-2 text-white/70 hover:text-white hover:bg-white/10"
+      className="w-fit -ml-2 mb-2 text-white/70 hover:text-white hover:bg-white/10 active:scale-[0.97] transition-transform"
       onClick={onClick}
       disabled={disabled}
     >
@@ -150,7 +150,7 @@ export function SubmitButton({
 }) {
   return (
     <Button
-      className={`${className} bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all`}
+      className={`${className} bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]`}
       onClick={onClick}
       disabled={isLoading || disabled}
     >
