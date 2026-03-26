@@ -54,6 +54,7 @@ export default function LoginPage() {
   const [passkeySupported, setPasskeySupported] = useState(false)
   const [copied, setCopied] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [totpStatus, setTotpStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
 
   useEffect(() => {
     setMounted(true)
@@ -185,6 +186,7 @@ export default function LoginPage() {
 
     setError("")
     setIsLoading(true)
+    setTotpStatus("loading")
 
     try {
       const res = await fetch("/api/auth/login/totp", {
@@ -209,10 +211,17 @@ export default function LoginPage() {
         expiresAt: new Date(data.session.expiresAt).getTime(),
       })
 
-      setStep("success")
-      setTimeout(() => router.push("/"), 1500)
+      setTotpStatus("success")
+      setTimeout(() => {
+        setStep("success")
+        setTotpStatus("idle")
+      }, 600)
+      setTimeout(() => router.push("/"), 2100)
     } catch (err) {
+      setTotpStatus("error")
+      setTotpCode("")
       setError(err instanceof Error ? err.message : "Verification failed")
+      setTimeout(() => setTotpStatus("idle"), 1000)
     } finally {
       setIsLoading(false)
     }
@@ -376,6 +385,7 @@ export default function LoginPage() {
 
     setError("")
     setIsLoading(true)
+    setTotpStatus("loading")
 
     try {
       const res = await fetch("/api/auth/login/totp", {
@@ -398,9 +408,16 @@ export default function LoginPage() {
         expiresAt: new Date(result.session.expiresAt).getTime(),
       })
 
-      setStep("nudge-add-passkey")
+      setTotpStatus("success")
+      setTimeout(() => {
+        setStep("nudge-add-passkey")
+        setTotpStatus("idle")
+      }, 600)
     } catch (err) {
+      setTotpStatus("error")
+      setTotpCode("")
       setError(err instanceof Error ? err.message : "Login failed")
+      setTimeout(() => setTotpStatus("idle"), 1000)
     } finally {
       setIsLoading(false)
     }
@@ -525,7 +542,14 @@ export default function LoginPage() {
   }
 
   // Glass card wrapper class
-  const glassCard = "rounded-2xl bg-black/30 backdrop-blur-xl border border-white/[0.12] shadow-2xl overflow-hidden"
+  const glassCard = "rounded-2xl bg-black/30 backdrop-blur-xl border border-white/[0.12] shadow-2xl overflow-hidden transition-shadow duration-300"
+
+  // Glass card with TOTP status feedback (for recovery and register-verify steps)
+  const totpGlassCard = `${glassCard} ${
+    totpStatus === "loading" ? "totp-loading" :
+    totpStatus === "success" ? "totp-success" :
+    totpStatus === "error" ? "totp-error" : ""
+  }`
 
   return (
     <div className="min-h-full flex flex-col items-center justify-center p-4 safe-area-inset">
@@ -572,7 +596,7 @@ export default function LoginPage() {
 
                   {passkeySupported && (
                     <Button
-                      className="w-full h-12 text-base bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]"
+                      className="w-full h-12 text-base bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
                       onClick={attemptPasskeyLogin}
                       disabled={isLoading}
                     >
@@ -592,7 +616,7 @@ export default function LoginPage() {
 
                   <Button
                     variant="outline"
-                    className="w-full h-12 text-base bg-transparent text-white/80 border-white/20 hover:bg-white/10 hover:text-white transition-all active:scale-[0.97]"
+                    className="w-full h-12 text-base bg-transparent text-white/80 border-white/20 hover:bg-white/10 hover:text-white transition-all active:scale-[1.03]"
                     onClick={() => {
                       setError("")
                       setStep("recovery")
@@ -604,7 +628,7 @@ export default function LoginPage() {
 
                   <Button
                     variant="ghost"
-                    className="w-full text-white/50 hover:text-white hover:bg-white/10 active:scale-[0.97] transition-transform"
+                    className="w-full text-white/50 hover:text-white hover:bg-white/10 active:scale-[1.03] transition-transform"
                     onClick={() => {
                       setError("")
                       setStep("register-callsign")
@@ -647,24 +671,25 @@ export default function LoginPage() {
               exit="exit"
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <div className={glassCard}>
+              <div className={totpGlassCard}>
                 <div className="px-6 pt-6 pb-2">
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="w-fit -ml-2 mb-2 text-white/70 hover:text-white hover:bg-white/10 active:scale-[0.97] transition-transform"
+                    className="w-fit -ml-2 mb-2 text-white/70 hover:text-white hover:bg-white/10 active:scale-[1.03] transition-transform"
                     onClick={() => {
                       setStep("initial")
                       setError("")
                       setCallsign("")
                       setTotpCode("")
+                      setTotpStatus("idle")
                     }}
                   >
                     <ArrowLeft className="h-4 w-4 mr-1" />
                     Back
                   </Button>
-                  <h2 className="text-lg font-semibold text-white">Account Recovery</h2>
-                  <p className="text-sm text-white/60 mt-1">Enter your callsign and authenticator code</p>
+                  <h2 className="text-lg font-semibold text-white text-center">Account Recovery</h2>
+                  <p className="text-sm text-white/60 mt-1 text-center">Enter your callsign and authenticator code</p>
                 </div>
                 <div className="px-6 pb-6 pt-4 space-y-4">
                   {error && (
@@ -682,14 +707,14 @@ export default function LoginPage() {
                       onChange={(e) => setCallsign(e.target.value)}
                       className="h-12 text-base bg-white/10 border-white/20 text-white placeholder:text-white/40 focus-visible:ring-white/30"
                     />
-                    <p className="text-xs text-white/40">
+                    <p className="text-xs text-white/40 text-center">
                       Check your authenticator app label: OOOI:{"{callsign}"}
                     </p>
                   </div>
 
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-white/80">Authenticator Code</label>
-                    <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center">
+                    <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
                       <InputOTPGroup>
                         <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                         <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
@@ -700,15 +725,6 @@ export default function LoginPage() {
                       </InputOTPGroup>
                     </InputOTP>
                   </div>
-
-                  <Button
-                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]"
-                    onClick={recoveryLogin}
-                    disabled={isLoading}
-                  >
-                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                    Sign In
-                  </Button>
                 </div>
               </div>
             </motion.div>
@@ -729,7 +745,7 @@ export default function LoginPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="w-fit -ml-2 mb-2 text-white/70 hover:text-white hover:bg-white/10 active:scale-[0.97] transition-transform"
+                    className="w-fit -ml-2 mb-2 text-white/70 hover:text-white hover:bg-white/10 active:scale-[1.03] transition-transform"
                     onClick={() => {
                       setStep("initial")
                       setError("")
@@ -739,8 +755,8 @@ export default function LoginPage() {
                     <ArrowLeft className="h-4 w-4 mr-1" />
                     Back
                   </Button>
-                  <h2 className="text-lg font-semibold text-white">Create Account</h2>
-                  <p className="text-sm text-white/60 mt-1">Choose a callsign for your pilot profile</p>
+                  <h2 className="text-lg font-semibold text-white text-center">Create Account</h2>
+                  <p className="text-sm text-white/60 mt-1 text-center">Choose a callsign for your pilot profile</p>
                 </div>
                 <div className="px-6 pb-6 pt-4 space-y-4">
                   {error && (
@@ -763,7 +779,7 @@ export default function LoginPage() {
                   </div>
 
                   <Button
-                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]"
+                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
                     onClick={startRegistration}
                     disabled={isLoading || !callsign.trim()}
                   >
@@ -787,8 +803,23 @@ export default function LoginPage() {
             >
               <div className={glassCard}>
                 <div className="px-6 pt-6 pb-2">
-                  <h2 className="text-lg font-semibold text-white">Setup Authentication</h2>
-                  <p className="text-sm text-white/60 mt-1">First, save your recovery code. Then create a passkey.</p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-fit -ml-2 mb-2 text-white/70 hover:text-white hover:bg-white/10 active:scale-[1.03] transition-transform"
+                    onClick={() => {
+                      setStep("register-callsign")
+                      setError("")
+                      setTotpSecret("")
+                      setTotpUri("")
+                      setRegistrationData(null)
+                    }}
+                  >
+                    <ArrowLeft className="h-4 w-4 mr-1" />
+                    Back
+                  </Button>
+                  <h2 className="text-lg font-semibold text-white text-center">Setup Authentication</h2>
+                  <p className="text-sm text-white/60 mt-1 text-center">First, save your recovery code. Then create a passkey.</p>
                 </div>
                 <div className="px-6 pb-6 pt-4 space-y-6">
                   {error && (
@@ -830,7 +861,7 @@ export default function LoginPage() {
                       This enables fast login with Face ID, Touch ID, or device PIN
                     </p>
                     <Button
-                      className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]"
+                      className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
                       onClick={registerPasskey}
                       disabled={isLoading}
                     >
@@ -857,8 +888,8 @@ export default function LoginPage() {
               exit="exit"
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <div className={glassCard}>
-                <div className="px-6 pt-6 pb-2">
+              <div className={totpGlassCard}>
+                <div className="px-6 pt-6 pb-2 text-center">
                   <h2 className="text-lg font-semibold text-white">Verify Setup</h2>
                   <p className="text-sm text-white/60 mt-1">Enter the code from your authenticator app to confirm setup</p>
                 </div>
@@ -870,7 +901,7 @@ export default function LoginPage() {
                     </div>
                   )}
 
-                  <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center">
+                  <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
                     <InputOTPGroup>
                       <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                       <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
@@ -880,15 +911,6 @@ export default function LoginPage() {
                       <InputOTPSlot index={5} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                     </InputOTPGroup>
                   </InputOTP>
-
-                  <Button
-                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]"
-                    onClick={verifyTotpSetup}
-                    disabled={isLoading || totpCode.length !== 6}
-                  >
-                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                    Complete Setup
-                  </Button>
                 </div>
               </div>
             </motion.div>
@@ -950,7 +972,7 @@ export default function LoginPage() {
                     </div>
                   )}
                   <Button
-                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[0.97]"
+                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
                     onClick={registerAdditionalPasskey}
                     disabled={isLoading}
                   >
@@ -959,7 +981,7 @@ export default function LoginPage() {
                   </Button>
                   <Button
                     variant="ghost"
-                    className="w-full text-white/50 hover:text-white hover:bg-white/10 active:scale-[0.97] transition-transform"
+                    className="w-full text-white/50 hover:text-white hover:bg-white/10 active:scale-[1.03] transition-transform"
                     onClick={() => router.push("/")}
                     disabled={isLoading}
                   >

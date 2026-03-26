@@ -277,6 +277,37 @@ textarea:focus-within {
   }
 }
 
+/* Login TOTP border feedback animations */
+@keyframes totp-border-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(255,255,255,0.12), 0 0 0 0 rgba(200,160,60,0); }
+  50% { box-shadow: 0 0 0 1px rgba(200,160,60,0.4), 0 0 20px 0 rgba(200,160,60,0.15); }
+}
+
+@keyframes totp-border-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
+}
+
+.totp-loading {
+  animation: totp-border-pulse 1.5s ease-in-out infinite;
+}
+
+.totp-success {
+  box-shadow: 0 0 0 1px rgba(52,211,153,0.6), 0 0 20px 0 rgba(52,211,153,0.2);
+  transition: box-shadow 0.3s ease-out;
+}
+
+.totp-error {
+  box-shadow: 0 0 0 1px rgba(248,113,113,0.6), 0 0 20px 0 rgba(248,113,113,0.2);
+  animation: totp-border-shake 0.4s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .totp-loading { animation: none; }
+  .totp-error { animation: none; }
+}
+
 /* Accordion animations */
 @keyframes accordion-down {
   from {
