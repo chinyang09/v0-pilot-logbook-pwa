@@ -291,16 +291,19 @@ textarea:focus-within {
 
 .totp-loading {
   animation: totp-border-pulse 1.5s ease-in-out infinite;
+  border-radius: 0.5rem;
 }
 
 .totp-success {
   box-shadow: 0 0 0 1px rgba(52,211,153,0.6), 0 0 20px 0 rgba(52,211,153,0.2);
   transition: box-shadow 0.3s ease-out;
+  border-radius: 0.5rem;
 }
 
 .totp-error {
   box-shadow: 0 0 0 1px rgba(248,113,113,0.6), 0 0 20px 0 rgba(248,113,113,0.2);
   animation: totp-border-shake 0.4s ease-out;
+  border-radius: 0.5rem;
 }
 
 @media (prefers-reduced-motion: reduce) {

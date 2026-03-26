@@ -65,6 +65,10 @@ export default function LoginPage() {
   useEffect(() => {
     if (totpCode.length === 6 && !isLoading && !autoSubmitRef.current) {
       autoSubmitRef.current = true
+      // Blur OTP input to dismiss focus ring
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur()
+      }
       if (step === "recovery") {
         recoveryLogin()
       } else if (step === "register-verify") {
@@ -544,12 +548,10 @@ export default function LoginPage() {
   // Glass card wrapper class
   const glassCard = "rounded-2xl bg-black/30 backdrop-blur-xl border border-white/[0.12] shadow-2xl overflow-hidden transition-shadow duration-300"
 
-  // Glass card with TOTP status feedback (for recovery and register-verify steps)
-  const totpGlassCard = `${glassCard} ${
-    totpStatus === "loading" ? "totp-loading" :
+  // TOTP status class for OTP input group
+  const totpInputClass = totpStatus === "loading" ? "totp-loading" :
     totpStatus === "success" ? "totp-success" :
     totpStatus === "error" ? "totp-error" : ""
-  }`
 
   return (
     <div className="min-h-full flex flex-col items-center justify-center p-4 safe-area-inset">
@@ -671,7 +673,7 @@ export default function LoginPage() {
               exit="exit"
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <div className={totpGlassCard}>
+              <div className={glassCard}>
                 <div className="px-6 pt-6 pb-2">
                   <Button
                     variant="ghost"
@@ -700,9 +702,8 @@ export default function LoginPage() {
                   )}
 
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-white/80">Callsign</label>
                     <Input
-                      placeholder="Your callsign (e.g., Maverick)"
+                      placeholder="Callsign"
                       value={callsign}
                       onChange={(e) => setCallsign(e.target.value)}
                       className="h-12 text-base bg-white/10 border-white/20 text-white placeholder:text-white/40 focus-visible:ring-white/30"
@@ -713,9 +714,8 @@ export default function LoginPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-white/80">Authenticator Code</label>
                     <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
-                      <InputOTPGroup>
+                      <InputOTPGroup className={totpInputClass}>
                         <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                         <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                         <InputOTPSlot index={2} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
@@ -767,15 +767,14 @@ export default function LoginPage() {
                   )}
 
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-white/80">Callsign</label>
                     <Input
-                      placeholder="e.g., Maverick, Goose, Iceman"
+                      placeholder="Callsign"
                       value={callsign}
                       onChange={(e) => setCallsign(e.target.value)}
                       className="h-12 text-base bg-white/10 border-white/20 text-white placeholder:text-white/40 focus-visible:ring-white/30"
                       autoFocus
                     />
-                    <p className="text-xs text-white/40">This will be your display name and recovery identifier</p>
+                    <p className="text-xs text-white/40 text-center">This will be your display name and recovery identifier</p>
                   </div>
 
                   <Button
@@ -831,8 +830,8 @@ export default function LoginPage() {
 
                   {/* TOTP Setup */}
                   <div className="space-y-3">
-                    <h3 className="font-medium text-sm text-white/90">1. Save Recovery Code</h3>
-                    <p className="text-xs text-white/50">
+                    <h3 className="font-medium text-sm text-white/90 text-center">1. Save Recovery Code</h3>
+                    <p className="text-xs text-white/50 text-center">
                       Scan this QR code with Google Authenticator, Authy, or similar app
                     </p>
                     <div className="flex justify-center p-4 bg-white rounded-lg">
@@ -856,8 +855,8 @@ export default function LoginPage() {
 
                   {/* Passkey Setup */}
                   <div className="space-y-3">
-                    <h3 className="font-medium text-sm text-white/90">2. Create Passkey</h3>
-                    <p className="text-xs text-white/50">
+                    <h3 className="font-medium text-sm text-white/90 text-center">2. Create Passkey</h3>
+                    <p className="text-xs text-white/50 text-center">
                       This enables fast login with Face ID, Touch ID, or device PIN
                     </p>
                     <Button
@@ -888,7 +887,7 @@ export default function LoginPage() {
               exit="exit"
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <div className={totpGlassCard}>
+              <div className={glassCard}>
                 <div className="px-6 pt-6 pb-2 text-center">
                   <h2 className="text-lg font-semibold text-white">Verify Setup</h2>
                   <p className="text-sm text-white/60 mt-1">Enter the code from your authenticator app to confirm setup</p>
@@ -902,7 +901,7 @@ export default function LoginPage() {
                   )}
 
                   <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
-                    <InputOTPGroup>
+                    <InputOTPGroup className={totpInputClass}>
                       <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                       <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                       <InputOTPSlot index={2} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
