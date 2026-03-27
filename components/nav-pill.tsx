@@ -243,7 +243,10 @@ function SidebarNav({
   }
 
   return (
-    <nav className={cn("overflow-y-auto overscroll-contain px-3 pb-4", className)}>
+    <nav
+      className={cn("overflow-y-auto overscroll-contain px-3 pb-4", className)}
+      style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+    >
       <SidebarNavItem
         href={dashboardNavItem.href}
         icon={dashboardNavItem.icon}
@@ -478,7 +481,7 @@ function DesktopPillMorph({
     >
       <GlassContainer
         cornerRadius={isExpanded ? 20 : 28}
-        className="h-full"
+        className="h-full no-glass-feedback"
         contentClassName="h-full !overflow-hidden !flex !flex-col"
       >
         {/* Pill bar — always visible */}
@@ -511,13 +514,13 @@ function DesktopPillMorph({
         >
           {/* Sidebar top row — toggle + sync flushed right */}
           <div className="flex items-center justify-end h-14 px-3 gap-1 flex-shrink-0">
-            <SyncIconButton />
             <button
               onClick={onToggleSidebar}
               className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
             >
               <PanelLeft className="h-5 w-5" />
             </button>
+            <SyncIconButton />
           </div>
 
           <SidebarNav pathname={pathname} className="flex-1 min-h-0" />
@@ -543,7 +546,7 @@ function MobilePillMorph({
   const ref = useRef<HTMLDivElement>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { expandedHeight } = useViewportMeasure()
-  const PHASE_DURATION = prefersReducedMotion ? 0 : 100
+  const PHASE_DURATION = prefersReducedMotion ? 0 : 150
 
   const { phase, advancePhase, isAtSidebarPosition, isAtFullHeight, isExpanded } =
     useMorphPhase(sidebarOpen, PHASE_DURATION)
@@ -558,54 +561,41 @@ function MobilePillMorph({
     advancePhase()
   }, [advancePhase])
 
-  // Mobile morph:
-  // pill state: bottom-center, auto width, pill height
-  // sliding: moves to top-left, widens to sidebar width
-  // expanding: grows height downward
-  // sidebar: full sidebar (left-aligned)
+  // Mobile morph — always bottom-anchored:
+  // pill: bottom-center, auto width, pill height
+  // sliding: slides to bottom-left, widens to sidebar width (still pill height)
+  // expanding: grows UPWARD (bottom anchored, height increases)
+  // sidebar: full sidebar height, bottom-left
 
   const transitionProperty = (() => {
     switch (phase) {
-      case "sliding": return "top, bottom, left, right, width, height, border-radius"
+      case "sliding": return "left, transform, width"
       case "expanding": return "height"
       case "collapsing": return "height"
-      case "returning": return "top, bottom, left, right, width, height, border-radius"
+      case "returning": return "left, transform, width"
       default: return "none"
     }
   })()
 
-  // Compute position and dimensions for each phase
-  const style: React.CSSProperties = (() => {
-    if (isAtSidebarPosition) {
-      // At sidebar position (top-left)
-      return {
-        position: "fixed" as const,
-        top: `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
-        left: SIDEBAR_MARGIN,
-        right: "auto",
-        bottom: "auto",
-        width: SIDEBAR_INNER_WIDTH,
-        height: isAtFullHeight ? expandedHeight : PILL_HEIGHT,
-        transitionProperty,
-        transitionDuration: `${PHASE_DURATION}ms`,
-        transitionTimingFunction: "cubic-bezier(0.25, 0.1, 0.25, 1)",
-      }
-    }
-    // Pill state: bottom center
-    return {
-      position: "fixed" as const,
-      bottom: `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-bottom, 0px))`,
-      left: "50%",
-      right: "auto",
-      top: "auto",
-      transform: `translateX(-50%) translateY(${hideNavbar ? "calc(100% + 24px)" : "0%"})`,
-      width: "auto",
-      height: PILL_HEIGHT,
-      transitionProperty: "transform",
-      transitionDuration: prefersReducedMotion ? "0ms" : "300ms",
-      transitionTimingFunction: "cubic-bezier(0.34, 1.56, 0.64, 1)",
-    }
-  })()
+  const style: React.CSSProperties = {
+    position: "fixed" as const,
+    bottom: `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-bottom, 0px))`,
+    left: isAtSidebarPosition ? SIDEBAR_MARGIN : "50%",
+    transform: isAtSidebarPosition
+      ? "translateX(0)"
+      : `translateX(-50%) translateY(${hideNavbar ? "calc(100% + 24px)" : "0%"})`,
+    width: isAtSidebarPosition ? SIDEBAR_INNER_WIDTH : "auto",
+    height: isAtFullHeight ? expandedHeight : PILL_HEIGHT,
+    transitionProperty: phase === "pill"
+      ? "transform"
+      : transitionProperty,
+    transitionDuration: phase === "pill"
+      ? (prefersReducedMotion ? "0ms" : "300ms")
+      : `${PHASE_DURATION}ms`,
+    transitionTimingFunction: phase === "pill"
+      ? "cubic-bezier(0.34, 1.56, 0.64, 1)"
+      : "cubic-bezier(0.25, 0.1, 0.25, 1)",
+  }
 
   return (
     <>
@@ -627,7 +617,7 @@ function MobilePillMorph({
       >
         <GlassContainer
           cornerRadius={isExpanded ? 20 : 28}
-          className="h-full"
+          className="h-full no-glass-feedback"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
         >
           {/* Pill bar — visible when collapsed */}
@@ -660,13 +650,13 @@ function MobilePillMorph({
           >
             {/* Sidebar top row — toggle + sync flushed right */}
             <div className="flex items-center justify-end h-14 px-3 gap-1 flex-shrink-0">
-              <SyncIconButton />
               <button
                 onClick={() => setSidebarOpen(false)}
                 className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
               >
                 <PanelLeft className="h-5 w-5" />
               </button>
+              <SyncIconButton />
             </div>
 
             <SidebarNav pathname={pathname} className="flex-1 min-h-0" />

@@ -580,6 +580,14 @@ textarea:focus-within {
   transition-timing-function: ease-out;
 }
 
+/* Disable scale feedback on containers with scrollable content —
+   transform during touch-scroll fights the browser's scroll engine */
+.GlassContainer.no-glass-feedback,
+.GlassContainer.no-glass-feedback:has(> .GlassContent:active) {
+  transform: none !important;
+  transition: none !important;
+}
+
 .GlassMaterial::before {
   content: "";
   position: absolute;
