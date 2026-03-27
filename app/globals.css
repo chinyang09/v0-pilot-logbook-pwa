@@ -170,6 +170,42 @@
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* ─── Native touch feel ─── */
+
+/* Remove 300ms tap delay on all interactive elements */
+button,
+a,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+input,
+select,
+textarea,
+label {
+  touch-action: manipulation;
+}
+
+/* Prevent text selection on buttons, nav, and interactive chrome */
+button,
+/* Native-like: disable text selection app-wide */
+*,
+*::before,
+*::after {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Re-enable selection for text content and inputs */
+input,
+textarea,
+[contenteditable="true"],
+pre,
+code,
+[data-selectable] {
+  -webkit-user-select: auto;
+  user-select: auto;
+}
+
 /* Scroll containment to prevent scroll chaining on iOS */
 .scroll-container {
   overscroll-behavior: contain;
@@ -405,6 +441,21 @@ textarea:focus-within {
   }
 }
 
+/* ─── Squircle (iOS-style superellipse) Clipping ─── */
+.squircle {
+  --squircle-radius: 22%;
+  border-radius: var(--squircle-radius);
+  /* Continuous corners via mask for true superellipse on supporting browsers */
+  mask-image: paint(squircle);
+  -webkit-mask-image: paint(squircle);
+}
+
+/* Squircle size variants */
+.squircle-sm { --squircle-radius: 16%; }
+.squircle-md { --squircle-radius: 22%; }
+.squircle-lg { --squircle-radius: 28%; }
+.squircle-xl { --squircle-radius: 34%; }
+
 /* ─── Liquid Glass UI ─── */
 .GlassContainer {
   --corner-radius: 24px;
@@ -518,16 +569,6 @@ textarea:focus-within {
 /* GlassContainer::before removed — invert effect moved to .GlassContent
    backdrop-filter to prevent white flash during transitions */
 
-/* Apple liquid glass touch feedback — scale up on press (iOS 26 pattern) */
-.GlassContainer {
-  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.GlassContainer:has(> .GlassContent:active) {
-  transform: scale(1.04);
-  transition-duration: 0.12s;
-  transition-timing-function: ease-out;
-}
 
 .GlassMaterial::before {
   content: "";

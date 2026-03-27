@@ -15,7 +15,7 @@ const OCR_MODEL_FILES = [
 const PRECACHE_ASSETS = [
   "/manifest.json",
   "/icon-192.png",
-  "/icon-512.jpg",
+  "/icon-512.png",
   "/offline.html",
   "/login", // Login page can be cached during install
   "/images/cockpit-bg.jpg", // Login page background

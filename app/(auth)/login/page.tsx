@@ -20,6 +20,7 @@ import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
 import { useAuth } from "@/components/providers/auth-provider"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
 import { motion, AnimatePresence } from "framer-motion"
+import { GlassContainer } from "@/components/ui/glass-container"
 
 type Step =
   | "initial" // Choose login or register
@@ -545,9 +546,6 @@ export default function LoginPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  // Glass card wrapper class
-  const glassCard = "rounded-2xl bg-black/30 backdrop-blur-xl border border-white/[0.12] shadow-2xl overflow-hidden transition-shadow duration-300"
-
   // TOTP status class for OTP input group
   const totpInputClass = totpStatus === "loading" ? "totp-loading" :
     totpStatus === "success" ? "totp-success" :
@@ -583,7 +581,7 @@ export default function LoginPage() {
               exit="exit"
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <div className={glassCard}>
+              <GlassContainer cornerRadius={16}>
                 <div className="px-6 pt-6 pb-2 text-center">
                   <h2 className="text-lg font-semibold text-white">Welcome back</h2>
                   <p className="text-sm text-white/60 mt-1">Sign in to your logbook</p>
@@ -639,7 +637,7 @@ export default function LoginPage() {
                     Create new account
                   </Button>
                 </div>
-              </div>
+              </GlassContainer>
             </motion.div>
           )}
 
@@ -653,13 +651,13 @@ export default function LoginPage() {
               exit="exit"
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <div className={glassCard}>
+              <GlassContainer cornerRadius={16}>
                 <div className="py-12 text-center">
                   <Loader2 className="h-12 w-12 animate-spin mx-auto text-white/80 mb-4" />
                   <p className="text-white font-medium">Waiting for passkey...</p>
                   <p className="text-white/60 text-sm mt-1">Use Face ID, Touch ID, or your device PIN</p>
                 </div>
-              </div>
+              </GlassContainer>
             </motion.div>
           )}
 
@@ -673,7 +671,7 @@ export default function LoginPage() {
               exit="exit"
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <div className={glassCard}>
+              <GlassContainer cornerRadius={16}>
                 <div className="px-6 pt-6 pb-2">
                   <Button
                     variant="ghost"
@@ -726,7 +724,7 @@ export default function LoginPage() {
                     </InputOTP>
                   </div>
                 </div>
-              </div>
+              </GlassContainer>
             </motion.div>
           )}
 
@@ -740,7 +738,7 @@ export default function LoginPage() {
               exit="exit"
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <div className={glassCard}>
+              <GlassContainer cornerRadius={16}>
                 <div className="px-6 pt-6 pb-2">
                   <Button
                     variant="ghost"
@@ -786,7 +784,7 @@ export default function LoginPage() {
                     Continue
                   </Button>
                 </div>
-              </div>
+              </GlassContainer>
             </motion.div>
           )}
 
@@ -800,7 +798,7 @@ export default function LoginPage() {
               exit="exit"
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <div className={glassCard}>
+              <GlassContainer cornerRadius={16}>
                 <div className="px-6 pt-6 pb-2">
                   <Button
                     variant="ghost"
@@ -873,7 +871,7 @@ export default function LoginPage() {
                     </Button>
                   </div>
                 </div>
-              </div>
+              </GlassContainer>
             </motion.div>
           )}
 
@@ -887,7 +885,7 @@ export default function LoginPage() {
               exit="exit"
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <div className={glassCard}>
+              <GlassContainer cornerRadius={16}>
                 <div className="px-6 pt-6 pb-2 text-center">
                   <h2 className="text-lg font-semibold text-white">Verify Setup</h2>
                   <p className="text-sm text-white/60 mt-1">Enter the code from your authenticator app to confirm setup</p>
@@ -913,7 +911,7 @@ export default function LoginPage() {
                     </InputOTP>
                   </div>
                 </div>
-              </div>
+              </GlassContainer>
             </motion.div>
           )}
 
@@ -927,7 +925,7 @@ export default function LoginPage() {
               exit="exit"
               transition={{ duration: 0.3, ease: "easeOut" }}
             >
-              <div className={glassCard}>
+              <GlassContainer cornerRadius={16}>
                 <div className="py-12 text-center">
                   <motion.div
                     initial={{ scale: 0 }}
@@ -941,7 +939,7 @@ export default function LoginPage() {
                   <p className="text-white font-medium text-lg">Welcome aboard!</p>
                   <p className="text-white/60 text-sm mt-1">Redirecting to your logbook...</p>
                 </div>
-              </div>
+              </GlassContainer>
             </motion.div>
           )}
 
@@ -955,7 +953,7 @@ export default function LoginPage() {
               exit="exit"
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <div className={`${glassCard} border-white/20`}>
+              <GlassContainer cornerRadius={16}>
                 <div className="px-6 pt-6 pb-2 text-center">
                   <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center mx-auto mb-3">
                     <ShieldCheck className="h-6 w-6 text-white/80" />
@@ -989,7 +987,7 @@ export default function LoginPage() {
                     Skip and go to Logbook
                   </Button>
                 </div>
-              </div>
+              </GlassContainer>
             </motion.div>
           )}
         </AnimatePresence>

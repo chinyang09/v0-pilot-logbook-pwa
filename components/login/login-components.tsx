@@ -3,6 +3,7 @@
 import type React from "react"
 import { Button } from "@/components/ui/button"
 import { AlertCircle, ArrowLeft, Loader2, CheckCircle2 } from "lucide-react"
+import { GlassContainer } from "@/components/ui/glass-container"
 
 /**
  * Login step types
@@ -74,7 +75,7 @@ export function StepCard({
   error?: string
 }) {
   return (
-    <div className="rounded-2xl bg-black/30 backdrop-blur-xl border border-white/[0.12] shadow-2xl overflow-hidden">
+    <GlassContainer cornerRadius={16}>
       <div className="px-6 pt-6 pb-2">
         {showBack && onBack && <StepBackButton onClick={onBack} />}
         <h2 className="text-lg font-semibold text-white">{title}</h2>
@@ -84,7 +85,7 @@ export function StepCard({
         <LoginErrorAlert error={error || ""} />
         {children}
       </div>
-    </div>
+    </GlassContainer>
   )
 }
 
@@ -99,13 +100,13 @@ export function LoadingStep({
   description: string
 }) {
   return (
-    <div className="rounded-2xl bg-black/30 backdrop-blur-xl border border-white/[0.12] shadow-2xl">
+    <GlassContainer cornerRadius={16}>
       <div className="py-12 text-center">
         <Loader2 className="h-12 w-12 animate-spin mx-auto text-white/80 mb-4" />
         <p className="text-white font-medium">{title}</p>
         <p className="text-white/60 text-sm mt-1">{description}</p>
       </div>
-    </div>
+    </GlassContainer>
   )
 }
 
@@ -120,7 +121,7 @@ export function SuccessStep({
   description?: string
 }) {
   return (
-    <div className="rounded-2xl bg-black/30 backdrop-blur-xl border border-white/[0.12] shadow-2xl">
+    <GlassContainer cornerRadius={16}>
       <div className="py-12 text-center">
         <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-4">
           <CheckCircle2 className="h-8 w-8 text-emerald-400" />
@@ -128,7 +129,7 @@ export function SuccessStep({
         <p className="text-white font-medium text-lg">{title}</p>
         <p className="text-white/60 text-sm mt-1">{description}</p>
       </div>
-    </div>
+    </GlassContainer>
   )
 }
 

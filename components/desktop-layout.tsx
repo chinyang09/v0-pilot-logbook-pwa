@@ -13,7 +13,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable"
 import { FlightForm } from "@/components/flight-form"
-import { useRef, useCallback, useEffect } from "react"
+import { useRef, useCallback, useEffect, useState } from "react"
 import { ChevronLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -109,6 +109,9 @@ function AppShellContent({ children }: AppShellProps) {
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
 
+  // Panel snap state — snaps main panel to 375px or 750px on drag end
+  const [isDragging, setIsDragging] = useState(false)
+
   // Refs for scroll-to-top tap zones
   const mainPanelRef = useRef<HTMLDivElement>(null)
   const detailPanelRef = useRef<HTMLDivElement>(null)
@@ -160,25 +163,55 @@ function AppShellContent({ children }: AppShellProps) {
     return () => { observer.disconnect(); clearTimeout(timer) }
   }, [sidebarOpen, isDesktop])
 
-  const scrollMainToTop = useCallback(() => {
-    // Find the first actually-scrollable element (scrollTop > 0 or has scroll overflow)
-    const candidates = mainPanelRef.current?.querySelectorAll("[data-scroll-container], .overflow-y-auto, .overflow-auto")
-    if (!candidates) return
-    for (const el of candidates) {
-      if (el.scrollTop > 0) { el.scrollTop = 0; return }
+  // Snap main panel to nearest mobile-width multiple (375px or 750px) on drag end
+  useEffect(() => {
+    if (isDragging || !isDesktop) return
+    const container = panelGroupContainerRef.current
+    const handle = mainPanelHandleRef.current
+    if (!container || !handle) return
+
+    const containerWidth = container.offsetWidth
+    if (containerWidth <= 0) return
+
+    const MOBILE_WIDTH = 375
+    const snapPoints = [MOBILE_WIDTH, MOBILE_WIDTH * 2]
+    const currentPx = (containerWidth * handle.getSize()) / 100
+    const closest = snapPoints.reduce((prev, curr) =>
+      Math.abs(curr - currentPx) < Math.abs(prev - currentPx) ? curr : prev
+    )
+    const targetPercent = (closest / containerWidth) * 100
+
+    // Only snap if within a reasonable range (20%-80%)
+    if (targetPercent >= 20 && targetPercent <= 80) {
+      handle.resize(targetPercent)
     }
-    // If nothing is scrolled, scroll the first candidate anyway (resets position)
-    if (candidates.length > 0) candidates[0].scrollTop = 0
+  }, [isDragging, isDesktop])
+
+  const smoothScrollToTop = useCallback((container: React.RefObject<HTMLDivElement | null>) => {
+    const candidates = container.current?.querySelectorAll("[data-scroll-container], .overflow-y-auto, .overflow-auto")
+    if (!candidates) return
+    let target: Element | null = null
+    for (const el of candidates) {
+      if (el.scrollTop > 0) { target = el; break }
+    }
+    if (!target && candidates.length > 0) target = candidates[0]
+    if (!target) return
+    const start = target.scrollTop
+    if (start === 0) return
+    const duration = 300
+    const startTime = performance.now()
+    const tick = (now: number) => {
+      const elapsed = now - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      const ease = 1 - Math.pow(1 - progress, 3) // ease-out cubic
+      target!.scrollTop = start * (1 - ease)
+      if (progress < 1) requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
   }, [])
 
-  const scrollDetailToTop = useCallback(() => {
-    const candidates = detailPanelRef.current?.querySelectorAll("[data-scroll-container], .overflow-y-auto, .overflow-auto")
-    if (!candidates) return
-    for (const el of candidates) {
-      if (el.scrollTop > 0) { el.scrollTop = 0; return }
-    }
-    if (candidates.length > 0) candidates[0].scrollTop = 0
-  }, [])
+  const scrollMainToTop = useCallback(() => smoothScrollToTop(mainPanelRef), [smoothScrollToTop])
+  const scrollDetailToTop = useCallback(() => smoothScrollToTop(detailPanelRef), [smoothScrollToTop])
 
   // Only show mobile overlay when the selection is explicit (in URL via ?selected=).
   // SessionStorage-restored selections set state but don't update the URL,
@@ -209,13 +242,13 @@ function AppShellContent({ children }: AppShellProps) {
           onClick={scrollMainToTop}
         >
           <div className="flex items-center justify-between px-4 w-full h-16">
-            {/* Main panel actions — flush left, stop propagation so buttons work */}
-            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+            {/* Main panel actions — flush left on desktop, full-width on mobile for search expansion */}
+            <div className="flex items-center gap-2 md:flex-none flex-1 min-w-0" onClick={e => e.stopPropagation()}>
               {mainActions}
             </div>
 
-            {/* Spacer — taps fall through to parent scrollMainToTop */}
-            <div className="flex-1 h-full" />
+            {/* Spacer — taps fall through to parent scrollMainToTop (desktop only, mobile actions fill width) */}
+            <div className="hidden md:block flex-1 h-full" />
 
             {/* Nav pill placeholder — actual pill is fixed-positioned on top */}
             <div className="flex-shrink-0 w-0" />
@@ -250,8 +283,8 @@ function AppShellContent({ children }: AppShellProps) {
               </div>
             </ResizablePanel>
 
-            {/* Resize handle — desktop only */}
-            <ResizableHandle withHandle className="hidden md:flex" />
+            {/* Resize handle — desktop only, snaps to mobile-width multiples */}
+            <ResizableHandle withHandle className="hidden md:flex" onDragging={setIsDragging} />
 
             {/* Detail panel — desktop only */}
             <ResizablePanel defaultSize={65} minSize={25} className="hidden md:block">

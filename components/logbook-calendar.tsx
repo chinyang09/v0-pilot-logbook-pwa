@@ -9,8 +9,11 @@ import {
   useMemo,
   useState,
 } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { FlightLog } from "@/lib/db";
 import { cn } from "@/lib/utils";
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 interface LogbookCalendarProps {
   flights: FlightLog[];
@@ -26,6 +29,14 @@ interface LogbookCalendarProps {
   glass?: boolean;
   /** Corner radius for glass mode (default 20) */
   cornerRadius?: number;
+  /** Switch between calendar day grid and month/year picker */
+  view?: "calendar" | "monthYear";
+  /** Called when a month is selected in monthYear view */
+  onMonthSelect?: (year: number, month: number) => void;
+  /** Called when year changes in monthYear view */
+  onYearChange?: (year: number) => void;
+  /** Show two consecutive months side by side (for wide panels ~750px) */
+  dualMonth?: boolean;
 }
 
 export interface CalendarHandle {
@@ -59,6 +70,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       className,
       glass = false,
       cornerRadius = 20,
+      view = "calendar",
+      onMonthSelect,
+      onYearChange,
+      dualMonth = false,
     },
     ref
   ) {
@@ -131,6 +146,37 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
       return days;
     }, [selectedMonth]);
+
+    // Second month days for dual-month mode
+    const nextMonthData = useMemo(() => {
+      if (!dualMonth) return null;
+      const nextMonth = selectedMonth.month === 11 ? 0 : selectedMonth.month + 1;
+      const nextYear = selectedMonth.month === 11 ? selectedMonth.year + 1 : selectedMonth.year;
+
+      const firstDay = new Date(nextYear, nextMonth, 1);
+      const startDay = firstDay.getDay();
+      const daysInMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
+
+      const days: { date: Date; dateStr: string; isCurrentMonth: boolean }[] = [];
+
+      for (let i = 0; i < startDay; i++) {
+        const prevDate = new Date(nextYear, nextMonth, -(startDay - i - 1));
+        days.push({ date: prevDate, dateStr: formatDateLocal(prevDate), isCurrentMonth: false });
+      }
+
+      for (let i = 1; i <= daysInMonth; i++) {
+        const date = new Date(nextYear, nextMonth, i);
+        days.push({ date, dateStr: formatDateLocal(date), isCurrentMonth: true });
+      }
+
+      const remainingDays = 42 - days.length;
+      for (let i = 1; i <= remainingDays; i++) {
+        const nextDate = new Date(nextYear, nextMonth + 1, i);
+        days.push({ date: nextDate, dateStr: formatDateLocal(nextDate), isCurrentMonth: false });
+      }
+
+      return { year: nextYear, month: nextMonth, days };
+    }, [selectedMonth, dualMonth]);
 
     useImperativeHandle(
       ref,
@@ -227,10 +273,60 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     };
 
     const today = getTodayLocal();
+    const nowMonth = new Date().getMonth();
+    const nowYear = new Date().getFullYear();
 
-    const calendarContent = (
+    // ─── Month/Year picker view ───────────────────────────────
+    const monthYearContent = (
+      <div className="px-2 py-2">
+        {/* Year navigation */}
+        <div className="flex items-center justify-between mb-3 px-1">
+          <button
+            onClick={() => onYearChange?.(selectedMonth.year - 1)}
+            className="h-9 w-9 flex items-center justify-center rounded-xl bg-foreground/5 active:scale-95 transition-all"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="text-base font-semibold tabular-nums">{selectedMonth.year}</span>
+          <button
+            onClick={() => onYearChange?.(selectedMonth.year + 1)}
+            className="h-9 w-9 flex items-center justify-center rounded-xl bg-foreground/5 active:scale-95 transition-all"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        {/* Month grid — 4×3 */}
+        <div className="grid grid-cols-4 gap-1.5 px-1">
+          {MONTHS.map((month, i) => {
+            const isSelected = i === selectedMonth.month;
+            const isCurrent = i === nowMonth && selectedMonth.year === nowYear;
+            return (
+              <button
+                key={month}
+                onClick={() => onMonthSelect?.(selectedMonth.year, i)}
+                className={cn(
+                  "h-10 rounded-xl text-sm font-medium transition-all active:scale-95",
+                  isSelected
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : isCurrent
+                      ? "bg-primary/15 text-primary font-semibold"
+                      : "text-foreground/70 active:bg-foreground/5"
+                )}
+              >
+                {month}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+
+    // ─── Reusable day grid renderer ────────────────────────────
+    const renderDayGrid = (
+      days: { date: Date; dateStr: string; isCurrentMonth: boolean }[],
+      keyPrefix = ""
+    ) => (
       <>
-        {/* HEADER: Days of the week */}
         <div className="grid grid-cols-7 gap-0 px-1 pt-0.5 pb-0">
           {DAYS.map((day, i) => (
             <div
@@ -241,49 +337,97 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             </div>
           ))}
         </div>
+        <div className="grid grid-cols-7 gap-0 px-1">
+          {days.map((dayInfo, dayIndex) => {
+            const flightInfo = flightDates.get(dayInfo.dateStr);
+            const isCurrentMonth = dayInfo.isCurrentMonth;
+            const isToday = dayInfo.dateStr === today;
+            const isSelected = dayInfo.dateStr === selectedDate;
 
-        {/* GRID: The actual month days */}
-        <div
-          ref={containerRef}
-          className="flex-1 px-1 py-0 overflow-hidden touch-none"
-          style={{ contain: "layout", touchAction: "none" }}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onWheel={handleWheel}
-        >
-          <div className="grid grid-cols-7 gap-0">
-            {calendarDays.map((dayInfo, dayIndex) => {
-              const flightInfo = flightDates.get(dayInfo.dateStr);
-              const isCurrentMonth = dayInfo.isCurrentMonth;
-              const isToday = dayInfo.dateStr === today;
-              const isSelected = dayInfo.dateStr === selectedDate;
-
-              return (
-                <button
-                  key={dayIndex}
-                  onClick={() => handleDateClick(dayInfo.dateStr, isCurrentMonth)}
-                  className="flex items-center justify-center aspect-square p-px"
+            return (
+              <button
+                key={`${keyPrefix}${dayIndex}`}
+                onClick={() => handleDateClick(dayInfo.dateStr, isCurrentMonth)}
+                className="flex items-center justify-center aspect-square p-px"
+              >
+                <div
+                  className={cn(
+                    "w-full aspect-square flex items-center justify-center text-lg rounded-full transition-all",
+                    isCurrentMonth
+                      ? "text-foreground/90"
+                      : "text-foreground/15",
+                    flightInfo && isCurrentMonth && !isSelected && "font-semibold text-primary bg-primary/20",
+                    isToday && "ring-1.5 ring-primary/60",
+                    isSelected && "bg-primary text-primary-foreground shadow-md z-10"
+                  )}
                 >
-                  <div
-                    className={cn(
-                      "w-full aspect-square flex items-center justify-center text-lg rounded-full transition-all",
-                      isCurrentMonth
-                        ? "text-foreground/90"
-                        : "text-foreground/15",
-                      flightInfo && isCurrentMonth && !isSelected && "font-semibold text-primary bg-primary/20",
-                      isToday && "ring-1.5 ring-primary/60",
-                      isSelected && "bg-primary text-primary-foreground shadow-md z-10"
-                    )}
-                  >
-                    {dayInfo.date.getDate()}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+                  {dayInfo.date.getDate()}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </>
+    );
+
+    // ─── Calendar day grid view ───────────────────────────────
+    const calendarContent = (
+      <div
+        ref={containerRef}
+        className="flex-1 overflow-hidden touch-none"
+        style={{ contain: "layout", touchAction: "none" }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onWheel={handleWheel}
+      >
+        {dualMonth && nextMonthData ? (
+          <div className="flex gap-2">
+            <div className="flex-1 min-w-0">
+              {renderDayGrid(calendarDays, "m1-")}
+            </div>
+            <div className="flex-1 min-w-0">
+              {renderDayGrid(nextMonthData.days, "m2-")}
+            </div>
+          </div>
+        ) : (
+          renderDayGrid(calendarDays)
+        )}
+      </div>
+    );
+
+    // ─── View switcher with crossfade ─────────────────────────
+    const activeContent = (
+      <div className="relative">
+        {/* Calendar view */}
+        <div
+          style={{
+            opacity: view === "calendar" ? 1 : 0,
+            visibility: view === "calendar" ? "visible" : "hidden",
+            transition: "opacity 0.15s ease-in-out",
+          }}
+        >
+          {calendarContent}
+        </div>
+        {/* Month/Year picker view — absolute overlay for crossfade */}
+        <div
+          className="absolute inset-0"
+          style={{
+            opacity: view === "monthYear" ? 1 : 0,
+            visibility: view === "monthYear" ? "visible" : "hidden",
+            transition: "opacity 0.15s ease-in-out",
+          }}
+        >
+          {dualMonth && view === "monthYear" ? (
+            <div className="flex gap-2">
+              <div className="flex-1 min-w-0">{monthYearContent}</div>
+              <div className="flex-1 min-w-0">{monthYearContent}</div>
+            </div>
+          ) : (
+            monthYearContent
+          )}
+        </div>
+      </div>
     );
 
     if (glass) {
@@ -302,7 +446,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 borderRadius: "inherit",
               }}
             />
-            {calendarContent}
+            {activeContent}
           </div>
           <div className="GlassMaterial">
             <div className="GlassEdgeReflection" />
@@ -323,7 +467,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       <div
         className={cn("flex flex-col w-full pb-0 overflow-hidden", className)}
       >
-        {calendarContent}
+        {activeContent}
       </div>
     );
   }
