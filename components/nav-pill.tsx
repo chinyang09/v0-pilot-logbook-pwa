@@ -22,7 +22,6 @@ import {
   ChevronDown,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
@@ -170,19 +169,17 @@ function PillBarContent({
   onToggleSidebar: () => void
 }) {
   return (
-    <div className="flex items-center h-14 px-1.5 gap-0">
+    <div className="flex items-center h-14 px-2">
       {/* Sidebar toggle — fixed width bookend */}
-      <Button
-        variant="ghost"
-        size="icon"
+      <button
         onClick={onToggleSidebar}
-        className="h-10 w-10 text-foreground/70 hover:text-foreground flex-shrink-0"
+        className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
       >
         <PanelLeft className="h-5 w-5" />
-      </Button>
+      </button>
 
       {/* Tabs — equally spaced, fill remaining space */}
-      <div className="flex items-center flex-1 min-w-0">
+      <div className="flex items-center flex-1 min-w-0 justify-evenly">
         {tabs.map((tabKey) => {
           const tab = TAB_CONFIG[tabKey]
           if (!tab) return null
@@ -190,29 +187,30 @@ function PillBarContent({
           const Icon = tab.icon
 
           return (
-            <Link key={tabKey} href={tab.href} className="flex-1 min-w-0">
+            <Link key={tabKey} href={tab.href}>
               {mode === "desktop" ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
+                <span
                   className={cn(
-                    "h-10 w-full px-1 text-sm font-medium",
-                    active ? "text-primary" : "text-foreground/60 hover:text-foreground"
+                    "inline-flex items-center justify-center h-9 px-4 rounded-full text-sm font-medium transition-colors",
+                    active
+                      ? "bg-foreground/10 text-primary"
+                      : "text-foreground/60 active:text-foreground"
                   )}
                 >
                   {tab.label}
-                </Button>
+                </span>
               ) : (
-                <Button
-                  variant="ghost"
+                <span
                   className={cn(
-                    "flex flex-col items-center gap-0.5 h-12 w-full px-0",
-                    active ? "text-primary" : "text-foreground/60 hover:text-foreground"
+                    "inline-flex flex-col items-center justify-center gap-0.5 h-11 px-3 rounded-full transition-colors",
+                    active
+                      ? "bg-foreground/10 text-primary"
+                      : "text-foreground/60 active:text-foreground"
                   )}
                 >
                   <Icon className="h-5 w-5" />
                   <span className="text-[9px] leading-none">{tab.label}</span>
-                </Button>
+                </span>
               )}
             </Link>
           )
@@ -481,7 +479,7 @@ function DesktopPillMorph({
       <GlassContainer
         cornerRadius={isExpanded ? 20 : 28}
         className="h-full"
-        contentClassName="h-full overflow-hidden flex flex-col"
+        contentClassName="h-full !overflow-hidden !flex !flex-col"
       >
         {/* Pill bar — always visible */}
         <div
@@ -511,18 +509,15 @@ function DesktopPillMorph({
             pointerEvents: isExpanded ? "auto" : "none",
           }}
         >
-          {/* Sidebar top row — toggle + sync */}
-          <div className="flex items-center h-14 px-3 flex-shrink-0">
-            <Button
-              variant="ghost"
-              size="icon"
+          {/* Sidebar top row — toggle + sync flushed right */}
+          <div className="flex items-center justify-end h-14 px-3 gap-1 flex-shrink-0">
+            <SyncIconButton />
+            <button
               onClick={onToggleSidebar}
-              className="h-11 w-11 text-foreground/70 hover:text-foreground flex-shrink-0"
+              className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
             >
               <PanelLeft className="h-5 w-5" />
-            </Button>
-            <div className="flex-1" />
-            <SyncIconButton />
+            </button>
           </div>
 
           <SidebarNav pathname={pathname} className="flex-1 min-h-0" />
@@ -565,9 +560,9 @@ function MobilePillMorph({
 
   // Mobile morph:
   // pill state: bottom-center, auto width, pill height
-  // sliding: moves to top-right, widens to sidebar width
+  // sliding: moves to top-left, widens to sidebar width
   // expanding: grows height downward
-  // sidebar: full sidebar (right-aligned)
+  // sidebar: full sidebar (left-aligned)
 
   const transitionProperty = (() => {
     switch (phase) {
@@ -582,12 +577,12 @@ function MobilePillMorph({
   // Compute position and dimensions for each phase
   const style: React.CSSProperties = (() => {
     if (isAtSidebarPosition) {
-      // At sidebar position (top-right)
+      // At sidebar position (top-left)
       return {
         position: "fixed" as const,
         top: `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
-        right: SIDEBAR_MARGIN,
-        left: "auto",
+        left: SIDEBAR_MARGIN,
+        right: "auto",
         bottom: "auto",
         width: SIDEBAR_INNER_WIDTH,
         height: isAtFullHeight ? expandedHeight : PILL_HEIGHT,
@@ -633,7 +628,7 @@ function MobilePillMorph({
         <GlassContainer
           cornerRadius={isExpanded ? 20 : 28}
           className="h-full"
-          contentClassName="h-full overflow-hidden flex flex-col"
+          contentClassName="h-full !overflow-hidden !flex !flex-col"
         >
           {/* Pill bar — visible when collapsed */}
           <div
@@ -663,18 +658,15 @@ function MobilePillMorph({
               pointerEvents: isExpanded ? "auto" : "none",
             }}
           >
-            {/* Sidebar top row */}
-            <div className="flex items-center h-14 px-3 flex-shrink-0">
-              <Button
-                variant="ghost"
-                size="icon"
+            {/* Sidebar top row — toggle + sync flushed right */}
+            <div className="flex items-center justify-end h-14 px-3 gap-1 flex-shrink-0">
+              <SyncIconButton />
+              <button
                 onClick={() => setSidebarOpen(false)}
-                className="h-11 w-11 text-foreground/70 hover:text-foreground flex-shrink-0"
+                className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
               >
                 <PanelLeft className="h-5 w-5" />
-              </Button>
-              <div className="flex-1" />
-              <SyncIconButton />
+              </button>
             </div>
 
             <SidebarNav pathname={pathname} className="flex-1 min-h-0" />

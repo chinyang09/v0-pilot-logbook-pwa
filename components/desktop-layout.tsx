@@ -160,25 +160,31 @@ function AppShellContent({ children }: AppShellProps) {
     return () => { observer.disconnect(); clearTimeout(timer) }
   }, [sidebarOpen, isDesktop])
 
-  const scrollMainToTop = useCallback(() => {
-    // Find the first actually-scrollable element (scrollTop > 0 or has scroll overflow)
-    const candidates = mainPanelRef.current?.querySelectorAll("[data-scroll-container], .overflow-y-auto, .overflow-auto")
+  const smoothScrollToTop = useCallback((container: React.RefObject<HTMLDivElement | null>) => {
+    const candidates = container.current?.querySelectorAll("[data-scroll-container], .overflow-y-auto, .overflow-auto")
     if (!candidates) return
+    let target: Element | null = null
     for (const el of candidates) {
-      if (el.scrollTop > 0) { el.scrollTop = 0; return }
+      if (el.scrollTop > 0) { target = el; break }
     }
-    // If nothing is scrolled, scroll the first candidate anyway (resets position)
-    if (candidates.length > 0) candidates[0].scrollTop = 0
+    if (!target && candidates.length > 0) target = candidates[0]
+    if (!target) return
+    const start = target.scrollTop
+    if (start === 0) return
+    const duration = 300
+    const startTime = performance.now()
+    const tick = (now: number) => {
+      const elapsed = now - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      const ease = 1 - Math.pow(1 - progress, 3) // ease-out cubic
+      target!.scrollTop = start * (1 - ease)
+      if (progress < 1) requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
   }, [])
 
-  const scrollDetailToTop = useCallback(() => {
-    const candidates = detailPanelRef.current?.querySelectorAll("[data-scroll-container], .overflow-y-auto, .overflow-auto")
-    if (!candidates) return
-    for (const el of candidates) {
-      if (el.scrollTop > 0) { el.scrollTop = 0; return }
-    }
-    if (candidates.length > 0) candidates[0].scrollTop = 0
-  }, [])
+  const scrollMainToTop = useCallback(() => smoothScrollToTop(mainPanelRef), [smoothScrollToTop])
+  const scrollDetailToTop = useCallback(() => smoothScrollToTop(detailPanelRef), [smoothScrollToTop])
 
   // Only show mobile overlay when the selection is explicit (in URL via ?selected=).
   // SessionStorage-restored selections set state but don't update the URL,
