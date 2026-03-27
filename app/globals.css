@@ -187,21 +187,21 @@ label {
 
 /* Prevent text selection on buttons, nav, and interactive chrome */
 button,
-a,
-nav,
-[role="button"],
-[role="tab"],
-[role="menuitem"],
-[role="navigation"],
-.GlassContent {
+/* Native-like: disable text selection app-wide */
+*,
+*::before,
+*::after {
   -webkit-user-select: none;
   user-select: none;
 }
 
-/* Re-enable selection for text inputs */
+/* Re-enable selection for text content and inputs */
 input,
 textarea,
-[contenteditable="true"] {
+[contenteditable="true"],
+pre,
+code,
+[data-selectable] {
   -webkit-user-select: auto;
   user-select: auto;
 }

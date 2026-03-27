@@ -106,10 +106,10 @@ const TAB_CONFIG: Record<
 // ─── Constants ───────────────────────────────────────────────
 
 const SIDEBAR_WIDTH = 288
-const SIDEBAR_PADDING = 12
-const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_PADDING * 2 // 264
+const SIDEBAR_MARGIN = 4 // distance from viewport edge when expanded
+const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_MARGIN * 2 // 280
 const PILL_HEIGHT = 56 // h-14
-const COLLAPSED_TOP = 4 // vertically center pill (56px) within header bar (64px)
+const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
 // ─── Sync status icon ────────────────────────────────────────
 
@@ -170,58 +170,56 @@ function PillBarContent({
   onToggleSidebar: () => void
 }) {
   return (
-    <div className="flex items-center h-14 px-2">
-      {/* Sidebar toggle */}
+    <div className="flex items-center h-14 px-1.5 gap-0">
+      {/* Sidebar toggle — fixed width bookend */}
       <Button
         variant="ghost"
         size="icon"
         onClick={onToggleSidebar}
-        className="h-11 w-11 text-foreground/70 hover:text-foreground flex-shrink-0"
+        className="h-10 w-10 text-foreground/70 hover:text-foreground flex-shrink-0"
       >
         <PanelLeft className="h-5 w-5" />
       </Button>
 
-      <div className="w-px h-7 bg-border/50 mx-1 flex-shrink-0" />
+      {/* Tabs — equally spaced, fill remaining space */}
+      <div className="flex items-center flex-1 min-w-0">
+        {tabs.map((tabKey) => {
+          const tab = TAB_CONFIG[tabKey]
+          if (!tab) return null
+          const active = tab.isActive(pathname)
+          const Icon = tab.icon
 
-      {/* Tabs — equally spaced */}
-      {tabs.map((tabKey) => {
-        const tab = TAB_CONFIG[tabKey]
-        if (!tab) return null
-        const active = tab.isActive(pathname)
-        const Icon = tab.icon
+          return (
+            <Link key={tabKey} href={tab.href} className="flex-1 min-w-0">
+              {mode === "desktop" ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-10 w-full px-1 text-sm font-medium",
+                    active ? "text-primary" : "text-foreground/60 hover:text-foreground"
+                  )}
+                >
+                  {tab.label}
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  className={cn(
+                    "flex flex-col items-center gap-0.5 h-12 w-full px-0",
+                    active ? "text-primary" : "text-foreground/60 hover:text-foreground"
+                  )}
+                >
+                  <Icon className="h-5 w-5" />
+                  <span className="text-[9px] leading-none">{tab.label}</span>
+                </Button>
+              )}
+            </Link>
+          )
+        })}
+      </div>
 
-        return (
-          <Link key={tabKey} href={tab.href} className="flex-1 min-w-0">
-            {mode === "desktop" ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-10 w-full px-2 text-sm font-medium",
-                  active ? "text-primary" : "text-foreground/60 hover:text-foreground"
-                )}
-              >
-                {tab.label}
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                className={cn(
-                  "flex flex-col items-center gap-0.5 h-12 w-full px-1",
-                  active ? "text-primary" : "text-foreground/60 hover:text-foreground"
-                )}
-              >
-                <Icon className="h-5 w-5" />
-                <span className="text-[9px] leading-none">{tab.label}</span>
-              </Button>
-            )}
-          </Link>
-        )
-      })}
-
-      <div className="w-px h-7 bg-border/50 mx-1 flex-shrink-0" />
-
-      {/* Sync status */}
+      {/* Sync status — fixed width bookend */}
       <SyncIconButton />
     </div>
   )
@@ -346,7 +344,7 @@ function useViewportMeasure() {
     return () => { window.removeEventListener("resize", measure); obs.disconnect() }
   }, [])
 
-  const expandedHeight = vh - SIDEBAR_PADDING * 2 - safeAreaTop - bannerHeight
+  const expandedHeight = vh - SIDEBAR_MARGIN * 2 - safeAreaTop - bannerHeight
   return { expandedHeight, safeAreaTop, bannerHeight }
 }
 
@@ -462,9 +460,9 @@ function DesktopPillMorph({
 
   const style: React.CSSProperties = {
     top: isAtSidebarPosition
-      ? `calc(${SIDEBAR_PADDING}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`
-      : `calc(${COLLAPSED_TOP}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
-    left: isAtSidebarPosition ? SIDEBAR_PADDING : "50%",
+      ? `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`
+      : `calc(${PILL_TOP}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
+    left: isAtSidebarPosition ? SIDEBAR_MARGIN : "50%",
     transform: isAtSidebarPosition ? "translateX(0)" : "translateX(-50%)",
     width: isAtSidebarPosition ? SIDEBAR_INNER_WIDTH : "auto",
     height: isAtFullHeight ? expandedHeight : PILL_HEIGHT,
@@ -567,9 +565,9 @@ function MobilePillMorph({
 
   // Mobile morph:
   // pill state: bottom-center, auto width, pill height
-  // sliding: moves to top-left, widens to sidebar width
+  // sliding: moves to top-right, widens to sidebar width
   // expanding: grows height downward
-  // sidebar: full sidebar
+  // sidebar: full sidebar (right-aligned)
 
   const transitionProperty = (() => {
     switch (phase) {
@@ -584,12 +582,12 @@ function MobilePillMorph({
   // Compute position and dimensions for each phase
   const style: React.CSSProperties = (() => {
     if (isAtSidebarPosition) {
-      // At sidebar position (top-left)
+      // At sidebar position (top-right)
       return {
         position: "fixed" as const,
-        top: `calc(${SIDEBAR_PADDING}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
-        left: SIDEBAR_PADDING,
-        right: "auto",
+        top: `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
+        right: SIDEBAR_MARGIN,
+        left: "auto",
         bottom: "auto",
         width: SIDEBAR_INNER_WIDTH,
         height: isAtFullHeight ? expandedHeight : PILL_HEIGHT,
@@ -601,7 +599,7 @@ function MobilePillMorph({
     // Pill state: bottom center
     return {
       position: "fixed" as const,
-      bottom: `calc(${SIDEBAR_PADDING}px + env(safe-area-inset-bottom, 0px))`,
+      bottom: `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-bottom, 0px))`,
       left: "50%",
       right: "auto",
       top: "auto",
