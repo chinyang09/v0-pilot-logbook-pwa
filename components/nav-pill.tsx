@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { motion, useReducedMotion } from "framer-motion"
+import { useReducedMotion } from "framer-motion"
 import {
   LayoutDashboard,
   Book,
@@ -31,6 +31,8 @@ import { usePreferences } from "@/components/providers/preferences-provider"
 import { navSections, dashboardNavItem } from "@/components/nav-sections"
 import { useSyncStatus, useSyncTrigger } from "@/hooks/sync/use-sync-status"
 import type { BottomNavTab } from "@/types/db/stores.types"
+
+// ─── Tab config ──────────────────────────────────────────────
 
 const TAB_CONFIG: Record<
   BottomNavTab,
@@ -101,56 +103,17 @@ const TAB_CONFIG: Record<
   },
 }
 
-const springTransition = {
-  type: "spring" as const,
-  stiffness: 400,
-  damping: 30,
-}
+// ─── Constants ───────────────────────────────────────────────
 
-const instantTransition = {
-  duration: 0,
-}
+const SIDEBAR_WIDTH = 288
+const SIDEBAR_PADDING = 12
+const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_PADDING * 2 // 264
+const PILL_HEIGHT = 56 // h-14
+const COLLAPSED_TOP = 4 // vertically center pill (56px) within header bar (64px)
 
-/**
- * Unified floating nav component.
- *
- * - Mobile (<768px): Bottom floating pill (auto-width, centered) with sidebar toggle + 4 icon tabs
- * - Desktop (≥768px): Top floating pill with sidebar toggle + text tabs
- *
- * Both morph into an identical floating glass sidebar on the left.
- */
-export function NavPill() {
-  const isDesktop = useIsDesktop()
-  const { isOpen: sidebarOpen, toggle: toggleSidebar } = useSidebar()
-  const { hideNavbar } = useScrollNavbarContext()
-  const pathname = usePathname()
-  const { preferences } = usePreferences()
-  const prefersReducedMotion = useReducedMotion()
+// ─── Sync status icon ────────────────────────────────────────
 
-  const tabs = preferences.navigation.bottomNavTabs
-  const transition = prefersReducedMotion ? instantTransition : springTransition
-
-  return isDesktop ? (
-    <DesktopPillMorph
-      tabs={tabs}
-      pathname={pathname}
-      sidebarOpen={sidebarOpen}
-      onToggleSidebar={toggleSidebar}
-      prefersReducedMotion={!!prefersReducedMotion}
-    />
-  ) : (
-    <MobilePill
-      tabs={tabs}
-      pathname={pathname}
-      hideNavbar={hideNavbar}
-      transition={transition}
-    />
-  )
-}
-
-// ─── Sync status icon button ─────────────────────────────────
-
-function SyncIconButton() {
+function SyncIconButton({ className }: { className?: string }) {
   const { status, isSyncing: statusSyncing } = useSyncStatus()
   const { triggerSync, isSyncing: triggerSyncing } = useSyncTrigger()
   const syncing = statusSyncing || triggerSyncing
@@ -160,16 +123,17 @@ function SyncIconButton() {
   }
 
   return (
-    <Button
-      variant="ghost"
-      size="icon"
+    <button
       onClick={handleSync}
       disabled={syncing || status === "offline"}
       className={cn(
-        "h-11 w-11 flex-shrink-0",
+        "flex items-center justify-center h-8 w-8 rounded-full flex-shrink-0 transition-colors",
         status === "offline"
-          ? "text-muted-foreground/40"
-          : "text-foreground/70 hover:text-foreground"
+          ? "text-red-400/70 cursor-not-allowed"
+          : syncing
+            ? "text-orange-400 cursor-wait"
+            : "text-emerald-400 hover:text-emerald-300 cursor-pointer",
+        className
       )}
       title={syncing ? "Syncing..." : status === "offline" ? "Offline" : "Tap to sync"}
     >
@@ -180,13 +144,91 @@ function SyncIconButton() {
       ) : (
         <Cloud className="h-4 w-4" />
       )}
-    </Button>
+    </button>
+  )
+}
+
+// ─── Shared pill bar content ─────────────────────────────────
+
+/**
+ * Shared pill bar row — used in both desktop and mobile collapsed states.
+ *
+ * Layout: [PanelLeft] | [divider] | [equally spaced tabs] | [SyncIcon]
+ *
+ * Desktop: tabs render as text labels
+ * Mobile: tabs render as icon + tiny label
+ */
+function PillBarContent({
+  tabs,
+  pathname,
+  mode,
+  onToggleSidebar,
+}: {
+  tabs: readonly BottomNavTab[]
+  pathname: string
+  mode: "desktop" | "mobile"
+  onToggleSidebar: () => void
+}) {
+  return (
+    <div className="flex items-center h-14 px-2">
+      {/* Sidebar toggle */}
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onToggleSidebar}
+        className="h-11 w-11 text-foreground/70 hover:text-foreground flex-shrink-0"
+      >
+        <PanelLeft className="h-5 w-5" />
+      </Button>
+
+      <div className="w-px h-7 bg-border/50 mx-1 flex-shrink-0" />
+
+      {/* Tabs — equally spaced */}
+      {tabs.map((tabKey) => {
+        const tab = TAB_CONFIG[tabKey]
+        if (!tab) return null
+        const active = tab.isActive(pathname)
+        const Icon = tab.icon
+
+        return (
+          <Link key={tabKey} href={tab.href} className="flex-1 min-w-0">
+            {mode === "desktop" ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-10 w-full px-2 text-sm font-medium",
+                  active ? "text-primary" : "text-foreground/60 hover:text-foreground"
+                )}
+              >
+                {tab.label}
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                className={cn(
+                  "flex flex-col items-center gap-0.5 h-12 w-full px-1",
+                  active ? "text-primary" : "text-foreground/60 hover:text-foreground"
+                )}
+              >
+                <Icon className="h-5 w-5" />
+                <span className="text-[9px] leading-none">{tab.label}</span>
+              </Button>
+            )}
+          </Link>
+        )
+      })}
+
+      <div className="w-px h-7 bg-border/50 mx-1 flex-shrink-0" />
+
+      {/* Sync status */}
+      <SyncIconButton />
+    </div>
   )
 }
 
 // ─── Shared sidebar nav content ──────────────────────────────
 
-/** Shared sidebar nav list — used by both desktop and mobile sidebars */
 function SidebarNav({
   pathname,
   className,
@@ -194,7 +236,6 @@ function SidebarNav({
   pathname: string
   className?: string
 }) {
-  // Track collapsed sections. All expanded by default.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const toggleSection = (label: string) => {
     setCollapsed((prev) => ({ ...prev, [label]: !prev[label] }))
@@ -248,7 +289,6 @@ function SidebarNav({
   )
 }
 
-/** Single sidebar nav item */
 function SidebarNavItem({
   href,
   icon,
@@ -278,37 +318,13 @@ function SidebarNavItem({
   )
 }
 
-// ─── Desktop: morphing pill ↔ sidebar ───────────────────────
+// ─── Viewport measurement hook ───────────────────────────────
 
-const SIDEBAR_WIDTH = 288
-const SIDEBAR_PADDING = 12
-const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_PADDING * 2 // 264
-const PILL_HEIGHT = 56 // h-14
-const COLLAPSED_TOP = 4 // vertically center pill (56px) within header bar (64px)
-
-type MorphPhase = "pill" | "sliding" | "expanding" | "sidebar" | "collapsing" | "returning"
-
-function DesktopPillMorph({
-  tabs,
-  pathname,
-  sidebarOpen,
-  onToggleSidebar,
-  prefersReducedMotion,
-}: {
-  tabs: readonly BottomNavTab[]
-  pathname: string
-  sidebarOpen: boolean
-  onToggleSidebar: () => void
-  prefersReducedMotion: boolean
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [phase, setPhase] = useState<MorphPhase>(sidebarOpen ? "sidebar" : "pill")
-  const prevOpenRef = useRef(sidebarOpen)
-  const safetyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-
+function useViewportMeasure() {
   const [vh, setVh] = useState(typeof window !== "undefined" ? window.innerHeight : 800)
   const [safeAreaTop, setSafeAreaTop] = useState(0)
   const [bannerHeight, setBannerHeight] = useState(0)
+
   useEffect(() => {
     const measure = () => {
       setVh(window.innerHeight)
@@ -331,13 +347,53 @@ function DesktopPillMorph({
   }, [])
 
   const expandedHeight = vh - SIDEBAR_PADDING * 2 - safeAreaTop - bannerHeight
-  const PHASE_DURATION = prefersReducedMotion ? 0 : 100
+  return { expandedHeight, safeAreaTop, bannerHeight }
+}
+
+// ─── Main export ─────────────────────────────────────────────
+
+export function NavPill() {
+  const isDesktop = useIsDesktop()
+  const { isOpen: sidebarOpen, toggle: toggleSidebar } = useSidebar()
+  const { hideNavbar } = useScrollNavbarContext()
+  const pathname = usePathname()
+  const { preferences } = usePreferences()
+  const prefersReducedMotion = useReducedMotion()
+
+  const tabs = preferences.navigation.bottomNavTabs
+
+  return isDesktop ? (
+    <DesktopPillMorph
+      tabs={tabs}
+      pathname={pathname}
+      sidebarOpen={sidebarOpen}
+      onToggleSidebar={toggleSidebar}
+      prefersReducedMotion={!!prefersReducedMotion}
+    />
+  ) : (
+    <MobilePillMorph
+      tabs={tabs}
+      pathname={pathname}
+      hideNavbar={hideNavbar}
+      prefersReducedMotion={!!prefersReducedMotion}
+    />
+  )
+}
+
+// ─── Morph phase state machine (shared) ──────────────────────
+
+type MorphPhase = "pill" | "sliding" | "expanding" | "sidebar" | "collapsing" | "returning"
+
+function useMorphPhase(isOpen: boolean, phaseDuration: number) {
+  const [phase, setPhase] = useState<MorphPhase>(isOpen ? "sidebar" : "pill")
+  const prevOpenRef = useRef(isOpen)
+  const safetyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   useEffect(() => {
-    if (prevOpenRef.current === sidebarOpen) return
-    prevOpenRef.current = sidebarOpen
-    setPhase(sidebarOpen ? "sliding" : "collapsing")
-  }, [sidebarOpen])
+    if (prevOpenRef.current === isOpen) return
+    prevOpenRef.current = isOpen
+    setPhase(isOpen ? "sliding" : "collapsing")
+  }, [isOpen])
 
   const advancePhase = useCallback(() => {
     clearTimeout(safetyTimerRef.current)
@@ -352,22 +408,47 @@ function DesktopPillMorph({
     })
   }, [])
 
-  const handleTransitionEnd = useCallback((e: React.TransitionEvent) => {
-    if (e.target !== ref.current) return
-    advancePhase()
-  }, [advancePhase])
-
   useEffect(() => {
     const isTransitioning = phase === "sliding" || phase === "expanding" || phase === "collapsing" || phase === "returning"
     if (!isTransitioning) return
     clearTimeout(safetyTimerRef.current)
-    safetyTimerRef.current = setTimeout(advancePhase, PHASE_DURATION + 50)
+    safetyTimerRef.current = setTimeout(advancePhase, phaseDuration + 50)
     return () => clearTimeout(safetyTimerRef.current)
-  }, [phase, PHASE_DURATION, advancePhase])
+  }, [phase, phaseDuration, advancePhase])
 
   const isAtSidebarPosition = phase === "sliding" || phase === "expanding" || phase === "sidebar" || phase === "collapsing"
   const isAtFullHeight = phase === "expanding" || phase === "sidebar"
   const isExpanded = phase === "sidebar" || phase === "expanding"
+
+  return { phase, advancePhase, isAtSidebarPosition, isAtFullHeight, isExpanded }
+}
+
+// ─── Desktop: top pill ↔ sidebar ─────────────────────────────
+
+function DesktopPillMorph({
+  tabs,
+  pathname,
+  sidebarOpen,
+  onToggleSidebar,
+  prefersReducedMotion,
+}: {
+  tabs: readonly BottomNavTab[]
+  pathname: string
+  sidebarOpen: boolean
+  onToggleSidebar: () => void
+  prefersReducedMotion: boolean
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const { expandedHeight } = useViewportMeasure()
+  const PHASE_DURATION = prefersReducedMotion ? 0 : 100
+
+  const { phase, advancePhase, isAtSidebarPosition, isAtFullHeight, isExpanded } =
+    useMorphPhase(sidebarOpen, PHASE_DURATION)
+
+  const handleTransitionEnd = useCallback((e: React.TransitionEvent) => {
+    if (e.target !== ref.current) return
+    advancePhase()
+  }, [advancePhase])
 
   const transitionProperty = (() => {
     switch (phase) {
@@ -404,115 +485,134 @@ function DesktopPillMorph({
         className="h-full"
         contentClassName="h-full overflow-hidden flex flex-col"
       >
-        {/* Top row — toggle + sync icon (always visible), pill tabs when collapsed */}
-        <div className="flex items-center h-14 px-3 flex-shrink-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleSidebar}
-            className="h-11 w-11 text-foreground/70 hover:text-foreground flex-shrink-0"
-          >
-            <PanelLeft className="h-5 w-5" />
-          </Button>
-
-          {/* Pill nav tabs — text labels, hidden when expanded */}
-          <div
-            className="flex items-center gap-0.5 flex-1 min-w-0 overflow-hidden whitespace-nowrap transition-opacity duration-100"
-            style={{
-              opacity: isExpanded ? 0 : 1,
-              visibility: isExpanded ? "hidden" : "visible",
-              pointerEvents: isExpanded ? "none" : "auto",
-            }}
-          >
-            <div className="w-px h-7 bg-border/50 mx-1" />
-            {tabs.map((tabKey) => {
-              const tab = TAB_CONFIG[tabKey]
-              if (!tab) return null
-              const active = tab.isActive(pathname)
-              return (
-                <Link key={tabKey} href={tab.href}>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={cn(
-                      "h-10 px-3 text-sm font-medium",
-                      active ? "text-primary" : "text-foreground/60 hover:text-foreground"
-                    )}
-                  >
-                    {tab.label}
-                  </Button>
-                </Link>
-              )
-            })}
-          </div>
-
-          <SyncIconButton />
+        {/* Pill bar — always visible */}
+        <div
+          className="flex-shrink-0"
+          style={{
+            opacity: isExpanded ? 0 : 1,
+            visibility: isExpanded ? "hidden" : "visible",
+            pointerEvents: isExpanded ? "none" : "auto",
+            height: isExpanded ? 0 : PILL_HEIGHT,
+            transition: "opacity 0.1s",
+          }}
+        >
+          <PillBarContent
+            tabs={tabs}
+            pathname={pathname}
+            mode="desktop"
+            onToggleSidebar={onToggleSidebar}
+          />
         </div>
 
-        {/* Sidebar nav — scrollable, revealed when expanded */}
+        {/* Sidebar header + nav — visible when expanded */}
         <div
-          className="flex-1 min-h-0 transition-opacity duration-150"
+          className="flex flex-col flex-1 min-h-0 transition-opacity duration-150"
           style={{
             opacity: isExpanded ? 1 : 0,
             visibility: isExpanded ? "visible" : "hidden",
             pointerEvents: isExpanded ? "auto" : "none",
           }}
         >
-          <SidebarNav pathname={pathname} className="h-full" />
+          {/* Sidebar top row — toggle + sync */}
+          <div className="flex items-center h-14 px-3 flex-shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleSidebar}
+              className="h-11 w-11 text-foreground/70 hover:text-foreground flex-shrink-0"
+            >
+              <PanelLeft className="h-5 w-5" />
+            </Button>
+            <div className="flex-1" />
+            <SyncIconButton />
+          </div>
+
+          <SidebarNav pathname={pathname} className="flex-1 min-h-0" />
         </div>
       </GlassContainer>
     </div>
   )
 }
 
-// ─── Mobile: bottom floating pill + glass sidebar ────────────
+// ─── Mobile: bottom pill ↔ sidebar ───────────────────────────
 
-function MobilePill({
+function MobilePillMorph({
   tabs,
   pathname,
   hideNavbar,
-  transition,
+  prefersReducedMotion,
 }: {
   tabs: readonly BottomNavTab[]
   pathname: string
   hideNavbar: boolean
-  transition: typeof springTransition | typeof instantTransition
+  prefersReducedMotion: boolean
 }) {
+  const ref = useRef<HTMLDivElement>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const leftTabs = tabs.slice(0, 2)
-  const rightTabs = tabs.slice(2, 4)
+  const { expandedHeight } = useViewportMeasure()
+  const PHASE_DURATION = prefersReducedMotion ? 0 : 100
 
-  // Viewport measurements for sidebar height (same as desktop)
-  const [vh, setVh] = useState(typeof window !== "undefined" ? window.innerHeight : 800)
-  const [safeAreaTop, setSafeAreaTop] = useState(0)
-  const [bannerHeight, setBannerHeight] = useState(0)
-  useEffect(() => {
-    const measure = () => {
-      setVh(window.innerHeight)
-      const el = document.createElement("div")
-      el.style.position = "fixed"
-      el.style.top = "env(safe-area-inset-top, 0px)"
-      el.style.visibility = "hidden"
-      document.body.appendChild(el)
-      const top = el.getBoundingClientRect().top
-      document.body.removeChild(el)
-      setSafeAreaTop(top)
-      const bh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--install-banner-height") || "0")
-      setBannerHeight(bh || 0)
-    }
-    measure()
-    window.addEventListener("resize", measure)
-    const obs = new MutationObserver(measure)
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] })
-    return () => { window.removeEventListener("resize", measure); obs.disconnect() }
-  }, [])
-
-  const sidebarHeight = vh - SIDEBAR_PADDING * 2 - safeAreaTop - bannerHeight
+  const { phase, advancePhase, isAtSidebarPosition, isAtFullHeight, isExpanded } =
+    useMorphPhase(sidebarOpen, PHASE_DURATION)
 
   // Close sidebar on route change
   useEffect(() => {
     setSidebarOpen(false)
   }, [pathname])
+
+  const handleTransitionEnd = useCallback((e: React.TransitionEvent) => {
+    if (e.target !== ref.current) return
+    advancePhase()
+  }, [advancePhase])
+
+  // Mobile morph:
+  // pill state: bottom-center, auto width, pill height
+  // sliding: moves to top-left, widens to sidebar width
+  // expanding: grows height downward
+  // sidebar: full sidebar
+
+  const transitionProperty = (() => {
+    switch (phase) {
+      case "sliding": return "top, bottom, left, right, width, height, border-radius"
+      case "expanding": return "height"
+      case "collapsing": return "height"
+      case "returning": return "top, bottom, left, right, width, height, border-radius"
+      default: return "none"
+    }
+  })()
+
+  // Compute position and dimensions for each phase
+  const style: React.CSSProperties = (() => {
+    if (isAtSidebarPosition) {
+      // At sidebar position (top-left)
+      return {
+        position: "fixed" as const,
+        top: `calc(${SIDEBAR_PADDING}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
+        left: SIDEBAR_PADDING,
+        right: "auto",
+        bottom: "auto",
+        width: SIDEBAR_INNER_WIDTH,
+        height: isAtFullHeight ? expandedHeight : PILL_HEIGHT,
+        transitionProperty,
+        transitionDuration: `${PHASE_DURATION}ms`,
+        transitionTimingFunction: "cubic-bezier(0.25, 0.1, 0.25, 1)",
+      }
+    }
+    // Pill state: bottom center
+    return {
+      position: "fixed" as const,
+      bottom: `calc(${SIDEBAR_PADDING}px + env(safe-area-inset-bottom, 0px))`,
+      left: "50%",
+      right: "auto",
+      top: "auto",
+      transform: `translateX(-50%) translateY(${hideNavbar ? "calc(100% + 24px)" : "0%"})`,
+      width: "auto",
+      height: PILL_HEIGHT,
+      transitionProperty: "transform",
+      transitionDuration: prefersReducedMotion ? "0ms" : "300ms",
+      transitionTimingFunction: "cubic-bezier(0.34, 1.56, 0.64, 1)",
+    }
+  })()
 
   return (
     <>
@@ -526,107 +626,63 @@ function MobilePill({
         onClick={() => setSidebarOpen(false)}
       />
 
-      {/* Floating glass sidebar — identical to desktop expanded sidebar */}
       <div
-        className="fixed z-[100]"
-        style={{
-          top: `calc(${SIDEBAR_PADDING}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
-          left: SIDEBAR_PADDING,
-          width: SIDEBAR_INNER_WIDTH,
-          height: sidebarHeight,
-          transform: sidebarOpen ? "translateX(0)" : "translateX(calc(-100% - 24px))",
-          opacity: sidebarOpen ? 1 : 0,
-          transition: "transform 0.2s cubic-bezier(0.25, 0.1, 0.25, 1), opacity 0.2s ease",
-          pointerEvents: sidebarOpen ? "auto" : "none",
-        }}
+        ref={ref}
+        className="z-[100]"
+        style={style}
+        onTransitionEnd={handleTransitionEnd}
       >
         <GlassContainer
-          cornerRadius={20}
+          cornerRadius={isExpanded ? 20 : 28}
           className="h-full"
           contentClassName="h-full overflow-hidden flex flex-col"
         >
-          {/* Top row — toggle + sync */}
-          <div className="flex items-center h-14 px-3 flex-shrink-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setSidebarOpen(false)}
-              className="h-11 w-11 text-foreground/70 hover:text-foreground flex-shrink-0"
-            >
-              <PanelLeft className="h-5 w-5" />
-            </Button>
-            <div className="flex-1" />
-            <SyncIconButton />
+          {/* Pill bar — visible when collapsed */}
+          <div
+            className="flex-shrink-0"
+            style={{
+              opacity: isExpanded ? 0 : 1,
+              visibility: isExpanded ? "hidden" : "visible",
+              pointerEvents: isExpanded ? "none" : "auto",
+              height: isExpanded ? 0 : PILL_HEIGHT,
+              transition: "opacity 0.1s",
+            }}
+          >
+            <PillBarContent
+              tabs={tabs}
+              pathname={pathname}
+              mode="mobile"
+              onToggleSidebar={() => setSidebarOpen(true)}
+            />
           </div>
 
-          {/* Scrollable nav */}
-          <SidebarNav pathname={pathname} className="flex-1 min-h-0" />
+          {/* Sidebar header + nav — visible when expanded */}
+          <div
+            className="flex flex-col flex-1 min-h-0 transition-opacity duration-150"
+            style={{
+              opacity: isExpanded ? 1 : 0,
+              visibility: isExpanded ? "visible" : "hidden",
+              pointerEvents: isExpanded ? "auto" : "none",
+            }}
+          >
+            {/* Sidebar top row */}
+            <div className="flex items-center h-14 px-3 flex-shrink-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSidebarOpen(false)}
+                className="h-11 w-11 text-foreground/70 hover:text-foreground flex-shrink-0"
+              >
+                <PanelLeft className="h-5 w-5" />
+              </Button>
+              <div className="flex-1" />
+              <SyncIconButton />
+            </div>
+
+            <SidebarNav pathname={pathname} className="flex-1 min-h-0" />
+          </div>
         </GlassContainer>
       </div>
-
-      {/* Bottom pill — auto-width, centered */}
-      <motion.div
-        className="fixed z-[60] bottom-0 left-0 right-0 flex justify-center px-4 pb-[env(safe-area-inset-bottom,0px)] mb-2"
-        animate={{ y: hideNavbar ? "100%" : "0%" }}
-        transition={transition}
-      >
-        <GlassContainer cornerRadius={28}>
-          <nav className="flex items-center h-16 px-1">
-            {/* Sidebar toggle — left side */}
-            <Button
-              variant="ghost"
-              className="h-12 w-12 text-foreground/70 hover:text-foreground flex-shrink-0"
-              size="icon"
-              onClick={() => setSidebarOpen(true)}
-            >
-              <PanelLeft className="h-5 w-5" />
-            </Button>
-
-            <div className="w-px h-7 bg-border/50 mx-0.5 flex-shrink-0" />
-
-            {/* Tab icons */}
-            {leftTabs.map((tabKey) => {
-              const tab = TAB_CONFIG[tabKey]
-              if (!tab) return null
-              const Icon = tab.icon
-              return (
-                <Link key={tabKey} href={tab.href} className="flex-1">
-                  <Button
-                    variant="ghost"
-                    className={cn(
-                      "flex flex-col items-center gap-0.5 h-14 w-full px-3",
-                      tab.isActive(pathname) && "text-primary"
-                    )}
-                  >
-                    <Icon className="h-5 w-5" />
-                    <span className="text-[9px]">{tab.label}</span>
-                  </Button>
-                </Link>
-              )
-            })}
-
-            {rightTabs.map((tabKey) => {
-              const tab = TAB_CONFIG[tabKey]
-              if (!tab) return null
-              const Icon = tab.icon
-              return (
-                <Link key={tabKey} href={tab.href} className="flex-1">
-                  <Button
-                    variant="ghost"
-                    className={cn(
-                      "flex flex-col items-center gap-0.5 h-14 w-full px-3",
-                      tab.isActive(pathname) && "text-primary"
-                    )}
-                  >
-                    <Icon className="h-5 w-5" />
-                    <span className="text-[9px]">{tab.label}</span>
-                  </Button>
-                </Link>
-              )
-            })}
-          </nav>
-        </GlassContainer>
-      </motion.div>
     </>
   )
 }
