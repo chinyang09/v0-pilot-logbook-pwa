@@ -303,7 +303,8 @@ function SidebarNavItem({
     <Link
       href={href}
       className={cn(
-        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
+        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150",
+        "active:scale-[0.98] active:bg-foreground/8",
         isActive
           ? "bg-foreground/10 text-primary font-medium"
           : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
@@ -481,7 +482,7 @@ function DesktopPillMorph({
     >
       <GlassContainer
         cornerRadius={isExpanded ? 20 : 28}
-        className="h-full no-glass-feedback"
+        className="h-full"
         contentClassName="h-full !overflow-hidden !flex !flex-col"
       >
         {/* Pill bar — always visible */}
@@ -617,7 +618,7 @@ function MobilePillMorph({
       >
         <GlassContainer
           cornerRadius={isExpanded ? 20 : 28}
-          className="h-full no-glass-feedback"
+          className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
         >
           {/* Pill bar — visible when collapsed */}

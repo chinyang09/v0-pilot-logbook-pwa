@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
 
 interface GlassContainerProps {
@@ -13,7 +14,11 @@ interface GlassContainerProps {
   /** Tint opacity 0-1 (default 0.3) */
   tintOpacity?: number
   style?: React.CSSProperties
+  /** Disable the whileTap scale feedback */
+  disableTapFeedback?: boolean
 }
+
+const tapTransition = { type: "spring" as const, stiffness: 400, damping: 25, duration: 0.15 }
 
 export function GlassContainer({
   children,
@@ -23,14 +28,17 @@ export function GlassContainer({
   tintColor,
   tintOpacity = 0.3,
   style,
+  disableTapFeedback,
 }: GlassContainerProps) {
   return (
-    <div
+    <motion.div
       className={cn("GlassContainer", className)}
       style={{
         "--corner-radius": `${cornerRadius}px`,
         ...style,
       } as React.CSSProperties}
+      whileTap={disableTapFeedback ? undefined : { scale: 1.015 }}
+      transition={tapTransition}
     >
       <div className={cn("GlassContent", contentClassName)}>
         {tintColor && (
@@ -56,6 +64,6 @@ export function GlassContainer({
         <div className="Contrast" />
         <div className="Brightness" />
       </div>
-    </div>
+    </motion.div>
   )
 }

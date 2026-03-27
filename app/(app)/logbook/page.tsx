@@ -20,7 +20,7 @@ import {
   CACHE_KEYS,
 } from "@/hooks/data"
 import { mutate } from "swr"
-import { Calendar, Plus, Search, X, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { Calendar, Plus, Search, X, ChevronDown } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -125,21 +125,21 @@ export default function LogbookPage() {
   const flightListRef = useRef<FlightListRef>(null)
   const calendarContainerRef = useRef<HTMLDivElement>(null)
 
-  // Measure calendar's natural height once for fixed spacer (not animated via ResizeObserver)
+  // Measure calendar's natural height + container width for dual-month detection
   const [calendarNaturalHeight, setCalendarNaturalHeight] = useState(0)
+  const [mainPanelWidth, setMainPanelWidth] = useState(0)
 
   useEffect(() => {
     const el = calendarContainerRef.current
     if (!el) return
     let rafId = 0
-    // scrollHeight gives natural content height regardless of max-height constraint
     const measure = () => {
       const h = el.scrollHeight
       if (h > 0) setCalendarNaturalHeight(h)
+      const w = el.offsetWidth
+      if (w > 0) setMainPanelWidth(w)
     }
     measure()
-    // Re-measure on resize (panel width changes affect calendar height).
-    // Throttled via RAF to prevent rapid state updates during sidebar width animation.
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(rafId)
       rafId = requestAnimationFrame(measure)
@@ -150,6 +150,8 @@ export default function LogbookPage() {
       cancelAnimationFrame(rafId)
     }
   }, [])
+
+  const dualMonth = mainPanelWidth >= 700
 
   // Track the topmost visible flight for calendar sync + date highlighting
   const topFlightIdRef = useRef<string | null>(null)
@@ -462,81 +464,7 @@ export default function LogbookPage() {
               className="overflow-hidden"
               style={{ willChange: "height, transform" }}
             >
-              {/* Month/Year quick picker dropdown — lightweight div, no GlassContainer.
-                  Button is in logbookActions (header bar), dropdown appears here in calendar area. */}
-              <AnimatePresence initial={false}>
-                {showMonthPicker && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.15 }}
-                    className="overflow-hidden px-2 pb-1"
-                  >
-                    <div className="bg-card rounded-2xl border border-border shadow-sm p-3">
-                      {/* Year navigation */}
-                      <div className="flex items-center justify-between mb-3">
-                        <button
-                          onClick={() => {
-                            const newYear = selectedMonth.year - 1
-                            setSelectedMonth({ year: newYear, month: selectedMonth.month })
-                            selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
-                            syncSourceRef.current = "calendar"
-                            handleCalendarMonthChange(newYear, selectedMonth.month)
-                          }}
-                          className="h-9 w-9 flex items-center justify-center rounded-xl bg-secondary hover:bg-secondary/80 active:scale-95 transition-all"
-                        >
-                          <ChevronLeft className="h-4 w-4" />
-                        </button>
-                        <span className="text-base font-semibold tabular-nums">{selectedMonth.year}</span>
-                        <button
-                          onClick={() => {
-                            const newYear = selectedMonth.year + 1
-                            setSelectedMonth({ year: newYear, month: selectedMonth.month })
-                            selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
-                            syncSourceRef.current = "calendar"
-                            handleCalendarMonthChange(newYear, selectedMonth.month)
-                          }}
-                          className="h-9 w-9 flex items-center justify-center rounded-xl bg-secondary hover:bg-secondary/80 active:scale-95 transition-all"
-                        >
-                          <ChevronRight className="h-4 w-4" />
-                        </button>
-                      </div>
-                      {/* Month grid */}
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {MONTHS.map((month, i) => {
-                          const isSelected = i === selectedMonth.month
-                          const isCurrentMonth = i === new Date().getMonth() && selectedMonth.year === new Date().getFullYear()
-                          return (
-                            <button
-                              key={month}
-                              onClick={() => {
-                                setSelectedMonth({ year: selectedMonth.year, month: i })
-                                selectedMonthRef.current = { year: selectedMonth.year, month: i }
-                                syncSourceRef.current = "calendar"
-                                handleCalendarMonthChange(selectedMonth.year, i)
-                                setShowMonthPicker(false)
-                              }}
-                              className={cn(
-                                "h-9 rounded-xl text-xs font-medium transition-all active:scale-95",
-                                isSelected
-                                  ? "bg-primary text-primary-foreground shadow-sm"
-                                  : isCurrentMonth
-                                    ? "bg-primary/15 text-primary font-semibold"
-                                    : "hover:bg-secondary text-foreground/70"
-                              )}
-                            >
-                              {month}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Calendar grid */}
+              {/* Calendar grid — morphs between day grid and month/year picker */}
               <div className="px-2 pb-2">
                 <LogbookCalendar
                   ref={calendarRef}
@@ -549,6 +477,21 @@ export default function LogbookPage() {
                   onScrollStart={handleCalendarScrollStart}
                   glass
                   cornerRadius={20}
+                  dualMonth={dualMonth}
+                  view={showMonthPicker ? "monthYear" : "calendar"}
+                  onMonthSelect={(year, month) => {
+                    setSelectedMonth({ year, month })
+                    selectedMonthRef.current = { year, month }
+                    syncSourceRef.current = "calendar"
+                    handleCalendarMonthChange(year, month)
+                    setShowMonthPicker(false)
+                  }}
+                  onYearChange={(newYear) => {
+                    setSelectedMonth({ year: newYear, month: selectedMonth.month })
+                    selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
+                    syncSourceRef.current = "calendar"
+                    handleCalendarMonthChange(newYear, selectedMonth.month)
+                  }}
                 />
               </div>
             </motion.div>

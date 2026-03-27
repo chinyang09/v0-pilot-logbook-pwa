@@ -13,7 +13,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable"
 import { FlightForm } from "@/components/flight-form"
-import { useRef, useCallback, useEffect } from "react"
+import { useRef, useCallback, useEffect, useState } from "react"
 import { ChevronLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -109,6 +109,9 @@ function AppShellContent({ children }: AppShellProps) {
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
 
+  // Panel snap state — snaps main panel to 375px or 750px on drag end
+  const [isDragging, setIsDragging] = useState(false)
+
   // Refs for scroll-to-top tap zones
   const mainPanelRef = useRef<HTMLDivElement>(null)
   const detailPanelRef = useRef<HTMLDivElement>(null)
@@ -159,6 +162,30 @@ function AppShellContent({ children }: AppShellProps) {
 
     return () => { observer.disconnect(); clearTimeout(timer) }
   }, [sidebarOpen, isDesktop])
+
+  // Snap main panel to nearest mobile-width multiple (375px or 750px) on drag end
+  useEffect(() => {
+    if (isDragging || !isDesktop) return
+    const container = panelGroupContainerRef.current
+    const handle = mainPanelHandleRef.current
+    if (!container || !handle) return
+
+    const containerWidth = container.offsetWidth
+    if (containerWidth <= 0) return
+
+    const MOBILE_WIDTH = 375
+    const snapPoints = [MOBILE_WIDTH, MOBILE_WIDTH * 2]
+    const currentPx = (containerWidth * handle.getSize()) / 100
+    const closest = snapPoints.reduce((prev, curr) =>
+      Math.abs(curr - currentPx) < Math.abs(prev - currentPx) ? curr : prev
+    )
+    const targetPercent = (closest / containerWidth) * 100
+
+    // Only snap if within a reasonable range (20%-80%)
+    if (targetPercent >= 20 && targetPercent <= 80) {
+      handle.resize(targetPercent)
+    }
+  }, [isDragging, isDesktop])
 
   const smoothScrollToTop = useCallback((container: React.RefObject<HTMLDivElement | null>) => {
     const candidates = container.current?.querySelectorAll("[data-scroll-container], .overflow-y-auto, .overflow-auto")
@@ -256,8 +283,8 @@ function AppShellContent({ children }: AppShellProps) {
               </div>
             </ResizablePanel>
 
-            {/* Resize handle — desktop only */}
-            <ResizableHandle withHandle className="hidden md:flex" />
+            {/* Resize handle — desktop only, snaps to mobile-width multiples */}
+            <ResizableHandle withHandle className="hidden md:flex" onDragging={setIsDragging} />
 
             {/* Detail panel — desktop only */}
             <ResizablePanel defaultSize={65} minSize={25} className="hidden md:block">
