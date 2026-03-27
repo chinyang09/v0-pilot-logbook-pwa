@@ -151,7 +151,7 @@ export default function LogbookPage() {
     }
   }, [])
 
-  const dualMonth = mainPanelWidth >= 700
+  const dualMonth = mainPanelWidth >= 620
 
   // Track the topmost visible flight for calendar sync + date highlighting
   const topFlightIdRef = useRef<string | null>(null)
