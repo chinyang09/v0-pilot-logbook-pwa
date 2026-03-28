@@ -8,6 +8,8 @@ import {
   useImperativeHandle,
   useMemo,
   useState,
+  useEffect,
+  useCallback,
 } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { FlightLog } from "@/lib/db";
@@ -56,6 +58,37 @@ function getTodayLocal(): string {
   return formatDateLocal(new Date());
 }
 
+function computeMonthDays(year: number, month: number) {
+  const firstDay = new Date(year, month, 1);
+  const startDay = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const days: { date: Date; dateStr: string; isCurrentMonth: boolean }[] = [];
+
+  for (let i = 0; i < startDay; i++) {
+    const prevDate = new Date(year, month, -(startDay - i - 1));
+    days.push({ date: prevDate, dateStr: formatDateLocal(prevDate), isCurrentMonth: false });
+  }
+
+  for (let i = 1; i <= daysInMonth; i++) {
+    const date = new Date(year, month, i);
+    days.push({ date, dateStr: formatDateLocal(date), isCurrentMonth: true });
+  }
+
+  const remainingDays = 42 - days.length;
+  for (let i = 1; i <= remainingDays; i++) {
+    const nextDate = new Date(year, month + 1, i);
+    days.push({ date: nextDate, dateStr: formatDateLocal(nextDate), isCurrentMonth: false });
+  }
+
+  return days;
+}
+
+function addMonths(year: number, month: number, offset: number): { year: number; month: number } {
+  const total = year * 12 + month + offset;
+  return { year: Math.floor(total / 12), month: ((total % 12) + 12) % 12 };
+}
+
 export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
   function LogbookCalendar(
     {
@@ -83,6 +116,47 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     const [hasTriggeredSwipeStart, setHasTriggeredSwipeStart] = useState(false);
     const isExternalScrollRef = useRef(false);
 
+    // ─── Carousel animation state (dual month only) ─────────────
+    const [displayMonth, setDisplayMonth] = useState(selectedMonth);
+    const [slideDirection, setSlideDirection] = useState<"none" | "forward" | "backward">("none");
+    const [isAnimating, setIsAnimating] = useState(false);
+    const prevSelectedRef = useRef(selectedMonth);
+
+    useEffect(() => {
+      const prev = prevSelectedRef.current;
+      prevSelectedRef.current = selectedMonth;
+
+      if (!dualMonth) {
+        setDisplayMonth(selectedMonth);
+        setSlideDirection("none");
+        setIsAnimating(false);
+        return;
+      }
+
+      const prevTotal = prev.year * 12 + prev.month;
+      const newTotal = selectedMonth.year * 12 + selectedMonth.month;
+
+      if (prevTotal === newTotal) return;
+
+      if (isAnimating) {
+        // If already animating, snap immediately to avoid visual glitches
+        setDisplayMonth(selectedMonth);
+        setSlideDirection("none");
+        setIsAnimating(false);
+        return;
+      }
+
+      setSlideDirection(newTotal > prevTotal ? "forward" : "backward");
+      setIsAnimating(true);
+    }, [selectedMonth, dualMonth, isAnimating]);
+
+    const handleSlideEnd = useCallback((e: React.TransitionEvent) => {
+      if (e.propertyName !== "transform") return;
+      setDisplayMonth(selectedMonth);
+      setIsAnimating(false);
+      setSlideDirection("none");
+    }, [selectedMonth]);
+
     const flightDates = useMemo(() => {
       const dates = new Map<string, { count: number; hasNight: boolean }>();
       flights.forEach((flight) => {
@@ -96,86 +170,41 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       return dates;
     }, [flights]);
 
-    const calendarDays = useMemo(() => {
-      const firstDay = new Date(selectedMonth.year, selectedMonth.month, 1);
-      const startDay = firstDay.getDay();
-      const daysInMonth = new Date(
-        selectedMonth.year,
-        selectedMonth.month + 1,
-        0
-      ).getDate();
+    // Days for the currently selected month (used in month/year picker + single month mode)
+    const calendarDays = useMemo(
+      () => computeMonthDays(selectedMonth.year, selectedMonth.month),
+      [selectedMonth]
+    );
 
-      const days: { date: Date; dateStr: string; isCurrentMonth: boolean }[] =
-        [];
+    // For dual month carousel, compute months based on displayMonth (lags behind during animation)
+    const carouselMonths = useMemo(() => {
+      if (!dualMonth) return null;
 
-      for (let i = 0; i < startDay; i++) {
-        const prevDate = new Date(
-          selectedMonth.year,
-          selectedMonth.month,
-          -(startDay - i - 1)
-        );
-        days.push({
-          date: prevDate,
-          dateStr: formatDateLocal(prevDate),
-          isCurrentMonth: false,
-        });
+      const m0 = displayMonth;
+      const m1 = addMonths(m0.year, m0.month, 1);
+
+      const base = [
+        { ...m0, days: computeMonthDays(m0.year, m0.month) },
+        { ...m1, days: computeMonthDays(m1.year, m1.month) },
+      ];
+
+      if (slideDirection === "forward") {
+        const m2 = addMonths(m0.year, m0.month, 2);
+        return [...base, { ...m2, days: computeMonthDays(m2.year, m2.month) }];
+      }
+      if (slideDirection === "backward") {
+        const mPrev = addMonths(m0.year, m0.month, -1);
+        return [{ ...mPrev, days: computeMonthDays(mPrev.year, mPrev.month) }, ...base];
       }
 
-      for (let i = 1; i <= daysInMonth; i++) {
-        const date = new Date(selectedMonth.year, selectedMonth.month, i);
-        days.push({
-          date,
-          dateStr: formatDateLocal(date),
-          isCurrentMonth: true,
-        });
-      }
+      return base;
+    }, [dualMonth, displayMonth, slideDirection]);
 
-      const remainingDays = 42 - days.length;
-      for (let i = 1; i <= remainingDays; i++) {
-        const nextDate = new Date(
-          selectedMonth.year,
-          selectedMonth.month + 1,
-          i
-        );
-        days.push({
-          date: nextDate,
-          dateStr: formatDateLocal(nextDate),
-          isCurrentMonth: false,
-        });
-      }
-
-      return days;
-    }, [selectedMonth]);
-
-    // Second month days for dual-month mode
+    // Backwards compat: nextMonthData for the month/year picker view
     const nextMonthData = useMemo(() => {
       if (!dualMonth) return null;
-      const nextMonth = selectedMonth.month === 11 ? 0 : selectedMonth.month + 1;
-      const nextYear = selectedMonth.month === 11 ? selectedMonth.year + 1 : selectedMonth.year;
-
-      const firstDay = new Date(nextYear, nextMonth, 1);
-      const startDay = firstDay.getDay();
-      const daysInMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
-
-      const days: { date: Date; dateStr: string; isCurrentMonth: boolean }[] = [];
-
-      for (let i = 0; i < startDay; i++) {
-        const prevDate = new Date(nextYear, nextMonth, -(startDay - i - 1));
-        days.push({ date: prevDate, dateStr: formatDateLocal(prevDate), isCurrentMonth: false });
-      }
-
-      for (let i = 1; i <= daysInMonth; i++) {
-        const date = new Date(nextYear, nextMonth, i);
-        days.push({ date, dateStr: formatDateLocal(date), isCurrentMonth: true });
-      }
-
-      const remainingDays = 42 - days.length;
-      for (let i = 1; i <= remainingDays; i++) {
-        const nextDate = new Date(nextYear, nextMonth + 1, i);
-        days.push({ date: nextDate, dateStr: formatDateLocal(nextDate), isCurrentMonth: false });
-      }
-
-      return { year: nextYear, month: nextMonth, days };
+      const next = addMonths(selectedMonth.year, selectedMonth.month, 1);
+      return { ...next, days: computeMonthDays(next.year, next.month) };
     }, [selectedMonth, dualMonth]);
 
     useImperativeHandle(
@@ -381,13 +410,35 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         onTouchEnd={handleTouchEnd}
         onWheel={handleWheel}
       >
-        {dualMonth && nextMonthData ? (
-          <div className="flex gap-2">
-            <div className="flex-1 min-w-0">
-              {renderDayGrid(calendarDays, "m1-")}
-            </div>
-            <div className="flex-1 min-w-0">
-              {renderDayGrid(nextMonthData.days, "m2-")}
+        {dualMonth && carouselMonths ? (
+          <div className="overflow-hidden">
+            <div
+              className="flex"
+              style={{
+                width: carouselMonths.length === 3 ? "150%" : "100%",
+                transform: isAnimating
+                  ? slideDirection === "forward"
+                    ? "translateX(-33.33%)"
+                    : "translateX(0%)"
+                  : slideDirection === "backward"
+                    ? "translateX(-33.33%)"
+                    : "translateX(0%)",
+                transition: isAnimating ? "transform 300ms ease-in-out" : "none",
+              }}
+              onTransitionEnd={handleSlideEnd}
+            >
+              {carouselMonths.map((m, i) => (
+                <div
+                  key={`carousel-${m.year}-${m.month}`}
+                  className="min-w-0 px-1"
+                  style={{ flex: carouselMonths.length === 3 ? "0 0 33.33%" : "0 0 50%" }}
+                >
+                  <div className="text-xs font-medium text-muted-foreground/50 text-center pb-0.5">
+                    {MONTHS[m.month]} {m.year}
+                  </div>
+                  {renderDayGrid(m.days, `m${i}-`)}
+                </div>
+              ))}
             </div>
           </div>
         ) : (
@@ -420,7 +471,12 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         >
           {dualMonth && view === "monthYear" ? (
             <div className="flex gap-2">
-              <div className="flex-1 min-w-0">{monthYearContent}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium text-muted-foreground/50 text-center pb-0.5">
+                  {MONTHS[selectedMonth.month]} {selectedMonth.year}
+                </div>
+                {renderDayGrid(calendarDays, "m1-")}
+              </div>
               <div className="flex-1 min-w-0">{monthYearContent}</div>
             </div>
           ) : (
@@ -442,7 +498,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
               className="absolute inset-0 pointer-events-none"
               style={{
                 background: "var(--background)",
-                opacity: 0.3,
+                opacity: 0.5,
                 borderRadius: "inherit",
               }}
             />

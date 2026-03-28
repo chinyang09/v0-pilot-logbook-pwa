@@ -275,9 +275,9 @@ function AppShellContent({ children }: AppShellProps) {
           <ResizablePanelGroup
             direction="horizontal"
             autoSaveId="desktop-panel-layout"
-            className="h-full md:min-w-[750px]"
+            className="h-full md:min-w-[700px]"
           >
-            <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={30} className="md:min-w-[375px]">
+            <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={30} className="md:min-w-[350px]">
               <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative">
                 {children}
               </div>
@@ -287,7 +287,7 @@ function AppShellContent({ children }: AppShellProps) {
             <ResizableHandle withHandle className="hidden md:flex" onDragging={setIsDragging} />
 
             {/* Detail panel — desktop only */}
-            <ResizablePanel defaultSize={65} minSize={25} className="hidden md:block">
+            <ResizablePanel defaultSize={65} minSize={20} className="hidden md:block">
               <div ref={detailPanelRef} className="h-full">
                 {isDesktop && <DetailPanelContent />}
               </div>
