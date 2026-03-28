@@ -113,8 +113,9 @@ function AppShellContent({ children }: AppShellProps) {
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
 
-  // Panel snap state — snaps main panel to 375px or 750px on drag end
+  // Panel snap state — snaps main panel to 360px or 720px on drag end or sidebar toggle
   const [isDragging, setIsDragging] = useState(false)
+  const [snapTrigger, setSnapTrigger] = useState(0)
 
   // Refs for scroll-to-top tap zones
   const mainPanelRef = useRef<HTMLDivElement>(null)
@@ -159,10 +160,12 @@ function AppShellContent({ children }: AppShellProps) {
     })
     observer.observe(container)
 
-    // Stop observing after animation settles (200ms sidebar + buffer)
+    // Stop observing after animation settles (200ms sidebar + buffer),
+    // then trigger a snap so the main panel lands on 360px or 720px.
     const timer = setTimeout(() => {
       observer.disconnect()
       targetMainPixelWidthRef.current = 0
+      setSnapTrigger(c => c + 1)
     }, 300)
 
     return () => { observer.disconnect(); clearTimeout(timer) }
@@ -190,7 +193,7 @@ function AppShellContent({ children }: AppShellProps) {
     if (targetPercent >= 20 && targetPercent <= 80) {
       handle.resize(targetPercent)
     }
-  }, [isDragging, isDesktop])
+  }, [isDragging, isDesktop, snapTrigger])
 
   const smoothScrollToTop = useCallback((container: React.RefObject<HTMLDivElement | null>) => {
     const candidates = container.current?.querySelectorAll("[data-scroll-container], .overflow-y-auto, .overflow-auto")

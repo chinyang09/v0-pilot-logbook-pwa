@@ -23,7 +23,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { GlassContainer } from "@/components/ui/glass-container"
-import { useIsDesktop, useCanPushSidebar } from "@/hooks/use-is-desktop"
+import { useCanPushSidebar } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { usePreferences } from "@/components/providers/preferences-provider"
@@ -353,7 +353,6 @@ function useViewportMeasure() {
 // ─── Main export ─────────────────────────────────────────────
 
 export function NavPill() {
-  const isDesktop = useIsDesktop()
   const canPush = useCanPushSidebar()
   const { isOpen: sidebarOpen, toggle: toggleSidebar } = useSidebar()
   const { hideNavbar } = useScrollNavbarContext()
@@ -363,14 +362,13 @@ export function NavPill() {
 
   const tabs = preferences.navigation.bottomNavTabs
 
-  return isDesktop ? (
+  return canPush ? (
     <DesktopPillMorph
       tabs={tabs}
       pathname={pathname}
       sidebarOpen={sidebarOpen}
       onToggleSidebar={toggleSidebar}
       prefersReducedMotion={!!prefersReducedMotion}
-      canPush={canPush}
     />
   ) : (
     <MobilePillMorph
@@ -433,14 +431,12 @@ function DesktopPillMorph({
   sidebarOpen,
   onToggleSidebar,
   prefersReducedMotion,
-  canPush,
 }: {
   tabs: readonly BottomNavTab[]
   pathname: string
   sidebarOpen: boolean
   onToggleSidebar: () => void
   prefersReducedMotion: boolean
-  canPush: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const { expandedHeight } = useViewportMeasure()
@@ -478,25 +474,12 @@ function DesktopPillMorph({
   }
 
   return (
-    <>
-      {/* Backdrop — overlay mode only (720-939px), sidebar overlays without pushing */}
-      {!canPush && (
-        <div
-          className="fixed inset-0 z-[59] bg-black/40 transition-opacity duration-200"
-          style={{
-            opacity: sidebarOpen ? 1 : 0,
-            pointerEvents: sidebarOpen ? "auto" : "none",
-          }}
-          onClick={onToggleSidebar}
-        />
-      )}
-
-      <div
-        ref={ref}
-        className="fixed z-[100]"
-        style={style}
-        onTransitionEnd={handleTransitionEnd}
-      >
+    <div
+      ref={ref}
+      className="fixed z-[100]"
+      style={style}
+      onTransitionEnd={handleTransitionEnd}
+    >
         <GlassContainer
           cornerRadius={isExpanded ? 20 : 28}
           className="h-full"
@@ -545,8 +528,7 @@ function DesktopPillMorph({
             <SidebarNav pathname={pathname} className="flex-1 min-h-0" />
           </div>
         </GlassContainer>
-      </div>
-    </>
+    </div>
   )
 }
 
