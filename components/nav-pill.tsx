@@ -23,7 +23,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { GlassContainer } from "@/components/ui/glass-container"
-import { useIsDesktop } from "@/hooks/use-is-desktop"
+import { useIsDesktop, useCanPushSidebar } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { usePreferences } from "@/components/providers/preferences-provider"
@@ -354,6 +354,7 @@ function useViewportMeasure() {
 
 export function NavPill() {
   const isDesktop = useIsDesktop()
+  const canPush = useCanPushSidebar()
   const { isOpen: sidebarOpen, toggle: toggleSidebar } = useSidebar()
   const { hideNavbar } = useScrollNavbarContext()
   const pathname = usePathname()
@@ -369,6 +370,7 @@ export function NavPill() {
       sidebarOpen={sidebarOpen}
       onToggleSidebar={toggleSidebar}
       prefersReducedMotion={!!prefersReducedMotion}
+      canPush={canPush}
     />
   ) : (
     <MobilePillMorph
@@ -431,12 +433,14 @@ function DesktopPillMorph({
   sidebarOpen,
   onToggleSidebar,
   prefersReducedMotion,
+  canPush,
 }: {
   tabs: readonly BottomNavTab[]
   pathname: string
   sidebarOpen: boolean
   onToggleSidebar: () => void
   prefersReducedMotion: boolean
+  canPush: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const { expandedHeight } = useViewportMeasure()
@@ -474,61 +478,75 @@ function DesktopPillMorph({
   }
 
   return (
-    <div
-      ref={ref}
-      className="fixed z-[100]"
-      style={style}
-      onTransitionEnd={handleTransitionEnd}
-    >
-      <GlassContainer
-        cornerRadius={isExpanded ? 20 : 28}
-        className="h-full"
-        contentClassName="h-full !overflow-hidden !flex !flex-col"
-        disableTapFeedback
-      >
-        {/* Pill bar — always visible */}
+    <>
+      {/* Backdrop — overlay mode only (720-939px), sidebar overlays without pushing */}
+      {!canPush && (
         <div
-          className="flex-shrink-0"
+          className="fixed inset-0 z-[59] bg-black/40 transition-opacity duration-200"
           style={{
-            opacity: isExpanded ? 0 : 1,
-            visibility: isExpanded ? "hidden" : "visible",
-            pointerEvents: isExpanded ? "none" : "auto",
-            height: isExpanded ? 0 : PILL_HEIGHT,
-            transition: "opacity 0.1s",
+            opacity: sidebarOpen ? 1 : 0,
+            pointerEvents: sidebarOpen ? "auto" : "none",
           }}
-        >
-          <PillBarContent
-            tabs={tabs}
-            pathname={pathname}
-            mode="desktop"
-            onToggleSidebar={onToggleSidebar}
-          />
-        </div>
+          onClick={onToggleSidebar}
+        />
+      )}
 
-        {/* Sidebar header + nav — visible when expanded */}
-        <div
-          className="flex flex-col flex-1 min-h-0 transition-opacity duration-150"
-          style={{
-            opacity: isExpanded ? 1 : 0,
-            visibility: isExpanded ? "visible" : "hidden",
-            pointerEvents: isExpanded ? "auto" : "none",
-          }}
+      <div
+        ref={ref}
+        className="fixed z-[100]"
+        style={style}
+        onTransitionEnd={handleTransitionEnd}
+      >
+        <GlassContainer
+          cornerRadius={isExpanded ? 20 : 28}
+          className="h-full"
+          contentClassName="h-full !overflow-hidden !flex !flex-col"
+          disableTapFeedback
         >
-          {/* Sidebar top row — toggle + sync flushed right */}
-          <div className="flex items-center justify-end h-14 px-3 gap-1 flex-shrink-0">
-            <button
-              onClick={onToggleSidebar}
-              className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
-            >
-              <PanelLeft className="h-5 w-5" />
-            </button>
-            <SyncIconButton />
+          {/* Pill bar — always visible */}
+          <div
+            className="flex-shrink-0"
+            style={{
+              opacity: isExpanded ? 0 : 1,
+              visibility: isExpanded ? "hidden" : "visible",
+              pointerEvents: isExpanded ? "none" : "auto",
+              height: isExpanded ? 0 : PILL_HEIGHT,
+              transition: "opacity 0.1s",
+            }}
+          >
+            <PillBarContent
+              tabs={tabs}
+              pathname={pathname}
+              mode="desktop"
+              onToggleSidebar={onToggleSidebar}
+            />
           </div>
 
-          <SidebarNav pathname={pathname} className="flex-1 min-h-0" />
-        </div>
-      </GlassContainer>
-    </div>
+          {/* Sidebar header + nav — visible when expanded */}
+          <div
+            className="flex flex-col flex-1 min-h-0 transition-opacity duration-150"
+            style={{
+              opacity: isExpanded ? 1 : 0,
+              visibility: isExpanded ? "visible" : "hidden",
+              pointerEvents: isExpanded ? "auto" : "none",
+            }}
+          >
+            {/* Sidebar top row — toggle + sync flushed right */}
+            <div className="flex items-center justify-end h-14 px-3 gap-1 flex-shrink-0">
+              <button
+                onClick={onToggleSidebar}
+                className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
+              >
+                <PanelLeft className="h-5 w-5" />
+              </button>
+              <SyncIconButton />
+            </div>
+
+            <SidebarNav pathname={pathname} className="flex-1 min-h-0" />
+          </div>
+        </GlassContainer>
+      </div>
+    </>
   )
 }
 

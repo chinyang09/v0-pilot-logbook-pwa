@@ -4,7 +4,7 @@ import type React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
-import { useIsDesktop } from "@/hooks/use-is-desktop"
+import { useIsDesktop, useCanPushSidebar } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import {
@@ -98,13 +98,17 @@ function DetailPanelContent() {
 /**
  * Unified responsive shell.
  *
- * Mobile (<768px): Full-width content + floating bottom nav pill
- * Desktop (≥768px): Push sidebar + resizable split panels + floating top nav pill
+ * Breakpoints (all min-widths):
+ *   ≥1200px: Push sidebar (220) + dual-month main (≥620) + detail (≥360)
+ *   ≥ 940px: Push sidebar (220) + main (≥360) + detail (≥360)
+ *   ≥ 720px: Overlay sidebar + main (≥360) + detail (≥360)
+ *   < 720px: Mobile — single panel + bottom pill + overlay sidebar
  */
 function AppShellContent({ children }: AppShellProps) {
   const { handleScroll } = useScrollNavbarContext()
   const { selectedId, setSelectedId } = useDetailPanel()
   const isDesktop = useIsDesktop()
+  const canPushSidebar = useCanPushSidebar()
   const { isOpen: sidebarOpen } = useSidebar()
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
@@ -124,8 +128,9 @@ function AppShellContent({ children }: AppShellProps) {
 
   // When sidebar opens/closes, lock the main panel's pixel width and continuously
   // recalculate its percentage via ResizeObserver so it never visually shrinks/grows.
+  // Only needed when the sidebar pushes content (wide desktop ≥ 940px).
   useEffect(() => {
-    if (!isDesktop) return
+    if (!isDesktop || !canPushSidebar) return
     if (prevSidebarOpenRef.current === sidebarOpen) return
 
     const handle = mainPanelHandleRef.current
@@ -161,7 +166,7 @@ function AppShellContent({ children }: AppShellProps) {
     }, 300)
 
     return () => { observer.disconnect(); clearTimeout(timer) }
-  }, [sidebarOpen, isDesktop])
+  }, [sidebarOpen, isDesktop, canPushSidebar])
 
   // Snap main panel to nearest mobile-width multiple (375px or 750px) on drag end
   useEffect(() => {
@@ -173,8 +178,8 @@ function AppShellContent({ children }: AppShellProps) {
     const containerWidth = container.offsetWidth
     if (containerWidth <= 0) return
 
-    const MOBILE_WIDTH = 375
-    const snapPoints = [MOBILE_WIDTH, MOBILE_WIDTH * 2]
+    const PANEL_WIDTH = 360
+    const snapPoints = [PANEL_WIDTH, PANEL_WIDTH * 2]
     const currentPx = (containerWidth * handle.getSize()) / 100
     const closest = snapPoints.reduce((prev, curr) =>
       Math.abs(curr - currentPx) < Math.abs(prev - currentPx) ? curr : prev
@@ -275,9 +280,9 @@ function AppShellContent({ children }: AppShellProps) {
           <ResizablePanelGroup
             direction="horizontal"
             autoSaveId="desktop-panel-layout"
-            className="h-full md:min-w-[700px]"
+            className="h-full md:min-w-[720px]"
           >
-            <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={30} className="md:min-w-[350px]">
+            <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={30} className="md:min-w-[360px]">
               <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative">
                 {children}
               </div>
@@ -287,7 +292,7 @@ function AppShellContent({ children }: AppShellProps) {
             <ResizableHandle withHandle className="hidden md:flex" onDragging={setIsDragging} />
 
             {/* Detail panel — desktop only */}
-            <ResizablePanel defaultSize={65} minSize={20} className="hidden md:block">
+            <ResizablePanel defaultSize={65} minSize={20} className="hidden md:block md:min-w-[360px]">
               <div ref={detailPanelRef} className="h-full">
                 {isDesktop && <DetailPanelContent />}
               </div>
