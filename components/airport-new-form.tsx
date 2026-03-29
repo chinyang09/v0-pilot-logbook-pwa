@@ -4,62 +4,12 @@ import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PageContainer } from "@/components/page-container"
+import { SettingsRow, ReadOnlyRow } from "@/components/ui/settings-row"
 import { Loader2, AlertCircle } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { addCustomAirport, getAirportByIcao, updateFlight } from "@/lib/db"
 import { syncService } from "@/lib/sync"
 import { submitAirportToServer } from "@/lib/submissions/submit"
-
-// --- Reusable Row (matches crew page pattern) ---
-function SettingsRow({
-  label,
-  value,
-  onChange,
-  placeholder,
-  required = false,
-  uppercase = false,
-  type = "text",
-  inputMode,
-}: {
-  label: string
-  value: string
-  onChange?: (value: string) => void
-  placeholder?: string
-  required?: boolean
-  uppercase?: boolean
-  type?: string
-  inputMode?: "text" | "decimal" | "numeric"
-}) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
-      <span className="text-foreground">
-        {label}
-        {required && <span className="text-destructive ml-0.5">*</span>}
-      </span>
-      <Input
-        type={type}
-        inputMode={inputMode}
-        value={value}
-        onChange={(e) =>
-          onChange?.(uppercase ? e.target.value.toUpperCase() : e.target.value)
-        }
-        placeholder={placeholder}
-        className={`text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 ${
-          uppercase ? "uppercase" : ""
-        }`}
-      />
-    </div>
-  )
-}
-
-function ReadOnlyRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
-      <span className="text-foreground">{label}</span>
-      <span className="text-muted-foreground">{value || "-"}</span>
-    </div>
-  )
-}
 
 export interface AirportNewFormProps {
   prefilledCode?: string

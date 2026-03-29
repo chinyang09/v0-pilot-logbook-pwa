@@ -45,6 +45,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const logout = useCallback(async () => {
+    // Sync pending changes before logout to prevent data loss
+    try {
+      const { syncService } = await import("@/lib/sync")
+      await syncService.syncBeforeLogout()
+    } catch (error) {
+      console.error("[Auth] Pre-logout sync failed:", error)
+    }
+
     // Clear server session cookie
     try {
       await fetch("/api/auth/session", { method: "DELETE" })

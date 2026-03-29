@@ -40,7 +40,7 @@ export default function AppLayout({
     <PreferencesProvider>
       <ScrollNavbarProvider>
         <SidebarProvider defaultOpen={false}>
-          <Suspense>
+          <Suspense fallback={null}>
             <DetailPanelProvider>
               <PageActionsProvider>
                 <AppLayoutContent>{children}</AppLayoutContent>

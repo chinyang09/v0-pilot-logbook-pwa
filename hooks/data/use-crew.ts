@@ -26,7 +26,6 @@ export function usePersonnel() {
     data,
     error,
     isLoading,
-    isValidating,
     mutate: mutatePersonnel,
   } = useSWR(isReady ? CACHE_KEYS.personnel : null, fetchPersonnel, {
     revalidateOnFocus: false,
@@ -41,7 +40,7 @@ export function usePersonnel() {
 
   return {
     personnel: data ?? [],
-    isLoading: isLoading || isValidating,
+    isLoading,
     error,
     refresh,
   }

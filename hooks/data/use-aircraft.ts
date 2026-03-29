@@ -26,7 +26,6 @@ export function useAircraft() {
     data,
     error,
     isLoading,
-    isValidating,
     mutate: mutateAircraft,
   } = useSWR(isReady ? CACHE_KEYS.aircraft : null, fetchAircraft, {
     revalidateOnFocus: false,
@@ -41,7 +40,9 @@ export function useAircraft() {
 
   return {
     aircraft: data ?? [],
-    isLoading: isLoading || isValidating,
+    // isLoading (no data yet) shows skeleton; isValidating (revalidating with existing data)
+    // is excluded so revalidations keep the list visible instead of flashing a skeleton.
+    isLoading,
     error,
     refresh,
   }

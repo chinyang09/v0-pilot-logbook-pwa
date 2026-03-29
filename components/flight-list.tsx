@@ -222,7 +222,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
               <div className="flex items-center justify-between mt-0.5">
                 <div className="flex flex-1 min-w-0 text-xs text-muted-foreground leading-tight">
                   {crewNames.map((name, i) => (
-                    <span key={i} className="flex-1 min-w-0 truncate">
+                    <span key={`${name}-${i}`} className="flex-1 min-w-0 truncate">
                       {i > 0 ? ", " : ""}{name}
                     </span>
                   ))}

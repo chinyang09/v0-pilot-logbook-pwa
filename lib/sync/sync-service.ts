@@ -33,6 +33,7 @@ class SyncService {
   private status: SyncStatus = "offline"
   private listeners: Set<(status: SyncStatus) => void> = new Set()
   private syncInProgress = false
+  private syncLock: Promise<void> = Promise.resolve()
   private onDataChangedCallbacks: Set<() => void> = new Set()
 
   constructor() {
@@ -129,25 +130,43 @@ class SyncService {
     pulled: number
     failed: number
   }> {
-    if (!navigator.onLine || this.syncInProgress) {
-      console.log("[v0] Skipping sync - offline or sync in progress")
+    if (!navigator.onLine) {
+      console.log("[v0] Skipping sync - offline")
       return { pushed: 0, pulled: 0, failed: 0 }
     }
 
+    // Use a lock to prevent concurrent sync operations
+    if (this.syncInProgress) {
+      console.log("[v0] Skipping sync - sync already in progress")
+      return { pushed: 0, pulled: 0, failed: 0 }
+    }
+
+    this.syncInProgress = true
+
+    const result = await this.executeFullSync()
+    return result
+  }
+
+  private async executeFullSync(): Promise<{
+    pushed: number
+    pulled: number
+    failed: number
+  }> {
     const session = await getUserSession()
 
     if (!session || (session.expiresAt && session.expiresAt < Date.now())) {
       console.log("[v0] Skipping sync - no valid or active session")
+      this.syncInProgress = false
       return { pushed: 0, pulled: 0, failed: 0 }
     }
 
     const dbReady = await initializeDB()
     if (!dbReady) {
       console.error("[v0] DB not ready for sync")
+      this.syncInProgress = false
       return { pushed: 0, pulled: 0, failed: 0 }
     }
 
-    this.syncInProgress = true
     this.setStatus("syncing")
 
     console.log("[v0] Starting full sync for user:", session.callsign)

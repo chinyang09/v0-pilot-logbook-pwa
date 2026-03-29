@@ -45,6 +45,29 @@ export class SyncTriggerManager {
   private syncCallback: (() => Promise<void>) | null = null
   private isInitialized: boolean = false
 
+  // Bound event listeners for proper cleanup
+  private onOnline = () => {
+    console.log("[v0] Network online - marking for sync")
+    this.networkJustOnline = true
+    this.checkAndTriggerSync("network-online")
+  }
+  private onVisibilityChange = () => {
+    if (document.visibilityState === "visible") {
+      console.log("[v0] App foregrounded - marking for sync")
+      this.appJustForegrounded = true
+      this.checkAndTriggerSync("app-foreground")
+    }
+  }
+  private onFocus = () => {
+    console.log("[v0] Window focused - checking sync")
+    this.appJustForegrounded = true
+    this.checkAndTriggerSync("window-focus")
+  }
+  private onBeforeUnload = () => {
+    console.log("[v0] App closing - triggering final sync (best effort)")
+    this.triggerSyncImmediate("app-closing")
+  }
+
   constructor(config: Partial<SyncTriggerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config }
   }
@@ -85,35 +108,19 @@ export class SyncTriggerManager {
   private setupLifecycleTriggers() {
     if (typeof window === "undefined") return
 
-    // Network online event
-    window.addEventListener("online", () => {
-      console.log("[v0] Network online - marking for sync")
-      this.networkJustOnline = true
-      this.checkAndTriggerSync("network-online")
-    })
+    window.addEventListener("online", this.onOnline)
+    document.addEventListener("visibilitychange", this.onVisibilityChange)
+    window.addEventListener("focus", this.onFocus)
+    window.addEventListener("beforeunload", this.onBeforeUnload)
+  }
 
-    // Visibility change (app foreground/background)
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") {
-        console.log("[v0] App foregrounded - marking for sync")
-        this.appJustForegrounded = true
-        this.checkAndTriggerSync("app-foreground")
-      }
-    })
+  private removeLifecycleTriggers() {
+    if (typeof window === "undefined") return
 
-    // Page focus (alternative to visibilitychange)
-    window.addEventListener("focus", () => {
-      console.log("[v0] Window focused - checking sync")
-      this.appJustForegrounded = true
-      this.checkAndTriggerSync("window-focus")
-    })
-
-    // Before unload (best effort sync)
-    window.addEventListener("beforeunload", () => {
-      console.log("[v0] App closing - triggering final sync (best effort)")
-      // Best effort - may not complete
-      this.triggerSyncImmediate("app-closing")
-    })
+    window.removeEventListener("online", this.onOnline)
+    document.removeEventListener("visibilitychange", this.onVisibilityChange)
+    window.removeEventListener("focus", this.onFocus)
+    window.removeEventListener("beforeunload", this.onBeforeUnload)
   }
 
   /**
@@ -296,8 +303,7 @@ export class SyncTriggerManager {
       this.periodicTimer = null
     }
 
-    // Note: We don't remove event listeners since they're global
-    // and removing them might affect other instances
+    this.removeLifecycleTriggers()
 
     this.isInitialized = false
     this.syncCallback = null

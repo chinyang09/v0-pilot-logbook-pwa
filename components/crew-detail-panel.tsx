@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { GlassContainer } from "@/components/ui/glass-container"
+import { SettingsRow, ToggleRow } from "@/components/ui/settings-row"
 import { useRegisterDetailActions } from "@/hooks/use-page-actions"
-import { Switch } from "@/components/ui/switch"
 import {
   getPersonnelById,
   updatePersonnel,
@@ -17,66 +17,6 @@ import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
 
 const ROLE_OPTIONS = ["PIC", "SIC", "Instructor", "Examiner"] as const
-
-function SettingsRow({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-  readOnly = false,
-}: {
-  label: string
-  value: string
-  onChange?: (value: string) => void
-  placeholder?: string
-  type?: string
-  readOnly?: boolean
-}) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
-      <span className="text-foreground">{label}</span>
-      {readOnly ? (
-        <span className="text-muted-foreground">{value || "-"}</span>
-      ) : (
-        <Input
-          type={type}
-          value={value}
-          onChange={(e) => onChange?.(e.target.value)}
-          placeholder={placeholder}
-          className="text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0"
-        />
-      )}
-    </div>
-  )
-}
-
-function ToggleRow({
-  label,
-  checked,
-  onCheckedChange,
-  readOnly = false,
-  disabled = false,
-}: {
-  label: string
-  checked: boolean
-  onCheckedChange?: (checked: boolean) => void
-  readOnly?: boolean
-  disabled?: boolean
-}) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
-      <span className={disabled ? "text-muted-foreground" : "text-foreground"}>
-        {label}
-      </span>
-      <Switch
-        checked={checked}
-        onCheckedChange={readOnly ? undefined : onCheckedChange}
-        disabled={readOnly || disabled}
-      />
-    </div>
-  )
-}
 
 interface CrewDetailPanelProps {
   crewId: string
