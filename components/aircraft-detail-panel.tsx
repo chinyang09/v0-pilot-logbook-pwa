@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { GlassContainer } from "@/components/ui/glass-container"
+import { SettingsRow } from "@/components/ui/settings-row"
 import { useRegisterDetailActions } from "@/hooks/use-page-actions"
 import {
   addCustomAircraftToDatabase,
@@ -11,39 +12,10 @@ import {
 } from "@/lib/db/stores/reference/aircraft.store"
 import { Loader2 } from "lucide-react"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
-import { getAircraftType, searchAircraftTypes } from "@/lib/db/stores/reference/aircraft-types.store"
+import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import type { AircraftType } from "@/types/entities/aircraft-type.types"
 import { formatAircraftType } from "@/lib/utils/aircraft-type-utils"
-
-function SettingsRow({
-  label,
-  value,
-  onChange,
-  placeholder,
-  readOnly = false,
-}: {
-  label: string
-  value: string
-  onChange?: (value: string) => void
-  placeholder?: string
-  readOnly?: boolean
-}) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
-      <span className="text-foreground">{label}</span>
-      {readOnly ? (
-        <span className="text-muted-foreground">{value || "-"}</span>
-      ) : (
-        <Input
-          value={value}
-          onChange={(e) => onChange?.(e.target.value)}
-          placeholder={placeholder}
-          className="text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 uppercase"
-        />
-      )}
-    </div>
-  )
-}
+import { useAircraftTypeSearch } from "@/hooks/use-aircraft-type-search"
 
 interface AircraftDetailPanelProps {
   /** Aircraft data from the parent's SWR hook (reactive) */
@@ -66,10 +38,12 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
     operator: aircraft.operator || "",
   })
 
-  const [typeSearchQuery, setTypeSearchQuery] = useState("")
-  const [typeSearchResults, setTypeSearchResults] = useState<AircraftType[]>([])
-  const [selectedType, setSelectedType] = useState<AircraftType | null>(null)
-  const [showTypeSearch, setShowTypeSearch] = useState(false)
+  const {
+    typeSearchQuery, setTypeSearchQuery,
+    typeSearchResults, selectedType, setSelectedType,
+    showTypeSearch, setShowTypeSearch,
+    handleSelectType, resetTypeSearch,
+  } = useAircraftTypeSearch()
 
   // Reset all transient state when aircraft identity changes (hot-swap)
   const prevRegRef = useRef(aircraft.registration);
@@ -78,11 +52,8 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
     prevRegRef.current = aircraft.registration;
     setIsEditing(false);
     setIsSaving(false);
-    setSelectedType(null);
-    setShowTypeSearch(false);
-    setTypeSearchQuery("");
-    setTypeSearchResults([]);
-  }, [aircraft.registration]);
+    resetTypeSearch();
+  }, [aircraft.registration, resetTypeSearch]);
 
   // Update form data from props when not editing (reactive from SWR)
   useEffect(() => {
@@ -113,26 +84,11 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
     []
   )
 
-  useEffect(() => {
-    if (!typeSearchQuery || typeSearchQuery.length < 1) {
-      setTypeSearchResults([])
-      return
-    }
-    const search = async () => {
-      const results = await searchAircraftTypes(typeSearchQuery, 20)
-      setTypeSearchResults(results)
-    }
-    const timer = setTimeout(search, 200)
-    return () => clearTimeout(timer)
-  }, [typeSearchQuery])
-
-  const handleSelectType = useCallback((type: AircraftType) => {
-    setSelectedType(type)
+  // Wrap handleSelectType to also update formData
+  const onSelectType = useCallback((type: AircraftType) => {
+    handleSelectType(type)
     setFormData((prev) => ({ ...prev, typecode: type.designator }))
-    setShowTypeSearch(false)
-    setTypeSearchQuery("")
-    setTypeSearchResults([])
-  }, [])
+  }, [handleSelectType])
 
   const handleSave = async () => {
     if (!formData.registration.trim()) return
@@ -236,6 +192,7 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
                 onChange={(value) => updateField("registration", value)}
                 placeholder="e.g. 9V-TNK"
                 readOnly={!isEditing}
+                uppercase
               />
 
               {isEditing ? (
@@ -267,7 +224,7 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
                         <button
                           key={type.designator}
                           type="button"
-                          onClick={() => handleSelectType(type)}
+                          onClick={() => onSelectType(type)}
                           className="w-full text-left px-3 py-2 hover:bg-accent border-b border-border last:border-b-0 transition-colors"
                         >
                           <div className="flex items-center gap-2">

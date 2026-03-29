@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PageContainer } from "@/components/page-container"
-import { Loader2, Search, AlertCircle } from "lucide-react"
+import { SettingsRow, ReadOnlyRow } from "@/components/ui/settings-row"
+import { Loader2, AlertCircle } from "lucide-react"
 import { useRouter } from "next/navigation"
 import {
   addCustomAircraftToDatabase,
@@ -13,49 +14,11 @@ import {
 } from "@/lib/db"
 import { syncService } from "@/lib/sync"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
-import { searchAircraftTypes, getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
+import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import type { AircraftType } from "@/types/entities/aircraft-type.types"
 import type { AircraftRecord } from "@/types/entities/aircraft.types"
 import { formatAircraftType } from "@/lib/utils/aircraft-type-utils"
-
-// --- Reusable Row (matches crew page pattern) ---
-function SettingsRow({
-  label,
-  value,
-  onChange,
-  placeholder,
-  required = false,
-}: {
-  label: string
-  value: string
-  onChange?: (value: string) => void
-  placeholder?: string
-  required?: boolean
-}) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
-      <span className="text-foreground">
-        {label}
-        {required && <span className="text-destructive ml-0.5">*</span>}
-      </span>
-      <Input
-        value={value}
-        onChange={(e) => onChange?.(e.target.value)}
-        placeholder={placeholder}
-        className="text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 uppercase"
-      />
-    </div>
-  )
-}
-
-function ReadOnlyRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
-      <span className="text-foreground">{label}</span>
-      <span className="text-muted-foreground">{value || "-"}</span>
-    </div>
-  )
-}
+import { useAircraftTypeSearch } from "@/hooks/use-aircraft-type-search"
 
 export interface AircraftNewFormProps {
   prefilledReg?: string
@@ -81,10 +44,12 @@ export function AircraftNewForm({
   const [isSaving, setIsSaving] = useState(false)
   const [registration, setRegistration] = useState(prefilledReg.toUpperCase())
   const [typecode, setTypecode] = useState("")
-  const [typeSearchQuery, setTypeSearchQuery] = useState("")
-  const [typeSearchResults, setTypeSearchResults] = useState<AircraftType[]>([])
-  const [selectedType, setSelectedType] = useState<AircraftType | null>(null)
-  const [showTypeSearch, setShowTypeSearch] = useState(false)
+  const {
+    typeSearchQuery, setTypeSearchQuery,
+    typeSearchResults, selectedType, setSelectedType,
+    showTypeSearch, setShowTypeSearch,
+    handleSelectType: baseHandleSelectType, resetTypeSearch,
+  } = useAircraftTypeSearch()
 
   // Type info looked up from Dexie for FR24 results
   const [fr24TypeInfo, setFr24TypeInfo] = useState<AircraftType | null>(null)
@@ -125,7 +90,7 @@ export function AircraftNewForm({
     setFr24Found(false)
     setExistingAircraft(null)
     setTypecode("")
-    setSelectedType(null)
+    resetTypeSearch()
 
     const timer = setTimeout(async () => {
       // 1. Check for duplicates in local DB
@@ -194,28 +159,10 @@ export function AircraftNewForm({
     getAircraftType(fr24Data.typecode).then((info) => setFr24TypeInfo(info))
   }, [fr24Data?.typecode])
 
-  // Search aircraft types when typecode changes (only when type field is visible)
-  useEffect(() => {
-    if (!typeSearchQuery || typeSearchQuery.length < 1) {
-      setTypeSearchResults([])
-      return
-    }
-
-    const search = async () => {
-      const results = await searchAircraftTypes(typeSearchQuery, 20)
-      setTypeSearchResults(results)
-    }
-    const timer = setTimeout(search, 200)
-    return () => clearTimeout(timer)
-  }, [typeSearchQuery])
-
   const handleSelectType = useCallback((type: AircraftType) => {
-    setSelectedType(type)
+    baseHandleSelectType(type)
     setTypecode(type.designator)
-    setShowTypeSearch(false)
-    setTypeSearchQuery("")
-    setTypeSearchResults([])
-  }, [])
+  }, [baseHandleSelectType])
 
   const handleSave = async () => {
     const reg = registration.trim().toUpperCase()
@@ -299,6 +246,7 @@ export function AircraftNewForm({
             onChange={setRegistration}
             placeholder="e.g. 9V-TNK"
             required
+            uppercase
           />
 
           {/* Duplicate detection banner */}

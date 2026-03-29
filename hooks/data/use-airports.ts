@@ -46,7 +46,6 @@ export function useAirports() {
     data,
     error,
     isLoading,
-    isValidating,
     mutate: mutateAirports,
   } = useSWR(isReady ? CACHE_KEYS.airports : null, fetchAirports, {
     revalidateOnFocus: false,
@@ -61,7 +60,7 @@ export function useAirports() {
 
   return {
     airports: data ?? [],
-    isLoading: isLoading || isValidating,
+    isLoading,
     error,
     refresh,
   }

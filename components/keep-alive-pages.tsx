@@ -88,7 +88,7 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
                 zIndex: isActive ? 1 : 0,
               }}
             >
-              <Suspense>
+              <Suspense fallback={null}>
                 <PageComponent />
               </Suspense>
             </div>

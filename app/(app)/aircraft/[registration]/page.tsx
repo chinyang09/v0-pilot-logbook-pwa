@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PageContainer } from "@/components/page-container"
+import { SettingsRow } from "@/components/ui/settings-row"
 import {
   getAircraftByRegistrationFromDB,
   addCustomAircraftToDatabase,
@@ -12,40 +13,11 @@ import {
 } from "@/lib/db"
 import { ArrowLeft, Loader2 } from "lucide-react"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
-import { getAircraftType, searchAircraftTypes } from "@/lib/db/stores/reference/aircraft-types.store"
+import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import type { AircraftType } from "@/types/entities/aircraft-type.types"
 import { formatAircraftType } from "@/lib/utils/aircraft-type-utils"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
-
-function SettingsRow({
-  label,
-  value,
-  onChange,
-  placeholder,
-  readOnly = false,
-}: {
-  label: string
-  value: string
-  onChange?: (value: string) => void
-  placeholder?: string
-  readOnly?: boolean
-}) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
-      <span className="text-foreground">{label}</span>
-      {readOnly ? (
-        <span className="text-muted-foreground">{value || "-"}</span>
-      ) : (
-        <Input
-          value={value}
-          onChange={(e) => onChange?.(e.target.value)}
-          placeholder={placeholder}
-          className="text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 uppercase"
-        />
-      )}
-    </div>
-  )
-}
+import { useAircraftTypeSearch } from "@/hooks/use-aircraft-type-search"
 
 export default function AircraftDetailPage() {
   const params = useParams()
@@ -66,10 +38,12 @@ export default function AircraftDetailPage() {
     operator: "",
   })
 
-  const [typeSearchQuery, setTypeSearchQuery] = useState("")
-  const [typeSearchResults, setTypeSearchResults] = useState<AircraftType[]>([])
-  const [selectedType, setSelectedType] = useState<AircraftType | null>(null)
-  const [showTypeSearch, setShowTypeSearch] = useState(false)
+  const {
+    typeSearchQuery, setTypeSearchQuery,
+    typeSearchResults, selectedType, setSelectedType,
+    showTypeSearch, setShowTypeSearch,
+    handleSelectType: baseHandleSelectType, resetTypeSearch,
+  } = useAircraftTypeSearch()
 
   // When switching to desktop view, redirect to aircraft page with selection
   useEffect(() => {
@@ -118,26 +92,10 @@ export default function AircraftDetailPage() {
     []
   )
 
-  useEffect(() => {
-    if (!typeSearchQuery || typeSearchQuery.length < 1) {
-      setTypeSearchResults([])
-      return
-    }
-    const search = async () => {
-      const results = await searchAircraftTypes(typeSearchQuery, 20)
-      setTypeSearchResults(results)
-    }
-    const timer = setTimeout(search, 200)
-    return () => clearTimeout(timer)
-  }, [typeSearchQuery])
-
   const handleSelectType = useCallback((type: AircraftType) => {
-    setSelectedType(type)
+    baseHandleSelectType(type)
     setFormData((prev) => ({ ...prev, typecode: type.designator }))
-    setShowTypeSearch(false)
-    setTypeSearchQuery("")
-    setTypeSearchResults([])
-  }, [])
+  }, [baseHandleSelectType])
 
   const handleSave = async () => {
     if (!formData.registration.trim()) return
@@ -269,6 +227,7 @@ export default function AircraftDetailPage() {
                 onChange={(value) => updateField("registration", value)}
                 placeholder="e.g. 9V-TNK"
                 readOnly={!isEditing}
+                uppercase
               />
 
               {isEditing ? (

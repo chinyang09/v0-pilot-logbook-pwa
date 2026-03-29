@@ -357,9 +357,9 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     ) => (
       <>
         <div className="grid grid-cols-7 gap-0 px-1 pt-0.5 pb-0">
-          {DAYS.map((day, i) => (
+          {DAYS.map((day) => (
             <div
-              key={i}
+              key={day}
               className="text-center text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider"
             >
               {day}

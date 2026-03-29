@@ -153,8 +153,8 @@ export function RosterCalendar({ entries, onDateClick }: RosterCalendarProps) {
 
         {/* Weekday headers - matching LogbookCalendar style */}
         <div className="grid grid-cols-7 gap-1 mb-1">
-          {DAYS.map((day, i) => (
-            <div key={i} className="text-center text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">
+          {DAYS.map((day) => (
+            <div key={day} className="text-center text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">
               {day}
             </div>
           ))}

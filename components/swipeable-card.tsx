@@ -91,7 +91,7 @@ export function SwipeableCard({
 
           return (
             <button
-              key={index}
+              key={action.label ?? index}
               onClick={(e: React.MouseEvent) => {
                 e.stopPropagation()
                 action.onClick()

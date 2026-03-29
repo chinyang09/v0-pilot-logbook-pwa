@@ -25,7 +25,7 @@ const CATEGORY_MAP: Record<string, string> = {
 /**
  * Parse a 3-char ICAO description code (e.g., "L2J") into structured fields
  */
-export function parseDescription(desc: string): {
+function parseDescription(desc: string): {
   category: string
   engineCount: number
   engineType: string
