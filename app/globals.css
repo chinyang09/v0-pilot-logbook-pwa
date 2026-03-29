@@ -89,6 +89,7 @@
 }
 
 @theme inline {
+  --breakpoint-md: 720px;
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", "Geist Mono Fallback";
   --color-background: var(--background);
