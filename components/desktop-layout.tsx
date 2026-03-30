@@ -99,8 +99,8 @@ function DetailPanelContent() {
  * Unified responsive shell.
  *
  * Breakpoints (all min-widths):
- *   ≥1200px: Push sidebar (220) + dual-month main (≥620) + detail (≥360)
- *   ≥ 940px: Push sidebar (220) + main (≥360) + detail (≥360)
+ *   ≥1180px: Push sidebar (200) + dual-month main (≥620) + detail (≥360)
+ *   ≥ 920px: Push sidebar (200) + main (≥360) + detail (≥360)
  *   ≥ 720px: Overlay sidebar + main (≥360) + detail (≥360)
  *   < 720px: Mobile — single panel + bottom pill + overlay sidebar
  */
@@ -113,7 +113,7 @@ function AppShellContent({ children }: AppShellProps) {
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
 
-  // Panel snap state — snaps main panel to 360px or 720px on drag end or sidebar toggle
+  // Panel snap state — snaps main panel to 360px or 620px on drag end or sidebar toggle
   const [isDragging, setIsDragging] = useState(false)
   const [snapTrigger, setSnapTrigger] = useState(0)
 
@@ -161,7 +161,7 @@ function AppShellContent({ children }: AppShellProps) {
     observer.observe(container)
 
     // Stop observing after animation settles (200ms sidebar + buffer),
-    // then trigger a snap so the main panel lands on 360px or 720px.
+    // then trigger a snap so the main panel lands on 360px or 620px.
     const timer = setTimeout(() => {
       observer.disconnect()
       targetMainPixelWidthRef.current = 0
@@ -171,7 +171,7 @@ function AppShellContent({ children }: AppShellProps) {
     return () => { observer.disconnect(); clearTimeout(timer) }
   }, [sidebarOpen, isDesktop, canPushSidebar])
 
-  // Snap main panel to nearest mobile-width multiple (375px or 750px) on drag end
+  // Snap main panel to 360px (single month) or 620px (dual month) on drag end
   useEffect(() => {
     if (isDragging || !isDesktop) return
     const container = panelGroupContainerRef.current
@@ -181,8 +181,16 @@ function AppShellContent({ children }: AppShellProps) {
     const containerWidth = container.offsetWidth
     if (containerWidth <= 0) return
 
-    const PANEL_WIDTH = 360
-    const snapPoints = [PANEL_WIDTH, PANEL_WIDTH * 2]
+    const SINGLE_MONTH = 360
+    const DUAL_MONTH = 620
+    const DETAIL_MIN = 360
+
+    // Only offer dual-month snap if container can fit both panels
+    const canFitDualMonth = containerWidth >= DUAL_MONTH + DETAIL_MIN
+    const snapPoints = canFitDualMonth
+      ? [SINGLE_MONTH, DUAL_MONTH]
+      : [SINGLE_MONTH]
+
     const currentPx = (containerWidth * handle.getSize()) / 100
     const closest = snapPoints.reduce((prev, curr) =>
       Math.abs(curr - currentPx) < Math.abs(prev - currentPx) ? curr : prev

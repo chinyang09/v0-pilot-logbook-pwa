@@ -352,7 +352,10 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
             if (instant) {
               rowVirtualizer.scrollToIndex(index, { align: "start", behavior: "auto" });
-              setTimeout(() => { isExternalScrollRef.current = false; }, 100);
+              setTimeout(() => {
+                isExternalScrollRef.current = false;
+                scrollContainerRef.current?.dispatchEvent(new Event('scroll'));
+              }, 100);
               return;
             }
 
@@ -385,6 +388,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                 requestAnimationFrame(animate);
               } else {
                 isExternalScrollRef.current = false;
+                container.dispatchEvent(new Event('scroll'));
               }
             };
 

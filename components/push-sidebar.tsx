@@ -4,7 +4,7 @@ import { useReducedMotion } from "framer-motion"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { useCanPushSidebar } from "@/hooks/use-is-desktop"
 
-const SIDEBAR_WIDTH = 220
+const SIDEBAR_WIDTH = 200
 
 /**
  * Push sidebar spacer — invisible flex child that animates width

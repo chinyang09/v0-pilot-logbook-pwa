@@ -111,6 +111,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     ref
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
+    const carouselRef = useRef<HTMLDivElement>(null);
+    const carouselHeightRef = useRef(0);
     const [swipeStartY, setSwipeStartY] = useState(0);
     const [isSwiping, setIsSwiping] = useState(false);
     const [hasTriggeredSwipeStart, setHasTriggeredSwipeStart] = useState(false);
@@ -120,7 +122,16 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     const [displayMonth, setDisplayMonth] = useState(selectedMonth);
     const [slideDirection, setSlideDirection] = useState<"none" | "forward" | "backward">("none");
     const [isAnimating, setIsAnimating] = useState(false);
+    const isAnimatingRef = useRef(false);
     const prevSelectedRef = useRef(selectedMonth);
+
+    // Measure carousel height when at rest (used during animation to keep container stable)
+    useEffect(() => {
+      if (!isAnimating && carouselRef.current) {
+        const h = carouselRef.current.offsetHeight;
+        if (h > 0) carouselHeightRef.current = h;
+      }
+    }, [isAnimating, displayMonth]);
 
     useEffect(() => {
       const prev = prevSelectedRef.current;
@@ -130,6 +141,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         setDisplayMonth(selectedMonth);
         setSlideDirection("none");
         setIsAnimating(false);
+        isAnimatingRef.current = false;
         return;
       }
 
@@ -138,22 +150,32 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
       if (prevTotal === newTotal) return;
 
-      if (isAnimating) {
-        // If already animating, snap immediately to avoid visual glitches
+      if (isAnimatingRef.current) {
+        // Rapid swipe: snap immediately to avoid visual glitches
         setDisplayMonth(selectedMonth);
         setSlideDirection("none");
         setIsAnimating(false);
+        isAnimatingRef.current = false;
+        return;
+      }
+
+      // Skip animation for reduced motion
+      if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        setDisplayMonth(selectedMonth);
         return;
       }
 
       setSlideDirection(newTotal > prevTotal ? "forward" : "backward");
       setIsAnimating(true);
-    }, [selectedMonth, dualMonth, isAnimating]);
+      isAnimatingRef.current = true;
+    }, [selectedMonth, dualMonth]);
 
-    const handleSlideEnd = useCallback((e: React.TransitionEvent) => {
-      if (e.propertyName !== "transform") return;
+    const handleAnimEnd = useCallback((e: React.AnimationEvent) => {
+      // Only snap when the anchor (shifting) panel finishes
+      if (!(e.target as HTMLElement).dataset.animAnchor) return;
       setDisplayMonth(selectedMonth);
       setIsAnimating(false);
+      isAnimatingRef.current = false;
       setSlideDirection("none");
     }, [selectedMonth]);
 
@@ -371,7 +393,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             const flightInfo = flightDates.get(dayInfo.dateStr);
             const isCurrentMonth = dayInfo.isCurrentMonth;
             const isToday = dayInfo.dateStr === today;
-            const isSelected = dayInfo.dateStr === selectedDate;
+            const isSelected = isCurrentMonth && dayInfo.dateStr === selectedDate;
 
             return (
               <button
@@ -384,9 +406,9 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                     "w-full aspect-square flex items-center justify-center text-lg rounded-full transition-all",
                     isCurrentMonth
                       ? "text-foreground/90"
-                      : "text-foreground/15",
+                      : "text-foreground/[0.06]",
                     flightInfo && isCurrentMonth && !isSelected && "font-semibold text-primary bg-primary/20",
-                    isToday && "ring-1.5 ring-primary/60",
+                    isCurrentMonth && isToday && "ring-1.5 ring-primary/60",
                     isSelected && "bg-primary text-primary-foreground shadow-md z-10"
                   )}
                 >
@@ -411,27 +433,92 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         onWheel={handleWheel}
       >
         {dualMonth && carouselMonths ? (
-          <div className="overflow-hidden">
+          isAnimating && carouselMonths.length === 3 ? (
+            // ─── Animated state: 3 panels with individual CSS keyframe animations ───
             <div
-              className="flex"
-              style={{
-                width: carouselMonths.length === 3 ? "150%" : "100%",
-                transform: isAnimating
-                  ? slideDirection === "forward"
-                    ? "translateX(-33.33%)"
-                    : "translateX(0%)"
-                  : slideDirection === "backward"
-                    ? "translateX(-33.33%)"
-                    : "translateX(0%)",
-                transition: isAnimating ? "transform 300ms ease-in-out" : "none",
-              }}
-              onTransitionEnd={handleSlideEnd}
+              ref={carouselRef}
+              className="relative overflow-hidden"
+              style={{ height: carouselHeightRef.current || undefined }}
+              onAnimationEnd={handleAnimEnd}
             >
+              {slideDirection === "forward" ? (
+                <>
+                  {/* Panel A: left month exits upward */}
+                  <div
+                    className="absolute top-0 left-0 w-1/2 px-1"
+                    style={{ animation: "cal-exit-up 300ms ease-out forwards" }}
+                  >
+                    <div className="text-xs font-medium text-muted-foreground/50 text-center pb-0.5">
+                      {MONTHS[carouselMonths[0].month]} {carouselMonths[0].year}
+                    </div>
+                    {renderDayGrid(carouselMonths[0].days, "m0-")}
+                  </div>
+                  {/* Panel B: right month shifts left (anchor) */}
+                  <div
+                    data-anim-anchor=""
+                    className="absolute top-0 left-1/2 w-1/2 px-1"
+                    style={{ animation: "cal-shift-left 300ms ease-out forwards" }}
+                  >
+                    <div className="text-xs font-medium text-muted-foreground/50 text-center pb-0.5">
+                      {MONTHS[carouselMonths[1].month]} {carouselMonths[1].year}
+                    </div>
+                    {renderDayGrid(carouselMonths[1].days, "m1-")}
+                  </div>
+                  {/* Panel C: new right month enters from top */}
+                  <div
+                    className="absolute top-0 left-1/2 w-1/2 px-1"
+                    style={{ animation: "cal-enter-top 300ms ease-out forwards" }}
+                  >
+                    <div className="text-xs font-medium text-muted-foreground/50 text-center pb-0.5">
+                      {MONTHS[carouselMonths[2].month]} {carouselMonths[2].year}
+                    </div>
+                    {renderDayGrid(carouselMonths[2].days, "m2-")}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Panel Z: new left month enters from top */}
+                  <div
+                    className="absolute top-0 left-0 w-1/2 px-1"
+                    style={{ animation: "cal-enter-top 300ms ease-out forwards" }}
+                  >
+                    <div className="text-xs font-medium text-muted-foreground/50 text-center pb-0.5">
+                      {MONTHS[carouselMonths[0].month]} {carouselMonths[0].year}
+                    </div>
+                    {renderDayGrid(carouselMonths[0].days, "m0-")}
+                  </div>
+                  {/* Panel A: left month shifts right (anchor) */}
+                  <div
+                    data-anim-anchor=""
+                    className="absolute top-0 left-0 w-1/2 px-1"
+                    style={{ animation: "cal-shift-right 300ms ease-out forwards" }}
+                  >
+                    <div className="text-xs font-medium text-muted-foreground/50 text-center pb-0.5">
+                      {MONTHS[carouselMonths[1].month]} {carouselMonths[1].year}
+                    </div>
+                    {renderDayGrid(carouselMonths[1].days, "m1-")}
+                  </div>
+                  {/* Panel B: right month exits upward */}
+                  <div
+                    className="absolute top-0 left-1/2 w-1/2 px-1"
+                    style={{ animation: "cal-exit-up 300ms ease-out forwards" }}
+                  >
+                    <div className="text-xs font-medium text-muted-foreground/50 text-center pb-0.5">
+                      {MONTHS[carouselMonths[2].month]} {carouselMonths[2].year}
+                    </div>
+                    {renderDayGrid(carouselMonths[2].days, "m2-")}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            // ─── Resting state: 2 panels in a flex row ───
+            <div ref={carouselRef} className="flex">
               {carouselMonths.map((m, i) => (
                 <div
                   key={`carousel-${m.year}-${m.month}`}
                   className="min-w-0 px-1"
-                  style={{ flex: carouselMonths.length === 3 ? "0 0 33.33%" : "0 0 50%" }}
+                  style={{ flex: "0 0 50%" }}
                 >
                   <div className="text-xs font-medium text-muted-foreground/50 text-center pb-0.5">
                     {MONTHS[m.month]} {m.year}
@@ -440,7 +527,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 </div>
               ))}
             </div>
-          </div>
+          )
         ) : (
           renderDayGrid(calendarDays)
         )}
@@ -471,7 +558,14 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         >
           {dualMonth && view === "monthYear" ? (
             <div className="flex gap-2">
-              <div className="flex-1 min-w-0">
+              <div
+                className="flex-1 min-w-0 touch-none"
+                style={{ touchAction: "none" }}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onWheel={handleWheel}
+              >
                 <div className="text-xs font-medium text-muted-foreground/50 text-center pb-0.5">
                   {MONTHS[selectedMonth.month]} {selectedMonth.year}
                 </div>
@@ -498,7 +592,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
               className="absolute inset-0 pointer-events-none"
               style={{
                 background: "var(--background)",
-                opacity: 0.5,
+                opacity: 0.85,
                 borderRadius: "inherit",
               }}
             />
