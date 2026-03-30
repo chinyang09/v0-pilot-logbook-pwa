@@ -104,7 +104,7 @@ const TAB_CONFIG: Record<
 
 // ─── Constants ───────────────────────────────────────────────
 
-const SIDEBAR_WIDTH = 220
+const SIDEBAR_WIDTH = 200
 const SIDEBAR_MARGIN = 4 // distance from viewport edge when expanded
 const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_MARGIN * 2 // 212
 const PILL_HEIGHT = 56 // h-14

@@ -122,6 +122,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     const [displayMonth, setDisplayMonth] = useState(selectedMonth);
     const [slideDirection, setSlideDirection] = useState<"none" | "forward" | "backward">("none");
     const [isAnimating, setIsAnimating] = useState(false);
+    const isAnimatingRef = useRef(false);
     const prevSelectedRef = useRef(selectedMonth);
 
     // Measure carousel height when at rest (used during animation to keep container stable)
@@ -140,6 +141,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         setDisplayMonth(selectedMonth);
         setSlideDirection("none");
         setIsAnimating(false);
+        isAnimatingRef.current = false;
         return;
       }
 
@@ -148,11 +150,12 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
       if (prevTotal === newTotal) return;
 
-      if (isAnimating) {
-        // If already animating, snap immediately to avoid visual glitches
+      if (isAnimatingRef.current) {
+        // Rapid swipe: snap immediately to avoid visual glitches
         setDisplayMonth(selectedMonth);
         setSlideDirection("none");
         setIsAnimating(false);
+        isAnimatingRef.current = false;
         return;
       }
 
@@ -164,13 +167,15 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
       setSlideDirection(newTotal > prevTotal ? "forward" : "backward");
       setIsAnimating(true);
-    }, [selectedMonth, dualMonth, isAnimating]);
+      isAnimatingRef.current = true;
+    }, [selectedMonth, dualMonth]);
 
     const handleAnimEnd = useCallback((e: React.AnimationEvent) => {
       // Only snap when the anchor (shifting) panel finishes
       if (!(e.target as HTMLElement).dataset.animAnchor) return;
       setDisplayMonth(selectedMonth);
       setIsAnimating(false);
+      isAnimatingRef.current = false;
       setSlideDirection("none");
     }, [selectedMonth]);
 
@@ -587,7 +592,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
               className="absolute inset-0 pointer-events-none"
               style={{
                 background: "var(--background)",
-                opacity: 0.7,
+                opacity: 0.85,
                 borderRadius: "inherit",
               }}
             />

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 
 const DESKTOP_BREAKPOINT = 720
-const WIDE_DESKTOP_BREAKPOINT = 940
+const WIDE_DESKTOP_BREAKPOINT = 920
 
 function useMediaQuery(minWidth: number) {
   const [matches, setMatches] = useState(false)
