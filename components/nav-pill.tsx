@@ -23,7 +23,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { GlassContainer } from "@/components/ui/glass-container"
-import { useCanPushSidebar } from "@/hooks/use-is-desktop"
+import { useDesktopPill } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { usePreferences } from "@/components/providers/preferences-provider"
@@ -104,9 +104,9 @@ const TAB_CONFIG: Record<
 
 // ─── Constants ───────────────────────────────────────────────
 
-const SIDEBAR_WIDTH = 200
+const SIDEBAR_WIDTH = 199
 const SIDEBAR_MARGIN = 4 // distance from viewport edge when expanded
-const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_MARGIN * 2 // 212
+const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_MARGIN * 2 // 191
 const PILL_HEIGHT = 56 // h-14
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
@@ -353,7 +353,7 @@ function useViewportMeasure() {
 // ─── Main export ─────────────────────────────────────────────
 
 export function NavPill() {
-  const canPush = useCanPushSidebar()
+  const canPush = useDesktopPill()
   const { isOpen: sidebarOpen, toggle: toggleSidebar } = useSidebar()
   const { hideNavbar } = useScrollNavbarContext()
   const pathname = usePathname()

@@ -4,14 +4,14 @@ import { useReducedMotion } from "framer-motion"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { useCanPushSidebar } from "@/hooks/use-is-desktop"
 
-const SIDEBAR_WIDTH = 200
+const SIDEBAR_WIDTH = 199
 
 /**
  * Push sidebar spacer — invisible flex child that animates width
  * to push content when the sidebar is open.
  *
- * Only pushes content when viewport is wide enough (>= 940px) to fit
- * sidebar + main panel + detail panel. On narrower desktops (720-939px),
+ * Only pushes content when viewport is wide enough (>= 920px) to fit
+ * sidebar + main panel + detail panel. On narrower desktops (720-919px),
  * the sidebar overlays content instead.
  */
 export function PushSidebar() {

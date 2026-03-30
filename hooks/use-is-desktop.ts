@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 
 const DESKTOP_BREAKPOINT = 720
 const WIDE_DESKTOP_BREAKPOINT = 920
+const DESKTOP_PILL_BREAKPOINT = 1120
 
 function useMediaQuery(minWidth: number) {
   const [matches, setMatches] = useState(false)
@@ -25,7 +26,12 @@ export function useIsDesktop() {
   return useMediaQuery(DESKTOP_BREAKPOINT)
 }
 
-/** True when viewport >= 940px — push sidebar fits alongside both panels */
+/** True when viewport >= 920px — push sidebar fits alongside both panels */
 export function useCanPushSidebar() {
   return useMediaQuery(WIDE_DESKTOP_BREAKPOINT)
+}
+
+/** True when viewport >= 1120px — desktop pill morph fits without overlapping actions */
+export function useDesktopPill() {
+  return useMediaQuery(DESKTOP_PILL_BREAKPOINT)
 }

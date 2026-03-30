@@ -102,9 +102,10 @@ function DetailPanelContent() {
  * Unified responsive shell.
  *
  * Breakpoints (all min-widths):
- *   ≥1180px: Push sidebar (200) + dual-month main (≥620) + detail (≥360)
- *   ≥ 920px: Push sidebar (200) + main (≥360) + detail (≥360)
- *   ≥ 720px: Overlay sidebar + main (≥360) + detail (≥360)
+ *   ≥1180px: Push sidebar (199) + dual-month main (≥620) + detail (≥360) + handle (1)
+ *   ≥1120px: Desktop pill morph (top center / sidebar)
+ *   ≥ 920px: Push sidebar (199) + main (≥360) + detail (≥360) + handle (1)
+ *   ≥ 720px: Split panels + bottom pill + overlay sidebar
  *   < 720px: Mobile — single panel + bottom pill + overlay sidebar
  */
 function AppShellContent({ children }: AppShellProps) {
@@ -132,7 +133,7 @@ function AppShellContent({ children }: AppShellProps) {
 
   // When sidebar opens/closes, lock the main panel's pixel width and continuously
   // recalculate its percentage via ResizeObserver so it never visually shrinks/grows.
-  // Only needed when the sidebar pushes content (wide desktop ≥ 940px).
+  // Only needed when the sidebar pushes content (wide desktop ≥ 920px).
   useEffect(() => {
     if (!isDesktop || !canPushSidebar) return
     if (prevSidebarOpenRef.current === sidebarOpen) return
