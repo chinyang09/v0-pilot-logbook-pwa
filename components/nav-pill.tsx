@@ -440,7 +440,7 @@ function DesktopPillMorph({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const { expandedHeight } = useViewportMeasure()
-  const PHASE_DURATION = prefersReducedMotion ? 0 : 100
+  const PHASE_DURATION = prefersReducedMotion ? 0 : 150
 
   const { phase, advancePhase, isAtSidebarPosition, isAtFullHeight, isExpanded } =
     useMorphPhase(sidebarOpen, PHASE_DURATION)
@@ -601,14 +601,25 @@ function MobilePillMorph({
 
   return (
     <>
-      {/* Backdrop — visible when sidebar is open */}
+      {/* Backdrop — dark overlay + progressive blur from sidebar edge */}
       <div
-        className="fixed inset-0 z-[59] bg-black/40 transition-opacity duration-200"
+        className="fixed inset-0 z-[58] bg-black/50 transition-opacity duration-200"
         style={{
           opacity: sidebarOpen ? 1 : 0,
           pointerEvents: sidebarOpen ? "auto" : "none",
         }}
         onClick={() => setSidebarOpen(false)}
+      />
+      <div
+        className="fixed inset-0 z-[59] transition-opacity duration-200"
+        style={{
+          opacity: sidebarOpen ? 1 : 0,
+          pointerEvents: "none",
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
+          maskImage: "linear-gradient(to right, black, transparent 60%)",
+          WebkitMaskImage: "linear-gradient(to right, black, transparent 60%)",
+        }}
       />
 
       <div
