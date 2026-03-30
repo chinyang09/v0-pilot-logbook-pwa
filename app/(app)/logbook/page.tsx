@@ -406,7 +406,7 @@ export default function LogbookPage() {
           {showCalendar && (
             <button
               onClick={() => setShowMonthPicker(prev => !prev)}
-              className="flex items-center gap-1 px-2 py-1 rounded-full text-sm font-medium text-foreground/80 hover:bg-foreground/5 transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded-full text-sm font-medium text-foreground/80 hover:bg-foreground/5 transition-colors min-w-[5.5rem] justify-center"
             >
               {MONTHS[selectedMonth.month]} {selectedMonth.year}
               <ChevronDown className={cn("h-3 w-3 opacity-50 transition-transform", showMonthPicker && "rotate-180")} />
