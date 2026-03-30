@@ -26,6 +26,9 @@ import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
 import { syncService } from "@/lib/sync"
 
+/** Layout width of ResizableHandle (w-px) — used to convert between pixel widths and panel percentages */
+const HANDLE_WIDTH_PX = 1
+
 interface AppShellProps {
   children: React.ReactNode
 }
@@ -144,7 +147,7 @@ function AppShellContent({ children }: AppShellProps) {
     // Capture pixel width before the container starts resizing
     const currentPercent = handle.getSize()
     const currentContainerWidth = container.offsetWidth
-    targetMainPixelWidthRef.current = currentContainerWidth * currentPercent / 100
+    targetMainPixelWidthRef.current = (currentContainerWidth - HANDLE_WIDTH_PX) * currentPercent / 100
 
     prevSidebarOpenRef.current = sidebarOpen
 
@@ -155,7 +158,7 @@ function AppShellContent({ children }: AppShellProps) {
       if (target <= 0) return
       const newWidth = container.offsetWidth
       if (newWidth <= 0) return
-      const newPercent = (target / newWidth) * 100
+      const newPercent = (target / (newWidth - HANDLE_WIDTH_PX)) * 100
       handle.resize(Math.min(Math.max(newPercent, 30), 70))
     })
     observer.observe(container)
@@ -185,17 +188,20 @@ function AppShellContent({ children }: AppShellProps) {
     const DUAL_MONTH = 620
     const DETAIL_MIN = 360
 
+    // Available width for panels (container minus handle)
+    const availableWidth = containerWidth - HANDLE_WIDTH_PX
+
     // Only offer dual-month snap if container can fit both panels
-    const canFitDualMonth = containerWidth >= DUAL_MONTH + DETAIL_MIN
+    const canFitDualMonth = availableWidth >= DUAL_MONTH + DETAIL_MIN
     const snapPoints = canFitDualMonth
       ? [SINGLE_MONTH, DUAL_MONTH]
       : [SINGLE_MONTH]
 
-    const currentPx = (containerWidth * handle.getSize()) / 100
+    const currentPx = (availableWidth * handle.getSize()) / 100
     const closest = snapPoints.reduce((prev, curr) =>
       Math.abs(curr - currentPx) < Math.abs(prev - currentPx) ? curr : prev
     )
-    const targetPercent = (closest / containerWidth) * 100
+    const targetPercent = (closest / availableWidth) * 100
 
     // Only snap if within a reasonable range (20%-80%)
     if (targetPercent >= 20 && targetPercent <= 80) {
