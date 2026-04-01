@@ -91,6 +91,14 @@ class SyncService {
     await triggerManager.syncBeforeLogout()
   }
 
+  /**
+   * Destroy sync triggers (cleanup timers and event listeners)
+   */
+  destroyTriggers() {
+    const triggerManager = getSyncTriggerManager()
+    triggerManager.destroy()
+  }
+
   private setStatus(status: SyncStatus) {
     this.status = status
     this.listeners.forEach((listener) => listener(status))

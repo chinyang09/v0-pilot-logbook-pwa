@@ -57,7 +57,11 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       refreshAllData()
     })
 
-    return unsubscribe
+    return () => {
+      unsubscribe()
+      syncService.destroyTriggers()
+      syncInitiated.current = false
+    }
   }, [])
 
   return <>{children}</>

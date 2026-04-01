@@ -1,8 +1,55 @@
 "use client"
 
-import { useState, useEffect, useRef, Suspense, lazy, type ReactNode } from "react"
+import { useState, useEffect, useRef, Suspense, lazy, Component, type ReactNode, type ErrorInfo } from "react"
 import { usePathname } from "next/navigation"
 import { ActiveRouteProvider } from "@/hooks/use-page-active"
+
+/**
+ * Error boundary for lazy-loaded persistent pages.
+ * Catches chunk load failures and render errors so they
+ * don't crash the entire app.
+ */
+class PageErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("[v0] Page error boundary caught:", error, errorInfo)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-1 items-center justify-center bg-background px-4">
+          <div className="text-center max-w-sm">
+            <h2 className="text-lg font-semibold text-foreground mb-1">
+              Page failed to load
+            </h2>
+            <p className="text-sm text-muted-foreground mb-6">
+              This page encountered an error. Please reload the app.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+            >
+              Reload App
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 /**
  * Lazy-imported page components — we manage their lifecycle directly,
@@ -88,9 +135,11 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
                 zIndex: isActive ? 1 : 0,
               }}
             >
-              <Suspense fallback={null}>
-                <PageComponent />
-              </Suspense>
+              <PageErrorBoundary>
+                <Suspense fallback={null}>
+                  <PageComponent />
+                </Suspense>
+              </PageErrorBoundary>
             </div>
           )
         })}

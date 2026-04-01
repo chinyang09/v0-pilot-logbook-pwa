@@ -167,10 +167,15 @@ export default function AircraftPage() {
 
   // Load preferences (favorites only) on mount
   useEffect(() => {
-    getUserPreferences().then((prefs) => {
-      const favs = prefs?.favoriteAircraft || []
-      setFavoriteRegs(new Set(favs.map((r) => r.toUpperCase())))
-    })
+    getUserPreferences()
+      .then((prefs) => {
+        const favs = prefs?.favoriteAircraft || []
+        setFavoriteRegs(new Set(favs.map((r) => r.toUpperCase())))
+      })
+      .catch((error) => {
+        console.error("[Aircraft] Failed to load preferences:", error)
+        setFavoriteRegs(new Set())
+      })
   }, [])
 
   // Derive recently used from actual flights (most recent first) — stable, no jump on click
@@ -209,17 +214,22 @@ export default function AircraftPage() {
       return
     }
     let cancelled = false
-    searchAircraftFromDB(debouncedSearchQuery, 500).then((results) => {
-      if (!cancelled) {
-        setSearchResults(
-          [...results].sort((a, b) => {
-            const regA = a.registration || a.icao24
-            const regB = b.registration || b.icao24
-            return regA.localeCompare(regB)
-          })
-        )
-      }
-    })
+    searchAircraftFromDB(debouncedSearchQuery, 500)
+      .then((results) => {
+        if (!cancelled) {
+          setSearchResults(
+            [...results].sort((a, b) => {
+              const regA = a.registration || a.icao24
+              const regB = b.registration || b.icao24
+              return regA.localeCompare(regB)
+            })
+          )
+        }
+      })
+      .catch((error) => {
+        console.error("[Aircraft] Search failed:", error)
+        if (!cancelled) setSearchResults([])
+      })
     return () => { cancelled = true }
   }, [debouncedSearchQuery, searchVersion])
 
