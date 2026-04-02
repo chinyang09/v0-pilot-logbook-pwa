@@ -129,10 +129,11 @@ function AppShellContent({ children }: AppShellProps) {
   const mainPanelHandleRef = useRef<ImperativePanelHandle>(null)
   const panelGroupContainerRef = useRef<HTMLDivElement>(null)
   const prevSidebarOpenRef = useRef(sidebarOpen)
-  const targetMainPixelWidthRef = useRef(0)
 
-  // When sidebar opens/closes, lock the main panel's pixel width and continuously
-  // recalculate its percentage via ResizeObserver so it never visually shrinks/grows.
+  // When sidebar opens/closes, CSS-lock the main panel's pixel width so it
+  // cannot visually resize during the sidebar animation (200ms).
+  // Uses min-width/max-width which are hard flexbox constraints — the panel
+  // physically stays at the locked width while the detail panel absorbs the change.
   // Only needed when the sidebar pushes content (wide desktop ≥ 920px).
   useEffect(() => {
     if (!isDesktop || !canPushSidebar) return
@@ -145,34 +146,49 @@ function AppShellContent({ children }: AppShellProps) {
       return
     }
 
-    // Capture pixel width before the container starts resizing
+    // Get the ResizablePanel DOM element (parent of the inner content div)
+    const mainPanelEl = mainPanelRef.current?.parentElement
+    if (!mainPanelEl) {
+      prevSidebarOpenRef.current = sidebarOpen
+      return
+    }
+
+    // Capture current pixel width before container starts resizing
     const currentPercent = handle.getSize()
     const currentContainerWidth = container.offsetWidth
-    targetMainPixelWidthRef.current = (currentContainerWidth - HANDLE_WIDTH_PX) * currentPercent / 100
+    const pixelWidth = (currentContainerWidth - HANDLE_WIDTH_PX) * currentPercent / 100
+
+    // CSS lock — prevents any visual change during sidebar animation
+    mainPanelEl.style.minWidth = `${pixelWidth}px`
+    mainPanelEl.style.maxWidth = `${pixelWidth}px`
 
     prevSidebarOpenRef.current = sidebarOpen
 
-    // Observe container width changes during the sidebar animation and
-    // recalculate main panel % on every frame to keep its pixel width constant.
-    const observer = new ResizeObserver(() => {
-      const target = targetMainPixelWidthRef.current
-      if (target <= 0) return
-      const newWidth = container.offsetWidth
-      if (newWidth <= 0) return
-      const newPercent = (target / (newWidth - HANDLE_WIDTH_PX)) * 100
-      handle.resize(Math.min(Math.max(newPercent, 30), 70))
-    })
-    observer.observe(container)
-
-    // Stop observing after animation settles (200ms sidebar + buffer),
-    // then trigger a snap so the main panel lands on 360px or 620px.
+    // After sidebar animation settles (200ms + buffer), sync library state and unlock
     const timer = setTimeout(() => {
-      observer.disconnect()
-      targetMainPixelWidthRef.current = 0
-      setSnapTrigger(c => c + 1)
+      const newContainerWidth = container.offsetWidth
+      const newAvailable = newContainerWidth - HANDLE_WIDTH_PX
+      const newPercent = (pixelWidth / newAvailable) * 100
+      const clampedPercent = Math.min(Math.max(newPercent, 30), 70)
+
+      // Update library's internal percentage to match the locked pixel width
+      handle.resize(clampedPercent)
+
+      // Remove CSS locks after library has applied new flex-basis, then snap
+      requestAnimationFrame(() => {
+        mainPanelEl.style.minWidth = ''
+        mainPanelEl.style.maxWidth = ''
+        setSnapTrigger(c => c + 1)
+      })
     }, 300)
 
-    return () => { observer.disconnect(); clearTimeout(timer) }
+    return () => {
+      clearTimeout(timer)
+      if (mainPanelEl) {
+        mainPanelEl.style.minWidth = ''
+        mainPanelEl.style.maxWidth = ''
+      }
+    }
   }, [sidebarOpen, isDesktop, canPushSidebar])
 
   // Snap main panel to 360px (single month) or 620px (dual month) on drag end
