@@ -4,6 +4,7 @@ import type React from "react"
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { getUserSession, saveUserSession, clearAllUserData, type UserSession } from "@/lib/db"
+import { resetDBState } from "@/hooks/data/use-db"
 import { startAuthentication } from "@simplewebauthn/browser"
 
 interface AuthContextType {
@@ -60,10 +61,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error("Failed to clear server session:", error)
     }
 
-    // Clear local data
-    await clearAllUserData()
+    // Set user null FIRST — triggers route protection redirect to /login,
+    // which unmounts KeepAlivePages before we clear the database.
+    // This prevents race conditions where mounted pages query a cleared DB.
     setUser(null)
     router.push("/login")
+
+    // Clear local data after navigation has started (KeepAlivePages unmounting)
+    try {
+      await clearAllUserData()
+    } catch (error) {
+      console.error("[Auth] Failed to clear local data:", error)
+    }
+
+    // Reset DB initialization state so re-login re-initializes properly
+    resetDBState()
   }, [router])
 
   const updateCallsign = useCallback(async (newCallsign: string) => {

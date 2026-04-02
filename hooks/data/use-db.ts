@@ -26,6 +26,14 @@ let dbInitialized = false
 let dbInitPromise: Promise<boolean> | null = null
 
 /**
+ * Reset DB initialization state (called on logout so re-login re-initializes)
+ */
+export function resetDBState() {
+  dbInitialized = false
+  dbInitPromise = null
+}
+
+/**
  * Check if the database is ready
  * Used internally by data hooks
  */
