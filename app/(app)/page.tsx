@@ -37,12 +37,12 @@ export default function Dashboard() {
     if (dutyPeriods.length === 0) return null
 
     const limits = calculateCumulativeLimits(dutyPeriods, new Date(), DEFAULT_FTL_LIMITS)
-    const compliance7Days = getComplianceStatus(limits.last7Days.utilizationPercent)
     const compliance14Days = getComplianceStatus(limits.last14Days.utilizationPercent)
     const compliance28Days = getComplianceStatus(limits.last28Days.utilizationPercent)
+    const compliance365Days = getComplianceStatus(limits.last365Days.utilizationPercent)
 
     // Find the worst compliance status
-    const allCompliance = [compliance7Days, compliance14Days, compliance28Days]
+    const allCompliance = [compliance14Days, compliance28Days, compliance365Days]
     const statusOrder = ["ok", "warning", "critical", "exceeded"]
     const worstCompliance = allCompliance.reduce((worst, current) => {
       const worstIndex = statusOrder.indexOf(worst.status)
@@ -53,9 +53,9 @@ export default function Dashboard() {
     return {
       limits,
       worstCompliance,
-      compliance7Days,
       compliance14Days,
       compliance28Days,
+      compliance365Days,
     }
   }, [scheduleEntries])
 
@@ -322,9 +322,9 @@ export default function Dashboard() {
               </div>
               <div className="space-y-2">
                 {[
-                  { period: "7 Days", compliance: fdpCompliance.compliance7Days, stats: fdpCompliance.limits.last7Days },
                   { period: "14 Days", compliance: fdpCompliance.compliance14Days, stats: fdpCompliance.limits.last14Days },
                   { period: "28 Days", compliance: fdpCompliance.compliance28Days, stats: fdpCompliance.limits.last28Days },
+                  { period: "12 Months", compliance: fdpCompliance.compliance365Days, stats: { dutyHours: undefined, flightHours: fdpCompliance.limits.last365Days.flightHours, utilizationPercent: fdpCompliance.limits.last365Days.utilizationPercent } },
                 ]
                   .filter((item) => item.compliance.status !== "ok")
                   .slice(0, 3)
@@ -348,7 +348,7 @@ export default function Dashboard() {
                                   Last {item.period}
                                 </p>
                                 <p className="text-xs text-muted-foreground truncate">
-                                  {item.stats.dutyHours?.toFixed(1)}h duty · {item.stats.flightHours.toFixed(1)}h flight
+                                  {item.stats.dutyHours != null ? `${item.stats.dutyHours.toFixed(1)}h duty · ` : ""}{item.stats.flightHours.toFixed(1)}h flight
                                 </p>
                               </div>
                             </div>
