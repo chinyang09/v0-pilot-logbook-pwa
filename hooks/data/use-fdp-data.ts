@@ -13,6 +13,7 @@ import {
   calculateCumulativeLimits,
   calculateCapacity,
   forecastExceedances,
+  generateTimelineData,
 } from "@/lib/utils/roster/fdp-calculator"
 
 /**
@@ -52,6 +53,9 @@ export function useFDPData() {
       (dp) => dp.restBefore && !dp.restBefore.compliant
     )
 
+    // Timeline chart data
+    const timelineData = generateTimelineData(withRest, limits)
+
     return {
       allDutyPeriods: withRest,
       pastDuties,
@@ -60,6 +64,7 @@ export function useFDPData() {
       capacity,
       forecast,
       restViolations,
+      timelineData,
     }
   }, [flights, scheduleEntries])
 

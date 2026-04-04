@@ -647,6 +647,72 @@ export function isDutyExceedingLimits(
   }
 }
 
+// ============================================
+// Timeline chart data generation
+// ============================================
+
+export interface TimelineDataPoint {
+  date: string                      // YYYY-MM-DD
+  dateLabel: string                 // "Apr 4" display label
+  dutyHours: number                 // Daily duty hours
+  flightHours: number               // Daily flight hours
+  rolling14DayDuty: number          // Rolling 14-day cumulative duty
+  rolling28DayDuty: number          // Rolling 28-day cumulative duty
+  rolling28DayFlight: number        // Rolling 28-day cumulative flight
+  rolling365DayFlight: number       // Rolling 365-day cumulative flight
+  restHours: number | null          // Rest before this duty (null if no prior duty)
+  restRequired: number | null       // Required rest hours
+  restCompliant: boolean | null     // Rest compliance
+  restRule: string | null           // Which Reg 3 sub-rule
+  isFuture: boolean
+  source: "logbook" | "schedule" | "merged"
+}
+
+/**
+ * Generate timeline data points for charting.
+ * Creates one data point per duty period with rolling cumulative totals.
+ */
+export function generateTimelineData(
+  dutyPeriods: DutyPeriod[],
+  limits: FTLLimits
+): TimelineDataPoint[] {
+  // dutyPeriods should be sorted chronologically (oldest first)
+  const sorted = [...dutyPeriods].sort((a, b) => a.date.localeCompare(b.date))
+
+  return sorted.map((dp) => {
+    const asOfDate = new Date(dp.date + "T23:59:59")
+
+    // Calculate rolling stats up to this date
+    const dpsUpToDate = sorted.filter((d) => d.date <= dp.date)
+    const stats14 = calculateRollingStats(dpsUpToDate, asOfDate, 14, limits)
+    const stats28 = calculateRollingStats(dpsUpToDate, asOfDate, 28, limits)
+    const stats365 = calculateRollingStats(dpsUpToDate, asOfDate, 365, limits)
+
+    const dateObj = new Date(dp.date + "T00:00:00")
+    const dateLabel = dateObj.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    })
+
+    return {
+      date: dp.date,
+      dateLabel,
+      dutyHours: dp.dutyMinutes / 60,
+      flightHours: dp.flightMinutes / 60,
+      rolling14DayDuty: stats14.dutyHours,
+      rolling28DayDuty: stats28.dutyHours,
+      rolling28DayFlight: stats28.flightHours,
+      rolling365DayFlight: stats365.flightHours,
+      restHours: dp.restBefore ? dp.restBefore.restMinutes / 60 : null,
+      restRequired: dp.restBefore ? dp.restBefore.requiredRestMinutes / 60 : null,
+      restCompliant: dp.restBefore ? dp.restBefore.compliant : null,
+      restRule: dp.restBefore ? dp.restBefore.rule : null,
+      isFuture: dp.isFuture,
+      source: dp.source,
+    }
+  })
+}
+
 /**
  * Get compliance status from utilization percentage
  */
