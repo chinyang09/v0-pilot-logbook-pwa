@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -11,16 +11,29 @@ import {
   TrendingUp,
   AlertTriangle,
   Info,
+  Clock,
+  CheckCircle2,
+  Calculator,
 } from "lucide-react"
 import { useFDPData } from "@/hooks/data/use-fdp-data"
 import { useScheduleEntries } from "@/hooks/data/use-schedule"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
+import { QuickCheckDialog } from "@/components/roster/quick-check-dialog"
 import { cn } from "@/lib/utils"
 
 function formatDateDDMMM(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00Z")
   return `${d.getUTCDate().toString().padStart(2, "0")} ${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}`
+}
+
+/** Format minutes as "Xh Ym" */
+function formatMinutesHM(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h === 0) return `${m}m`
+  if (m === 0) return `${h}h`
+  return `${h}h ${m}m`
 }
 
 function LimitCard({
@@ -67,30 +80,53 @@ function LimitCard({
   )
 }
 
+const RULE_DESCRIPTIONS: Record<string, string> = {
+  "3a": "10h rest (local night)",
+  "3b": "12h rest (no local night)",
+  "3c": "rest matching duty hours",
+  "3d": "24h rest (>16h duty)",
+}
+
 export default function FDPPage() {
   const { refresh, isLoading: scheduleLoading } = useScheduleEntries()
   const {
+    allDutyPeriods,
     capacity,
     forecast,
     restViolations,
+    restUntilLegal,
     timelineData,
     isLoading,
   } = useFDPData()
 
-  // Refresh action button
+  const [quickCheckOpen, setQuickCheckOpen] = useState(false)
+
+  // Header actions: refresh + quick check
   const fdpActions = useMemo(
     () => (
-      <GlassContainer cornerRadius={28}>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-14 w-14"
-          onClick={() => refresh()}
-          disabled={isLoading}
-        >
-          <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
-        </Button>
-      </GlassContainer>
+      <div className="flex gap-2">
+        <GlassContainer cornerRadius={28}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-14 w-14"
+            onClick={() => setQuickCheckOpen(true)}
+          >
+            <Calculator className="h-5 w-5" />
+          </Button>
+        </GlassContainer>
+        <GlassContainer cornerRadius={28}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-14 w-14"
+            onClick={() => refresh()}
+            disabled={isLoading}
+          >
+            <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
+          </Button>
+        </GlassContainer>
+      </div>
     ),
     [refresh, isLoading]
   )
@@ -100,6 +136,61 @@ export default function FDPPage() {
   return (
     <PageContainer>
       <div className="px-4 pt-4 pb-safe space-y-4">
+        {/* Rest Until Legal Card */}
+        {restUntilLegal && (
+          <Card
+            className={cn(
+              "border",
+              restUntilLegal.isLegalNow
+                ? "border-green-500/20 bg-green-500/5"
+                : "border-orange-500/20 bg-orange-500/5"
+            )}
+          >
+            <CardContent className="pt-4 pb-3">
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  "p-2 rounded-lg mt-0.5",
+                  restUntilLegal.isLegalNow ? "bg-green-500/10" : "bg-orange-500/10"
+                )}>
+                  {restUntilLegal.isLegalNow ? (
+                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                  ) : (
+                    <Clock className="h-5 w-5 text-orange-500" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  {restUntilLegal.isLegalNow ? (
+                    <>
+                      <div className="text-sm font-semibold text-green-600 dark:text-green-400">
+                        Legal for next duty
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Last duty ended {restUntilLegal.lastDebriefTime} UTC on{" "}
+                        {formatDateDDMMM(restUntilLegal.lastDutyDate)} ·{" "}
+                        {formatMinutesHM(restUntilLegal.restElapsedMinutes)} ago
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-sm font-semibold text-orange-600 dark:text-orange-400">
+                        {formatMinutesHM(restUntilLegal.restNeededMinutes)} rest needed
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Legal at{" "}
+                        {new Date(restUntilLegal.legalAtUtc).toISOString().slice(11, 16)} UTC
+                        {" · "}
+                        {RULE_DESCRIPTIONS[restUntilLegal.rule] ?? `Reg ${restUntilLegal.rule}`}
+                        {" · "}
+                        {formatMinutesHM(restUntilLegal.lastDutyMinutes)} duty
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Capacity Overview — 4 limit cards */}
         <Card>
           <CardContent className="pt-4 pb-3">
@@ -191,6 +282,13 @@ export default function FDPPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Quick Check Dialog */}
+      <QuickCheckDialog
+        open={quickCheckOpen}
+        onOpenChange={setQuickCheckOpen}
+        dutyPeriods={allDutyPeriods}
+      />
     </PageContainer>
   )
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useEffect } from "react"
+import { useMemo, useState, useEffect, useCallback } from "react"
 import { useFlights } from "./use-flights"
 import { useScheduleEntries } from "./use-schedule"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
@@ -15,7 +15,9 @@ import {
   calculateCapacity,
   forecastExceedances,
   generateTimelineData,
+  calculateRestUntilLegal,
 } from "@/lib/utils/roster/fdp-calculator"
+import type { RestUntilLegalResult } from "@/lib/utils/roster/fdp-calculator"
 import { getAirportByIata } from "@/lib/db/stores/reference/airports.store"
 import { getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
 
@@ -91,6 +93,9 @@ export function useFDPData() {
     // Timeline chart data
     const timelineData = generateTimelineData(withRest, limits)
 
+    // Rest until legal for next duty
+    const restUntilLegal = calculateRestUntilLegal(currentDPs)
+
     return {
       allDutyPeriods: withRest,
       pastDuties,
@@ -100,11 +105,35 @@ export function useFDPData() {
       forecast,
       restViolations,
       timelineData,
+      restUntilLegal,
     }
   }, [flights, scheduleEntries, airportTimezones])
 
+  // Live countdown — recompute rest-until-legal every 60 seconds
+  const [liveRestUntilLegal, setLiveRestUntilLegal] = useState<RestUntilLegalResult | null>(
+    result.restUntilLegal
+  )
+
+  useEffect(() => {
+    setLiveRestUntilLegal(result.restUntilLegal)
+  }, [result.restUntilLegal])
+
+  useEffect(() => {
+    if (!result.restUntilLegal || result.restUntilLegal.isLegalNow) return
+
+    const interval = setInterval(() => {
+      // Rebuild from the same last duty data but with updated "now"
+      const currentDPs = result.allDutyPeriods.filter((dp) => !dp.isFuture)
+      const updated = calculateRestUntilLegal(currentDPs)
+      setLiveRestUntilLegal(updated)
+    }, 60_000)
+
+    return () => clearInterval(interval)
+  }, [result.restUntilLegal, result.allDutyPeriods])
+
   return {
     ...result,
+    restUntilLegal: liveRestUntilLegal,
     isLoading: flightsLoading || scheduleLoading,
   }
 }

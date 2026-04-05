@@ -37,11 +37,20 @@ interface ViewConfig {
   color: string
 }
 
+// OKLCH palette — perceptually uniform, works on both light and dark backgrounds
 const VIEW_COLORS: Record<string, string> = {
-  duty14: "hsl(217, 91%, 60%)",   // blue
-  duty28: "hsl(270, 67%, 58%)",   // purple
-  flight28: "hsl(142, 71%, 45%)", // green
-  flight365: "hsl(25, 95%, 53%)", // orange
+  duty14: "oklch(0.65 0.15 250)",   // bright blue
+  duty28: "oklch(0.60 0.15 300)",   // purple-violet
+  flight28: "oklch(0.65 0.18 155)", // vivid teal-green
+  flight365: "oklch(0.70 0.15 55)", // warm amber
+}
+
+// Semantic colors for data bars and compliance indicators
+const COLORS = {
+  compliant: "oklch(0.65 0.20 155)",   // warm green
+  violation: "oklch(0.60 0.22 25)",    // warm red
+  future: "oklch(0.65 0.15 250)",      // muted blue
+  warning90: "oklch(0.70 0.15 55)",    // amber for 90% line
 }
 
 interface FDPTimelineChartProps {
@@ -58,6 +67,7 @@ export function FDPTimelineChart({
   forecast,
 }: FDPTimelineChartProps) {
   const [activeViews, setActiveViews] = useState<Set<ChartView>>(new Set(["duty14"]))
+  const [brushRange, setBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null)
 
   const views: ViewConfig[] = useMemo(
     () => [
@@ -124,17 +134,10 @@ export function FDPTimelineChart({
   // Toggle handler
   const toggleView = useCallback((key: ChartView) => {
     setActiveViews((prev) => {
-      // Rest is mutually exclusive
-      if (key === "rest") {
-        return new Set(["rest"])
-      }
-      // If rest is selected and user picks non-rest, replace
-      if (prev.has("rest")) {
-        return new Set([key])
-      }
+      if (key === "rest") return new Set(["rest"])
+      if (prev.has("rest")) return new Set([key])
       const next = new Set(prev)
       if (next.has(key)) {
-        // Don't deselect the last one
         if (next.size <= 1) return prev
         next.delete(key)
       } else {
@@ -142,6 +145,7 @@ export function FDPTimelineChart({
       }
       return next
     })
+    setBrushRange(null) // reset brush on view change
   }, [])
 
   // Capacity for selected views — show the most constrained (bottleneck)
@@ -155,7 +159,6 @@ export function FDPTimelineChart({
               : capacity.flight365Days
       return { ...cap, label: v.label }
     })
-    // Return the one with least remaining (bottleneck)
     return caps.reduce((min, c) => (c.remaining < min.remaining ? c : min))
   }, [isRestView, selectedNonRestViews, capacity])
 
@@ -182,15 +185,15 @@ export function FDPTimelineChart({
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Required</span>
-                <span>{data.restRequired!.toFixed(0)}h</span>
+                <span className="font-medium">{data.restRequired!.toFixed(0)}h</span>
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Rule</span>
-                <span>{data.restRule}</span>
+                <span className="font-medium">{data.restRule}</span>
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Status</span>
-                <span className={data.restCompliant ? "text-green-500" : "text-red-500"}>
+                <span className={cn("font-medium", data.restCompliant ? "text-green-500" : "text-red-500")}>
                   {data.restCompliant ? "Compliant" : "Violation"}
                 </span>
               </div>
@@ -275,6 +278,26 @@ export function FDPTimelineChart({
     const maxLimit = Math.max(...selectedNonRestViews.map((v) => v.limitValue))
     return [0, Math.ceil(maxLimit * 1.1)]
   }, [selectedNonRestViews])
+
+  // Brush date range label
+  const activeData = isRestView ? restData : timelineData
+  const brushDateLabel = useMemo(() => {
+    if (!brushRange || activeData.length === 0) return null
+    const start = activeData[brushRange.startIndex]
+    const end = activeData[brushRange.endIndex]
+    if (!start || !end) return null
+    return `${start.dateLabel} — ${end.dateLabel}`
+  }, [brushRange, activeData])
+
+  // Default brush start
+  const defaultBrushStart = useMemo(
+    () => Math.max(0, activeData.length - 90),
+    [activeData.length]
+  )
+
+  // Shared axis/grid theme props
+  const axisTickStyle = { fontSize: 10, fill: "hsl(var(--muted-foreground))" }
+  const gridStroke = "hsl(var(--border))"
 
   return (
     <div className="space-y-3">
@@ -398,7 +421,7 @@ export function FDPTimelineChart({
       )}
 
       {/* Chart */}
-      <Card>
+      <Card className="shadow-sm">
         <CardContent className="pt-4 pb-2 px-2">
           {(isRestView ? restData.length === 0 : timelineData.length === 0) ? (
             <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
@@ -408,16 +431,16 @@ export function FDPTimelineChart({
             /* Rest period chart */
             <ResponsiveContainer width="100%" height={320}>
               <ComposedChart data={restData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" opacity={0.3} />
+                <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
                 <XAxis
                   dataKey="dateLabel"
-                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  tick={axisTickStyle}
                   tickLine={false}
                   axisLine={false}
                   interval="preserveStartEnd"
                 />
                 <YAxis
-                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  tick={axisTickStyle}
                   tickLine={false}
                   axisLine={false}
                   unit="h"
@@ -440,11 +463,7 @@ export function FDPTimelineChart({
                   {restData.map((entry, index) => (
                     <Cell
                       key={index}
-                      fill={
-                        entry.restCompliant
-                          ? "hsl(142, 71%, 45%)"
-                          : "hsl(0, 84%, 60%)"
-                      }
+                      fill={entry.restCompliant ? COLORS.compliant : COLORS.violation}
                       opacity={entry.isFuture ? 0.5 : 0.85}
                     />
                   ))}
@@ -455,8 +474,9 @@ export function FDPTimelineChart({
                   stroke="hsl(var(--border))"
                   fill="hsl(var(--card))"
                   travellerWidth={10}
-                  startIndex={Math.max(0, restData.length - 90)}
+                  startIndex={defaultBrushStart}
                   tickFormatter={() => ""}
+                  onChange={(range) => setBrushRange(range as { startIndex: number; endIndex: number })}
                 />
               </ComposedChart>
             </ResponsiveContainer>
@@ -467,21 +487,21 @@ export function FDPTimelineChart({
                 <defs>
                   {selectedNonRestViews.map((view) => (
                     <linearGradient key={view.key} id={`gradient-${view.key}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={view.color} stopOpacity={isSingleView ? 0.3 : 0.2} />
-                      <stop offset="95%" stopColor={view.color} stopOpacity={0.03} />
+                      <stop offset="5%" stopColor={view.color} stopOpacity={isSingleView ? 0.35 : 0.25} />
+                      <stop offset="95%" stopColor={view.color} stopOpacity={0.05} />
                     </linearGradient>
                   ))}
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" opacity={0.3} />
+                <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
                 <XAxis
                   dataKey="dateLabel"
-                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  tick={axisTickStyle}
                   tickLine={false}
                   axisLine={false}
                   interval="preserveStartEnd"
                 />
                 <YAxis
-                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  tick={axisTickStyle}
                   tickLine={false}
                   axisLine={false}
                   unit="h"
@@ -495,13 +515,13 @@ export function FDPTimelineChart({
                   <ReferenceLine
                     key={`limit-${view.key}`}
                     y={view.limitValue}
-                    stroke={isSingleView ? "hsl(0, 84%, 60%)" : view.color}
-                    strokeDasharray="6 3"
-                    strokeWidth={1.5}
+                    stroke={isSingleView ? COLORS.violation : view.color}
+                    strokeDasharray={isSingleView ? "0" : "6 3"}
+                    strokeWidth={2}
                     label={{
                       value: `${view.limitValue}h`,
                       position: "right",
-                      fill: isSingleView ? "hsl(0, 84%, 60%)" : view.color,
+                      fill: isSingleView ? COLORS.violation : view.color,
                       fontSize: 10,
                     }}
                   />
@@ -511,7 +531,7 @@ export function FDPTimelineChart({
                 {isSingleView && primaryView && (
                   <ReferenceLine
                     y={primaryView.limitValue * 0.9}
-                    stroke="hsl(25, 95%, 53%)"
+                    stroke={COLORS.warning90}
                     strokeDasharray="3 3"
                     strokeWidth={1}
                     opacity={0.5}
@@ -549,7 +569,7 @@ export function FDPTimelineChart({
                   />
                 ))}
 
-                {/* Daily bars — one per unique barKey */}
+                {/* Daily bars — use view color for coherence */}
                 {uniqueBarKeys.map((barKey, barIdx) => {
                   const barView = selectedNonRestViews.find((v) => v.barKey === barKey)!
                   return (
@@ -565,10 +585,10 @@ export function FDPTimelineChart({
                           key={index}
                           fill={
                             uniqueBarKeys.length > 1
-                              ? barIdx === 0 ? "hsl(142, 71%, 45%)" : "hsl(217, 91%, 60%)"
-                              : entry.isFuture ? "hsl(217, 91%, 60%)" : "hsl(142, 71%, 45%)"
+                              ? barIdx === 0 ? COLORS.compliant : COLORS.future
+                              : entry.isFuture ? COLORS.future : COLORS.compliant
                           }
-                          opacity={entry.isFuture ? 0.4 : 0.7}
+                          opacity={entry.isFuture ? 0.35 : 0.6}
                         />
                       ))}
                     </Bar>
@@ -580,11 +600,19 @@ export function FDPTimelineChart({
                   stroke="hsl(var(--border))"
                   fill="hsl(var(--card))"
                   travellerWidth={10}
-                  startIndex={Math.max(0, timelineData.length - 90)}
+                  startIndex={defaultBrushStart}
                   tickFormatter={() => ""}
+                  onChange={(range) => setBrushRange(range as { startIndex: number; endIndex: number })}
                 />
               </ComposedChart>
             </ResponsiveContainer>
+          )}
+
+          {/* Brush date range label */}
+          {brushDateLabel && (
+            <div className="text-center text-[10px] text-muted-foreground mt-1 tabular-nums">
+              {brushDateLabel}
+            </div>
           )}
         </CardContent>
       </Card>

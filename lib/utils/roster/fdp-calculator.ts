@@ -1047,6 +1047,243 @@ export function generateTimelineData(
   return result
 }
 
+// ============================================
+// Rest until legal
+// ============================================
+
+export interface RestUntilLegalResult {
+  isLegalNow: boolean
+  restNeededMinutes: number    // 0 if legal
+  restElapsedMinutes: number   // since last debrief
+  requiredRestMinutes: number  // total required by regulation
+  rule: RestPeriodInfo["rule"]
+  lastDutyDate: string
+  lastDebriefTime: string
+  lastDutyMinutes: number
+  legalAtUtc: string           // ISO timestamp when pilot becomes legal
+}
+
+/**
+ * Calculate how much rest is still needed before the pilot is legally
+ * available for the next duty period (per CAAS Reg 3).
+ *
+ * Returns null if there are no past duty periods.
+ */
+export function calculateRestUntilLegal(
+  dutyPeriods: DutyPeriod[],
+  asOfDate?: Date
+): RestUntilLegalResult | null {
+  const now = asOfDate ?? new Date()
+  const pastDPs = dutyPeriods
+    .filter((dp) => !dp.isFuture)
+    .sort((a, b) => a.date.localeCompare(b.date))
+
+  if (pastDPs.length === 0) return null
+
+  const lastDP = pastDPs[pastDPs.length - 1]
+
+  // Calculate debrief timestamp
+  let debriefDate = lastDP.date
+  const reportMin = hhmmToMinutes(lastDP.reportTime)
+  const debriefMin = hhmmToMinutes(lastDP.debriefTime)
+
+  // Handle debrief crossing midnight
+  if (debriefMin < reportMin) {
+    const d = new Date(debriefDate + "T00:00:00Z")
+    d.setUTCDate(d.getUTCDate() + 1)
+    debriefDate = d.toISOString().split("T")[0]
+  }
+
+  const debriefTimestamp = new Date(`${debriefDate}T${lastDP.debriefTime}:00Z`)
+  const restElapsedMs = now.getTime() - debriefTimestamp.getTime()
+  const restElapsedMinutes = Math.max(0, Math.floor(restElapsedMs / 60000))
+
+  // Determine required rest based on preceding duty duration (Reg 3)
+  const precedingDutyMinutes = lastDP.dutyMinutes
+  let requiredRestMinutes: number
+  let rule: RestPeriodInfo["rule"]
+
+  if (precedingDutyMinutes > 16 * 60) {
+    // Reg 3(1)(d): preceding duty > 16h → ≥24h + local night
+    requiredRestMinutes = 24 * 60
+    rule = "3d"
+  } else if (precedingDutyMinutes > 10 * 60) {
+    // Reg 3(1)(c): preceding duty > 10h but ≤ 16h → ≥ preceding duty rounded up
+    requiredRestMinutes = Math.ceil(precedingDutyMinutes / 60) * 60
+    rule = "3c"
+  } else {
+    // For rules 3a/3b we need to check if the rest window includes local night.
+    // Project the rest window from debrief to debrief + max(10h, 12h) to determine
+    // which rule applies — if rest includes local night, 10h applies; else 12h.
+    const legalAtForNight = new Date(debriefTimestamp.getTime() + 10 * 60 * 60000)
+    const restEndDate = legalAtForNight.toISOString().split("T")[0]
+    const restEndTime = legalAtForNight.toISOString().split("T")[1].slice(0, 5)
+
+    const hasLocalNight = includesLocalNight(
+      debriefDate,
+      lastDP.debriefTime,
+      restEndDate,
+      restEndTime
+    )
+
+    if (hasLocalNight) {
+      requiredRestMinutes = 10 * 60
+      rule = "3a"
+    } else {
+      requiredRestMinutes = 12 * 60
+      rule = "3b"
+    }
+  }
+
+  const restNeededMinutes = Math.max(0, requiredRestMinutes - restElapsedMinutes)
+  const legalAtMs = debriefTimestamp.getTime() + requiredRestMinutes * 60000
+  const legalAtUtc = new Date(legalAtMs).toISOString()
+
+  return {
+    isLegalNow: restNeededMinutes === 0,
+    restNeededMinutes,
+    restElapsedMinutes,
+    requiredRestMinutes,
+    rule,
+    lastDutyDate: lastDP.date,
+    lastDebriefTime: lastDP.debriefTime,
+    lastDutyMinutes: lastDP.dutyMinutes,
+    legalAtUtc,
+  }
+}
+
+// ============================================
+// Quick Check — hypothetical duty simulation
+// ============================================
+
+export interface QuickCheckInput {
+  date: string           // YYYY-MM-DD
+  reportTime: string     // HH:MM
+  debriefTime: string    // HH:MM
+  flightMinutes: number
+  sectorCount: number
+}
+
+export interface QuickCheckResult {
+  restBefore: {
+    compliant: boolean
+    restMinutes: number
+    requiredRestMinutes: number
+    rule: RestPeriodInfo["rule"]
+  } | null
+  duty14Days: { projected: number; limit: number; compliant: boolean }
+  duty28Days: { projected: number; limit: number; compliant: boolean }
+  flight28Days: { projected: number; limit: number; compliant: boolean }
+  flight365Days: { projected: number; limit: number; compliant: boolean }
+  maxFdp: { dutyMinutes: number; maxFdpMinutes: number; compliant: boolean }
+  overallCompliant: boolean
+}
+
+/**
+ * Simulate adding a hypothetical duty period to the existing data
+ * and check all regulatory limits. Used for "quick check" legality
+ * when a pilot is asked to accept an ad-hoc flight or swap.
+ */
+export function simulateHypotheticalDuty(
+  existingDPs: DutyPeriod[],
+  hypothetical: QuickCheckInput,
+  limits: FTLLimits
+): QuickCheckResult {
+  // Build a temporary DutyPeriod from the hypothetical input
+  const reportMin = hhmmToMinutes(hypothetical.reportTime)
+  let debriefMin = hhmmToMinutes(hypothetical.debriefTime)
+  if (debriefMin <= reportMin) debriefMin += 1440 // crosses midnight
+
+  const dutyMinutes = debriefMin - reportMin
+  const maxFdpResult = calculateMaxFDP(hypothetical.reportTime, hypothetical.sectorCount)
+  const maxFdpMinutes = typeof maxFdpResult === "number" ? maxFdpResult : maxFdpResult.maxFdpMinutes
+
+  const hypotheticalDP: DutyPeriod = {
+    id: "__quick_check__",
+    date: hypothetical.date,
+    reportTime: hypothetical.reportTime,
+    debriefTime: hypothetical.debriefTime,
+    dutyMinutes,
+    flightMinutes: hypothetical.flightMinutes,
+    sectorCount: hypothetical.sectorCount,
+    maxFdpMinutes,
+    fdpExtensionUsed: false,
+    source: "schedule",
+    isFuture: true,
+    scheduleEntryIds: [],
+    flightIds: [],
+  }
+
+  // Insert into existing DPs and sort chronologically
+  const allDPs = [...existingDPs.filter((dp) => !dp.isFuture), hypotheticalDP]
+    .sort((a, b) => a.date.localeCompare(b.date))
+
+  // Rest period check — find the DP immediately before the hypothetical
+  const hypoIndex = allDPs.findIndex((dp) => dp.id === "__quick_check__")
+  let restCheck: QuickCheckResult["restBefore"] = null
+
+  if (hypoIndex > 0) {
+    const prevDP = allDPs[hypoIndex - 1]
+    const rest = calculateRestPeriod(hypotheticalDP, prevDP)
+    restCheck = {
+      compliant: rest.compliant,
+      restMinutes: rest.restMinutes,
+      requiredRestMinutes: rest.requiredRestMinutes,
+      rule: rest.rule,
+    }
+  }
+
+  // Rolling stats including hypothetical
+  const asOfDate = new Date(hypothetical.date + "T23:59:59Z")
+  const stats14 = calculateRollingStats(allDPs, asOfDate, 14, limits)
+  const stats28 = calculateRollingStats(allDPs, asOfDate, 28, limits)
+  const stats365 = calculateRollingStats(allDPs, asOfDate, 365, limits)
+
+  const duty14 = {
+    projected: stats14.dutyHours,
+    limit: limits.maxDuty14Days,
+    compliant: stats14.dutyHours <= limits.maxDuty14Days,
+  }
+  const duty28 = {
+    projected: stats28.dutyHours,
+    limit: limits.maxDuty28Days,
+    compliant: stats28.dutyHours <= limits.maxDuty28Days,
+  }
+  const flight28 = {
+    projected: stats28.flightHours,
+    limit: limits.maxFlight28Days,
+    compliant: stats28.flightHours <= limits.maxFlight28Days,
+  }
+  const flight365 = {
+    projected: stats365.flightHours,
+    limit: limits.maxFlight365Days,
+    compliant: stats365.flightHours <= limits.maxFlight365Days,
+  }
+  const maxFdpCheck = {
+    dutyMinutes,
+    maxFdpMinutes,
+    compliant: dutyMinutes <= maxFdpMinutes,
+  }
+
+  const overallCompliant =
+    (restCheck === null || restCheck.compliant) &&
+    duty14.compliant &&
+    duty28.compliant &&
+    flight28.compliant &&
+    flight365.compliant &&
+    maxFdpCheck.compliant
+
+  return {
+    restBefore: restCheck,
+    duty14Days: duty14,
+    duty28Days: duty28,
+    flight28Days: flight28,
+    flight365Days: flight365,
+    maxFdp: maxFdpCheck,
+    overallCompliant,
+  }
+}
+
 /**
  * Get compliance status from utilization percentage
  */
