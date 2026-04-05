@@ -47,6 +47,11 @@ export type DiscrepancyType =
 // Only track flight crew (pilots) - cabin crew not tracked
 export type CrewRole = "CPT" | "PIC" | "FO"
 
+// FDP calculation types (CAAS Reg 14/15)
+export type CrewConfiguration = "two-pilot" | "single-pilot"
+export type AugmentedCrewLevel = "none" | "plus-one" | "plus-two"
+export type FdpTableUsed = "A" | "B" | "C"
+
 // ============================================
 // Schedule Entry (parsed from CSV)
 // ============================================
@@ -225,6 +230,13 @@ export interface DutyPeriod {
   // FDP limits (based on regulations)
   maxFdpMinutes: number             // Based on report time & sectors
   fdpExtensionUsed: boolean
+
+  // FDP calculation metadata (CAAS Reg 14/15)
+  crewConfig?: CrewConfiguration          // defaults to "two-pilot"
+  augmentedCrew?: AugmentedCrewLevel      // defaults to "none"
+  fdpTableUsed?: FdpTableUsed             // which CAAS table was applied
+  departureTimezoneOffset?: number        // UTC offset of departure airport
+  effectiveSectors?: number               // after long sector adjustment
 
   // Data origin
   source: DutyPeriodSource

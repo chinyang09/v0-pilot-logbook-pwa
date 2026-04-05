@@ -17,9 +17,20 @@ import type {
   CapacityRemaining,
   ForecastExceedance,
   ForecastResult,
+  CrewConfiguration,
+  AugmentedCrewLevel,
+  FdpTableUsed,
 } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
 import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time"
+import {
+  lookupTableA,
+  lookupTableB,
+  lookupTableC,
+  applyLongSectorAdjustment,
+  applyAugmentedCrewExtension,
+  isAcclimated,
+} from "@/lib/utils/roster/fdp-tables"
 
 // ============================================
 // Constants
@@ -43,9 +54,14 @@ const LOCAL_NIGHT_UTC_END = 22 * 60     // 22:00 UTC = 06:00 SGT (next day)
 // ============================================
 
 /**
- * Calculate duty period from a schedule entry
+ * Calculate duty period from a schedule entry.
+ * @param entry - The schedule entry
+ * @param departureTimezoneOffset - UTC offset of departure airport (default 8 = SGT)
  */
-export function calculateDutyPeriodFromSchedule(entry: ScheduleEntry): DutyPeriod | null {
+export function calculateDutyPeriodFromSchedule(
+  entry: ScheduleEntry,
+  departureTimezoneOffset: number = 8
+): DutyPeriod | null {
   if (!entry.reportTime || !entry.debriefTime) return null
 
   const reportMinutes = hhmmToMinutes(entry.reportTime)
@@ -57,8 +73,9 @@ export function calculateDutyPeriodFromSchedule(entry: ScheduleEntry): DutyPerio
     dutyMinutes += 1440 // Add 24 hours
   }
 
-  // Calculate flight time from sectors
+  // Calculate flight time and longest sector from sectors
   let flightMinutes = 0
+  let longestSectorMinutes = 0
   if (entry.sectors && entry.sectors.length > 0) {
     entry.sectors.forEach((sector) => {
       const outTime = sector.actualOut || sector.scheduledOut
@@ -69,9 +86,29 @@ export function calculateDutyPeriodFromSchedule(entry: ScheduleEntry): DutyPerio
         let blockTime = in_ - out
         if (blockTime < 0) blockTime += 1440
         flightMinutes += blockTime
+        longestSectorMinutes = Math.max(longestSectorMinutes, blockTime)
       }
     })
   }
+
+  // Convert report time to local departure time for table lookup
+  let localReportMinutes: number
+  if (entry.timeReference === "UTC") {
+    localReportMinutes = reportMinutes + departureTimezoneOffset * 60
+  } else {
+    // LOCAL_BASE = SGT (UTC+8), convert to departure local
+    localReportMinutes = reportMinutes + (departureTimezoneOffset - 8) * 60
+  }
+  if (localReportMinutes < 0) localReportMinutes += 1440
+  const localReportTime = minutesToHHMM(localReportMinutes % 1440)
+
+  const sectorCount = entry.sectors?.length || 0
+  const fdpResult = calculateMaxFDP({
+    reportTimeLocal: localReportTime,
+    sectors: sectorCount,
+    departureTimezoneOffset,
+    longestSectorMinutes,
+  })
 
   const today = new Date().toISOString().split("T")[0]
 
@@ -82,9 +119,12 @@ export function calculateDutyPeriodFromSchedule(entry: ScheduleEntry): DutyPerio
     debriefTime: entry.debriefTime,
     dutyMinutes,
     flightMinutes,
-    sectorCount: entry.sectors?.length || 0,
-    maxFdpMinutes: calculateMaxFDP(entry.reportTime, entry.sectors?.length || 0),
+    sectorCount,
+    maxFdpMinutes: fdpResult.maxFdpMinutes,
     fdpExtensionUsed: false,
+    fdpTableUsed: fdpResult.tableUsed,
+    departureTimezoneOffset,
+    effectiveSectors: fdpResult.effectiveSectors,
     source: "schedule",
     isFuture: entry.date > today,
     scheduleEntryIds: [entry.id],
@@ -93,12 +133,21 @@ export function calculateDutyPeriodFromSchedule(entry: ScheduleEntry): DutyPerio
 }
 
 /**
- * Get duty periods from schedule entries (flight duties only)
+ * Get duty periods from schedule entries (flight duties only).
+ * @param entries - Schedule entries
+ * @param airportTimezones - Pre-resolved map of IATA code → UTC offset
  */
-export function getDutyPeriodsFromSchedule(entries: ScheduleEntry[]): DutyPeriod[] {
+export function getDutyPeriodsFromSchedule(
+  entries: ScheduleEntry[],
+  airportTimezones?: Map<string, number>
+): DutyPeriod[] {
   return entries
     .filter((entry) => entry.dutyType === "flight" && entry.reportTime && entry.debriefTime)
-    .map((entry) => calculateDutyPeriodFromSchedule(entry))
+    .map((entry) => {
+      const depIata = entry.sectors?.[0]?.departureIata
+      const tzOffset = depIata && airportTimezones ? airportTimezones.get(depIata) ?? 8 : 8
+      return calculateDutyPeriodFromSchedule(entry, tzOffset)
+    })
     .filter((dp): dp is DutyPeriod => dp !== null)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 }
@@ -159,6 +208,26 @@ export function createDutyPeriodsFromFlights(flights: FlightLog[]): DutyPeriod[]
 
     const dutyMinutes = debriefMinutes - reportMinutes
 
+    // Departure timezone from first flight (default SGT)
+    const depTzOffset = dateFlights[0]?.departureTimezone ?? 8
+
+    // Longest sector block time for long sector adjustment
+    const longestSectorMinutes = Math.max(
+      ...dateFlights.map((f) => (f.blockTime ? hhmmToMinutes(f.blockTime) : 0))
+    )
+
+    // Convert UTC report time to local departure time for table lookup
+    let localReportMinutes = reportMinutes + depTzOffset * 60
+    if (localReportMinutes < 0) localReportMinutes += 1440
+    const localReportTime = minutesToHHMM(localReportMinutes % 1440)
+
+    const fdpResult = calculateMaxFDP({
+      reportTimeLocal: localReportTime,
+      sectors: dateFlights.length,
+      departureTimezoneOffset: depTzOffset,
+      longestSectorMinutes,
+    })
+
     dutyPeriods.push({
       id: `logbook-${date}`,
       date,
@@ -167,8 +236,11 @@ export function createDutyPeriodsFromFlights(flights: FlightLog[]): DutyPeriod[]
       dutyMinutes,
       flightMinutes: totalFlightMinutes,
       sectorCount: dateFlights.length,
-      maxFdpMinutes: calculateMaxFDP(reportTime, dateFlights.length),
+      maxFdpMinutes: fdpResult.maxFdpMinutes,
       fdpExtensionUsed: false,
+      fdpTableUsed: fdpResult.tableUsed,
+      departureTimezoneOffset: depTzOffset,
+      effectiveSectors: fdpResult.effectiveSectors,
       source: "logbook",
       isFuture: false,
       scheduleEntryIds: [],
@@ -238,38 +310,184 @@ export function mergeDutyPeriods(
 }
 
 // ============================================
-// Max FDP calculation (CAAS)
+// Overnight duty period merging
 // ============================================
 
+/** Minimum rest period in minutes (Reg 3(1)(a): 10h) */
+const MIN_REST_MINUTES = 600
+
 /**
- * Calculate max FDP based on report time and sectors.
- * Based on CAAS regulations (simplified):
- *   0600-1259: 13h base
- *   1300-1759: 12h base
- *   0500-0559: 12h base
- *   1800-0459: 11h base
- *   -30min per sector beyond 2, minimum 9h
+ * Merge adjacent duty periods where the gap between debrief and next report
+ * is less than minimum rest (10 hours).
+ * This handles overnight flights that get split across dates.
  */
-export function calculateMaxFDP(reportTime: string, sectors: number): number {
-  const reportMinutes = hhmmToMinutes(reportTime)
-  const reportHour = Math.floor(reportMinutes / 60)
+export function mergeAdjacentDutyPeriods(dutyPeriods: DutyPeriod[]): DutyPeriod[] {
+  if (dutyPeriods.length <= 1) return dutyPeriods
 
-  let baseFDP: number
-  if (reportHour >= 6 && reportHour < 13) {
-    baseFDP = 13 * 60
-  } else if (reportHour >= 13 && reportHour < 18) {
-    baseFDP = 12 * 60
-  } else if (reportHour >= 5 && reportHour < 6) {
-    baseFDP = 12 * 60
+  // Sort chronologically
+  const sorted = [...dutyPeriods].sort((a, b) => {
+    const dateCmp = a.date.localeCompare(b.date)
+    if (dateCmp !== 0) return dateCmp
+    return hhmmToMinutes(a.reportTime) - hhmmToMinutes(b.reportTime)
+  })
+
+  const result: DutyPeriod[] = [sorted[0]]
+
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = result[result.length - 1]
+    const curr = sorted[i]
+
+    // Calculate absolute minutes for debrief and report
+    const prevDayMinutes = dateToDays(prev.date) * 1440
+    let prevDebriefAbs = prevDayMinutes + hhmmToMinutes(prev.debriefTime)
+    // Handle debrief wrapping past midnight
+    if (hhmmToMinutes(prev.debriefTime) < hhmmToMinutes(prev.reportTime)) {
+      prevDebriefAbs += 1440
+    }
+
+    const currDayMinutes = dateToDays(curr.date) * 1440
+    const currReportAbs = currDayMinutes + hhmmToMinutes(curr.reportTime)
+
+    const gap = currReportAbs - prevDebriefAbs
+
+    if (gap < MIN_REST_MINUTES) {
+      // Merge: combine into a single duty period
+      let currDebriefAbs = currDayMinutes + hhmmToMinutes(curr.debriefTime)
+      if (hhmmToMinutes(curr.debriefTime) < hhmmToMinutes(curr.reportTime)) {
+        currDebriefAbs += 1440
+      }
+
+      const prevReportAbs = prevDayMinutes + hhmmToMinutes(prev.reportTime)
+      const totalDutyMinutes = currDebriefAbs - prevReportAbs
+      const totalSectors = prev.sectorCount + curr.sectorCount
+
+      // Recalculate max FDP with merged parameters
+      const depTzOffset = prev.departureTimezoneOffset ?? 8
+      let localReportMinutes = hhmmToMinutes(prev.reportTime) + depTzOffset * 60
+      if (localReportMinutes < 0) localReportMinutes += 1440
+      const localReportTime = minutesToHHMM(localReportMinutes % 1440)
+
+      const fdpResult = calculateMaxFDP({
+        reportTimeLocal: localReportTime,
+        sectors: totalSectors,
+        departureTimezoneOffset: depTzOffset,
+      })
+
+      result[result.length - 1] = {
+        ...prev,
+        debriefTime: curr.debriefTime,
+        dutyMinutes: totalDutyMinutes,
+        flightMinutes: prev.flightMinutes + curr.flightMinutes,
+        sectorCount: totalSectors,
+        maxFdpMinutes: fdpResult.maxFdpMinutes,
+        fdpTableUsed: fdpResult.tableUsed,
+        effectiveSectors: fdpResult.effectiveSectors,
+        flightIds: [...prev.flightIds, ...curr.flightIds],
+        scheduleEntryIds: [...prev.scheduleEntryIds, ...curr.scheduleEntryIds],
+        source: prev.source !== curr.source ? "merged" : prev.source,
+      }
+    } else {
+      result.push(curr)
+    }
+  }
+
+  return result
+}
+
+// ============================================
+// Max FDP calculation (CAAS Reg 14 Fifth Schedule)
+// ============================================
+
+export interface FdpCalculationParams {
+  reportTimeLocal: string              // HH:MM in local time at departure
+  sectors: number
+  crewConfig?: CrewConfiguration       // default: "two-pilot"
+  augmentedCrew?: AugmentedCrewLevel   // default: "none"
+  departureTimezoneOffset?: number     // default: 8 (SGT = acclimated)
+  longestSectorMinutes?: number        // default: 0 (no long sector adj)
+}
+
+export interface FdpCalculationResult {
+  maxFdpMinutes: number
+  tableUsed: FdpTableUsed
+  effectiveSectors: number
+}
+
+/**
+ * Calculate max FDP per CAAS Regulation 14 Fifth Schedule.
+ *
+ * Overload 1 (backward-compatible): (reportTime, sectors) → number
+ * Overload 2 (full): (params) → { maxFdpMinutes, tableUsed, effectiveSectors }
+ */
+export function calculateMaxFDP(reportTime: string, sectors: number): number
+export function calculateMaxFDP(params: FdpCalculationParams): FdpCalculationResult
+export function calculateMaxFDP(
+  reportTimeOrParams: string | FdpCalculationParams,
+  sectorsArg?: number
+): number | FdpCalculationResult {
+  if (typeof reportTimeOrParams === "string") {
+    // Backward-compatible: old callers get just the number
+    const result = calculateMaxFDPFull({
+      reportTimeLocal: reportTimeOrParams,
+      sectors: sectorsArg!,
+    })
+    return result.maxFdpMinutes
+  }
+  return calculateMaxFDPFull(reportTimeOrParams)
+}
+
+function calculateMaxFDPFull(params: FdpCalculationParams): FdpCalculationResult {
+  const {
+    reportTimeLocal,
+    sectors,
+    crewConfig = "two-pilot",
+    augmentedCrew = "none",
+    departureTimezoneOffset = 8,
+    longestSectorMinutes = 0,
+  } = params
+
+  const localHour = Math.floor(hhmmToMinutes(reportTimeLocal) / 60)
+
+  // Determine which table to use
+  let tableUsed: FdpTableUsed
+  if (crewConfig === "single-pilot") {
+    tableUsed = "C"
+  } else if (isAcclimated(departureTimezoneOffset)) {
+    tableUsed = "A"
   } else {
-    baseFDP = 11 * 60
+    tableUsed = "B"
   }
 
-  if (sectors > 2) {
-    baseFDP -= (sectors - 2) * 30
+  // Apply long sector adjustment (only for 2-pilot, Tables A/B)
+  let effectiveSectors = sectors
+  if (tableUsed !== "C" && longestSectorMinutes > 420) {
+    effectiveSectors = applyLongSectorAdjustment(
+      sectors,
+      longestSectorMinutes,
+      tableUsed as "A" | "B"
+    )
   }
 
-  return Math.max(baseFDP, 9 * 60)
+  // Look up base FDP from the appropriate table
+  let maxFdpMinutes: number
+  switch (tableUsed) {
+    case "A":
+      maxFdpMinutes = lookupTableA(localHour, effectiveSectors)
+      break
+    case "B":
+      maxFdpMinutes = lookupTableB(effectiveSectors)
+      break
+    case "C":
+      maxFdpMinutes = lookupTableC(localHour, sectors)
+      break
+  }
+
+  // Apply augmented crew extension (Reg 15)
+  if (augmentedCrew !== "none") {
+    maxFdpMinutes = applyAugmentedCrewExtension(maxFdpMinutes, augmentedCrew)
+  }
+
+  return { maxFdpMinutes, tableUsed, effectiveSectors }
 }
 
 // ============================================

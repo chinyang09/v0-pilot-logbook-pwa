@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { useFlights } from "./use-flights"
 import { useScheduleEntries } from "./use-schedule"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
@@ -9,12 +9,15 @@ import {
   createDutyPeriodsFromFlights,
   getDutyPeriodsFromSchedule,
   mergeDutyPeriods,
+  mergeAdjacentDutyPeriods,
   calculateAllRestPeriods,
   calculateCumulativeLimits,
   calculateCapacity,
   forecastExceedances,
   generateTimelineData,
 } from "@/lib/utils/roster/fdp-calculator"
+import { getAirportByIata } from "@/lib/db/stores/reference/airports.store"
+import { getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
 
 /**
  * Combined FDP data hook.
@@ -26,9 +29,41 @@ export function useFDPData() {
   const { flights, isLoading: flightsLoading } = useFlights()
   const { scheduleEntries, isLoading: scheduleLoading } = useScheduleEntries()
 
+  // Pre-resolve airport timezone offsets for schedule entries
+  const [airportTimezones, setAirportTimezones] = useState<Map<string, number>>(new Map())
+
+  useEffect(() => {
+    async function resolveTimezones() {
+      const iatas = new Set<string>()
+      for (const entry of scheduleEntries) {
+        const depIata = entry.sectors?.[0]?.departureIata
+        if (depIata) iatas.add(depIata)
+      }
+      if (iatas.size === 0) {
+        setAirportTimezones(new Map())
+        return
+      }
+      const map = new Map<string, number>()
+      await Promise.all(
+        [...iatas].map(async (iata) => {
+          const airport = await getAirportByIata(iata)
+          if (airport?.tz) {
+            map.set(iata, getAirportTimeInfo(airport.tz).offset)
+          }
+        })
+      )
+      setAirportTimezones(map)
+    }
+    if (scheduleEntries.length > 0) {
+      resolveTimezones()
+    }
+  }, [scheduleEntries])
+
   const result = useMemo(() => {
-    const logbookDPs = createDutyPeriodsFromFlights(flights)
-    const scheduleDPs = getDutyPeriodsFromSchedule(scheduleEntries)
+    const logbookDPs = mergeAdjacentDutyPeriods(createDutyPeriodsFromFlights(flights))
+    const scheduleDPs = mergeAdjacentDutyPeriods(
+      getDutyPeriodsFromSchedule(scheduleEntries, airportTimezones)
+    )
 
     const merged = mergeDutyPeriods(logbookDPs, scheduleDPs)
     const withRest = calculateAllRestPeriods(merged)
@@ -66,7 +101,7 @@ export function useFDPData() {
       restViolations,
       timelineData,
     }
-  }, [flights, scheduleEntries])
+  }, [flights, scheduleEntries, airportTimezones])
 
   return {
     ...result,
