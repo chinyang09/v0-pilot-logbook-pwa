@@ -214,6 +214,246 @@ export function isDutyExceedingLimits(
 }
 
 /**
+ * Calculate rest status since the last duty ended.
+ * Returns how much rest has elapsed, how much is required,
+ * and how much remains before the pilot is legal for the next duty.
+ */
+export function calculateRestStatus(
+  dutyPeriods: DutyPeriod[],
+  limits: FTLLimits,
+  now: Date = new Date()
+): {
+  lastDutyDate: string | null
+  lastDebriefTime: string | null
+  restElapsedMinutes: number
+  restRequiredMinutes: number
+  restRemainingMinutes: number
+  isLegalForDuty: boolean
+  legalAtTime: Date | null
+} {
+  if (dutyPeriods.length === 0) {
+    return {
+      lastDutyDate: null,
+      lastDebriefTime: null,
+      restElapsedMinutes: 0,
+      restRequiredMinutes: limits.minRestBetweenDuties * 60,
+      restRemainingMinutes: 0,
+      isLegalForDuty: true,
+      legalAtTime: null,
+    }
+  }
+
+  // Sort ascending by date+debriefTime to find the most recent duty that has ended
+  const sorted = [...dutyPeriods].sort((a, b) => {
+    const aEnd = new Date(`${a.date}T${a.debriefTime}:00`).getTime()
+    const bEnd = new Date(`${b.date}T${b.debriefTime}:00`).getTime()
+    return bEnd - aEnd // newest first
+  })
+
+  // Find the most recent duty whose debrief has already passed
+  let lastDuty: DutyPeriod | null = null
+  for (const dp of sorted) {
+    const debriefDate = new Date(`${dp.date}T${dp.debriefTime}:00`)
+    // Handle day wrap: if debrief < report, debrief is next day
+    const reportMinutes = hhmmToMinutes(dp.reportTime)
+    const debriefMinutes = hhmmToMinutes(dp.debriefTime)
+    if (debriefMinutes < reportMinutes) {
+      debriefDate.setDate(debriefDate.getDate() + 1)
+    }
+    if (debriefDate <= now) {
+      lastDuty = dp
+      break
+    }
+  }
+
+  if (!lastDuty) {
+    return {
+      lastDutyDate: null,
+      lastDebriefTime: null,
+      restElapsedMinutes: 0,
+      restRequiredMinutes: limits.minRestBetweenDuties * 60,
+      restRemainingMinutes: 0,
+      isLegalForDuty: true,
+      legalAtTime: null,
+    }
+  }
+
+  // Calculate debrief end datetime
+  const debriefEnd = new Date(`${lastDuty.date}T${lastDuty.debriefTime}:00`)
+  const reportMinutes = hhmmToMinutes(lastDuty.reportTime)
+  const debriefMinutes = hhmmToMinutes(lastDuty.debriefTime)
+  if (debriefMinutes < reportMinutes) {
+    debriefEnd.setDate(debriefEnd.getDate() + 1)
+  }
+
+  const restElapsedMinutes = Math.max(0, (now.getTime() - debriefEnd.getTime()) / 60000)
+  const restRequiredMinutes = limits.minRestBetweenDuties * 60
+  const restRemainingMinutes = Math.max(0, restRequiredMinutes - restElapsedMinutes)
+
+  const legalAtTime = restRemainingMinutes > 0
+    ? new Date(debriefEnd.getTime() + restRequiredMinutes * 60000)
+    : null
+
+  return {
+    lastDutyDate: lastDuty.date,
+    lastDebriefTime: lastDuty.debriefTime,
+    restElapsedMinutes,
+    restRequiredMinutes,
+    restRemainingMinutes,
+    isLegalForDuty: restRemainingMinutes <= 0,
+    legalAtTime,
+  }
+}
+
+/**
+ * Quick legality check: temporarily add a hypothetical duty to existing
+ * duty periods and check all regulatory limits for violations.
+ */
+export function checkLegalityWithDuty(
+  existingDutyPeriods: DutyPeriod[],
+  hypotheticalDuty: {
+    date: string       // YYYY-MM-DD
+    reportTime: string // HH:MM
+    debriefTime: string // HH:MM
+    sectors: number
+    flightMinutes: number
+  },
+  limits: FTLLimits
+): {
+  violations: Array<{ rule: string; actual: string; limit: string; severity: "warning" | "exceeded" }>
+  isLegal: boolean
+  dutyPeriod: DutyPeriod
+  cumulativeLimits: CumulativeDutyLimits
+  restViolation: { restAvailable: number; restRequired: number } | null
+} {
+  // Build the hypothetical DutyPeriod
+  const reportMinutes = hhmmToMinutes(hypotheticalDuty.reportTime)
+  const debriefMinutes = hhmmToMinutes(hypotheticalDuty.debriefTime)
+  let dutyMinutes = debriefMinutes - reportMinutes
+  if (dutyMinutes < 0) dutyMinutes += 1440
+
+  const dp: DutyPeriod = {
+    id: `hypothetical-${Date.now()}`,
+    date: hypotheticalDuty.date,
+    reportTime: hypotheticalDuty.reportTime,
+    debriefTime: hypotheticalDuty.debriefTime,
+    dutyMinutes,
+    flightMinutes: hypotheticalDuty.flightMinutes,
+    sectorCount: hypotheticalDuty.sectors,
+    maxFdpMinutes: calculateMaxFDP(hypotheticalDuty.reportTime, hypotheticalDuty.sectors),
+    fdpExtensionUsed: false,
+    scheduleEntryIds: [],
+    flightIds: [],
+  }
+
+  // Merge with existing duty periods
+  const allPeriods = [...existingDutyPeriods, dp]
+
+  // Calculate cumulative limits as of the hypothetical duty date
+  const forDate = new Date(hypotheticalDuty.date + "T23:59:59")
+  const cumLimits = calculateCumulativeLimits(allPeriods, forDate, limits)
+
+  // Collect violations
+  const violations: Array<{ rule: string; actual: string; limit: string; severity: "warning" | "exceeded" }> = []
+
+  // Check single duty FDP
+  if (dp.dutyMinutes > dp.maxFdpMinutes) {
+    violations.push({
+      rule: "FDP Limit",
+      actual: `${(dp.dutyMinutes / 60).toFixed(1)}h`,
+      limit: `${(dp.maxFdpMinutes / 60).toFixed(1)}h`,
+      severity: "exceeded",
+    })
+  }
+
+  // Check single duty max
+  if (dp.dutyMinutes / 60 > limits.maxSingleDutyHours) {
+    violations.push({
+      rule: "Single Duty",
+      actual: `${(dp.dutyMinutes / 60).toFixed(1)}h`,
+      limit: `${limits.maxSingleDutyHours}h`,
+      severity: "exceeded",
+    })
+  }
+
+  // Check rolling limits
+  const rollingChecks: Array<{ label: string; stats: { dutyHours?: number; flightHours: number; maxDutyHours?: number; maxFlightHours: number; utilizationPercent: number } }> = [
+    { label: "7-Day Duty", stats: cumLimits.last7Days },
+    { label: "14-Day Duty", stats: cumLimits.last14Days },
+    { label: "28-Day Duty", stats: cumLimits.last28Days },
+    { label: "7-Day Flight", stats: cumLimits.last7Days },
+    { label: "14-Day Flight", stats: cumLimits.last14Days },
+    { label: "28-Day Flight", stats: cumLimits.last28Days },
+    { label: "90-Day Flight", stats: cumLimits.last90Days },
+    { label: "365-Day Flight", stats: cumLimits.last365Days },
+  ]
+
+  for (const check of rollingChecks) {
+    const isDutyCheck = check.label.includes("Duty")
+    const actual = isDutyCheck ? (check.stats as RollingPeriodStats).dutyHours : check.stats.flightHours
+    const max = isDutyCheck ? (check.stats as RollingPeriodStats).maxDutyHours : check.stats.maxFlightHours
+    if (actual === undefined || max === undefined || max <= 0) continue
+
+    if (actual > max) {
+      violations.push({
+        rule: check.label,
+        actual: `${actual.toFixed(1)}h`,
+        limit: `${max}h`,
+        severity: "exceeded",
+      })
+    } else if (actual / max >= 0.9) {
+      violations.push({
+        rule: check.label,
+        actual: `${actual.toFixed(1)}h`,
+        limit: `${max}h`,
+        severity: "warning",
+      })
+    }
+  }
+
+  // Check rest before this duty
+  let restViolation: { restAvailable: number; restRequired: number } | null = null
+  const reportDateTime = new Date(`${hypotheticalDuty.date}T${hypotheticalDuty.reportTime}:00`)
+
+  // Find the most recent duty before this one
+  const priorDuties = existingDutyPeriods
+    .map(d => {
+      const end = new Date(`${d.date}T${d.debriefTime}:00`)
+      const rMin = hhmmToMinutes(d.reportTime)
+      const dMin = hhmmToMinutes(d.debriefTime)
+      if (dMin < rMin) end.setDate(end.getDate() + 1)
+      return { dp: d, endTime: end }
+    })
+    .filter(d => d.endTime < reportDateTime)
+    .sort((a, b) => b.endTime.getTime() - a.endTime.getTime())
+
+  if (priorDuties.length > 0) {
+    const restAvailableMinutes = (reportDateTime.getTime() - priorDuties[0].endTime.getTime()) / 60000
+    const restRequiredMinutes = limits.minRestBetweenDuties * 60
+    if (restAvailableMinutes < restRequiredMinutes) {
+      restViolation = {
+        restAvailable: restAvailableMinutes,
+        restRequired: restRequiredMinutes,
+      }
+      violations.push({
+        rule: "Min Rest",
+        actual: `${(restAvailableMinutes / 60).toFixed(1)}h`,
+        limit: `${limits.minRestBetweenDuties}h`,
+        severity: "exceeded",
+      })
+    }
+  }
+
+  return {
+    violations,
+    isLegal: violations.filter(v => v.severity === "exceeded").length === 0,
+    dutyPeriod: dp,
+    cumulativeLimits: cumLimits,
+    restViolation,
+  }
+}
+
+/**
  * Get compliance status for cumulative limits
  */
 export function getComplianceStatus(utilizationPercent: number): {
