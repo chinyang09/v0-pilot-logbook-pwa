@@ -158,7 +158,9 @@ export function getDutyPeriodsFromSchedule(
 
 /**
  * Create duty periods from actual flight logs, grouped by date.
- * Multiple flights on the same date become one duty period.
+ * Flights on the same date are split into separate duty periods when the gap
+ * between consecutive flights (previous IN → next OUT) exceeds minimum rest
+ * (10h), indicating the pilot went off duty between them.
  * Estimates report/debrief from earliest OUT and latest IN times.
  */
 export function createDutyPeriodsFromFlights(flights: FlightLog[]): DutyPeriod[] {
@@ -174,81 +176,130 @@ export function createDutyPeriodsFromFlights(flights: FlightLog[]): DutyPeriod[]
   const dutyPeriods: DutyPeriod[] = []
 
   for (const [date, dateFlights] of byDate) {
-    // Sum flight minutes from block times
-    let totalFlightMinutes = 0
-    let earliestOut = Infinity
-    let latestIn = -Infinity
+    // Sort flights by OUT time within the date
+    const sorted = [...dateFlights].sort((a, b) => {
+      const aOut = a.outTime ? hhmmToMinutes(a.outTime) : 0
+      const bOut = b.outTime ? hhmmToMinutes(b.outTime) : 0
+      return aOut - bOut
+    })
 
-    for (const flight of dateFlights) {
-      if (flight.blockTime) {
-        totalFlightMinutes += hhmmToMinutes(flight.blockTime)
-      }
-      if (flight.outTime) {
-        earliestOut = Math.min(earliestOut, hhmmToMinutes(flight.outTime))
-      }
-      if (flight.inTime) {
-        let inMin = hhmmToMinutes(flight.inTime)
-        // Handle overnight: if IN is before OUT, it's next day
-        if (flight.outTime && inMin < hhmmToMinutes(flight.outTime)) {
-          inMin += 1440
+    // Split into sub-groups when gap between consecutive flights >= MIN_REST_MINUTES
+    const subGroups: FlightLog[][] = [[sorted[0]]]
+    for (let i = 1; i < sorted.length; i++) {
+      const prevFlight = sorted[i - 1]
+      const currFlight = sorted[i]
+
+      if (prevFlight.inTime && currFlight.outTime) {
+        let prevIn = hhmmToMinutes(prevFlight.inTime)
+        // Handle overnight IN
+        if (prevFlight.outTime && prevIn < hhmmToMinutes(prevFlight.outTime)) {
+          prevIn += 1440
         }
-        latestIn = Math.max(latestIn, inMin)
+        const currOut = hhmmToMinutes(currFlight.outTime)
+        const gap = currOut - prevIn
+        // If gap < 0, currOut is earlier in the day (shouldn't happen after sort)
+        // If gap >= MIN_REST_MINUTES, start a new sub-group
+        if (gap >= MIN_REST_MINUTES) {
+          subGroups.push([currFlight])
+          continue
+        }
       }
+
+      subGroups[subGroups.length - 1].push(currFlight)
     }
 
-    if (earliestOut === Infinity || latestIn === -Infinity) continue
-
-    // Estimate report/debrief with buffers
-    const reportMinutes = Math.max(0, earliestOut - REPORT_BUFFER_MINUTES)
-    const debriefMinutes = latestIn + DEBRIEF_BUFFER_MINUTES
-
-    // Normalize to within 24h for display
-    const reportTime = minutesToHHMM(reportMinutes % 1440)
-    const debriefTime = minutesToHHMM(debriefMinutes % 1440)
-
-    const dutyMinutes = debriefMinutes - reportMinutes
-
-    // Departure timezone from first flight (default SGT)
-    const depTzOffset = dateFlights[0]?.departureTimezone ?? 8
-
-    // Longest sector block time for long sector adjustment
-    const longestSectorMinutes = Math.max(
-      ...dateFlights.map((f) => (f.blockTime ? hhmmToMinutes(f.blockTime) : 0))
-    )
-
-    // Convert UTC report time to local departure time for table lookup
-    let localReportMinutes = reportMinutes + depTzOffset * 60
-    if (localReportMinutes < 0) localReportMinutes += 1440
-    const localReportTime = minutesToHHMM(localReportMinutes % 1440)
-
-    const fdpResult = calculateMaxFDP({
-      reportTimeLocal: localReportTime,
-      sectors: dateFlights.length,
-      departureTimezoneOffset: depTzOffset,
-      longestSectorMinutes,
-    })
-
-    dutyPeriods.push({
-      id: `logbook-${date}`,
-      date,
-      reportTime,
-      debriefTime,
-      dutyMinutes,
-      flightMinutes: totalFlightMinutes,
-      sectorCount: dateFlights.length,
-      maxFdpMinutes: fdpResult.maxFdpMinutes,
-      fdpExtensionUsed: false,
-      fdpTableUsed: fdpResult.tableUsed,
-      departureTimezoneOffset: depTzOffset,
-      effectiveSectors: fdpResult.effectiveSectors,
-      source: "logbook",
-      isFuture: false,
-      scheduleEntryIds: [],
-      flightIds: dateFlights.map((f) => f.id),
-    })
+    // Create a DutyPeriod for each sub-group
+    for (let idx = 0; idx < subGroups.length; idx++) {
+      const groupFlights = subGroups[idx]
+      const dp = createDutyPeriodFromFlightGroup(date, groupFlights, idx, subGroups.length)
+      if (dp) dutyPeriods.push(dp)
+    }
   }
 
   return dutyPeriods.sort((a, b) => a.date.localeCompare(b.date))
+}
+
+/** Create a single DutyPeriod from a group of flights on the same date */
+function createDutyPeriodFromFlightGroup(
+  date: string,
+  groupFlights: FlightLog[],
+  groupIdx: number,
+  totalGroups: number
+): DutyPeriod | null {
+  let totalFlightMinutes = 0
+  let earliestOut = Infinity
+  let latestIn = -Infinity
+
+  for (const flight of groupFlights) {
+    if (flight.blockTime) {
+      totalFlightMinutes += hhmmToMinutes(flight.blockTime)
+    }
+    if (flight.outTime) {
+      earliestOut = Math.min(earliestOut, hhmmToMinutes(flight.outTime))
+    }
+    if (flight.inTime) {
+      let inMin = hhmmToMinutes(flight.inTime)
+      // Handle overnight: if IN is before OUT, it's next day
+      if (flight.outTime && inMin < hhmmToMinutes(flight.outTime)) {
+        inMin += 1440
+      }
+      latestIn = Math.max(latestIn, inMin)
+    }
+  }
+
+  if (earliestOut === Infinity || latestIn === -Infinity) return null
+
+  // Estimate report/debrief with buffers
+  const reportMinutes = Math.max(0, earliestOut - REPORT_BUFFER_MINUTES)
+  const debriefMinutes = latestIn + DEBRIEF_BUFFER_MINUTES
+
+  // Normalize to within 24h for display
+  const reportTime = minutesToHHMM(reportMinutes % 1440)
+  const debriefTime = minutesToHHMM(debriefMinutes % 1440)
+
+  const dutyMinutes = debriefMinutes - reportMinutes
+
+  // Departure timezone from first flight (default SGT)
+  const depTzOffset = groupFlights[0]?.departureTimezone ?? 8
+
+  // Longest sector block time for long sector adjustment
+  const longestSectorMinutes = Math.max(
+    ...groupFlights.map((f) => (f.blockTime ? hhmmToMinutes(f.blockTime) : 0))
+  )
+
+  // Convert UTC report time to local departure time for table lookup
+  let localReportMinutes = reportMinutes + depTzOffset * 60
+  if (localReportMinutes < 0) localReportMinutes += 1440
+  const localReportTime = minutesToHHMM(localReportMinutes % 1440)
+
+  const fdpResult = calculateMaxFDP({
+    reportTimeLocal: localReportTime,
+    sectors: groupFlights.length,
+    departureTimezoneOffset: depTzOffset,
+    longestSectorMinutes,
+  })
+
+  // Use unique id when multiple duty periods exist on same date
+  const id = totalGroups > 1 ? `logbook-${date}-${groupIdx}` : `logbook-${date}`
+
+  return {
+    id,
+    date,
+    reportTime,
+    debriefTime,
+    dutyMinutes,
+    flightMinutes: totalFlightMinutes,
+    sectorCount: groupFlights.length,
+    maxFdpMinutes: fdpResult.maxFdpMinutes,
+    fdpExtensionUsed: false,
+    fdpTableUsed: fdpResult.tableUsed,
+    departureTimezoneOffset: depTzOffset,
+    effectiveSectors: fdpResult.effectiveSectors,
+    source: "logbook",
+    isFuture: false,
+    scheduleEntryIds: [],
+    flightIds: groupFlights.map((f) => f.id),
+  }
 }
 
 // ============================================
@@ -260,53 +311,61 @@ export function createDutyPeriodsFromFlights(flights: FlightLog[]): DutyPeriod[]
  * - Past dates: prefer logbook data (actual); include schedule non-flight duties
  * - Future dates: use schedule data
  * - Same date with both: merge (logbook flight times + schedule report/debrief)
+ *
+ * Supports multiple logbook duty periods on the same date (e.g., morning
+ * and evening duties split by a rest period >= 10h).
  */
 export function mergeDutyPeriods(
   logbookDPs: DutyPeriod[],
   scheduleDPs: DutyPeriod[]
 ): DutyPeriod[] {
   const today = new Date().toISOString().split("T")[0]
-  const merged = new Map<string, DutyPeriod>()
+  const result: DutyPeriod[] = []
 
-  // Index logbook by date
-  const logbookByDate = new Map<string, DutyPeriod>()
+  // Index logbook DPs by date (supports multiple per date)
+  const logbookByDate = new Map<string, DutyPeriod[]>()
   for (const dp of logbookDPs) {
-    logbookByDate.set(dp.date, dp)
+    const existing = logbookByDate.get(dp.date) || []
+    existing.push(dp)
+    logbookByDate.set(dp.date, existing)
   }
+
+  const consumedDates = new Set<string>()
 
   // Process schedule entries
   for (const dp of scheduleDPs) {
-    const logbookDP = logbookByDate.get(dp.date)
+    const logbookDPsForDate = logbookByDate.get(dp.date)
 
     if (dp.date > today) {
       // Future: use schedule data, mark as future
-      merged.set(dp.date, { ...dp, isFuture: true })
-    } else if (logbookDP) {
-      // Past with both: create merged entry
-      merged.set(dp.date, {
-        ...dp,
-        flightMinutes: logbookDP.flightMinutes,
-        flightIds: logbookDP.flightIds,
-        sectorCount: logbookDP.sectorCount,
-        source: "merged",
-        isFuture: false,
-      })
-      logbookByDate.delete(dp.date) // consumed
-    } else {
+      result.push({ ...dp, isFuture: true })
+    } else if (logbookDPsForDate && !consumedDates.has(dp.date)) {
+      // Past with both: prefer logbook DPs (may be multiple), mark as consumed
+      for (const logDP of logbookDPsForDate) {
+        result.push({ ...logDP, source: "merged" })
+      }
+      consumedDates.add(dp.date)
+    } else if (!consumedDates.has(dp.date)) {
       // Past schedule only (e.g., standby, training counted as duty)
-      merged.set(dp.date, { ...dp, isFuture: false })
+      result.push({ ...dp, isFuture: false })
     }
   }
 
   // Add remaining logbook entries not matched by schedule
-  for (const [date, dp] of logbookByDate) {
-    if (!merged.has(date)) {
-      merged.set(date, dp)
+  for (const [date, dps] of logbookByDate) {
+    if (!consumedDates.has(date)) {
+      for (const dp of dps) {
+        result.push(dp)
+      }
     }
   }
 
   // Sort chronologically (oldest first) for rest period calculation
-  return Array.from(merged.values()).sort((a, b) => a.date.localeCompare(b.date))
+  return result.sort((a, b) => {
+    const dateCmp = a.date.localeCompare(b.date)
+    if (dateCmp !== 0) return dateCmp
+    return hhmmToMinutes(a.reportTime) - hhmmToMinutes(b.reportTime)
+  })
 }
 
 // ============================================
