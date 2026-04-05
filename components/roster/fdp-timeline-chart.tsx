@@ -13,6 +13,7 @@ import {
   ResponsiveContainer,
   Cell,
   Area,
+  Brush,
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -288,6 +289,15 @@ export function FDPTimelineChart({
           const isActive = activeViews.has(view.key)
           const isMulti = activeViews.size > 1 && !isRestView
 
+          const remainingColor = pct >= 100 ? "text-red-500"
+            : pct >= 90 ? "text-orange-500"
+              : pct >= 75 ? "text-yellow-500"
+                : "text-green-500"
+          const barColor = pct >= 100 ? "bg-red-500"
+            : pct >= 90 ? "bg-orange-500"
+              : pct >= 75 ? "bg-yellow-500"
+                : "bg-green-500"
+
           return (
             <button
               key={view.key}
@@ -317,27 +327,28 @@ export function FDPTimelineChart({
               )}>
                 {view.regulation}
               </span>
-              <div className="flex items-center gap-1 mt-1">
+              {/* Prominent used / limit display */}
+              <span className={cn(
+                "text-sm font-semibold tabular-nums mt-0.5",
+                isActive && !isMulti ? "text-primary-foreground" : "text-foreground"
+              )}>
+                {cap.used.toFixed(0)}h / {cap.limit}h
+              </span>
+              <div className="flex items-center gap-1.5 mt-1 w-full">
                 <div className={cn(
-                  "h-1 rounded-full flex-1 min-w-[60px]",
-                  isActive && !isMulti ? "bg-primary-foreground/20" : "bg-secondary"
+                  "h-1.5 rounded-full flex-1 min-w-[60px]",
+                  isActive && !isMulti ? "bg-primary-foreground/20" : "bg-muted"
                 )}>
                   <div
-                    className={cn(
-                      "h-full rounded-full transition-all",
-                      pct >= 100 ? "bg-red-500"
-                        : pct >= 90 ? "bg-orange-500"
-                          : pct >= 75 ? "bg-yellow-500"
-                            : isActive && !isMulti ? "bg-primary-foreground" : "bg-green-500"
-                    )}
+                    className={cn("h-full rounded-full transition-all", barColor)}
                     style={{ width: `${Math.min(pct, 100)}%` }}
                   />
                 </div>
                 <span className={cn(
-                  "text-[10px] font-medium",
-                  isActive && !isMulti ? "text-primary-foreground/70" : "text-muted-foreground"
+                  "text-[10px] font-semibold whitespace-nowrap",
+                  isActive && !isMulti ? "text-primary-foreground" : remainingColor
                 )}>
-                  {cap.remaining.toFixed(0)}h
+                  {cap.remaining.toFixed(0)}h left
                 </span>
               </div>
             </button>
@@ -390,12 +401,12 @@ export function FDPTimelineChart({
       <Card>
         <CardContent className="pt-4 pb-2 px-2">
           {(isRestView ? restData.length === 0 : timelineData.length === 0) ? (
-            <div className="h-[280px] flex items-center justify-center text-sm text-muted-foreground">
+            <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
               No data to display
             </div>
           ) : isRestView ? (
             /* Rest period chart */
-            <ResponsiveContainer width="100%" height={280}>
+            <ResponsiveContainer width="100%" height={320}>
               <ComposedChart data={restData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border" opacity={0.3} />
                 <XAxis
@@ -438,11 +449,20 @@ export function FDPTimelineChart({
                     />
                   ))}
                 </Bar>
+                <Brush
+                  dataKey="dateLabel"
+                  height={24}
+                  stroke="hsl(var(--border))"
+                  fill="hsl(var(--card))"
+                  travellerWidth={10}
+                  startIndex={Math.max(0, restData.length - 90)}
+                  tickFormatter={() => ""}
+                />
               </ComposedChart>
             </ResponsiveContainer>
           ) : (
             /* Duty/Flight rolling chart — supports multi-select */
-            <ResponsiveContainer width="100%" height={280}>
+            <ResponsiveContainer width="100%" height={320}>
               <ComposedChart data={timelineData} margin={{ top: 5, right: 60, left: 0, bottom: 5 }}>
                 <defs>
                   {selectedNonRestViews.map((view) => (
@@ -554,6 +574,15 @@ export function FDPTimelineChart({
                     </Bar>
                   )
                 })}
+                <Brush
+                  dataKey="dateLabel"
+                  height={24}
+                  stroke="hsl(var(--border))"
+                  fill="hsl(var(--card))"
+                  travellerWidth={10}
+                  startIndex={Math.max(0, timelineData.length - 90)}
+                  tickFormatter={() => ""}
+                />
               </ComposedChart>
             </ResponsiveContainer>
           )}
@@ -579,10 +608,7 @@ export function FDPTimelineChart({
                 className="flex items-center justify-between text-xs px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20"
               >
                 <span className="text-red-500 font-medium">
-                  {new Date(exc.date + "T00:00:00").toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                  })}
+                  {(() => { const d = new Date(exc.date + "T00:00:00Z"); return `${d.getUTCDate().toString().padStart(2, "0")} ${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}`; })()}
                 </span>
                 <span className="text-red-500">
                   {exc.projected.toFixed(1)}h / {exc.limit}h — breach

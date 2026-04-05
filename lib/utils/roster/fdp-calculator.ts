@@ -945,49 +945,106 @@ export interface TimelineDataPoint {
   source: "logbook" | "schedule" | "merged"
 }
 
+/** Format a UTC date as "dd MMM" (e.g. "04 Apr") */
+function formatDateLabel(dateStr: string): string {
+  const dateObj = new Date(dateStr + "T00:00:00Z")
+  const day = dateObj.getUTCDate().toString().padStart(2, "0")
+  const mon = dateObj.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })
+  return `${day} ${mon}`
+}
+
+/** Get the next date string (YYYY-MM-DD) after the given date */
+function nextDate(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00Z")
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().split("T")[0]
+}
+
 /**
  * Generate timeline data points for charting.
- * Creates one data point per duty period with rolling cumulative totals.
+ * Creates a continuous timeline from earliest to latest duty date,
+ * filling gap days (no flights) with zero-duty data points so rolling
+ * period lines show accurate decay during rest days.
  */
 export function generateTimelineData(
   dutyPeriods: DutyPeriod[],
   limits: FTLLimits
 ): TimelineDataPoint[] {
-  // dutyPeriods should be sorted chronologically (oldest first)
+  if (dutyPeriods.length === 0) return []
+
   const sorted = [...dutyPeriods].sort((a, b) => a.date.localeCompare(b.date))
+  const today = new Date().toISOString().split("T")[0]
 
-  return sorted.map((dp) => {
-    const asOfDate = new Date(dp.date + "T23:59:59")
+  // Index duty periods by date (supports multiple DPs per date)
+  const dpsByDate = new Map<string, DutyPeriod[]>()
+  for (const dp of sorted) {
+    const existing = dpsByDate.get(dp.date) || []
+    existing.push(dp)
+    dpsByDate.set(dp.date, existing)
+  }
 
-    // Calculate rolling stats up to this date
-    const dpsUpToDate = sorted.filter((d) => d.date <= dp.date)
+  // Determine date range: earliest DP to max(latest DP, today)
+  const startDate = sorted[0].date
+  const lastDpDate = sorted[sorted.length - 1].date
+  const endDate = lastDpDate > today ? lastDpDate : today
+
+  const result: TimelineDataPoint[] = []
+  let currentDate = startDate
+
+  while (currentDate <= endDate) {
+    const asOfDate = new Date(currentDate + "T23:59:59Z")
+    const dpsOnDate = dpsByDate.get(currentDate)
+
+    // Calculate rolling stats for this date (uses all DPs up to this date)
+    const dpsUpToDate = sorted.filter((d) => d.date <= currentDate)
     const stats14 = calculateRollingStats(dpsUpToDate, asOfDate, 14, limits)
     const stats28 = calculateRollingStats(dpsUpToDate, asOfDate, 28, limits)
     const stats365 = calculateRollingStats(dpsUpToDate, asOfDate, 365, limits)
 
-    const dateObj = new Date(dp.date + "T00:00:00")
-    const dateLabel = dateObj.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    })
-
-    return {
-      date: dp.date,
-      dateLabel,
-      dutyHours: dp.dutyMinutes / 60,
-      flightHours: dp.flightMinutes / 60,
-      rolling14DayDuty: stats14.dutyHours,
-      rolling28DayDuty: stats28.dutyHours,
-      rolling28DayFlight: stats28.flightHours,
-      rolling365DayFlight: stats365.flightHours,
-      restHours: dp.restBefore ? dp.restBefore.restMinutes / 60 : null,
-      restRequired: dp.restBefore ? dp.restBefore.requiredRestMinutes / 60 : null,
-      restCompliant: dp.restBefore ? dp.restBefore.compliant : null,
-      restRule: dp.restBefore ? dp.restBefore.rule : null,
-      isFuture: dp.isFuture,
-      source: dp.source,
+    if (dpsOnDate) {
+      // Duty day(s) — create a point per DP on this date
+      for (const dp of dpsOnDate) {
+        result.push({
+          date: dp.date,
+          dateLabel: formatDateLabel(dp.date),
+          dutyHours: dp.dutyMinutes / 60,
+          flightHours: dp.flightMinutes / 60,
+          rolling14DayDuty: stats14.dutyHours,
+          rolling28DayDuty: stats28.dutyHours,
+          rolling28DayFlight: stats28.flightHours,
+          rolling365DayFlight: stats365.flightHours,
+          restHours: dp.restBefore ? dp.restBefore.restMinutes / 60 : null,
+          restRequired: dp.restBefore ? dp.restBefore.requiredRestMinutes / 60 : null,
+          restCompliant: dp.restBefore ? dp.restBefore.compliant : null,
+          restRule: dp.restBefore ? dp.restBefore.rule : null,
+          isFuture: dp.isFuture,
+          source: dp.source,
+        })
+      }
+    } else {
+      // Gap day — zero duty/flight, but rolling stats still calculated
+      result.push({
+        date: currentDate,
+        dateLabel: formatDateLabel(currentDate),
+        dutyHours: 0,
+        flightHours: 0,
+        rolling14DayDuty: stats14.dutyHours,
+        rolling28DayDuty: stats28.dutyHours,
+        rolling28DayFlight: stats28.flightHours,
+        rolling365DayFlight: stats365.flightHours,
+        restHours: null,
+        restRequired: null,
+        restCompliant: null,
+        restRule: null,
+        isFuture: currentDate > today,
+        source: "logbook",
+      })
     }
-  })
+
+    currentDate = nextDate(currentDate)
+  }
+
+  return result
 }
 
 /**

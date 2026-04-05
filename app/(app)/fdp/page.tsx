@@ -10,40 +10,72 @@ import {
   RefreshCw,
   TrendingUp,
   AlertTriangle,
-  Shield,
   Info,
 } from "lucide-react"
 import { useFDPData } from "@/hooks/data/use-fdp-data"
 import { useScheduleEntries } from "@/hooks/data/use-schedule"
-import { getComplianceStatus } from "@/lib/utils/roster/fdp-calculator"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
 import { cn } from "@/lib/utils"
 
+function formatDateDDMMM(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00Z")
+  return `${d.getUTCDate().toString().padStart(2, "0")} ${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}`
+}
+
+function LimitCard({
+  label,
+  regulation,
+  used,
+  limit,
+}: {
+  label: string
+  regulation: string
+  used: number
+  limit: number
+}) {
+  const remaining = Math.max(0, limit - used)
+  const pct = limit > 0 ? (used / limit) * 100 : 0
+  const barColor = pct >= 100 ? "bg-red-500"
+    : pct >= 90 ? "bg-orange-500"
+      : pct >= 75 ? "bg-yellow-500"
+        : "bg-green-500"
+  const remainingColor = pct >= 100 ? "text-red-500"
+    : pct >= 90 ? "text-orange-500"
+      : pct >= 75 ? "text-yellow-500"
+        : "text-green-500"
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className="text-[10px] text-muted-foreground">{regulation}</span>
+      </div>
+      <div className="text-lg font-semibold tabular-nums">
+        {used.toFixed(1)}h <span className="text-muted-foreground text-sm font-normal">/ {limit}h</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-muted">
+        <div
+          className={cn("h-full rounded-full transition-all", barColor)}
+          style={{ width: `${Math.min(pct, 100)}%` }}
+        />
+      </div>
+      <div className={cn("text-xs font-medium", remainingColor)}>
+        {remaining.toFixed(1)}h available
+      </div>
+    </div>
+  )
+}
+
 export default function FDPPage() {
   const { refresh, isLoading: scheduleLoading } = useScheduleEntries()
   const {
-    allDutyPeriods,
-    cumulativeLimits,
     capacity,
     forecast,
     restViolations,
     timelineData,
     isLoading,
   } = useFDPData()
-
-  // Compliance for each rolling period
-  const compliance14Days = getComplianceStatus(cumulativeLimits.last14Days.utilizationPercent)
-  const compliance28Days = getComplianceStatus(cumulativeLimits.last28Days.utilizationPercent)
-  const compliance365Days = getComplianceStatus(cumulativeLimits.last365Days.utilizationPercent)
-
-  // Overall compliance (worst status)
-  const overallCompliance = [compliance14Days, compliance28Days, compliance365Days].reduce(
-    (worst, current) => {
-      const order = ["ok", "warning", "critical", "exceeded"]
-      return order.indexOf(current.status) > order.indexOf(worst.status) ? current : worst
-    }
-  )
 
   // Refresh action button
   const fdpActions = useMemo(
@@ -68,76 +100,57 @@ export default function FDPPage() {
   return (
     <PageContainer>
       <div className="px-4 pt-4 pb-safe space-y-4">
-        {/* Overall Status Banner */}
-        <Card
-          className={cn(
-            "border",
-            overallCompliance.status === "exceeded"
-              ? "border-red-500/20 bg-red-500/5"
-              : overallCompliance.status === "critical"
-                ? "border-orange-500/20 bg-orange-500/5"
-                : overallCompliance.status === "warning"
-                  ? "border-yellow-500/20 bg-yellow-500/5"
-                  : "border-green-500/20 bg-green-500/5"
-          )}
-        >
-          <CardContent className="pt-5 pb-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm text-muted-foreground mb-1">Overall Compliance</div>
-                <div className={cn("text-2xl font-bold", overallCompliance.color)}>
-                  {overallCompliance.label}
-                </div>
-
-                {capacity.canAcceptMore ? (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {capacity.flight28Days.remaining.toFixed(1)}h flight and{" "}
-                    {Math.min(capacity.duty14Days.remaining, capacity.duty28Days.remaining).toFixed(1)}h duty remaining
-                    (limited by {capacity.bottleneck})
-                  </p>
-                ) : (
-                  <p className="text-xs text-red-500 mt-1">
-                    Limit reached — {capacity.bottleneck}
-                  </p>
-                )}
-
-                {forecast.hasExceedance && (
-                  <div className="flex items-center gap-1 mt-1.5">
-                    <AlertTriangle className="h-3 w-3 text-orange-500" />
-                    <p className="text-xs text-orange-500">
-                      Projected breach on{" "}
-                      {new Date(forecast.exceedances[0].date + "T00:00:00").toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </p>
-                  </div>
-                )}
-
-                {restViolations.length > 0 && (
-                  <div className="flex items-center gap-1 mt-1">
-                    <AlertTriangle className="h-3 w-3 text-red-500" />
-                    <p className="text-xs text-red-500">
-                      {restViolations.length} rest period violation{restViolations.length !== 1 ? "s" : ""}
-                    </p>
-                  </div>
-                )}
-              </div>
-              <div
-                className={cn(
-                  "p-3 rounded-xl",
-                  overallCompliance.status === "exceeded"
-                    ? "bg-red-500/10"
-                    : overallCompliance.status === "critical"
-                      ? "bg-orange-500/10"
-                      : overallCompliance.status === "warning"
-                        ? "bg-yellow-500/10"
-                        : "bg-green-500/10"
-                )}
-              >
-                <Shield className={cn("h-8 w-8", overallCompliance.color)} />
-              </div>
+        {/* Capacity Overview — 4 limit cards */}
+        <Card>
+          <CardContent className="pt-4 pb-3">
+            <div className="grid grid-cols-2 gap-4">
+              <LimitCard
+                label="14-Day Duty"
+                regulation="Reg 12(a)"
+                used={capacity.duty14Days.used}
+                limit={capacity.duty14Days.limit}
+              />
+              <LimitCard
+                label="28-Day Duty"
+                regulation="Reg 12(b)"
+                used={capacity.duty28Days.used}
+                limit={capacity.duty28Days.limit}
+              />
+              <LimitCard
+                label="28-Day Flight"
+                regulation="Reg 107(a)"
+                used={capacity.flight28Days.used}
+                limit={capacity.flight28Days.limit}
+              />
+              <LimitCard
+                label="12-Mo Flight"
+                regulation="Reg 107(b)"
+                used={capacity.flight365Days.used}
+                limit={capacity.flight365Days.limit}
+              />
             </div>
+
+            {/* Warnings footer */}
+            {(restViolations.length > 0 || forecast.hasExceedance) && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-border">
+                {restViolations.length > 0 && (
+                  <div className="flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3 text-red-500" />
+                    <span className="text-xs text-red-500">
+                      {restViolations.length} rest violation{restViolations.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                )}
+                {forecast.hasExceedance && (
+                  <div className="flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3 text-orange-500" />
+                    <span className="text-xs text-orange-500">
+                      Breach on {formatDateDDMMM(forecast.exceedances[0].date)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 
