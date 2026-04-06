@@ -13,11 +13,10 @@ import {
   ResponsiveContainer,
   Cell,
   Area,
-  Brush,
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Check } from "lucide-react"
+import { Check, ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
 import type { FTLLimits, CapacityRemaining, ForecastResult } from "@/types/entities/roster.types"
@@ -67,11 +66,23 @@ export function FDPTimelineChart({
   forecast,
 }: FDPTimelineChartProps) {
   const [activeViews, setActiveViews] = useState<Set<ChartView>>(new Set(["duty14"]))
-  const [brushRange, setBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null)
+
+  // Gesture zoom/pan state — visible window into the data array
+  const MIN_WINDOW = 7 // minimum 7 days visible
+  const DEFAULT_WINDOW = 90 // default to ~90 days
+  const [viewWindow, setViewWindow] = useState<{ start: number; end: number } | null>(null)
+  const gestureRef = useRef<{
+    isPanning: boolean
+    startX: number
+    startWindow: { start: number; end: number }
+    pinchStartDist: number
+    pinchStartWindow: { start: number; end: number }
+  } | null>(null)
 
   // Resolve oklch CSS variables to rgb for SVG attributes (SVG fill/stroke
   // cannot use hsl(var(...)) when the variable holds an oklch value).
   // A hidden probe div carries the Tailwind classes; getComputedStyle returns rgb.
+  // Uses inline visibility:hidden instead of sr-only (clip-path:inset breaks iOS Safari).
   const probeRef = useRef<HTMLDivElement>(null)
   const [cc, setCc] = useState({ text: "#999", border: "#444", card: "#1a1a1a", fg: "#ccc" })
   useEffect(() => {
@@ -169,7 +180,7 @@ export function FDPTimelineChart({
       }
       return next
     })
-    setBrushRange(null) // reset brush on view change
+    setViewWindow(null) // reset zoom on view change
   }, [])
 
   // Capacity for selected views — show the most constrained (bottleneck)
@@ -303,29 +314,133 @@ export function FDPTimelineChart({
     return [0, Math.ceil(maxLimit * 1.1)]
   }, [selectedNonRestViews])
 
-  // Brush date range label — separate state per view type to avoid stale indices
+  // Compute the sliced data for the visible window
   const activeData = isRestView ? restData : timelineData
-  const brushDateLabel = useMemo(() => {
-    if (!brushRange || activeData.length === 0) return null
-    const si = Math.min(brushRange.startIndex, activeData.length - 1)
-    const ei = Math.min(brushRange.endIndex, activeData.length - 1)
-    if (si < 0 || ei < 0) return null
-    return `${activeData[si].dateLabel} — ${activeData[ei].dateLabel}`
-  }, [brushRange, activeData])
+  const slicedData = useMemo(() => {
+    if (!activeData.length) return activeData
+    if (!viewWindow) {
+      // Default: show last DEFAULT_WINDOW days or all if shorter
+      const start = Math.max(0, activeData.length - DEFAULT_WINDOW)
+      return activeData.slice(start)
+    }
+    return activeData.slice(viewWindow.start, viewWindow.end + 1)
+  }, [activeData, viewWindow])
 
-  // Brush key forces remount on view switch to avoid stale index crash
-  const brushKey = isRestView ? "brush-rest" : `brush-duty-${Array.from(activeViews).sort().join(",")}`
+  // Effective window for gesture calculations
+  const effectiveWindow = useMemo(() => {
+    if (!activeData.length) return { start: 0, end: 0 }
+    if (!viewWindow) {
+      return { start: Math.max(0, activeData.length - DEFAULT_WINDOW), end: activeData.length - 1 }
+    }
+    return viewWindow
+  }, [activeData, viewWindow])
 
-  // Safe brush onChange handler with bounds check
-  const handleBrushChange = useCallback(
-    (range: unknown) => {
-      const r = range as { startIndex?: number; endIndex?: number }
-      if (r && typeof r.startIndex === "number" && typeof r.endIndex === "number" && r.startIndex >= 0) {
-        setBrushRange({ startIndex: r.startIndex, endIndex: r.endIndex })
+  // Visible date range label
+  const dateRangeLabel = useMemo(() => {
+    if (slicedData.length < 2) return null
+    return `${slicedData[0].dateLabel} — ${slicedData[slicedData.length - 1].dateLabel}`
+  }, [slicedData])
+
+  // Gesture handlers for zoom/pan
+  const chartWrapperRef = useRef<HTMLDivElement>(null)
+
+  const clampWindow = useCallback((start: number, end: number, maxLen: number) => {
+    let s = Math.round(start)
+    let e = Math.round(end)
+    const minW = MIN_WINDOW
+    // Enforce minimum window size
+    if (e - s < minW) {
+      const mid = (s + e) / 2
+      s = Math.round(mid - minW / 2)
+      e = s + minW
+    }
+    // Clamp to bounds
+    if (s < 0) { e -= s; s = 0 }
+    if (e >= maxLen) { s -= (e - maxLen + 1); e = maxLen - 1 }
+    if (s < 0) s = 0
+    return { start: s, end: e }
+  }, [])
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      // Single finger → pan
+      gestureRef.current = {
+        isPanning: true,
+        startX: e.touches[0].clientX,
+        startWindow: { ...effectiveWindow },
+        pinchStartDist: 0,
+        pinchStartWindow: { ...effectiveWindow },
       }
-    },
-    []
-  )
+    } else if (e.touches.length === 2) {
+      // Two fingers → pinch zoom
+      const dist = Math.abs(e.touches[0].clientX - e.touches[1].clientX)
+      gestureRef.current = {
+        isPanning: false,
+        startX: 0,
+        startWindow: { ...effectiveWindow },
+        pinchStartDist: dist,
+        pinchStartWindow: { ...effectiveWindow },
+      }
+    }
+  }, [effectiveWindow])
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!gestureRef.current || !chartWrapperRef.current) return
+    const maxLen = activeData.length
+    if (maxLen === 0) return
+    const wrapperWidth = chartWrapperRef.current.clientWidth || 300
+
+    if (e.touches.length === 1 && gestureRef.current.isPanning) {
+      // Pan: drag left/right shifts the window
+      const dx = e.touches[0].clientX - gestureRef.current.startX
+      const windowSize = gestureRef.current.startWindow.end - gestureRef.current.startWindow.start
+      const dataPxRatio = windowSize / wrapperWidth
+      const shift = Math.round(-dx * dataPxRatio)
+      const newStart = gestureRef.current.startWindow.start + shift
+      const newEnd = gestureRef.current.startWindow.end + shift
+      setViewWindow(clampWindow(newStart, newEnd, maxLen))
+    } else if (e.touches.length === 2 && !gestureRef.current.isPanning) {
+      // Pinch zoom: distance change adjusts window size
+      const dist = Math.abs(e.touches[0].clientX - e.touches[1].clientX)
+      const scale = gestureRef.current.pinchStartDist / Math.max(dist, 1)
+      const prevW = gestureRef.current.pinchStartWindow
+      const oldSize = prevW.end - prevW.start
+      const newSize = Math.round(oldSize * scale)
+      const mid = (prevW.start + prevW.end) / 2
+      const newStart = mid - newSize / 2
+      const newEnd = mid + newSize / 2
+      setViewWindow(clampWindow(newStart, newEnd, maxLen))
+    }
+  }, [activeData.length, clampWindow])
+
+  const handleTouchEnd = useCallback(() => {
+    gestureRef.current = null
+  }, [])
+
+  // Zoom controls (buttons for non-touch devices too)
+  const zoomIn = useCallback(() => {
+    const maxLen = activeData.length
+    if (maxLen === 0) return
+    const w = effectiveWindow
+    const size = w.end - w.start
+    const newSize = Math.max(MIN_WINDOW, Math.round(size * 0.6))
+    const mid = (w.start + w.end) / 2
+    setViewWindow(clampWindow(mid - newSize / 2, mid + newSize / 2, maxLen))
+  }, [activeData.length, effectiveWindow, clampWindow])
+
+  const zoomOut = useCallback(() => {
+    const maxLen = activeData.length
+    if (maxLen === 0) return
+    const w = effectiveWindow
+    const size = w.end - w.start
+    const newSize = Math.min(maxLen - 1, Math.round(size * 1.6))
+    const mid = (w.start + w.end) / 2
+    setViewWindow(clampWindow(mid - newSize / 2, mid + newSize / 2, maxLen))
+  }, [activeData.length, effectiveWindow, clampWindow])
+
+  const resetZoom = useCallback(() => {
+    setViewWindow(null)
+  }, [])
 
   // Shared axis/grid theme props — using resolved rgb from probe
   const axisTickStyle = { fontSize: 10, fill: cc.text }
@@ -333,10 +448,13 @@ export function FDPTimelineChart({
 
   return (
     <div className="space-y-3">
-      {/* Hidden probe to resolve oklch CSS vars → rgb for SVG */}
+      {/* Hidden probe to resolve oklch CSS vars → rgb for SVG.
+          Uses visibility:hidden (not sr-only) because clip-path:inset(50%) in sr-only
+          prevents getComputedStyle from resolving oklch on iOS Safari. */}
       <div
         ref={probeRef}
-        className="sr-only text-muted-foreground border-border bg-card outline-foreground"
+        className="text-muted-foreground border-border bg-card outline-foreground"
+        style={{ position: "absolute", visibility: "hidden", pointerEvents: "none" }}
         aria-hidden="true"
       />
       {/* View selector tabs */}
@@ -467,191 +585,214 @@ export function FDPTimelineChart({
             </div>
           ) : isRestView ? (
             /* Rest period chart */
-            <ResponsiveContainer width="100%" height={320}>
-              <ComposedChart data={restData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
-                <XAxis
-                  dataKey="dateLabel"
-                  tick={axisTickStyle}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={axisTickStyle}
-                  tickLine={false}
-                  axisLine={false}
-                  unit="h"
-                  width={40}
-                />
-                <Tooltip content={<CustomTooltip />} />
+            <div
+              ref={chartWrapperRef}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              className="touch-none"
+            >
+              <ResponsiveContainer width="100%" height={320}>
+                <ComposedChart data={slicedData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
+                  <XAxis
+                    dataKey="dateLabel"
+                    tick={axisTickStyle}
+                    tickLine={false}
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={axisTickStyle}
+                    tickLine={false}
+                    axisLine={false}
+                    unit="h"
+                    width={40}
+                  />
+                  <Tooltip content={<CustomTooltip />} />
 
-                {/* Required rest as a line */}
-                <Line
-                  dataKey="restRequired"
-                  stroke={cc.text}
-                  strokeDasharray="4 4"
-                  strokeWidth={1.5}
-                  dot={false}
-                  name="Required"
-                />
+                  {/* Required rest as a line */}
+                  <Line
+                    dataKey="restRequired"
+                    stroke={cc.text}
+                    strokeDasharray="4 4"
+                    strokeWidth={1.5}
+                    dot={false}
+                    name="Required"
+                  />
 
-                {/* Actual rest as bars colored by compliance */}
-                <Bar dataKey="restHours" radius={[3, 3, 0, 0]} maxBarSize={24} name="Rest">
-                  {restData.map((entry, index) => (
-                    <Cell
-                      key={index}
-                      fill={entry.restCompliant ? COLORS.compliant : COLORS.violation}
-                      opacity={entry.isFuture ? 0.5 : 0.85}
-                    />
-                  ))}
-                </Bar>
-                <Brush
-                  key={brushKey}
-                  dataKey="dateLabel"
-                  height={24}
-                  stroke={cc.text}
-                  fill={cc.card}
-                  travellerWidth={10}
-                  tickFormatter={() => ""}
-                  onChange={handleBrushChange}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
+                  {/* Actual rest as bars colored by compliance */}
+                  <Bar dataKey="restHours" radius={[3, 3, 0, 0]} maxBarSize={24} name="Rest">
+                    {slicedData.map((entry, index) => (
+                      <Cell
+                        key={index}
+                        fill={entry.restCompliant ? COLORS.compliant : COLORS.violation}
+                        opacity={entry.isFuture ? 0.5 : 0.85}
+                      />
+                    ))}
+                  </Bar>
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
           ) : (
             /* Duty/Flight rolling chart — supports multi-select */
-            <ResponsiveContainer width="100%" height={320}>
-              <ComposedChart data={timelineData} margin={{ top: 5, right: 60, left: 0, bottom: 5 }}>
-                <defs>
+            <div
+              ref={!isRestView ? chartWrapperRef : undefined}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              className="touch-none"
+            >
+              <ResponsiveContainer width="100%" height={320}>
+                <ComposedChart data={slicedData} margin={{ top: 5, right: 60, left: 0, bottom: 5 }}>
+                  <defs>
+                    {selectedNonRestViews.map((view) => (
+                      <linearGradient key={view.key} id={`gradient-${view.key}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={view.color} stopOpacity={isSingleView ? 0.35 : 0.25} />
+                        <stop offset="95%" stopColor={view.color} stopOpacity={0.05} />
+                      </linearGradient>
+                    ))}
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
+                  <XAxis
+                    dataKey="dateLabel"
+                    tick={axisTickStyle}
+                    tickLine={false}
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={axisTickStyle}
+                    tickLine={false}
+                    axisLine={false}
+                    unit="h"
+                    width={40}
+                    domain={yDomain}
+                  />
+                  <Tooltip content={<CustomTooltip />} />
+
+                  {/* Limit threshold lines — one per selected view */}
                   {selectedNonRestViews.map((view) => (
-                    <linearGradient key={view.key} id={`gradient-${view.key}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={view.color} stopOpacity={isSingleView ? 0.35 : 0.25} />
-                      <stop offset="95%" stopColor={view.color} stopOpacity={0.05} />
-                    </linearGradient>
+                    <ReferenceLine
+                      key={`limit-${view.key}`}
+                      y={view.limitValue}
+                      stroke={isSingleView ? COLORS.violation : view.color}
+                      strokeDasharray={isSingleView ? "0" : "6 3"}
+                      strokeWidth={2}
+                      label={{
+                        value: `${view.limitValue}h`,
+                        position: "right",
+                        fill: isSingleView ? COLORS.violation : view.color,
+                        fontSize: 10,
+                      }}
+                    />
                   ))}
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
-                <XAxis
-                  dataKey="dateLabel"
-                  tick={axisTickStyle}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={axisTickStyle}
-                  tickLine={false}
-                  axisLine={false}
-                  unit="h"
-                  width={40}
-                  domain={yDomain}
-                />
-                <Tooltip content={<CustomTooltip />} />
 
-                {/* Limit threshold lines — one per selected view */}
-                {selectedNonRestViews.map((view) => (
-                  <ReferenceLine
-                    key={`limit-${view.key}`}
-                    y={view.limitValue}
-                    stroke={isSingleView ? COLORS.violation : view.color}
-                    strokeDasharray={isSingleView ? "0" : "6 3"}
-                    strokeWidth={2}
-                    label={{
-                      value: `${view.limitValue}h`,
-                      position: "right",
-                      fill: isSingleView ? COLORS.violation : view.color,
-                      fontSize: 10,
-                    }}
-                  />
-                ))}
+                  {/* Warning threshold (90%) — only for single view */}
+                  {isSingleView && primaryView && (
+                    <ReferenceLine
+                      y={primaryView.limitValue * 0.9}
+                      stroke={COLORS.warning90}
+                      strokeDasharray="3 3"
+                      strokeWidth={1}
+                      opacity={0.5}
+                    />
+                  )}
 
-                {/* Warning threshold (90%) — only for single view */}
-                {isSingleView && primaryView && (
-                  <ReferenceLine
-                    y={primaryView.limitValue * 0.9}
-                    stroke={COLORS.warning90}
-                    strokeDasharray="3 3"
-                    strokeWidth={1}
-                    opacity={0.5}
-                  />
-                )}
+                  {/* Today marker */}
+                  {slicedData.some((d) => d.date === todayStr) && (
+                    <ReferenceLine
+                      x={slicedData.find((d) => d.date === todayStr)?.dateLabel}
+                      stroke={cc.fg}
+                      strokeDasharray="2 2"
+                      strokeWidth={1}
+                      opacity={0.4}
+                      label={{
+                        value: "Today",
+                        position: "top",
+                        fill: cc.text,
+                        fontSize: 9,
+                      }}
+                    />
+                  )}
 
-                {/* Today marker */}
-                {timelineData.some((d) => d.date === todayStr) && (
-                  <ReferenceLine
-                    x={timelineData.find((d) => d.date === todayStr)?.dateLabel}
-                    stroke={cc.fg}
-                    strokeDasharray="2 2"
-                    strokeWidth={1}
-                    opacity={0.4}
-                    label={{
-                      value: "Today",
-                      position: "top",
-                      fill: cc.text,
-                      fontSize: 9,
-                    }}
-                  />
-                )}
+                  {/* Rolling cumulative areas — one per selected view */}
+                  {selectedNonRestViews.map((view) => (
+                    <Area
+                      key={`area-${view.key}`}
+                      dataKey={view.rollingKey}
+                      fill={`url(#gradient-${view.key})`}
+                      stroke={view.color}
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={{ r: 4, strokeWidth: 2 }}
+                      name={view.rollingLabel}
+                    />
+                  ))}
 
-                {/* Rolling cumulative areas — one per selected view */}
-                {selectedNonRestViews.map((view) => (
-                  <Area
-                    key={`area-${view.key}`}
-                    dataKey={view.rollingKey}
-                    fill={`url(#gradient-${view.key})`}
-                    stroke={view.color}
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 4, strokeWidth: 2 }}
-                    name={view.rollingLabel}
-                  />
-                ))}
-
-                {/* Daily bars — use view color for coherence */}
-                {uniqueBarKeys.map((barKey, barIdx) => {
-                  const barView = selectedNonRestViews.find((v) => v.barKey === barKey)!
-                  return (
-                    <Bar
-                      key={`bar-${barKey}`}
-                      dataKey={barKey}
-                      radius={[2, 2, 0, 0]}
-                      maxBarSize={uniqueBarKeys.length > 1 ? 12 : 16}
-                      name={barView.barLabel}
-                    >
-                      {timelineData.map((entry, index) => (
-                        <Cell
-                          key={index}
-                          fill={
-                            uniqueBarKeys.length > 1
-                              ? barIdx === 0 ? COLORS.compliant : COLORS.future
-                              : entry.isFuture ? COLORS.future : COLORS.compliant
-                          }
-                          opacity={entry.isFuture ? 0.35 : 0.6}
-                        />
-                      ))}
-                    </Bar>
-                  )
-                })}
-                <Brush
-                  key={brushKey}
-                  dataKey="dateLabel"
-                  height={24}
-                  stroke={cc.text}
-                  fill={cc.card}
-                  travellerWidth={10}
-                  tickFormatter={() => ""}
-                  onChange={handleBrushChange}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          )}
-
-          {/* Brush date range label */}
-          {brushDateLabel && (
-            <div className="text-center text-[10px] text-muted-foreground mt-1 tabular-nums">
-              {brushDateLabel}
+                  {/* Daily bars — use view color for coherence */}
+                  {uniqueBarKeys.map((barKey, barIdx) => {
+                    const barView = selectedNonRestViews.find((v) => v.barKey === barKey)!
+                    return (
+                      <Bar
+                        key={`bar-${barKey}`}
+                        dataKey={barKey}
+                        radius={[2, 2, 0, 0]}
+                        maxBarSize={uniqueBarKeys.length > 1 ? 12 : 16}
+                        name={barView.barLabel}
+                      >
+                        {slicedData.map((entry, index) => (
+                          <Cell
+                            key={index}
+                            fill={
+                              uniqueBarKeys.length > 1
+                                ? barIdx === 0 ? COLORS.compliant : COLORS.future
+                                : entry.isFuture ? COLORS.future : COLORS.compliant
+                            }
+                            opacity={entry.isFuture ? 0.35 : 0.6}
+                          />
+                        ))}
+                      </Bar>
+                    )
+                  })}
+                </ComposedChart>
+              </ResponsiveContainer>
             </div>
           )}
+
+          {/* Zoom controls + date range label */}
+          <div className="flex items-center justify-between mt-1.5 px-1">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={zoomIn}
+                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                aria-label="Zoom in"
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={zoomOut}
+                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                aria-label="Zoom out"
+              >
+                <ZoomOut className="h-3.5 w-3.5" />
+              </button>
+              {viewWindow && (
+                <button
+                  onClick={resetZoom}
+                  className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                  aria-label="Reset zoom"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            {dateRangeLabel && (
+              <span className="text-[10px] text-muted-foreground tabular-nums">
+                {dateRangeLabel}
+              </span>
+            )}
+          </div>
         </CardContent>
       </Card>
 
