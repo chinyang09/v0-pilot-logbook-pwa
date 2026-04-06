@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -101,6 +101,23 @@ export default function FDPPage() {
 
   const [quickCheckOpen, setQuickCheckOpen] = useState(false)
 
+  // Live digital countdown — updates every 10 seconds
+  const [countdown, setCountdown] = useState("")
+  useEffect(() => {
+    if (!restUntilLegal) return
+    const update = () => {
+      const legalAt = new Date(restUntilLegal.legalAtUtc).getTime()
+      const remaining = Math.max(0, legalAt - Date.now())
+      const h = Math.floor(remaining / 3600000)
+      const m = Math.floor((remaining % 3600000) / 60000)
+      setCountdown(`${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`)
+    }
+    update()
+    if (restUntilLegal.isLegalNow) return
+    const interval = setInterval(update, 10_000)
+    return () => clearInterval(interval)
+  }, [restUntilLegal])
+
   // Header actions: refresh + quick check
   const fdpActions = useMemo(
     () => (
@@ -143,45 +160,45 @@ export default function FDPPage() {
               "border",
               restUntilLegal.isLegalNow
                 ? "border-green-500/20 bg-green-500/5"
-                : "border-orange-500/20 bg-orange-500/5"
+                : "border-red-500/20 bg-red-500/5"
             )}
           >
             <CardContent className="pt-4 pb-3">
-              <div className="flex items-start gap-3">
-                <div className={cn(
-                  "p-2 rounded-lg mt-0.5",
-                  restUntilLegal.isLegalNow ? "bg-green-500/10" : "bg-orange-500/10"
-                )}>
-                  {restUntilLegal.isLegalNow ? (
-                    <CheckCircle2 className="h-5 w-5 text-green-500" />
-                  ) : (
-                    <Clock className="h-5 w-5 text-orange-500" />
-                  )}
+              <div className="flex items-center gap-3">
+                {/* Digital countdown */}
+                <div className="shrink-0">
+                  <div className={cn(
+                    "text-2xl font-mono font-bold tabular-nums leading-none",
+                    restUntilLegal.isLegalNow ? "text-green-500" : "text-red-500"
+                  )}>
+                    {restUntilLegal.isLegalNow ? "00:00" : countdown}
+                  </div>
+                  <div className={cn(
+                    "text-[10px] font-medium mt-0.5",
+                    restUntilLegal.isLegalNow ? "text-green-500/70" : "text-red-500/70"
+                  )}>
+                    {restUntilLegal.isLegalNow ? "LEGAL" : "to legality"}
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
+                {/* Details */}
+                <div className="flex-1 min-w-0 border-l border-border pl-3">
                   {restUntilLegal.isLegalNow ? (
-                    <>
-                      <div className="text-sm font-semibold text-green-600 dark:text-green-400">
-                        Legal for next duty
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Last duty ended {restUntilLegal.lastDebriefTime} UTC on{" "}
-                        {formatDateDDMMM(restUntilLegal.lastDutyDate)} ·{" "}
-                        {formatMinutesHM(restUntilLegal.restElapsedMinutes)} ago
-                      </p>
-                    </>
+                    <p className="text-xs text-muted-foreground">
+                      Last duty ended {restUntilLegal.lastDebriefTime}Z on{" "}
+                      {formatDateDDMMM(restUntilLegal.lastDutyDate)} ·{" "}
+                      {formatMinutesHM(restUntilLegal.restElapsedMinutes)} ago
+                    </p>
                   ) : (
                     <>
-                      <div className="text-sm font-semibold text-orange-600 dark:text-orange-400">
-                        {formatMinutesHM(restUntilLegal.restNeededMinutes)} rest needed
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
+                      <p className="text-xs text-foreground font-medium">
                         Legal at{" "}
-                        {new Date(restUntilLegal.legalAtUtc).toISOString().slice(11, 16)} UTC
-                        {" · "}
+                        {new Date(restUntilLegal.legalAtUtc).toISOString().slice(11, 16)}Z
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
                         {RULE_DESCRIPTIONS[restUntilLegal.rule] ?? `Reg ${restUntilLegal.rule}`}
                         {" · "}
-                        {formatMinutesHM(restUntilLegal.lastDutyMinutes)} duty
+                        {formatMinutesHM(restUntilLegal.lastDutyMinutes)} duty on{" "}
+                        {formatDateDDMMM(restUntilLegal.lastDutyDate)}
                       </p>
                     </>
                   )}

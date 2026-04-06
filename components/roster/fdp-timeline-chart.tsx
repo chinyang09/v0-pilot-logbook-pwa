@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import {
   ComposedChart,
   Bar,
@@ -68,6 +68,30 @@ export function FDPTimelineChart({
 }: FDPTimelineChartProps) {
   const [activeViews, setActiveViews] = useState<Set<ChartView>>(new Set(["duty14"]))
   const [brushRange, setBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null)
+
+  // Resolve oklch CSS variables to rgb for SVG attributes (SVG fill/stroke
+  // cannot use hsl(var(...)) when the variable holds an oklch value).
+  // A hidden probe div carries the Tailwind classes; getComputedStyle returns rgb.
+  const probeRef = useRef<HTMLDivElement>(null)
+  const [cc, setCc] = useState({ text: "#999", border: "#444", card: "#1a1a1a", fg: "#ccc" })
+  useEffect(() => {
+    const update = () => {
+      const el = probeRef.current
+      if (!el) return
+      const s = getComputedStyle(el)
+      setCc({
+        text: s.color,
+        border: s.borderColor,
+        card: s.backgroundColor,
+        fg: s.outlineColor,
+      })
+    }
+    // Initial resolve + re-resolve on light/dark toggle
+    update()
+    const obs = new MutationObserver(update)
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
+    return () => obs.disconnect()
+  }, [])
 
   const views: ViewConfig[] = useMemo(
     () => [
@@ -279,28 +303,42 @@ export function FDPTimelineChart({
     return [0, Math.ceil(maxLimit * 1.1)]
   }, [selectedNonRestViews])
 
-  // Brush date range label
+  // Brush date range label — separate state per view type to avoid stale indices
   const activeData = isRestView ? restData : timelineData
   const brushDateLabel = useMemo(() => {
     if (!brushRange || activeData.length === 0) return null
-    const start = activeData[brushRange.startIndex]
-    const end = activeData[brushRange.endIndex]
-    if (!start || !end) return null
-    return `${start.dateLabel} — ${end.dateLabel}`
+    const si = Math.min(brushRange.startIndex, activeData.length - 1)
+    const ei = Math.min(brushRange.endIndex, activeData.length - 1)
+    if (si < 0 || ei < 0) return null
+    return `${activeData[si].dateLabel} — ${activeData[ei].dateLabel}`
   }, [brushRange, activeData])
 
-  // Default brush start
-  const defaultBrushStart = useMemo(
-    () => Math.max(0, activeData.length - 90),
-    [activeData.length]
+  // Brush key forces remount on view switch to avoid stale index crash
+  const brushKey = isRestView ? "brush-rest" : `brush-duty-${Array.from(activeViews).sort().join(",")}`
+
+  // Safe brush onChange handler with bounds check
+  const handleBrushChange = useCallback(
+    (range: unknown) => {
+      const r = range as { startIndex?: number; endIndex?: number }
+      if (r && typeof r.startIndex === "number" && typeof r.endIndex === "number" && r.startIndex >= 0) {
+        setBrushRange({ startIndex: r.startIndex, endIndex: r.endIndex })
+      }
+    },
+    []
   )
 
-  // Shared axis/grid theme props
-  const axisTickStyle = { fontSize: 10, fill: "hsl(var(--muted-foreground))" }
-  const gridStroke = "hsl(var(--border))"
+  // Shared axis/grid theme props — using resolved rgb from probe
+  const axisTickStyle = { fontSize: 10, fill: cc.text }
+  const gridStroke = cc.border
 
   return (
     <div className="space-y-3">
+      {/* Hidden probe to resolve oklch CSS vars → rgb for SVG */}
+      <div
+        ref={probeRef}
+        className="sr-only text-muted-foreground border-border bg-card outline-foreground"
+        aria-hidden="true"
+      />
       {/* View selector tabs */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
         {views.map((view) => {
@@ -329,11 +367,11 @@ export function FDPTimelineChart({
                 "flex flex-col items-start px-3 py-2 rounded-lg text-left transition-all min-w-[120px] shrink-0 relative",
                 isActive
                   ? isMulti
-                    ? "bg-secondary shadow-sm text-foreground ring-2"
+                    ? "bg-secondary shadow-sm text-foreground"
                     : "bg-primary text-primary-foreground shadow-sm"
                   : "bg-secondary/50 hover:bg-secondary text-foreground"
               )}
-              style={isActive && isMulti ? { ringColor: view.color, borderColor: view.color, outlineColor: view.color } : undefined}
+              style={isActive && isMulti ? { boxShadow: `0 0 0 2px ${view.color}` } : undefined}
             >
               {isActive && isMulti && (
                 <div
@@ -451,7 +489,7 @@ export function FDPTimelineChart({
                 {/* Required rest as a line */}
                 <Line
                   dataKey="restRequired"
-                  stroke="hsl(var(--muted-foreground))"
+                  stroke={cc.text}
                   strokeDasharray="4 4"
                   strokeWidth={1.5}
                   dot={false}
@@ -469,14 +507,14 @@ export function FDPTimelineChart({
                   ))}
                 </Bar>
                 <Brush
+                  key={brushKey}
                   dataKey="dateLabel"
                   height={24}
-                  stroke="hsl(var(--border))"
-                  fill="hsl(var(--card))"
+                  stroke={cc.text}
+                  fill={cc.card}
                   travellerWidth={10}
-                  startIndex={defaultBrushStart}
                   tickFormatter={() => ""}
-                  onChange={(range) => setBrushRange(range as { startIndex: number; endIndex: number })}
+                  onChange={handleBrushChange}
                 />
               </ComposedChart>
             </ResponsiveContainer>
@@ -542,14 +580,14 @@ export function FDPTimelineChart({
                 {timelineData.some((d) => d.date === todayStr) && (
                   <ReferenceLine
                     x={timelineData.find((d) => d.date === todayStr)?.dateLabel}
-                    stroke="hsl(var(--foreground))"
+                    stroke={cc.fg}
                     strokeDasharray="2 2"
                     strokeWidth={1}
                     opacity={0.4}
                     label={{
                       value: "Today",
                       position: "top",
-                      fill: "hsl(var(--muted-foreground))",
+                      fill: cc.text,
                       fontSize: 9,
                     }}
                   />
@@ -595,14 +633,14 @@ export function FDPTimelineChart({
                   )
                 })}
                 <Brush
+                  key={brushKey}
                   dataKey="dateLabel"
                   height={24}
-                  stroke="hsl(var(--border))"
-                  fill="hsl(var(--card))"
+                  stroke={cc.text}
+                  fill={cc.card}
                   travellerWidth={10}
-                  startIndex={defaultBrushStart}
                   tickFormatter={() => ""}
-                  onChange={(range) => setBrushRange(range as { startIndex: number; endIndex: number })}
+                  onChange={handleBrushChange}
                 />
               </ComposedChart>
             </ResponsiveContainer>

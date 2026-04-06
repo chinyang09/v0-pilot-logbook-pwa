@@ -6,12 +6,11 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { CheckCircle2, XCircle, Calculator } from "lucide-react"
+import { CheckCircle2, XCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { simulateHypotheticalDuty } from "@/lib/utils/roster/fdp-calculator"
 import type { QuickCheckResult } from "@/lib/utils/roster/fdp-calculator"
@@ -32,39 +31,35 @@ function tomorrow(): string {
 
 function CheckRow({
   label,
-  projected,
-  limit,
-  unit,
+  value,
   compliant,
 }: {
   label: string
-  projected: string
-  limit: string
-  unit: string
+  value: string
   compliant: boolean
 }) {
   return (
-    <div className="flex items-center justify-between py-1.5">
-      <div className="flex items-center gap-2">
+    <div className="flex items-center justify-between py-1">
+      <div className="flex items-center gap-1.5">
         {compliant ? (
-          <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
         ) : (
-          <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+          <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
         )}
-        <span className="text-sm">{label}</span>
+        <span className="text-xs">{label}</span>
       </div>
-      <span className={cn("text-sm tabular-nums font-medium", !compliant && "text-red-500")}>
-        {projected}{unit} / {limit}{unit}
+      <span className={cn("text-xs tabular-nums font-medium", !compliant && "text-red-500")}>
+        {value}
       </span>
     </div>
   )
 }
 
 const RULE_LABELS: Record<string, string> = {
-  "3a": "Reg 3(a)",
-  "3b": "Reg 3(b)",
-  "3c": "Reg 3(c)",
-  "3d": "Reg 3(d)",
+  "3a": "3(a)",
+  "3b": "3(b)",
+  "3c": "3(c)",
+  "3d": "3(d)",
 }
 
 export function QuickCheckDialog({ open, onOpenChange, dutyPeriods }: QuickCheckDialogProps) {
@@ -104,146 +99,130 @@ export function QuickCheckDialog({ open, onOpenChange, dutyPeriods }: QuickCheck
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Calculator className="h-4 w-4" />
-            Quick Legality Check
-          </DialogTitle>
-          <DialogDescription>
-            Enter a hypothetical duty to check if it would breach any limits.
-          </DialogDescription>
+      <DialogContent
+        className="max-w-xs max-h-[85vh] overflow-y-auto"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <DialogHeader className="pb-0">
+          <DialogTitle className="text-sm">Quick Legality Check</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3">
-          {/* Form */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <Label htmlFor="qc-date" className="text-xs text-muted-foreground">Date</Label>
+        <div className="space-y-2">
+          {/* Compact form — 2×2 grid */}
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <Label htmlFor="qc-date" className="text-[10px] text-muted-foreground">Date</Label>
               <Input
                 id="qc-date"
                 type="date"
                 value={date}
                 onChange={(e) => { setDate(e.target.value); setResult(null) }}
-                className="mt-1"
+                className="mt-0.5 h-8 text-xs"
               />
             </div>
             <div>
-              <Label htmlFor="qc-report" className="text-xs text-muted-foreground">Report (UTC)</Label>
+              <Label htmlFor="qc-report" className="text-[10px] text-muted-foreground">Report</Label>
               <Input
                 id="qc-report"
                 type="time"
                 value={reportTime}
                 onChange={(e) => { setReportTime(e.target.value); setResult(null) }}
-                className="mt-1"
+                className="mt-0.5 h-8 text-xs"
               />
             </div>
             <div>
-              <Label htmlFor="qc-debrief" className="text-xs text-muted-foreground">Debrief (UTC)</Label>
+              <Label htmlFor="qc-debrief" className="text-[10px] text-muted-foreground">Debrief</Label>
               <Input
                 id="qc-debrief"
                 type="time"
                 value={debriefTime}
                 onChange={(e) => { setDebriefTime(e.target.value); setResult(null) }}
-                className="mt-1"
+                className="mt-0.5 h-8 text-xs"
               />
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
             <div>
-              <Label htmlFor="qc-flight" className="text-xs text-muted-foreground">Flight time (h)</Label>
+              <Label htmlFor="qc-flight" className="text-[10px] text-muted-foreground">Flight (h)</Label>
               <Input
                 id="qc-flight"
                 type="number"
                 step="0.5"
                 min="0"
+                inputMode="decimal"
                 value={flightHours}
                 onChange={(e) => { setFlightHours(e.target.value); setResult(null) }}
-                className="mt-1"
+                className="mt-0.5 h-8 text-xs"
               />
             </div>
             <div>
-              <Label htmlFor="qc-sectors" className="text-xs text-muted-foreground">Sectors</Label>
+              <Label htmlFor="qc-sectors" className="text-[10px] text-muted-foreground">Sectors</Label>
               <Input
                 id="qc-sectors"
                 type="number"
                 min="1"
+                inputMode="numeric"
                 value={sectors}
                 onChange={(e) => { setSectors(e.target.value); setResult(null) }}
-                className="mt-1"
+                className="mt-0.5 h-8 text-xs"
               />
             </div>
           </div>
 
-          <Button onClick={handleCheck} className="w-full">
-            Check Legality
+          <Button onClick={handleCheck} className="w-full h-8 text-xs" size="sm">
+            Check
           </Button>
 
           {/* Results */}
           {result && (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {/* Overall verdict */}
               <div className={cn(
-                "rounded-lg p-3 text-center font-semibold text-sm",
+                "rounded-md py-1.5 text-center font-semibold text-xs",
                 result.overallCompliant
                   ? "bg-green-500/10 text-green-600 dark:text-green-400"
                   : "bg-red-500/10 text-red-600 dark:text-red-400"
               )}>
-                {result.overallCompliant ? "LEGAL — All limits met" : "VIOLATION — Limit(s) breached"}
+                {result.overallCompliant ? "LEGAL" : "VIOLATION"}
               </div>
 
-              {/* Individual checks */}
-              <div className="divide-y divide-border text-foreground">
-                {/* Rest period */}
+              {/* Individual checks — compact */}
+              <div className="divide-y divide-border">
                 {result.restBefore && (
                   <CheckRow
                     label={`Rest (${RULE_LABELS[result.restBefore.rule] ?? result.restBefore.rule})`}
-                    projected={(result.restBefore.restMinutes / 60).toFixed(1)}
-                    limit={(result.restBefore.requiredRestMinutes / 60).toFixed(0)}
-                    unit="h"
+                    value={`${(result.restBefore.restMinutes / 60).toFixed(1)} / ${(result.restBefore.requiredRestMinutes / 60).toFixed(0)}h`}
                     compliant={result.restBefore.compliant}
                   />
                 )}
-
-                {/* Single duty FDP */}
                 <CheckRow
-                  label="Single FDP"
-                  projected={(result.maxFdp.dutyMinutes / 60).toFixed(1)}
-                  limit={(result.maxFdp.maxFdpMinutes / 60).toFixed(1)}
-                  unit="h"
+                  label="FDP"
+                  value={`${(result.maxFdp.dutyMinutes / 60).toFixed(1)} / ${(result.maxFdp.maxFdpMinutes / 60).toFixed(1)}h`}
                   compliant={result.maxFdp.compliant}
                 />
-
-                {/* Rolling limits */}
                 <CheckRow
-                  label="14-Day Duty"
-                  projected={result.duty14Days.projected.toFixed(1)}
-                  limit={result.duty14Days.limit.toString()}
-                  unit="h"
+                  label="14d Duty"
+                  value={`${result.duty14Days.projected.toFixed(1)} / ${result.duty14Days.limit}h`}
                   compliant={result.duty14Days.compliant}
                 />
                 <CheckRow
-                  label="28-Day Duty"
-                  projected={result.duty28Days.projected.toFixed(1)}
-                  limit={result.duty28Days.limit.toString()}
-                  unit="h"
+                  label="28d Duty"
+                  value={`${result.duty28Days.projected.toFixed(1)} / ${result.duty28Days.limit}h`}
                   compliant={result.duty28Days.compliant}
                 />
                 <CheckRow
-                  label="28-Day Flight"
-                  projected={result.flight28Days.projected.toFixed(1)}
-                  limit={result.flight28Days.limit.toString()}
-                  unit="h"
+                  label="28d Flight"
+                  value={`${result.flight28Days.projected.toFixed(1)} / ${result.flight28Days.limit}h`}
                   compliant={result.flight28Days.compliant}
                 />
                 <CheckRow
-                  label="12-Mo Flight"
-                  projected={result.flight365Days.projected.toFixed(1)}
-                  limit={result.flight365Days.limit.toString()}
-                  unit="h"
+                  label="12mo Flight"
+                  value={`${result.flight365Days.projected.toFixed(1)} / ${result.flight365Days.limit}h`}
                   compliant={result.flight365Days.compliant}
                 />
               </div>
 
-              <Button variant="outline" onClick={handleReset} className="w-full" size="sm">
+              <Button variant="ghost" onClick={handleReset} className="w-full h-7 text-[10px] text-muted-foreground" size="sm">
                 Reset
               </Button>
             </div>
