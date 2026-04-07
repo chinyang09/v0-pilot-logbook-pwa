@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect, useCallback } from "react"
 import { useFlights } from "./use-flights"
 import { useScheduleEntries } from "./use-schedule"
+import { useDBReady } from "./use-db"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 import type { DutyPeriod } from "@/types/entities/roster.types"
 import {
@@ -17,9 +18,37 @@ import {
   generateTimelineData,
   calculateRestUntilLegal,
 } from "@/lib/utils/roster/fdp-calculator"
-import type { RestUntilLegalResult } from "@/lib/utils/roster/fdp-calculator"
+import type { RestUntilLegalResult, TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
 import { getAirportByIata } from "@/lib/db/stores/reference/airports.store"
 import { getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
+
+/** Safe empty defaults — avoids recreating objects on every render */
+const EMPTY_CAPACITY = {
+  duty14Days: { used: 0, limit: 0, remaining: 0 },
+  duty28Days: { used: 0, limit: 0, remaining: 0 },
+  flight28Days: { used: 0, limit: 0, remaining: 0 },
+  flight365Days: { used: 0, limit: 0, remaining: 0 },
+  canAcceptMore: true,
+  bottleneck: "",
+}
+
+const EMPTY_RESULT = {
+  allDutyPeriods: [] as DutyPeriod[],
+  pastDuties: [] as DutyPeriod[],
+  futureDuties: [] as DutyPeriod[],
+  cumulativeLimits: {
+    last14Days: { dutyHours: 0, flightHours: 0, maxDutyHours: 0, maxFlightHours: 0, utilizationPercent: 0 },
+    last28Days: { dutyHours: 0, flightHours: 0, maxDutyHours: 0, maxFlightHours: 0, utilizationPercent: 0 },
+    last365Days: { flightHours: 0, maxFlightHours: 0, utilizationPercent: 0 },
+    calculatedAt: 0,
+    calculatedForDate: "",
+  },
+  capacity: EMPTY_CAPACITY,
+  forecast: { exceedances: [] as Array<{ date: string; limitName: string; projected: number; limit: number }>, hasExceedance: false },
+  restViolations: [] as DutyPeriod[],
+  timelineData: [] as TimelineDataPoint[],
+  restUntilLegal: null as RestUntilLegalResult | null,
+}
 
 /**
  * Combined FDP data hook.
@@ -28,6 +57,7 @@ import { getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
  * forecast exceedances per CAAS regulations.
  */
 export function useFDPData() {
+  const { isReady: dbReady } = useDBReady()
   const { flights, isLoading: flightsLoading } = useFlights()
   const { scheduleEntries, isLoading: scheduleLoading } = useScheduleEntries()
 
@@ -62,61 +92,67 @@ export function useFDPData() {
         setAirportTimezones(map)
       } catch (err) {
         console.warn("[FDP] Failed to resolve timezones:", err)
-        // Silently fail — will use default SGT offset
       }
     }
-    if (scheduleEntries.length > 0) {
+    if (dbReady && scheduleEntries.length > 0) {
       resolveTimezones()
     }
-  }, [scheduleEntries])
+  }, [dbReady, scheduleEntries])
 
   const result = useMemo(() => {
-    const logbookDPs = mergeAdjacentDutyPeriods(createDutyPeriodsFromFlights(flights))
-    const scheduleDPs = mergeAdjacentDutyPeriods(
-      getDutyPeriodsFromSchedule(scheduleEntries, airportTimezones)
-    )
+    if (!dbReady) return EMPTY_RESULT
 
-    const merged = mergeDutyPeriods(logbookDPs, scheduleDPs)
-    const withRest = calculateAllRestPeriods(merged)
+    try {
+      const logbookDPs = mergeAdjacentDutyPeriods(createDutyPeriodsFromFlights(flights))
+      const scheduleDPs = mergeAdjacentDutyPeriods(
+        getDutyPeriodsFromSchedule(scheduleEntries, airportTimezones)
+      )
 
-    const today = new Date()
-    const limits = DEFAULT_FTL_LIMITS
+      const merged = mergeDutyPeriods(logbookDPs, scheduleDPs)
+      const withRest = calculateAllRestPeriods(merged)
 
-    // Use only non-future DPs for current cumulative/capacity calculations
-    const currentDPs = withRest.filter((dp) => !dp.isFuture)
-    const cumulativeLimits = calculateCumulativeLimits(currentDPs, today, limits)
-    const capacity = calculateCapacity(currentDPs, today, limits)
+      const today = new Date()
+      const limits = DEFAULT_FTL_LIMITS
 
-    // Forecast uses all DPs (past + future) to project exceedances
-    const forecast = forecastExceedances(withRest, limits)
+      // Use only non-future DPs for current cumulative/capacity calculations
+      const currentDPs = withRest.filter((dp) => !dp.isFuture)
+      const cumulativeLimits = calculateCumulativeLimits(currentDPs, today, limits)
+      const capacity = calculateCapacity(currentDPs, today, limits)
 
-    // Split for display
-    const pastDuties = withRest.filter((dp) => !dp.isFuture)
-    const futureDuties = withRest.filter((dp) => dp.isFuture)
+      // Forecast uses all DPs (past + future) to project exceedances
+      const forecast = forecastExceedances(withRest, limits)
 
-    // Rest violations
-    const restViolations = withRest.filter(
-      (dp) => dp.restBefore && !dp.restBefore.compliant
-    )
+      // Split for display
+      const pastDuties = withRest.filter((dp) => !dp.isFuture)
+      const futureDuties = withRest.filter((dp) => dp.isFuture)
 
-    // Timeline chart data
-    const timelineData = generateTimelineData(withRest, limits)
+      // Rest violations
+      const restViolations = withRest.filter(
+        (dp) => dp.restBefore && !dp.restBefore.compliant
+      )
 
-    // Rest until legal for next duty
-    const restUntilLegal = calculateRestUntilLegal(currentDPs)
+      // Timeline chart data
+      const timelineData = generateTimelineData(withRest, limits)
 
-    return {
-      allDutyPeriods: withRest,
-      pastDuties,
-      futureDuties,
-      cumulativeLimits,
-      capacity,
-      forecast,
-      restViolations,
-      timelineData,
-      restUntilLegal,
+      // Rest until legal for next duty
+      const restUntilLegal = calculateRestUntilLegal(currentDPs)
+
+      return {
+        allDutyPeriods: withRest,
+        pastDuties,
+        futureDuties,
+        cumulativeLimits,
+        capacity,
+        forecast,
+        restViolations,
+        timelineData,
+        restUntilLegal,
+      }
+    } catch (err) {
+      console.error("[FDP] Error computing duty data:", err)
+      return EMPTY_RESULT
     }
-  }, [flights, scheduleEntries, airportTimezones])
+  }, [dbReady, flights, scheduleEntries, airportTimezones])
 
   // Live countdown — recompute rest-until-legal every 60 seconds
   const [liveRestUntilLegal, setLiveRestUntilLegal] = useState<RestUntilLegalResult | null>(
@@ -143,6 +179,6 @@ export function useFDPData() {
   return {
     ...result,
     restUntilLegal: liveRestUntilLegal,
-    isLoading: flightsLoading || scheduleLoading,
+    isLoading: !dbReady || flightsLoading || scheduleLoading,
   }
 }

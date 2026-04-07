@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useEffect, useCallback } from "react"
+import { Component, useMemo, useState, useEffect, useCallback, type ReactNode, type ErrorInfo } from "react"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -26,6 +26,42 @@ import { QuickCheckPanel } from "@/components/roster/quick-check-panel"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import type { ScenarioResult } from "@/lib/utils/roster/fdp-calculator"
 import { cn } from "@/lib/utils"
+
+/** Error boundary around the chart — prevents Recharts crashes from taking down the page */
+class ChartErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { hasError: false }
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[FDP] Chart render error:", error, info)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Card>
+          <CardContent className="py-6 text-center">
+            <AlertTriangle className="h-6 w-6 text-muted-foreground/40 mb-2 mx-auto" />
+            <p className="text-xs font-medium text-foreground mb-1">Chart failed to render</p>
+            <button
+              onClick={() => this.setState({ hasError: false })}
+              className="text-[10px] text-primary hover:underline"
+            >
+              Tap to retry
+            </button>
+          </CardContent>
+        </Card>
+      )
+    }
+    return this.props.children
+  }
+}
 
 /** Format minutes as "Xh Ym" */
 function formatMinutesHM(minutes: number): string {
@@ -262,15 +298,17 @@ export default function FDPPage() {
 
         {/* Interactive Timeline Chart — tabs integrated into card */}
         {timelineData.length > 0 ? (
-          <FDPTimelineChart
-            timelineData={timelineData}
-            limits={activeLimits}
-            capacity={capacity}
-            forecast={forecast}
-            scenarioTimelineData={scenarioResult?.timelineData}
-            scenarioModifiedDates={scenarioResult?.modifiedDates}
-            scenarioRemovedDates={scenarioResult?.removedDates}
-          />
+          <ChartErrorBoundary>
+            <FDPTimelineChart
+              timelineData={timelineData}
+              limits={activeLimits}
+              capacity={capacity}
+              forecast={forecast}
+              scenarioTimelineData={scenarioResult?.timelineData}
+              scenarioModifiedDates={scenarioResult?.modifiedDates}
+              scenarioRemovedDates={scenarioResult?.removedDates}
+            />
+          </ChartErrorBoundary>
         ) : !isLoading ? (
           <Card>
             <CardContent className="py-6 text-center">
