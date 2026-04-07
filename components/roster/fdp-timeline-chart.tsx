@@ -10,6 +10,7 @@ import {
   CartesianGrid,
   Tooltip,
   ReferenceLine,
+  ReferenceArea,
   ResponsiveContainer,
   Cell,
   Area,
@@ -46,9 +47,10 @@ const VIEW_COLORS: Record<string, string> = {
 
 // Semantic colors for data bars and compliance indicators
 const COLORS = {
-  compliant: "oklch(0.65 0.20 155)",   // warm green
+  dutyBar: "oklch(0.65 0.15 250)",     // blue for duty hours bars
+  flightBar: "oklch(0.70 0.15 80)",    // yellow-amber for flight hours bars
+  restBar: "oklch(0.65 0.20 155)",     // green for rest hours bars
   violation: "oklch(0.60 0.22 25)",    // warm red
-  future: "oklch(0.65 0.15 250)",      // muted blue
   warning90: "oklch(0.70 0.15 55)",    // amber for 90% line
 }
 
@@ -81,7 +83,6 @@ export function FDPTimelineChart({
   } | null>(null)
   const overviewRef = useRef<HTMLDivElement>(null)
   const rafRef = useRef<number>(0)
-  const AXIS_ZONE_HEIGHT = 40
   const CHART_LEFT_PX = 40 // YAxis width
   const CHART_RIGHT_PX = 20 // right margin — same for main + overview
   const EDGE_TOLERANCE = 24 // px tolerance for edge-drag detection
@@ -443,10 +444,11 @@ export function FDPTimelineChart({
     tooltipTimerRef.current = setTimeout(() => setTooltipActive(false), 2000)
   }, [])
 
-  // Main chart touch — zone-aware: axis zone = pan, chart body = tooltip (passthrough), 2-finger = zoom
+  // Main chart touch — pinch zoom only, single finger = tooltip (passthrough)
   const handleChartTouchStart = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 2) {
-      // Pinch zoom anywhere on chart
+      // Pinch zoom — dismiss tooltip immediately
+      setTooltipActive(false)
       const dist = Math.abs(e.touches[0].clientX - e.touches[1].clientX)
       const wrapper = chartWrapperRef.current
       gestureRef.current = {
@@ -460,27 +462,9 @@ export function FDPTimelineChart({
       return
     }
     if (e.touches.length === 1) {
-      const wrapper = chartWrapperRef.current
-      if (!wrapper) return
-      const rect = wrapper.getBoundingClientRect()
-      const touchY = e.touches[0].clientY - rect.top
-      // Only pan if touching the bottom axis zone
-      if (touchY > rect.height - AXIS_ZONE_HEIGHT) {
-        if (overviewDateTimerRef.current) clearTimeout(overviewDateTimerRef.current)
-        setShowOverviewDates(true)
-        gestureRef.current = {
-          mode: "pan",
-          startX: e.touches[0].clientX,
-          startWindow: { ...effectiveWindow },
-          pinchStartDist: 0,
-          pinchStartWindow: { ...effectiveWindow },
-          wrapperWidth: wrapper.clientWidth || 300,
-        }
-      } else {
-        // Chart body — show tooltip, set timer to dismiss
-        if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current)
-        setTooltipActive(true)
-      }
+      // Chart body — show tooltip, set timer to dismiss
+      if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current)
+      setTooltipActive(true)
     }
   }, [effectiveWindow])
 
@@ -489,6 +473,8 @@ export function FDPTimelineChart({
     if (e.touches.length < 1) return
     if (overviewDateTimerRef.current) clearTimeout(overviewDateTimerRef.current)
     setShowOverviewDates(true)
+    // Dismiss chart tooltip/focus when interacting with overview
+    setTooltipActive(false)
 
     const wrapper = overviewRef.current
     if (!wrapper) return
@@ -707,7 +693,33 @@ export function FDPTimelineChart({
 
       {/* Chart */}
       <Card className="shadow-sm">
-        <CardContent className="pt-4 pb-2 px-2">
+        <CardContent className="pt-4 pb-2 px-2 relative">
+          {/* Zoom controls — top right */}
+          <div className="absolute top-2 right-2 flex items-center gap-0.5 z-20">
+            <button
+              onClick={zoomIn}
+              className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+              aria-label="Zoom in"
+            >
+              <ZoomIn className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={zoomOut}
+              className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+              aria-label="Zoom out"
+            >
+              <ZoomOut className="h-3.5 w-3.5" />
+            </button>
+            {viewWindow && (
+              <button
+                onClick={resetZoom}
+                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                aria-label="Reset zoom"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           {(isRestView ? restData.length === 0 : timelineData.length === 0) ? (
             <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
               No data to display
@@ -722,10 +734,6 @@ export function FDPTimelineChart({
               onTouchEnd={handleGestureEnd}
               className="touch-none relative"
             >
-              {/* Axis pan zone visual hint — subtle gradient at bottom */}
-              <div className="absolute bottom-0 pointer-events-none" style={{ left: CHART_LEFT_PX, right: CHART_RIGHT_PX, height: AXIS_ZONE_HEIGHT }}>
-                <div className="w-full h-full bg-gradient-to-t from-muted/10 to-transparent" />
-              </div>
               <ResponsiveContainer width="100%" height={320}>
                 <ComposedChart data={slicedData} margin={{ top: 5, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
@@ -760,8 +768,8 @@ export function FDPTimelineChart({
                     {slicedData.map((entry, index) => (
                       <Cell
                         key={index}
-                        fill={entry.restCompliant ? COLORS.compliant : COLORS.violation}
-                        opacity={entry.isFuture ? 0.5 : 0.85}
+                        fill={entry.restCompliant ? COLORS.restBar : COLORS.violation}
+                        opacity={entry.isFuture ? 0.4 : 0.85}
                       />
                     ))}
                   </Bar>
@@ -777,18 +785,13 @@ export function FDPTimelineChart({
               onTouchEnd={handleGestureEnd}
               className="touch-none relative"
             >
-              {/* Axis pan zone affordance */}
-              <div className="absolute bottom-0 pointer-events-none z-10" style={{ left: CHART_LEFT_PX, right: CHART_RIGHT_PX, height: AXIS_ZONE_HEIGHT }}>
-                <div className="w-full h-full border-t border-dashed border-border/40 bg-gradient-to-t from-muted/15 to-transparent" />
-                <div className="absolute top-1 left-1/2 -translate-x-1/2 text-[8px] text-muted-foreground/50 select-none">↔ drag to pan</div>
-              </div>
               <ResponsiveContainer width="100%" height={320}>
                 <ComposedChart data={slicedData} margin={{ top: 5, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
                   <defs>
                     {selectedNonRestViews.map((view) => (
                       <linearGradient key={view.key} id={`gradient-${view.key}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={view.color} stopOpacity={isSingleView ? 0.35 : 0.25} />
-                        <stop offset="95%" stopColor={view.color} stopOpacity={0.05} />
+                        <stop offset="5%" stopColor={view.color} stopOpacity={isSingleView ? 0.5 : 0.35} />
+                        <stop offset="95%" stopColor={view.color} stopOpacity={0.08} />
                       </linearGradient>
                     ))}
                   </defs>
@@ -855,6 +858,23 @@ export function FDPTimelineChart({
                     />
                   )}
 
+                  {/* Future region overlay — subtle dimming after today */}
+                  {(() => {
+                    const todayIdx = slicedData.findIndex((d) => d.date === todayStr)
+                    if (todayIdx >= 0 && todayIdx < slicedData.length - 1) {
+                      return (
+                        <ReferenceArea
+                          x1={slicedData[todayIdx].dateLabel}
+                          x2={slicedData[slicedData.length - 1].dateLabel}
+                          fill={cc.card}
+                          fillOpacity={0.3}
+                          strokeOpacity={0}
+                        />
+                      )
+                    }
+                    return null
+                  })()}
+
                   {/* Rolling cumulative areas — one per selected view */}
                   {selectedNonRestViews.map((view) => (
                     <Area
@@ -864,14 +884,15 @@ export function FDPTimelineChart({
                       stroke={view.color}
                       strokeWidth={2}
                       dot={false}
-                      activeDot={{ r: 4, strokeWidth: 2 }}
+                      activeDot={false}
                       name={view.rollingLabel}
                     />
                   ))}
 
-                  {/* Daily bars — use view color for coherence */}
-                  {uniqueBarKeys.map((barKey, barIdx) => {
+                  {/* Daily bars — duty: blue, flight: yellow */}
+                  {uniqueBarKeys.map((barKey) => {
                     const barView = selectedNonRestViews.find((v) => v.barKey === barKey)!
+                    const barColor = barKey === "dutyHours" ? COLORS.dutyBar : COLORS.flightBar
                     return (
                       <Bar
                         key={`bar-${barKey}`}
@@ -883,12 +904,8 @@ export function FDPTimelineChart({
                         {slicedData.map((entry, index) => (
                           <Cell
                             key={index}
-                            fill={
-                              uniqueBarKeys.length > 1
-                                ? barIdx === 0 ? COLORS.compliant : COLORS.future
-                                : entry.isFuture ? COLORS.future : COLORS.compliant
-                            }
-                            opacity={entry.isFuture ? 0.35 : 0.6}
+                            fill={barColor}
+                            opacity={entry.isFuture ? 0.3 : 0.7}
                           />
                         ))}
                       </Bar>
@@ -898,9 +915,6 @@ export function FDPTimelineChart({
               </ResponsiveContainer>
             </div>
           )}
-
-          {/* Axis drag hint */}
-          <div className="text-center text-[8px] text-muted-foreground/40 select-none mt-0.5">↔ drag axis to pan</div>
 
           {/* Overview mini-chart — "big picture" with rolling lines + active window */}
           {activeData.length > 0 && (
@@ -928,7 +942,7 @@ export function FDPTimelineChart({
                     {isRestView ? (
                       <Bar dataKey="restHours" maxBarSize={4} isAnimationActive={false}>
                         {activeData.map((entry, i) => (
-                          <Cell key={i} fill={entry.restCompliant ? COLORS.compliant : COLORS.violation} opacity={0.6} />
+                          <Cell key={i} fill={entry.restCompliant ? COLORS.restBar : COLORS.violation} opacity={0.6} />
                         ))}
                       </Bar>
                     ) : (
@@ -1003,32 +1017,6 @@ export function FDPTimelineChart({
             </div>
           )}
 
-          {/* Zoom controls */}
-          <div className="flex items-center gap-1 mt-1 px-1">
-            <button
-              onClick={zoomIn}
-              className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-              aria-label="Zoom in"
-            >
-              <ZoomIn className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={zoomOut}
-              className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-              aria-label="Zoom out"
-            >
-              <ZoomOut className="h-3.5 w-3.5" />
-            </button>
-            {viewWindow && (
-              <button
-                onClick={resetZoom}
-                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                aria-label="Reset zoom"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
         </CardContent>
       </Card>
 
