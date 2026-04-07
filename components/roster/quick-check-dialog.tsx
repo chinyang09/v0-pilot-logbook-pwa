@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo } from "react"
 import {
   Dialog,
   DialogContent,
@@ -10,17 +10,26 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { CheckCircle2, XCircle } from "lucide-react"
+import {
+  CheckCircle2,
+  XCircle,
+  Plus,
+  Trash2,
+  ArrowLeftRight,
+  AlertTriangle,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
-import { simulateHypotheticalDuty } from "@/lib/utils/roster/fdp-calculator"
-import type { QuickCheckResult } from "@/lib/utils/roster/fdp-calculator"
+import { simulateScenario } from "@/lib/utils/roster/fdp-calculator"
+import type { ScenarioChange, ScenarioResult } from "@/lib/utils/roster/fdp-calculator"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
-import type { DutyPeriod } from "@/types/entities/roster.types"
+import type { DutyPeriod, FTLLimits } from "@/types/entities/roster.types"
 
 interface QuickCheckDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   dutyPeriods: DutyPeriod[]
+  limits?: FTLLimits
+  onScenarioResult?: (result: ScenarioResult | null) => void
 }
 
 function tomorrow(): string {
@@ -29,149 +38,302 @@ function tomorrow(): string {
   return d.toISOString().split("T")[0]
 }
 
-function CheckRow({
-  label,
-  value,
-  compliant,
-}: {
-  label: string
-  value: string
-  compliant: boolean
-}) {
-  return (
-    <div className="flex items-center justify-between py-1">
-      <div className="flex items-center gap-1.5">
-        {compliant ? (
-          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
-        ) : (
-          <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
-        )}
-        <span className="text-xs">{label}</span>
-      </div>
-      <span className={cn("text-xs tabular-nums font-medium", !compliant && "text-red-500")}>
-        {value}
-      </span>
-    </div>
+function formatDateShort(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00Z")
+  return `${d.getUTCDate().toString().padStart(2, "0")} ${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}`
+}
+
+let nextChangeId = 1
+
+interface ChangeEntry {
+  id: string
+  type: "add" | "remove"
+  date: string
+  reportTime: string
+  debriefTime: string
+  flightHours: string
+  sectors: string
+  /** For remove: the DP id to exclude */
+  targetDutyId: string
+}
+
+function newAddEntry(): ChangeEntry {
+  return {
+    id: `c${nextChangeId++}`,
+    type: "add",
+    date: tomorrow(),
+    reportTime: "06:00",
+    debriefTime: "14:00",
+    flightHours: "6",
+    sectors: "2",
+    targetDutyId: "",
+  }
+}
+
+export function QuickCheckDialog({
+  open,
+  onOpenChange,
+  dutyPeriods,
+  limits = DEFAULT_FTL_LIMITS,
+  onScenarioResult,
+}: QuickCheckDialogProps) {
+  const [changes, setChanges] = useState<ChangeEntry[]>([newAddEntry()])
+  const [result, setResult] = useState<ScenarioResult | null>(null)
+  const [mode, setMode] = useState<"add" | "swap">("add")
+
+  // Future duty periods available for removal/swap
+  const futureDPs = useMemo(
+    () => dutyPeriods.filter((dp) => dp.isFuture).sort((a, b) => a.date.localeCompare(b.date)),
+    [dutyPeriods]
   )
-}
 
-const RULE_LABELS: Record<string, string> = {
-  "3a": "3(a)",
-  "3b": "3(b)",
-  "3c": "3(c)",
-  "3d": "3(d)",
-}
-
-export function QuickCheckDialog({ open, onOpenChange, dutyPeriods }: QuickCheckDialogProps) {
-  const [date, setDate] = useState(tomorrow)
-  const [reportTime, setReportTime] = useState("06:00")
-  const [debriefTime, setDebriefTime] = useState("14:00")
-  const [flightHours, setFlightHours] = useState("6")
-  const [sectors, setSectors] = useState("2")
-  const [result, setResult] = useState<QuickCheckResult | null>(null)
-
-  const handleCheck = useCallback(() => {
-    const fh = parseFloat(flightHours) || 0
-    const sc = parseInt(sectors) || 1
-
-    const res = simulateHypotheticalDuty(
-      dutyPeriods,
-      {
-        date,
-        reportTime,
-        debriefTime,
-        flightMinutes: Math.round(fh * 60),
-        sectorCount: sc,
-      },
-      DEFAULT_FTL_LIMITS
-    )
-    setResult(res)
-  }, [dutyPeriods, date, reportTime, debriefTime, flightHours, sectors])
-
-  const handleReset = useCallback(() => {
+  const addChange = useCallback(() => {
+    setChanges((prev) => [...prev, newAddEntry()])
     setResult(null)
-    setDate(tomorrow())
-    setReportTime("06:00")
-    setDebriefTime("14:00")
-    setFlightHours("6")
-    setSectors("2")
   }, [])
 
+  const removeChange = useCallback((id: string) => {
+    setChanges((prev) => prev.filter((c) => c.id !== id))
+    setResult(null)
+  }, [])
+
+  const updateChange = useCallback((id: string, updates: Partial<ChangeEntry>) => {
+    setChanges((prev) => prev.map((c) => c.id === id ? { ...c, ...updates } : c))
+    setResult(null)
+  }, [])
+
+  const addSwap = useCallback((dpId: string, dpDate: string) => {
+    // Add a "remove" entry for the selected DP
+    const removeEntry: ChangeEntry = {
+      id: `c${nextChangeId++}`,
+      type: "remove",
+      date: dpDate,
+      reportTime: "",
+      debriefTime: "",
+      flightHours: "",
+      sectors: "",
+      targetDutyId: dpId,
+    }
+    // Add an "add" entry for the replacement
+    const addEntry = newAddEntry()
+    setChanges((prev) => [...prev, removeEntry, addEntry])
+    setResult(null)
+  }, [])
+
+  const toggleRemoveDuty = useCallback((dpId: string, dpDate: string) => {
+    setChanges((prev) => {
+      const existing = prev.find((c) => c.type === "remove" && c.targetDutyId === dpId)
+      if (existing) {
+        return prev.filter((c) => c.id !== existing.id)
+      }
+      return [...prev, {
+        id: `c${nextChangeId++}`,
+        type: "remove" as const,
+        date: dpDate,
+        reportTime: "",
+        debriefTime: "",
+        flightHours: "",
+        sectors: "",
+        targetDutyId: dpId,
+      }]
+    })
+    setResult(null)
+  }, [])
+
+  const handleCheck = useCallback(() => {
+    const scenarioChanges: ScenarioChange[] = changes.map((c) => ({
+      id: c.id,
+      type: c.type,
+      date: c.date,
+      reportTime: c.type === "add" ? c.reportTime : undefined,
+      debriefTime: c.type === "add" ? c.debriefTime : undefined,
+      flightMinutes: c.type === "add" ? Math.round((parseFloat(c.flightHours) || 0) * 60) : undefined,
+      sectorCount: c.type === "add" ? (parseInt(c.sectors) || 1) : undefined,
+      targetDutyId: c.type === "remove" ? c.targetDutyId : undefined,
+    }))
+
+    const res = simulateScenario(dutyPeriods, scenarioChanges, limits)
+    setResult(res)
+    onScenarioResult?.(res)
+  }, [changes, dutyPeriods, limits, onScenarioResult])
+
+  const handleReset = useCallback(() => {
+    setChanges([newAddEntry()])
+    setResult(null)
+    onScenarioResult?.(null)
+    setMode("add")
+  }, [onScenarioResult])
+
+  const handleClose = useCallback((open: boolean) => {
+    if (!open) {
+      onScenarioResult?.(null)
+    }
+    onOpenChange(open)
+  }, [onOpenChange, onScenarioResult])
+
+  const removedDutyIds = useMemo(
+    () => new Set(changes.filter((c) => c.type === "remove").map((c) => c.targetDutyId)),
+    [changes]
+  )
+
+  const addEntries = changes.filter((c) => c.type === "add")
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent
-        className="max-w-xs max-h-[85vh] overflow-y-auto"
+        className="max-w-sm max-h-[90vh] overflow-y-auto"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <DialogHeader className="pb-0">
-          <DialogTitle className="text-sm">Quick Legality Check</DialogTitle>
+          <DialogTitle className="text-sm">Legality Check</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-2">
-          {/* Compact form — 2×2 grid */}
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <Label htmlFor="qc-date" className="text-[10px] text-muted-foreground">Date</Label>
-              <Input
-                id="qc-date"
-                type="date"
-                value={date}
-                onChange={(e) => { setDate(e.target.value); setResult(null) }}
-                className="mt-0.5 h-8 text-xs"
-              />
-            </div>
-            <div>
-              <Label htmlFor="qc-report" className="text-[10px] text-muted-foreground">Report</Label>
-              <Input
-                id="qc-report"
-                type="time"
-                value={reportTime}
-                onChange={(e) => { setReportTime(e.target.value); setResult(null) }}
-                className="mt-0.5 h-8 text-xs"
-              />
-            </div>
-            <div>
-              <Label htmlFor="qc-debrief" className="text-[10px] text-muted-foreground">Debrief</Label>
-              <Input
-                id="qc-debrief"
-                type="time"
-                value={debriefTime}
-                onChange={(e) => { setDebriefTime(e.target.value); setResult(null) }}
-                className="mt-0.5 h-8 text-xs"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label htmlFor="qc-flight" className="text-[10px] text-muted-foreground">Flight (h)</Label>
-              <Input
-                id="qc-flight"
-                type="number"
-                step="0.5"
-                min="0"
-                inputMode="decimal"
-                value={flightHours}
-                onChange={(e) => { setFlightHours(e.target.value); setResult(null) }}
-                className="mt-0.5 h-8 text-xs"
-              />
-            </div>
-            <div>
-              <Label htmlFor="qc-sectors" className="text-[10px] text-muted-foreground">Sectors</Label>
-              <Input
-                id="qc-sectors"
-                type="number"
-                min="1"
-                inputMode="numeric"
-                value={sectors}
-                onChange={(e) => { setSectors(e.target.value); setResult(null) }}
-                className="mt-0.5 h-8 text-xs"
-              />
-            </div>
+          {/* Mode selector */}
+          <div className="flex gap-1">
+            <button
+              onClick={() => setMode("add")}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[10px] font-medium transition-colors",
+                mode === "add" ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"
+              )}
+            >
+              <Plus className="h-3 w-3" /> Add Flight
+            </button>
+            <button
+              onClick={() => setMode("swap")}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[10px] font-medium transition-colors",
+                mode === "swap" ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"
+              )}
+            >
+              <ArrowLeftRight className="h-3 w-3" /> Swap / Remove
+            </button>
           </div>
 
-          <Button onClick={handleCheck} className="w-full h-8 text-xs" size="sm">
-            Check
-          </Button>
+          {/* Swap mode: show future DPs to remove */}
+          {mode === "swap" && futureDPs.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted-foreground">Tap scheduled duties to remove/swap:</p>
+              <div className="max-h-[120px] overflow-y-auto space-y-0.5">
+                {futureDPs.map((dp) => {
+                  const isRemoved = removedDutyIds.has(dp.id)
+                  return (
+                    <div key={dp.id} className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => toggleRemoveDuty(dp.id, dp.date)}
+                        className={cn(
+                          "flex-1 flex items-center justify-between px-2 py-1 rounded text-[10px] transition-colors",
+                          isRemoved ? "bg-red-500/10 text-red-500 line-through" : "bg-secondary/50 text-foreground hover:bg-secondary"
+                        )}
+                      >
+                        <span className="font-medium tabular-nums">{formatDateShort(dp.date)}</span>
+                        <span className="tabular-nums">{dp.reportTime}–{dp.debriefTime} ({(dp.flightMinutes / 60).toFixed(1)}h)</span>
+                      </button>
+                      {isRemoved && (
+                        <button
+                          onClick={() => addSwap(dp.id, dp.date)}
+                          className="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                          title="Add replacement flight"
+                        >
+                          <ArrowLeftRight className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {mode === "swap" && futureDPs.length === 0 && (
+            <p className="text-[10px] text-muted-foreground text-center py-2">No scheduled future duties to swap.</p>
+          )}
+
+          {/* Add entries */}
+          {addEntries.length > 0 && (
+            <div className="space-y-2">
+              {addEntries.length > 1 && (
+                <p className="text-[10px] text-muted-foreground">{addEntries.length} flights to add:</p>
+              )}
+              {addEntries.map((entry, idx) => (
+                <div key={entry.id} className="relative bg-secondary/30 rounded-md p-2 space-y-1.5">
+                  {addEntries.length > 1 && (
+                    <button
+                      onClick={() => removeChange(entry.id)}
+                      className="absolute top-1 right-1 p-0.5 rounded text-muted-foreground hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <div>
+                      <Label className="text-[9px] text-muted-foreground">Date</Label>
+                      <Input
+                        type="date"
+                        value={entry.date}
+                        onChange={(e) => updateChange(entry.id, { date: e.target.value })}
+                        className="h-7 text-[11px] px-1.5"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[9px] text-muted-foreground">Report</Label>
+                      <Input
+                        type="time"
+                        value={entry.reportTime}
+                        onChange={(e) => updateChange(entry.id, { reportTime: e.target.value })}
+                        className="h-7 text-[11px] px-1.5"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[9px] text-muted-foreground">Debrief</Label>
+                      <Input
+                        type="time"
+                        value={entry.debriefTime}
+                        onChange={(e) => updateChange(entry.id, { debriefTime: e.target.value })}
+                        className="h-7 text-[11px] px-1.5"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <div>
+                      <Label className="text-[9px] text-muted-foreground">Flight (h)</Label>
+                      <Input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        inputMode="decimal"
+                        value={entry.flightHours}
+                        onChange={(e) => updateChange(entry.id, { flightHours: e.target.value })}
+                        className="h-7 text-[11px] px-1.5"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[9px] text-muted-foreground">Sectors</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        inputMode="numeric"
+                        value={entry.sectors}
+                        onChange={(e) => updateChange(entry.id, { sectors: e.target.value })}
+                        className="h-7 text-[11px] px-1.5"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex gap-1.5">
+            <Button onClick={addChange} variant="outline" size="sm" className="flex-1 h-7 text-[10px]">
+              <Plus className="h-3 w-3 mr-1" /> Add Flight
+            </Button>
+            <Button onClick={handleCheck} size="sm" className="flex-1 h-7 text-[10px]">
+              Check Legality
+            </Button>
+          </div>
 
           {/* Results */}
           {result && (
@@ -179,50 +341,41 @@ export function QuickCheckDialog({ open, onOpenChange, dutyPeriods }: QuickCheck
               {/* Overall verdict */}
               <div className={cn(
                 "rounded-md py-1.5 text-center font-semibold text-xs",
-                result.overallCompliant
+                result.overallLegal
                   ? "bg-green-500/10 text-green-600 dark:text-green-400"
                   : "bg-red-500/10 text-red-600 dark:text-red-400"
               )}>
-                {result.overallCompliant ? "LEGAL" : "VIOLATION"}
+                {result.overallLegal ? "ALL CHANGES LEGAL" : "VIOLATIONS DETECTED"}
               </div>
 
-              {/* Individual checks — compact */}
-              <div className="divide-y divide-border">
-                {result.restBefore && (
-                  <CheckRow
-                    label={`Rest (${RULE_LABELS[result.restBefore.rule] ?? result.restBefore.rule})`}
-                    value={`${(result.restBefore.restMinutes / 60).toFixed(1)} / ${(result.restBefore.requiredRestMinutes / 60).toFixed(0)}h`}
-                    compliant={result.restBefore.compliant}
-                  />
+              {/* Violations list */}
+              {result.violations.length > 0 && (
+                <div className="space-y-0.5">
+                  {result.violations.map((v, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-[10px] px-2 py-1 rounded bg-red-500/10">
+                      <div className="flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
+                        <span className="text-red-500">{formatDateShort(v.date)}</span>
+                      </div>
+                      <span className="text-red-500 tabular-nums">
+                        {v.projected.toFixed(1)}h / {v.limit.toFixed(0)}h
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Summary of changes */}
+              <div className="text-[10px] text-muted-foreground px-1">
+                {result.modifiedDates.size > 0 && (
+                  <span>{result.modifiedDates.size} flight{result.modifiedDates.size !== 1 ? "s" : ""} added</span>
                 )}
-                <CheckRow
-                  label="FDP"
-                  value={`${(result.maxFdp.dutyMinutes / 60).toFixed(1)} / ${(result.maxFdp.maxFdpMinutes / 60).toFixed(1)}h`}
-                  compliant={result.maxFdp.compliant}
-                />
-                <CheckRow
-                  label="14d Duty"
-                  value={`${result.duty14Days.projected.toFixed(1)} / ${result.duty14Days.limit}h`}
-                  compliant={result.duty14Days.compliant}
-                />
-                <CheckRow
-                  label="28d Duty"
-                  value={`${result.duty28Days.projected.toFixed(1)} / ${result.duty28Days.limit}h`}
-                  compliant={result.duty28Days.compliant}
-                />
-                <CheckRow
-                  label="28d Flight"
-                  value={`${result.flight28Days.projected.toFixed(1)} / ${result.flight28Days.limit}h`}
-                  compliant={result.flight28Days.compliant}
-                />
-                <CheckRow
-                  label="12mo Flight"
-                  value={`${result.flight365Days.projected.toFixed(1)} / ${result.flight365Days.limit}h`}
-                  compliant={result.flight365Days.compliant}
-                />
+                {result.removedDates.size > 0 && (
+                  <span>{result.modifiedDates.size > 0 ? " · " : ""}{result.removedDates.size} removed</span>
+                )}
               </div>
 
-              <Button variant="ghost" onClick={handleReset} className="w-full h-7 text-[10px] text-muted-foreground" size="sm">
+              <Button variant="ghost" onClick={handleReset} className="w-full h-6 text-[10px] text-muted-foreground" size="sm">
                 Reset
               </Button>
             </div>

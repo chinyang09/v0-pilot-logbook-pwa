@@ -10,7 +10,6 @@ import {
   RefreshCw,
   TrendingUp,
   AlertTriangle,
-  Clock,
   Calculator,
   ChevronDown,
 } from "lucide-react"
@@ -24,12 +23,8 @@ import {
 } from "@/types/entities/roster.types"
 import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
 import { QuickCheckDialog } from "@/components/roster/quick-check-dialog"
+import type { ScenarioResult } from "@/lib/utils/roster/fdp-calculator"
 import { cn } from "@/lib/utils"
-
-function formatDateDDMMM(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00Z")
-  return `${d.getUTCDate().toString().padStart(2, "0")} ${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}`
-}
 
 /** Format minutes as "Xh Ym" */
 function formatMinutesHM(minutes: number): string {
@@ -38,45 +33,6 @@ function formatMinutesHM(minutes: number): string {
   if (h === 0) return `${m}m`
   if (m === 0) return `${h}h`
   return `${h}h ${m}m`
-}
-
-function LimitCard({
-  label,
-  used,
-  limit,
-}: {
-  label: string
-  used: number
-  limit: number
-}) {
-  const remaining = Math.max(0, limit - used)
-  const pct = limit > 0 ? (used / limit) * 100 : 0
-  const barColor = pct >= 100 ? "bg-red-500"
-    : pct >= 90 ? "bg-orange-500"
-      : pct >= 75 ? "bg-yellow-500"
-        : "bg-green-500"
-  const remainingColor = pct >= 100 ? "text-red-500"
-    : pct >= 90 ? "text-orange-500"
-      : pct >= 75 ? "text-yellow-500"
-        : "text-green-500"
-
-  return (
-    <div className="space-y-1">
-      <span className="text-[10px] text-muted-foreground">{label}</span>
-      <div className="text-sm font-semibold tabular-nums">
-        {used.toFixed(0)}h <span className="text-muted-foreground text-xs font-normal">/ {limit}h</span>
-      </div>
-      <div className="h-1 rounded-full bg-muted">
-        <div
-          className={cn("h-full rounded-full transition-all", barColor)}
-          style={{ width: `${Math.min(pct, 100)}%` }}
-        />
-      </div>
-      <div className={cn("text-[10px] font-medium", remainingColor)}>
-        {remaining.toFixed(0)}h left
-      </div>
-    </div>
-  )
 }
 
 const RULE_DESCRIPTIONS: Record<string, string> = {
@@ -106,6 +62,7 @@ export default function FDPPage() {
   } = useFDPData()
 
   const [quickCheckOpen, setQuickCheckOpen] = useState(false)
+  const [scenarioResult, setScenarioResult] = useState<ScenarioResult | null>(null)
   const [ruleMenuOpen, setRuleMenuOpen] = useState(false)
   const [activeRule, setActiveRule] = useState<RegulationType>("CAAS")
   const [customLimits, setCustomLimits] = useState<FTLLimits>(DEFAULT_FTL_LIMITS)
@@ -174,14 +131,14 @@ export default function FDPPage() {
 
   return (
     <PageContainer>
-      <div className="px-4 pt-3 pb-safe space-y-3">
+      <div className="px-4 pt-2 pb-safe space-y-2">
         {/* Rule selector + Rest countdown row */}
         <div className="flex items-stretch gap-2">
           {/* Rule selector chip */}
           <div className="relative shrink-0">
             <button
               onClick={() => setRuleMenuOpen(!ruleMenuOpen)}
-              className="flex items-center gap-1 px-3 py-2 rounded-lg bg-secondary text-foreground text-xs font-medium h-full"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-secondary text-foreground text-xs font-medium h-full"
             >
               {REGULATION_LABELS[activeRule]}
               <ChevronDown className="h-3 w-3 text-muted-foreground" />
@@ -214,10 +171,10 @@ export default function FDPPage() {
                   : "border-red-500/20 bg-red-500/5"
               )}
             >
-              <CardContent className="py-2 px-3">
+              <CardContent className="py-1.5 px-2.5">
                 <div className="flex items-center gap-2">
                   <div className={cn(
-                    "text-xl font-mono font-bold tabular-nums leading-none",
+                    "text-lg font-mono font-bold tabular-nums leading-none",
                     restUntilLegal.isLegalNow ? "text-green-500" : "text-red-500"
                   )}>
                     {restUntilLegal.isLegalNow ? "00:00" : countdown}
@@ -242,67 +199,42 @@ export default function FDPPage() {
           )}
         </div>
 
-        {/* Capacity Overview — 4 limit cards, compact */}
-        <Card>
-          <CardContent className="py-2.5 px-3">
-            <div className="grid grid-cols-4 gap-3">
-              <LimitCard
-                label="14-Day Duty"
-                used={capacity.duty14Days.used}
-                limit={activeLimits.maxDuty14Days}
-              />
-              <LimitCard
-                label="28-Day Duty"
-                used={capacity.duty28Days.used}
-                limit={activeLimits.maxDuty28Days}
-              />
-              <LimitCard
-                label="28-Day Flight"
-                used={capacity.flight28Days.used}
-                limit={activeLimits.maxFlight28Days}
-              />
-              <LimitCard
-                label="12-Mo Flight"
-                used={capacity.flight365Days.used}
-                limit={activeLimits.maxFlight365Days}
-              />
-            </div>
-
-            {/* Warnings footer */}
-            {(restViolations.length > 0 || forecast.hasExceedance) && (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 pt-2 border-t border-border">
-                {restViolations.length > 0 && (
-                  <div className="flex items-center gap-1">
-                    <AlertTriangle className="h-3 w-3 text-red-500" />
-                    <span className="text-[10px] text-red-500">
-                      {restViolations.length} rest violation{restViolations.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                )}
-                {forecast.hasExceedance && (
-                  <div className="flex items-center gap-1">
-                    <AlertTriangle className="h-3 w-3 text-orange-500" />
-                    <span className="text-[10px] text-orange-500">
-                      Breach on {formatDateDDMMM(forecast.exceedances[0].date)}
-                    </span>
-                  </div>
-                )}
+        {/* Warnings — compact inline */}
+        {(restViolations.length > 0 || forecast.hasExceedance) && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1">
+            {restViolations.length > 0 && (
+              <div className="flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3 text-red-500" />
+                <span className="text-[10px] text-red-500">
+                  {restViolations.length} rest violation{restViolations.length !== 1 ? "s" : ""}
+                </span>
               </div>
             )}
-          </CardContent>
-        </Card>
+            {forecast.hasExceedance && (
+              <div className="flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3 text-orange-500" />
+                <span className="text-[10px] text-orange-500">
+                  Breach forecast
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
-        {/* Interactive Timeline Chart */}
+        {/* Interactive Timeline Chart — tabs integrated into card */}
         {timelineData.length > 0 ? (
           <FDPTimelineChart
             timelineData={timelineData}
             limits={activeLimits}
             capacity={capacity}
             forecast={forecast}
+            scenarioTimelineData={scenarioResult?.timelineData}
+            scenarioModifiedDates={scenarioResult?.modifiedDates}
+            scenarioRemovedDates={scenarioResult?.removedDates}
           />
         ) : !isLoading ? (
           <Card>
-            <CardContent className="py-8 text-center">
+            <CardContent className="py-6 text-center">
               <TrendingUp className="h-8 w-8 text-muted-foreground/40 mb-2 mx-auto" />
               <p className="text-xs font-medium text-foreground mb-0.5">No Duty Periods</p>
               <p className="text-[10px] text-muted-foreground max-w-[200px] mx-auto">
@@ -318,6 +250,8 @@ export default function FDPPage() {
         open={quickCheckOpen}
         onOpenChange={setQuickCheckOpen}
         dutyPeriods={allDutyPeriods}
+        limits={activeLimits}
+        onScenarioResult={setScenarioResult}
       />
     </PageContainer>
   )

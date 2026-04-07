@@ -1284,6 +1284,165 @@ export function simulateHypotheticalDuty(
   }
 }
 
+// ============================================
+// Scenario Simulation — multi-change what-if analysis
+// ============================================
+
+export interface ScenarioChange {
+  id: string
+  type: "add" | "remove"
+  /** For "add": the duty to inject. For "remove": identifies the DP to exclude. */
+  date: string           // YYYY-MM-DD
+  reportTime?: string    // HH:MM (required for "add")
+  debriefTime?: string   // HH:MM (required for "add")
+  flightMinutes?: number // required for "add"
+  sectorCount?: number   // required for "add"
+  /** For "remove": the original DP id to exclude */
+  targetDutyId?: string
+}
+
+export interface ScenarioViolation {
+  date: string
+  type: "rest" | "duty14" | "duty28" | "flight28" | "flight365" | "fdp"
+  label: string
+  projected: number
+  limit: number
+}
+
+export interface ScenarioResult {
+  timelineData: TimelineDataPoint[]
+  violations: ScenarioViolation[]
+  overallLegal: boolean
+  /** Set of dates that were modified (added/affected by removal) */
+  modifiedDates: Set<string>
+  /** Set of dates that were removed */
+  removedDates: Set<string>
+}
+
+/**
+ * Apply scenario changes to existing duty periods and regenerate
+ * timeline data with full compliance checking.
+ * Changes are non-destructive — returns new data without modifying originals.
+ */
+export function simulateScenario(
+  existingDPs: DutyPeriod[],
+  changes: ScenarioChange[],
+  limits: FTLLimits
+): ScenarioResult {
+  const removedIds = new Set<string>()
+  const removedDates = new Set<string>()
+  const modifiedDates = new Set<string>()
+
+  // Collect removals
+  for (const change of changes) {
+    if (change.type === "remove" && change.targetDutyId) {
+      removedIds.add(change.targetDutyId)
+      removedDates.add(change.date)
+    }
+  }
+
+  // Start with existing DPs minus removals
+  const baseDPs = existingDPs.filter((dp) => !removedIds.has(dp.id))
+
+  // Build added DPs
+  const addedDPs: DutyPeriod[] = []
+  for (const change of changes) {
+    if (change.type === "add" && change.reportTime && change.debriefTime) {
+      const reportMin = hhmmToMinutes(change.reportTime)
+      let debriefMin = hhmmToMinutes(change.debriefTime)
+      if (debriefMin <= reportMin) debriefMin += 1440
+
+      const dutyMinutes = debriefMin - reportMin
+      const sectorCount = change.sectorCount ?? 1
+      const maxFdpResult = calculateMaxFDP(change.reportTime, sectorCount)
+      const maxFdpMinutes = typeof maxFdpResult === "number" ? maxFdpResult : maxFdpResult.maxFdpMinutes
+
+      addedDPs.push({
+        id: `__scenario_${change.id}__`,
+        date: change.date,
+        reportTime: change.reportTime,
+        debriefTime: change.debriefTime,
+        dutyMinutes,
+        flightMinutes: change.flightMinutes ?? 0,
+        sectorCount,
+        maxFdpMinutes,
+        fdpExtensionUsed: false,
+        source: "schedule",
+        isFuture: true,
+        scheduleEntryIds: [],
+        flightIds: [],
+      })
+      modifiedDates.add(change.date)
+    }
+  }
+
+  // Merge and sort
+  const allDPs = [...baseDPs, ...addedDPs].sort((a, b) => a.date.localeCompare(b.date))
+
+  // Recalculate rest periods
+  const withRest = calculateAllRestPeriods(allDPs)
+
+  // Generate timeline
+  const timelineData = generateTimelineData(withRest, limits)
+
+  // Check for violations
+  const violations: ScenarioViolation[] = []
+  const today = new Date().toISOString().split("T")[0]
+
+  for (const dp of withRest) {
+    // Only check violations on modified/added dates or future dates affected
+    if (dp.restBefore && !dp.restBefore.compliant) {
+      violations.push({
+        date: dp.date,
+        type: "rest",
+        label: `Rest violation (${dp.restBefore.rule})`,
+        projected: dp.restBefore.restMinutes / 60,
+        limit: dp.restBefore.requiredRestMinutes / 60,
+      })
+    }
+
+    if (dp.dutyMinutes > dp.maxFdpMinutes) {
+      violations.push({
+        date: dp.date,
+        type: "fdp",
+        label: "FDP exceeded",
+        projected: dp.dutyMinutes / 60,
+        limit: dp.maxFdpMinutes / 60,
+      })
+    }
+  }
+
+  // Check rolling limits on modified dates
+  for (const date of modifiedDates) {
+    const asOfDate = new Date(date + "T23:59:59Z")
+    const dpsUpToDate = withRest.filter((d) => d.date <= date)
+    const stats14 = calculateRollingStats(dpsUpToDate, asOfDate, 14, limits)
+    const stats28 = calculateRollingStats(dpsUpToDate, asOfDate, 28, limits)
+    const stats365 = calculateRollingStats(dpsUpToDate, asOfDate, 365, limits)
+
+    if (stats14.dutyHours > limits.maxDuty14Days) {
+      violations.push({ date, type: "duty14", label: "14-day duty limit", projected: stats14.dutyHours, limit: limits.maxDuty14Days })
+    }
+    if (stats28.dutyHours > limits.maxDuty28Days) {
+      violations.push({ date, type: "duty28", label: "28-day duty limit", projected: stats28.dutyHours, limit: limits.maxDuty28Days })
+    }
+    if (stats28.flightHours > limits.maxFlight28Days) {
+      violations.push({ date, type: "flight28", label: "28-day flight limit", projected: stats28.flightHours, limit: limits.maxFlight28Days })
+    }
+    if (stats365.flightHours > limits.maxFlight365Days) {
+      violations.push({ date, type: "flight365", label: "12-month flight limit", projected: stats365.flightHours, limit: limits.maxFlight365Days })
+    }
+  }
+
+  return {
+    timelineData,
+    violations,
+    overallLegal: violations.length === 0,
+    modifiedDates,
+    removedDates,
+  }
+}
+
 /**
  * Get compliance status from utilization percentage
  */

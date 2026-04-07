@@ -16,7 +16,6 @@ import {
   Area,
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Check, ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
@@ -58,6 +57,10 @@ interface FDPTimelineChartProps {
   limits: FTLLimits
   capacity: CapacityRemaining
   forecast: ForecastResult
+  /** Scenario overlay: if set, renders scenario timeline with highlights */
+  scenarioTimelineData?: TimelineDataPoint[]
+  scenarioModifiedDates?: Set<string>
+  scenarioRemovedDates?: Set<string>
 }
 
 export function FDPTimelineChart({
@@ -65,6 +68,9 @@ export function FDPTimelineChart({
   limits,
   capacity,
   forecast,
+  scenarioTimelineData,
+  scenarioModifiedDates,
+  scenarioRemovedDates,
 }: FDPTimelineChartProps) {
   const [activeViews, setActiveViews] = useState<Set<ChartView>>(new Set(["duty14"]))
 
@@ -310,7 +316,10 @@ export function FDPTimelineChart({
   }, [selectedNonRestViews])
 
   // Compute the sliced data for the visible window
-  const activeData = isRestView ? restData : timelineData
+  // Use scenario data when available (non-rest views only)
+  const hasScenario = !isRestView && !!scenarioTimelineData
+  const effectiveTimelineData = hasScenario ? scenarioTimelineData! : timelineData
+  const activeData = isRestView ? restData : effectiveTimelineData
   const slicedData = useMemo(() => {
     if (!activeData.length) return activeData
     if (!viewWindow) {
@@ -543,7 +552,7 @@ export function FDPTimelineChart({
   const gridStroke = cc.border
 
   return (
-    <div className="space-y-3">
+    <div>
       {/* Hidden probe to resolve oklch CSS vars → rgb for SVG.
           Uses visibility:hidden (not sr-only) because clip-path:inset(50%) in sr-only
           prevents getComputedStyle from resolving oklch on iOS Safari. */}
@@ -553,99 +562,94 @@ export function FDPTimelineChart({
         style={{ position: "absolute", visibility: "hidden", pointerEvents: "none" }}
         aria-hidden="true"
       />
-      {/* View selector tabs */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-        {views.map((view) => {
-          const cap = view.key === "duty14" ? capacity.duty14Days
-            : view.key === "duty28" ? capacity.duty28Days
-              : view.key === "flight28" ? capacity.flight28Days
-                : capacity.flight365Days
-          const pct = cap.limit > 0 ? (cap.used / cap.limit) * 100 : 0
-          const isActive = activeViews.has(view.key)
-          const isMulti = activeViews.size > 1 && !isRestView
+      <Card className="shadow-sm">
+        <CardContent className="pt-2 pb-2 px-2 relative">
+          {/* View selector tabs — inside card */}
+          <div className="flex gap-1 overflow-x-auto pb-1.5 scrollbar-none px-0.5">
+            {views.map((view) => {
+              const cap = view.key === "duty14" ? capacity.duty14Days
+                : view.key === "duty28" ? capacity.duty28Days
+                  : view.key === "flight28" ? capacity.flight28Days
+                    : capacity.flight365Days
+              const pct = cap.limit > 0 ? (cap.used / cap.limit) * 100 : 0
+              const isActive = activeViews.has(view.key)
+              const isMulti = activeViews.size > 1 && !isRestView
 
-          const remainingColor = pct >= 100 ? "text-red-500"
-            : pct >= 90 ? "text-orange-500"
-              : pct >= 75 ? "text-yellow-500"
-                : "text-green-500"
-          const barColor = pct >= 100 ? "bg-red-500"
-            : pct >= 90 ? "bg-orange-500"
-              : pct >= 75 ? "bg-yellow-500"
-                : "bg-green-500"
+              const remainingColor = pct >= 100 ? "text-red-500"
+                : pct >= 90 ? "text-orange-500"
+                  : pct >= 75 ? "text-yellow-500"
+                    : "text-green-500"
+              const barColor = pct >= 100 ? "bg-red-500"
+                : pct >= 90 ? "bg-orange-500"
+                  : pct >= 75 ? "bg-yellow-500"
+                    : "bg-green-500"
 
-          return (
+              return (
+                <button
+                  key={view.key}
+                  onClick={() => toggleView(view.key)}
+                  className={cn(
+                    "flex flex-col items-start px-2 py-1.5 rounded-md text-left transition-all min-w-0 flex-1 relative",
+                    isActive
+                      ? isMulti
+                        ? "bg-secondary shadow-sm text-foreground"
+                        : "bg-primary text-primary-foreground shadow-sm"
+                      : "bg-secondary/50 hover:bg-secondary text-foreground"
+                  )}
+                  style={isActive && isMulti ? { boxShadow: `0 0 0 2px ${view.color}` } : undefined}
+                >
+                  {isActive && isMulti && (
+                    <div
+                      className="absolute top-0.5 right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: view.color }}
+                    >
+                      <Check className="h-2 w-2 text-white" />
+                    </div>
+                  )}
+                  <span className="text-[10px] leading-tight font-medium truncate w-full">{view.label}</span>
+                  <span className={cn(
+                    "text-xs font-bold tabular-nums leading-tight",
+                    isActive && !isMulti ? "text-primary-foreground" : "text-foreground"
+                  )}>
+                    {cap.used.toFixed(0)}<span className="font-normal text-[10px]">/{cap.limit}</span>
+                  </span>
+                  <div className="flex items-center gap-1 mt-0.5 w-full">
+                    <div className={cn(
+                      "h-1 rounded-full flex-1",
+                      isActive && !isMulti ? "bg-primary-foreground/20" : "bg-muted"
+                    )}>
+                      <div
+                        className={cn("h-full rounded-full transition-all", barColor)}
+                        style={{ width: `${Math.min(pct, 100)}%` }}
+                      />
+                    </div>
+                    <span className={cn(
+                      "text-[9px] font-semibold whitespace-nowrap",
+                      isActive && !isMulti ? "text-primary-foreground" : remainingColor
+                    )}>
+                      {cap.remaining.toFixed(0)}h
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
+
+            {/* Rest period tab */}
             <button
-              key={view.key}
-              onClick={() => toggleView(view.key)}
+              onClick={() => toggleView("rest")}
               className={cn(
-                "flex flex-col items-start px-3 py-2 rounded-lg text-left transition-all min-w-[120px] shrink-0 relative",
-                isActive
-                  ? isMulti
-                    ? "bg-secondary shadow-sm text-foreground"
-                    : "bg-primary text-primary-foreground shadow-sm"
+                "flex flex-col items-center justify-center px-2 py-1.5 rounded-md text-center transition-all min-w-[48px] shrink-0",
+                isRestView
+                  ? "bg-primary text-primary-foreground shadow-sm"
                   : "bg-secondary/50 hover:bg-secondary text-foreground"
               )}
-              style={isActive && isMulti ? { boxShadow: `0 0 0 2px ${view.color}` } : undefined}
             >
-              {isActive && isMulti && (
-                <div
-                  className="absolute top-1 right-1 w-4 h-4 rounded-full flex items-center justify-center"
-                  style={{ backgroundColor: view.color }}
-                >
-                  <Check className="h-2.5 w-2.5 text-white" />
-                </div>
+              <span className="text-[10px] font-medium leading-tight">Rest</span>
+              {restData.some((d) => !d.restCompliant) && (
+                <span className={cn("text-[8px] font-medium mt-0.5", isRestView ? "text-primary-foreground/70" : "text-red-500")}>!</span>
               )}
-              <span className="text-xs font-medium">{view.label}</span>
-              {/* Prominent used / limit display */}
-              <span className={cn(
-                "text-sm font-semibold tabular-nums mt-0.5",
-                isActive && !isMulti ? "text-primary-foreground" : "text-foreground"
-              )}>
-                {cap.used.toFixed(0)}h / {cap.limit}h
-              </span>
-              <div className="flex items-center gap-1.5 mt-1 w-full">
-                <div className={cn(
-                  "h-1.5 rounded-full flex-1 min-w-[60px]",
-                  isActive && !isMulti ? "bg-primary-foreground/20" : "bg-muted"
-                )}>
-                  <div
-                    className={cn("h-full rounded-full transition-all", barColor)}
-                    style={{ width: `${Math.min(pct, 100)}%` }}
-                  />
-                </div>
-                <span className={cn(
-                  "text-[10px] font-semibold whitespace-nowrap",
-                  isActive && !isMulti ? "text-primary-foreground" : remainingColor
-                )}>
-                  {cap.remaining.toFixed(0)}h left
-                </span>
-              </div>
             </button>
-          )
-        })}
-
-        {/* Rest period tab */}
-        <button
-          onClick={() => toggleView("rest")}
-          className={cn(
-            "flex flex-col items-start px-3 py-2 rounded-lg text-left transition-all min-w-[120px] shrink-0",
-            isRestView
-              ? "bg-primary text-primary-foreground shadow-sm"
-              : "bg-secondary/50 hover:bg-secondary text-foreground"
-          )}
-        >
-          <span className="text-xs font-medium">Rest Periods</span>
-          {restData.some((d) => !d.restCompliant) && (
-            <Badge variant="outline" className={cn("text-[9px] h-4 mt-1", isRestView ? "border-primary-foreground/30 text-primary-foreground" : "border-red-500/30 text-red-500")}>
-              Violations
-            </Badge>
-          )}
-        </button>
-      </div>
-
-      {/* Chart */}
-      <Card className="shadow-sm">
-        <CardContent className="pt-4 pb-2 px-2 relative">
+          </div>
           {/* Zoom controls — top right */}
           <div className="absolute top-2 right-2 flex items-center gap-0.5 z-20">
             <button
@@ -841,7 +845,7 @@ export function FDPTimelineChart({
                     />
                   ))}
 
-                  {/* Daily bars — duty: blue, flight: yellow */}
+                  {/* Daily bars — duty: blue, flight: yellow, scenario: highlighted */}
                   {uniqueBarKeys.map((barKey) => {
                     const barView = selectedNonRestViews.find((v) => v.barKey === barKey)!
                     const barColor = barKey === "dutyHours" ? COLORS.dutyBar : COLORS.flightBar
@@ -853,13 +857,19 @@ export function FDPTimelineChart({
                         maxBarSize={uniqueBarKeys.length > 1 ? 12 : 16}
                         name={barView.barLabel}
                       >
-                        {slicedData.map((entry, index) => (
-                          <Cell
-                            key={index}
-                            fill={barColor}
-                            opacity={entry.isFuture ? 0.3 : 0.7}
-                          />
-                        ))}
+                        {slicedData.map((entry, index) => {
+                          const isModified = hasScenario && scenarioModifiedDates?.has(entry.date)
+                          const isRemoved = hasScenario && scenarioRemovedDates?.has(entry.date)
+                          const cellColor = isModified ? "oklch(0.70 0.20 145)" // bright green for added
+                            : isRemoved ? COLORS.violation // red for removed
+                              : barColor
+                          const cellOpacity = isRemoved ? 0.2
+                            : isModified ? 0.9
+                              : entry.isFuture ? 0.3 : 0.7
+                          return (
+                            <Cell key={index} fill={cellColor} opacity={cellOpacity} />
+                          )
+                        })}
                       </Bar>
                     )
                   })}
@@ -970,37 +980,38 @@ export function FDPTimelineChart({
             </div>
           )}
 
+          {/* Forecast exceedance warnings — inside card */}
+          {!isRestView && forecast.hasExceedance && (
+            <div className="px-1 pb-1 space-y-1">
+              {forecast.exceedances
+                .filter((exc) => {
+                  return Array.from(activeViews).some((viewKey) => {
+                    if (viewKey === "duty14") return exc.limitName.includes("14-day duty")
+                    if (viewKey === "duty28") return exc.limitName.includes("28-day duty")
+                    if (viewKey === "flight28") return exc.limitName.includes("28-day flight")
+                    if (viewKey === "flight365") return exc.limitName.includes("12-month flight")
+                    return false
+                  })
+                })
+                .slice(0, 3)
+                .map((exc, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between text-[10px] px-2 py-1 rounded bg-red-500/10"
+                  >
+                    <span className="text-red-500 font-medium">
+                      {(() => { const d = new Date(exc.date + "T00:00:00Z"); return `${d.getUTCDate().toString().padStart(2, "0")} ${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}`; })()}
+                    </span>
+                    <span className="text-red-500">
+                      {exc.projected.toFixed(1)}h / {exc.limit}h
+                    </span>
+                  </div>
+                ))}
+            </div>
+          )}
+
         </CardContent>
       </Card>
-
-      {/* Forecast exceedance warnings */}
-      {!isRestView && forecast.hasExceedance && (
-        <div className="space-y-1.5">
-          {forecast.exceedances
-            .filter((exc) => {
-              return Array.from(activeViews).some((viewKey) => {
-                if (viewKey === "duty14") return exc.limitName.includes("14-day duty")
-                if (viewKey === "duty28") return exc.limitName.includes("28-day duty")
-                if (viewKey === "flight28") return exc.limitName.includes("28-day flight")
-                if (viewKey === "flight365") return exc.limitName.includes("12-month flight")
-                return false
-              })
-            })
-            .map((exc, idx) => (
-              <div
-                key={idx}
-                className="flex items-center justify-between text-xs px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20"
-              >
-                <span className="text-red-500 font-medium">
-                  {(() => { const d = new Date(exc.date + "T00:00:00Z"); return `${d.getUTCDate().toString().padStart(2, "0")} ${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}`; })()}
-                </span>
-                <span className="text-red-500">
-                  {exc.projected.toFixed(1)}h / {exc.limit}h — breach
-                </span>
-              </div>
-            ))}
-        </div>
-      )}
     </div>
   )
 }
