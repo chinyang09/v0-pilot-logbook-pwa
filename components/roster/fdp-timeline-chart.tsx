@@ -565,9 +565,9 @@ export function FDPTimelineChart({
         aria-hidden="true"
       />
       <Card className="shadow-sm">
-        <CardContent className="pt-2 pb-2 px-2 relative">
+        <CardContent className="pt-1 pb-2 px-2 relative">
           {/* View selector tabs — inside card */}
-          <div className="flex gap-1 overflow-x-auto pb-1.5 pt-0.5 scrollbar-none px-0.5" style={{ margin: -2, padding: "4px 2px 6px" }}>
+          <div className="flex gap-1 overflow-x-auto pb-1.5 pt-0.5 scrollbar-none px-0.5" style={{ margin: "-2px -2px 0", padding: "2px 2px 6px" }}>
             {views.map((view) => {
               const cap = view.key === "duty14" ? capacity.duty14Days
                 : view.key === "duty28" ? capacity.duty28Days
@@ -859,7 +859,7 @@ export function FDPTimelineChart({
           )}
             </div>
             {/* Zoom controls — vertical, right of chart */}
-            <div className="flex flex-col items-center justify-center gap-1 pl-0.5 pr-0.5 shrink-0">
+            <div className="flex flex-col items-center justify-start gap-1 pt-1 shrink-0">
               <button
                 onClick={zoomIn}
                 className="p-1.5 rounded hover:bg-secondary text-muted-foreground transition-colors"

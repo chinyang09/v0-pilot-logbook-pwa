@@ -62,7 +62,7 @@ export default function FDPPage() {
     isLoading,
   } = useFDPData()
 
-  const { setDetailContent, setHasDetailSupport } = useDetailPanel()
+  const { setDetailContent, setHasDetailSupport, setSelectedId } = useDetailPanel()
   const [scenarioResult, setScenarioResult] = useState<ScenarioResult | null>(null)
   const [quickCheckOpen, setQuickCheckOpen] = useState(false)
   const [ruleMenuOpen, setRuleMenuOpen] = useState(false)
@@ -93,7 +93,13 @@ export default function FDPPage() {
     setQuickCheckOpen(false)
     setScenarioResult(null)
     setDetailContent(null)
-  }, [setDetailContent])
+    setSelectedId(null)
+  }, [setDetailContent, setSelectedId])
+
+  // "View Chart" dismisses mobile overlay but keeps scenario result
+  const handleViewChart = useCallback(() => {
+    setSelectedId(null)
+  }, [setSelectedId])
 
   useEffect(() => {
     if (quickCheckOpen) {
@@ -103,12 +109,15 @@ export default function FDPPage() {
           limits={activeLimits}
           onScenarioResult={setScenarioResult}
           onClose={closeQuickCheck}
+          onViewChart={handleViewChart}
         />
       )
+      setSelectedId("legal-check")
     } else {
       setDetailContent(null)
+      setSelectedId(null)
     }
-  }, [quickCheckOpen, allDutyPeriods, activeLimits, closeQuickCheck, setDetailContent])
+  }, [quickCheckOpen, allDutyPeriods, activeLimits, closeQuickCheck, handleViewChart, setDetailContent, setSelectedId])
 
   // Live digital countdown — updates every 10 seconds
   const [countdown, setCountdown] = useState("")

@@ -36,25 +36,34 @@ export function useFDPData() {
 
   useEffect(() => {
     async function resolveTimezones() {
-      const iatas = new Set<string>()
-      for (const entry of scheduleEntries) {
-        const depIata = entry.sectors?.[0]?.departureIata
-        if (depIata) iatas.add(depIata)
+      try {
+        const iatas = new Set<string>()
+        for (const entry of scheduleEntries) {
+          const depIata = entry.sectors?.[0]?.departureIata
+          if (depIata) iatas.add(depIata)
+        }
+        if (iatas.size === 0) {
+          setAirportTimezones(new Map())
+          return
+        }
+        const map = new Map<string, number>()
+        await Promise.all(
+          [...iatas].map(async (iata) => {
+            try {
+              const airport = await getAirportByIata(iata)
+              if (airport?.tz) {
+                map.set(iata, getAirportTimeInfo(airport.tz).offset)
+              }
+            } catch {
+              // Individual airport lookup failed — skip, will use default SGT offset
+            }
+          })
+        )
+        setAirportTimezones(map)
+      } catch (err) {
+        console.warn("[FDP] Failed to resolve timezones:", err)
+        // Silently fail — will use default SGT offset
       }
-      if (iatas.size === 0) {
-        setAirportTimezones(new Map())
-        return
-      }
-      const map = new Map<string, number>()
-      await Promise.all(
-        [...iatas].map(async (iata) => {
-          const airport = await getAirportByIata(iata)
-          if (airport?.tz) {
-            map.set(iata, getAirportTimeInfo(airport.tz).offset)
-          }
-        })
-      )
-      setAirportTimezones(map)
     }
     if (scheduleEntries.length > 0) {
       resolveTimezones()

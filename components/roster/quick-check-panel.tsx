@@ -9,7 +9,7 @@ import {
   Trash2,
   ArrowLeftRight,
   AlertTriangle,
-  X,
+  BarChart3,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { simulateScenario } from "@/lib/utils/roster/fdp-calculator"
@@ -22,6 +22,7 @@ interface QuickCheckPanelProps {
   limits?: FTLLimits
   onScenarioResult?: (result: ScenarioResult | null) => void
   onClose?: () => void
+  onViewChart?: () => void
 }
 
 function tomorrow(): string {
@@ -75,6 +76,7 @@ export function QuickCheckPanel({
   limits = DEFAULT_FTL_LIMITS,
   onScenarioResult,
   onClose,
+  onViewChart,
 }: QuickCheckPanelProps) {
   const [changes, setChanges] = useState<ChangeEntry[]>([newAddEntry()])
   const [result, setResult] = useState<ScenarioResult | null>(null)
@@ -168,13 +170,17 @@ export function QuickCheckPanel({
   const addEntries = changes.filter((c) => c.type === "add")
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full pt-16">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
         <h2 className="text-sm font-semibold">Legality Check</h2>
-        {onClose && (
-          <button onClick={onClose} className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors">
-            <X className="h-4 w-4" />
+        {onViewChart && (
+          <button
+            onClick={onViewChart}
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+          >
+            <BarChart3 className="h-3.5 w-3.5" />
+            <span>View Chart</span>
           </button>
         )}
       </div>

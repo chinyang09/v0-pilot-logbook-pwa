@@ -228,6 +228,7 @@ function createDutyPeriodFromFlightGroup(
 ): DutyPeriod | null {
   let totalFlightMinutes = 0
   let earliestOut = Infinity
+  let earliestScheduledOut = Infinity
   let latestIn = -Infinity
 
   for (const flight of groupFlights) {
@@ -236,6 +237,10 @@ function createDutyPeriodFromFlightGroup(
     }
     if (flight.outTime) {
       earliestOut = Math.min(earliestOut, hhmmToMinutes(flight.outTime))
+    }
+    // Track scheduled OUT for FDP table lookup (CAAS uses scheduled, not actual)
+    if (flight.scheduledOut) {
+      earliestScheduledOut = Math.min(earliestScheduledOut, hhmmToMinutes(flight.scheduledOut))
     }
     if (flight.inTime) {
       let inMin = hhmmToMinutes(flight.inTime)
@@ -249,9 +254,14 @@ function createDutyPeriodFromFlightGroup(
 
   if (earliestOut === Infinity || latestIn === -Infinity) return null
 
-  // Estimate report/debrief with buffers
+  // Estimate report/debrief with buffers (using actual times for duty hours)
   const reportMinutes = Math.max(0, earliestOut - REPORT_BUFFER_MINUTES)
   const debriefMinutes = latestIn + DEBRIEF_BUFFER_MINUTES
+
+  // For FDP table lookup: use scheduled OUT when available, else actual OUT
+  const scheduledReportMinutes = earliestScheduledOut !== Infinity
+    ? Math.max(0, earliestScheduledOut - REPORT_BUFFER_MINUTES)
+    : reportMinutes
 
   // Normalize to within 24h for display
   const reportTime = minutesToHHMM(reportMinutes % 1440)
@@ -267,8 +277,8 @@ function createDutyPeriodFromFlightGroup(
     ...groupFlights.map((f) => (f.blockTime ? hhmmToMinutes(f.blockTime) : 0))
   )
 
-  // Convert UTC report time to local departure time for table lookup
-  let localReportMinutes = reportMinutes + depTzOffset * 60
+  // Convert scheduled report time to local for FDP table lookup
+  let localReportMinutes = scheduledReportMinutes + depTzOffset * 60
   if (localReportMinutes < 0) localReportMinutes += 1440
   const localReportTime = minutesToHHMM(localReportMinutes % 1440)
 
@@ -1198,8 +1208,18 @@ export function simulateHypotheticalDuty(
   if (debriefMin <= reportMin) debriefMin += 1440 // crosses midnight
 
   const dutyMinutes = debriefMin - reportMin
-  const maxFdpResult = calculateMaxFDP(hypothetical.reportTime, hypothetical.sectorCount)
-  const maxFdpMinutes = typeof maxFdpResult === "number" ? maxFdpResult : maxFdpResult.maxFdpMinutes
+
+  // Report time is in UTC — convert to local for FDP table lookup (default SGT)
+  const depTzOffset = 8
+  let localReportMin = reportMin + depTzOffset * 60
+  if (localReportMin < 0) localReportMin += 1440
+  const localReportTime = minutesToHHMM(localReportMin % 1440)
+
+  const fdpResult = calculateMaxFDP({
+    reportTimeLocal: localReportTime,
+    sectors: hypothetical.sectorCount,
+    departureTimezoneOffset: depTzOffset,
+  })
 
   const hypotheticalDP: DutyPeriod = {
     id: "__quick_check__",
@@ -1209,7 +1229,7 @@ export function simulateHypotheticalDuty(
     dutyMinutes,
     flightMinutes: hypothetical.flightMinutes,
     sectorCount: hypothetical.sectorCount,
-    maxFdpMinutes,
+    maxFdpMinutes: fdpResult.maxFdpMinutes,
     fdpExtensionUsed: false,
     source: "schedule",
     isFuture: true,
@@ -1357,8 +1377,19 @@ export function simulateScenario(
 
       const dutyMinutes = debriefMin - reportMin
       const sectorCount = change.sectorCount ?? 1
-      const maxFdpResult = calculateMaxFDP(change.reportTime, sectorCount)
-      const maxFdpMinutes = typeof maxFdpResult === "number" ? maxFdpResult : maxFdpResult.maxFdpMinutes
+
+      // Report time is in UTC — convert to local for FDP table lookup (default SGT)
+      const depTzOffset = 8
+      let localRepMin = reportMin + depTzOffset * 60
+      if (localRepMin < 0) localRepMin += 1440
+      const localRepTime = minutesToHHMM(localRepMin % 1440)
+
+      const fdpRes = calculateMaxFDP({
+        reportTimeLocal: localRepTime,
+        sectors: sectorCount,
+        departureTimezoneOffset: depTzOffset,
+      })
+      const maxFdpMinutes = fdpRes.maxFdpMinutes
 
       addedDPs.push({
         id: `__scenario_${change.id}__`,
