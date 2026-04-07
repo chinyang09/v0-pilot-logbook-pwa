@@ -88,6 +88,9 @@ export function FDPTimelineChart({
   // Fade-in/out date labels on overview during gesture
   const [showOverviewDates, setShowOverviewDates] = useState(false)
   const overviewDateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Hide tooltip after touch ends (Recharts doesn't auto-dismiss on mobile)
+  const [tooltipActive, setTooltipActive] = useState(true)
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Resolve oklch CSS variables to rgb for SVG attributes (SVG fill/stroke
   // cannot use hsl(var(...)) when the variable holds an oklch value).
@@ -390,7 +393,8 @@ export function FDPTimelineChart({
       const dx = touches[0].clientX - gestureRef.current.startX
       const windowSize = gestureRef.current.startWindow.end - gestureRef.current.startWindow.start
       const dataPxRatio = windowSize / ww
-      const shift = Math.round(-dx * dataPxRatio)
+      // Drag right → window moves right (indices increase)
+      const shift = Math.round(dx * dataPxRatio)
       setViewWindow(clampWindow(
         gestureRef.current.startWindow.start + shift,
         gestureRef.current.startWindow.end + shift,
@@ -434,6 +438,9 @@ export function FDPTimelineChart({
     // Fade out overview dates after 1.5s
     if (overviewDateTimerRef.current) clearTimeout(overviewDateTimerRef.current)
     overviewDateTimerRef.current = setTimeout(() => setShowOverviewDates(false), 1500)
+    // Dismiss tooltip after 2s
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current)
+    tooltipTimerRef.current = setTimeout(() => setTooltipActive(false), 2000)
   }, [])
 
   // Main chart touch — zone-aware: axis zone = pan, chart body = tooltip (passthrough), 2-finger = zoom
@@ -469,8 +476,11 @@ export function FDPTimelineChart({
           pinchStartWindow: { ...effectiveWindow },
           wrapperWidth: wrapper.clientWidth || 300,
         }
+      } else {
+        // Chart body — show tooltip, set timer to dismiss
+        if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current)
+        setTooltipActive(true)
       }
-      // else: chart body — do nothing, let Recharts handle tooltip
     }
   }, [effectiveWindow])
 
@@ -712,10 +722,9 @@ export function FDPTimelineChart({
               onTouchEnd={handleGestureEnd}
               className="touch-none relative"
             >
-              {/* Axis pan zone affordance */}
+              {/* Axis pan zone visual hint — subtle gradient at bottom */}
               <div className="absolute bottom-0 pointer-events-none" style={{ left: CHART_LEFT_PX, right: CHART_RIGHT_PX, height: AXIS_ZONE_HEIGHT }}>
-                <div className="w-full h-full border-t border-dashed border-border/40 bg-gradient-to-t from-muted/15 to-transparent" />
-                <div className="absolute top-1 left-1/2 -translate-x-1/2 text-[8px] text-muted-foreground/50 select-none">↔ drag to pan</div>
+                <div className="w-full h-full bg-gradient-to-t from-muted/10 to-transparent" />
               </div>
               <ResponsiveContainer width="100%" height={320}>
                 <ComposedChart data={slicedData} margin={{ top: 5, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
@@ -734,7 +743,7 @@ export function FDPTimelineChart({
                     unit="h"
                     width={CHART_LEFT_PX}
                   />
-                  <Tooltip content={<CustomTooltip />} />
+                  <Tooltip content={<CustomTooltip />} active={tooltipActive ? undefined : false} />
 
                   {/* Required rest as a line */}
                   <Line
@@ -799,7 +808,7 @@ export function FDPTimelineChart({
                     width={CHART_LEFT_PX}
                     domain={yDomain}
                   />
-                  <Tooltip content={<CustomTooltip />} />
+                  <Tooltip content={<CustomTooltip />} active={tooltipActive ? undefined : false} />
 
                   {/* Limit threshold lines — one per selected view */}
                   {selectedNonRestViews.map((view) => (
@@ -890,6 +899,9 @@ export function FDPTimelineChart({
             </div>
           )}
 
+          {/* Axis drag hint */}
+          <div className="text-center text-[8px] text-muted-foreground/40 select-none mt-0.5">↔ drag axis to pan</div>
+
           {/* Overview mini-chart — "big picture" with rolling lines + active window */}
           {activeData.length > 0 && (
             <div
@@ -899,34 +911,45 @@ export function FDPTimelineChart({
               onTouchEnd={handleGestureEnd}
               className="relative mt-2 touch-none cursor-grab active:cursor-grabbing select-none"
             >
-              {/* Mini chart showing full dataset with rolling lines */}
-              <ResponsiveContainer width="100%" height={50}>
-                <ComposedChart data={activeData} margin={{ top: 2, right: CHART_RIGHT_PX, left: 0, bottom: 2 }}>
-                  <XAxis dataKey="dateLabel" hide />
-                  <YAxis hide domain={[0, "auto"]} width={CHART_LEFT_PX} />
-                  {isRestView ? (
-                    <Bar dataKey="restHours" maxBarSize={4} isAnimationActive={false}>
-                      {activeData.map((entry, i) => (
-                        <Cell key={i} fill={entry.restCompliant ? COLORS.compliant : COLORS.violation} opacity={0.6} />
-                      ))}
-                    </Bar>
-                  ) : (
-                    <>
+              {/* Mini chart showing full dataset with rolling lines + shaded fill */}
+              <div className="overflow-hidden" style={{ marginLeft: CHART_LEFT_PX, marginRight: CHART_RIGHT_PX }}>
+                <ResponsiveContainer width="100%" height={50}>
+                  <ComposedChart data={activeData} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
+                    <defs>
                       {selectedNonRestViews.map((view) => (
-                        <Area
-                          key={`ov-${view.key}`}
-                          dataKey={view.rollingKey}
-                          fill="none"
-                          stroke={view.color}
-                          strokeWidth={1}
-                          dot={false}
-                          isAnimationActive={false}
-                        />
+                        <linearGradient key={`ov-grad-${view.key}`} id={`ov-gradient-${view.key}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={view.color} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={view.color} stopOpacity={0.02} />
+                        </linearGradient>
                       ))}
-                    </>
-                  )}
-                </ComposedChart>
-              </ResponsiveContainer>
+                    </defs>
+                    <XAxis dataKey="dateLabel" hide />
+                    <YAxis hide domain={[0, "auto"]} />
+                    {isRestView ? (
+                      <Bar dataKey="restHours" maxBarSize={4} isAnimationActive={false}>
+                        {activeData.map((entry, i) => (
+                          <Cell key={i} fill={entry.restCompliant ? COLORS.compliant : COLORS.violation} opacity={0.6} />
+                        ))}
+                      </Bar>
+                    ) : (
+                      <>
+                        {selectedNonRestViews.map((view) => (
+                          <Area
+                            key={`ov-${view.key}`}
+                            dataKey={view.rollingKey}
+                            fill={`url(#ov-gradient-${view.key})`}
+                            stroke={view.color}
+                            strokeWidth={1}
+                            dot={false}
+                            activeDot={false}
+                            isAnimationActive={false}
+                          />
+                        ))}
+                      </>
+                    )}
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
 
               {/* Darkened left region */}
               <div
@@ -948,17 +971,17 @@ export function FDPTimelineChart({
                   opacity: 0.75,
                 }}
               />
-              {/* Active window border box */}
+              {/* Active window box with rounded border */}
               <div
-                className="absolute top-0 bottom-0 border-x-2 border-primary/60 pointer-events-none rounded-sm"
+                className="absolute top-0 bottom-0 border border-foreground/40 rounded-md pointer-events-none"
                 style={{
                   left: `calc(${CHART_LEFT_PX}px + (100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.leftPct / 100})`,
                   width: `calc((100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.widthPct / 100})`,
                 }}
               >
                 {/* Edge grab handles */}
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-1 h-4 rounded-full bg-primary/60" />
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-1 h-4 rounded-full bg-primary/60" />
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[3px] w-1.5 h-5 rounded-full bg-foreground/40" />
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[3px] w-1.5 h-5 rounded-full bg-foreground/40" />
               </div>
 
               {/* Fade-in/out date labels at edges of active window */}
