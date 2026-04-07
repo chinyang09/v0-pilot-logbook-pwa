@@ -195,7 +195,7 @@ export function FDPTimelineChart({
       }
       return next
     })
-    setViewWindow(null) // reset zoom on view change
+    // Preserve zoom window when toggling views (don't reset)
   }, [])
 
   // Today marker
@@ -247,12 +247,14 @@ export function FDPTimelineChart({
             {data.dateLabel}
             {data.isFuture && <span className="text-muted-foreground ml-1">(scheduled)</span>}
           </p>
-          {/* Daily values */}
+          {/* Daily values with FDP limit */}
           <div className="space-y-0.5 mb-1.5">
             {data.dutyHours > 0 && (
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Duty</span>
-                <span className="font-medium">{data.dutyHours.toFixed(1)}h</span>
+                <span className={cn("font-medium", data.maxFdpHours && data.dutyHours > data.maxFdpHours && "text-red-500")}>
+                  {data.dutyHours.toFixed(1)}h{data.maxFdpHours ? ` / ${data.maxFdpHours.toFixed(1)}h` : ""}
+                </span>
               </div>
             )}
             {data.flightHours > 0 && (
@@ -565,7 +567,7 @@ export function FDPTimelineChart({
       <Card className="shadow-sm">
         <CardContent className="pt-2 pb-2 px-2 relative">
           {/* View selector tabs — inside card */}
-          <div className="flex gap-1 overflow-x-auto pb-1.5 scrollbar-none px-0.5">
+          <div className="flex gap-1 overflow-x-auto pb-1.5 pt-0.5 scrollbar-none px-0.5" style={{ margin: -2, padding: "4px 2px 6px" }}>
             {views.map((view) => {
               const cap = view.key === "duty14" ? capacity.duty14Days
                 : view.key === "duty28" ? capacity.duty28Days
@@ -650,37 +652,15 @@ export function FDPTimelineChart({
               )}
             </button>
           </div>
-          {/* Zoom controls — top right */}
-          <div className="absolute top-2 right-2 flex items-center gap-0.5 z-20">
-            <button
-              onClick={zoomIn}
-              className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-              aria-label="Zoom in"
-            >
-              <ZoomIn className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={zoomOut}
-              className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-              aria-label="Zoom out"
-            >
-              <ZoomOut className="h-3.5 w-3.5" />
-            </button>
-            {viewWindow && (
-              <button
-                onClick={resetZoom}
-                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                aria-label="Reset zoom"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
           {(isRestView ? restData.length === 0 : timelineData.length === 0) ? (
             <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
               No data to display
             </div>
-          ) : isRestView ? (
+          ) : (
+          <div className="flex">
+            {/* Chart area */}
+            <div className="flex-1 min-w-0">
+          {isRestView ? (
             /* Rest period chart — single finger on chart body = tooltip,
                single finger on axis zone = pan, two fingers = pinch zoom */
             <div
@@ -876,6 +856,35 @@ export function FDPTimelineChart({
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
+          )}
+            </div>
+            {/* Zoom controls — vertical, right of chart */}
+            <div className="flex flex-col items-center justify-center gap-1 pl-0.5 pr-0.5 shrink-0">
+              <button
+                onClick={zoomIn}
+                className="p-1.5 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                aria-label="Zoom in"
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={zoomOut}
+                className="p-1.5 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                aria-label="Zoom out"
+              >
+                <ZoomOut className="h-3.5 w-3.5" />
+              </button>
+              {viewWindow && (
+                <button
+                  onClick={resetZoom}
+                  className="p-1.5 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                  aria-label="Reset zoom"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
           )}
 
           {/* Overview mini-chart — "big picture" with rolling lines + active window */}

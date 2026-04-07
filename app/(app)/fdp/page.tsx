@@ -22,7 +22,8 @@ import {
   type RegulationType,
 } from "@/types/entities/roster.types"
 import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
-import { QuickCheckDialog } from "@/components/roster/quick-check-dialog"
+import { QuickCheckPanel } from "@/components/roster/quick-check-panel"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
 import type { ScenarioResult } from "@/lib/utils/roster/fdp-calculator"
 import { cn } from "@/lib/utils"
 
@@ -61,11 +62,18 @@ export default function FDPPage() {
     isLoading,
   } = useFDPData()
 
-  const [quickCheckOpen, setQuickCheckOpen] = useState(false)
+  const { setDetailContent, setHasDetailSupport } = useDetailPanel()
   const [scenarioResult, setScenarioResult] = useState<ScenarioResult | null>(null)
+  const [quickCheckOpen, setQuickCheckOpen] = useState(false)
   const [ruleMenuOpen, setRuleMenuOpen] = useState(false)
   const [activeRule, setActiveRule] = useState<RegulationType>("CAAS")
   const [customLimits, setCustomLimits] = useState<FTLLimits>(DEFAULT_FTL_LIMITS)
+
+  // Register detail panel support
+  useEffect(() => {
+    setHasDetailSupport(true)
+    return () => setHasDetailSupport(false)
+  }, [setHasDetailSupport])
 
   const activeLimits = useMemo(() => {
     if (activeRule === "CUSTOM") return customLimits
@@ -79,6 +87,28 @@ export default function FDPPage() {
     }
     setRuleMenuOpen(false)
   }, [])
+
+  // Open/close quick check panel in detail panel
+  const closeQuickCheck = useCallback(() => {
+    setQuickCheckOpen(false)
+    setScenarioResult(null)
+    setDetailContent(null)
+  }, [setDetailContent])
+
+  useEffect(() => {
+    if (quickCheckOpen) {
+      setDetailContent(
+        <QuickCheckPanel
+          dutyPeriods={allDutyPeriods}
+          limits={activeLimits}
+          onScenarioResult={setScenarioResult}
+          onClose={closeQuickCheck}
+        />
+      )
+    } else {
+      setDetailContent(null)
+    }
+  }, [quickCheckOpen, allDutyPeriods, activeLimits, closeQuickCheck, setDetailContent])
 
   // Live digital countdown — updates every 10 seconds
   const [countdown, setCountdown] = useState("")
@@ -106,9 +136,9 @@ export default function FDPPage() {
             variant="ghost"
             size="icon"
             className="h-14 w-14"
-            onClick={() => setQuickCheckOpen(true)}
+            onClick={() => setQuickCheckOpen((prev) => !prev)}
           >
-            <Calculator className="h-5 w-5" />
+            <Calculator className={cn("h-5 w-5", quickCheckOpen && "text-primary")} />
           </Button>
         </GlassContainer>
         <GlassContainer cornerRadius={28}>
@@ -124,7 +154,7 @@ export default function FDPPage() {
         </GlassContainer>
       </div>
     ),
-    [refresh, isLoading]
+    [refresh, isLoading, quickCheckOpen]
   )
 
   useRegisterMainActions(fdpActions, true)
@@ -244,15 +274,6 @@ export default function FDPPage() {
           </Card>
         ) : null}
       </div>
-
-      {/* Quick Check Dialog */}
-      <QuickCheckDialog
-        open={quickCheckOpen}
-        onOpenChange={setQuickCheckOpen}
-        dutyPeriods={allDutyPeriods}
-        limits={activeLimits}
-        onScenarioResult={setScenarioResult}
-      />
     </PageContainer>
   )
 }

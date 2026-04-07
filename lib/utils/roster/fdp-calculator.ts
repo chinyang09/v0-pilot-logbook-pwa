@@ -933,6 +933,7 @@ export interface TimelineDataPoint {
   dateLabel: string                 // "Apr 4" display label
   dutyHours: number                 // Daily duty hours
   flightHours: number               // Daily flight hours
+  maxFdpHours: number | null        // Max FDP for this duty (null if no duty)
   rolling14DayDuty: number          // Rolling 14-day cumulative duty
   rolling28DayDuty: number          // Rolling 28-day cumulative duty
   rolling28DayFlight: number        // Rolling 28-day cumulative flight
@@ -1009,6 +1010,7 @@ export function generateTimelineData(
           dateLabel: formatDateLabel(dp.date),
           dutyHours: dp.dutyMinutes / 60,
           flightHours: dp.flightMinutes / 60,
+          maxFdpHours: dp.maxFdpMinutes / 60,
           rolling14DayDuty: stats14.dutyHours,
           rolling28DayDuty: stats28.dutyHours,
           rolling28DayFlight: stats28.flightHours,
@@ -1028,6 +1030,7 @@ export function generateTimelineData(
         dateLabel: formatDateLabel(currentDate),
         dutyHours: 0,
         flightHours: 0,
+        maxFdpHours: null,
         rolling14DayDuty: stats14.dutyHours,
         rolling28DayDuty: stats28.dutyHours,
         rolling28DayFlight: stats28.flightHours,
@@ -1385,22 +1388,37 @@ export function simulateScenario(
   // Generate timeline
   const timelineData = generateTimelineData(withRest, limits)
 
-  // Check for violations
+  // Check for violations — only on scenario-affected dates
+  // A date is "affected" if it was added, removed, or is directly adjacent to a change
   const violations: ScenarioViolation[] = []
-  const today = new Date().toISOString().split("T")[0]
+  const affectedDates = new Set([...modifiedDates, ...removedDates])
+
+  // Also mark dates immediately after a modified/removed date as affected (rest impact)
+  for (const dp of withRest) {
+    const dpIdx = withRest.indexOf(dp)
+    if (dpIdx > 0) {
+      const prevDp = withRest[dpIdx - 1]
+      if (affectedDates.has(prevDp.date)) {
+        affectedDates.add(dp.date)
+      }
+    }
+  }
 
   for (const dp of withRest) {
-    // Only check violations on modified/added dates or future dates affected
+    if (!affectedDates.has(dp.date)) continue
+
+    // Rest check — only flag if rest is genuinely insufficient
     if (dp.restBefore && !dp.restBefore.compliant) {
       violations.push({
         date: dp.date,
         type: "rest",
-        label: `Rest violation (${dp.restBefore.rule})`,
+        label: `Insufficient rest`,
         projected: dp.restBefore.restMinutes / 60,
         limit: dp.restBefore.requiredRestMinutes / 60,
       })
     }
 
+    // FDP check
     if (dp.dutyMinutes > dp.maxFdpMinutes) {
       violations.push({
         date: dp.date,
@@ -1412,25 +1430,27 @@ export function simulateScenario(
     }
   }
 
-  // Check rolling limits on modified dates
-  for (const date of modifiedDates) {
+  // Check rolling limits on all affected dates
+  for (const date of affectedDates) {
     const asOfDate = new Date(date + "T23:59:59Z")
     const dpsUpToDate = withRest.filter((d) => d.date <= date)
+    if (dpsUpToDate.length === 0) continue
+
     const stats14 = calculateRollingStats(dpsUpToDate, asOfDate, 14, limits)
     const stats28 = calculateRollingStats(dpsUpToDate, asOfDate, 28, limits)
     const stats365 = calculateRollingStats(dpsUpToDate, asOfDate, 365, limits)
 
     if (stats14.dutyHours > limits.maxDuty14Days) {
-      violations.push({ date, type: "duty14", label: "14-day duty limit", projected: stats14.dutyHours, limit: limits.maxDuty14Days })
+      violations.push({ date, type: "duty14", label: "14-day duty", projected: stats14.dutyHours, limit: limits.maxDuty14Days })
     }
     if (stats28.dutyHours > limits.maxDuty28Days) {
-      violations.push({ date, type: "duty28", label: "28-day duty limit", projected: stats28.dutyHours, limit: limits.maxDuty28Days })
+      violations.push({ date, type: "duty28", label: "28-day duty", projected: stats28.dutyHours, limit: limits.maxDuty28Days })
     }
     if (stats28.flightHours > limits.maxFlight28Days) {
-      violations.push({ date, type: "flight28", label: "28-day flight limit", projected: stats28.flightHours, limit: limits.maxFlight28Days })
+      violations.push({ date, type: "flight28", label: "28-day flight", projected: stats28.flightHours, limit: limits.maxFlight28Days })
     }
     if (stats365.flightHours > limits.maxFlight365Days) {
-      violations.push({ date, type: "flight365", label: "12-month flight limit", projected: stats365.flightHours, limit: limits.maxFlight365Days })
+      violations.push({ date, type: "flight365", label: "12-mo flight", projected: stats365.flightHours, limit: limits.maxFlight365Days })
     }
   }
 
