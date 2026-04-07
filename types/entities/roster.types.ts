@@ -428,6 +428,33 @@ export const DEFAULT_FTL_LIMITS: FTLLimits = {
   maxExtendedDutyHours: 15,
 }
 
+export const FAA_FTL_LIMITS: FTLLimits = {
+  regulationType: "FAA",
+  maxDuty14Days: 100,               // 14 CFR 117.23 (cumulative)
+  maxDuty28Days: 190,               // FAA 28-day rolling
+  maxFlight28Days: 100,             // 14 CFR 117.11(b)
+  maxFlight365Days: 1000,           // 14 CFR 121.383(a)
+  maxSingleDutyHours: 14,
+  maxExtendedDutyHours: 16,
+}
+
+export const EASA_FTL_LIMITS: FTLLimits = {
+  regulationType: "EASA",
+  maxDuty14Days: 110,               // ORO.FTL.210(b)(1) 14-day
+  maxDuty28Days: 190,               // ORO.FTL.210(b)(2) 28-day
+  maxFlight28Days: 100,             // ORO.FTL.210(a)(1) 28-day
+  maxFlight365Days: 900,            // ORO.FTL.210(a)(2) 12-month
+  maxSingleDutyHours: 13,
+  maxExtendedDutyHours: 15,
+}
+
+export const FTL_PRESETS: Record<RegulationType, FTLLimits> = {
+  CAAS: DEFAULT_FTL_LIMITS,
+  FAA: FAA_FTL_LIMITS,
+  EASA: EASA_FTL_LIMITS,
+  CUSTOM: DEFAULT_FTL_LIMITS, // placeholder, user overrides
+}
+
 // ============================================
 // Create/Update utility types
 // ============================================

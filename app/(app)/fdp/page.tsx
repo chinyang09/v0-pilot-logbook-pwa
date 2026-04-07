@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useEffect } from "react"
+import { useMemo, useState, useEffect, useCallback } from "react"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -10,14 +10,18 @@ import {
   RefreshCw,
   TrendingUp,
   AlertTriangle,
-  Info,
   Clock,
-  CheckCircle2,
   Calculator,
+  ChevronDown,
 } from "lucide-react"
 import { useFDPData } from "@/hooks/data/use-fdp-data"
 import { useScheduleEntries } from "@/hooks/data/use-schedule"
-import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
+import {
+  DEFAULT_FTL_LIMITS,
+  FTL_PRESETS,
+  type FTLLimits,
+  type RegulationType,
+} from "@/types/entities/roster.types"
 import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
 import { QuickCheckDialog } from "@/components/roster/quick-check-dialog"
 import { cn } from "@/lib/utils"
@@ -38,12 +42,10 @@ function formatMinutesHM(minutes: number): string {
 
 function LimitCard({
   label,
-  regulation,
   used,
   limit,
 }: {
   label: string
-  regulation: string
   used: number
   limit: number
 }) {
@@ -59,22 +61,19 @@ function LimitCard({
         : "text-green-500"
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-baseline justify-between">
-        <span className="text-xs text-muted-foreground">{label}</span>
-        <span className="text-[10px] text-muted-foreground">{regulation}</span>
+    <div className="space-y-1">
+      <span className="text-[10px] text-muted-foreground">{label}</span>
+      <div className="text-sm font-semibold tabular-nums">
+        {used.toFixed(0)}h <span className="text-muted-foreground text-xs font-normal">/ {limit}h</span>
       </div>
-      <div className="text-lg font-semibold tabular-nums">
-        {used.toFixed(1)}h <span className="text-muted-foreground text-sm font-normal">/ {limit}h</span>
-      </div>
-      <div className="h-1.5 rounded-full bg-muted">
+      <div className="h-1 rounded-full bg-muted">
         <div
           className={cn("h-full rounded-full transition-all", barColor)}
           style={{ width: `${Math.min(pct, 100)}%` }}
         />
       </div>
-      <div className={cn("text-xs font-medium", remainingColor)}>
-        {remaining.toFixed(1)}h available
+      <div className={cn("text-[10px] font-medium", remainingColor)}>
+        {remaining.toFixed(0)}h left
       </div>
     </div>
   )
@@ -85,6 +84,13 @@ const RULE_DESCRIPTIONS: Record<string, string> = {
   "3b": "12h rest (no local night)",
   "3c": "rest matching duty hours",
   "3d": "24h rest (>16h duty)",
+}
+
+const REGULATION_LABELS: Record<RegulationType, string> = {
+  CAAS: "CAAS",
+  FAA: "FAA",
+  EASA: "EASA",
+  CUSTOM: "Custom",
 }
 
 export default function FDPPage() {
@@ -100,6 +106,22 @@ export default function FDPPage() {
   } = useFDPData()
 
   const [quickCheckOpen, setQuickCheckOpen] = useState(false)
+  const [ruleMenuOpen, setRuleMenuOpen] = useState(false)
+  const [activeRule, setActiveRule] = useState<RegulationType>("CAAS")
+  const [customLimits, setCustomLimits] = useState<FTLLimits>(DEFAULT_FTL_LIMITS)
+
+  const activeLimits = useMemo(() => {
+    if (activeRule === "CUSTOM") return customLimits
+    return FTL_PRESETS[activeRule]
+  }, [activeRule, customLimits])
+
+  const handleRuleChange = useCallback((rule: RegulationType) => {
+    setActiveRule(rule)
+    if (rule !== "CUSTOM") {
+      setCustomLimits(FTL_PRESETS[rule])
+    }
+    setRuleMenuOpen(false)
+  }, [])
 
   // Live digital countdown — updates every 10 seconds
   const [countdown, setCountdown] = useState("")
@@ -152,99 +174,107 @@ export default function FDPPage() {
 
   return (
     <PageContainer>
-      <div className="px-4 pt-4 pb-safe space-y-4">
-        {/* Rest Until Legal Card */}
-        {restUntilLegal && (
-          <Card
-            className={cn(
-              "border",
-              restUntilLegal.isLegalNow
-                ? "border-green-500/20 bg-green-500/5"
-                : "border-red-500/20 bg-red-500/5"
+      <div className="px-4 pt-3 pb-safe space-y-3">
+        {/* Rule selector + Rest countdown row */}
+        <div className="flex items-stretch gap-2">
+          {/* Rule selector chip */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setRuleMenuOpen(!ruleMenuOpen)}
+              className="flex items-center gap-1 px-3 py-2 rounded-lg bg-secondary text-foreground text-xs font-medium h-full"
+            >
+              {REGULATION_LABELS[activeRule]}
+              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            </button>
+            {ruleMenuOpen && (
+              <div className="absolute top-full left-0 mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[100px]">
+                {(["CAAS", "FAA", "EASA"] as RegulationType[]).map((rule) => (
+                  <button
+                    key={rule}
+                    onClick={() => handleRuleChange(rule)}
+                    className={cn(
+                      "block w-full text-left px-3 py-1.5 text-xs hover:bg-secondary transition-colors",
+                      activeRule === rule && "font-semibold text-primary"
+                    )}
+                  >
+                    {REGULATION_LABELS[rule]}
+                  </button>
+                ))}
+              </div>
             )}
-          >
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center gap-3">
-                {/* Digital countdown */}
-                <div className="shrink-0">
+          </div>
+
+          {/* Rest Until Legal — inline compact */}
+          {restUntilLegal && (
+            <Card
+              className={cn(
+                "flex-1 border",
+                restUntilLegal.isLegalNow
+                  ? "border-green-500/20 bg-green-500/5"
+                  : "border-red-500/20 bg-red-500/5"
+              )}
+            >
+              <CardContent className="py-2 px-3">
+                <div className="flex items-center gap-2">
                   <div className={cn(
-                    "text-2xl font-mono font-bold tabular-nums leading-none",
+                    "text-xl font-mono font-bold tabular-nums leading-none",
                     restUntilLegal.isLegalNow ? "text-green-500" : "text-red-500"
                   )}>
                     {restUntilLegal.isLegalNow ? "00:00" : countdown}
                   </div>
-                  <div className={cn(
-                    "text-[10px] font-medium mt-0.5",
-                    restUntilLegal.isLegalNow ? "text-green-500/70" : "text-red-500/70"
-                  )}>
-                    {restUntilLegal.isLegalNow ? "LEGAL" : "to legality"}
+                  <div className="flex-1 min-w-0 border-l border-border pl-2">
+                    {restUntilLegal.isLegalNow ? (
+                      <p className="text-[10px] text-muted-foreground leading-tight">
+                        LEGAL · {formatMinutesHM(restUntilLegal.restElapsedMinutes)} since last duty
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-foreground leading-tight">
+                        Legal at {new Date(restUntilLegal.legalAtUtc).toISOString().slice(11, 16)}Z
+                        <span className="text-muted-foreground">
+                          {" · "}{RULE_DESCRIPTIONS[restUntilLegal.rule] ?? restUntilLegal.rule}
+                        </span>
+                      </p>
+                    )}
                   </div>
                 </div>
-                {/* Details */}
-                <div className="flex-1 min-w-0 border-l border-border pl-3">
-                  {restUntilLegal.isLegalNow ? (
-                    <p className="text-xs text-muted-foreground">
-                      Last duty ended {restUntilLegal.lastDebriefTime}Z on{" "}
-                      {formatDateDDMMM(restUntilLegal.lastDutyDate)} ·{" "}
-                      {formatMinutesHM(restUntilLegal.restElapsedMinutes)} ago
-                    </p>
-                  ) : (
-                    <>
-                      <p className="text-xs text-foreground font-medium">
-                        Legal at{" "}
-                        {new Date(restUntilLegal.legalAtUtc).toISOString().slice(11, 16)}Z
-                      </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
-                        {RULE_DESCRIPTIONS[restUntilLegal.rule] ?? `Reg ${restUntilLegal.rule}`}
-                        {" · "}
-                        {formatMinutesHM(restUntilLegal.lastDutyMinutes)} duty on{" "}
-                        {formatDateDDMMM(restUntilLegal.lastDutyDate)}
-                      </p>
-                    </>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
-        {/* Capacity Overview — 4 limit cards */}
+        {/* Capacity Overview — 4 limit cards, compact */}
         <Card>
-          <CardContent className="pt-4 pb-3">
-            <div className="grid grid-cols-2 gap-4">
+          <CardContent className="py-2.5 px-3">
+            <div className="grid grid-cols-4 gap-3">
               <LimitCard
                 label="14-Day Duty"
-                regulation="Reg 12(a)"
                 used={capacity.duty14Days.used}
-                limit={capacity.duty14Days.limit}
+                limit={activeLimits.maxDuty14Days}
               />
               <LimitCard
                 label="28-Day Duty"
-                regulation="Reg 12(b)"
                 used={capacity.duty28Days.used}
-                limit={capacity.duty28Days.limit}
+                limit={activeLimits.maxDuty28Days}
               />
               <LimitCard
                 label="28-Day Flight"
-                regulation="Reg 107(a)"
                 used={capacity.flight28Days.used}
-                limit={capacity.flight28Days.limit}
+                limit={activeLimits.maxFlight28Days}
               />
               <LimitCard
                 label="12-Mo Flight"
-                regulation="Reg 107(b)"
                 used={capacity.flight365Days.used}
-                limit={capacity.flight365Days.limit}
+                limit={activeLimits.maxFlight365Days}
               />
             </div>
 
             {/* Warnings footer */}
             {(restViolations.length > 0 || forecast.hasExceedance) && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-border">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 pt-2 border-t border-border">
                 {restViolations.length > 0 && (
                   <div className="flex items-center gap-1">
                     <AlertTriangle className="h-3 w-3 text-red-500" />
-                    <span className="text-xs text-red-500">
+                    <span className="text-[10px] text-red-500">
                       {restViolations.length} rest violation{restViolations.length !== 1 ? "s" : ""}
                     </span>
                   </div>
@@ -252,7 +282,7 @@ export default function FDPPage() {
                 {forecast.hasExceedance && (
                   <div className="flex items-center gap-1">
                     <AlertTriangle className="h-3 w-3 text-orange-500" />
-                    <span className="text-xs text-orange-500">
+                    <span className="text-[10px] text-orange-500">
                       Breach on {formatDateDDMMM(forecast.exceedances[0].date)}
                     </span>
                   </div>
@@ -266,38 +296,21 @@ export default function FDPPage() {
         {timelineData.length > 0 ? (
           <FDPTimelineChart
             timelineData={timelineData}
-            limits={DEFAULT_FTL_LIMITS}
+            limits={activeLimits}
             capacity={capacity}
             forecast={forecast}
           />
         ) : !isLoading ? (
           <Card>
-            <CardContent className="py-12 text-center">
-              <TrendingUp className="h-10 w-10 text-muted-foreground/40 mb-3 mx-auto" />
-              <p className="text-sm font-medium text-foreground mb-1">No Duty Periods</p>
-              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto">
-                Import your schedule or log flights to see FDP calculations and regulatory
-                compliance.
+            <CardContent className="py-8 text-center">
+              <TrendingUp className="h-8 w-8 text-muted-foreground/40 mb-2 mx-auto" />
+              <p className="text-xs font-medium text-foreground mb-0.5">No Duty Periods</p>
+              <p className="text-[10px] text-muted-foreground max-w-[200px] mx-auto">
+                Import schedule or log flights to see FDP compliance.
               </p>
             </CardContent>
           </Card>
         ) : null}
-
-        {/* Regulatory Info */}
-        <Card>
-          <CardContent className="pt-4 pb-3 px-3">
-            <div className="flex items-center gap-2 mb-2">
-              <Info className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Regulatory Authority</span>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {DEFAULT_FTL_LIMITS.regulationType} — Civil Aviation Authority of Singapore
-            </div>
-            <div className="text-[10px] text-muted-foreground mt-1">
-              Reg 3 (Rest Periods) · Reg 12 (Duty Hours) · Reg 107 (Flight Time)
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Quick Check Dialog */}

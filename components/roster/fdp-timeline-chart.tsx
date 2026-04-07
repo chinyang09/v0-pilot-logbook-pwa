@@ -27,7 +27,6 @@ type ChartView = "duty14" | "duty28" | "flight28" | "flight365" | "rest"
 interface ViewConfig {
   key: ChartView
   label: string
-  regulation: string
   rollingKey: keyof TimelineDataPoint
   limitValue: number
   barKey: keyof TimelineDataPoint
@@ -123,7 +122,6 @@ export function FDPTimelineChart({
       {
         key: "duty14" as ChartView,
         label: "14-Day Duty",
-        regulation: "Reg 12(a)",
         rollingKey: "rolling14DayDuty" as keyof TimelineDataPoint,
         limitValue: limits.maxDuty14Days,
         barKey: "dutyHours" as keyof TimelineDataPoint,
@@ -135,7 +133,6 @@ export function FDPTimelineChart({
       {
         key: "duty28" as ChartView,
         label: "28-Day Duty",
-        regulation: "Reg 12(b)",
         rollingKey: "rolling28DayDuty" as keyof TimelineDataPoint,
         limitValue: limits.maxDuty28Days,
         barKey: "dutyHours" as keyof TimelineDataPoint,
@@ -147,7 +144,6 @@ export function FDPTimelineChart({
       {
         key: "flight28" as ChartView,
         label: "28-Day Flight",
-        regulation: "Reg 107(a)",
         rollingKey: "rolling28DayFlight" as keyof TimelineDataPoint,
         limitValue: limits.maxFlight28Days,
         barKey: "flightHours" as keyof TimelineDataPoint,
@@ -159,7 +155,6 @@ export function FDPTimelineChart({
       {
         key: "flight365" as ChartView,
         label: "12-Mo Flight",
-        regulation: "Reg 107(b)",
         rollingKey: "rolling365DayFlight" as keyof TimelineDataPoint,
         limitValue: limits.maxFlight365Days,
         barKey: "flightHours" as keyof TimelineDataPoint,
@@ -196,20 +191,6 @@ export function FDPTimelineChart({
     })
     setViewWindow(null) // reset zoom on view change
   }, [])
-
-  // Capacity for selected views — show the most constrained (bottleneck)
-  const capacityForView = useMemo(() => {
-    if (isRestView || selectedNonRestViews.length === 0) return null
-    const caps = selectedNonRestViews.map((v) => {
-      const cap =
-        v.key === "duty14" ? capacity.duty14Days
-          : v.key === "duty28" ? capacity.duty28Days
-            : v.key === "flight28" ? capacity.flight28Days
-              : capacity.flight365Days
-      return { ...cap, label: v.label }
-    })
-    return caps.reduce((min, c) => (c.remaining < min.remaining ? c : min))
-  }, [isRestView, selectedNonRestViews, capacity])
 
   // Today marker
   const todayStr = new Date().toISOString().split("T")[0]
@@ -615,12 +596,6 @@ export function FDPTimelineChart({
                 </div>
               )}
               <span className="text-xs font-medium">{view.label}</span>
-              <span className={cn(
-                "text-[10px]",
-                isActive && !isMulti ? "text-primary-foreground/70" : "text-muted-foreground"
-              )}>
-                {view.regulation}
-              </span>
               {/* Prominent used / limit display */}
               <span className={cn(
                 "text-sm font-semibold tabular-nums mt-0.5",
@@ -660,9 +635,6 @@ export function FDPTimelineChart({
           )}
         >
           <span className="text-xs font-medium">Rest Periods</span>
-          <span className={cn("text-[10px]", isRestView ? "text-primary-foreground/70" : "text-muted-foreground")}>
-            Reg 3
-          </span>
           {restData.some((d) => !d.restCompliant) && (
             <Badge variant="outline" className={cn("text-[9px] h-4 mt-1", isRestView ? "border-primary-foreground/30 text-primary-foreground" : "border-red-500/30 text-red-500")}>
               Violations
@@ -670,26 +642,6 @@ export function FDPTimelineChart({
           )}
         </button>
       </div>
-
-      {/* Current capacity summary */}
-      {!isRestView && capacityForView && (
-        <div className="flex items-center justify-between px-1">
-          <span className="text-xs text-muted-foreground">
-            {capacityForView.used.toFixed(1)}h used of {capacityForView.limit}h
-            {selectedNonRestViews.length > 1 && (
-              <span className="ml-1">({(capacityForView as { label: string }).label})</span>
-            )}
-          </span>
-          <span className={cn(
-            "text-xs font-medium",
-            capacityForView.remaining <= 0 ? "text-red-500"
-              : capacityForView.remaining < capacityForView.limit * 0.1 ? "text-orange-500"
-                : "text-green-500"
-          )}>
-            {capacityForView.remaining.toFixed(1)}h remaining
-          </span>
-        </div>
-      )}
 
       {/* Chart */}
       <Card className="shadow-sm">
@@ -924,9 +876,10 @@ export function FDPTimelineChart({
               onTouchMove={handleGestureMove}
               onTouchEnd={handleGestureEnd}
               className="relative mt-2 touch-none cursor-grab active:cursor-grabbing select-none"
+              style={{ paddingTop: 4, paddingBottom: 4 }}
             >
               {/* Mini chart showing full dataset with rolling lines + shaded fill */}
-              <div className="overflow-hidden" style={{ marginLeft: CHART_LEFT_PX, marginRight: CHART_RIGHT_PX }}>
+              <div className="overflow-hidden rounded" style={{ marginLeft: CHART_LEFT_PX, marginRight: CHART_RIGHT_PX }}>
                 <ResponsiveContainer width="100%" height={50}>
                   <ComposedChart data={activeData} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
                     <defs>
