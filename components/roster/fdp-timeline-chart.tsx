@@ -3,7 +3,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import {
   ComposedChart,
-  AreaChart,
   Bar,
   Line,
   XAxis,
@@ -11,7 +10,6 @@ import {
   CartesianGrid,
   Tooltip,
   ReferenceLine,
-  ReferenceArea,
   ResponsiveContainer,
   Cell,
   Area,
@@ -74,7 +72,7 @@ export function FDPTimelineChart({
   const DEFAULT_WINDOW = 90 // default to ~90 days
   const [viewWindow, setViewWindow] = useState<{ start: number; end: number } | null>(null)
   const gestureRef = useRef<{
-    mode: "pan" | "pinch"
+    mode: "pan" | "pinch" | "edge-left" | "edge-right"
     startX: number
     startWindow: { start: number; end: number }
     pinchStartDist: number
@@ -83,7 +81,13 @@ export function FDPTimelineChart({
   } | null>(null)
   const overviewRef = useRef<HTMLDivElement>(null)
   const rafRef = useRef<number>(0)
-  const AXIS_ZONE_HEIGHT = 40 // px from bottom of chart treated as axis drag zone
+  const AXIS_ZONE_HEIGHT = 40
+  const CHART_LEFT_PX = 40 // YAxis width
+  const CHART_RIGHT_PX = 20 // right margin — same for main + overview
+  const EDGE_TOLERANCE = 24 // px tolerance for edge-drag detection
+  // Fade-in/out date labels on overview during gesture
+  const [showOverviewDates, setShowOverviewDates] = useState(false)
+  const overviewDateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Resolve oklch CSS variables to rgb for SVG attributes (SVG fill/stroke
   // cannot use hsl(var(...)) when the variable holds an oklch value).
@@ -341,11 +345,9 @@ export function FDPTimelineChart({
     return viewWindow
   }, [activeData, viewWindow])
 
-  // Visible date range label
-  const dateRangeLabel = useMemo(() => {
-    if (slicedData.length < 2) return null
-    return `${slicedData[0].dateLabel} — ${slicedData[slicedData.length - 1].dateLabel}`
-  }, [slicedData])
+  // Overview edge date labels (shown during gesture, fade after release)
+  const overviewStartLabel = activeData[effectiveWindow.start]?.dateLabel ?? ""
+  const overviewEndLabel = activeData[effectiveWindow.end]?.dateLabel ?? ""
 
   // Gesture handlers for zoom/pan
   const chartWrapperRef = useRef<HTMLDivElement>(null)
@@ -365,14 +367,26 @@ export function FDPTimelineChart({
     return { start: s, end: e }
   }, [])
 
+  // Convert overview touch X position to data index
+  const touchToDataIndex = useCallback((clientX: number) => {
+    const el = overviewRef.current
+    if (!el || activeData.length <= 1) return 0
+    const rect = el.getBoundingClientRect()
+    const plotWidth = rect.width - CHART_LEFT_PX - CHART_RIGHT_PX
+    const relX = clientX - rect.left - CHART_LEFT_PX
+    const pct = Math.max(0, Math.min(1, relX / plotWidth))
+    return Math.round(pct * (activeData.length - 1))
+  }, [activeData.length])
+
   // Shared move handler — RAF-throttled for smooth real-time updates
   const applyGestureMove = useCallback((touches: React.TouchList) => {
     if (!gestureRef.current) return
     const maxLen = activeData.length
     if (maxLen === 0) return
     const ww = gestureRef.current.wrapperWidth || 300
+    const mode = gestureRef.current.mode
 
-    if (gestureRef.current.mode === "pan" && touches.length >= 1) {
+    if (mode === "pan" && touches.length >= 1) {
       const dx = touches[0].clientX - gestureRef.current.startX
       const windowSize = gestureRef.current.startWindow.end - gestureRef.current.startWindow.start
       const dataPxRatio = windowSize / ww
@@ -382,7 +396,7 @@ export function FDPTimelineChart({
         gestureRef.current.startWindow.end + shift,
         maxLen,
       ))
-    } else if (gestureRef.current.mode === "pinch" && touches.length === 2) {
+    } else if (mode === "pinch" && touches.length === 2) {
       const dist = Math.abs(touches[0].clientX - touches[1].clientX)
       const scale = gestureRef.current.pinchStartDist / Math.max(dist, 1)
       const prevW = gestureRef.current.pinchStartWindow
@@ -390,8 +404,18 @@ export function FDPTimelineChart({
       const newSize = Math.round(oldSize * scale)
       const mid = (prevW.start + prevW.end) / 2
       setViewWindow(clampWindow(mid - newSize / 2, mid + newSize / 2, maxLen))
+    } else if (mode === "edge-left" && touches.length >= 1) {
+      const idx = touchToDataIndex(touches[0].clientX)
+      const end = gestureRef.current.startWindow.end
+      const newStart = Math.max(0, Math.min(idx, end - MIN_WINDOW))
+      setViewWindow({ start: newStart, end })
+    } else if (mode === "edge-right" && touches.length >= 1) {
+      const idx = touchToDataIndex(touches[0].clientX)
+      const start = gestureRef.current.startWindow.start
+      const newEnd = Math.min(maxLen - 1, Math.max(idx, start + MIN_WINDOW))
+      setViewWindow({ start, end: newEnd })
     }
-  }, [activeData.length, clampWindow])
+  }, [activeData.length, clampWindow, touchToDataIndex])
 
   const handleGestureMove = useCallback((e: React.TouchEvent) => {
     if (!gestureRef.current) return
@@ -407,6 +431,9 @@ export function FDPTimelineChart({
   const handleGestureEnd = useCallback(() => {
     cancelAnimationFrame(rafRef.current)
     gestureRef.current = null
+    // Fade out overview dates after 1.5s
+    if (overviewDateTimerRef.current) clearTimeout(overviewDateTimerRef.current)
+    overviewDateTimerRef.current = setTimeout(() => setShowOverviewDates(false), 1500)
   }, [])
 
   // Main chart touch — zone-aware: axis zone = pan, chart body = tooltip (passthrough), 2-finger = zoom
@@ -432,6 +459,8 @@ export function FDPTimelineChart({
       const touchY = e.touches[0].clientY - rect.top
       // Only pan if touching the bottom axis zone
       if (touchY > rect.height - AXIS_ZONE_HEIGHT) {
+        if (overviewDateTimerRef.current) clearTimeout(overviewDateTimerRef.current)
+        setShowOverviewDates(true)
         gestureRef.current = {
           mode: "pan",
           startX: e.touches[0].clientX,
@@ -445,20 +474,52 @@ export function FDPTimelineChart({
     }
   }, [effectiveWindow])
 
-  // Overview touch — always pan
+  // Overview touch — detect edge-drag, window-drag, or jump
   const handleOverviewTouchStart = useCallback((e: React.TouchEvent) => {
-    if (e.touches.length >= 1) {
-      const wrapper = overviewRef.current
+    if (e.touches.length < 1) return
+    if (overviewDateTimerRef.current) clearTimeout(overviewDateTimerRef.current)
+    setShowOverviewDates(true)
+
+    const wrapper = overviewRef.current
+    if (!wrapper) return
+    const rect = wrapper.getBoundingClientRect()
+    const touchX = e.touches[0].clientX
+    const plotWidth = rect.width - CHART_LEFT_PX - CHART_RIGHT_PX
+    const total = Math.max(activeData.length - 1, 1)
+    const winLeftPx = rect.left + CHART_LEFT_PX + (effectiveWindow.start / total) * plotWidth
+    const winRightPx = rect.left + CHART_LEFT_PX + (effectiveWindow.end / total) * plotWidth
+    const ww = wrapper.clientWidth || 300
+
+    if (Math.abs(touchX - winLeftPx) < EDGE_TOLERANCE) {
+      // Dragging left edge
       gestureRef.current = {
-        mode: "pan",
-        startX: e.touches[0].clientX,
-        startWindow: { ...effectiveWindow },
-        pinchStartDist: 0,
-        pinchStartWindow: { ...effectiveWindow },
-        wrapperWidth: wrapper?.clientWidth || 300,
+        mode: "edge-left", startX: touchX, startWindow: { ...effectiveWindow },
+        pinchStartDist: 0, pinchStartWindow: { ...effectiveWindow }, wrapperWidth: ww,
+      }
+    } else if (Math.abs(touchX - winRightPx) < EDGE_TOLERANCE) {
+      // Dragging right edge
+      gestureRef.current = {
+        mode: "edge-right", startX: touchX, startWindow: { ...effectiveWindow },
+        pinchStartDist: 0, pinchStartWindow: { ...effectiveWindow }, wrapperWidth: ww,
+      }
+    } else if (touchX > winLeftPx && touchX < winRightPx) {
+      // Inside window → pan
+      gestureRef.current = {
+        mode: "pan", startX: touchX, startWindow: { ...effectiveWindow },
+        pinchStartDist: 0, pinchStartWindow: { ...effectiveWindow }, wrapperWidth: ww,
+      }
+    } else {
+      // Outside window → jump center to touch, then pan
+      const idx = touchToDataIndex(touchX)
+      const halfWin = Math.round((effectiveWindow.end - effectiveWindow.start) / 2)
+      const newWindow = clampWindow(idx - halfWin, idx + halfWin, activeData.length)
+      setViewWindow(newWindow)
+      gestureRef.current = {
+        mode: "pan", startX: touchX, startWindow: newWindow,
+        pinchStartDist: 0, pinchStartWindow: newWindow, wrapperWidth: ww,
       }
     }
-  }, [effectiveWindow])
+  }, [effectiveWindow, activeData.length, touchToDataIndex, clampWindow])
 
   // Zoom button controls
   const zoomIn = useCallback(() => {
@@ -485,27 +546,20 @@ export function FDPTimelineChart({
     setViewWindow(null)
   }, [])
 
-  // Overview window highlight positions (percentage of full data range)
+  // Overview window highlight — CSS calc values for the active window box
   const overviewHighlight = useMemo(() => {
-    if (!activeData.length) return { leftPct: 0, widthPct: 100 }
-    const total = activeData.length - 1
-    if (total <= 0) return { leftPct: 0, widthPct: 100 }
+    const total = Math.max(activeData.length - 1, 1)
     const leftPct = (effectiveWindow.start / total) * 100
+    const rightPct = ((total - effectiveWindow.end) / total) * 100
     const widthPct = ((effectiveWindow.end - effectiveWindow.start) / total) * 100
-    return { leftPct, widthPct }
+    return { leftPct, rightPct, widthPct }
   }, [activeData.length, effectiveWindow])
 
-  // Overview data key — pick primary metric for the mini-chart
-  const overviewDataKey = useMemo(() => {
-    if (isRestView) return "restHours"
-    return "dutyHours"
-  }, [isRestView])
-
-  const overviewColor = useMemo(() => {
-    if (isRestView) return COLORS.compliant
-    if (primaryView) return primaryView.color
-    return VIEW_COLORS.duty14
-  }, [isRestView, primaryView])
+  // X-axis tick interval — show ~6 labels max to avoid clutter
+  const xAxisInterval = useMemo(() => {
+    if (slicedData.length <= 7) return 0
+    return Math.max(1, Math.floor(slicedData.length / 6) - 1)
+  }, [slicedData.length])
 
   // Shared axis/grid theme props — using resolved rgb from probe
   const axisTickStyle = { fontSize: 10, fill: cc.text }
@@ -656,24 +710,29 @@ export function FDPTimelineChart({
               onTouchStart={handleChartTouchStart}
               onTouchMove={handleGestureMove}
               onTouchEnd={handleGestureEnd}
-              className="touch-none"
+              className="touch-none relative"
             >
+              {/* Axis pan zone affordance */}
+              <div className="absolute bottom-0 pointer-events-none" style={{ left: CHART_LEFT_PX, right: CHART_RIGHT_PX, height: AXIS_ZONE_HEIGHT }}>
+                <div className="w-full h-full border-t border-dashed border-border/40 bg-gradient-to-t from-muted/15 to-transparent" />
+                <div className="absolute top-1 left-1/2 -translate-x-1/2 text-[8px] text-muted-foreground/50 select-none">↔ drag to pan</div>
+              </div>
               <ResponsiveContainer width="100%" height={320}>
-                <ComposedChart data={slicedData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                <ComposedChart data={slicedData} margin={{ top: 5, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
                   <XAxis
                     dataKey="dateLabel"
                     tick={axisTickStyle}
                     tickLine={false}
                     axisLine={false}
-                    interval="preserveStartEnd"
+                    interval={xAxisInterval}
                   />
                   <YAxis
                     tick={axisTickStyle}
                     tickLine={false}
                     axisLine={false}
                     unit="h"
-                    width={40}
+                    width={CHART_LEFT_PX}
                   />
                   <Tooltip content={<CustomTooltip />} />
 
@@ -707,10 +766,15 @@ export function FDPTimelineChart({
               onTouchStart={handleChartTouchStart}
               onTouchMove={handleGestureMove}
               onTouchEnd={handleGestureEnd}
-              className="touch-none"
+              className="touch-none relative"
             >
+              {/* Axis pan zone affordance */}
+              <div className="absolute bottom-0 pointer-events-none z-10" style={{ left: CHART_LEFT_PX, right: CHART_RIGHT_PX, height: AXIS_ZONE_HEIGHT }}>
+                <div className="w-full h-full border-t border-dashed border-border/40 bg-gradient-to-t from-muted/15 to-transparent" />
+                <div className="absolute top-1 left-1/2 -translate-x-1/2 text-[8px] text-muted-foreground/50 select-none">↔ drag to pan</div>
+              </div>
               <ResponsiveContainer width="100%" height={320}>
-                <ComposedChart data={slicedData} margin={{ top: 5, right: 60, left: 0, bottom: 5 }}>
+                <ComposedChart data={slicedData} margin={{ top: 5, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
                   <defs>
                     {selectedNonRestViews.map((view) => (
                       <linearGradient key={view.key} id={`gradient-${view.key}`} x1="0" y1="0" x2="0" y2="1">
@@ -725,14 +789,14 @@ export function FDPTimelineChart({
                     tick={axisTickStyle}
                     tickLine={false}
                     axisLine={false}
-                    interval="preserveStartEnd"
+                    interval={xAxisInterval}
                   />
                   <YAxis
                     tick={axisTickStyle}
                     tickLine={false}
                     axisLine={false}
                     unit="h"
-                    width={40}
+                    width={CHART_LEFT_PX}
                     domain={yDomain}
                   />
                   <Tooltip content={<CustomTooltip />} />
@@ -747,7 +811,7 @@ export function FDPTimelineChart({
                       strokeWidth={2}
                       label={{
                         value: `${view.limitValue}h`,
-                        position: "right",
+                        position: "insideTopRight",
                         fill: isSingleView ? COLORS.violation : view.color,
                         fontSize: 10,
                       }}
@@ -826,97 +890,120 @@ export function FDPTimelineChart({
             </div>
           )}
 
-          {/* Overview mini-chart — "big picture" with visible window highlight */}
+          {/* Overview mini-chart — "big picture" with rolling lines + active window */}
           {activeData.length > 0 && (
             <div
               ref={overviewRef}
               onTouchStart={handleOverviewTouchStart}
               onTouchMove={handleGestureMove}
               onTouchEnd={handleGestureEnd}
-              className="relative mt-1 touch-none cursor-grab active:cursor-grabbing"
+              className="relative mt-2 touch-none cursor-grab active:cursor-grabbing select-none"
             >
-              {/* Mini area chart showing full dataset */}
+              {/* Mini chart showing full dataset with rolling lines */}
               <ResponsiveContainer width="100%" height={50}>
-                <AreaChart data={activeData} margin={{ top: 2, right: isRestView ? 20 : 60, left: 0, bottom: 2 }}>
-                  <defs>
-                    <linearGradient id="overview-gradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={overviewColor} stopOpacity={0.4} />
-                      <stop offset="95%" stopColor={overviewColor} stopOpacity={0.05} />
-                    </linearGradient>
-                  </defs>
-                  <YAxis hide domain={[0, "auto"]} width={40} />
-                  <Area
-                    dataKey={overviewDataKey}
-                    fill="url(#overview-gradient)"
-                    stroke={overviewColor}
-                    strokeWidth={1}
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                  {/* Darken non-visible left region */}
-                  {effectiveWindow.start > 0 && activeData[0] && activeData[effectiveWindow.start] && (
-                    <ReferenceArea
-                      x1={activeData[0].dateLabel}
-                      x2={activeData[effectiveWindow.start].dateLabel}
-                      fill={cc.card}
-                      fillOpacity={0.7}
-                      strokeOpacity={0}
-                    />
+                <ComposedChart data={activeData} margin={{ top: 2, right: CHART_RIGHT_PX, left: 0, bottom: 2 }}>
+                  <XAxis dataKey="dateLabel" hide />
+                  <YAxis hide domain={[0, "auto"]} width={CHART_LEFT_PX} />
+                  {isRestView ? (
+                    <Bar dataKey="restHours" maxBarSize={4} isAnimationActive={false}>
+                      {activeData.map((entry, i) => (
+                        <Cell key={i} fill={entry.restCompliant ? COLORS.compliant : COLORS.violation} opacity={0.6} />
+                      ))}
+                    </Bar>
+                  ) : (
+                    <>
+                      {selectedNonRestViews.map((view) => (
+                        <Area
+                          key={`ov-${view.key}`}
+                          dataKey={view.rollingKey}
+                          fill="none"
+                          stroke={view.color}
+                          strokeWidth={1}
+                          dot={false}
+                          isAnimationActive={false}
+                        />
+                      ))}
+                    </>
                   )}
-                  {/* Darken non-visible right region */}
-                  {effectiveWindow.end < activeData.length - 1 && activeData[effectiveWindow.end] && activeData[activeData.length - 1] && (
-                    <ReferenceArea
-                      x1={activeData[effectiveWindow.end].dateLabel}
-                      x2={activeData[activeData.length - 1].dateLabel}
-                      fill={cc.card}
-                      fillOpacity={0.7}
-                      strokeOpacity={0}
-                    />
-                  )}
-                </AreaChart>
+                </ComposedChart>
               </ResponsiveContainer>
-              {/* Border around visible window within overview */}
+
+              {/* Darkened left region */}
               <div
-                className="absolute top-0 bottom-0 border-x-2 border-primary/50 pointer-events-none"
+                className="absolute top-0 bottom-0 pointer-events-none"
                 style={{
-                  left: `calc(40px + (100% - ${isRestView ? 60 : 100}px) * ${overviewHighlight.leftPct / 100})`,
-                  width: `calc((100% - ${isRestView ? 60 : 100}px) * ${overviewHighlight.widthPct / 100})`,
+                  left: CHART_LEFT_PX,
+                  width: `calc((100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.leftPct / 100})`,
+                  backgroundColor: cc.card,
+                  opacity: 0.75,
                 }}
               />
+              {/* Darkened right region */}
+              <div
+                className="absolute top-0 bottom-0 pointer-events-none"
+                style={{
+                  right: CHART_RIGHT_PX,
+                  width: `calc((100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.rightPct / 100})`,
+                  backgroundColor: cc.card,
+                  opacity: 0.75,
+                }}
+              />
+              {/* Active window border box */}
+              <div
+                className="absolute top-0 bottom-0 border-x-2 border-primary/60 pointer-events-none rounded-sm"
+                style={{
+                  left: `calc(${CHART_LEFT_PX}px + (100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.leftPct / 100})`,
+                  width: `calc((100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.widthPct / 100})`,
+                }}
+              >
+                {/* Edge grab handles */}
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-1 h-4 rounded-full bg-primary/60" />
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-1 h-4 rounded-full bg-primary/60" />
+              </div>
+
+              {/* Fade-in/out date labels at edges of active window */}
+              <div
+                className="absolute top-0 bottom-0 pointer-events-none transition-opacity duration-500"
+                style={{
+                  left: `calc(${CHART_LEFT_PX}px + (100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.leftPct / 100})`,
+                  width: `calc((100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.widthPct / 100})`,
+                  opacity: showOverviewDates ? 1 : 0,
+                }}
+              >
+                <span className="absolute -top-3.5 left-0 -translate-x-1/2 text-[9px] text-muted-foreground tabular-nums whitespace-nowrap bg-card/80 px-0.5 rounded">
+                  {overviewStartLabel}
+                </span>
+                <span className="absolute -top-3.5 right-0 translate-x-1/2 text-[9px] text-muted-foreground tabular-nums whitespace-nowrap bg-card/80 px-0.5 rounded">
+                  {overviewEndLabel}
+                </span>
+              </div>
             </div>
           )}
 
-          {/* Zoom controls + date range label */}
-          <div className="flex items-center justify-between mt-1 px-1">
-            <div className="flex items-center gap-1">
+          {/* Zoom controls */}
+          <div className="flex items-center gap-1 mt-1 px-1">
+            <button
+              onClick={zoomIn}
+              className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+              aria-label="Zoom in"
+            >
+              <ZoomIn className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={zoomOut}
+              className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+              aria-label="Zoom out"
+            >
+              <ZoomOut className="h-3.5 w-3.5" />
+            </button>
+            {viewWindow && (
               <button
-                onClick={zoomIn}
+                onClick={resetZoom}
                 className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                aria-label="Zoom in"
+                aria-label="Reset zoom"
               >
-                <ZoomIn className="h-3.5 w-3.5" />
+                <RotateCcw className="h-3.5 w-3.5" />
               </button>
-              <button
-                onClick={zoomOut}
-                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                aria-label="Zoom out"
-              >
-                <ZoomOut className="h-3.5 w-3.5" />
-              </button>
-              {viewWindow && (
-                <button
-                  onClick={resetZoom}
-                  className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                  aria-label="Reset zoom"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-            {dateRangeLabel && (
-              <span className="text-[10px] text-muted-foreground tabular-nums">
-                {dateRangeLabel}
-              </span>
             )}
           </div>
         </CardContent>
