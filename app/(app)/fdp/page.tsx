@@ -98,7 +98,7 @@ export default function FDPPage() {
     isLoading,
   } = useFDPData()
 
-  const { setDetailContent, setHasDetailSupport, setSelectedId } = useDetailPanel()
+  const { selectedId, setDetailContent, setHasDetailSupport, setSelectedId } = useDetailPanel()
   const [scenarioResult, setScenarioResult] = useState<ScenarioResult | null>(null)
   const [quickCheckOpen, setQuickCheckOpen] = useState(false)
   const [ruleMenuOpen, setRuleMenuOpen] = useState(false)
@@ -154,6 +154,14 @@ export default function FDPPage() {
       setSelectedId(null)
     }
   }, [quickCheckOpen, allDutyPeriods, activeLimits, closeQuickCheck, handleViewChart, setDetailContent, setSelectedId])
+
+  // Sync quickCheckOpen when selectedId is cleared externally (e.g., mobile back button)
+  useEffect(() => {
+    if (selectedId === null && quickCheckOpen) {
+      setQuickCheckOpen(false)
+      setScenarioResult(null)
+    }
+  }, [selectedId, quickCheckOpen])
 
   // Live digital countdown — updates every 10 seconds
   const [countdown, setCountdown] = useState("")

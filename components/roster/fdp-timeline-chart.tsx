@@ -35,21 +35,21 @@ interface ViewConfig {
   color: string
 }
 
-// OKLCH palette — perceptually uniform, works on both light and dark backgrounds
+// SVG-safe hex palette — perceptually uniform, works on both light and dark backgrounds
 const VIEW_COLORS: Record<string, string> = {
-  duty14: "oklch(0.65 0.15 250)",   // bright blue
-  duty28: "oklch(0.60 0.15 300)",   // purple-violet
-  flight28: "oklch(0.65 0.18 155)", // vivid teal-green
-  flight365: "oklch(0.70 0.15 55)", // warm amber
+  duty14: "#4a8fd6",   // bright blue
+  duty28: "#8b5fd6",   // purple-violet
+  flight28: "#2ba06b", // vivid teal-green
+  flight365: "#c4903a",// warm amber
 }
 
-// Semantic colors for data bars and compliance indicators
+// Semantic colors for data bars and compliance indicators (hex for SVG compatibility)
 const COLORS = {
-  dutyBar: "oklch(0.65 0.15 250)",     // blue for duty hours bars
-  flightBar: "oklch(0.70 0.15 80)",    // yellow-amber for flight hours bars
-  restBar: "oklch(0.65 0.20 155)",     // green for rest hours bars
-  violation: "oklch(0.60 0.22 25)",    // warm red
-  warning90: "oklch(0.70 0.15 55)",    // amber for 90% line
+  dutyBar: "#4a8fd6",     // blue for duty hours bars
+  flightBar: "#b09830",   // yellow-amber for flight hours bars
+  restBar: "#1aa268",     // green for rest hours bars
+  violation: "#d04a3a",   // warm red
+  warning90: "#c4903a",   // amber for 90% line
 }
 
 interface FDPTimelineChartProps {
@@ -840,7 +840,7 @@ export function FDPTimelineChart({
                         {slicedData.map((entry, index) => {
                           const isModified = hasScenario && scenarioModifiedDates?.has(entry.date)
                           const isRemoved = hasScenario && scenarioRemovedDates?.has(entry.date)
-                          const cellColor = isModified ? "oklch(0.70 0.20 145)" // bright green for added
+                          const cellColor = isModified ? "#20a96c" // bright green for added
                             : isRemoved ? COLORS.violation // red for removed
                               : barColor
                           const cellOpacity = isRemoved ? 0.2
