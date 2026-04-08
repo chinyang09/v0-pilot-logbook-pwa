@@ -1087,13 +1087,30 @@ export function calculateRestUntilLegal(
   asOfDate?: Date
 ): RestUntilLegalResult | null {
   const now = asOfDate ?? new Date()
-  const pastDPs = dutyPeriods
-    .filter((dp) => !dp.isFuture)
+
+  // Only consider duties whose debrief has actually passed.
+  // Same-day scheduled duties that haven't been completed yet must be excluded
+  // (their isFuture can be false because date === today, but they haven't happened).
+  const completedDPs = dutyPeriods
+    .filter((dp) => {
+      if (dp.isFuture) return false
+      // Compute debrief timestamp to check if it's in the past
+      let dDate = dp.date
+      const rMin = hhmmToMinutes(dp.reportTime)
+      const dMin = hhmmToMinutes(dp.debriefTime)
+      if (dMin < rMin) {
+        const d = new Date(dDate + "T00:00:00Z")
+        d.setUTCDate(d.getUTCDate() + 1)
+        dDate = d.toISOString().split("T")[0]
+      }
+      const ts = new Date(`${dDate}T${dp.debriefTime}:00Z`)
+      return ts.getTime() <= now.getTime()
+    })
     .sort((a, b) => a.date.localeCompare(b.date))
 
-  if (pastDPs.length === 0) return null
+  if (completedDPs.length === 0) return null
 
-  const lastDP = pastDPs[pastDPs.length - 1]
+  const lastDP = completedDPs[completedDPs.length - 1]
 
   // Calculate debrief timestamp
   let debriefDate = lastDP.date

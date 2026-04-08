@@ -58,6 +58,17 @@ export function useRegisterMainActions(actions: ReactNode, isActive: boolean) {
     // Clears on unmount (non-keepalive) AND on inactive→active transition cleanup (keepalive).
     // This prevents stale actions persisting when lazy-loaded pages race during navigation.
     return () => setMainActions(null)
+    // Deliberately excluding `actions` — the ref tracks the latest value without
+    // triggering cleanup→re-register cycles that flash buttons off momentarily.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, setMainActions])
+
+  // Sync ref-held actions to context when the ReactNode identity changes
+  // (separate from the mount/unmount effect to avoid cleanup flicker).
+  useEffect(() => {
+    if (isActive) {
+      setMainActions(actionsRef.current)
+    }
   }, [isActive, setMainActions, actions])
 }
 
@@ -71,5 +82,12 @@ export function useRegisterDetailActions(actions: ReactNode, isActive: boolean) 
       setDetailActions(actionsRef.current)
     }
     return () => setDetailActions(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, setDetailActions])
+
+  useEffect(() => {
+    if (isActive) {
+      setDetailActions(actionsRef.current)
+    }
   }, [isActive, setDetailActions, actions])
 }
