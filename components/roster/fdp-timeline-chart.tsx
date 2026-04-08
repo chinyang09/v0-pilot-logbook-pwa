@@ -72,6 +72,15 @@ export function FDPTimelineChart({
   scenarioModifiedDates,
   scenarioRemovedDates,
 }: FDPTimelineChartProps) {
+  // Defer chart rendering by one frame so ResponsiveContainer measures
+  // a fully-laid-out container. On full page refresh the container can
+  // have 0 dimensions on the first paint, causing Recharts to crash.
+  const [chartReady, setChartReady] = useState(false)
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setChartReady(true))
+    return () => cancelAnimationFrame(id)
+  }, [])
+
   const [activeViews, setActiveViews] = useState<Set<ChartView>>(new Set(["duty14"]))
 
   // Gesture zoom/pan state — visible window into the data array
@@ -652,9 +661,9 @@ export function FDPTimelineChart({
               )}
             </button>
           </div>
-          {(isRestView ? restData.length === 0 : timelineData.length === 0) ? (
+          {!chartReady || (isRestView ? restData.length === 0 : timelineData.length === 0) ? (
             <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
-              No data to display
+              {chartReady ? "No data to display" : ""}
             </div>
           ) : (
           <div className="flex">
@@ -888,7 +897,7 @@ export function FDPTimelineChart({
           )}
 
           {/* Overview mini-chart — "big picture" with rolling lines + active window */}
-          {activeData.length > 0 && (
+          {chartReady && activeData.length > 0 && (
             <div
               ref={overviewRef}
               onTouchStart={handleOverviewTouchStart}
