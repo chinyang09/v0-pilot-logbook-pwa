@@ -1,6 +1,6 @@
 "use client"
 
-import { Component, useMemo, useState, useEffect, useCallback, type ReactNode, type ErrorInfo } from "react"
+import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type ErrorInfo } from "react"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -155,12 +155,16 @@ export default function FDPPage() {
     }
   }, [quickCheckOpen, allDutyPeriods, activeLimits, closeQuickCheck, handleViewChart, setDetailContent, setSelectedId])
 
-  // Sync quickCheckOpen when selectedId is cleared externally (e.g., mobile back button)
+  // Sync quickCheckOpen when selectedId is cleared externally (e.g., mobile back button).
+  // Only fires on non-null → null transitions to avoid interfering with initial panel open
+  // (where selectedId is still null while setSelectedId("legal-check") is queued).
+  const prevSelectedIdRef = useRef(selectedId)
   useEffect(() => {
-    if (selectedId === null && quickCheckOpen) {
+    if (prevSelectedIdRef.current !== null && selectedId === null && quickCheckOpen) {
       setQuickCheckOpen(false)
       setScenarioResult(null)
     }
+    prevSelectedIdRef.current = selectedId
   }, [selectedId, quickCheckOpen])
 
   // Live digital countdown — updates every 10 seconds
