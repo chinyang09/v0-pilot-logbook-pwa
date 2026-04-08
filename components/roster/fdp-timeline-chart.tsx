@@ -16,7 +16,7 @@ import {
   Area,
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
-import { Check, ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
+import { ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
 import type { FTLLimits, CapacityRemaining, ForecastResult } from "@/types/entities/roster.types"
@@ -181,21 +181,9 @@ export function FDPTimelineChart({
   const isSingleView = selectedNonRestViews.length === 1
   const primaryView = selectedNonRestViews[0]
 
-  // Toggle handler
+  // Toggle handler — single-select: tapping a tab selects it exclusively
   const toggleView = useCallback((key: ChartView) => {
-    setActiveViews((prev) => {
-      if (key === "rest") return new Set(["rest"])
-      if (prev.has("rest")) return new Set([key])
-      const next = new Set(prev)
-      if (next.has(key)) {
-        if (next.size <= 1) return prev
-        next.delete(key)
-      } else {
-        next.add(key)
-      }
-      return next
-    })
-    // Preserve zoom window when toggling views (don't reset)
+    setActiveViews(new Set([key]))
   }, [])
 
   // Today marker
@@ -322,6 +310,17 @@ export function FDPTimelineChart({
   const hasScenario = !isRestView && !!scenarioTimelineData
   const effectiveTimelineData = hasScenario ? scenarioTimelineData! : timelineData
   const activeData = isRestView ? restData : effectiveTimelineData
+
+  // Reset zoom window when underlying data changes (e.g., refresh/resync)
+  // to prevent stale indices from pointing beyond the new data length.
+  const prevDataLenRef = useRef(activeData.length)
+  useEffect(() => {
+    if (prevDataLenRef.current !== activeData.length && viewWindow) {
+      setViewWindow(null)
+    }
+    prevDataLenRef.current = activeData.length
+  }, [activeData.length, viewWindow])
+
   const slicedData = useMemo(() => {
     if (!activeData.length) return activeData
     if (!viewWindow) {
@@ -575,7 +574,6 @@ export function FDPTimelineChart({
                     : capacity.flight365Days
               const pct = cap.limit > 0 ? (cap.used / cap.limit) * 100 : 0
               const isActive = activeViews.has(view.key)
-              const isMulti = activeViews.size > 1 && !isRestView
 
               const remainingColor = pct >= 100 ? "text-red-500"
                 : pct >= 90 ? "text-orange-500"
@@ -593,32 +591,21 @@ export function FDPTimelineChart({
                   className={cn(
                     "flex flex-col items-start px-2 py-1.5 rounded-md text-left transition-all min-w-0 flex-1 relative",
                     isActive
-                      ? isMulti
-                        ? "bg-secondary shadow-sm text-foreground"
-                        : "bg-primary text-primary-foreground shadow-sm"
+                      ? "bg-primary text-primary-foreground shadow-sm"
                       : "bg-secondary/50 hover:bg-secondary text-foreground"
                   )}
-                  style={isActive && isMulti ? { boxShadow: `0 0 0 2px ${view.color}` } : undefined}
                 >
-                  {isActive && isMulti && (
-                    <div
-                      className="absolute top-0.5 right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center"
-                      style={{ backgroundColor: view.color }}
-                    >
-                      <Check className="h-2 w-2 text-white" />
-                    </div>
-                  )}
                   <span className="text-[10px] leading-tight font-medium truncate w-full">{view.label}</span>
                   <span className={cn(
                     "text-xs font-bold tabular-nums leading-tight",
-                    isActive && !isMulti ? "text-primary-foreground" : "text-foreground"
+                    isActive ? "text-primary-foreground" : "text-foreground"
                   )}>
                     {cap.used.toFixed(0)}<span className="font-normal text-[10px]">/{cap.limit}</span>
                   </span>
                   <div className="flex items-center gap-1 mt-0.5 w-full">
                     <div className={cn(
                       "h-1 rounded-full flex-1",
-                      isActive && !isMulti ? "bg-primary-foreground/20" : "bg-muted"
+                      isActive ? "bg-primary-foreground/20" : "bg-muted"
                     )}>
                       <div
                         className={cn("h-full rounded-full transition-all", barColor)}
@@ -627,7 +614,7 @@ export function FDPTimelineChart({
                     </div>
                     <span className={cn(
                       "text-[9px] font-semibold whitespace-nowrap",
-                      isActive && !isMulti ? "text-primary-foreground" : remainingColor
+                      isActive ? "text-primary-foreground" : remainingColor
                     )}>
                       {cap.remaining.toFixed(0)}h
                     </span>
@@ -697,11 +684,10 @@ export function FDPTimelineChart({
                     strokeWidth={1.5}
                     dot={false}
                     name="Required"
-                    isAnimationActive={false}
                   />
 
                   {/* Actual rest as bars colored by compliance */}
-                  <Bar dataKey="restHours" radius={[3, 3, 0, 0]} maxBarSize={24} name="Rest" isAnimationActive={false}>
+                  <Bar dataKey="restHours" radius={[3, 3, 0, 0]} maxBarSize={24} name="Rest">
                     {slicedData.map((entry, index) => (
                       <Cell
                         key={index}
@@ -823,11 +809,10 @@ export function FDPTimelineChart({
                       dot={false}
                       activeDot={false}
                       name={view.rollingLabel}
-                      isAnimationActive={false}
                     />
                   ))}
 
-                  {/* Daily bars — duty: blue, flight: yellow, scenario: highlighted */}
+                  {/* Daily bars — duty: blue, flight: yellow, red when rolling exceeds limit */}
                   {uniqueBarKeys.map((barKey) => {
                     const barView = selectedNonRestViews.find((v) => v.barKey === barKey)!
                     const barColor = barKey === "dutyHours" ? COLORS.dutyBar : COLORS.flightBar
@@ -838,14 +823,17 @@ export function FDPTimelineChart({
                         radius={[2, 2, 0, 0]}
                         maxBarSize={uniqueBarKeys.length > 1 ? 12 : 16}
                         name={barView.barLabel}
-                        isAnimationActive={false}
                       >
                         {slicedData.map((entry, index) => {
                           const isModified = hasScenario && scenarioModifiedDates?.has(entry.date)
                           const isRemoved = hasScenario && scenarioRemovedDates?.has(entry.date)
+                          // Red bar when rolling cumulative exceeds the limit for the active view
+                          const rollingValue = primaryView ? (entry[primaryView.rollingKey] as number) : 0
+                          const exceedsLimit = primaryView ? rollingValue > primaryView.limitValue : false
                           const cellColor = isModified ? "#20a96c" // bright green for added
                             : isRemoved ? COLORS.violation // red for removed
-                              : barColor
+                              : exceedsLimit ? COLORS.violation // red for limit exceedance
+                                : barColor
                           const cellOpacity = isRemoved ? 0.2
                             : isModified ? 0.9
                               : entry.isFuture ? 0.3 : 0.7
