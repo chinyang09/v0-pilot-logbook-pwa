@@ -1,280 +1,333 @@
 "use client"
 
-import { useMemo } from "react"
+import { Component, useMemo, useState, useEffect, useCallback, type ReactNode, type ErrorInfo } from "react"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { RefreshCw, TrendingUp, AlertTriangle, CheckCircle2, Info } from "lucide-react"
-import { useScheduleEntries } from "@/hooks/data/use-schedule"
-import { DutyPeriodCard } from "@/components/roster"
 import {
-  getDutyPeriodsFromSchedule,
-  calculateCumulativeLimits,
-  getComplianceStatus,
-} from "@/lib/utils/roster/fdp-calculator"
-import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
+  RefreshCw,
+  TrendingUp,
+  AlertTriangle,
+  Calculator,
+  ChevronDown,
+} from "lucide-react"
+import { useFDPData } from "@/hooks/data/use-fdp-data"
+import { useScheduleEntries } from "@/hooks/data/use-schedule"
+import {
+  DEFAULT_FTL_LIMITS,
+  FTL_PRESETS,
+  type FTLLimits,
+  type RegulationType,
+} from "@/types/entities/roster.types"
+import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
+import { QuickCheckPanel } from "@/components/roster/quick-check-panel"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import type { ScenarioResult } from "@/lib/utils/roster/fdp-calculator"
 import { cn } from "@/lib/utils"
 
-export default function FDPPage() {
-  const { scheduleEntries, isLoading, refresh } = useScheduleEntries()
-
-  // Calculate duty periods from schedule entries
-  const dutyPeriods = useMemo(() => {
-    return getDutyPeriodsFromSchedule(scheduleEntries)
-  }, [scheduleEntries])
-
-  // Calculate cumulative limits for today
-  const cumulativeLimits = useMemo(() => {
-    return calculateCumulativeLimits(dutyPeriods, new Date(), DEFAULT_FTL_LIMITS)
-  }, [dutyPeriods])
-
-  // Recent duty periods (last 14 days)
-  const recentDutyPeriods = useMemo(() => {
-    const twoWeeksAgo = new Date()
-    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14)
-    return dutyPeriods.filter((dp) => {
-      const dpDate = new Date(dp.date + "T00:00:00")
-      return dpDate >= twoWeeksAgo
-    })
-  }, [dutyPeriods])
-
-  // Get compliance status for each period
-  const compliance7Days = getComplianceStatus(cumulativeLimits.last7Days.utilizationPercent)
-  const compliance14Days = getComplianceStatus(cumulativeLimits.last14Days.utilizationPercent)
-  const compliance28Days = getComplianceStatus(cumulativeLimits.last28Days.utilizationPercent)
-  const compliance90Days = getComplianceStatus(cumulativeLimits.last90Days.utilizationPercent)
-  const compliance365Days = getComplianceStatus(cumulativeLimits.last365Days.utilizationPercent)
-
-  // Overall compliance (worst status)
-  const overallCompliance = [
-    compliance7Days,
-    compliance14Days,
-    compliance28Days,
-    compliance90Days,
-    compliance365Days,
-  ].reduce((worst, current) => {
-    const statusOrder = ["ok", "warning", "critical", "exceeded"]
-    const worstIndex = statusOrder.indexOf(worst.status)
-    const currentIndex = statusOrder.indexOf(current.status)
-    return currentIndex > worstIndex ? current : worst
-  })
-
-  const RollingPeriodCard = ({
-    title,
-    days,
-    stats,
-    compliance,
-  }: {
-    title: string
-    days: number
-    stats: { dutyHours?: number; flightHours: number; maxDutyHours?: number; maxFlightHours: number }
-    compliance: ReturnType<typeof getComplianceStatus>
-  }) => {
-    const StatusIcon =
-      compliance.status === "exceeded" || compliance.status === "critical"
-        ? AlertTriangle
-        : compliance.status === "warning"
-          ? Info
-          : CheckCircle2
-
-    return (
-      <Card>
-        <CardContent className="pt-4 pb-3 px-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-xs text-muted-foreground">{title}</div>
-            <StatusIcon className={cn("h-3.5 w-3.5", compliance.color)} />
-          </div>
-
-          {stats.dutyHours !== undefined && stats.maxDutyHours !== undefined && stats.maxDutyHours > 0 && (
-            <div className="mb-2">
-              <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-muted-foreground">Duty</span>
-                <span className="font-medium">
-                  {stats.dutyHours.toFixed(1)}h / {stats.maxDutyHours}h
-                </span>
-              </div>
-              <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                <div
-                  className={cn("h-full transition-all", compliance.color.replace("text", "bg"))}
-                  style={{ width: `${Math.min((stats.dutyHours / stats.maxDutyHours) * 100, 100)}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          <div>
-            <div className="flex items-center justify-between text-xs mb-1">
-              <span className="text-muted-foreground">Flight</span>
-              <span className="font-medium">
-                {stats.flightHours.toFixed(1)}h / {stats.maxFlightHours}h
-              </span>
-            </div>
-            <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-              <div
-                className={cn("h-full transition-all", compliance.color.replace("text", "bg"))}
-                style={{
-                  width: `${Math.min((stats.flightHours / stats.maxFlightHours) * 100, 100)}%`,
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="mt-2 text-center">
-            <Badge variant="outline" className={cn("text-xs", compliance.color)}>
-              {compliance.label}
-            </Badge>
-          </div>
-        </CardContent>
-      </Card>
-    )
+/** Error boundary around the chart — prevents Recharts crashes from taking down the page */
+class ChartErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { hasError: false }
   }
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[FDP] Chart render error:", error, info)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Card>
+          <CardContent className="py-6 text-center">
+            <AlertTriangle className="h-6 w-6 text-muted-foreground/40 mb-2 mx-auto" />
+            <p className="text-xs font-medium text-foreground mb-1">Chart failed to render</p>
+            <button
+              onClick={() => this.setState({ hasError: false })}
+              className="text-[10px] text-primary hover:underline"
+            >
+              Tap to retry
+            </button>
+          </CardContent>
+        </Card>
+      )
+    }
+    return this.props.children
+  }
+}
 
-  // Glass action buttons for the floating header bar
-  const fdpActions = useMemo(() => (
-    <GlassContainer cornerRadius={28}>
-      <Button variant="ghost" size="icon" className="h-14 w-14" onClick={() => refresh()} disabled={isLoading}>
-        <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
-      </Button>
-    </GlassContainer>
-  ), [refresh, isLoading])
+/** Format minutes as "Xh Ym" */
+function formatMinutesHM(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h === 0) return `${m}m`
+  if (m === 0) return `${h}h`
+  return `${h}h ${m}m`
+}
+
+const RULE_DESCRIPTIONS: Record<string, string> = {
+  "3a": "10h rest (local night)",
+  "3b": "12h rest (no local night)",
+  "3c": "rest matching duty hours",
+  "3d": "24h rest (>16h duty)",
+}
+
+const REGULATION_LABELS: Record<RegulationType, string> = {
+  CAAS: "CAAS",
+  FAA: "FAA",
+  EASA: "EASA",
+  CUSTOM: "Custom",
+}
+
+export default function FDPPage() {
+  const { refresh, isLoading: scheduleLoading } = useScheduleEntries()
+  const {
+    allDutyPeriods,
+    capacity,
+    forecast,
+    restViolations,
+    restUntilLegal,
+    timelineData,
+    isLoading,
+  } = useFDPData()
+
+  const { selectedId, setDetailContent, setHasDetailSupport, setSelectedId } = useDetailPanel()
+  const [scenarioResult, setScenarioResult] = useState<ScenarioResult | null>(null)
+  const [quickCheckOpen, setQuickCheckOpen] = useState(false)
+  const [ruleMenuOpen, setRuleMenuOpen] = useState(false)
+  const [activeRule, setActiveRule] = useState<RegulationType>("CAAS")
+  const [customLimits, setCustomLimits] = useState<FTLLimits>(DEFAULT_FTL_LIMITS)
+
+  // Register detail panel support
+  useEffect(() => {
+    setHasDetailSupport(true)
+    return () => setHasDetailSupport(false)
+  }, [setHasDetailSupport])
+
+  const activeLimits = useMemo(() => {
+    if (activeRule === "CUSTOM") return customLimits
+    return FTL_PRESETS[activeRule]
+  }, [activeRule, customLimits])
+
+  const handleRuleChange = useCallback((rule: RegulationType) => {
+    setActiveRule(rule)
+    if (rule !== "CUSTOM") {
+      setCustomLimits(FTL_PRESETS[rule])
+    }
+    setRuleMenuOpen(false)
+  }, [])
+
+  // Open/close quick check panel in detail panel
+  const closeQuickCheck = useCallback(() => {
+    setQuickCheckOpen(false)
+    setScenarioResult(null)
+    setDetailContent(null)
+    setSelectedId(null)
+  }, [setDetailContent, setSelectedId])
+
+  // "View Chart" dismisses mobile overlay but keeps scenario result
+  const handleViewChart = useCallback(() => {
+    setSelectedId(null)
+  }, [setSelectedId])
+
+  useEffect(() => {
+    if (quickCheckOpen) {
+      setDetailContent(
+        <QuickCheckPanel
+          dutyPeriods={allDutyPeriods}
+          limits={activeLimits}
+          onScenarioResult={setScenarioResult}
+          onClose={closeQuickCheck}
+          onViewChart={handleViewChart}
+        />
+      )
+      setSelectedId("legal-check")
+    } else {
+      setDetailContent(null)
+      setSelectedId(null)
+    }
+  }, [quickCheckOpen, allDutyPeriods, activeLimits, closeQuickCheck, handleViewChart, setDetailContent, setSelectedId])
+
+  // Sync quickCheckOpen when selectedId is cleared externally (e.g., mobile back button)
+  useEffect(() => {
+    if (selectedId === null && quickCheckOpen) {
+      setQuickCheckOpen(false)
+      setScenarioResult(null)
+    }
+  }, [selectedId, quickCheckOpen])
+
+  // Live digital countdown — updates every 10 seconds
+  const [countdown, setCountdown] = useState("")
+  useEffect(() => {
+    if (!restUntilLegal) return
+    const update = () => {
+      const legalAt = new Date(restUntilLegal.legalAtUtc).getTime()
+      const remaining = Math.max(0, legalAt - Date.now())
+      const h = Math.floor(remaining / 3600000)
+      const m = Math.floor((remaining % 3600000) / 60000)
+      setCountdown(`${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`)
+    }
+    update()
+    if (restUntilLegal.isLegalNow) return
+    const interval = setInterval(update, 10_000)
+    return () => clearInterval(interval)
+  }, [restUntilLegal])
+
+  // Header actions: refresh + quick check
+  const fdpActions = useMemo(
+    () => (
+      <div className="flex gap-2">
+        <GlassContainer cornerRadius={28}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-14 w-14"
+            onClick={() => setQuickCheckOpen((prev) => !prev)}
+          >
+            <Calculator className={cn("h-5 w-5", quickCheckOpen && "text-primary")} />
+          </Button>
+        </GlassContainer>
+        <GlassContainer cornerRadius={28}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-14 w-14"
+            onClick={() => refresh()}
+            disabled={isLoading}
+          >
+            <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
+          </Button>
+        </GlassContainer>
+      </div>
+    ),
+    [refresh, isLoading, quickCheckOpen]
+  )
 
   useRegisterMainActions(fdpActions, true)
 
   return (
-    <PageContainer
-    >
-      <div className="px-4 pt-4 pb-safe space-y-4">
-        {/* Overall Status Card */}
-        <Card
-          className={cn(
-            "border",
-            overallCompliance.status === "exceeded"
-              ? "border-red-500/20 bg-red-500/5"
-              : overallCompliance.status === "critical"
-                ? "border-orange-500/20 bg-orange-500/5"
-                : overallCompliance.status === "warning"
-                  ? "border-yellow-500/20 bg-yellow-500/5"
-                  : "border-green-500/20 bg-green-500/5"
+    <PageContainer>
+      <div className="px-4 pt-2 pb-safe space-y-2">
+        {/* Rule selector + Rest countdown row */}
+        <div className="flex items-stretch gap-2">
+          {/* Rule selector chip */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setRuleMenuOpen(!ruleMenuOpen)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-secondary text-foreground text-xs font-medium h-full"
+            >
+              {REGULATION_LABELS[activeRule]}
+              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            </button>
+            {ruleMenuOpen && (
+              <div className="absolute top-full left-0 mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[100px]">
+                {(["CAAS", "FAA", "EASA"] as RegulationType[]).map((rule) => (
+                  <button
+                    key={rule}
+                    onClick={() => handleRuleChange(rule)}
+                    className={cn(
+                      "block w-full text-left px-3 py-1.5 text-xs hover:bg-secondary transition-colors",
+                      activeRule === rule && "font-semibold text-primary"
+                    )}
+                  >
+                    {REGULATION_LABELS[rule]}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Rest Until Legal — inline compact */}
+          {restUntilLegal && (
+            <Card
+              className={cn(
+                "flex-1 border",
+                restUntilLegal.isLegalNow
+                  ? "border-green-500/20 bg-green-500/5"
+                  : "border-red-500/20 bg-red-500/5"
+              )}
+            >
+              <CardContent className="py-1.5 px-2.5">
+                <div className="flex items-center gap-2">
+                  <div className={cn(
+                    "text-lg font-mono font-bold tabular-nums leading-none",
+                    restUntilLegal.isLegalNow ? "text-green-500" : "text-red-500"
+                  )}>
+                    {restUntilLegal.isLegalNow ? "00:00" : countdown}
+                  </div>
+                  <div className="flex-1 min-w-0 border-l border-border pl-2">
+                    {restUntilLegal.isLegalNow ? (
+                      <p className="text-[10px] text-muted-foreground leading-tight">
+                        LEGAL · {formatMinutesHM(restUntilLegal.restElapsedMinutes)} since last duty
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-foreground leading-tight">
+                        Legal at {new Date(restUntilLegal.legalAtUtc).toISOString().slice(11, 16)}Z
+                        <span className="text-muted-foreground">
+                          {" · "}{RULE_DESCRIPTIONS[restUntilLegal.rule] ?? restUntilLegal.rule}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           )}
-        >
-          <CardContent className="pt-6 pb-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm text-muted-foreground mb-1">Overall Compliance</div>
-                <div className={cn("text-2xl font-bold", overallCompliance.color)}>
-                  {overallCompliance.label}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  Calculated on {new Date(cumulativeLimits.calculatedAt).toLocaleDateString()}
-                </div>
-              </div>
-              <div
-                className={cn(
-                  "p-3 rounded-xl",
-                  overallCompliance.status === "exceeded"
-                    ? "bg-red-500/10"
-                    : overallCompliance.status === "critical"
-                      ? "bg-orange-500/10"
-                      : overallCompliance.status === "warning"
-                        ? "bg-yellow-500/10"
-                        : "bg-green-500/10"
-                )}
-              >
-                <TrendingUp className={cn("h-8 w-8", overallCompliance.color)} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Regulatory Info */}
-        <Card>
-          <CardContent className="pt-4 pb-3 px-3">
-            <div className="flex items-center gap-2 mb-2">
-              <Info className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Regulatory Authority</span>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {DEFAULT_FTL_LIMITS.regulationType} - Civil Aviation Authority of Singapore
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Rolling Periods */}
-        <div className="space-y-3">
-          <h2 className="text-base font-semibold text-foreground">Rolling Limits</h2>
-
-          <div className="grid grid-cols-2 gap-2">
-            <RollingPeriodCard
-              title="Last 7 Days"
-              days={7}
-              stats={cumulativeLimits.last7Days}
-              compliance={compliance7Days}
-            />
-            <RollingPeriodCard
-              title="Last 14 Days"
-              days={14}
-              stats={cumulativeLimits.last14Days}
-              compliance={compliance14Days}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-2">
-            <RollingPeriodCard
-              title="Last 28 Days"
-              days={28}
-              stats={cumulativeLimits.last28Days}
-              compliance={compliance28Days}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <RollingPeriodCard
-              title="Last 90 Days"
-              days={90}
-              stats={cumulativeLimits.last90Days}
-              compliance={compliance90Days}
-            />
-            <RollingPeriodCard
-              title="Last 365 Days"
-              days={365}
-              stats={cumulativeLimits.last365Days}
-              compliance={compliance365Days}
-            />
-          </div>
         </div>
 
-        {/* Recent Duty Periods */}
-        {recentDutyPeriods.length > 0 && (
-          <div className="space-y-3">
-            <h2 className="text-base font-semibold text-foreground">
-              Recent Duty Periods ({recentDutyPeriods.length})
-            </h2>
-            <div className="space-y-2">
-              {recentDutyPeriods.slice(0, 10).map((dp) => (
-                <DutyPeriodCard key={dp.id} dutyPeriod={dp} limits={DEFAULT_FTL_LIMITS} />
-              ))}
-            </div>
-            {recentDutyPeriods.length > 10 && (
-              <p className="text-center text-sm text-muted-foreground">
-                +{recentDutyPeriods.length - 10} more duty periods
-              </p>
+        {/* Warnings — compact inline */}
+        {(restViolations.length > 0 || forecast.hasExceedance) && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1">
+            {restViolations.length > 0 && (
+              <div className="flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3 text-red-500" />
+                <span className="text-[10px] text-red-500">
+                  {restViolations.length} rest violation{restViolations.length !== 1 ? "s" : ""}
+                </span>
+              </div>
+            )}
+            {forecast.hasExceedance && (
+              <div className="flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3 text-orange-500" />
+                <span className="text-[10px] text-orange-500">
+                  Breach forecast
+                </span>
+              </div>
             )}
           </div>
         )}
 
-        {/* Empty State */}
-        {dutyPeriods.length === 0 && !isLoading && (
+        {/* Interactive Timeline Chart — tabs integrated into card */}
+        {timelineData.length > 0 ? (
+          <ChartErrorBoundary>
+            <FDPTimelineChart
+              timelineData={timelineData}
+              limits={activeLimits}
+              capacity={capacity}
+              forecast={forecast}
+              scenarioTimelineData={scenarioResult?.timelineData}
+              scenarioModifiedDates={scenarioResult?.modifiedDates}
+              scenarioRemovedDates={scenarioResult?.removedDates}
+            />
+          </ChartErrorBoundary>
+        ) : !isLoading ? (
           <Card>
-            <CardContent className="py-12 text-center">
-              <TrendingUp className="h-10 w-10 text-muted-foreground/40 mb-3 mx-auto" />
-              <p className="text-sm font-medium text-foreground mb-1">No Duty Periods</p>
-              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto">Import your schedule to see FDP calculations and regulatory compliance.</p>
+            <CardContent className="py-6 text-center">
+              <TrendingUp className="h-8 w-8 text-muted-foreground/40 mb-2 mx-auto" />
+              <p className="text-xs font-medium text-foreground mb-0.5">No Duty Periods</p>
+              <p className="text-[10px] text-muted-foreground max-w-[200px] mx-auto">
+                Import schedule or log flights to see FDP compliance.
+              </p>
             </CardContent>
           </Card>
-        )}
+        ) : null}
       </div>
     </PageContainer>
   )

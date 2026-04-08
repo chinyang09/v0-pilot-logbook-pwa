@@ -47,6 +47,11 @@ export type DiscrepancyType =
 // Only track flight crew (pilots) - cabin crew not tracked
 export type CrewRole = "CPT" | "PIC" | "FO"
 
+// FDP calculation types (CAAS Reg 14/15)
+export type CrewConfiguration = "two-pilot" | "single-pilot"
+export type AugmentedCrewLevel = "none" | "plus-one" | "plus-two"
+export type FdpTableUsed = "A" | "B" | "C"
+
 // ============================================
 // Schedule Entry (parsed from CSV)
 // ============================================
@@ -190,6 +195,20 @@ export interface CurrencyWithStatus extends Currency {
 // Duty Time & FDP Calculations
 // ============================================
 
+/**
+ * Rest period compliance per CAAS Regulation 3
+ */
+export interface RestPeriodInfo {
+  restMinutes: number               // Actual rest between duties
+  requiredRestMinutes: number       // Minimum required per Reg 3
+  includesLocalNight: boolean       // Rest overlaps 22:00-06:00 SGT
+  precedingDutyMinutes: number      // Duration of preceding duty
+  compliant: boolean                // restMinutes >= requiredRestMinutes
+  rule: "3a" | "3b" | "3c" | "3d"  // Which Reg 3 sub-rule applies
+}
+
+export type DutyPeriodSource = "logbook" | "schedule" | "merged"
+
 export interface DutyPeriod {
   id: string
   date: string                      // YYYY-MM-DD
@@ -201,7 +220,9 @@ export interface DutyPeriod {
   // Calculated durations (in minutes)
   dutyMinutes: number
   flightMinutes: number             // Total block time
-  restBeforeMinutes?: number        // Rest since last duty
+
+  // Rest period (CAAS Reg 3)
+  restBefore?: RestPeriodInfo       // Rest since last duty
 
   // Sectors flown
   sectorCount: number
@@ -209,6 +230,17 @@ export interface DutyPeriod {
   // FDP limits (based on regulations)
   maxFdpMinutes: number             // Based on report time & sectors
   fdpExtensionUsed: boolean
+
+  // FDP calculation metadata (CAAS Reg 14/15)
+  crewConfig?: CrewConfiguration          // defaults to "two-pilot"
+  augmentedCrew?: AugmentedCrewLevel      // defaults to "none"
+  fdpTableUsed?: FdpTableUsed             // which CAAS table was applied
+  departureTimezoneOffset?: number        // UTC offset of departure airport
+  effectiveSectors?: number               // after long sector adjustment
+
+  // Data origin
+  source: DutyPeriodSource
+  isFuture: boolean
 
   // Linked entries
   scheduleEntryIds: string[]
@@ -224,16 +256,44 @@ export interface RollingPeriodStats {
 }
 
 export interface CumulativeDutyLimits {
-  // Rolling periods
-  last7Days: RollingPeriodStats
-  last14Days: RollingPeriodStats
-  last28Days: RollingPeriodStats
-  last90Days: Omit<RollingPeriodStats, "maxDutyHours">
-  last365Days: Omit<RollingPeriodStats, "maxDutyHours">
+  // Rolling periods (CAAS only)
+  last14Days: RollingPeriodStats                                                          // Reg 12(a): 90h duty
+  last28Days: RollingPeriodStats                                                          // Reg 12(b): 180h duty, Reg 107: 100h flight
+  last365Days: Pick<RollingPeriodStats, "flightHours" | "maxFlightHours" | "utilizationPercent">  // Reg 107: 1000h flight
 
   // Calculation metadata
   calculatedAt: number
   calculatedForDate: string         // YYYY-MM-DD
+}
+
+/**
+ * Remaining capacity before hitting each regulatory limit
+ */
+export interface CapacityRemaining {
+  duty14Days: { used: number; limit: number; remaining: number }
+  duty28Days: { used: number; limit: number; remaining: number }
+  flight28Days: { used: number; limit: number; remaining: number }
+  flight365Days: { used: number; limit: number; remaining: number }
+  canAcceptMore: boolean            // true if all remaining > 0
+  bottleneck: string                // e.g. "14-day duty"
+}
+
+/**
+ * A single projected limit exceedance from future scheduled duties
+ */
+export interface ForecastExceedance {
+  date: string
+  limitName: string
+  projected: number
+  limit: number
+}
+
+/**
+ * Result of forecasting future duty periods against limits
+ */
+export interface ForecastResult {
+  exceedances: ForecastExceedance[]
+  hasExceedance: boolean
 }
 
 // ============================================
@@ -345,41 +405,54 @@ export type RegulationType = "CAAS" | "EASA" | "FAA" | "CUSTOM"
 export interface FTLLimits {
   regulationType: RegulationType
 
-  // Duty limits (in hours)
-  maxDuty7Days: number
-  maxDuty14Days: number
-  maxDuty28Days: number
+  // Duty limits (hours) — CAAS Reg 12
+  maxDuty14Days: number             // 90h in consecutive 14 days
+  maxDuty28Days: number             // 180h in consecutive 28 days
 
-  // Flight time limits (in hours)
-  maxFlight7Days: number
-  maxFlight14Days: number
-  maxFlight28Days: number
-  maxFlight90Days: number
-  maxFlight365Days: number
+  // Flight time limits (hours) — CAAS Reg 107
+  maxFlight28Days: number           // 100h in 28-day period
+  maxFlight365Days: number          // 1000h in 12-month period
 
   // Single duty limits
   maxSingleDutyHours: number
   maxExtendedDutyHours: number
-
-  // Rest requirements
-  minRestBetweenDuties: number
-  minWeeklyRest: number
 }
 
 export const DEFAULT_FTL_LIMITS: FTLLimits = {
   regulationType: "CAAS",
-  maxDuty7Days: 60,
-  maxDuty14Days: 110,
-  maxDuty28Days: 190,
-  maxFlight7Days: 30,
-  maxFlight14Days: 60,
-  maxFlight28Days: 100,
-  maxFlight90Days: 280,
-  maxFlight365Days: 900,
+  maxDuty14Days: 90,                // Reg 12(1)(a)
+  maxDuty28Days: 180,               // Reg 12(1)(b)
+  maxFlight28Days: 100,             // Reg 107(2)(a)
+  maxFlight365Days: 1000,           // Reg 107(2)(b)
   maxSingleDutyHours: 13,
   maxExtendedDutyHours: 15,
-  minRestBetweenDuties: 10,
-  minWeeklyRest: 36,
+}
+
+export const FAA_FTL_LIMITS: FTLLimits = {
+  regulationType: "FAA",
+  maxDuty14Days: 100,               // 14 CFR 117.23 (cumulative)
+  maxDuty28Days: 190,               // FAA 28-day rolling
+  maxFlight28Days: 100,             // 14 CFR 117.11(b)
+  maxFlight365Days: 1000,           // 14 CFR 121.383(a)
+  maxSingleDutyHours: 14,
+  maxExtendedDutyHours: 16,
+}
+
+export const EASA_FTL_LIMITS: FTLLimits = {
+  regulationType: "EASA",
+  maxDuty14Days: 110,               // ORO.FTL.210(b)(1) 14-day
+  maxDuty28Days: 190,               // ORO.FTL.210(b)(2) 28-day
+  maxFlight28Days: 100,             // ORO.FTL.210(a)(1) 28-day
+  maxFlight365Days: 900,            // ORO.FTL.210(a)(2) 12-month
+  maxSingleDutyHours: 13,
+  maxExtendedDutyHours: 15,
+}
+
+export const FTL_PRESETS: Record<RegulationType, FTLLimits> = {
+  CAAS: DEFAULT_FTL_LIMITS,
+  FAA: FAA_FTL_LIMITS,
+  EASA: EASA_FTL_LIMITS,
+  CUSTOM: DEFAULT_FTL_LIMITS, // placeholder, user overrides
 }
 
 // ============================================
