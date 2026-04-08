@@ -72,15 +72,6 @@ export function FDPTimelineChart({
   scenarioModifiedDates,
   scenarioRemovedDates,
 }: FDPTimelineChartProps) {
-  // Defer chart rendering by one frame so ResponsiveContainer measures
-  // a fully-laid-out container. On full page refresh the container can
-  // have 0 dimensions on the first paint, causing Recharts to crash.
-  const [chartReady, setChartReady] = useState(false)
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setChartReady(true))
-    return () => cancelAnimationFrame(id)
-  }, [])
-
   const [activeViews, setActiveViews] = useState<Set<ChartView>>(new Set(["duty14"]))
 
   // Gesture zoom/pan state — visible window into the data array
@@ -661,9 +652,9 @@ export function FDPTimelineChart({
               )}
             </button>
           </div>
-          {!chartReady || (isRestView ? restData.length === 0 : timelineData.length === 0) ? (
+          {(isRestView ? restData.length === 0 : timelineData.length === 0) ? (
             <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
-              {chartReady ? "No data to display" : ""}
+              No data to display
             </div>
           ) : (
           <div className="flex">
@@ -706,10 +697,11 @@ export function FDPTimelineChart({
                     strokeWidth={1.5}
                     dot={false}
                     name="Required"
+                    isAnimationActive={false}
                   />
 
                   {/* Actual rest as bars colored by compliance */}
-                  <Bar dataKey="restHours" radius={[3, 3, 0, 0]} maxBarSize={24} name="Rest">
+                  <Bar dataKey="restHours" radius={[3, 3, 0, 0]} maxBarSize={24} name="Rest" isAnimationActive={false}>
                     {slicedData.map((entry, index) => (
                       <Cell
                         key={index}
@@ -831,6 +823,7 @@ export function FDPTimelineChart({
                       dot={false}
                       activeDot={false}
                       name={view.rollingLabel}
+                      isAnimationActive={false}
                     />
                   ))}
 
@@ -845,6 +838,7 @@ export function FDPTimelineChart({
                         radius={[2, 2, 0, 0]}
                         maxBarSize={uniqueBarKeys.length > 1 ? 12 : 16}
                         name={barView.barLabel}
+                        isAnimationActive={false}
                       >
                         {slicedData.map((entry, index) => {
                           const isModified = hasScenario && scenarioModifiedDates?.has(entry.date)
@@ -897,7 +891,7 @@ export function FDPTimelineChart({
           )}
 
           {/* Overview mini-chart — "big picture" with rolling lines + active window */}
-          {chartReady && activeData.length > 0 && (
+          {activeData.length > 0 && (
             <div
               ref={overviewRef}
               onTouchStart={handleOverviewTouchStart}
