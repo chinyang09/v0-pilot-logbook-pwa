@@ -105,11 +105,24 @@ export default function FDPPage() {
   const [activeRule, setActiveRule] = useState<RegulationType>("CAAS")
   const [customLimits, setCustomLimits] = useState<FTLLimits>(DEFAULT_FTL_LIMITS)
 
+  // Stable refs for detail panel setters — these change identity on every URL
+  // update (setSelectedId is a useCallback with searchParams in deps, so
+  // router.replace → searchParams → new setSelectedId ref). Including them
+  // in effect deps causes an infinite setState loop ("Maximum update depth
+  // exceeded") because the effect calls setSelectedId → URL changes →
+  // setSelectedId new ref → effect reruns.
+  const setDetailContentRef = useRef(setDetailContent)
+  const setSelectedIdRef = useRef(setSelectedId)
+  const setHasDetailSupportRef = useRef(setHasDetailSupport)
+  useEffect(() => { setDetailContentRef.current = setDetailContent })
+  useEffect(() => { setSelectedIdRef.current = setSelectedId })
+  useEffect(() => { setHasDetailSupportRef.current = setHasDetailSupport })
+
   // Register detail panel support
   useEffect(() => {
-    setHasDetailSupport(true)
-    return () => setHasDetailSupport(false)
-  }, [setHasDetailSupport])
+    setHasDetailSupportRef.current(true)
+    return () => setHasDetailSupportRef.current(false)
+  }, [])
 
   const activeLimits = useMemo(() => {
     if (activeRule === "CUSTOM") return customLimits
@@ -124,22 +137,24 @@ export default function FDPPage() {
     setRuleMenuOpen(false)
   }, [])
 
-  // Open/close quick check panel in detail panel
+  // Open/close quick check panel in detail panel (stable ref via closure over refs)
   const closeQuickCheck = useCallback(() => {
     setQuickCheckOpen(false)
     setScenarioResult(null)
-    setDetailContent(null)
-    setSelectedId(null)
-  }, [setDetailContent, setSelectedId])
+    setDetailContentRef.current(null)
+    setSelectedIdRef.current(null)
+  }, [])
 
   // "View Chart" dismisses mobile overlay but keeps scenario result
   const handleViewChart = useCallback(() => {
-    setSelectedId(null)
-  }, [setSelectedId])
+    setSelectedIdRef.current(null)
+  }, [])
 
+  // Sync quickCheckOpen → detail panel. Uses refs to avoid infinite loop
+  // from unstable setSelectedId/setDetailContent dependencies.
   useEffect(() => {
     if (quickCheckOpen) {
-      setDetailContent(
+      setDetailContentRef.current(
         <QuickCheckPanel
           dutyPeriods={allDutyPeriods}
           limits={activeLimits}
@@ -148,12 +163,12 @@ export default function FDPPage() {
           onViewChart={handleViewChart}
         />
       )
-      setSelectedId("legal-check")
+      setSelectedIdRef.current("legal-check")
     } else {
-      setDetailContent(null)
-      setSelectedId(null)
+      setDetailContentRef.current(null)
+      setSelectedIdRef.current(null)
     }
-  }, [quickCheckOpen, allDutyPeriods, activeLimits, closeQuickCheck, handleViewChart, setDetailContent, setSelectedId])
+  }, [quickCheckOpen, allDutyPeriods, activeLimits, closeQuickCheck, handleViewChart])
 
   // Sync quickCheckOpen when selectedId is cleared externally (e.g., mobile back button).
   // Only fires on non-null → null transitions to avoid interfering with initial panel open

@@ -16,7 +16,7 @@ import {
   Area,
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
-import { ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
+import { ZoomIn, ZoomOut, RotateCcw, Layers, Square } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
 import type { FTLLimits, CapacityRemaining, ForecastResult } from "@/types/entities/roster.types"
@@ -181,10 +181,32 @@ export function FDPTimelineChart({
   const isSingleView = selectedNonRestViews.length === 1
   const primaryView = selectedNonRestViews[0]
 
-  // Toggle handler — single-select: tapping a tab selects it exclusively
+  // Multi-select mode toggle — false = single-select (default), true = multi-select
+  const [multiSelectMode, setMultiSelectMode] = useState(false)
+
+  // Toggle handler — respects multiSelectMode
   const toggleView = useCallback((key: ChartView) => {
-    setActiveViews(new Set([key]))
-  }, [])
+    setActiveViews((prev) => {
+      // Rest is always mutually exclusive (even in multi-select mode)
+      if (key === "rest") return new Set(["rest"])
+      if (prev.has("rest")) return new Set([key])
+
+      if (!multiSelectMode) {
+        // Single-select: tapping a tab selects it exclusively
+        return new Set([key])
+      }
+
+      // Multi-select: toggle the tab, but never allow zero selections
+      const next = new Set(prev)
+      if (next.has(key)) {
+        if (next.size <= 1) return prev
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }, [multiSelectMode])
 
   // Today marker
   const todayStr = new Date().toISOString().split("T")[0]
@@ -638,6 +660,39 @@ export function FDPTimelineChart({
                 <span className={cn("text-[8px] font-medium mt-0.5", isRestView ? "text-primary-foreground/70" : "text-red-500")}>!</span>
               )}
             </button>
+
+            {/* Multi/Single select mode toggle — hidden for rest view since rest is always single */}
+            {!isRestView && (
+              <button
+                onClick={() => {
+                  setMultiSelectMode((prev) => {
+                    const next = !prev
+                    // When switching to single-select, collapse to just the primary view
+                    if (!next && primaryView) {
+                      setActiveViews(new Set([primaryView.key]))
+                    }
+                    return next
+                  })
+                }}
+                className={cn(
+                  "flex flex-col items-center justify-center px-2 py-1.5 rounded-md text-center transition-all min-w-[40px] shrink-0",
+                  multiSelectMode
+                    ? "bg-primary/20 text-primary"
+                    : "bg-secondary/50 hover:bg-secondary text-muted-foreground"
+                )}
+                aria-label={multiSelectMode ? "Switch to single-select" : "Switch to multi-select"}
+                title={multiSelectMode ? "Multi-select (tap to switch to single)" : "Single-select (tap to switch to multi)"}
+              >
+                {multiSelectMode ? (
+                  <Layers className="h-3.5 w-3.5" />
+                ) : (
+                  <Square className="h-3.5 w-3.5" />
+                )}
+                <span className="text-[8px] font-medium mt-0.5 leading-tight">
+                  {multiSelectMode ? "Multi" : "Single"}
+                </span>
+              </button>
+            )}
           </div>
           {(isRestView ? restData.length === 0 : timelineData.length === 0) ? (
             <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">

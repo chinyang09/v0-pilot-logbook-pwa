@@ -39,8 +39,13 @@ import {
 /** Report time buffer before first OUT time (minutes) */
 const REPORT_BUFFER_MINUTES = 60
 
-/** Debrief time buffer after last IN time (minutes) */
-const DEBRIEF_BUFFER_MINUTES = 30
+/**
+ * Rest start buffer after gate-in (minutes).
+ * Duty period ends at gate-in (no post-duty extension), but the pilot is
+ * considered "at rest" only after this buffer — accounting for shutdown,
+ * debrief, and transit to rest location.
+ */
+const REST_START_BUFFER_MINUTES = 30
 
 /**
  * SGT local night window in UTC minutes.
@@ -254,9 +259,12 @@ function createDutyPeriodFromFlightGroup(
 
   if (earliestOut === Infinity || latestIn === -Infinity) return null
 
-  // Estimate report/debrief with buffers (using actual times for duty hours)
+  // Report = 1h before first gate-out. Debrief = last gate-in (no buffer).
+  // Duty period duration = 1h report + (gate-out to gate-in). The +30min post-duty
+  // buffer is NOT counted toward duty hours — it's applied to rest start instead
+  // (see REST_START_BUFFER_MINUTES in rest calculations).
   const reportMinutes = Math.max(0, earliestOut - REPORT_BUFFER_MINUTES)
-  const debriefMinutes = latestIn + DEBRIEF_BUFFER_MINUTES
+  const debriefMinutes = latestIn
 
   // For FDP table lookup: use scheduled OUT when available, else actual OUT
   const scheduledReportMinutes = earliestScheduledOut !== Infinity
@@ -632,7 +640,10 @@ export function calculateRestPeriod(
     }
   }
 
-  const restMinutes = currReportAbsolute - prevDebriefAbsolute
+  // Rest starts REST_START_BUFFER_MINUTES after gate-in (debrief), not at gate-in.
+  // This accounts for shutdown, debrief, and transit time that isn't duty but
+  // also isn't rest.
+  const restMinutes = currReportAbsolute - prevDebriefAbsolute - REST_START_BUFFER_MINUTES
 
   // Check if rest includes local night
   const hasLocalNight = includesLocalNight(
@@ -1125,7 +1136,9 @@ export function calculateRestUntilLegal(
   }
 
   const debriefTimestamp = new Date(`${debriefDate}T${lastDP.debriefTime}:00Z`)
-  const restElapsedMs = now.getTime() - debriefTimestamp.getTime()
+  // Rest starts REST_START_BUFFER_MINUTES after gate-in, not at gate-in itself.
+  const restStartTimestamp = new Date(debriefTimestamp.getTime() + REST_START_BUFFER_MINUTES * 60000)
+  const restElapsedMs = now.getTime() - restStartTimestamp.getTime()
   const restElapsedMinutes = Math.max(0, Math.floor(restElapsedMs / 60000))
 
   // Determine required rest based on preceding duty duration (Reg 3)
@@ -1143,9 +1156,9 @@ export function calculateRestUntilLegal(
     rule = "3c"
   } else {
     // For rules 3a/3b we need to check if the rest window includes local night.
-    // Project the rest window from debrief to debrief + max(10h, 12h) to determine
+    // Project the rest window from rest-start to rest-start + max(10h, 12h) to determine
     // which rule applies — if rest includes local night, 10h applies; else 12h.
-    const legalAtForNight = new Date(debriefTimestamp.getTime() + 10 * 60 * 60000)
+    const legalAtForNight = new Date(restStartTimestamp.getTime() + 10 * 60 * 60000)
     const restEndDate = legalAtForNight.toISOString().split("T")[0]
     const restEndTime = legalAtForNight.toISOString().split("T")[1].slice(0, 5)
 
@@ -1166,7 +1179,7 @@ export function calculateRestUntilLegal(
   }
 
   const restNeededMinutes = Math.max(0, requiredRestMinutes - restElapsedMinutes)
-  const legalAtMs = debriefTimestamp.getTime() + requiredRestMinutes * 60000
+  const legalAtMs = restStartTimestamp.getTime() + requiredRestMinutes * 60000
   const legalAtUtc = new Date(legalAtMs).toISOString()
 
   return {
