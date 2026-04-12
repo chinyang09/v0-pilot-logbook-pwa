@@ -105,22 +105,41 @@ export function FDPTimelineChart({
   const probeRef = useRef<HTMLDivElement>(null)
   const [cc, setCc] = useState({ text: "#999", border: "#444", card: "#1a1a1a", fg: "#ccc" })
   useEffect(() => {
-    const update = () => {
-      const el = probeRef.current
-      if (!el) return
-      const s = getComputedStyle(el)
-      setCc({
-        text: s.color,
-        border: s.borderColor,
-        card: s.backgroundColor,
-        fg: s.outlineColor,
-      })
+    // Validate that a computed-style string is a valid SVG color (rgb/rgba/hex/named).
+    // An empty string or a stray oklch() would crash Recharts SVG rendering.
+    const isValidSvgColor = (v: string | null | undefined): boolean => {
+      if (!v) return false
+      const s = v.trim()
+      if (!s) return false
+      // Reject oklch/oklab/lch/lab — SVG can't parse these in attributes.
+      if (/^okl|^lab|^lch/i.test(s)) return false
+      return true
     }
-    // Initial resolve + re-resolve on light/dark toggle
-    update()
+    const update = () => {
+      try {
+        const el = probeRef.current
+        if (!el) return
+        const s = getComputedStyle(el)
+        const next = {
+          text: isValidSvgColor(s.color) ? s.color : "#999",
+          border: isValidSvgColor(s.borderColor) ? s.borderColor : "#444",
+          card: isValidSvgColor(s.backgroundColor) ? s.backgroundColor : "#1a1a1a",
+          fg: isValidSvgColor(s.outlineColor) ? s.outlineColor : "#ccc",
+        }
+        setCc(next)
+      } catch {
+        // Keep fallback values on any error (e.g., detached node during unmount)
+      }
+    }
+    // Initial resolve + re-resolve on light/dark toggle.
+    // Defer to next frame so the probe div has been laid out on mount.
+    const raf = requestAnimationFrame(update)
     const obs = new MutationObserver(update)
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
-    return () => obs.disconnect()
+    return () => {
+      cancelAnimationFrame(raf)
+      obs.disconnect()
+    }
   }, [])
 
   const views: ViewConfig[] = useMemo(
@@ -211,6 +230,17 @@ export function FDPTimelineChart({
   // Today marker
   const todayStr = new Date().toISOString().split("T")[0]
 
+  // Format decimal hours to "X hr Y min" — precise display for tooltips.
+  // Examples: 5.5 → "5 hr 30 min", 0.25 → "15 min", 8 → "8 hr 0 min"
+  const formatHoursHM = useCallback((hours: number | null | undefined): string => {
+    if (hours == null || !Number.isFinite(hours)) return "—"
+    const totalMinutes = Math.round(hours * 60)
+    const h = Math.floor(totalMinutes / 60)
+    const m = totalMinutes % 60
+    if (h === 0) return `${m} min`
+    return `${h} hr ${m} min`
+  }, [])
+
   // Custom tooltip
   const CustomTooltip = useCallback(
     ({ active, payload }: { active?: boolean; payload?: Array<{ payload: TimelineDataPoint }> }) => {
@@ -220,18 +250,18 @@ export function FDPTimelineChart({
       if (isRestView) {
         if (data.restHours === null) return null
         return (
-          <div className="bg-popover border border-border rounded-lg p-3 shadow-lg text-xs max-w-[240px]">
+          <div className="bg-popover border border-border rounded-lg p-3 shadow-lg text-xs max-w-[260px]">
             <p className="font-medium text-foreground mb-1">{data.dateLabel}</p>
             <div className="space-y-1">
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Rest</span>
-                <span className={cn("font-medium", !data.restCompliant && "text-red-500")}>
-                  {data.restHours!.toFixed(1)}h
+                <span className={cn("font-medium tabular-nums", !data.restCompliant && "text-red-500")}>
+                  {formatHoursHM(data.restHours)}
                 </span>
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Required</span>
-                <span className="font-medium">{data.restRequired!.toFixed(0)}h</span>
+                <span className="font-medium tabular-nums">{formatHoursHM(data.restRequired)}</span>
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Rule</span>
@@ -262,15 +292,15 @@ export function FDPTimelineChart({
             {data.dutyHours > 0 && (
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Duty</span>
-                <span className={cn("font-medium", data.maxFdpHours && data.dutyHours > data.maxFdpHours && "text-red-500")}>
-                  {data.dutyHours.toFixed(1)}h{data.maxFdpHours ? ` / ${data.maxFdpHours.toFixed(1)}h` : ""}
+                <span className={cn("font-medium tabular-nums", data.maxFdpHours && data.dutyHours > data.maxFdpHours && "text-red-500")}>
+                  {formatHoursHM(data.dutyHours)}{data.maxFdpHours ? ` / ${formatHoursHM(data.maxFdpHours)}` : ""}
                 </span>
               </div>
             )}
             {data.flightHours > 0 && (
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Flight</span>
-                <span className="font-medium">{data.flightHours.toFixed(1)}h</span>
+                <span className="font-medium tabular-nums">{formatHoursHM(data.flightHours)}</span>
               </div>
             )}
           </div>
@@ -283,7 +313,7 @@ export function FDPTimelineChart({
                 <div key={view.key}>
                   <div className="flex justify-between gap-3">
                     <span style={{ color: view.color }} className="font-medium">{view.rollingLabel}</span>
-                    <span className="font-medium">{rollingValue.toFixed(1)}h / {view.limitValue}h</span>
+                    <span className="font-medium tabular-nums">{formatHoursHM(rollingValue)} / {view.limitValue} hr</span>
                   </div>
                   <div className="flex justify-end">
                     <span className={cn(
@@ -305,13 +335,53 @@ export function FDPTimelineChart({
         </div>
       )
     },
-    [isRestView, selectedNonRestViews]
+    [isRestView, selectedNonRestViews, formatHoursHM]
   )
+
+  // Sanitize numeric fields to protect Recharts from NaN/Infinity which would
+  // crash SVG rendering (NaN coordinates → invalid path → "Chart failed to render").
+  const safeTimelineData = useMemo(() => {
+    const clean = (v: unknown): number => {
+      const n = typeof v === "number" ? v : Number(v)
+      return Number.isFinite(n) ? n : 0
+    }
+    return timelineData.map((d) => ({
+      ...d,
+      dutyHours: clean(d.dutyHours),
+      flightHours: clean(d.flightHours),
+      rolling14DayDuty: clean(d.rolling14DayDuty),
+      rolling28DayDuty: clean(d.rolling28DayDuty),
+      rolling28DayFlight: clean(d.rolling28DayFlight),
+      rolling365DayFlight: clean(d.rolling365DayFlight),
+      // restHours/restRequired/maxFdpHours can be null — preserve that, but
+      // replace NaN/Infinity with null so Recharts skips the point.
+      restHours: d.restHours == null ? null : (Number.isFinite(d.restHours) ? d.restHours : null),
+      restRequired: d.restRequired == null ? null : (Number.isFinite(d.restRequired) ? d.restRequired : null),
+      maxFdpHours: d.maxFdpHours == null ? null : (Number.isFinite(d.maxFdpHours) ? d.maxFdpHours : null),
+    }))
+  }, [timelineData])
+
+  const safeScenarioData = useMemo(() => {
+    if (!scenarioTimelineData) return undefined
+    const clean = (v: unknown): number => {
+      const n = typeof v === "number" ? v : Number(v)
+      return Number.isFinite(n) ? n : 0
+    }
+    return scenarioTimelineData.map((d) => ({
+      ...d,
+      dutyHours: clean(d.dutyHours),
+      flightHours: clean(d.flightHours),
+      rolling14DayDuty: clean(d.rolling14DayDuty),
+      rolling28DayDuty: clean(d.rolling28DayDuty),
+      rolling28DayFlight: clean(d.rolling28DayFlight),
+      rolling365DayFlight: clean(d.rolling365DayFlight),
+    }))
+  }, [scenarioTimelineData])
 
   // Filter rest data to only entries with rest info
   const restData = useMemo(
-    () => timelineData.filter((d) => d.restHours !== null),
-    [timelineData]
+    () => safeTimelineData.filter((d) => d.restHours !== null),
+    [safeTimelineData]
   )
 
   // Unique bar keys across selected views
@@ -329,8 +399,8 @@ export function FDPTimelineChart({
 
   // Compute the sliced data for the visible window
   // Use scenario data when available (non-rest views only)
-  const hasScenario = !isRestView && !!scenarioTimelineData
-  const effectiveTimelineData = hasScenario ? scenarioTimelineData! : timelineData
+  const hasScenario = !isRestView && !!safeScenarioData
+  const effectiveTimelineData = hasScenario ? safeScenarioData! : safeTimelineData
   const activeData = isRestView ? restData : effectiveTimelineData
 
   // Reset zoom window when underlying data changes (e.g., refresh/resync)
@@ -405,8 +475,12 @@ export function FDPTimelineChart({
 
     if (mode === "pan" && touches.length >= 1) {
       const dx = touches[0].clientX - gestureRef.current.startX
-      const windowSize = gestureRef.current.startWindow.end - gestureRef.current.startWindow.start
-      const dataPxRatio = windowSize / ww
+      // Pan originates from the overview bar: the overview's plot area
+      // (ww minus axis gutters) spans the full data range, so one overview
+      // pixel maps to activeData.length / plotWidth data indices. This keeps
+      // the window moving 1:1 with the finger across the overview.
+      const plotWidth = Math.max(1, ww - CHART_LEFT_PX - CHART_RIGHT_PX)
+      const dataPxRatio = maxLen / plotWidth
       // Drag right → window moves right (indices increase)
       const shift = Math.round(dx * dataPxRatio)
       setViewWindow(clampWindow(
@@ -610,24 +684,25 @@ export function FDPTimelineChart({
                 <button
                   key={view.key}
                   onClick={() => toggleView(view.key)}
+                  style={isActive ? { backgroundColor: view.color } : undefined}
                   className={cn(
                     "flex flex-col items-start px-2 py-1.5 rounded-md text-left transition-all min-w-0 flex-1 relative",
                     isActive
-                      ? "bg-primary text-primary-foreground shadow-sm"
+                      ? "text-white shadow-sm"
                       : "bg-secondary/50 hover:bg-secondary text-foreground"
                   )}
                 >
                   <span className="text-[10px] leading-tight font-medium truncate w-full">{view.label}</span>
                   <span className={cn(
                     "text-xs font-bold tabular-nums leading-tight",
-                    isActive ? "text-primary-foreground" : "text-foreground"
+                    isActive ? "text-white" : "text-foreground"
                   )}>
                     {cap.used.toFixed(0)}<span className="font-normal text-[10px]">/{cap.limit}</span>
                   </span>
                   <div className="flex items-center gap-1 mt-0.5 w-full">
                     <div className={cn(
                       "h-1 rounded-full flex-1",
-                      isActive ? "bg-primary-foreground/20" : "bg-muted"
+                      isActive ? "bg-white/20" : "bg-muted"
                     )}>
                       <div
                         className={cn("h-full rounded-full transition-all", barColor)}
@@ -636,7 +711,7 @@ export function FDPTimelineChart({
                     </div>
                     <span className={cn(
                       "text-[9px] font-semibold whitespace-nowrap",
-                      isActive ? "text-primary-foreground" : remainingColor
+                      isActive ? "text-white" : remainingColor
                     )}>
                       {cap.remaining.toFixed(0)}h
                     </span>
@@ -694,7 +769,7 @@ export function FDPTimelineChart({
               </button>
             )}
           </div>
-          {(isRestView ? restData.length === 0 : timelineData.length === 0) ? (
+          {(isRestView ? restData.length === 0 : safeTimelineData.length === 0) ? (
             <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
               No data to display
             </div>
