@@ -105,8 +105,9 @@ export function FDPTimelineChart({
   } | null>(null)
   const overviewRef = useRef<HTMLDivElement>(null)
   const rafRef = useRef<number>(0)
-  const CHART_LEFT_PX = 40 // YAxis width
+  const CHART_LEFT_PX = 0 // YAxis is hidden — no left gutter needed
   const CHART_RIGHT_PX = 4 // right margin — same for main + overview, kept tight so zoom tools sit ~1px from plot
+  const CHART_EDGE_PAD = 18 // horizontal padding so first/last X-axis tick labels aren't clipped
   const EDGE_TOLERANCE = 24 // px tolerance for edge-drag detection
   // Fade-in/out date labels on overview during gesture
   const [showOverviewDates, setShowOverviewDates] = useState(false)
@@ -867,6 +868,7 @@ export function FDPTimelineChart({
                     tickLine={false}
                     axisLine={false}
                     interval={xAxisInterval}
+                    padding={{ left: CHART_EDGE_PAD, right: CHART_EDGE_PAD }}
                   />
                   <YAxis hide domain={yDomain} />
                   <Tooltip content={<CustomTooltip />} active={tooltipActive ? undefined : false} />
@@ -1005,48 +1007,10 @@ export function FDPTimelineChart({
               </ResponsiveContainer>
             </div>
           )}
-            </div>
-            {/* Zoom controls — vertical, hugging the chart (~1px gap). */}
-            <div className="flex flex-col items-center justify-start gap-0.5 pt-1 shrink-0 -ml-px">
-              <button
-                onClick={zoomIn}
-                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                aria-label="Zoom in"
-              >
-                <ZoomIn className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={zoomOut}
-                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                aria-label="Zoom out"
-              >
-                <ZoomOut className="h-3.5 w-3.5" />
-              </button>
-              {viewWindow && (
-                <button
-                  onClick={resetZoom}
-                  className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                  aria-label="Reset zoom"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
-              )}
-              {hasScenario && onClearScenario && (
-                <button
-                  onClick={onClearScenario}
-                  className="p-1 rounded hover:bg-secondary transition-colors"
-                  style={{ color: COLORS.scenario }}
-                  aria-label="Clear scenario overlay"
-                  title="Clear scenario overlay"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-          )}
 
-          {/* Overview mini-chart — "big picture" with rolling lines + active window */}
+          {/* Overview mini-chart — "big picture" with rolling lines + active window.
+              Placed inside flex-1 min-w-0 so it aligns width-wise with the main chart
+              (excluding the zoom tools column on the right). */}
           {mounted && activeData.length > 0 && (
             <div
               ref={overviewRef}
@@ -1121,6 +1085,46 @@ export function FDPTimelineChart({
                 </span>
               </div>
             </div>
+          )}
+            </div>
+            {/* Zoom controls — vertical, hugging the chart (~1px gap). */}
+            <div className="flex flex-col items-center justify-start gap-0.5 pt-1 shrink-0 -ml-px">
+              <button
+                onClick={zoomIn}
+                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                aria-label="Zoom in"
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={zoomOut}
+                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                aria-label="Zoom out"
+              >
+                <ZoomOut className="h-3.5 w-3.5" />
+              </button>
+              {viewWindow && (
+                <button
+                  onClick={resetZoom}
+                  className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                  aria-label="Reset zoom"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {hasScenario && onClearScenario && (
+                <button
+                  onClick={onClearScenario}
+                  className="p-1 rounded hover:bg-secondary transition-colors"
+                  style={{ color: COLORS.scenario }}
+                  aria-label="Clear scenario overlay"
+                  title="Clear scenario overlay"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
           )}
 
           {/* Forecast exceedance warnings — inside card */}
