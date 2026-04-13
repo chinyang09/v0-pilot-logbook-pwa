@@ -16,7 +16,7 @@ import {
   Area,
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
-import { ZoomIn, ZoomOut, RotateCcw, Layers, Square } from "lucide-react"
+import { ZoomIn, ZoomOut, RotateCcw, Layers, Square, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
 import type { FTLLimits, CapacityRemaining, ForecastResult } from "@/types/entities/roster.types"
@@ -64,6 +64,9 @@ interface FDPTimelineChartProps {
   scenarioTimelineData?: TimelineDataPoint[]
   scenarioModifiedDates?: Set<string>
   scenarioRemovedDates?: Set<string>
+  /** Called when the user taps the on-chart reset button to clear the
+   *  scenario overlay. When omitted, the reset button is hidden. */
+  onClearScenario?: () => void
 }
 
 export function FDPTimelineChart({
@@ -74,6 +77,7 @@ export function FDPTimelineChart({
   scenarioTimelineData,
   scenarioModifiedDates,
   scenarioRemovedDates,
+  onClearScenario,
 }: FDPTimelineChartProps) {
   const [activeViews, setActiveViews] = useState<Set<ChartView>>(new Set(["duty14"]))
 
@@ -92,7 +96,7 @@ export function FDPTimelineChart({
   const overviewRef = useRef<HTMLDivElement>(null)
   const rafRef = useRef<number>(0)
   const CHART_LEFT_PX = 40 // YAxis width
-  const CHART_RIGHT_PX = 20 // right margin — same for main + overview
+  const CHART_RIGHT_PX = 4 // right margin — same for main + overview, kept tight so zoom tools sit ~1px from plot
   const EDGE_TOLERANCE = 24 // px tolerance for edge-drag detection
   // Fade-in/out date labels on overview during gesture
   const [showOverviewDates, setShowOverviewDates] = useState(false)
@@ -154,7 +158,7 @@ export function FDPTimelineChart({
         limitValue: limits.maxDuty14Days,
         barKey: "dutyHours" as keyof TimelineDataPoint,
         barLabel: "Duty",
-        rollingLabel: "Rolling 14-Day",
+        rollingLabel: "14-Day",
         unit: "h",
         color: VIEW_COLORS.duty14,
       },
@@ -165,7 +169,7 @@ export function FDPTimelineChart({
         limitValue: limits.maxDuty28Days,
         barKey: "dutyHours" as keyof TimelineDataPoint,
         barLabel: "Duty",
-        rollingLabel: "Rolling 28-Day",
+        rollingLabel: "28-Day",
         unit: "h",
         color: VIEW_COLORS.duty28,
       },
@@ -176,18 +180,18 @@ export function FDPTimelineChart({
         limitValue: limits.maxFlight28Days,
         barKey: "flightHours" as keyof TimelineDataPoint,
         barLabel: "Flight",
-        rollingLabel: "Rolling 28-Day",
+        rollingLabel: "28-Day",
         unit: "h",
         color: VIEW_COLORS.flight28,
       },
       {
         key: "flight365" as ChartView,
-        label: "12-Mo Flight",
+        label: "12-Mth Flight",
         rollingKey: "rolling365DayFlight" as keyof TimelineDataPoint,
         limitValue: limits.maxFlight365Days,
         barKey: "flightHours" as keyof TimelineDataPoint,
         barLabel: "Flight",
-        rollingLabel: "Rolling 12-Month",
+        rollingLabel: "12-Mth",
         unit: "h",
         color: VIEW_COLORS.flight365,
       },
@@ -721,35 +725,32 @@ export function FDPTimelineChart({
                 <button
                   key={view.key}
                   onClick={() => toggleView(view.key)}
-                  style={isActive ? { backgroundColor: view.color } : undefined}
+                  style={isActive ? {
+                    // Safari-tab style: subtle view-colored border with a
+                    // barely-visible tint, letting the chart line color itself
+                    // do the identifying rather than a loud filled background.
+                    borderColor: view.color,
+                    backgroundColor: `${view.color}1f`, // ~12% alpha tint
+                  } : undefined}
                   className={cn(
-                    "flex flex-col items-start px-2 py-1.5 rounded-md text-left transition-all min-w-0 flex-1 relative",
+                    "flex flex-col items-start px-2 py-1.5 rounded-md text-left transition-all min-w-0 flex-1 relative border",
                     isActive
-                      ? "text-white shadow-sm"
-                      : "bg-secondary/50 hover:bg-secondary text-foreground"
+                      ? "text-foreground shadow-sm"
+                      : "border-transparent bg-secondary/50 hover:bg-secondary text-foreground"
                   )}
                 >
                   <span className="text-[10px] leading-tight font-medium truncate w-full">{view.label}</span>
-                  <span className={cn(
-                    "text-xs font-bold tabular-nums leading-tight",
-                    isActive ? "text-white" : "text-foreground"
-                  )}>
+                  <span className="text-xs font-bold tabular-nums leading-tight text-foreground">
                     {cap.used.toFixed(0)}<span className="font-normal text-[10px]">/{cap.limit}</span>
                   </span>
                   <div className="flex items-center gap-1 mt-0.5 w-full">
-                    <div className={cn(
-                      "h-1 rounded-full flex-1",
-                      isActive ? "bg-white/20" : "bg-muted"
-                    )}>
+                    <div className="h-1 rounded-full flex-1 bg-muted">
                       <div
                         className={cn("h-full rounded-full transition-all", barColor)}
                         style={{ width: `${Math.min(pct, 100)}%` }}
                       />
                     </div>
-                    <span className={cn(
-                      "text-[9px] font-semibold whitespace-nowrap",
-                      isActive ? "text-white" : remainingColor
-                    )}>
+                    <span className={cn("text-[9px] font-semibold whitespace-nowrap", remainingColor)}>
                       {cap.remaining.toFixed(0)}h
                     </span>
                   </div>
@@ -760,11 +761,15 @@ export function FDPTimelineChart({
             {/* Rest period tab */}
             <button
               onClick={() => toggleView("rest")}
+              style={isRestView ? {
+                borderColor: COLORS.restBar,
+                backgroundColor: `${COLORS.restBar}1f`,
+              } : undefined}
               className={cn(
-                "flex flex-col items-center justify-center px-2 py-1.5 rounded-md text-center transition-all min-w-[48px] shrink-0",
+                "flex flex-col items-center justify-center px-2 py-1.5 rounded-md text-center transition-all min-w-[48px] shrink-0 border",
                 isRestView
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "bg-secondary/50 hover:bg-secondary text-foreground"
+                  ? "text-foreground shadow-sm"
+                  : "border-transparent bg-secondary/50 hover:bg-secondary text-foreground"
               )}
             >
               <span className="text-[10px] font-medium leading-tight">Rest</span>
@@ -827,13 +832,7 @@ export function FDPTimelineChart({
               <ResponsiveContainer width="100%" height={320}>
                 <ComposedChart data={slicedData} margin={{ top: 5, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
-                  <XAxis
-                    dataKey="dateLabel"
-                    tick={axisTickStyle}
-                    tickLine={false}
-                    axisLine={false}
-                    interval={xAxisInterval}
-                  />
+                  <XAxis dataKey="dateLabel" hide />
                   <YAxis
                     tick={axisTickStyle}
                     tickLine={false}
@@ -891,13 +890,7 @@ export function FDPTimelineChart({
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
-                  <XAxis
-                    dataKey="dateLabel"
-                    tick={axisTickStyle}
-                    tickLine={false}
-                    axisLine={false}
-                    interval={xAxisInterval}
-                  />
+                  <XAxis dataKey="dateLabel" hide />
                   <YAxis
                     tick={axisTickStyle}
                     tickLine={false}
@@ -990,7 +983,8 @@ export function FDPTimelineChart({
 
                   {/* Scenario change overlay — orange area painted over the
                       base area for dates that differ from the original timeline.
-                      Only rendered when a what-if scenario is active. */}
+                      Only rendered when a what-if scenario is active.
+                      Animates in sync with the base area so it doesn't pop. */}
                   {hasScenario && selectedNonRestViews.map((view) => (
                     <Area
                       key={`area-change-${view.key}`}
@@ -1001,7 +995,6 @@ export function FDPTimelineChart({
                       dot={false}
                       activeDot={false}
                       connectNulls={false}
-                      isAnimationActive={false}
                       name="Scenario change"
                     />
                   ))}
@@ -1043,18 +1036,18 @@ export function FDPTimelineChart({
             </div>
           )}
             </div>
-            {/* Zoom controls — vertical, right of chart */}
-            <div className="flex flex-col items-center justify-start gap-1 pt-1 shrink-0">
+            {/* Zoom controls — vertical, hugging the chart (~1px gap). */}
+            <div className="flex flex-col items-center justify-start gap-0.5 pt-1 shrink-0 -ml-px">
               <button
                 onClick={zoomIn}
-                className="p-1.5 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
                 aria-label="Zoom in"
               >
                 <ZoomIn className="h-3.5 w-3.5" />
               </button>
               <button
                 onClick={zoomOut}
-                className="p-1.5 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
                 aria-label="Zoom out"
               >
                 <ZoomOut className="h-3.5 w-3.5" />
@@ -1062,10 +1055,21 @@ export function FDPTimelineChart({
               {viewWindow && (
                 <button
                   onClick={resetZoom}
-                  className="p-1.5 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                  className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
                   aria-label="Reset zoom"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {hasScenario && onClearScenario && (
+                <button
+                  onClick={onClearScenario}
+                  className="p-1 rounded hover:bg-secondary transition-colors"
+                  style={{ color: COLORS.scenario }}
+                  aria-label="Clear scenario overlay"
+                  title="Clear scenario overlay"
+                >
+                  <X className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>

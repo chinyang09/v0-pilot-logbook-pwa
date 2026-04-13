@@ -334,6 +334,7 @@ export default function FDPPage() {
               scenarioTimelineData={scenarioResult?.timelineData}
               scenarioModifiedDates={scenarioResult?.modifiedDates}
               scenarioRemovedDates={scenarioResult?.removedDates}
+              onClearScenario={() => setScenarioResult(null)}
             />
           </ChartErrorBoundary>
         ) : !isLoading ? (
