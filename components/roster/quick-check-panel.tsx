@@ -271,7 +271,7 @@ export function QuickCheckPanel({
                       type="date"
                       value={entry.date}
                       onChange={(e) => updateChange(entry.id, { date: e.target.value })}
-                      className="h-8 text-xs px-2 mt-0.5"
+                      className="h-8 text-xs px-2 mt-0.5 appearance-none block w-full [&::-webkit-date-and-time-value]:text-left [&::-webkit-calendar-picker-indicator]:opacity-60"
                     />
                   </div>
                   <div>

@@ -109,9 +109,12 @@ export function calculateDutyPeriodFromSchedule(
 
   const sectorCount = entry.sectors?.length || 0
 
-  // Build route string like "WSSS-VVNB/VVNB-WSSS" for tooltip display
+  // Build chained route string like "WSSS-VVNB-WSSS" (dep of first + arr of each sector)
   const route = entry.sectors && entry.sectors.length > 0
-    ? entry.sectors.map((s) => `${s.departureIata || "?"}-${s.arrivalIata || "?"}`).join("/")
+    ? [
+        entry.sectors[0].departureIata || "?",
+        ...entry.sectors.map((s) => s.arrivalIata || "?"),
+      ].join("-").toUpperCase()
     : undefined
 
   const fdpResult = calculateMaxFDP({
@@ -307,14 +310,13 @@ function createDutyPeriodFromFlightGroup(
   // Use unique id when multiple duty periods exist on same date
   const id = totalGroups > 1 ? `logbook-${date}-${groupIdx}` : `logbook-${date}`
 
-  // Build route string like "WSSS-VVNB/VVNB-WSSS" (prefers ICAO, falls back to IATA)
-  const route = groupFlights
-    .map((f) => {
-      const dep = f.departureIcao || f.departureIata || "?"
-      const arr = f.arrivalIcao || f.arrivalIata || "?"
-      return `${dep}-${arr}`
-    })
-    .join("/")
+  // Build chained route string like "WSSS-VVNB-WSSS" (prefers ICAO, falls back to IATA)
+  const route = groupFlights.length > 0
+    ? [
+        groupFlights[0].departureIcao || groupFlights[0].departureIata || "?",
+        ...groupFlights.map((f) => f.arrivalIcao || f.arrivalIata || "?"),
+      ].join("-").toUpperCase()
+    : ""
 
   return {
     id,
@@ -479,7 +481,16 @@ export function mergeAdjacentDutyPeriods(dutyPeriods: DutyPeriod[]): DutyPeriod[
         flightIds: [...prev.flightIds, ...curr.flightIds],
         scheduleEntryIds: [...prev.scheduleEntryIds, ...curr.scheduleEntryIds],
         source: prev.source !== curr.source ? "merged" : prev.source,
-        route: [prev.route, curr.route].filter(Boolean).join("/") || undefined,
+        route: (() => {
+          // Chain two route strings, collapsing duplicate airports at the seam
+          // (e.g. "WSSS-VVNB-WSSS" + "WSSS-KIX-WSSS" → "WSSS-VVNB-WSSS-KIX-WSSS")
+          const a = prev.route ? prev.route.split("-") : []
+          const b = curr.route ? curr.route.split("-") : []
+          if (!a.length) return b.join("-") || undefined
+          if (!b.length) return a.join("-") || undefined
+          const merged = a[a.length - 1] === b[0] ? [...a, ...b.slice(1)] : [...a, ...b]
+          return merged.join("-") || undefined
+        })(),
       }
     } else {
       result.push(curr)

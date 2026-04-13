@@ -105,6 +105,16 @@ export function FDPTimelineChart({
   const [tooltipActive, setTooltipActive] = useState(true)
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Defer Recharts mount by one frame. On hard refresh, the ResponsiveContainer
+  // can briefly compute a 0×0 viewport (before layout settles), producing NaN
+  // coordinates that crash SVG rendering. Waiting for rAF after mount ensures
+  // the parent has measurable dimensions before Recharts initializes.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setMounted(true))
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
   // Resolve oklch CSS variables to rgb for SVG attributes (SVG fill/stroke
   // cannot use hsl(var(...)) when the variable holds an oklch value).
   // A hidden probe div carries the Tailwind classes; getComputedStyle returns rgb.
@@ -153,45 +163,45 @@ export function FDPTimelineChart({
     () => [
       {
         key: "duty14" as ChartView,
-        label: "14-Day Duty",
+        label: "14D Duty",
         rollingKey: "rolling14DayDuty" as keyof TimelineDataPoint,
         limitValue: limits.maxDuty14Days,
         barKey: "dutyHours" as keyof TimelineDataPoint,
         barLabel: "Duty",
-        rollingLabel: "14-Day",
+        rollingLabel: "14D",
         unit: "h",
         color: VIEW_COLORS.duty14,
       },
       {
         key: "duty28" as ChartView,
-        label: "28-Day Duty",
+        label: "28D Duty",
         rollingKey: "rolling28DayDuty" as keyof TimelineDataPoint,
         limitValue: limits.maxDuty28Days,
         barKey: "dutyHours" as keyof TimelineDataPoint,
         barLabel: "Duty",
-        rollingLabel: "28-Day",
+        rollingLabel: "28D",
         unit: "h",
         color: VIEW_COLORS.duty28,
       },
       {
         key: "flight28" as ChartView,
-        label: "28-Day Flight",
+        label: "28D Flight",
         rollingKey: "rolling28DayFlight" as keyof TimelineDataPoint,
         limitValue: limits.maxFlight28Days,
         barKey: "flightHours" as keyof TimelineDataPoint,
         barLabel: "Flight",
-        rollingLabel: "28-Day",
+        rollingLabel: "28D",
         unit: "h",
         color: VIEW_COLORS.flight28,
       },
       {
         key: "flight365" as ChartView,
-        label: "12-Mth Flight",
+        label: "12M Flight",
         rollingKey: "rolling365DayFlight" as keyof TimelineDataPoint,
         limitValue: limits.maxFlight365Days,
         barKey: "flightHours" as keyof TimelineDataPoint,
         barLabel: "Flight",
-        rollingLabel: "12-Mth",
+        rollingLabel: "12M",
         unit: "h",
         color: VIEW_COLORS.flight365,
       },
@@ -245,6 +255,17 @@ export function FDPTimelineChart({
     const h = Math.floor(totalMinutes / 60)
     const m = totalMinutes % 60
     return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
+  }, [])
+
+  // Compact integer formatter — 1000 → "1k", 1500 → "1.5k" (for tight tab displays).
+  const formatCap = useCallback((n: number): string => {
+    if (!Number.isFinite(n)) return "0"
+    const abs = Math.abs(n)
+    if (abs >= 1000) {
+      const v = n / 1000
+      return `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}k`
+    }
+    return `${Math.round(n)}`
   }, [])
 
   // Custom tooltip
@@ -320,7 +341,7 @@ export function FDPTimelineChart({
                   <div className="flex justify-between gap-3">
                     <span style={{ color: view.color }} className="font-medium">{view.rollingLabel}</span>
                     <span className="font-medium tabular-nums">
-                      {formatHoursHM(rollingValue)}/{formatHoursHM(view.limitValue)}
+                      {formatHoursHM(rollingValue)}/{view.limitValue >= 1000 ? `${formatCap(view.limitValue)}h` : formatHoursHM(view.limitValue)}
                     </span>
                   </div>
                   <div className="flex justify-end">
@@ -345,7 +366,7 @@ export function FDPTimelineChart({
         </div>
       )
     },
-    [isRestView, selectedNonRestViews, formatHoursHM]
+    [isRestView, selectedNonRestViews, formatHoursHM, formatCap]
   )
 
   // Sanitize numeric fields to protect Recharts from NaN/Infinity which would
@@ -741,7 +762,7 @@ export function FDPTimelineChart({
                 >
                   <span className="text-[10px] leading-tight font-medium truncate w-full">{view.label}</span>
                   <span className="text-xs font-bold tabular-nums leading-tight text-foreground">
-                    {cap.used.toFixed(0)}<span className="font-normal text-[10px]">/{cap.limit}</span>
+                    {formatCap(cap.used)}<span className="font-normal text-[10px]">/{formatCap(cap.limit)}</span>
                   </span>
                   <div className="flex items-center gap-1 mt-0.5 w-full">
                     <div className="h-1 rounded-full flex-1 bg-muted">
@@ -811,7 +832,11 @@ export function FDPTimelineChart({
               </button>
             )}
           </div>
-          {(isRestView ? restData.length === 0 : safeTimelineData.length === 0) ? (
+          {!mounted ? (
+            <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
+              <div className="h-5 w-5 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+            </div>
+          ) : (isRestView ? restData.length === 0 : safeTimelineData.length === 0) ? (
             <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
               No data to display
             </div>
@@ -831,15 +856,14 @@ export function FDPTimelineChart({
             >
               <ResponsiveContainer width="100%" height={320}>
                 <ComposedChart data={slicedData} margin={{ top: 5, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
-                  <XAxis dataKey="dateLabel" hide />
-                  <YAxis
+                  <XAxis
+                    dataKey="dateLabel"
                     tick={axisTickStyle}
                     tickLine={false}
                     axisLine={false}
-                    unit="h"
-                    width={CHART_LEFT_PX}
+                    interval={xAxisInterval}
                   />
+                  <YAxis hide />
                   <Tooltip content={<CustomTooltip />} active={tooltipActive ? undefined : false} />
 
                   {/* Required rest as a line */}
@@ -889,16 +913,14 @@ export function FDPTimelineChart({
                       <stop offset="95%" stopColor={COLORS.scenario} stopOpacity={0.12} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
-                  <XAxis dataKey="dateLabel" hide />
-                  <YAxis
+                  <XAxis
+                    dataKey="dateLabel"
                     tick={axisTickStyle}
                     tickLine={false}
                     axisLine={false}
-                    unit="h"
-                    width={CHART_LEFT_PX}
-                    domain={yDomain}
+                    interval={xAxisInterval}
                   />
+                  <YAxis hide domain={yDomain} />
                   <Tooltip content={<CustomTooltip />} active={tooltipActive ? undefined : false} />
 
                   {/* Limit threshold lines — one per selected view */}
@@ -1077,7 +1099,7 @@ export function FDPTimelineChart({
           )}
 
           {/* Overview mini-chart — "big picture" with rolling lines + active window */}
-          {activeData.length > 0 && (
+          {mounted && activeData.length > 0 && (
             <div
               ref={overviewRef}
               onTouchStart={handleOverviewTouchStart}
@@ -1086,8 +1108,9 @@ export function FDPTimelineChart({
               className="relative mt-2 touch-none cursor-grab active:cursor-grabbing select-none"
               style={{ paddingTop: 4, paddingBottom: 4 }}
             >
-              {/* Mini chart showing full dataset with rolling lines + shaded fill */}
-              <div className="overflow-hidden rounded" style={{ marginLeft: CHART_LEFT_PX, marginRight: CHART_RIGHT_PX }}>
+              {/* Rounded clip container — chart, darken overlays, and window all share
+                  these rounded corners so the darkened regions clip seamlessly into them. */}
+              <div className="relative overflow-hidden rounded-md" style={{ marginLeft: CHART_LEFT_PX, marginRight: CHART_RIGHT_PX }}>
                 <ResponsiveContainer width="100%" height={50}>
                   <ComposedChart data={activeData} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
                     <defs>
@@ -1124,39 +1147,37 @@ export function FDPTimelineChart({
                     )}
                   </ComposedChart>
                 </ResponsiveContainer>
-              </div>
 
-              {/* Darkened left region */}
-              <div
-                className="absolute top-0 bottom-0 pointer-events-none"
-                style={{
-                  left: CHART_LEFT_PX,
-                  width: `calc((100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.leftPct / 100})`,
-                  backgroundColor: cc.card,
-                  opacity: 0.75,
-                }}
-              />
-              {/* Darkened right region */}
-              <div
-                className="absolute top-0 bottom-0 pointer-events-none"
-                style={{
-                  right: CHART_RIGHT_PX,
-                  width: `calc((100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.rightPct / 100})`,
-                  backgroundColor: cc.card,
-                  opacity: 0.75,
-                }}
-              />
-              {/* Active window box with rounded border */}
-              <div
-                className="absolute top-0 bottom-0 border border-foreground/40 rounded-md pointer-events-none"
-                style={{
-                  left: `calc(${CHART_LEFT_PX}px + (100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.leftPct / 100})`,
-                  width: `calc((100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.widthPct / 100})`,
-                }}
-              >
-                {/* Edge grab handles */}
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[3px] w-1.5 h-5 rounded-full bg-foreground/40" />
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[3px] w-1.5 h-5 rounded-full bg-foreground/40" />
+                {/* Darkened left region — inside rounded container so it clips to corners */}
+                <div
+                  className="absolute inset-y-0 left-0 pointer-events-none"
+                  style={{
+                    width: `${overviewHighlight.leftPct}%`,
+                    backgroundColor: cc.card,
+                    opacity: 0.75,
+                  }}
+                />
+                {/* Darkened right region — inside rounded container so it clips to corners */}
+                <div
+                  className="absolute inset-y-0 right-0 pointer-events-none"
+                  style={{
+                    width: `${overviewHighlight.rightPct}%`,
+                    backgroundColor: cc.card,
+                    opacity: 0.75,
+                  }}
+                />
+                {/* Active window box */}
+                <div
+                  className="absolute inset-y-0 border border-foreground/40 pointer-events-none"
+                  style={{
+                    left: `${overviewHighlight.leftPct}%`,
+                    width: `${overviewHighlight.widthPct}%`,
+                  }}
+                >
+                  {/* Edge grab handles */}
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[3px] w-1.5 h-5 rounded-full bg-foreground/40" />
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[3px] w-1.5 h-5 rounded-full bg-foreground/40" />
+                </div>
               </div>
 
               {/* Fade-in/out date labels at edges of active window */}
