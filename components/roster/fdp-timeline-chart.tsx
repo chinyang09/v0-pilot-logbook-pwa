@@ -4,10 +4,8 @@ import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import {
   ComposedChart,
   Bar,
-  Line,
   XAxis,
   YAxis,
-  CartesianGrid,
   Tooltip,
   ReferenceLine,
   ReferenceArea,
@@ -16,12 +14,12 @@ import {
   Area,
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
-import { ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
+import { ZoomIn, ZoomOut, RotateCcw, Layers, Square, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
 import type { FTLLimits, CapacityRemaining, ForecastResult } from "@/types/entities/roster.types"
 
-type ChartView = "duty14" | "duty28" | "flight28" | "flight365" | "rest"
+type ChartView = "duty14" | "duty28" | "flight28" | "flight365"
 
 interface ViewConfig {
   key: ChartView
@@ -35,21 +33,24 @@ interface ViewConfig {
   color: string
 }
 
-// SVG-safe hex palette — perceptually uniform, works on both light and dark backgrounds
+// SVG-safe hex palette — muted / desaturated for night-time viewing comfort.
+// Orange (#d68a3e) is reserved for scenario "what-if" change highlighting, so
+// flight365 uses a slate-cyan that does not conflict with orange.
 const VIEW_COLORS: Record<string, string> = {
-  duty14: "#4a8fd6",   // bright blue
-  duty28: "#8b5fd6",   // purple-violet
-  flight28: "#2ba06b", // vivid teal-green
-  flight365: "#c4903a",// warm amber
+  duty14: "#6b8eae",   // muted steel blue
+  duty28: "#8a7aa5",   // muted purple
+  flight28: "#5a9478", // muted sage green
+  flight365: "#6fa3b0",// muted slate-cyan (distinct from orange)
 }
 
 // Semantic colors for data bars and compliance indicators (hex for SVG compatibility)
 const COLORS = {
-  dutyBar: "#4a8fd6",     // blue for duty hours bars
-  flightBar: "#b09830",   // yellow-amber for flight hours bars
-  restBar: "#1aa268",     // green for rest hours bars
-  violation: "#d04a3a",   // warm red
-  warning90: "#c4903a",   // amber for 90% line
+  dutyBar: "#6b8eae",     // muted blue for duty hours bars
+  flightBar: "#8a7e4a",   // muted warm khaki for flight hours bars
+  restBar: "#4a8870",     // muted green for rest hours bars
+  violation: "#b04e3a",   // muted red
+  warning90: "#b08040",   // muted amber for 90% line
+  scenario: "#d68a3e",    // muted orange — scenario/what-if change highlight
 }
 
 interface FDPTimelineChartProps {
@@ -61,6 +62,9 @@ interface FDPTimelineChartProps {
   scenarioTimelineData?: TimelineDataPoint[]
   scenarioModifiedDates?: Set<string>
   scenarioRemovedDates?: Set<string>
+  /** Called when the user taps the on-chart reset button to clear the
+   *  scenario overlay. When omitted, the reset button is hidden. */
+  onClearScenario?: () => void
 }
 
 export function FDPTimelineChart({
@@ -71,7 +75,20 @@ export function FDPTimelineChart({
   scenarioTimelineData,
   scenarioModifiedDates,
   scenarioRemovedDates,
+  onClearScenario,
 }: FDPTimelineChartProps) {
+  // Stage-by-stage diagnostics for chart render pipeline. These logs are
+  // intentionally verbose so that a chart-failed-to-render report can be
+  // traced to the exact stage (props → mount → probe → sanitize → slice → mount).
+  console.log("[FDP-chart] ▶ render", {
+    timelineDataLen: timelineData?.length ?? 0,
+    hasCapacity: !!capacity,
+    hasForecast: !!forecast,
+    hasScenario: !!scenarioTimelineData,
+    scenarioLen: scenarioTimelineData?.length ?? 0,
+    limits: limits?.regulationType,
+  })
+
   const [activeViews, setActiveViews] = useState<Set<ChartView>>(new Set(["duty14"]))
 
   // Gesture zoom/pan state — visible window into the data array
@@ -88,8 +105,9 @@ export function FDPTimelineChart({
   } | null>(null)
   const overviewRef = useRef<HTMLDivElement>(null)
   const rafRef = useRef<number>(0)
-  const CHART_LEFT_PX = 40 // YAxis width
-  const CHART_RIGHT_PX = 20 // right margin — same for main + overview
+  const CHART_LEFT_PX = 0 // YAxis is hidden — no left gutter needed
+  const CHART_RIGHT_PX = 4 // right margin — same for main + overview, kept tight so zoom tools sit ~1px from plot
+  const CHART_EDGE_PAD = 18 // horizontal padding so first/last X-axis tick labels aren't clipped
   const EDGE_TOLERANCE = 24 // px tolerance for edge-drag detection
   // Fade-in/out date labels on overview during gesture
   const [showOverviewDates, setShowOverviewDates] = useState(false)
@@ -98,6 +116,20 @@ export function FDPTimelineChart({
   const [tooltipActive, setTooltipActive] = useState(true)
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Defer Recharts mount by one frame. On hard refresh, the ResponsiveContainer
+  // can briefly compute a 0×0 viewport (before layout settles), producing NaN
+  // coordinates that crash SVG rendering. Waiting for rAF after mount ensures
+  // the parent has measurable dimensions before Recharts initializes.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    console.log("[FDP-chart] ① mount effect scheduled")
+    const raf = requestAnimationFrame(() => {
+      console.log("[FDP-chart] ② rAF fired → mounted=true")
+      setMounted(true)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
   // Resolve oklch CSS variables to rgb for SVG attributes (SVG fill/stroke
   // cannot use hsl(var(...)) when the variable holds an oklch value).
   // A hidden probe div carries the Tailwind classes; getComputedStyle returns rgb.
@@ -105,67 +137,95 @@ export function FDPTimelineChart({
   const probeRef = useRef<HTMLDivElement>(null)
   const [cc, setCc] = useState({ text: "#999", border: "#444", card: "#1a1a1a", fg: "#ccc" })
   useEffect(() => {
-    const update = () => {
-      const el = probeRef.current
-      if (!el) return
-      const s = getComputedStyle(el)
-      setCc({
-        text: s.color,
-        border: s.borderColor,
-        card: s.backgroundColor,
-        fg: s.outlineColor,
-      })
+    // Validate that a computed-style string is a valid SVG color (rgb/rgba/hex/named).
+    // An empty string or a stray oklch() would crash Recharts SVG rendering.
+    const isValidSvgColor = (v: string | null | undefined): boolean => {
+      if (!v) return false
+      const s = v.trim()
+      if (!s) return false
+      // Reject oklch/oklab/lch/lab — SVG can't parse these in attributes.
+      if (/^okl|^lab|^lch/i.test(s)) return false
+      return true
     }
-    // Initial resolve + re-resolve on light/dark toggle
-    update()
+    const update = () => {
+      try {
+        const el = probeRef.current
+        if (!el) {
+          console.warn("[FDP-chart] ③ probe: element not mounted yet")
+          return
+        }
+        const s = getComputedStyle(el)
+        const raw = {
+          color: s.color, borderColor: s.borderColor,
+          backgroundColor: s.backgroundColor, outlineColor: s.outlineColor,
+        }
+        const next = {
+          text: isValidSvgColor(s.color) ? s.color : "#999",
+          border: isValidSvgColor(s.borderColor) ? s.borderColor : "#444",
+          card: isValidSvgColor(s.backgroundColor) ? s.backgroundColor : "#1a1a1a",
+          fg: isValidSvgColor(s.outlineColor) ? s.outlineColor : "#ccc",
+        }
+        console.log("[FDP-chart] ③ probe resolved", { raw, resolved: next })
+        setCc(next)
+      } catch (err) {
+        // Keep fallback values on any error (e.g., detached node during unmount)
+        console.error("[FDP-chart] ③ probe error", err)
+      }
+    }
+    // Initial resolve + re-resolve on light/dark toggle.
+    // Defer to next frame so the probe div has been laid out on mount.
+    const raf = requestAnimationFrame(update)
     const obs = new MutationObserver(update)
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
-    return () => obs.disconnect()
+    return () => {
+      cancelAnimationFrame(raf)
+      obs.disconnect()
+    }
   }, [])
 
   const views: ViewConfig[] = useMemo(
     () => [
       {
         key: "duty14" as ChartView,
-        label: "14-Day Duty",
+        label: "14D Duty",
         rollingKey: "rolling14DayDuty" as keyof TimelineDataPoint,
         limitValue: limits.maxDuty14Days,
         barKey: "dutyHours" as keyof TimelineDataPoint,
         barLabel: "Duty",
-        rollingLabel: "Rolling 14-Day",
+        rollingLabel: "14D",
         unit: "h",
         color: VIEW_COLORS.duty14,
       },
       {
         key: "duty28" as ChartView,
-        label: "28-Day Duty",
+        label: "28D Duty",
         rollingKey: "rolling28DayDuty" as keyof TimelineDataPoint,
         limitValue: limits.maxDuty28Days,
         barKey: "dutyHours" as keyof TimelineDataPoint,
         barLabel: "Duty",
-        rollingLabel: "Rolling 28-Day",
+        rollingLabel: "28D",
         unit: "h",
         color: VIEW_COLORS.duty28,
       },
       {
         key: "flight28" as ChartView,
-        label: "28-Day Flight",
+        label: "28D Flight",
         rollingKey: "rolling28DayFlight" as keyof TimelineDataPoint,
         limitValue: limits.maxFlight28Days,
         barKey: "flightHours" as keyof TimelineDataPoint,
         barLabel: "Flight",
-        rollingLabel: "Rolling 28-Day",
+        rollingLabel: "28D",
         unit: "h",
         color: VIEW_COLORS.flight28,
       },
       {
         key: "flight365" as ChartView,
-        label: "12-Mo Flight",
+        label: "12M Flight",
         rollingKey: "rolling365DayFlight" as keyof TimelineDataPoint,
         limitValue: limits.maxFlight365Days,
         barKey: "flightHours" as keyof TimelineDataPoint,
         barLabel: "Flight",
-        rollingLabel: "Rolling 12-Month",
+        rollingLabel: "12M",
         unit: "h",
         color: VIEW_COLORS.flight365,
       },
@@ -173,7 +233,6 @@ export function FDPTimelineChart({
     [limits]
   )
 
-  const isRestView = activeViews.has("rest")
   const selectedNonRestViews = useMemo(
     () => views.filter((v) => activeViews.has(v.key)),
     [activeViews, views]
@@ -181,53 +240,58 @@ export function FDPTimelineChart({
   const isSingleView = selectedNonRestViews.length === 1
   const primaryView = selectedNonRestViews[0]
 
-  // Toggle handler — single-select: tapping a tab selects it exclusively
+  // Multi-select mode toggle — false = single-select (default), true = multi-select
+  const [multiSelectMode, setMultiSelectMode] = useState(false)
+
+  // Toggle handler — respects multiSelectMode
   const toggleView = useCallback((key: ChartView) => {
-    setActiveViews(new Set([key]))
-  }, [])
+    setActiveViews((prev) => {
+      if (!multiSelectMode) {
+        // Single-select: tapping a tab selects it exclusively
+        return new Set([key])
+      }
+
+      // Multi-select: toggle the tab, but never allow zero selections
+      const next = new Set(prev)
+      if (next.has(key)) {
+        if (next.size <= 1) return prev
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }, [multiSelectMode])
 
   // Today marker
   const todayStr = new Date().toISOString().split("T")[0]
+
+  // Format decimal hours to zero-padded "HH:MM" — precise, compact display.
+  // Examples: 5.5 → "05:30", 0.25 → "00:15", 14 → "14:00"
+  const formatHoursHM = useCallback((hours: number | null | undefined): string => {
+    if (hours == null || !Number.isFinite(hours)) return "—"
+    const totalMinutes = Math.max(0, Math.round(hours * 60))
+    const h = Math.floor(totalMinutes / 60)
+    const m = totalMinutes % 60
+    return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
+  }, [])
+
+  // Compact integer formatter — 1000 → "1k", 1500 → "1.5k" (for tight tab displays).
+  const formatCap = useCallback((n: number): string => {
+    if (!Number.isFinite(n)) return "0"
+    const abs = Math.abs(n)
+    if (abs >= 1000) {
+      const v = n / 1000
+      return `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}k`
+    }
+    return `${Math.round(n)}`
+  }, [])
 
   // Custom tooltip
   const CustomTooltip = useCallback(
     ({ active, payload }: { active?: boolean; payload?: Array<{ payload: TimelineDataPoint }> }) => {
       if (!active || !payload || payload.length === 0) return null
       const data = payload[0].payload
-
-      if (isRestView) {
-        if (data.restHours === null) return null
-        return (
-          <div className="bg-popover border border-border rounded-lg p-3 shadow-lg text-xs max-w-[240px]">
-            <p className="font-medium text-foreground mb-1">{data.dateLabel}</p>
-            <div className="space-y-1">
-              <div className="flex justify-between gap-4">
-                <span className="text-muted-foreground">Rest</span>
-                <span className={cn("font-medium", !data.restCompliant && "text-red-500")}>
-                  {data.restHours!.toFixed(1)}h
-                </span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-muted-foreground">Required</span>
-                <span className="font-medium">{data.restRequired!.toFixed(0)}h</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-muted-foreground">Rule</span>
-                <span className="font-medium">{data.restRule}</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-muted-foreground">Status</span>
-                <span className={cn("font-medium", data.restCompliant ? "text-green-500" : "text-red-500")}>
-                  {data.restCompliant ? "Compliant" : "Violation"}
-                </span>
-              </div>
-            </div>
-            {data.isFuture && (
-              <p className="text-muted-foreground mt-1 italic">Scheduled</p>
-            )}
-          </div>
-        )
-      }
 
       return (
         <div className="bg-popover border border-border rounded-lg p-3 shadow-lg text-xs max-w-[260px]">
@@ -240,15 +304,15 @@ export function FDPTimelineChart({
             {data.dutyHours > 0 && (
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Duty</span>
-                <span className={cn("font-medium", data.maxFdpHours && data.dutyHours > data.maxFdpHours && "text-red-500")}>
-                  {data.dutyHours.toFixed(1)}h{data.maxFdpHours ? ` / ${data.maxFdpHours.toFixed(1)}h` : ""}
+                <span className={cn("font-medium tabular-nums", data.maxFdpHours && data.dutyHours > data.maxFdpHours && "text-red-500")}>
+                  {formatHoursHM(data.dutyHours)}{data.maxFdpHours ? `/${formatHoursHM(data.maxFdpHours)}` : ""}
                 </span>
               </div>
             )}
             {data.flightHours > 0 && (
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Flight</span>
-                <span className="font-medium">{data.flightHours.toFixed(1)}h</span>
+                <span className="font-medium tabular-nums">{formatHoursHM(data.flightHours)}</span>
               </div>
             )}
           </div>
@@ -261,7 +325,9 @@ export function FDPTimelineChart({
                 <div key={view.key}>
                   <div className="flex justify-between gap-3">
                     <span style={{ color: view.color }} className="font-medium">{view.rollingLabel}</span>
-                    <span className="font-medium">{rollingValue.toFixed(1)}h / {view.limitValue}h</span>
+                    <span className="font-medium tabular-nums">
+                      {formatHoursHM(rollingValue)}/{view.limitValue >= 1000 ? `${formatCap(view.limitValue)}h` : formatHoursHM(view.limitValue)}
+                    </span>
                   </div>
                   <div className="flex justify-end">
                     <span className={cn(
@@ -277,20 +343,64 @@ export function FDPTimelineChart({
               )
             })}
           </div>
-          <div className="mt-1 pt-1 border-t border-border text-muted-foreground">
-            Source: {data.source}
-          </div>
+          {data.route && (
+            <div className="mt-1 pt-1 border-t border-border text-muted-foreground truncate">
+              {data.route}
+            </div>
+          )}
         </div>
       )
     },
-    [isRestView, selectedNonRestViews]
+    [selectedNonRestViews, formatHoursHM, formatCap]
   )
 
-  // Filter rest data to only entries with rest info
-  const restData = useMemo(
-    () => timelineData.filter((d) => d.restHours !== null),
-    [timelineData]
-  )
+  // Sanitize numeric fields to protect Recharts from NaN/Infinity which would
+  // crash SVG rendering (NaN coordinates → invalid path → "Chart failed to render").
+  const safeTimelineData = useMemo(() => {
+    const clean = (v: unknown): number => {
+      const n = typeof v === "number" ? v : Number(v)
+      return Number.isFinite(n) ? n : 0
+    }
+    let badCount = 0
+    const result = timelineData.map((d) => {
+      const o = {
+        ...d,
+        dutyHours: clean(d.dutyHours),
+        flightHours: clean(d.flightHours),
+        rolling14DayDuty: clean(d.rolling14DayDuty),
+        rolling28DayDuty: clean(d.rolling28DayDuty),
+        rolling28DayFlight: clean(d.rolling28DayFlight),
+        rolling365DayFlight: clean(d.rolling365DayFlight),
+        restHours: d.restHours == null ? null : (Number.isFinite(d.restHours) ? d.restHours : null),
+        restRequired: d.restRequired == null ? null : (Number.isFinite(d.restRequired) ? d.restRequired : null),
+        maxFdpHours: d.maxFdpHours == null ? null : (Number.isFinite(d.maxFdpHours) ? d.maxFdpHours : null),
+      }
+      // Count any upstream value that came in non-finite so we can attribute
+      // blame when something goes wrong.
+      const fields = [d.dutyHours, d.flightHours, d.rolling14DayDuty, d.rolling28DayDuty, d.rolling28DayFlight, d.rolling365DayFlight]
+      if (fields.some((v) => typeof v === "number" && !Number.isFinite(v))) badCount++
+      return o
+    })
+    console.log("[FDP-chart] ④ safeTimelineData", { in: timelineData.length, out: result.length, sanitized: badCount })
+    return result
+  }, [timelineData])
+
+  const safeScenarioData = useMemo(() => {
+    if (!scenarioTimelineData) return undefined
+    const clean = (v: unknown): number => {
+      const n = typeof v === "number" ? v : Number(v)
+      return Number.isFinite(n) ? n : 0
+    }
+    return scenarioTimelineData.map((d) => ({
+      ...d,
+      dutyHours: clean(d.dutyHours),
+      flightHours: clean(d.flightHours),
+      rolling14DayDuty: clean(d.rolling14DayDuty),
+      rolling28DayDuty: clean(d.rolling28DayDuty),
+      rolling28DayFlight: clean(d.rolling28DayFlight),
+      rolling365DayFlight: clean(d.rolling365DayFlight),
+    }))
+  }, [scenarioTimelineData])
 
   // Unique bar keys across selected views
   const uniqueBarKeys = useMemo(() => {
@@ -306,10 +416,9 @@ export function FDPTimelineChart({
   }, [selectedNonRestViews])
 
   // Compute the sliced data for the visible window
-  // Use scenario data when available (non-rest views only)
-  const hasScenario = !isRestView && !!scenarioTimelineData
-  const effectiveTimelineData = hasScenario ? scenarioTimelineData! : timelineData
-  const activeData = isRestView ? restData : effectiveTimelineData
+  const hasScenario = !!safeScenarioData
+  const effectiveTimelineData = hasScenario ? safeScenarioData! : safeTimelineData
+  const activeData = effectiveTimelineData
 
   // Reset zoom window when underlying data changes (e.g., refresh/resync)
   // to prevent stale indices from pointing beyond the new data length.
@@ -322,14 +431,57 @@ export function FDPTimelineChart({
   }, [activeData.length, viewWindow])
 
   const slicedData = useMemo(() => {
-    if (!activeData.length) return activeData
-    if (!viewWindow) {
-      // Default: show last DEFAULT_WINDOW days or all if shorter
-      const start = Math.max(0, activeData.length - DEFAULT_WINDOW)
-      return activeData.slice(start)
+    if (!activeData.length) {
+      console.log("[FDP-chart] ⑤ slicedData: empty input → returning []")
+      return activeData
     }
-    return activeData.slice(viewWindow.start, viewWindow.end + 1)
-  }, [activeData, viewWindow])
+    const base = !viewWindow
+      // Default: show last DEFAULT_WINDOW days or all if shorter
+      ? activeData.slice(Math.max(0, activeData.length - DEFAULT_WINDOW))
+      : activeData.slice(viewWindow.start, viewWindow.end + 1)
+
+    console.log("[FDP-chart] ⑤ slicedData computed", {
+      active: activeData.length,
+      viewWindow,
+      sliced: base.length,
+      firstDate: base[0]?.date,
+      lastDate: base[base.length - 1]?.date,
+      hasScenario,
+    })
+
+    // When a scenario is active, enrich each point with a per-view "scenario
+    // change" field that carries the rolling value only for dates that are
+    // modified/removed (plus one-day padding on each side so the overlaid area
+    // has width and joins the base area smoothly at the boundaries).
+    if (!hasScenario) return base
+    const changedDates = new Set<string>([
+      ...(scenarioModifiedDates ?? []),
+      ...(scenarioRemovedDates ?? []),
+    ])
+    if (changedDates.size === 0) return base
+    // Expand: mark a point as "in-change-region" if the point itself OR either
+    // neighbor is in changedDates. This guarantees the overlay segment spans
+    // at least one full day of chart width and seams with the base area.
+    const inRegion = base.map((d, i) => {
+      if (changedDates.has(d.date)) return true
+      const prev = base[i - 1]
+      const next = base[i + 1]
+      return (prev && changedDates.has(prev.date)) || (next && changedDates.has(next.date))
+    })
+    return base.map((d, i) => {
+      const out: Record<string, unknown> = { ...d }
+      if (inRegion[i]) {
+        for (const v of selectedNonRestViews) {
+          out[`${v.rollingKey}__change`] = d[v.rollingKey]
+        }
+      } else {
+        for (const v of selectedNonRestViews) {
+          out[`${v.rollingKey}__change`] = null
+        }
+      }
+      return out as typeof d
+    })
+  }, [activeData, viewWindow, hasScenario, scenarioModifiedDates, scenarioRemovedDates, selectedNonRestViews])
 
   // Effective window for gesture calculations
   const effectiveWindow = useMemo(() => {
@@ -383,8 +535,12 @@ export function FDPTimelineChart({
 
     if (mode === "pan" && touches.length >= 1) {
       const dx = touches[0].clientX - gestureRef.current.startX
-      const windowSize = gestureRef.current.startWindow.end - gestureRef.current.startWindow.start
-      const dataPxRatio = windowSize / ww
+      // Pan originates from the overview bar: the overview's plot area
+      // (ww minus axis gutters) spans the full data range, so one overview
+      // pixel maps to activeData.length / plotWidth data indices. This keeps
+      // the window moving 1:1 with the finger across the overview.
+      const plotWidth = Math.max(1, ww - CHART_LEFT_PX - CHART_RIGHT_PX)
+      const dataPxRatio = maxLen / plotWidth
       // Drag right → window moves right (indices increase)
       const shift = Math.round(dx * dataPxRatio)
       setViewWindow(clampWindow(
@@ -552,6 +708,14 @@ export function FDPTimelineChart({
   const axisTickStyle = { fontSize: 10, fill: cc.text }
   const gridStroke = cc.border
 
+  // Extract rgb components from the card color to build a translucent overlay for
+  // the overview's window box-shadow. Falls back to a safe dark value if parsing fails.
+  const cardOverlay = useMemo(() => {
+    const m = cc.card.match(/\d+(\.\d+)?/g)
+    if (!m || m.length < 3) return "rgba(26,26,26,0.75)"
+    return `rgba(${m[0]},${m[1]},${m[2]},0.75)`
+  }, [cc.card])
+
   return (
     <div>
       {/* Hidden probe to resolve oklch CSS vars → rgb for SVG.
@@ -588,34 +752,32 @@ export function FDPTimelineChart({
                 <button
                   key={view.key}
                   onClick={() => toggleView(view.key)}
+                  style={isActive ? {
+                    // Safari-tab style: subtle view-colored border with a
+                    // barely-visible tint, letting the chart line color itself
+                    // do the identifying rather than a loud filled background.
+                    borderColor: view.color,
+                    backgroundColor: `${view.color}1f`, // ~12% alpha tint
+                  } : undefined}
                   className={cn(
-                    "flex flex-col items-start px-2 py-1.5 rounded-md text-left transition-all min-w-0 flex-1 relative",
+                    "flex flex-col items-start px-2 py-1.5 rounded-md text-left transition-all min-w-0 flex-1 relative border",
                     isActive
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "bg-secondary/50 hover:bg-secondary text-foreground"
+                      ? "text-foreground shadow-sm"
+                      : "border-transparent bg-secondary/50 hover:bg-secondary text-foreground"
                   )}
                 >
                   <span className="text-[10px] leading-tight font-medium truncate w-full">{view.label}</span>
-                  <span className={cn(
-                    "text-xs font-bold tabular-nums leading-tight",
-                    isActive ? "text-primary-foreground" : "text-foreground"
-                  )}>
-                    {cap.used.toFixed(0)}<span className="font-normal text-[10px]">/{cap.limit}</span>
+                  <span className="text-xs font-bold tabular-nums leading-tight text-foreground">
+                    {formatCap(cap.used)}<span className="font-normal text-[10px]">/{formatCap(cap.limit)}</span>
                   </span>
                   <div className="flex items-center gap-1 mt-0.5 w-full">
-                    <div className={cn(
-                      "h-1 rounded-full flex-1",
-                      isActive ? "bg-primary-foreground/20" : "bg-muted"
-                    )}>
+                    <div className="h-1 rounded-full flex-1 bg-muted">
                       <div
                         className={cn("h-full rounded-full transition-all", barColor)}
                         style={{ width: `${Math.min(pct, 100)}%` }}
                       />
                     </div>
-                    <span className={cn(
-                      "text-[9px] font-semibold whitespace-nowrap",
-                      isActive ? "text-primary-foreground" : remainingColor
-                    )}>
+                    <span className={cn("text-[9px] font-semibold whitespace-nowrap", remainingColor)}>
                       {cap.remaining.toFixed(0)}h
                     </span>
                   </div>
@@ -623,23 +785,42 @@ export function FDPTimelineChart({
               )
             })}
 
-            {/* Rest period tab */}
+            {/* Multi/Single select mode toggle */}
             <button
-              onClick={() => toggleView("rest")}
+              onClick={() => {
+                setMultiSelectMode((prev) => {
+                  const next = !prev
+                  // When switching to single-select, collapse to just the primary view
+                  if (!next && primaryView) {
+                    setActiveViews(new Set([primaryView.key]))
+                  }
+                  return next
+                })
+              }}
               className={cn(
-                "flex flex-col items-center justify-center px-2 py-1.5 rounded-md text-center transition-all min-w-[48px] shrink-0",
-                isRestView
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "bg-secondary/50 hover:bg-secondary text-foreground"
+                "flex flex-col items-center justify-center px-2 py-1.5 rounded-md text-center transition-all min-w-[40px] shrink-0",
+                multiSelectMode
+                  ? "bg-primary/20 text-primary"
+                  : "bg-secondary/50 hover:bg-secondary text-muted-foreground"
               )}
+              aria-label={multiSelectMode ? "Switch to single-select" : "Switch to multi-select"}
+              title={multiSelectMode ? "Multi-select (tap to switch to single)" : "Single-select (tap to switch to multi)"}
             >
-              <span className="text-[10px] font-medium leading-tight">Rest</span>
-              {restData.some((d) => !d.restCompliant) && (
-                <span className={cn("text-[8px] font-medium mt-0.5", isRestView ? "text-primary-foreground/70" : "text-red-500")}>!</span>
+              {multiSelectMode ? (
+                <Layers className="h-3.5 w-3.5" />
+              ) : (
+                <Square className="h-3.5 w-3.5" />
               )}
+              <span className="text-[8px] font-medium mt-0.5 leading-tight">
+                {multiSelectMode ? "Multi" : "Single"}
+              </span>
             </button>
           </div>
-          {(isRestView ? restData.length === 0 : timelineData.length === 0) ? (
+          {!mounted ? (
+            <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
+              <div className="h-5 w-5 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+            </div>
+          ) : safeTimelineData.length === 0 ? (
             <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
               No data to display
             </div>
@@ -647,59 +828,17 @@ export function FDPTimelineChart({
           <div className="flex">
             {/* Chart area */}
             <div className="flex-1 min-w-0">
-          {isRestView ? (
-            /* Rest period chart — single finger on chart body = tooltip,
-               single finger on axis zone = pan, two fingers = pinch zoom */
-            <div
-              ref={chartWrapperRef}
-              onTouchStart={handleChartTouchStart}
-              onTouchMove={handleGestureMove}
-              onTouchEnd={handleGestureEnd}
-              className="touch-none relative"
-            >
-              <ResponsiveContainer width="100%" height={320}>
-                <ComposedChart data={slicedData} margin={{ top: 5, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
-                  <XAxis
-                    dataKey="dateLabel"
-                    tick={axisTickStyle}
-                    tickLine={false}
-                    axisLine={false}
-                    interval={xAxisInterval}
-                  />
-                  <YAxis
-                    tick={axisTickStyle}
-                    tickLine={false}
-                    axisLine={false}
-                    unit="h"
-                    width={CHART_LEFT_PX}
-                  />
-                  <Tooltip content={<CustomTooltip />} active={tooltipActive ? undefined : false} />
-
-                  {/* Required rest as a line */}
-                  <Line
-                    dataKey="restRequired"
-                    stroke={cc.text}
-                    strokeDasharray="4 4"
-                    strokeWidth={1.5}
-                    dot={false}
-                    name="Required"
-                  />
-
-                  {/* Actual rest as bars colored by compliance */}
-                  <Bar dataKey="restHours" radius={[3, 3, 0, 0]} maxBarSize={24} name="Rest">
-                    {slicedData.map((entry, index) => (
-                      <Cell
-                        key={index}
-                        fill={entry.restCompliant ? COLORS.restBar : COLORS.violation}
-                        opacity={entry.isFuture ? 0.4 : 0.85}
-                      />
-                    ))}
-                  </Bar>
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
+          {(() => {
+            console.log("[FDP-chart] ⑥ about to render ResponsiveContainer", {
+              mounted,
+              slicedLen: slicedData.length,
+              viewsSelected: Array.from(activeViews),
+              cc,
+              yDomain,
+            })
+            return null
+          })()}
+          {(
             /* Duty/Flight rolling chart — supports multi-select */
             <div
               ref={chartWrapperRef}
@@ -709,7 +848,7 @@ export function FDPTimelineChart({
               className="touch-none relative"
             >
               <ResponsiveContainer width="100%" height={320}>
-                <ComposedChart data={slicedData} margin={{ top: 5, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
+                <ComposedChart data={slicedData} margin={{ top: 18, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
                   <defs>
                     {selectedNonRestViews.map((view) => (
                       <linearGradient key={view.key} id={`gradient-${view.key}`} x1="0" y1="0" x2="0" y2="1">
@@ -717,23 +856,21 @@ export function FDPTimelineChart({
                         <stop offset="95%" stopColor={view.color} stopOpacity={0.08} />
                       </linearGradient>
                     ))}
+                    {/* Scenario overlay gradient — muted orange for what-if changes */}
+                    <linearGradient id="gradient-scenario-change" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={COLORS.scenario} stopOpacity={0.55} />
+                      <stop offset="95%" stopColor={COLORS.scenario} stopOpacity={0.12} />
+                    </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
                   <XAxis
                     dataKey="dateLabel"
                     tick={axisTickStyle}
                     tickLine={false}
                     axisLine={false}
                     interval={xAxisInterval}
+                    padding={{ left: CHART_EDGE_PAD, right: CHART_EDGE_PAD }}
                   />
-                  <YAxis
-                    tick={axisTickStyle}
-                    tickLine={false}
-                    axisLine={false}
-                    unit="h"
-                    width={CHART_LEFT_PX}
-                    domain={yDomain}
-                  />
+                  <YAxis hide domain={yDomain} />
                   <Tooltip content={<CustomTooltip />} active={tooltipActive ? undefined : false} />
 
                   {/* Limit threshold lines — one per selected view */}
@@ -764,19 +901,23 @@ export function FDPTimelineChart({
                     />
                   )}
 
-                  {/* Today marker */}
+                  {/* Today marker — always rendered when today falls inside the
+                      visible window. Uses a solid (non-opacity) label color and
+                      extra top margin on the chart so the "Today" text isn't
+                      clipped by the plot area. Colored to contrast with both
+                      the chart palette and the scenario-orange overlay. */}
                   {slicedData.some((d) => d.date === todayStr) && (
                     <ReferenceLine
                       x={slicedData.find((d) => d.date === todayStr)?.dateLabel}
                       stroke={cc.fg}
-                      strokeDasharray="2 2"
-                      strokeWidth={1}
-                      opacity={0.4}
+                      strokeDasharray="3 3"
+                      strokeWidth={1.25}
                       label={{
                         value: "Today",
                         position: "top",
-                        fill: cc.text,
-                        fontSize: 9,
+                        fill: cc.fg,
+                        fontSize: 10,
+                        fontWeight: 600,
                       }}
                     />
                   )}
@@ -812,6 +953,24 @@ export function FDPTimelineChart({
                     />
                   ))}
 
+                  {/* Scenario change overlay — orange area painted over the
+                      base area for dates that differ from the original timeline.
+                      Only rendered when a what-if scenario is active.
+                      Animates in sync with the base area so it doesn't pop. */}
+                  {hasScenario && selectedNonRestViews.map((view) => (
+                    <Area
+                      key={`area-change-${view.key}`}
+                      dataKey={`${view.rollingKey}__change`}
+                      fill="url(#gradient-scenario-change)"
+                      stroke={COLORS.scenario}
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={false}
+                      connectNulls={false}
+                      name="Scenario change"
+                    />
+                  ))}
+
                   {/* Daily bars — duty: blue, flight: yellow, red when rolling exceeds limit */}
                   {uniqueBarKeys.map((barKey) => {
                     const barView = selectedNonRestViews.find((v) => v.barKey === barKey)!
@@ -830,7 +989,7 @@ export function FDPTimelineChart({
                           // Red bar when rolling cumulative exceeds the limit for the active view
                           const rollingValue = primaryView ? (entry[primaryView.rollingKey] as number) : 0
                           const exceedsLimit = primaryView ? rollingValue > primaryView.limitValue : false
-                          const cellColor = isModified ? "#20a96c" // bright green for added
+                          const cellColor = isModified ? COLORS.scenario // orange for scenario additions/changes
                             : isRemoved ? COLORS.violation // red for removed
                               : exceedsLimit ? COLORS.violation // red for limit exceedance
                                 : barColor
@@ -848,38 +1007,11 @@ export function FDPTimelineChart({
               </ResponsiveContainer>
             </div>
           )}
-            </div>
-            {/* Zoom controls — vertical, right of chart */}
-            <div className="flex flex-col items-center justify-start gap-1 pt-1 shrink-0">
-              <button
-                onClick={zoomIn}
-                className="p-1.5 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                aria-label="Zoom in"
-              >
-                <ZoomIn className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={zoomOut}
-                className="p-1.5 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                aria-label="Zoom out"
-              >
-                <ZoomOut className="h-3.5 w-3.5" />
-              </button>
-              {viewWindow && (
-                <button
-                  onClick={resetZoom}
-                  className="p-1.5 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                  aria-label="Reset zoom"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-          )}
 
-          {/* Overview mini-chart — "big picture" with rolling lines + active window */}
-          {activeData.length > 0 && (
+          {/* Overview mini-chart — "big picture" with rolling lines + active window.
+              Placed inside flex-1 min-w-0 so it aligns width-wise with the main chart
+              (excluding the zoom tools column on the right). */}
+          {mounted && activeData.length > 0 && (
             <div
               ref={overviewRef}
               onTouchStart={handleOverviewTouchStart}
@@ -888,8 +1020,9 @@ export function FDPTimelineChart({
               className="relative mt-2 touch-none cursor-grab active:cursor-grabbing select-none"
               style={{ paddingTop: 4, paddingBottom: 4 }}
             >
-              {/* Mini chart showing full dataset with rolling lines + shaded fill */}
-              <div className="overflow-hidden rounded" style={{ marginLeft: CHART_LEFT_PX, marginRight: CHART_RIGHT_PX }}>
+              {/* Rounded clip container — chart, darken overlays, and window all share
+                  these rounded corners so the darkened regions clip seamlessly into them. */}
+              <div className="relative overflow-hidden rounded-md" style={{ marginLeft: CHART_LEFT_PX, marginRight: CHART_RIGHT_PX }}>
                 <ResponsiveContainer width="100%" height={50}>
                   <ComposedChart data={activeData} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
                     <defs>
@@ -902,63 +1035,37 @@ export function FDPTimelineChart({
                     </defs>
                     <XAxis dataKey="dateLabel" hide />
                     <YAxis hide domain={[0, "auto"]} />
-                    {isRestView ? (
-                      <Bar dataKey="restHours" maxBarSize={4} isAnimationActive={false}>
-                        {activeData.map((entry, i) => (
-                          <Cell key={i} fill={entry.restCompliant ? COLORS.restBar : COLORS.violation} opacity={0.6} />
-                        ))}
-                      </Bar>
-                    ) : (
-                      <>
-                        {selectedNonRestViews.map((view) => (
-                          <Area
-                            key={`ov-${view.key}`}
-                            dataKey={view.rollingKey}
-                            fill={`url(#ov-gradient-${view.key})`}
-                            stroke={view.color}
-                            strokeWidth={1}
-                            dot={false}
-                            activeDot={false}
-                            isAnimationActive={false}
-                          />
-                        ))}
-                      </>
-                    )}
+                    {selectedNonRestViews.map((view) => (
+                      <Area
+                        key={`ov-${view.key}`}
+                        dataKey={view.rollingKey}
+                        fill={`url(#ov-gradient-${view.key})`}
+                        stroke={view.color}
+                        strokeWidth={1}
+                        dot={false}
+                        activeDot={false}
+                        isAnimationActive={false}
+                      />
+                    ))}
                   </ComposedChart>
                 </ResponsiveContainer>
-              </div>
 
-              {/* Darkened left region */}
-              <div
-                className="absolute top-0 bottom-0 pointer-events-none"
-                style={{
-                  left: CHART_LEFT_PX,
-                  width: `calc((100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.leftPct / 100})`,
-                  backgroundColor: cc.card,
-                  opacity: 0.75,
-                }}
-              />
-              {/* Darkened right region */}
-              <div
-                className="absolute top-0 bottom-0 pointer-events-none"
-                style={{
-                  right: CHART_RIGHT_PX,
-                  width: `calc((100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.rightPct / 100})`,
-                  backgroundColor: cc.card,
-                  opacity: 0.75,
-                }}
-              />
-              {/* Active window box with rounded border */}
-              <div
-                className="absolute top-0 bottom-0 border border-foreground/40 rounded-md pointer-events-none"
-                style={{
-                  left: `calc(${CHART_LEFT_PX}px + (100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.leftPct / 100})`,
-                  width: `calc((100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.widthPct / 100})`,
-                }}
-              >
-                {/* Edge grab handles */}
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[3px] w-1.5 h-5 rounded-full bg-foreground/40" />
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[3px] w-1.5 h-5 rounded-full bg-foreground/40" />
+                {/* Active window box with rounded corners. The huge box-shadow
+                    paints the darkened region *outside* the window and is clipped
+                    by the parent `overflow-hidden rounded-md` container — this
+                    creates a seamless rounded "cutout" with no visible seams. */}
+                <div
+                  className="absolute inset-y-0 border border-foreground/40 rounded-md pointer-events-none"
+                  style={{
+                    left: `${overviewHighlight.leftPct}%`,
+                    width: `${overviewHighlight.widthPct}%`,
+                    boxShadow: `0 0 0 9999px ${cardOverlay}`,
+                  }}
+                >
+                  {/* Edge grab handles */}
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[3px] w-1.5 h-5 rounded-full bg-foreground/40" />
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[3px] w-1.5 h-5 rounded-full bg-foreground/40" />
+                </div>
               </div>
 
               {/* Fade-in/out date labels at edges of active window */}
@@ -979,9 +1086,49 @@ export function FDPTimelineChart({
               </div>
             </div>
           )}
+            </div>
+            {/* Zoom controls — vertical, hugging the chart (~1px gap). */}
+            <div className="flex flex-col items-center justify-start gap-0.5 pt-1 shrink-0 -ml-px">
+              <button
+                onClick={zoomIn}
+                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                aria-label="Zoom in"
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={zoomOut}
+                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                aria-label="Zoom out"
+              >
+                <ZoomOut className="h-3.5 w-3.5" />
+              </button>
+              {viewWindow && (
+                <button
+                  onClick={resetZoom}
+                  className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                  aria-label="Reset zoom"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {hasScenario && onClearScenario && (
+                <button
+                  onClick={onClearScenario}
+                  className="p-1 rounded hover:bg-secondary transition-colors"
+                  style={{ color: COLORS.scenario }}
+                  aria-label="Clear scenario overlay"
+                  title="Clear scenario overlay"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+          )}
 
           {/* Forecast exceedance warnings — inside card */}
-          {!isRestView && forecast.hasExceedance && (
+          {forecast.hasExceedance && (
             <div className="px-1 pb-1 space-y-1">
               {forecast.exceedances
                 .filter((exc) => {

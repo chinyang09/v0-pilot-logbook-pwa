@@ -30,17 +30,21 @@ import { cn } from "@/lib/utils"
 /** Error boundary around the chart — prevents Recharts crashes from taking down the page */
 class ChartErrorBoundary extends Component<
   { children: ReactNode },
-  { hasError: boolean }
+  { hasError: boolean; errorMessage: string }
 > {
   constructor(props: { children: ReactNode }) {
     super(props)
-    this.state = { hasError: false }
+    this.state = { hasError: false, errorMessage: "" }
   }
-  static getDerivedStateFromError() {
-    return { hasError: true }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, errorMessage: error?.message ?? String(error) }
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("[FDP] Chart render error:", error, info)
+    console.error("[FDP-chart] ✖ boundary caught", {
+      message: error?.message,
+      stack: error?.stack,
+      componentStack: info?.componentStack,
+    })
   }
   render() {
     if (this.state.hasError) {
@@ -49,8 +53,13 @@ class ChartErrorBoundary extends Component<
           <CardContent className="py-6 text-center">
             <AlertTriangle className="h-6 w-6 text-muted-foreground/40 mb-2 mx-auto" />
             <p className="text-xs font-medium text-foreground mb-1">Chart failed to render</p>
+            {this.state.errorMessage && (
+              <p className="text-[10px] text-muted-foreground mb-2 max-w-[280px] mx-auto break-words">
+                {this.state.errorMessage}
+              </p>
+            )}
             <button
-              onClick={() => this.setState({ hasError: false })}
+              onClick={() => this.setState({ hasError: false, errorMessage: "" })}
               className="text-[10px] text-primary hover:underline"
             >
               Tap to retry
@@ -105,11 +114,24 @@ export default function FDPPage() {
   const [activeRule, setActiveRule] = useState<RegulationType>("CAAS")
   const [customLimits, setCustomLimits] = useState<FTLLimits>(DEFAULT_FTL_LIMITS)
 
+  // Stable refs for detail panel setters — these change identity on every URL
+  // update (setSelectedId is a useCallback with searchParams in deps, so
+  // router.replace → searchParams → new setSelectedId ref). Including them
+  // in effect deps causes an infinite setState loop ("Maximum update depth
+  // exceeded") because the effect calls setSelectedId → URL changes →
+  // setSelectedId new ref → effect reruns.
+  const setDetailContentRef = useRef(setDetailContent)
+  const setSelectedIdRef = useRef(setSelectedId)
+  const setHasDetailSupportRef = useRef(setHasDetailSupport)
+  useEffect(() => { setDetailContentRef.current = setDetailContent })
+  useEffect(() => { setSelectedIdRef.current = setSelectedId })
+  useEffect(() => { setHasDetailSupportRef.current = setHasDetailSupport })
+
   // Register detail panel support
   useEffect(() => {
-    setHasDetailSupport(true)
-    return () => setHasDetailSupport(false)
-  }, [setHasDetailSupport])
+    setHasDetailSupportRef.current(true)
+    return () => setHasDetailSupportRef.current(false)
+  }, [])
 
   const activeLimits = useMemo(() => {
     if (activeRule === "CUSTOM") return customLimits
@@ -124,22 +146,24 @@ export default function FDPPage() {
     setRuleMenuOpen(false)
   }, [])
 
-  // Open/close quick check panel in detail panel
+  // Open/close quick check panel in detail panel (stable ref via closure over refs)
   const closeQuickCheck = useCallback(() => {
     setQuickCheckOpen(false)
     setScenarioResult(null)
-    setDetailContent(null)
-    setSelectedId(null)
-  }, [setDetailContent, setSelectedId])
+    setDetailContentRef.current(null)
+    setSelectedIdRef.current(null)
+  }, [])
 
   // "View Chart" dismisses mobile overlay but keeps scenario result
   const handleViewChart = useCallback(() => {
-    setSelectedId(null)
-  }, [setSelectedId])
+    setSelectedIdRef.current(null)
+  }, [])
 
+  // Sync quickCheckOpen → detail panel. Uses refs to avoid infinite loop
+  // from unstable setSelectedId/setDetailContent dependencies.
   useEffect(() => {
     if (quickCheckOpen) {
-      setDetailContent(
+      setDetailContentRef.current(
         <QuickCheckPanel
           dutyPeriods={allDutyPeriods}
           limits={activeLimits}
@@ -148,12 +172,12 @@ export default function FDPPage() {
           onViewChart={handleViewChart}
         />
       )
-      setSelectedId("legal-check")
+      setSelectedIdRef.current("legal-check")
     } else {
-      setDetailContent(null)
-      setSelectedId(null)
+      setDetailContentRef.current(null)
+      setSelectedIdRef.current(null)
     }
-  }, [quickCheckOpen, allDutyPeriods, activeLimits, closeQuickCheck, handleViewChart, setDetailContent, setSelectedId])
+  }, [quickCheckOpen, allDutyPeriods, activeLimits, closeQuickCheck, handleViewChart])
 
   // Sync quickCheckOpen when selectedId is cleared externally (e.g., mobile back button).
   // Only fires on non-null → null transitions to avoid interfering with initial panel open
@@ -319,6 +343,7 @@ export default function FDPPage() {
               scenarioTimelineData={scenarioResult?.timelineData}
               scenarioModifiedDates={scenarioResult?.modifiedDates}
               scenarioRemovedDates={scenarioResult?.removedDates}
+              onClearScenario={() => setScenarioResult(null)}
             />
           </ChartErrorBoundary>
         ) : !isLoading ? (
