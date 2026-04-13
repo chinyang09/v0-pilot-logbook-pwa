@@ -30,17 +30,21 @@ import { cn } from "@/lib/utils"
 /** Error boundary around the chart — prevents Recharts crashes from taking down the page */
 class ChartErrorBoundary extends Component<
   { children: ReactNode },
-  { hasError: boolean }
+  { hasError: boolean; errorMessage: string }
 > {
   constructor(props: { children: ReactNode }) {
     super(props)
-    this.state = { hasError: false }
+    this.state = { hasError: false, errorMessage: "" }
   }
-  static getDerivedStateFromError() {
-    return { hasError: true }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, errorMessage: error?.message ?? String(error) }
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("[FDP] Chart render error:", error, info)
+    console.error("[FDP-chart] ✖ boundary caught", {
+      message: error?.message,
+      stack: error?.stack,
+      componentStack: info?.componentStack,
+    })
   }
   render() {
     if (this.state.hasError) {
@@ -49,8 +53,13 @@ class ChartErrorBoundary extends Component<
           <CardContent className="py-6 text-center">
             <AlertTriangle className="h-6 w-6 text-muted-foreground/40 mb-2 mx-auto" />
             <p className="text-xs font-medium text-foreground mb-1">Chart failed to render</p>
+            {this.state.errorMessage && (
+              <p className="text-[10px] text-muted-foreground mb-2 max-w-[280px] mx-auto break-words">
+                {this.state.errorMessage}
+              </p>
+            )}
             <button
-              onClick={() => this.setState({ hasError: false })}
+              onClick={() => this.setState({ hasError: false, errorMessage: "" })}
               className="text-[10px] text-primary hover:underline"
             >
               Tap to retry
