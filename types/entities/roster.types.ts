@@ -245,6 +245,9 @@ export interface DutyPeriod {
   // Linked entries
   scheduleEntryIds: string[]
   flightIds: string[]
+
+  // Display: route string (e.g. "WSSS-VVNB/VVNB-WSSS") built from sectors
+  route?: string
 }
 
 export interface RollingPeriodStats {

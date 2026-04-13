@@ -108,6 +108,12 @@ export function calculateDutyPeriodFromSchedule(
   const localReportTime = minutesToHHMM(localReportMinutes % 1440)
 
   const sectorCount = entry.sectors?.length || 0
+
+  // Build route string like "WSSS-VVNB/VVNB-WSSS" for tooltip display
+  const route = entry.sectors && entry.sectors.length > 0
+    ? entry.sectors.map((s) => `${s.departureIata || "?"}-${s.arrivalIata || "?"}`).join("/")
+    : undefined
+
   const fdpResult = calculateMaxFDP({
     reportTimeLocal: localReportTime,
     sectors: sectorCount,
@@ -134,6 +140,7 @@ export function calculateDutyPeriodFromSchedule(
     isFuture: entry.date > today,
     scheduleEntryIds: [entry.id],
     flightIds: entry.linkedFlightIds || [],
+    route,
   }
 }
 
@@ -300,6 +307,15 @@ function createDutyPeriodFromFlightGroup(
   // Use unique id when multiple duty periods exist on same date
   const id = totalGroups > 1 ? `logbook-${date}-${groupIdx}` : `logbook-${date}`
 
+  // Build route string like "WSSS-VVNB/VVNB-WSSS" (prefers ICAO, falls back to IATA)
+  const route = groupFlights
+    .map((f) => {
+      const dep = f.departureIcao || f.departureIata || "?"
+      const arr = f.arrivalIcao || f.arrivalIata || "?"
+      return `${dep}-${arr}`
+    })
+    .join("/")
+
   return {
     id,
     date,
@@ -317,6 +333,7 @@ function createDutyPeriodFromFlightGroup(
     isFuture: false,
     scheduleEntryIds: [],
     flightIds: groupFlights.map((f) => f.id),
+    route,
   }
 }
 
@@ -462,6 +479,7 @@ export function mergeAdjacentDutyPeriods(dutyPeriods: DutyPeriod[]): DutyPeriod[
         flightIds: [...prev.flightIds, ...curr.flightIds],
         scheduleEntryIds: [...prev.scheduleEntryIds, ...curr.scheduleEntryIds],
         source: prev.source !== curr.source ? "merged" : prev.source,
+        route: [prev.route, curr.route].filter(Boolean).join("/") || undefined,
       }
     } else {
       result.push(curr)
@@ -965,6 +983,7 @@ export interface TimelineDataPoint {
   restRule: string | null           // Which Reg 3 sub-rule
   isFuture: boolean
   source: "logbook" | "schedule" | "merged"
+  route?: string                    // e.g. "WSSS-VVNB/VVNB-WSSS"
 }
 
 /** Format a UTC date as "dd MMM" (e.g. "04 Apr") */
@@ -1042,6 +1061,7 @@ export function generateTimelineData(
           restRule: dp.restBefore ? dp.restBefore.rule : null,
           isFuture: dp.isFuture,
           source: dp.source,
+          route: dp.route,
         })
       }
     } else {

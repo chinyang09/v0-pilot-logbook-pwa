@@ -35,21 +35,24 @@ interface ViewConfig {
   color: string
 }
 
-// SVG-safe hex palette — perceptually uniform, works on both light and dark backgrounds
+// SVG-safe hex palette — muted / desaturated for night-time viewing comfort.
+// Orange (#d68a3e) is reserved for scenario "what-if" change highlighting, so
+// flight365 uses a slate-cyan that does not conflict with orange.
 const VIEW_COLORS: Record<string, string> = {
-  duty14: "#4a8fd6",   // bright blue
-  duty28: "#8b5fd6",   // purple-violet
-  flight28: "#2ba06b", // vivid teal-green
-  flight365: "#c4903a",// warm amber
+  duty14: "#6b8eae",   // muted steel blue
+  duty28: "#8a7aa5",   // muted purple
+  flight28: "#5a9478", // muted sage green
+  flight365: "#6fa3b0",// muted slate-cyan (distinct from orange)
 }
 
 // Semantic colors for data bars and compliance indicators (hex for SVG compatibility)
 const COLORS = {
-  dutyBar: "#4a8fd6",     // blue for duty hours bars
-  flightBar: "#b09830",   // yellow-amber for flight hours bars
-  restBar: "#1aa268",     // green for rest hours bars
-  violation: "#d04a3a",   // warm red
-  warning90: "#c4903a",   // amber for 90% line
+  dutyBar: "#6b8eae",     // muted blue for duty hours bars
+  flightBar: "#8a7e4a",   // muted warm khaki for flight hours bars
+  restBar: "#4a8870",     // muted green for rest hours bars
+  violation: "#b04e3a",   // muted red
+  warning90: "#b08040",   // muted amber for 90% line
+  scenario: "#d68a3e",    // muted orange — scenario/what-if change highlight
 }
 
 interface FDPTimelineChartProps {
@@ -230,15 +233,14 @@ export function FDPTimelineChart({
   // Today marker
   const todayStr = new Date().toISOString().split("T")[0]
 
-  // Format decimal hours to "X hr Y min" — precise display for tooltips.
-  // Examples: 5.5 → "5 hr 30 min", 0.25 → "15 min", 8 → "8 hr 0 min"
+  // Format decimal hours to zero-padded "HH:MM" — precise, compact display.
+  // Examples: 5.5 → "05:30", 0.25 → "00:15", 14 → "14:00"
   const formatHoursHM = useCallback((hours: number | null | undefined): string => {
     if (hours == null || !Number.isFinite(hours)) return "—"
-    const totalMinutes = Math.round(hours * 60)
+    const totalMinutes = Math.max(0, Math.round(hours * 60))
     const h = Math.floor(totalMinutes / 60)
     const m = totalMinutes % 60
-    if (h === 0) return `${m} min`
-    return `${h} hr ${m} min`
+    return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
   }, [])
 
   // Custom tooltip
@@ -293,7 +295,7 @@ export function FDPTimelineChart({
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Duty</span>
                 <span className={cn("font-medium tabular-nums", data.maxFdpHours && data.dutyHours > data.maxFdpHours && "text-red-500")}>
-                  {formatHoursHM(data.dutyHours)}{data.maxFdpHours ? ` / ${formatHoursHM(data.maxFdpHours)}` : ""}
+                  {formatHoursHM(data.dutyHours)}{data.maxFdpHours ? `/${formatHoursHM(data.maxFdpHours)}` : ""}
                 </span>
               </div>
             )}
@@ -313,7 +315,9 @@ export function FDPTimelineChart({
                 <div key={view.key}>
                   <div className="flex justify-between gap-3">
                     <span style={{ color: view.color }} className="font-medium">{view.rollingLabel}</span>
-                    <span className="font-medium tabular-nums">{formatHoursHM(rollingValue)} / {view.limitValue} hr</span>
+                    <span className="font-medium tabular-nums">
+                      {formatHoursHM(rollingValue)}/{formatHoursHM(view.limitValue)}
+                    </span>
                   </div>
                   <div className="flex justify-end">
                     <span className={cn(
@@ -329,9 +333,11 @@ export function FDPTimelineChart({
               )
             })}
           </div>
-          <div className="mt-1 pt-1 border-t border-border text-muted-foreground">
-            Source: {data.source}
-          </div>
+          {data.route && (
+            <div className="mt-1 pt-1 border-t border-border text-muted-foreground truncate">
+              {data.route}
+            </div>
+          )}
         </div>
       )
     },
@@ -415,13 +421,44 @@ export function FDPTimelineChart({
 
   const slicedData = useMemo(() => {
     if (!activeData.length) return activeData
-    if (!viewWindow) {
+    const base = !viewWindow
       // Default: show last DEFAULT_WINDOW days or all if shorter
-      const start = Math.max(0, activeData.length - DEFAULT_WINDOW)
-      return activeData.slice(start)
-    }
-    return activeData.slice(viewWindow.start, viewWindow.end + 1)
-  }, [activeData, viewWindow])
+      ? activeData.slice(Math.max(0, activeData.length - DEFAULT_WINDOW))
+      : activeData.slice(viewWindow.start, viewWindow.end + 1)
+
+    // When a scenario is active, enrich each point with a per-view "scenario
+    // change" field that carries the rolling value only for dates that are
+    // modified/removed (plus one-day padding on each side so the overlaid area
+    // has width and joins the base area smoothly at the boundaries).
+    if (!hasScenario) return base
+    const changedDates = new Set<string>([
+      ...(scenarioModifiedDates ?? []),
+      ...(scenarioRemovedDates ?? []),
+    ])
+    if (changedDates.size === 0) return base
+    // Expand: mark a point as "in-change-region" if the point itself OR either
+    // neighbor is in changedDates. This guarantees the overlay segment spans
+    // at least one full day of chart width and seams with the base area.
+    const inRegion = base.map((d, i) => {
+      if (changedDates.has(d.date)) return true
+      const prev = base[i - 1]
+      const next = base[i + 1]
+      return (prev && changedDates.has(prev.date)) || (next && changedDates.has(next.date))
+    })
+    return base.map((d, i) => {
+      const out: Record<string, unknown> = { ...d }
+      if (inRegion[i]) {
+        for (const v of selectedNonRestViews) {
+          out[`${v.rollingKey}__change`] = d[v.rollingKey]
+        }
+      } else {
+        for (const v of selectedNonRestViews) {
+          out[`${v.rollingKey}__change`] = null
+        }
+      }
+      return out as typeof d
+    })
+  }, [activeData, viewWindow, hasScenario, scenarioModifiedDates, scenarioRemovedDates, selectedNonRestViews])
 
   // Effective window for gesture calculations
   const effectiveWindow = useMemo(() => {
@@ -839,7 +876,7 @@ export function FDPTimelineChart({
               className="touch-none relative"
             >
               <ResponsiveContainer width="100%" height={320}>
-                <ComposedChart data={slicedData} margin={{ top: 5, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
+                <ComposedChart data={slicedData} margin={{ top: 18, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
                   <defs>
                     {selectedNonRestViews.map((view) => (
                       <linearGradient key={view.key} id={`gradient-${view.key}`} x1="0" y1="0" x2="0" y2="1">
@@ -847,6 +884,11 @@ export function FDPTimelineChart({
                         <stop offset="95%" stopColor={view.color} stopOpacity={0.08} />
                       </linearGradient>
                     ))}
+                    {/* Scenario overlay gradient — muted orange for what-if changes */}
+                    <linearGradient id="gradient-scenario-change" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={COLORS.scenario} stopOpacity={0.55} />
+                      <stop offset="95%" stopColor={COLORS.scenario} stopOpacity={0.12} />
+                    </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} opacity={0.3} />
                   <XAxis
@@ -894,19 +936,23 @@ export function FDPTimelineChart({
                     />
                   )}
 
-                  {/* Today marker */}
+                  {/* Today marker — always rendered when today falls inside the
+                      visible window. Uses a solid (non-opacity) label color and
+                      extra top margin on the chart so the "Today" text isn't
+                      clipped by the plot area. Colored to contrast with both
+                      the chart palette and the scenario-orange overlay. */}
                   {slicedData.some((d) => d.date === todayStr) && (
                     <ReferenceLine
                       x={slicedData.find((d) => d.date === todayStr)?.dateLabel}
                       stroke={cc.fg}
-                      strokeDasharray="2 2"
-                      strokeWidth={1}
-                      opacity={0.4}
+                      strokeDasharray="3 3"
+                      strokeWidth={1.25}
                       label={{
                         value: "Today",
                         position: "top",
-                        fill: cc.text,
-                        fontSize: 9,
+                        fill: cc.fg,
+                        fontSize: 10,
+                        fontWeight: 600,
                       }}
                     />
                   )}
@@ -942,6 +988,24 @@ export function FDPTimelineChart({
                     />
                   ))}
 
+                  {/* Scenario change overlay — orange area painted over the
+                      base area for dates that differ from the original timeline.
+                      Only rendered when a what-if scenario is active. */}
+                  {hasScenario && selectedNonRestViews.map((view) => (
+                    <Area
+                      key={`area-change-${view.key}`}
+                      dataKey={`${view.rollingKey}__change`}
+                      fill="url(#gradient-scenario-change)"
+                      stroke={COLORS.scenario}
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={false}
+                      connectNulls={false}
+                      isAnimationActive={false}
+                      name="Scenario change"
+                    />
+                  ))}
+
                   {/* Daily bars — duty: blue, flight: yellow, red when rolling exceeds limit */}
                   {uniqueBarKeys.map((barKey) => {
                     const barView = selectedNonRestViews.find((v) => v.barKey === barKey)!
@@ -960,7 +1024,7 @@ export function FDPTimelineChart({
                           // Red bar when rolling cumulative exceeds the limit for the active view
                           const rollingValue = primaryView ? (entry[primaryView.rollingKey] as number) : 0
                           const exceedsLimit = primaryView ? rollingValue > primaryView.limitValue : false
-                          const cellColor = isModified ? "#20a96c" // bright green for added
+                          const cellColor = isModified ? COLORS.scenario // orange for scenario additions/changes
                             : isRemoved ? COLORS.violation // red for removed
                               : exceedsLimit ? COLORS.violation // red for limit exceedance
                                 : barColor
