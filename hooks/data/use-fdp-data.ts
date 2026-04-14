@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useEffect, useCallback } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { useFlights } from "./use-flights"
 import { useScheduleEntries } from "./use-schedule"
 import { useDBReady } from "./use-db"
@@ -188,31 +188,27 @@ export function useFDPData() {
     }
   }, [dbReady, flights, scheduleEntries, airportTimezones])
 
-  // Live countdown — recompute rest-until-legal every 60 seconds
-  const [liveRestUntilLegal, setLiveRestUntilLegal] = useState<RestUntilLegalResult | null>(
-    result.restUntilLegal
-  )
-
-  useEffect(() => {
-    setLiveRestUntilLegal(result.restUntilLegal)
-  }, [result.restUntilLegal])
-
-  useEffect(() => {
-    if (!result.restUntilLegal || result.restUntilLegal.isLegalNow) return
-
-    const interval = setInterval(() => {
-      // Rebuild from the same last duty data but with updated "now"
-      const currentDPs = result.allDutyPeriods.filter((dp) => !dp.isFuture)
-      const updated = calculateRestUntilLegal(currentDPs)
-      setLiveRestUntilLegal(updated)
-    }, 60_000)
-
-    return () => clearInterval(interval)
-  }, [result.restUntilLegal, result.allDutyPeriods])
-
+  // NOTE: we deliberately do NOT keep a separate `liveRestUntilLegal` state
+  // here anymore. The previous implementation stored `result.restUntilLegal`
+  // into useState and synced it with a useEffect, but because
+  // `calculateRestUntilLegal()` returns a fresh object on every memo run,
+  // every SWR revalidation that gave us a new `flights` / `scheduleEntries`
+  // array reference would:
+  //   result memo recomputes → result.restUntilLegal = new object ref
+  //     → sync useEffect fires → setLiveRestUntilLegal(new ref)
+  //     → React re-renders (Object.is mismatch)
+  //     → next data revalidation repeats it
+  // which surfaced as React error #185 ("Maximum update depth exceeded")
+  // and the chart error boundary caught it as "Chart failed to render".
+  //
+  // Callers that need `isLegalNow` to transition over time (i.e. once the
+  // user has rested past `legalAtUtc`) should derive it from Date.now() at
+  // render time, typically using the same interval that drives the UI
+  // countdown. `result.restUntilLegal` itself is stable across renders as
+  // long as the underlying data is stable, which is the invariant the chart
+  // and the quick-check panel rely on.
   return {
     ...result,
-    restUntilLegal: liveRestUntilLegal,
     isLoading: !dbReady || flightsLoading || scheduleLoading,
   }
 }

@@ -215,19 +215,44 @@ export default function FDPPage() {
     prevSelectedIdRef.current = selectedId
   }, [selectedId, quickCheckOpen])
 
-  // Live digital countdown — updates every 10 seconds
+  // Live digital countdown — updates every 10 seconds.
+  //
+  // `restUntilLegal` comes straight from the `useFDPData` memo, so
+  // `restUntilLegal.isLegalNow` is a static snapshot of the moment the memo
+  // last ran (typically at most once per data change). To reflect the user
+  // crossing the `legalAtUtc` boundary in real time, we also track a local
+  // `isLegalNow` state that we refresh from `Date.now()` on the same 10s
+  // cadence as the countdown itself.
   const [countdown, setCountdown] = useState("")
+  const [isLegalNow, setIsLegalNow] = useState(() =>
+    restUntilLegal ? restUntilLegal.isLegalNow : true
+  )
   useEffect(() => {
-    if (!restUntilLegal) return
+    if (!restUntilLegal) {
+      setCountdown("")
+      setIsLegalNow(true)
+      return
+    }
+    const legalAt = new Date(restUntilLegal.legalAtUtc).getTime()
     const update = () => {
-      const legalAt = new Date(restUntilLegal.legalAtUtc).getTime()
-      const remaining = Math.max(0, legalAt - Date.now())
+      const now = Date.now()
+      const legal = now >= legalAt
+      // Use functional setState to bail out when value is unchanged — prevents
+      // an unnecessary re-render every 10s once we're in the LEGAL state.
+      setIsLegalNow((prev) => (prev === legal ? prev : legal))
+      if (legal) {
+        setCountdown((prev) => (prev === "00:00" ? prev : "00:00"))
+        return
+      }
+      const remaining = Math.max(0, legalAt - now)
       const h = Math.floor(remaining / 3600000)
       const m = Math.floor((remaining % 3600000) / 60000)
-      setCountdown(`${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`)
+      const next = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
+      setCountdown((prev) => (prev === next ? prev : next))
     }
     update()
-    if (restUntilLegal.isLegalNow) return
+    // Keep ticking even after we cross legalAt — the setState bailouts above
+    // make subsequent ticks effectively free.
     const interval = setInterval(update, 10_000)
     return () => clearInterval(interval)
   }, [restUntilLegal])
@@ -301,7 +326,7 @@ export default function FDPPage() {
             <Card
               className={cn(
                 "flex-1 border",
-                restUntilLegal.isLegalNow
+                isLegalNow
                   ? "border-green-500/20 bg-green-500/5"
                   : "border-red-500/20 bg-red-500/5"
               )}
@@ -310,12 +335,12 @@ export default function FDPPage() {
                 <div className="flex items-center gap-2">
                   <div className={cn(
                     "text-lg font-mono font-bold tabular-nums leading-none",
-                    restUntilLegal.isLegalNow ? "text-green-500" : "text-red-500"
+                    isLegalNow ? "text-green-500" : "text-red-500"
                   )}>
-                    {restUntilLegal.isLegalNow ? "00:00" : countdown}
+                    {isLegalNow ? "00:00" : countdown}
                   </div>
                   <div className="flex-1 min-w-0 border-l border-border pl-2">
-                    {restUntilLegal.isLegalNow ? (
+                    {isLegalNow ? (
                       <p className="text-[10px] text-muted-foreground leading-tight">
                         LEGAL · {formatMinutesHM(restUntilLegal.restElapsedMinutes)} since last duty
                       </p>
