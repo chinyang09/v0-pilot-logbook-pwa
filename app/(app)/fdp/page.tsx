@@ -161,8 +161,25 @@ export default function FDPPage() {
 
   // Sync quickCheckOpen → detail panel. Uses refs to avoid infinite loop
   // from unstable setSelectedId/setDetailContent dependencies.
+  //
+  // CRITICAL: `allDutyPeriods` is a new array reference every time `useFDPData`'s
+  // memo recomputes (e.g. when airport timezones resolve, when SWR revalidates
+  // flights or schedule). That happens on every data refresh. If we blindly called
+  // setSelectedId(null)/setDetailContent(null) in the else branch on every such
+  // re-run, each call would fire router.replace() → searchParams notification →
+  // DetailPanelProvider layout effect → re-render → effect re-runs → … and
+  // compound into React error #185 ("Maximum update depth exceeded"), which the
+  // ChartErrorBoundary surfaces as "Chart failed to render".
+  //
+  // Fix: only run the open/close side effects when quickCheckOpen *transitions*,
+  // and only refresh the panel content (when it is open) when its props change.
+  const prevQuickCheckOpenRef = useRef(false)
   useEffect(() => {
+    const wasOpen = prevQuickCheckOpenRef.current
+    prevQuickCheckOpenRef.current = quickCheckOpen
+
     if (quickCheckOpen) {
+      // Refresh panel content whenever relevant props change (dutyPeriods, limits, etc.)
       setDetailContentRef.current(
         <QuickCheckPanel
           dutyPeriods={allDutyPeriods}
@@ -172,8 +189,15 @@ export default function FDPPage() {
           onViewChart={handleViewChart}
         />
       )
-      setSelectedIdRef.current("legal-check")
-    } else {
+      // Only claim the detail-panel selection slot on the open transition.
+      // Calling setSelectedId("legal-check") on every dep change would keep
+      // firing router.replace even when nothing actually changed.
+      if (!wasOpen) {
+        setSelectedIdRef.current("legal-check")
+      }
+    } else if (wasOpen) {
+      // Only tear down on the close transition — not on every allDutyPeriods
+      // re-reference (which would cause the setState storm described above).
       setDetailContentRef.current(null)
       setSelectedIdRef.current(null)
     }
