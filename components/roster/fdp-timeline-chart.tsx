@@ -14,7 +14,7 @@ import {
   Area,
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
-import { ZoomIn, ZoomOut, RotateCcw, Layers, Square, X } from "lucide-react"
+import { ZoomIn, ZoomOut, RotateCcw, Rows3, Square, X } from "lucide-react"
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 import type { TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
@@ -94,7 +94,7 @@ export function FDPTimelineChart({
 
   // Gesture zoom/pan state — visible window into the data array
   const MIN_WINDOW = 7 // minimum 7 days visible
-  const DEFAULT_WINDOW = 90 // default to ~90 days
+  const DEFAULT_WINDOW = 28 // default to 28 days
   const [viewWindow, setViewWindow] = useState<{ start: number; end: number } | null>(null)
   const gestureRef = useRef<{
     mode: "pan" | "pinch" | "edge-left" | "edge-right"
@@ -110,8 +110,7 @@ export function FDPTimelineChart({
   const CHART_RIGHT_PX = 4 // right margin — same for main + overview, kept tight so zoom tools sit ~1px from plot
   const CHART_EDGE_PAD = 18 // horizontal padding so first/last X-axis tick labels aren't clipped
   const EDGE_TOLERANCE = 24 // px tolerance for edge-drag detection
-  // Fade-in/out date labels on overview during gesture
-  const [showOverviewDates, setShowOverviewDates] = useState(false)
+  // Overview gesture dismiss timer (kept for tooltip dismiss on gesture end)
   const overviewDateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Hide tooltip after touch ends (Recharts doesn't auto-dismiss on mobile)
   const [tooltipActive, setTooltipActive] = useState(true)
@@ -321,7 +320,7 @@ export function FDPTimelineChart({
             : headerPct >= 75 ? "text-yellow-500" : "text-green-500"
 
       return (
-        <div className="backdrop-blur-md bg-popover/70 border border-border/60 rounded-lg p-2.5 shadow-lg text-xs max-w-[240px]">
+        <div className="backdrop-blur-xl bg-popover/40 border border-border/40 rounded-lg p-2.5 shadow-lg text-xs max-w-[240px]">
           {/* 1. Date + utilization % */}
           <div className="flex items-baseline justify-between gap-3 mb-1.5">
             <p className="font-medium text-foreground">{data.dateLabel}</p>
@@ -430,11 +429,12 @@ export function FDPTimelineChart({
     return Array.from(keys) as (keyof TimelineDataPoint)[]
   }, [selectedNonRestViews])
 
-  // Y-axis domain for multi-select
+  // Y-axis domain for multi-select — tight 5% headroom above the hard limit
+  // (limits are the compliance ceiling; we don't need more than a sliver above).
   const yDomain = useMemo(() => {
     if (selectedNonRestViews.length === 0) return undefined
     const maxLimit = Math.max(...selectedNonRestViews.map((v) => v.limitValue))
-    return [0, Math.ceil(maxLimit * 1.1)]
+    return [0, Math.ceil(maxLimit * 1.05)]
   }, [selectedNonRestViews])
 
   // Compute the sliced data for the visible window
@@ -452,14 +452,30 @@ export function FDPTimelineChart({
     prevDataLenRef.current = activeData.length
   }, [activeData.length, viewWindow])
 
+  // Smart default window: if the schedule extends into the future, show the
+  // last 28 days (working backward from latest). Otherwise (no schedule),
+  // anchor around today with 3 weeks historic + 1 week look-ahead.
+  const defaultWindowRange = useMemo(() => {
+    if (!activeData.length) return { start: 0, end: 0 }
+    const lastIdx = activeData.length - 1
+    const todayIdx = activeData.findIndex((d) => d.date === todayStr)
+    const hasFutureSchedule = todayIdx >= 0 && todayIdx < lastIdx
+    if (hasFutureSchedule) {
+      return { start: Math.max(0, lastIdx - (DEFAULT_WINDOW - 1)), end: lastIdx }
+    }
+    const anchor = todayIdx >= 0 ? todayIdx : lastIdx
+    const start = Math.max(0, anchor - 20) // 3 weeks back
+    const end = Math.min(lastIdx, anchor + 7) // 1 week ahead (clamped)
+    return { start, end }
+  }, [activeData, todayStr])
+
   const slicedData = useMemo(() => {
     if (!activeData.length) {
       console.log("[FDP-chart] ⑤ slicedData: empty input → returning []")
       return activeData
     }
     const base = !viewWindow
-      // Default: show last DEFAULT_WINDOW days or all if shorter
-      ? activeData.slice(Math.max(0, activeData.length - DEFAULT_WINDOW))
+      ? activeData.slice(defaultWindowRange.start, defaultWindowRange.end + 1)
       : activeData.slice(viewWindow.start, viewWindow.end + 1)
 
     console.log("[FDP-chart] ⑤ slicedData computed", {
@@ -505,18 +521,12 @@ export function FDPTimelineChart({
     })
   }, [activeData, viewWindow, hasScenario, scenarioModifiedDates, scenarioRemovedDates, selectedNonRestViews])
 
-  // Effective window for gesture calculations
+  // Effective window for gesture calculations — mirrors slicedData's default.
   const effectiveWindow = useMemo(() => {
     if (!activeData.length) return { start: 0, end: 0 }
-    if (!viewWindow) {
-      return { start: Math.max(0, activeData.length - DEFAULT_WINDOW), end: activeData.length - 1 }
-    }
+    if (!viewWindow) return defaultWindowRange
     return viewWindow
-  }, [activeData, viewWindow])
-
-  // Overview edge date labels (shown during gesture, fade after release)
-  const overviewStartLabel = activeData[effectiveWindow.start]?.dateLabel ?? ""
-  const overviewEndLabel = activeData[effectiveWindow.end]?.dateLabel ?? ""
+  }, [activeData.length, viewWindow, defaultWindowRange])
 
   // Gesture handlers for zoom/pan
   const chartWrapperRef = useRef<HTMLDivElement>(null)
@@ -605,9 +615,7 @@ export function FDPTimelineChart({
   const handleGestureEnd = useCallback(() => {
     cancelAnimationFrame(rafRef.current)
     gestureRef.current = null
-    // Fade out overview dates after 1.5s
     if (overviewDateTimerRef.current) clearTimeout(overviewDateTimerRef.current)
-    overviewDateTimerRef.current = setTimeout(() => setShowOverviewDates(false), 1500)
     // Dismiss tooltip after 2s
     if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current)
     tooltipTimerRef.current = setTimeout(() => setTooltipActive(false), 2000)
@@ -641,7 +649,6 @@ export function FDPTimelineChart({
   const handleOverviewTouchStart = useCallback((e: React.TouchEvent) => {
     if (e.touches.length < 1) return
     if (overviewDateTimerRef.current) clearTimeout(overviewDateTimerRef.current)
-    setShowOverviewDates(true)
     // Dismiss chart tooltip/focus when interacting with overview
     setTooltipActive(false)
 
@@ -720,11 +727,18 @@ export function FDPTimelineChart({
     return { leftPct, rightPct, widthPct }
   }, [activeData.length, effectiveWindow])
 
-  // X-axis tick interval — show ~6 labels max to avoid clutter
-  const xAxisInterval = useMemo(() => {
-    if (slicedData.length <= 7) return 0
-    return Math.max(1, Math.floor(slicedData.length / 6) - 1)
-  }, [slicedData.length])
+  // X-axis ticks — show at most 5 labels: start, 25%, 50%, 75%, end.
+  // Breaks the period into quarters so the axis stays scannable.
+  const xAxisTicks = useMemo(() => {
+    const n = slicedData.length
+    if (n === 0) return [] as string[]
+    if (n === 1) return [slicedData[0].dateLabel]
+    const indices = [0, Math.floor(n * 0.25), Math.floor(n * 0.5), Math.floor(n * 0.75), n - 1]
+    const labels = indices
+      .map((i) => slicedData[i]?.dateLabel)
+      .filter((v): v is string => !!v)
+    return Array.from(new Set(labels))
+  }, [slicedData])
 
   // Shared axis/grid theme props — using resolved rgb from probe
   const axisTickStyle = { fontSize: 10, fill: cc.text }
@@ -752,8 +766,8 @@ export function FDPTimelineChart({
         style={{ position: "absolute", visibility: "hidden", pointerEvents: "none" }}
         aria-hidden="true"
       />
-      <Card className="shadow-sm">
-        <CardContent className="pt-0.5 pb-1 px-1.5 relative">
+      <Card className="shadow-sm py-0 gap-0">
+        <CardContent className="pt-0 pb-0.5 px-1.5 relative">
           {/* View selector tabs — flat, integrated into card (no raised buttons) */}
           <div className="flex gap-0.5 overflow-x-auto scrollbar-none">
             {views.map((view) => {
@@ -816,9 +830,64 @@ export function FDPTimelineChart({
               No data to display
             </div>
           ) : (
-          <div className="flex">
-            {/* Chart area */}
-            <div className="flex-1 min-w-0">
+          <>
+            {/* Horizontal zoom controls row — sits between tabs and chart */}
+            <div className="flex items-center justify-end gap-0.5 py-0.5 -mt-0.5">
+              <button
+                onClick={() => {
+                  setMultiSelectMode((prev) => {
+                    const next = !prev
+                    if (!next && primaryView) {
+                      setActiveViews(new Set([primaryView.key]))
+                    }
+                    return next
+                  })
+                }}
+                className={cn(
+                  "p-1 rounded transition-colors",
+                  multiSelectMode ? "text-primary" : "text-muted-foreground hover:bg-secondary"
+                )}
+                aria-label={multiSelectMode ? "Switch to single-select" : "Switch to multi-select"}
+                title={multiSelectMode ? "Multi-select (tap to switch to single)" : "Single-select (tap to switch to multi)"}
+              >
+                {multiSelectMode ? <Rows3 className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+              </button>
+              <div className="h-3.5 w-px bg-border mx-1" />
+              <button
+                onClick={zoomIn}
+                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                aria-label="Zoom in"
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={zoomOut}
+                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                aria-label="Zoom out"
+              >
+                <ZoomOut className="h-3.5 w-3.5" />
+              </button>
+              {viewWindow && (
+                <button
+                  onClick={resetZoom}
+                  className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                  aria-label="Reset zoom"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {hasScenario && onClearScenario && (
+                <button
+                  onClick={onClearScenario}
+                  className="p-1 rounded hover:bg-secondary transition-colors"
+                  style={{ color: COLORS.scenario }}
+                  aria-label="Clear scenario overlay"
+                  title="Clear scenario overlay"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           {(() => {
             console.log("[FDP-chart] ⑥ about to render ResponsiveContainer", {
               mounted,
@@ -839,7 +908,7 @@ export function FDPTimelineChart({
               className="touch-none relative"
             >
               <ResponsiveContainer width="100%" height={320}>
-                <ComposedChart data={slicedData} margin={{ top: 18, right: CHART_RIGHT_PX, left: 0, bottom: 5 }}>
+                <ComposedChart data={slicedData} margin={{ top: 14, right: 0, left: 0, bottom: 0 }}>
                   <defs>
                     {selectedNonRestViews.map((view) => (
                       <linearGradient key={view.key} id={`gradient-${view.key}`} x1="0" y1="0" x2="0" y2="1">
@@ -866,7 +935,8 @@ export function FDPTimelineChart({
                     tick={axisTickStyle}
                     tickLine={false}
                     axisLine={false}
-                    interval={xAxisInterval}
+                    ticks={xAxisTicks}
+                    interval={0}
                     padding={{ left: CHART_EDGE_PAD, right: CHART_EDGE_PAD }}
                   />
                   <YAxis hide domain={yDomain} />
@@ -944,7 +1014,8 @@ export function FDPTimelineChart({
                     return null
                   })()}
 
-                  {/* Rolling cumulative areas — one per selected view */}
+                  {/* Rolling cumulative areas — one per selected view.
+                      activeDot highlights the focused point under the tooltip cursor. */}
                   {selectedNonRestViews.map((view) => (
                     <Area
                       key={`area-${view.key}`}
@@ -953,7 +1024,7 @@ export function FDPTimelineChart({
                       stroke={view.color}
                       strokeWidth={2}
                       dot={false}
-                      activeDot={false}
+                      activeDot={{ r: 4, fill: view.color, stroke: cc.card, strokeWidth: 1.5 }}
                       name={view.rollingLabel}
                     />
                   ))}
@@ -1022,8 +1093,8 @@ export function FDPTimelineChart({
               onTouchStart={handleOverviewTouchStart}
               onTouchMove={handleGestureMove}
               onTouchEnd={handleGestureEnd}
-              className="relative mt-1 touch-none cursor-grab active:cursor-grabbing select-none"
-              style={{ paddingTop: 2, paddingBottom: 2 }}
+              className="relative -mt-1 touch-none cursor-grab active:cursor-grabbing select-none"
+              style={{ paddingTop: 0, paddingBottom: 0 }}
             >
               {/* Rounded clip container — chart, darken overlays, and window all share
                   these rounded corners so the darkened regions clip seamlessly into them. */}
@@ -1073,90 +1144,9 @@ export function FDPTimelineChart({
                 </div>
               </div>
 
-              {/* Fade-in/out date labels at edges of active window */}
-              <div
-                className="absolute top-0 bottom-0 pointer-events-none transition-opacity duration-500"
-                style={{
-                  left: `calc(${CHART_LEFT_PX}px + (100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.leftPct / 100})`,
-                  width: `calc((100% - ${CHART_LEFT_PX + CHART_RIGHT_PX}px) * ${overviewHighlight.widthPct / 100})`,
-                  opacity: showOverviewDates ? 1 : 0,
-                }}
-              >
-                <span className="absolute -top-3.5 left-0 -translate-x-1/2 text-[9px] text-muted-foreground tabular-nums whitespace-nowrap bg-card/80 px-0.5 rounded">
-                  {overviewStartLabel}
-                </span>
-                <span className="absolute -top-3.5 right-0 translate-x-1/2 text-[9px] text-muted-foreground tabular-nums whitespace-nowrap bg-card/80 px-0.5 rounded">
-                  {overviewEndLabel}
-                </span>
-              </div>
             </div>
           )}
-            </div>
-            {/* Zoom controls — vertical, hugging the chart (~1px gap). */}
-            <div className="flex flex-col items-center justify-start gap-0.5 pt-1 shrink-0 -ml-px">
-              {/* Multi/Single select mode toggle — sits at the top of the controls column */}
-              <button
-                onClick={() => {
-                  setMultiSelectMode((prev) => {
-                    const next = !prev
-                    // When switching to single-select, collapse to just the primary view
-                    if (!next && primaryView) {
-                      setActiveViews(new Set([primaryView.key]))
-                    }
-                    return next
-                  })
-                }}
-                className={cn(
-                  "p-1 rounded transition-colors",
-                  multiSelectMode
-                    ? "text-primary"
-                    : "text-muted-foreground hover:bg-secondary"
-                )}
-                aria-label={multiSelectMode ? "Switch to single-select" : "Switch to multi-select"}
-                title={multiSelectMode ? "Multi-select (tap to switch to single)" : "Single-select (tap to switch to multi)"}
-              >
-                {multiSelectMode ? (
-                  <Layers className="h-3.5 w-3.5" />
-                ) : (
-                  <Square className="h-3.5 w-3.5" />
-                )}
-              </button>
-              <button
-                onClick={zoomIn}
-                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                aria-label="Zoom in"
-              >
-                <ZoomIn className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={zoomOut}
-                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                aria-label="Zoom out"
-              >
-                <ZoomOut className="h-3.5 w-3.5" />
-              </button>
-              {viewWindow && (
-                <button
-                  onClick={resetZoom}
-                  className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
-                  aria-label="Reset zoom"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
-              )}
-              {hasScenario && onClearScenario && (
-                <button
-                  onClick={onClearScenario}
-                  className="p-1 rounded hover:bg-secondary transition-colors"
-                  style={{ color: COLORS.scenario }}
-                  aria-label="Clear scenario overlay"
-                  title="Clear scenario overlay"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
+          </>
           )}
 
           {/* Forecast exceedance warnings — inside card */}
