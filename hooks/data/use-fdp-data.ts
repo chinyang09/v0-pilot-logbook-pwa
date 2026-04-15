@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useEffect, useCallback } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { useFlights } from "./use-flights"
 import { useScheduleEntries } from "./use-schedule"
 import { useDBReady } from "./use-db"
@@ -61,43 +61,77 @@ export function useFDPData() {
   const { flights, isLoading: flightsLoading } = useFlights()
   const { scheduleEntries, isLoading: scheduleLoading } = useScheduleEntries()
 
-  // Pre-resolve airport timezone offsets for schedule entries
-  const [airportTimezones, setAirportTimezones] = useState<Map<string, number>>(new Map())
+  // Pre-resolve airport timezone offsets for schedule entries.
+  //
+  // IMPORTANT: this state MUST only update when the resolved content actually
+  // changes. SWR hands us a new `scheduleEntries` array reference on every
+  // revalidation, which re-runs this effect. If each run called
+  // setAirportTimezones(new Map(...)) unconditionally, the downstream useMemo
+  // (result) would recompute → `allDutyPeriods` gets a new reference → the
+  // FDPPage quick-check effect fires → router.replace → searchParams churn →
+  // eventually React error #185 ("Maximum update depth exceeded"), which the
+  // chart error boundary reports as "Chart failed to render". With roster
+  // imports this loop is easier to trigger because schedule entries are
+  // present and the effect actually does work.
+  const [airportTimezones, setAirportTimezones] = useState<Map<string, number>>(() => new Map())
+
+  // Build a stable key of departure IATAs so the effect only re-resolves when
+  // the *set* of airports actually changes — not on every SWR revalidation
+  // that hands us an identical list in a new array reference.
+  const depIatasKey = useMemo(() => {
+    const iatas = new Set<string>()
+    for (const entry of scheduleEntries) {
+      const depIata = entry.sectors?.[0]?.departureIata
+      if (depIata) iatas.add(depIata)
+    }
+    return [...iatas].sort().join(",")
+  }, [scheduleEntries])
 
   useEffect(() => {
-    async function resolveTimezones() {
+    if (!dbReady) return
+    if (depIatasKey === "") {
+      // Only swap to a fresh empty Map if we don't already have one.
+      setAirportTimezones((prev) => (prev.size === 0 ? prev : new Map()))
+      return
+    }
+
+    let cancelled = false
+    ;(async () => {
       try {
-        const iatas = new Set<string>()
-        for (const entry of scheduleEntries) {
-          const depIata = entry.sectors?.[0]?.departureIata
-          if (depIata) iatas.add(depIata)
-        }
-        if (iatas.size === 0) {
-          setAirportTimezones(new Map())
-          return
-        }
-        const map = new Map<string, number>()
+        const iatas = depIatasKey.split(",")
+        const entries: Array<[string, number]> = []
         await Promise.all(
-          [...iatas].map(async (iata) => {
+          iatas.map(async (iata) => {
             try {
               const airport = await getAirportByIata(iata)
               if (airport?.tz) {
-                map.set(iata, getAirportTimeInfo(airport.tz).offset)
+                entries.push([iata, getAirportTimeInfo(airport.tz).offset])
               }
             } catch {
               // Individual airport lookup failed — skip, will use default SGT offset
             }
           })
         )
-        setAirportTimezones(map)
+        if (cancelled) return
+        setAirportTimezones((prev) => {
+          // Bail out (keep previous ref) when content is identical — prevents
+          // the result memo from recomputing and avoids the loop described above.
+          if (prev.size === entries.length) {
+            let same = true
+            for (const [k, v] of entries) {
+              if (prev.get(k) !== v) { same = false; break }
+            }
+            if (same) return prev
+          }
+          return new Map(entries)
+        })
       } catch (err) {
         console.warn("[FDP] Failed to resolve timezones:", err)
       }
-    }
-    if (dbReady && scheduleEntries.length > 0) {
-      resolveTimezones()
-    }
-  }, [dbReady, scheduleEntries])
+    })()
+
+    return () => { cancelled = true }
+  }, [dbReady, depIatasKey])
 
   const result = useMemo(() => {
     if (!dbReady) return EMPTY_RESULT
@@ -154,31 +188,27 @@ export function useFDPData() {
     }
   }, [dbReady, flights, scheduleEntries, airportTimezones])
 
-  // Live countdown — recompute rest-until-legal every 60 seconds
-  const [liveRestUntilLegal, setLiveRestUntilLegal] = useState<RestUntilLegalResult | null>(
-    result.restUntilLegal
-  )
-
-  useEffect(() => {
-    setLiveRestUntilLegal(result.restUntilLegal)
-  }, [result.restUntilLegal])
-
-  useEffect(() => {
-    if (!result.restUntilLegal || result.restUntilLegal.isLegalNow) return
-
-    const interval = setInterval(() => {
-      // Rebuild from the same last duty data but with updated "now"
-      const currentDPs = result.allDutyPeriods.filter((dp) => !dp.isFuture)
-      const updated = calculateRestUntilLegal(currentDPs)
-      setLiveRestUntilLegal(updated)
-    }, 60_000)
-
-    return () => clearInterval(interval)
-  }, [result.restUntilLegal, result.allDutyPeriods])
-
+  // NOTE: we deliberately do NOT keep a separate `liveRestUntilLegal` state
+  // here anymore. The previous implementation stored `result.restUntilLegal`
+  // into useState and synced it with a useEffect, but because
+  // `calculateRestUntilLegal()` returns a fresh object on every memo run,
+  // every SWR revalidation that gave us a new `flights` / `scheduleEntries`
+  // array reference would:
+  //   result memo recomputes → result.restUntilLegal = new object ref
+  //     → sync useEffect fires → setLiveRestUntilLegal(new ref)
+  //     → React re-renders (Object.is mismatch)
+  //     → next data revalidation repeats it
+  // which surfaced as React error #185 ("Maximum update depth exceeded")
+  // and the chart error boundary caught it as "Chart failed to render".
+  //
+  // Callers that need `isLegalNow` to transition over time (i.e. once the
+  // user has rested past `legalAtUtc`) should derive it from Date.now() at
+  // render time, typically using the same interval that drives the UI
+  // countdown. `result.restUntilLegal` itself is stable across renders as
+  // long as the underlying data is stable, which is the invariant the chart
+  // and the quick-check panel rely on.
   return {
     ...result,
-    restUntilLegal: liveRestUntilLegal,
     isLoading: !dbReady || flightsLoading || scheduleLoading,
   }
 }
