@@ -15,6 +15,7 @@ import {
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
 import { ZoomIn, ZoomOut, RotateCcw, Layers, Square, X } from "lucide-react"
+import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 import type { TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
 import type { FTLLimits, CapacityRemaining, ForecastResult } from "@/types/entities/roster.types"
@@ -287,71 +288,92 @@ export function FDPTimelineChart({
     return `${Math.round(n)}`
   }, [])
 
+  // Compact denominator formatter for tooltip — drop ":00" trailing zeros and
+  // suppress the "h" suffix on >=1000 values (e.g. "/90" not "/90:00", "/1k" not "/1kh").
+  const formatLimitShort = useCallback((hours: number): string => {
+    if (!Number.isFinite(hours)) return "—"
+    if (Math.abs(hours) >= 1000) {
+      const v = hours / 1000
+      return `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}k`
+    }
+    const totalMinutes = Math.max(0, Math.round(hours * 60))
+    const h = Math.floor(totalMinutes / 60)
+    const m = totalMinutes % 60
+    if (m === 0) return `${h}`
+    return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
+  }, [])
+
   // Custom tooltip
   const CustomTooltip = useCallback(
     ({ active, payload }: { active?: boolean; payload?: Array<{ payload: TimelineDataPoint }> }) => {
       if (!active || !payload || payload.length === 0) return null
       const data = payload[0].payload
 
+      // Header utilization % — uses the primary (first) selected view so the
+      // header shows the most relevant rolling figure at a glance.
+      const headerView = selectedNonRestViews[0]
+      const headerPct = headerView && headerView.limitValue > 0
+        ? Math.round(((data[headerView.rollingKey] as number) / headerView.limitValue) * 100)
+        : null
+      const headerPctColor = headerPct == null ? "text-muted-foreground"
+        : headerPct >= 100 ? "text-red-500"
+          : headerPct >= 90 ? "text-orange-500"
+            : headerPct >= 75 ? "text-yellow-500" : "text-green-500"
+
       return (
-        <div className="bg-popover border border-border rounded-lg p-3 shadow-lg text-xs max-w-[260px]">
-          <p className="font-medium text-foreground mb-1.5">
-            {data.dateLabel}
-            {data.isFuture && <span className="text-muted-foreground ml-1">(scheduled)</span>}
-          </p>
-          {/* Daily values with FDP limit */}
-          <div className="space-y-0.5 mb-1.5">
-            {data.dutyHours > 0 && (
-              <div className="flex justify-between gap-4">
-                <span className="text-muted-foreground">Duty</span>
-                <span className={cn("font-medium tabular-nums", data.maxFdpHours && data.dutyHours > data.maxFdpHours && "text-red-500")}>
-                  {formatHoursHM(data.dutyHours)}{data.maxFdpHours ? `/${formatHoursHM(data.maxFdpHours)}` : ""}
-                </span>
-              </div>
-            )}
-            {data.flightHours > 0 && (
-              <div className="flex justify-between gap-4">
-                <span className="text-muted-foreground">Flight</span>
-                <span className="font-medium tabular-nums">{formatHoursHM(data.flightHours)}</span>
-              </div>
+        <div className="backdrop-blur-md bg-popover/70 border border-border/60 rounded-lg p-2.5 shadow-lg text-xs max-w-[240px]">
+          {/* 1. Date + utilization % */}
+          <div className="flex items-baseline justify-between gap-3 mb-1.5">
+            <p className="font-medium text-foreground">{data.dateLabel}</p>
+            {headerPct != null && (
+              <span className={cn("text-[10px] font-medium tabular-nums", headerPctColor)}>
+                {headerPct}% utilized
+              </span>
             )}
           </div>
-          {/* Rolling values for each selected view */}
-          <div className="space-y-1 border-t border-border pt-1.5">
+          {/* 2. Rolling values for each selected view (14d / 28d / 12M) */}
+          <div className="space-y-0.5">
             {selectedNonRestViews.map((view) => {
               const rollingValue = data[view.rollingKey] as number
-              const pct = view.limitValue > 0 ? ((rollingValue / view.limitValue) * 100).toFixed(0) : "0"
               return (
-                <div key={view.key}>
-                  <div className="flex justify-between gap-3">
-                    <span style={{ color: view.color }} className="font-medium">{view.rollingLabel}</span>
-                    <span className="font-medium tabular-nums">
-                      {formatHoursHM(rollingValue)}/{view.limitValue >= 1000 ? `${formatCap(view.limitValue)}h` : formatHoursHM(view.limitValue)}
-                    </span>
-                  </div>
-                  <div className="flex justify-end">
-                    <span className={cn(
-                      "text-[10px]",
-                      Number(pct) >= 100 ? "text-red-500" :
-                        Number(pct) >= 90 ? "text-orange-500" :
-                          Number(pct) >= 75 ? "text-yellow-500" : "text-green-500"
-                    )}>
-                      {pct}% utilized
-                    </span>
-                  </div>
+                <div key={view.key} className="flex justify-between gap-3">
+                  <span style={{ color: view.color }} className="font-medium">{view.rollingLabel}</span>
+                  <span className="font-medium tabular-nums">
+                    {formatHoursHM(rollingValue)}<span className="text-muted-foreground">/{formatLimitShort(view.limitValue)}</span>
+                  </span>
                 </div>
               )
             })}
           </div>
+          {/* 3. Daily duty + flight */}
+          {(data.dutyHours > 0 || data.flightHours > 0) && (
+            <div className="space-y-0.5 mt-1.5 pt-1.5 border-t border-border/60">
+              {data.dutyHours > 0 && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Duty</span>
+                  <span className={cn("font-medium tabular-nums", data.maxFdpHours && data.dutyHours > data.maxFdpHours && "text-red-500")}>
+                    {formatHoursHM(data.dutyHours)}{data.maxFdpHours ? `/${formatHoursHM(data.maxFdpHours)}` : ""}
+                  </span>
+                </div>
+              )}
+              {data.flightHours > 0 && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Flight</span>
+                  <span className="font-medium tabular-nums">{formatHoursHM(data.flightHours)}</span>
+                </div>
+              )}
+            </div>
+          )}
+          {/* 4. Destination/route */}
           {data.route && (
-            <div className="mt-1 pt-1 border-t border-border text-muted-foreground truncate">
+            <div className="mt-1.5 pt-1.5 border-t border-border/60 text-muted-foreground truncate">
               {data.route}
             </div>
           )}
         </div>
       )
     },
-    [selectedNonRestViews, formatHoursHM, formatCap]
+    [selectedNonRestViews, formatHoursHM, formatLimitShort]
   )
 
   // Sanitize numeric fields to protect Recharts from NaN/Infinity which would
@@ -708,16 +730,19 @@ export function FDPTimelineChart({
   const axisTickStyle = { fontSize: 10, fill: cc.text }
   const gridStroke = cc.border
 
-  // Extract rgb components from the card color to build a translucent overlay for
-  // the overview's window box-shadow. Falls back to a safe dark value if parsing fails.
-  const cardOverlay = useMemo(() => {
-    const m = cc.card.match(/\d+(\.\d+)?/g)
-    if (!m || m.length < 3) return "rgba(26,26,26,0.75)"
-    return `rgba(${m[0]},${m[1]},${m[2]},0.75)`
-  }, [cc.card])
+  // Theme-aware overlay for the overview's "darken outside window" effect.
+  // Dark theme → semi-transparent black (darkens). Light theme → semi-transparent
+  // white (lightens). Avoids using the card's own bg, which produces an opaque
+  // identical-tone overlay that hides the chart silhouette entirely.
+  const { resolvedTheme } = useTheme()
+  const isDark = resolvedTheme !== "light"
+  const cardOverlay = isDark ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.65)"
 
   return (
-    <div>
+    <div
+      className="outline-none [&_*]:outline-none [&_*]:focus:outline-none [&_*]:focus-visible:outline-none"
+      style={{ WebkitTapHighlightColor: "transparent" }}
+    >
       {/* Hidden probe to resolve oklch CSS vars → rgb for SVG.
           Uses visibility:hidden (not sr-only) because clip-path:inset(50%) in sr-only
           prevents getComputedStyle from resolving oklch on iOS Safari. */}
@@ -728,9 +753,9 @@ export function FDPTimelineChart({
         aria-hidden="true"
       />
       <Card className="shadow-sm">
-        <CardContent className="pt-1 pb-2 px-2 relative">
-          {/* View selector tabs — inside card */}
-          <div className="flex gap-1 overflow-x-auto pb-1.5 pt-0.5 scrollbar-none px-0.5" style={{ margin: "-2px -2px 0", padding: "2px 2px 6px" }}>
+        <CardContent className="pt-0.5 pb-1 px-1.5 relative">
+          {/* View selector tabs — flat, integrated into card (no raised buttons) */}
+          <div className="flex gap-0.5 overflow-x-auto scrollbar-none">
             {views.map((view) => {
               const cap = view.key === "duty14" ? capacity.duty14Days
                 : view.key === "duty28" ? capacity.duty28Days
@@ -753,22 +778,19 @@ export function FDPTimelineChart({
                   key={view.key}
                   onClick={() => toggleView(view.key)}
                   style={isActive ? {
-                    // Safari-tab style: subtle view-colored border with a
-                    // barely-visible tint, letting the chart line color itself
-                    // do the identifying rather than a loud filled background.
-                    borderColor: view.color,
-                    backgroundColor: `${view.color}1f`, // ~12% alpha tint
+                    // Active = subtle view-colored bottom border only — flat, integrated.
+                    borderBottomColor: view.color,
                   } : undefined}
                   className={cn(
-                    "flex flex-col items-start px-2 py-1.5 rounded-md text-left transition-all min-w-0 flex-1 relative border",
+                    "flex flex-col items-start px-1.5 py-1 text-left transition-colors min-w-0 flex-1 relative border-b-2 bg-transparent",
                     isActive
-                      ? "text-foreground shadow-sm"
-                      : "border-transparent bg-secondary/50 hover:bg-secondary text-foreground"
+                      ? "text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
                   )}
                 >
                   <span className="text-[10px] leading-tight font-medium truncate w-full">{view.label}</span>
                   <span className="text-xs font-bold tabular-nums leading-tight text-foreground">
-                    {formatCap(cap.used)}<span className="font-normal text-[10px]">/{formatCap(cap.limit)}</span>
+                    {formatCap(cap.used)}<span className="font-normal text-[10px] text-muted-foreground">/{formatCap(cap.limit)}</span>
                   </span>
                   <div className="flex items-center gap-1 mt-0.5 w-full">
                     <div className="h-1 rounded-full flex-1 bg-muted">
@@ -784,37 +806,6 @@ export function FDPTimelineChart({
                 </button>
               )
             })}
-
-            {/* Multi/Single select mode toggle */}
-            <button
-              onClick={() => {
-                setMultiSelectMode((prev) => {
-                  const next = !prev
-                  // When switching to single-select, collapse to just the primary view
-                  if (!next && primaryView) {
-                    setActiveViews(new Set([primaryView.key]))
-                  }
-                  return next
-                })
-              }}
-              className={cn(
-                "flex flex-col items-center justify-center px-2 py-1.5 rounded-md text-center transition-all min-w-[40px] shrink-0",
-                multiSelectMode
-                  ? "bg-primary/20 text-primary"
-                  : "bg-secondary/50 hover:bg-secondary text-muted-foreground"
-              )}
-              aria-label={multiSelectMode ? "Switch to single-select" : "Switch to multi-select"}
-              title={multiSelectMode ? "Multi-select (tap to switch to single)" : "Single-select (tap to switch to multi)"}
-            >
-              {multiSelectMode ? (
-                <Layers className="h-3.5 w-3.5" />
-              ) : (
-                <Square className="h-3.5 w-3.5" />
-              )}
-              <span className="text-[8px] font-medium mt-0.5 leading-tight">
-                {multiSelectMode ? "Multi" : "Single"}
-              </span>
-            </button>
           </div>
           {!mounted ? (
             <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
@@ -861,6 +852,14 @@ export function FDPTimelineChart({
                       <stop offset="5%" stopColor={COLORS.scenario} stopOpacity={0.55} />
                       <stop offset="95%" stopColor={COLORS.scenario} stopOpacity={0.12} />
                     </linearGradient>
+                    {/* Future-region fade — left edge transitions from transparent
+                        to the dimmed overlay across the first 10% so the boundary
+                        with present-day data feels seamless instead of a hard step. */}
+                    <linearGradient id="future-fade" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor={isDark ? "#000" : "#fff"} stopOpacity={0} />
+                      <stop offset="10%" stopColor={isDark ? "#000" : "#fff"} stopOpacity={isDark ? 0.35 : 0.5} />
+                      <stop offset="100%" stopColor={isDark ? "#000" : "#fff"} stopOpacity={isDark ? 0.35 : 0.5} />
+                    </linearGradient>
                   </defs>
                   <XAxis
                     dataKey="dateLabel"
@@ -871,7 +870,13 @@ export function FDPTimelineChart({
                     padding={{ left: CHART_EDGE_PAD, right: CHART_EDGE_PAD }}
                   />
                   <YAxis hide domain={yDomain} />
-                  <Tooltip content={<CustomTooltip />} active={tooltipActive ? undefined : false} />
+                  <Tooltip
+                    content={<CustomTooltip />}
+                    active={tooltipActive ? undefined : false}
+                    position={{ x: 4, y: 0 }}
+                    cursor={{ stroke: cc.text, strokeOpacity: 0.3, strokeDasharray: "2 2" }}
+                    wrapperStyle={{ pointerEvents: "none", outline: "none" }}
+                  />
 
                   {/* Limit threshold lines — one per selected view */}
                   {selectedNonRestViews.map((view) => (
@@ -922,7 +927,7 @@ export function FDPTimelineChart({
                     />
                   )}
 
-                  {/* Future region overlay — subtle dimming after today */}
+                  {/* Future region overlay — progressive fade from today rightward. */}
                   {(() => {
                     const todayIdx = slicedData.findIndex((d) => d.date === todayStr)
                     if (todayIdx >= 0 && todayIdx < slicedData.length - 1) {
@@ -930,8 +935,8 @@ export function FDPTimelineChart({
                         <ReferenceArea
                           x1={slicedData[todayIdx].dateLabel}
                           x2={slicedData[slicedData.length - 1].dateLabel}
-                          fill={cc.card}
-                          fillOpacity={0.3}
+                          fill="url(#future-fade)"
+                          fillOpacity={1}
                           strokeOpacity={0}
                         />
                       )
@@ -1017,8 +1022,8 @@ export function FDPTimelineChart({
               onTouchStart={handleOverviewTouchStart}
               onTouchMove={handleGestureMove}
               onTouchEnd={handleGestureEnd}
-              className="relative mt-2 touch-none cursor-grab active:cursor-grabbing select-none"
-              style={{ paddingTop: 4, paddingBottom: 4 }}
+              className="relative mt-1 touch-none cursor-grab active:cursor-grabbing select-none"
+              style={{ paddingTop: 2, paddingBottom: 2 }}
             >
               {/* Rounded clip container — chart, darken overlays, and window all share
                   these rounded corners so the darkened regions clip seamlessly into them. */}
@@ -1089,6 +1094,33 @@ export function FDPTimelineChart({
             </div>
             {/* Zoom controls — vertical, hugging the chart (~1px gap). */}
             <div className="flex flex-col items-center justify-start gap-0.5 pt-1 shrink-0 -ml-px">
+              {/* Multi/Single select mode toggle — sits at the top of the controls column */}
+              <button
+                onClick={() => {
+                  setMultiSelectMode((prev) => {
+                    const next = !prev
+                    // When switching to single-select, collapse to just the primary view
+                    if (!next && primaryView) {
+                      setActiveViews(new Set([primaryView.key]))
+                    }
+                    return next
+                  })
+                }}
+                className={cn(
+                  "p-1 rounded transition-colors",
+                  multiSelectMode
+                    ? "text-primary"
+                    : "text-muted-foreground hover:bg-secondary"
+                )}
+                aria-label={multiSelectMode ? "Switch to single-select" : "Switch to multi-select"}
+                title={multiSelectMode ? "Multi-select (tap to switch to single)" : "Single-select (tap to switch to multi)"}
+              >
+                {multiSelectMode ? (
+                  <Layers className="h-3.5 w-3.5" />
+                ) : (
+                  <Square className="h-3.5 w-3.5" />
+                )}
+              </button>
               <button
                 onClick={zoomIn}
                 className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
