@@ -7,14 +7,10 @@ import { SidebarProvider } from "@/hooks/use-sidebar-context"
 import { DetailPanelProvider } from "@/hooks/use-detail-panel"
 import { PageActionsProvider } from "@/hooks/use-page-actions"
 import { PreferencesProvider } from "@/components/providers/preferences-provider"
-import { useDraftGenerator } from "@/hooks/use-draft-generator"
 import { AppShell } from "@/components/desktop-layout"
 import { KeepAlivePages } from "@/components/keep-alive-pages"
 
 function AppLayoutContent({ children }: { children: React.ReactNode }) {
-  // Background draft generation
-  useDraftGenerator()
-
   return (
     <AppShell>
       <KeepAlivePages>{children}</KeepAlivePages>

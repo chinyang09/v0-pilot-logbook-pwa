@@ -1,19 +1,12 @@
 "use client"
 
-import { useState, useRef, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback } from "react"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   Calendar as CalendarIcon,
   Upload,
@@ -23,124 +16,38 @@ import {
   RefreshCw,
   List,
   CalendarDays,
-  Settings,
-  FileDown,
   Shield,
   TrendingUp,
   ArrowRight,
 } from "lucide-react"
-import { parseScheduleCSV, detectCSVType } from "@/lib/utils/parsers"
 import { useScheduleEntries, useCurrencies, useDiscrepancyCounts, refreshAllData } from "@/hooks/data"
-import type { ScheduleImportResult, ScheduleEntry } from "@/types"
+import type { ScheduleEntry } from "@/types"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
-import { DutyEntryCard, RosterCalendar, DraftSettings } from "@/components/roster"
-import { getDraftGenerationConfig } from "@/lib/db"
-import { processPendingDrafts } from "@/lib/utils/roster/draft-generator"
+import { DutyEntryCard, RosterCalendar } from "@/components/roster"
 import { FastScroll, generateDateItems, type FastScrollItem } from "@/components/ui/fast-scroll"
+import { useRosterImportHandler } from "./import-handler"
 
 type ViewMode = "list" | "calendar"
 
 export default function RosterPage() {
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [isImporting, setIsImporting] = useState(false)
-  const [importProgress, setImportProgress] = useState(0)
-  const [importStage, setImportStage] = useState("")
-  const [importResult, setImportResult] = useState<ScheduleImportResult | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>("list")
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [selectedEntries, setSelectedEntries] = useState<ScheduleEntry[]>([])
-  const [isGeneratingDrafts, setIsGeneratingDrafts] = useState(false)
-  const [draftResult, setDraftResult] = useState<string | null>(null)
-  const [showSettings, setShowSettings] = useState(false)
 
   const { scheduleEntries, isLoading: entriesLoading, refresh: refreshEntries } = useScheduleEntries()
   const { currencies, isLoading: currenciesLoading } = useCurrencies()
   const { counts: discrepancyCounts } = useDiscrepancyCounts()
 
-  const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    setIsImporting(true)
-    setImportProgress(0)
-    setImportStage("Reading file...")
-    setImportResult(null)
-
-    try {
-      const content = await file.text()
-      const csvType = detectCSVType(content)
-
-      if (csvType !== "schedule") {
-        setImportResult({
-          success: false,
-          entriesCreated: 0,
-          entriesUpdated: 0,
-          entriesSkipped: 0,
-          draftsCreated: 0,
-          currenciesUpdated: 0,
-          personnelCreated: 0,
-          discrepancies: [],
-          errors: [
-            {
-              line: 0,
-              message:
-                csvType === "logbook"
-                  ? "This appears to be a Logbook CSV. Please use the Data Import page for logbook data."
-                  : "Unrecognized CSV format. Please use a Scoot Personal Crew Schedule Report.",
-            },
-          ],
-          warnings: [],
-          timeReference: "UTC",
-          dateRange: { start: "", end: "" },
-          crewMember: { crewId: "", name: "", base: "", role: "", aircraftType: "" },
-        })
-        return
-      }
-
-      const result = await parseScheduleCSV(content, {
-        onProgress: (percent, stage, detail) => {
-          setImportProgress(percent)
-          setImportStage(detail || stage)
-        },
-        sourceFile: file.name,
-      })
-
-      setImportResult(result)
-
-      if (result.success) {
-        await refreshEntries()
-        await refreshAllData()
-      }
-    } catch (error) {
-      console.error("Import error:", error)
-      setImportResult({
-        success: false,
-        entriesCreated: 0,
-        entriesUpdated: 0,
-        entriesSkipped: 0,
-        draftsCreated: 0,
-        currenciesUpdated: 0,
-        personnelCreated: 0,
-        discrepancies: [],
-        errors: [
-          {
-            line: 0,
-            message: error instanceof Error ? error.message : "Unknown error occurred",
-          },
-        ],
-        warnings: [],
-        timeReference: "UTC",
-        dateRange: { start: "", end: "" },
-        crewMember: { crewId: "", name: "", base: "", role: "", aircraftType: "" },
-      })
-    } finally {
-      setIsImporting(false)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
-      }
-    }
-  }, [refreshEntries])
+  const {
+    isImporting,
+    importProgress,
+    importStage,
+    importSummary,
+    fileInputRef,
+    handleFileImport,
+    ReviewModal,
+  } = useRosterImportHandler({ refreshEntries, refreshAllData })
 
   // Group schedule entries by date
   const entriesByDate = scheduleEntries.reduce(
@@ -163,11 +70,9 @@ export default function RosterPage() {
 
   const [activeMonthKey, setActiveMonthKey] = useState<string | undefined>(undefined);
 
-  // Handle FastScroll selection with instant scrolling
   const handleFastScrollSelect = useCallback((monthYear: string) => {
     setActiveMonthKey(monthYear);
 
-    // Find the first date in this month/year
     const [targetYear, targetMonth] = monthYear.split("-");
     const targetDate = sortedDates.find((date) => {
       const [year, month] = date.split("-");
@@ -175,7 +80,6 @@ export default function RosterPage() {
     });
 
     if (targetDate) {
-      // Scroll to the element with instant behavior for snappy feedback
       const element = document.getElementById(`roster-date-${targetDate}`);
       if (element) {
         element.scrollIntoView({ behavior: "instant", block: "start" });
@@ -193,31 +97,6 @@ export default function RosterPage() {
     setSelectedDate(null)
     setSelectedEntries([])
   }
-
-  const handleGenerateDrafts = useCallback(async () => {
-    try {
-      setIsGeneratingDrafts(true)
-      setDraftResult(null)
-
-      const config = await getDraftGenerationConfig()
-      const result = await processPendingDrafts(config)
-
-      if (result.created > 0) {
-        setDraftResult(`Created ${result.created} draft flight(s) from ${result.entriesProcessed.length} schedule entry(ies)`)
-        await refreshAllData()
-      } else {
-        setDraftResult("No new drafts to create")
-      }
-
-      setTimeout(() => setDraftResult(null), 5000)
-    } catch (error) {
-      console.error("Failed to generate drafts:", error)
-      setDraftResult("Failed to generate drafts")
-      setTimeout(() => setDraftResult(null), 5000)
-    } finally {
-      setIsGeneratingDrafts(false)
-    }
-  }, [])
 
   // Glass action buttons for the floating header bar
   const rosterActions = useMemo(() => (
@@ -247,36 +126,19 @@ export default function RosterPage() {
       </GlassContainer>
       <GlassContainer cornerRadius={28}>
         <div className="flex items-center gap-0.5 px-1 h-14">
-          <Button variant="ghost" size="icon" className="h-12 w-12" onClick={() => setShowSettings(true)}>
-            <Settings className="h-5 w-5" />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-12 w-12" onClick={handleGenerateDrafts} disabled={isGeneratingDrafts}>
-            <FileDown className={cn("h-5 w-5", isGeneratingDrafts && "animate-bounce")} />
-          </Button>
           <Button variant="ghost" size="icon" className="h-12 w-12" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
             <Upload className="h-5 w-5" />
           </Button>
         </div>
       </GlassContainer>
     </>
-  ), [refreshEntries, entriesLoading, viewMode, isGeneratingDrafts, isImporting, handleGenerateDrafts])
+  ), [refreshEntries, entriesLoading, viewMode, isImporting, fileInputRef])
 
   useRegisterMainActions(rosterActions, true)
 
   return (
     <>
-      {/* Settings dialog — rendered outside PageContainer to avoid scroll container issues */}
-      <Dialog open={showSettings} onOpenChange={setShowSettings}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Draft Generation Settings</DialogTitle>
-            <DialogDescription>
-              Configure automatic draft flight generation from your schedule
-            </DialogDescription>
-          </DialogHeader>
-          <DraftSettings onSave={() => setShowSettings(false)} />
-        </DialogContent>
-      </Dialog>
+      {ReviewModal}
 
       <PageContainer>
         <div className="px-4 pt-4 pb-safe space-y-4">
@@ -284,21 +146,9 @@ export default function RosterPage() {
           type="file"
           ref={fileInputRef}
           accept=".csv"
-          onChange={handleFileSelect}
+          onChange={handleFileImport}
           className="hidden"
         />
-
-        {/* Draft Generation Result */}
-        {draftResult && (
-          <Card className="border-blue-500/50">
-            <CardContent className="pt-4">
-              <div className="flex items-center gap-2 text-sm">
-                <CheckCircle2 className="h-4 w-4 text-blue-500" />
-                <span>{draftResult}</span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Import Progress */}
         {isImporting && (
@@ -315,71 +165,18 @@ export default function RosterPage() {
           </Card>
         )}
 
-        {/* Import Result */}
-        {importResult && (
-          <Card className={importResult.success ? "border-green-500/50" : "border-destructive/50"}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                {importResult.success ? (
-                  <>
-                    <CheckCircle2 className="h-5 w-5 text-green-500" />
-                    Import Successful
-                  </>
+        {/* Import Summary */}
+        {importSummary && !isImporting && (
+          <Card className={importSummary.toLowerCase().includes("fail") || importSummary.toLowerCase().includes("error") ? "border-destructive/50" : "border-green-500/50"}>
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-2 text-sm">
+                {importSummary.toLowerCase().includes("fail") || importSummary.toLowerCase().includes("error") ? (
+                  <XCircle className="h-4 w-4 text-destructive" />
                 ) : (
-                  <>
-                    <XCircle className="h-5 w-5 text-destructive" />
-                    Import Failed
-                  </>
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
                 )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {importResult.success ? (
-                <div className="space-y-2 text-sm">
-                  <p>
-                    <span className="font-medium">{importResult.entriesCreated}</span> entries created,{" "}
-                    <span className="font-medium">{importResult.entriesUpdated}</span> updated
-                  </p>
-                  {importResult.draftsCreated > 0 && (
-                    <p>
-                      <span className="font-medium">{importResult.draftsCreated}</span> flights created
-                      from actual times
-                    </p>
-                  )}
-                  {importResult.currenciesUpdated > 0 && (
-                    <p>
-                      <span className="font-medium">{importResult.currenciesUpdated}</span> currencies
-                      updated
-                    </p>
-                  )}
-                  {importResult.personnelCreated > 0 && (
-                    <p>
-                      <span className="font-medium">{importResult.personnelCreated}</span> crew members
-                      added
-                    </p>
-                  )}
-                  {importResult.discrepancies.length > 0 && (
-                    <p className="text-yellow-600">
-                      <AlertCircle className="h-4 w-4 inline mr-1" />
-                      <span className="font-medium">{importResult.discrepancies.length}</span>{" "}
-                      discrepancies found
-                    </p>
-                  )}
-                  {importResult.dateRange.start && (
-                    <p className="text-muted-foreground">
-                      Period: {importResult.dateRange.start} to {importResult.dateRange.end}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-2 text-sm">
-                  {importResult.errors.map((error, idx) => (
-                    <p key={idx} className="text-destructive">
-                      {error.message}
-                    </p>
-                  ))}
-                </div>
-              )}
+                <span>{importSummary}</span>
+              </div>
             </CardContent>
           </Card>
         )}
