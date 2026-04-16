@@ -11,14 +11,12 @@ import {
   TrendingUp,
   AlertTriangle,
   Calculator,
-  ChevronDown,
 } from "lucide-react"
 import { useFDPData } from "@/hooks/data/use-fdp-data"
 import { useScheduleEntries } from "@/hooks/data/use-schedule"
+import { usePreferences } from "@/components/providers/preferences-provider"
 import {
-  DEFAULT_FTL_LIMITS,
   FTL_PRESETS,
-  type FTLLimits,
   type RegulationType,
 } from "@/types/entities/roster.types"
 import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
@@ -81,38 +79,41 @@ function formatMinutesHM(minutes: number): string {
   return `${h}h ${m}m`
 }
 
-const RULE_DESCRIPTIONS: Record<string, string> = {
-  "3a": "10h rest (local night)",
-  "3b": "12h rest (no local night)",
-  "3c": "rest matching duty hours",
-  "3d": "24h rest (>16h duty)",
+/** Extract outbound destination from a route string like "WSSS-VVNB/VVNB-WSSS". */
+function extractDestination(route?: string): string {
+  if (!route) return ""
+  const firstSector = route.split("/")[0] ?? ""
+  const parts = firstSector.split("-")
+  return parts[1]?.trim() ?? ""
 }
 
-const REGULATION_LABELS: Record<RegulationType, string> = {
-  CAAS: "CAAS",
-  FAA: "FAA",
-  EASA: "EASA",
-  CUSTOM: "Custom",
+/** Format a YYYY-MM-DD date as e.g. "Apr 16" */
+function formatShortDate(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number)
+  if (!y || !m || !d) return ymd
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  return dt.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })
 }
 
 export default function FDPPage() {
-  const { refresh, isLoading: scheduleLoading } = useScheduleEntries()
+  const { refresh } = useScheduleEntries()
   const {
     allDutyPeriods,
     capacity,
     forecast,
     restViolations,
+    futureDuties,
     restUntilLegal,
     timelineData,
     isLoading,
   } = useFDPData()
 
+  const { preferences } = usePreferences()
+  const activeRule: RegulationType = preferences.dutyTimeDefaults?.regulationType ?? "CAAS"
+
   const { selectedId, setDetailContent, setHasDetailSupport, setSelectedId } = useDetailPanel()
   const [scenarioResult, setScenarioResult] = useState<ScenarioResult | null>(null)
   const [quickCheckOpen, setQuickCheckOpen] = useState(false)
-  const [ruleMenuOpen, setRuleMenuOpen] = useState(false)
-  const [activeRule, setActiveRule] = useState<RegulationType>("CAAS")
-  const [customLimits, setCustomLimits] = useState<FTLLimits>(DEFAULT_FTL_LIMITS)
 
   // Stable refs for detail panel setters — these change identity on every URL
   // update (setSelectedId is a useCallback with searchParams in deps, so
@@ -133,18 +134,10 @@ export default function FDPPage() {
     return () => setHasDetailSupportRef.current(false)
   }, [])
 
-  const activeLimits = useMemo(() => {
-    if (activeRule === "CUSTOM") return customLimits
-    return FTL_PRESETS[activeRule]
-  }, [activeRule, customLimits])
-
-  const handleRuleChange = useCallback((rule: RegulationType) => {
-    setActiveRule(rule)
-    if (rule !== "CUSTOM") {
-      setCustomLimits(FTL_PRESETS[rule])
-    }
-    setRuleMenuOpen(false)
-  }, [])
+  const activeLimits = useMemo(
+    () => FTL_PRESETS[activeRule] ?? FTL_PRESETS.CAAS,
+    [activeRule]
+  )
 
   // Open/close quick check panel in detail panel (stable ref via closure over refs)
   const closeQuickCheck = useCallback(() => {
@@ -215,47 +208,19 @@ export default function FDPPage() {
     prevSelectedIdRef.current = selectedId
   }, [selectedId, quickCheckOpen])
 
-  // Live digital countdown — updates every 10 seconds.
+  // Next scheduled duty drives the banner — no more ticking countdown.
   //
-  // `restUntilLegal` comes straight from the `useFDPData` memo, so
-  // `restUntilLegal.isLegalNow` is a static snapshot of the moment the memo
-  // last ran (typically at most once per data change). To reflect the user
-  // crossing the `legalAtUtc` boundary in real time, we also track a local
-  // `isLegalNow` state that we refresh from `Date.now()` on the same 10s
-  // cadence as the countdown itself.
-  const [countdown, setCountdown] = useState("")
-  const [isLegalNow, setIsLegalNow] = useState(() =>
-    restUntilLegal ? restUntilLegal.isLegalNow : true
-  )
-  useEffect(() => {
-    if (!restUntilLegal) {
-      setCountdown("")
-      setIsLegalNow(true)
-      return
-    }
-    const legalAt = new Date(restUntilLegal.legalAtUtc).getTime()
-    const update = () => {
-      const now = Date.now()
-      const legal = now >= legalAt
-      // Use functional setState to bail out when value is unchanged — prevents
-      // an unnecessary re-render every 10s once we're in the LEGAL state.
-      setIsLegalNow((prev) => (prev === legal ? prev : legal))
-      if (legal) {
-        setCountdown((prev) => (prev === "00:00" ? prev : "00:00"))
-        return
-      }
-      const remaining = Math.max(0, legalAt - now)
-      const h = Math.floor(remaining / 3600000)
-      const m = Math.floor((remaining % 3600000) / 60000)
-      const next = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
-      setCountdown((prev) => (prev === next ? prev : next))
-    }
-    update()
-    // Keep ticking even after we cross legalAt — the setState bailouts above
-    // make subsequent ticks effectively free.
-    const interval = setInterval(update, 10_000)
-    return () => clearInterval(interval)
-  }, [restUntilLegal])
+  // IMPORTANT: we deliberately do NOT mirror `restUntilLegal`, `futureDuties`,
+  // or any other `useFDPData` output into local state. SWR revalidations and
+  // airport-timezone resolution hand us new array references repeatedly; any
+  // setState-on-prop-change pattern risks React error #185 ("Maximum update
+  // depth exceeded") which the chart error boundary surfaces as "Chart failed
+  // to render". Static snapshots from the data hook are sufficient.
+  const nextDuty = futureDuties[0]
+  const nextDestination = extractDestination(nextDuty?.route)
+  const restHadMinutes = restUntilLegal?.restElapsedMinutes ?? 0
+  const restRequiredMinutes = restUntilLegal?.requiredRestMinutes ?? 0
+  const isRestMet = restHadMinutes >= restRequiredMinutes
 
   // Header actions: refresh + quick check
   const fdpActions = useMemo(
@@ -292,92 +257,93 @@ export default function FDPPage() {
   return (
     <PageContainer>
       <div className="px-4 pt-2 pb-safe space-y-2">
-        {/* Rule selector + Rest countdown row */}
-        <div className="flex items-stretch gap-2">
-          {/* Rule selector chip */}
-          <div className="relative shrink-0">
-            <button
-              onClick={() => setRuleMenuOpen(!ruleMenuOpen)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-secondary text-foreground text-xs font-medium h-full"
-            >
-              {REGULATION_LABELS[activeRule]}
-              <ChevronDown className="h-3 w-3 text-muted-foreground" />
-            </button>
-            {ruleMenuOpen && (
-              <div className="absolute top-full left-0 mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[100px]">
-                {(["CAAS", "FAA", "EASA"] as RegulationType[]).map((rule) => (
-                  <button
-                    key={rule}
-                    onClick={() => handleRuleChange(rule)}
-                    className={cn(
-                      "block w-full text-left px-3 py-1.5 text-xs hover:bg-secondary transition-colors",
-                      activeRule === rule && "font-semibold text-primary"
-                    )}
-                  >
-                    {REGULATION_LABELS[rule]}
-                  </button>
-                ))}
-              </div>
+        {/* Next duty banner — reports next scheduled duty + rest vs. requirement.
+            Static snapshot from useFDPData; no tick interval to avoid setState
+            churn that could crash the chart (React error #185). */}
+        {nextDuty ? (
+          <Card
+            className={cn(
+              "border py-0 gap-0",
+              isRestMet
+                ? "border-green-500/20 bg-green-500/5"
+                : "border-red-500/20 bg-red-500/5"
             )}
-          </div>
-
-          {/* Rest Until Legal — inline compact */}
-          {restUntilLegal && (
-            <Card
-              className={cn(
-                "flex-1 border",
-                isLegalNow
-                  ? "border-green-500/20 bg-green-500/5"
-                  : "border-red-500/20 bg-red-500/5"
-              )}
-            >
-              <CardContent className="py-1.5 px-2.5">
-                <div className="flex items-center gap-2">
-                  <div className={cn(
-                    "text-lg font-mono font-bold tabular-nums leading-none",
-                    isLegalNow ? "text-green-500" : "text-red-500"
-                  )}>
-                    {isLegalNow ? "00:00" : countdown}
-                  </div>
-                  <div className="flex-1 min-w-0 border-l border-border pl-2">
-                    {isLegalNow ? (
-                      <p className="text-[10px] text-muted-foreground leading-tight">
-                        LEGAL · {formatMinutesHM(restUntilLegal.restElapsedMinutes)} since last duty
-                      </p>
-                    ) : (
-                      <p className="text-[10px] text-foreground leading-tight">
-                        Legal at {new Date(restUntilLegal.legalAtUtc).toISOString().slice(11, 16)}Z
-                        <span className="text-muted-foreground">
-                          {" · "}{RULE_DESCRIPTIONS[restUntilLegal.rule] ?? restUntilLegal.rule}
-                        </span>
-                      </p>
-                    )}
-                  </div>
+          >
+            <CardContent className="py-1.5 px-2.5">
+              <div className="flex items-center gap-2.5">
+                {/* Left: next reporting time in distinctive serif/mono */}
+                <div className="flex flex-col leading-none shrink-0">
+                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                    Next
+                  </span>
+                  <span className="font-serif italic text-base tabular-nums text-foreground mt-0.5">
+                    {formatShortDate(nextDuty.date)} {nextDuty.reportTime}Z
+                  </span>
                 </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+                {nextDestination && (
+                  <div className="border-l border-border pl-2.5 min-w-0 shrink-0">
+                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground block leading-none">
+                      Dest
+                    </span>
+                    <span className="text-sm font-semibold text-foreground mt-0.5 block leading-none">
+                      {nextDestination}
+                    </span>
+                  </div>
+                )}
+                {restUntilLegal && (
+                  <div className="border-l border-border pl-2.5 min-w-0 flex-1">
+                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground block leading-none">
+                      Rest
+                    </span>
+                    <span
+                      className={cn(
+                        "text-sm font-mono font-semibold tabular-nums mt-0.5 block leading-none",
+                        isRestMet ? "text-green-500" : "text-red-500"
+                      )}
+                    >
+                      {formatMinutesHM(restHadMinutes)}
+                      <span className="text-muted-foreground mx-0.5">/</span>
+                      {formatMinutesHM(restRequiredMinutes)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ) : restUntilLegal ? (
+          /* Fallback: no upcoming scheduled duty but we have rest info */
+          <Card className="border border-border/60 py-0 gap-0">
+            <CardContent className="py-1.5 px-2.5">
+              <div className="flex items-center gap-2.5">
+                <div className="flex flex-col leading-none shrink-0">
+                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                    Next
+                  </span>
+                  <span className="font-serif italic text-sm text-muted-foreground mt-0.5">
+                    None scheduled
+                  </span>
+                </div>
+                <div className="border-l border-border pl-2.5 flex-1">
+                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground block leading-none">
+                    Rest since last duty
+                  </span>
+                  <span className="text-sm font-mono font-semibold tabular-nums text-foreground mt-0.5 block leading-none">
+                    {formatMinutesHM(restHadMinutes)}
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
 
-        {/* Warnings — compact inline */}
-        {(restViolations.length > 0 || forecast.hasExceedance) && (
+        {/* Forecast breach — rest violations are now rendered as red overlays
+            on the chart itself, so only the breach forecast stays inline here. */}
+        {forecast.hasExceedance && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1">
-            {restViolations.length > 0 && (
-              <div className="flex items-center gap-1">
-                <AlertTriangle className="h-3 w-3 text-red-500" />
-                <span className="text-[10px] text-red-500">
-                  {restViolations.length} rest violation{restViolations.length !== 1 ? "s" : ""}
-                </span>
-              </div>
-            )}
-            {forecast.hasExceedance && (
-              <div className="flex items-center gap-1">
-                <AlertTriangle className="h-3 w-3 text-orange-500" />
-                <span className="text-[10px] text-orange-500">
-                  Breach forecast
-                </span>
-              </div>
-            )}
+            <div className="flex items-center gap-1">
+              <AlertTriangle className="h-3 w-3 text-orange-500" />
+              <span className="text-[10px] text-orange-500">Breach forecast</span>
+            </div>
           </div>
         )}
 
@@ -389,6 +355,7 @@ export default function FDPPage() {
               limits={activeLimits}
               capacity={capacity}
               forecast={forecast}
+              restViolationDates={restViolations.map((dp) => dp.date)}
               scenarioTimelineData={scenarioResult?.timelineData}
               scenarioModifiedDates={scenarioResult?.modifiedDates}
               scenarioRemovedDates={scenarioResult?.removedDates}

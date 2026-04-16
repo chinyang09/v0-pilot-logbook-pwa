@@ -45,6 +45,8 @@ export interface AutoFillPreferences {
 export interface DutyTimeDefaults {
   minutesBeforeOut: number
   minutesAfterIn: number
+  /** Regulatory authority used for FTL limits (CAAS, FAA, EASA). Defaults to CAAS. */
+  regulationType?: "CAAS" | "FAA" | "EASA"
 }
 
 export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
@@ -77,6 +79,7 @@ export const DEFAULT_AUTO_FILL_PREFERENCES: AutoFillPreferences = {
 export const DEFAULT_DUTY_TIME_DEFAULTS: DutyTimeDefaults = {
   minutesBeforeOut: 60,
   minutesAfterIn: 30,
+  regulationType: "CAAS",
 }
 
 export type BottomNavTab =

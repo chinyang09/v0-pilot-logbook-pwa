@@ -272,11 +272,32 @@ function DutyTimeSection({ preferences, updateDutyTimeDefaults }: {
   preferences: ReturnType<typeof usePreferences>["preferences"]
   updateDutyTimeDefaults: ReturnType<typeof usePreferences>["updateDutyTimeDefaults"]
 }) {
+  const regulation = preferences.dutyTimeDefaults.regulationType ?? "CAAS"
   return (
     <div className="p-4 space-y-5">
       <div>
         <h2 className="text-lg font-semibold">Duty Time Defaults</h2>
         <p className="text-sm text-muted-foreground">Default report and debrief times used for duty period calculations.</p>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div className="space-y-0.5">
+          <Label>Regulation</Label>
+          <p className="text-xs text-muted-foreground">FTL ruleset used for FDP limits &amp; rest</p>
+        </div>
+        <Select
+          value={regulation}
+          onValueChange={(v) => updateDutyTimeDefaults({ regulationType: v as "CAAS" | "FAA" | "EASA" })}
+        >
+          <SelectTrigger className="w-[120px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="CAAS">CAAS</SelectItem>
+            <SelectItem value="FAA">FAA</SelectItem>
+            <SelectItem value="EASA">EASA</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="flex items-center justify-between">
