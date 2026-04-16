@@ -14,7 +14,20 @@ import {
   Area,
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
-import { ZoomIn, ZoomOut, RotateCcw, Rows3, Square, X } from "lucide-react"
+import { ZoomIn, ZoomOut, RotateCcw, X } from "lucide-react"
+
+// Custom inline icons for the multi/single toggle — tailored shapes that
+// visually communicate "stacked rolling areas" vs "single rolling area".
+const MultiSelectIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+    <path d="m2.75 19.25l5.325-5.325q.575-.575 1.425-.575t1.425.575L13.5 16.5l6.4-7.225q.275-.325.713-.325t.737.3q.275.275.287.663t-.262.687L14.9 17.9q-.575.65-1.425.688T12 18l-2.5-2.5l-5.25 5.25q-.325.325-.75.325t-.75-.325t-.325-.75t.325-.75m0-6l5.325-5.325Q8.65 7.35 9.5 7.35t1.425.575L13.5 10.5l6.4-7.225q.275-.325.713-.325t.737.3q.275.275.287.662t-.262.688L14.9 11.9q-.575.65-1.425.688T12 12L9.5 9.5l-5.25 5.25q-.325.325-.75.325t-.75-.325t-.325-.75t.325-.75"/>
+  </svg>
+)
+const SingleSelectIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+    <path d="M2.75 17.75q-.325-.325-.325-.75t.325-.75l5.325-5.325q.575-.575 1.425-.575t1.425.575L13.5 13.5l6.4-7.225q.275-.325.713-.325t.737.3q.275.275.287.662t-.262.688L14.9 14.9q-.575.65-1.425.688T12 15l-2.5-2.5l-5.25 5.25q-.325.325-.75.325t-.75-.325"/>
+  </svg>
+)
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 import type { TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
@@ -59,6 +72,9 @@ interface FDPTimelineChartProps {
   limits: FTLLimits
   capacity: CapacityRemaining
   forecast: ForecastResult
+  /** Dates (YYYY-MM-DD) where the rest-before-duty was non-compliant. Rendered
+   *  as a red column overlay on the chart, replacing the old inline alert. */
+  restViolationDates?: string[]
   /** Scenario overlay: if set, renders scenario timeline with highlights */
   scenarioTimelineData?: TimelineDataPoint[]
   scenarioModifiedDates?: Set<string>
@@ -73,6 +89,7 @@ export function FDPTimelineChart({
   limits,
   capacity,
   forecast,
+  restViolationDates,
   scenarioTimelineData,
   scenarioModifiedDates,
   scenarioRemovedDates,
@@ -262,6 +279,24 @@ export function FDPTimelineChart({
       return next
     })
   }, [multiSelectMode])
+
+  // Mode toggle — when flipping to multi, default to 28-day duty + flight
+  // (the most common "am I safe this month" pair). When flipping back to
+  // single, collapse to the primary (first) selected view.
+  const toggleMultiSelectMode = useCallback(() => {
+    setMultiSelectMode((prev) => {
+      const next = !prev
+      if (next) {
+        setActiveViews(new Set<ChartView>(["duty28", "flight28"]))
+      } else {
+        setActiveViews((av) => {
+          const first = av.values().next().value as ChartView | undefined
+          return new Set<ChartView>([first ?? "duty14"])
+        })
+      }
+      return next
+    })
+  }, [])
 
   // Today marker
   const todayStr = new Date().toISOString().split("T")[0]
@@ -767,9 +802,9 @@ export function FDPTimelineChart({
         aria-hidden="true"
       />
       <Card className="shadow-sm py-0 gap-0">
-        <CardContent className="pt-0 pb-0.5 px-1.5 relative">
-          {/* View selector tabs — flat, integrated into card (no raised buttons) */}
-          <div className="flex gap-0.5 overflow-x-auto scrollbar-none">
+        <CardContent className="pt-1.5 pb-1.5 px-1.5 relative">
+          {/* View selector tabs — flat, integrated into card with vertical dividers between */}
+          <div className="flex overflow-x-auto scrollbar-none divide-x divide-border/60 border-b border-border">
             {views.map((view) => {
               const cap = view.key === "duty14" ? capacity.duty14Days
                 : view.key === "duty28" ? capacity.duty28Days
@@ -831,18 +866,10 @@ export function FDPTimelineChart({
             </div>
           ) : (
           <>
-            {/* Horizontal zoom controls row — sits between tabs and chart */}
-            <div className="flex items-center justify-end gap-0.5 py-0.5 -mt-0.5">
+            {/* Horizontal zoom controls row — sits between tabs and chart, right-aligned */}
+            <div className="flex items-center justify-end gap-0.5 py-1">
               <button
-                onClick={() => {
-                  setMultiSelectMode((prev) => {
-                    const next = !prev
-                    if (!next && primaryView) {
-                      setActiveViews(new Set([primaryView.key]))
-                    }
-                    return next
-                  })
-                }}
+                onClick={toggleMultiSelectMode}
                 className={cn(
                   "p-1 rounded transition-colors",
                   multiSelectMode ? "text-primary" : "text-muted-foreground hover:bg-secondary"
@@ -850,7 +877,9 @@ export function FDPTimelineChart({
                 aria-label={multiSelectMode ? "Switch to single-select" : "Switch to multi-select"}
                 title={multiSelectMode ? "Multi-select (tap to switch to single)" : "Single-select (tap to switch to multi)"}
               >
-                {multiSelectMode ? <Rows3 className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                {multiSelectMode
+                  ? <MultiSelectIcon className="h-4 w-4" />
+                  : <SingleSelectIcon className="h-4 w-4" />}
               </button>
               <div className="h-3.5 w-px bg-border mx-1" />
               <button
@@ -1014,8 +1043,29 @@ export function FDPTimelineChart({
                     return null
                   })()}
 
+                  {/* Rest violation overlays — one red column per violation date.
+                      Uses the same translucent-fill pattern as the future region
+                      so violations read as "this column is problematic" without
+                      a separate alert banner above the chart. */}
+                  {restViolationDates?.map((vDate) => {
+                    const hit = slicedData.find((d) => d.date === vDate)
+                    if (!hit) return null
+                    return (
+                      <ReferenceArea
+                        key={`rest-viol-${vDate}`}
+                        x1={hit.dateLabel}
+                        x2={hit.dateLabel}
+                        fill={COLORS.violation}
+                        fillOpacity={0.22}
+                        strokeOpacity={0}
+                      />
+                    )
+                  })}
+
                   {/* Rolling cumulative areas — one per selected view.
-                      activeDot highlights the focused point under the tooltip cursor. */}
+                      activeDot is a hollow ring: outer stroke uses the view color,
+                      inner fill uses the card background so it reads as a ring
+                      instead of a filled dot with a dark border. */}
                   {selectedNonRestViews.map((view) => (
                     <Area
                       key={`area-${view.key}`}
@@ -1024,7 +1074,7 @@ export function FDPTimelineChart({
                       stroke={view.color}
                       strokeWidth={2}
                       dot={false}
-                      activeDot={{ r: 4, fill: view.color, stroke: cc.card, strokeWidth: 1.5 }}
+                      activeDot={{ r: 4, fill: cc.card, stroke: view.color, strokeWidth: 2 }}
                       name={view.rollingLabel}
                     />
                   ))}
