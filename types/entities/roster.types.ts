@@ -18,7 +18,7 @@ export type DutyType =
   | "positioning" // Deadhead/positioning flights
   | "other"
 
-export type TimeReference = "UTC" | "LOCAL_BASE"
+export type TimeReference = "UTC" | "LOCAL_BASE" | "LOCAL_STATION"
 
 export type CurrencyCode =
   | "MEDIC"      // Medical

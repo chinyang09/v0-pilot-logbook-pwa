@@ -116,10 +116,11 @@ export default function LogbookPage() {
     return () => setHasDetailSupport(false)
   }, [setHasDetailSupport])
 
-  // Re-assert detail panel ownership when this keep-alive page becomes active again
+  // Re-assert detail panel ownership and refresh flight data when this keep-alive page becomes active again
   const isActive = usePageActive("/logbook", useCallback(() => {
     setHasDetailSupport(true)
-  }, [setHasDetailSupport]))
+    refreshFlights()
+  }, [setHasDetailSupport, refreshFlights]))
 
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)

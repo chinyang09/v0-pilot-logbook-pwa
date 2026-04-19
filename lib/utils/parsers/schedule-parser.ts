@@ -1,80 +1,123 @@
 /**
- * Scoot Schedule CSV Parser
+ * Scoot Schedule CSV Parser — v2
  *
- * Parses "Personal Crew Schedule Report" CSV exports from Scoot
- * Handles both UTC and Local Base time references
- * Handles variable column structures between exports
+ * Parses "Personal Crew Schedule Report" exports (UTC, Local Base, or Local
+ * Station) and returns a PlannedImport describing what WOULD happen — no DB
+ * writes occur here. The caller (roster page) presents the plan to the user,
+ * the user accepts/rejects per operation, and then executeRosterImport()
+ * applies the approved changes.
+ *
+ * This parser:
+ *   1. Reads the CSV header to determine time reference + date range.
+ *   2. Extracts each sector's raw times.
+ *   3. Normalizes every time to UTC via time-reference-normalizer.
+ *   4. Calls reconcileRoster() to classify operations against existing flights.
+ *
+ * Currency + personnel handling (which the old parser also did) is kept here
+ * so callers can use it for side-effect writes separately from flight
+ * reconciliation. Crew/currency writes happen inside executeRosterImport()
+ * and always proceed — only flight operations go through the review modal.
  */
 
 import type {
-  ScheduleEntry,
-  ScheduledSector,
   ScheduledCrewMember,
   Currency,
   TimeReference,
-  DutyType,
-  ScheduleImportResult,
   CrewRole,
-  Discrepancy,
 } from "@/types/entities/roster.types";
 import type { Personnel } from "@/types/entities/crew.types";
 import type { FlightLog } from "@/types/entities/flight.types";
 import {
   userDb,
   getAirportByIata,
-  getAirportTimeInfo,
   getAllPersonnel,
   getCurrentUserPersonnel,
 } from "@/lib/db";
-import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
-  hhmmToMinutes,
-  minutesToHHMM,
-  calculateDuration,
-  isValidHHMM,
-} from "@/lib/utils/time";
+  normalizeTimeToUTC,
+  parseTimeToken,
+} from "./time-reference-normalizer";
+import {
+  reconcileRoster,
+  type ParsedSector,
+  type ReconcilerOperation,
+} from "@/lib/utils/roster/reconciler";
 
-// ============================================
-// Types
-// ============================================
+// ============================================================
+// Public types
+// ============================================================
 
-interface ParseOptions {
+export interface PlannedImport {
+  success: boolean;
+  timeReference: TimeReference;
+  dateRange: { start: string; end: string };
+  crewMember: {
+    crewId: string;
+    name: string;
+    base: string;
+    role: string;
+    aircraftType: string;
+  };
+  /** Operations from the reconciler — user opts in per row. */
+  operations: AcceptableOperation[];
+  /** Currency updates — always executed, not user-reviewed. */
+  currencies: Omit<Currency, "id" | "createdAt" | "syncStatus">[];
+  /** New pilot crew discovered — always executed. */
+  personnelToCreate: Personnel[];
+  personnelToUpdate: { id: string; data: Partial<Personnel> }[];
+  errors: Array<{ line: number; message: string; raw?: string }>;
+  warnings: Array<{ line: number; message: string }>;
+  summary: {
+    toCreate: number;
+    toUpdate: number;
+    toDelete: number;
+    identical: number;
+    ignored: number;
+  };
+}
+
+/** A reconciler op plus an acceptance flag. Defaults vary by kind. */
+export type AcceptableOperation = ReconcilerOperation & { accepted: boolean };
+
+export interface ParseOptions {
   onProgress?: (percent: number, stage: string, detail?: string) => void;
   sourceFile?: string;
 }
 
-// ============================================
+// ============================================================
 // Constants
-// ============================================
+// ============================================================
 
-const DUTY_CODE_MAP: Record<string, { type: DutyType; description: string }> = {
-  LOFF: { type: "off", description: "Local Day Off for Tech Crew" },
-  OOFF: { type: "off", description: "Overseas Off" },
-  CSL: { type: "leave", description: "Sick Leave" },
-  ALL: { type: "leave", description: "Annual Leave" },
-  CCL: { type: "leave", description: "Childcare Leave" },
-  BKUP: { type: "standby", description: "Backup" },
-  SBYG: { type: "standby", description: "Standby G: 1800L - 0600L +1" },
-  SBYA: { type: "standby", description: "Standby A" },
-  EBT1: { type: "training", description: "EBT Day 1" },
-  EBT2: { type: "training", description: "EBT Day 2" },
-};
-
-// Only track pilots - cabin crew not stored
 const CREW_ROLE_MAP: Record<string, CrewRole> = {
   CPT: "CPT",
   PIC: "PIC",
   FO: "FO",
 };
 
-// Roles to skip (cabin crew)
-const SKIP_ROLES = new Set(["CL", "CIC", "CC", "DHC", "INS", "TRN"]);
-
 const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-// ============================================
-// CSV Parsing Utilities
-// ============================================
+// ============================================================
+// CSV splitter (quote-aware)
+// ============================================================
+
+function splitCsvRows(csvContent: string): string[] {
+  const rows: string[] = [];
+  let currentRow = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < csvContent.length; i++) {
+    const char = csvContent[i];
+    if (char === '"') inQuotes = !inQuotes;
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (currentRow.trim()) rows.push(currentRow);
+      currentRow = "";
+    } else {
+      currentRow += char;
+    }
+  }
+  if (currentRow.trim()) rows.push(currentRow);
+  return rows;
+}
 
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];
@@ -98,7 +141,6 @@ function parseCSVLine(line: string): string[] {
     }
   }
   result.push(current.trim());
-
   return result.map((s) => s.replace(/^"|"$/g, "").trim());
 }
 
@@ -109,20 +151,14 @@ function parseDDMMYYYY(dateStr: string): string {
   return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
 }
 
-// ============================================
-// Header Parsing
-// ============================================
+// ============================================================
+// Header parsing
+// ============================================================
 
 interface ParsedHeader {
   timeReference: TimeReference;
   dateRange: { start: string; end: string };
-  crewInfo: {
-    crewId: string;
-    name: string;
-    base: string;
-    role: string;
-    aircraftType: string;
-  };
+  crewInfo: PlannedImport["crewMember"];
   columnIndices: {
     date: number;
     duties: number;
@@ -137,268 +173,281 @@ interface ParsedHeader {
 }
 
 function parseHeader(lines: string[]): ParsedHeader {
-  // Detect time reference
   let timeReference: TimeReference = "UTC";
   let dateRange = { start: "", end: "" };
 
   for (const line of lines.slice(0, 10)) {
     if (line.includes("All times in")) {
-      timeReference = line.includes("Local Base") ? "LOCAL_BASE" : "UTC";
-      const dateMatch = line.match(
+      if (line.includes("Local Base")) timeReference = "LOCAL_BASE";
+      else if (line.includes("Local Station")) timeReference = "LOCAL_STATION";
+      else timeReference = "UTC";
+
+      const rangeMatch = line.match(
         /(\d{2}\/\d{2}\/\d{4})\s*-\s*(\d{2}\/\d{2}\/\d{4})/
       );
-      if (dateMatch) {
+      if (rangeMatch) {
         dateRange = {
-          start: parseDDMMYYYY(dateMatch[1]),
-          end: parseDDMMYYYY(dateMatch[2]),
+          start: parseDDMMYYYY(rangeMatch[1]),
+          end: parseDDMMYYYY(rangeMatch[2]),
         };
       }
+      break;
     }
   }
 
-  // Extract crew info
-  let crewInfo = {
+  // Crew info line — e.g. "9766 Lim Chin Yang SIN-FO-32N"
+  let crewInfo: PlannedImport["crewMember"] = {
     crewId: "",
     name: "",
-    base: "SIN",
+    base: "",
     role: "",
     aircraftType: "",
   };
   for (const line of lines.slice(0, 10)) {
-    const cleanLine = line.replace(/"/g, "");
-    const crewMatch = cleanLine.match(
-      /^(\d{4,5})\s+(.+?)\s+(SIN|[A-Z]{3}),\s*(\w+),\s*(\w+)/
+    const match = line.match(
+      /^(\d+)\s+(.+?)\s+([A-Z]{3})-(\w+)-(\w+)/
     );
-    if (crewMatch) {
+    if (match) {
       crewInfo = {
-        crewId: crewMatch[1],
-        name: crewMatch[2].trim(),
-        base: crewMatch[3],
-        role: crewMatch[4],
-        aircraftType: crewMatch[5],
+        crewId: match[1],
+        name: match[2].trim(),
+        base: match[3],
+        role: match[4],
+        aircraftType: match[5],
       };
       break;
     }
   }
 
-  // Find header row
-  let dataStartIndex = -1;
-  let columnIndices = {
-    date: 0,
-    duties: 1,
-    details: 2,
-    reportTimes: 3,
-    actualTimes: 4,
-    debriefTimes: 5,
-    indicators: 6,
-    crew: 7,
-  };
-
-  for (let i = 0; i < lines.length; i++) {
+  // Column header row
+  let headerRowIndex = -1;
+  for (let i = 0; i < Math.min(lines.length, 20); i++) {
     if (
-      lines[i].startsWith("Date,Duties") ||
-      lines[i].includes("Date,Duties")
+      lines[i].includes("Date") &&
+      lines[i].includes("Duties") &&
+      lines[i].includes("Details")
     ) {
-      dataStartIndex = i + 1;
-      const headers = parseCSVLine(lines[i]);
-
-      // Handle extra empty column between Duties and Details
-      if (headers[2] === "") {
-        columnIndices = {
-          date: 0,
-          duties: 1,
-          details: 3,
-          reportTimes: 4,
-          actualTimes: 5,
-          debriefTimes: 6,
-          indicators: 7,
-          crew: 8,
-        };
-      }
+      headerRowIndex = i;
       break;
     }
   }
-
-  if (dataStartIndex === -1) {
-    throw new Error("Could not find schedule data header row");
+  if (headerRowIndex === -1) {
+    throw new Error("Could not locate schedule column header row");
   }
 
-  return { timeReference, dateRange, crewInfo, columnIndices, dataStartIndex };
+  const headerCols = parseCSVLine(lines[headerRowIndex]).map((c) =>
+    c.toLowerCase()
+  );
+  const idx = (needle: string) =>
+    headerCols.findIndex((c) => c.includes(needle));
+
+  const columnIndices = {
+    date: idx("date"),
+    duties: idx("duties"),
+    details: idx("details"),
+    reportTimes: idx("report"),
+    actualTimes: idx("actual"),
+    debriefTimes: idx("debrief"),
+    indicators: idx("indicator"),
+    crew: idx("crew"),
+  };
+
+  return {
+    timeReference,
+    dateRange,
+    crewInfo,
+    columnIndices,
+    dataStartIndex: headerRowIndex + 1,
+  };
 }
 
-// ============================================
-// Duty Parsing
-// ============================================
+// ============================================================
+// Sector extraction (raw, pre-normalization)
+// ============================================================
 
-function parseDutiesColumn(
-  dutiesCell: string,
-  detailsCell: string
-): {
-  dutyCode: string;
-  dutyType: DutyType;
-  dutyDescription: string;
-  sectors: ScheduledSector[];
-} {
-  const dutyCode = dutiesCell.trim();
-  const upperCode = dutyCode.toUpperCase();
+interface RawSector {
+  flightNumber: string;
+  aircraftType: string;
+  departureIata: string;
+  arrivalIata: string;
+  /** Raw tokens from CSV — still carrying 'A' prefix and ⁺¹ markers */
+  rawSchedOut?: string;
+  rawSchedIn?: string;
+  rawActualOut?: string;
+  rawActualIn?: string;
+  rowDate: string;
+  sourceLine: number;
+  crew?: ScheduledCrewMember[];
+}
 
-  if (DUTY_CODE_MAP[upperCode]) {
-    return {
-      dutyCode,
-      dutyType: DUTY_CODE_MAP[upperCode].type,
-      dutyDescription: DUTY_CODE_MAP[upperCode].description,
-      sectors: [],
-    };
-  }
+function extractSectorsFromRow(
+  row: string,
+  header: ParsedHeader,
+  lineNumber: number
+): RawSector[] {
+  const cols = parseCSVLine(row);
+  const rowDate = parseDDMMYYYY(cols[header.columnIndices.date] || "");
+  if (!rowDate) return [];
 
-  if (/^EBT\d/i.test(upperCode)) {
-    return {
-      dutyCode,
-      dutyType: "training",
-      dutyDescription: detailsCell || dutyCode,
-      sectors: [],
-    };
-  }
+  const dutiesCell = cols[header.columnIndices.duties] || "";
+  const detailsCell = cols[header.columnIndices.details] || "";
+  const actualsCell = cols[header.columnIndices.actualTimes] || "";
 
-  // Parse flight sectors
   const dutyLines = dutiesCell.split(/\r?\n/).filter(Boolean);
   const detailLines = detailsCell.split(/\r?\n/).filter(Boolean);
-  const sectors: ScheduledSector[] = [];
+  const actualLines = actualsCell.split(/\r?\n/).filter(Boolean);
+
+  const sectors: RawSector[] = [];
 
   for (let i = 0; i < dutyLines.length; i++) {
     const dutyLine = dutyLines[i].trim();
     const detailLine = detailLines[i]?.trim() || "";
+    const actualLine = actualLines[i]?.trim() || "";
 
     const flightMatch = dutyLine.match(/^(\w*\d+)\s*\[(\w+)\]$/);
     if (!flightMatch) continue;
 
-    // Normalize flight number: ensure airline prefix is present
     let flightNumber = flightMatch[1];
     const hasPrefix = /[A-Za-z]/.test(flightNumber.replace(/\d/g, ""));
-    if (!hasPrefix) {
-      flightNumber = "TR" + flightNumber; // Scoot ICAO code
-    }
+    if (!hasPrefix) flightNumber = `TR${flightNumber}`;
 
     const routeMatch = detailLine.match(/^(\w{3})\s*-\s*(\w{3})/);
     if (!routeMatch) continue;
 
-    sectors.push({
+    // Parse actual-times line — may be scheduled-only, actual-only, or mixed.
+    const timeMatch = actualLine.match(
+      /(A?\d{2}:\d{2}(?:⁺¹)?)\s*-\s*(A?\d{2}:\d{2}(?:⁺¹)?)/
+    );
+
+    const sector: RawSector = {
       flightNumber,
       aircraftType: flightMatch[2],
       departureIata: routeMatch[1].toUpperCase(),
       arrivalIata: routeMatch[2].toUpperCase(),
-      scheduledOut: "",
-      scheduledIn: "",
+      rowDate,
+      sourceLine: lineNumber,
+    };
+
+    if (timeMatch) {
+      const outParsed = parseTimeToken(timeMatch[1]);
+      const inParsed = parseTimeToken(timeMatch[2]);
+      if (outParsed) {
+        if (outParsed.isActual) sector.rawActualOut = timeMatch[1];
+        else sector.rawSchedOut = timeMatch[1];
+      }
+      if (inParsed) {
+        if (inParsed.isActual) sector.rawActualIn = timeMatch[2];
+        else sector.rawSchedIn = timeMatch[2];
+      }
+    }
+
+    sectors.push(sector);
+  }
+
+  return sectors;
+}
+
+// ============================================================
+// Normalization to ParsedSector (UTC)
+// ============================================================
+
+interface AirportLookup {
+  (iata: string): Promise<{ tz: string } | undefined>;
+}
+
+async function normalizeSector(
+  raw: RawSector,
+  header: ParsedHeader,
+  lookupAirport: AirportLookup,
+  baseTz: string | undefined,
+  warnings: PlannedImport["warnings"]
+): Promise<ParsedSector | null> {
+  const [dep, arr] = await Promise.all([
+    lookupAirport(raw.departureIata),
+    lookupAirport(raw.arrivalIata),
+  ]);
+
+  if (!dep || !arr) {
+    warnings.push({
+      line: raw.sourceLine,
+      message: `Unknown airport: ${!dep ? raw.departureIata : ""}${!dep && !arr ? " and " : ""}${!arr ? raw.arrivalIata : ""} — using UTC offset 0`,
     });
   }
 
-  return {
-    dutyCode,
-    dutyType: sectors.length > 0 ? "flight" : "other",
-    dutyDescription: "",
-    sectors,
-  };
-}
+  const depTz = dep?.tz || "Etc/UTC";
+  const arrTz = arr?.tz || "Etc/UTC";
 
-// ============================================
-// Time Parsing
-// ============================================
+  const norm = (rawTime: string | undefined, role: "out" | "in") =>
+    rawTime
+      ? normalizeTimeToUTC({
+          rawTime,
+          rowDate: raw.rowDate,
+          timeReference: header.timeReference,
+          role,
+          depTz,
+          arrTz,
+          baseTz,
+        })
+      : null;
 
-export function localToUtcWithDayOffset(
-  localTime: string | undefined | null,
-  timezoneOffset: number,
-  nextDay = false
-): { time: string; dayOffset: number } {
-  if (!localTime || !isValidHHMM(localTime)) {
-    return { time: "", dayOffset: 0 };
-  }
+  const schedOut = norm(raw.rawSchedOut, "out");
+  const schedIn = norm(raw.rawSchedIn, "in");
+  const actOut = norm(raw.rawActualOut, "out");
+  const actIn = norm(raw.rawActualIn, "in");
 
-  let minutes =
-    hhmmToMinutes(localTime) - timezoneOffset * 60 + (nextDay ? 1440 : 0);
-
-  let dayOffset = 0;
-  if (minutes < 0) {
-    minutes += 1440;
-    dayOffset = -1;
-  } else if (minutes >= 1440) {
-    minutes -= 1440;
-    dayOffset = 1;
+  // UTC date of the flight anchors on OUT (preferring actual when present).
+  const anchor = actOut || schedOut;
+  if (!anchor) {
+    warnings.push({
+      line: raw.sourceLine,
+      message: `Sector ${raw.flightNumber} has no parseable OUT time — skipping`,
+    });
+    return null;
   }
 
   return {
-    time: minutesToHHMM(minutes),
-    dayOffset,
+    date: anchor.utcDate,
+    flightNumber: raw.flightNumber,
+    aircraftType: raw.aircraftType,
+    departureIata: raw.departureIata,
+    arrivalIata: raw.arrivalIata,
+    scheduledOut: schedOut?.utcTime,
+    scheduledIn: schedIn?.utcTime,
+    actualOut: actOut?.utcTime,
+    actualIn: actIn?.utcTime,
+    sourceLine: raw.sourceLine,
+    crew: raw.crew,
   };
 }
 
-function parseActualTimes(timesCell: string, sectors: ScheduledSector[]): void {
-  const timeLines = timesCell.split(/\r?\n/).filter(Boolean);
-
-  for (let i = 0; i < Math.min(timeLines.length, sectors.length); i++) {
-    const timeLine = timeLines[i].trim();
-    const sector = sectors[i];
-
-    const timeMatch = timeLine.match(
-      /A?(\d{2}:\d{2})(?:⁺¹)?\s*-\s*A?(\d{2}:\d{2})(?:⁺¹)?(?:\/(\d{2}:\d{2}))?/
-    );
-
-    if (timeMatch) {
-      const hasActualPrefix = timeLine.includes("A");
-      if (hasActualPrefix) {
-        sector.actualOut = timeMatch[1];
-        sector.actualIn = timeMatch[2];
-      } else {
-        sector.scheduledOut = timeMatch[1];
-        sector.scheduledIn = timeMatch[2];
-      }
-
-      if (timeMatch[3]) {
-        const [hh, mm] = timeMatch[3].split(":").map(Number);
-        sector.delay = hh * 60 + mm;
-      }
-
-      sector.nextDay = timeLine.includes("⁺¹");
-    }
-  }
-}
-
-// ============================================
-// Crew Parsing (Pilots Only)
-// ============================================
+// ============================================================
+// Crew parsing (pilots only)
+// ============================================================
 
 function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
   const crew: ScheduledCrewMember[] = [];
   const lines = crewCell.split(/\r?\n/).filter(Boolean);
 
   for (const line of lines) {
-    // This regex handles: "Role - ID - Name" AND "Role - Role - ID - Name"
-    // It captures the name as everything following the last hyphen
     const match = line.match(
       /^([A-Z\s]+?)\s-\s(?:[A-Z\s]+?\s-\s)?(\d+)\s-\s(.+)$/
     );
+    if (!match) continue;
 
-    if (match) {
-      const rolePart = match[1].trim().toUpperCase();
-      const crewId = match[2];
-      const name = match[3].trim();
+    const rolePart = match[1].trim().toUpperCase();
+    const crewId = match[2];
+    const name = match[3].trim();
 
-      // Check if the role is in our Pilot map (CPT, PIC, FO)
-      // This automatically filters out CL, CC, etc.
-      if (CREW_ROLE_MAP[rolePart]) {
-        crew.push({
-          role: CREW_ROLE_MAP[rolePart],
-          crewId,
-          name,
-        });
-      }
+    if (CREW_ROLE_MAP[rolePart]) {
+      crew.push({ role: CREW_ROLE_MAP[rolePart], crewId, name });
     }
   }
   return crew;
 }
 
-// ============================================
-// Currency Parsing
-// ============================================
+// ============================================================
+// Currency parsing
+// ============================================================
 
 function parseCurrencies(
   lines: string[],
@@ -436,74 +485,45 @@ function parseCurrencies(
   return currencies;
 }
 
-// ============================================
-// Main Parser Function
-// ============================================
+// ============================================================
+// Main entry point
+// ============================================================
 
 export async function parseScheduleCSV(
   csvContent: string,
-  options?: ParseOptions
-): Promise<ScheduleImportResult> {
-  const { onProgress, sourceFile } = options ?? {};
-  //const lines = csvContent.split(/\r?\n/);
+  options: ParseOptions = {}
+): Promise<PlannedImport> {
+  const { onProgress } = options;
+  const lines = splitCsvRows(csvContent);
 
-  //quickfix: todo refactor and name fix properly
-  const rows: string[] = [];
-  let currentRow = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < csvContent.length; i++) {
-    const char = csvContent[i];
-    if (char === '"') inQuotes = !inQuotes;
-
-    // Only split on newlines that are OUTSIDE of quotes
-    if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (currentRow.trim()) rows.push(currentRow);
-      currentRow = "";
-    } else {
-      currentRow += char;
-    }
-  }
-  if (currentRow.trim()) rows.push(currentRow);
-
-  // Use 'rows' for the rest of your parsing loop
-  const lines = rows;
-
-  const result: ScheduleImportResult = {
+  const plan: PlannedImport = {
     success: false,
-    entriesCreated: 0,
-    entriesUpdated: 0,
-    entriesSkipped: 0,
-    draftsCreated: 0,
-    currenciesUpdated: 0,
-    personnelCreated: 0,
-    discrepancies: [],
-    errors: [],
-    warnings: [],
     timeReference: "UTC",
     dateRange: { start: "", end: "" },
     crewMember: { crewId: "", name: "", base: "", role: "", aircraftType: "" },
+    operations: [],
+    currencies: [],
+    personnelToCreate: [],
+    personnelToUpdate: [],
+    errors: [],
+    warnings: [],
+    summary: {
+      toCreate: 0,
+      toUpdate: 0,
+      toDelete: 0,
+      identical: 0,
+      ignored: 0,
+    },
   };
 
   try {
     onProgress?.(5, "Parsing", "Reading CSV header...");
-
     const header = parseHeader(lines);
-    result.timeReference = header.timeReference;
-    result.dateRange = header.dateRange;
-    result.crewMember = header.crewInfo;
-
-    // Resolve crew base timezone (for UTC normalization)
-    const baseAirport = await getAirportByIata(header.crewInfo.base);
-    const baseOffsetHours = baseAirport
-      ? getAirportTimeInfo(baseAirport.tz).offset
-      : 0;
-
-    const { columnIndices, dataStartIndex } = header;
+    plan.timeReference = header.timeReference;
+    plan.dateRange = header.dateRange;
+    plan.crewMember = header.crewInfo;
 
     onProgress?.(10, "Validating", "Checking user profile...");
-
-    // Get current user
     const currentUser = await getCurrentUserPersonnel();
     if (!currentUser) {
       throw new Error(
@@ -511,506 +531,196 @@ export async function parseScheduleCSV(
       );
     }
 
-    onProgress?.(15, "Loading", "Fetching existing personnel...");
+    // Base airport TZ (required for LOCAL_BASE; informational otherwise)
+    const baseAirport = await getAirportByIata(header.crewInfo.base);
+    const baseTz = baseAirport?.tz;
 
-    // Load existing personnel for crew matching (same pattern as scoot-parser)
+    // Airport lookup with in-import cache
+    const airportCache = new Map<string, { tz: string } | undefined>();
+    const lookupAirport = async (
+      iata: string
+    ): Promise<{ tz: string } | undefined> => {
+      if (airportCache.has(iata)) return airportCache.get(iata);
+      const a = await getAirportByIata(iata);
+      const entry = a?.tz ? { tz: a.tz } : undefined;
+      airportCache.set(iata, entry);
+      return entry;
+    };
+
+    onProgress?.(15, "Loading", "Fetching existing personnel...");
     const existingPersonnel = await getAllPersonnel();
-    const crewCache = new Map<string, string>(); // name (lowercase) -> id
+    const crewCache = new Map<string, string>();
     existingPersonnel.forEach((p) => {
       crewCache.set(p.name.toLowerCase(), p.id);
       if (p.crewId) crewCache.set(p.crewId, p.id);
     });
 
-    const entriesToSave: ScheduleEntry[] = [];
-    const currenciesToSave: Omit<
-      Currency,
-      "id" | "createdAt" | "syncStatus"
-    >[] = [];
-    const personnelToCreate: Personnel[] = [];
-    const personnelToUpdate: { id: string; data: Partial<Personnel> }[] = [];
-    const flightsToCreate: FlightLog[] = [];
-    const syncQueueEntries: any[] = [];
+    onProgress?.(20, "Parsing", "Extracting sectors...");
 
-    onProgress?.(20, "Processing", "Parsing schedule entries...");
+    // Stage A: raw extraction per row
+    const rawSectors: RawSector[] = [];
+    const currencyStartMarker = "Code,,,Description";
+    let currencyStartIdx = -1;
 
-    // Parse schedule entries
-    let processedRows = 0;
-    const totalRows = lines.length - dataStartIndex;
+    for (let i = header.dataStartIndex; i < lines.length; i++) {
+      const row = lines[i];
+      if (row.includes(currencyStartMarker)) {
+        currencyStartIdx = i + 1;
+        break;
+      }
+      if (!row.trim() || row.startsWith("Total Hours")) continue;
 
-    for (let i = dataStartIndex; i < lines.length; i++) {
-      const line = lines[i].trim();
+      const cols = parseCSVLine(row);
+      const duties = cols[header.columnIndices.duties] || "";
+      if (!duties.match(/\d+\s*\[/)) continue; // not a flight row
 
-      // Progress update
-      processedRows++;
-      if (processedRows % 10 === 0) {
-        const percent = 20 + Math.floor((processedRows / totalRows) * 50);
-        onProgress?.(
-          percent,
-          "Processing",
-          `Row ${processedRows} of ~${totalRows}...`
+      try {
+        const sectors = extractSectorsFromRow(row, header, i + 1);
+
+        // Crew → personnel diff
+        const crewMembers = parseCrewColumn(
+          cols[header.columnIndices.crew] || ""
         );
-      }
-
-      if (line.startsWith("Total Hours")) continue;
-      if (line.startsWith("Expiry Dates")) {
-        const expiryStart = lines.findIndex(
-          (l, idx) => idx > i && l.includes("Code") && l.includes("Expiry")
-        );
-        if (expiryStart > 0) {
-          currenciesToSave.push(...parseCurrencies(lines, expiryStart + 1));
-        }
-        continue;
-      }
-      if (
-        line.startsWith("Training") ||
-        line.startsWith("Memos") ||
-        line.startsWith("Descriptions") ||
-        line.startsWith("Generated")
-      ) {
-        continue;
-      }
-      if (!line || line.startsWith(",")) continue;
-
-      const cols = parseCSVLine(line);
-      const rawDate = cols[columnIndices.date] || "";
-      const dateMatch = rawDate.match(/^(\d{2}\/\d{2}\/\d{4})/);
-      if (!dateMatch) continue;
-
-      const date = parseDDMMYYYY(dateMatch[1]);
-      const duty = parseDutiesColumn(
-        cols[columnIndices.duties] || "",
-        cols[columnIndices.details] || ""
-      );
-
-      parseActualTimes(cols[columnIndices.actualTimes] || "", duty.sectors);
-
-      let reportTime = cols[columnIndices.reportTimes]?.replace(/[^\d:]/g, "");
-      let debriefTime = cols[columnIndices.debriefTimes]
-        ?.replace(/[⁺¹]/g, "")
-        .trim();
-
-      // 1. ⏱ Normalize to UTC and Capture Date Offset
-      if (header.timeReference === "LOCAL_BASE") {
-        // Convert Duty Times
-
-        
-          if (reportTime)
-            reportTime = localToUtcWithDayOffset(
-              reportTime,
-              baseOffsetHours
-            ).time;
-
-          if (debriefTime)
-            debriefTime = localToUtcWithDayOffset(
-              debriefTime,
-              baseOffsetHours
-            ).time;
-        
-
-        for (const sector of duty.sectors) {
-          // Track the offset BEFORE we overwrite the local time
-          // Capture offset ONLY from LOCAL OUT time
-          let flightDateOffset = 0;
-
-          if (sector.actualOut) {
-            const res = localToUtcWithDayOffset(
-              sector.actualOut,
-              baseOffsetHours
-            );
-            flightDateOffset = res.dayOffset;
-            sector.actualOut = res.time;
-          } else if (sector.scheduledOut) {
-            const res = localToUtcWithDayOffset(
-              sector.scheduledOut,
-              baseOffsetHours
-            );
-            flightDateOffset = res.dayOffset;
-            sector.scheduledOut = res.time;
+        for (const member of crewMembers) {
+          const normalizedName = normalize(member.name);
+          if (crewCache.has(normalizedName) || crewCache.has(member.crewId)) {
+            member.personnelId = crewCache.get(normalizedName) || crewCache.get(member.crewId);
+            continue;
           }
-
-          // Persist offset for later flight-date resolution
-          (sector as any)._utcDateOffset = flightDateOffset;
-          // Convert other times
-          if (sector.scheduledIn)
-            sector.scheduledIn = localToUtcWithDayOffset(
-              sector.scheduledIn,
-              baseOffsetHours,
-              sector.nextDay
-            ).time;
-          if (sector.actualIn)
-            sector.actualIn = localToUtcWithDayOffset(
-              sector.actualIn,
-              baseOffsetHours,
-              sector.nextDay
-            ).time;
-        }
-      }
-
-      // Parse crew (pilots only)
-      const crew = parseCrewColumn(cols[columnIndices.crew] || "");
-
-      // Link/create crew personnel (same logic as scoot-parser)
-      // updated with "healing" as logbook report as max 20char for crew name
-      for (const member of crew) {
-        const normalizedCsvName = normalize(member.name);
-        // Check cache by Name or CrewID
-        let personnelId =
-          crewCache.get(normalizedCsvName) || crewCache.get(member.crewId);
-
-        if (!personnelId) {
-          // 20-CHAR HEALING: Look for a person in DB with no ID whose name is a prefix of our current full name
           const truncatedMatch = existingPersonnel.find(
-            (p) => !p.crewId && normalizedCsvName.startsWith(normalize(p.name))
+            (p) =>
+              !p.crewId && normalizedName.startsWith(normalize(p.name))
           );
-
           if (truncatedMatch) {
-            const updateData = {
-              name: member.name,
-              crewId: member.crewId,
-              updatedAt: Date.now(),
-            };
-            personnelToUpdate.push({ id: truncatedMatch.id, data: updateData });
-
-            // Track the update for sync
-            syncQueueEntries.push({
-              id: crypto.randomUUID(),
-              type: "update",
-              collection: "personnel",
-              data: { ...truncatedMatch, ...updateData },
-              timestamp: Date.now(),
+            plan.personnelToUpdate.push({
+              id: truncatedMatch.id,
+              data: {
+                name: member.name,
+                crewId: member.crewId,
+                updatedAt: Date.now(),
+              },
             });
-            personnelId = truncatedMatch.id;
-            console.log(`Healed: ${truncatedMatch.name} -> ${member.name}`);
+            crewCache.set(normalizedName, truncatedMatch.id);
+            crewCache.set(member.crewId, truncatedMatch.id);
+            member.personnelId = truncatedMatch.id;
           } else {
-            // Create New if no match found
             const newPerson: Personnel = {
               id: crypto.randomUUID(),
               name: member.name,
               crewId: member.crewId,
-              organization: "Scoot", //todo: logic to check organization, now is just assumed to be scoot since parse from scoot schedule
+              organization: "Scoot",
               roles: member.role === "FO" ? ["SIC"] : ["PIC"],
-              isMe: false, // Ensure this doesn't match your own profile
+              isMe: false,
               createdAt: Date.now(),
               syncStatus: "pending",
             };
-            personnelToCreate.push(newPerson);
-            syncQueueEntries.push({
-              id: crypto.randomUUID(),
-              type: "create",
-              collection: "personnel",
-              data: newPerson,
-              timestamp: Date.now(),
-            });
-            personnelId = newPerson.id;
+            plan.personnelToCreate.push(newPerson);
+            crewCache.set(normalizedName, newPerson.id);
+            crewCache.set(member.crewId, newPerson.id);
+            member.personnelId = newPerson.id;
           }
-          // Update cache for the rest of this import
-          crewCache.set(normalizedCsvName, personnelId);
-          crewCache.set(member.crewId, personnelId);
         }
-        member.personnelId = personnelId;
+
+        for (const sector of sectors) {
+          sector.crew = crewMembers;
+        }
+        rawSectors.push(...sectors);
+      } catch (error) {
+        plan.errors.push({
+          line: i + 1,
+          message:
+            error instanceof Error
+              ? error.message
+              : "Error parsing row",
+        });
       }
-
-      // ============================================
-      // SMART FLIGHT MATCHING
-      // ============================================
-      for (const sector of duty.sectors) {
-        // Apply UTC day shift for LOCAL_BASE schedules
-        let flightDate = date;
-        if (header.timeReference === "LOCAL_BASE") {
-          const dayOffset = (sector as any)._utcDateOffset ?? 0;
-          if (dayOffset !== 0) {
-            const d = new Date(date + "T00:00:00Z");
-            d.setUTCDate(d.getUTCDate() + dayOffset);
-            flightDate = d.toISOString().slice(0, 10);
-          }
-          delete (sector as any)._utcDateOffset;
-        }
-
-        // 1. NORMALIZE FLIGHT NUMBER (Fixes "128" vs "TR128")
-        const csvFlightNum = sector.flightNumber.replace(/\D/g, "");
-        const fullFlightNumber = `TR${csvFlightNum}`;
-
-        // 2. QUERY DATABASE — match by date + flight number OR date + route
-        const existingFlight = await userDb.flights
-          .where("date")
-          .equals(flightDate)
-          .filter((f: FlightLog) => {
-            const dbFlightNum = f.flightNumber.replace(/\D/g, "");
-            if (dbFlightNum === csvFlightNum) return true;
-            // Also match by route (handles drafts with different flight number format)
-            if (f.departureIata === sector.departureIata && f.arrivalIata === sector.arrivalIata) return true;
-            return false;
-          })
-          .first();
-
-        if (existingFlight) {
-          // Flight exists — hydrate with actual times if available
-          if (sector.actualOut && sector.actualIn) {
-            const timesMatch =
-              existingFlight.outTime === sector.actualOut &&
-              existingFlight.inTime === sector.actualIn;
-
-            if (!timesMatch && (existingFlight.outTime || existingFlight.inTime)) {
-              // Times differ and flight already has times - add discrepancy
-              result.discrepancies.push({
-                id: crypto.randomUUID(),
-                type: "time_mismatch",
-                severity: "info",
-                flightLogId: existingFlight.id,
-                field: "times",
-                scheduleValue: `OUT: ${sector.actualOut}, IN: ${sector.actualIn}`,
-                logbookValue: `OUT: ${existingFlight.outTime}, IN: ${existingFlight.inTime}`,
-                message: `Flight ${fullFlightNumber} times differ from schedule`,
-                resolved: false,
-                createdAt: Date.now(),
-              });
-            }
-          }
-
-          // Link this sector to existing flight
-          sector.linkedFlightId = existingFlight.id;
-        } else if (sector.actualOut && sector.actualIn) {
-            // Flight doesn't exist and we have actual times - create it
-            const depAirport = await getAirportByIata(sector.departureIata);
-            const arrAirport = await getAirportByIata(sector.arrivalIata);
-            const depOffset = depAirport
-              ? getAirportTimeInfo(depAirport.tz).offset
-              : 0;
-            const arrOffset = arrAirport
-              ? getAirportTimeInfo(arrAirport.tz).offset
-              : 0;
-
-            // Determine PIC from crew
-            const picMember = crew.find(
-              (c) => c.role === "CPT" || c.role === "PIC"
-            );
-            const isUserPic =
-              picMember?.name.toLowerCase() === currentUser.name.toLowerCase();
-
-            // Calculate block time from actual times
-            const blockTime = calculateDuration(
-              sector.actualOut,
-              sector.actualIn
-            );
-
-            // Calculate night time if airports available
-            const nightTimeResult =
-              !depAirport || !arrAirport
-                ? null
-                : calculateNightTimeComplete(
-                    flightDate,
-                    sector.actualOut,
-                    "", // offTime not available
-                    "", // onTime not available
-                    sector.actualIn,
-                    { lat: depAirport.latitude, lon: depAirport.longitude },
-                    { lat: arrAirport.latitude, lon: arrAirport.longitude }
-                  );
-            const nightTime = nightTimeResult?.nightTimeHHMM ?? "00:00";
-
-            const newFlight: FlightLog = {
-              id: crypto.randomUUID(),
-              isDraft: false, // Actual times = confirmed flight
-              date: flightDate,
-              flightNumber: fullFlightNumber,
-              aircraftReg: "", // Not in schedule
-              aircraftType: sector.aircraftType,
-              departureIata: sector.departureIata,
-              departureIcao: depAirport?.icao || "",
-              arrivalIata: sector.arrivalIata,
-              arrivalIcao: arrAirport?.icao || "",
-              departureTimezone: depOffset,
-              arrivalTimezone: arrOffset,
-              scheduledOut: sector.scheduledOut || "",
-              scheduledIn: sector.scheduledIn || "",
-              outTime: sector.actualOut,
-              offTime: "",
-              onTime: "",
-              inTime: sector.actualIn,
-              blockTime: blockTime,
-              flightTime: blockTime, // Use block time as flight time estimate
-              nightTime: nightTime,
-              dayTime: minutesToHHMM(
-                Math.max(0, hhmmToMinutes(blockTime) - hhmmToMinutes(nightTime))
-              ),
-              picId: isUserPic ? currentUser.id : picMember?.personnelId || "",
-              picName: isUserPic ? "Self" : picMember?.name || "",
-              sicId: !isUserPic ? currentUser.id : "",
-              sicName: !isUserPic ? "Self" : "",
-              additionalCrew: [],
-              pilotFlying: true,
-              pilotRole: isUserPic ? "PIC" : "SIC",
-              picTime: isUserPic ? blockTime : "00:00",
-              sicTime: !isUserPic ? blockTime : "00:00",
-              picusTime: "00:00",
-              dualTime: "00:00",
-              instructorTime: "00:00",
-              dayTakeoffs: 0,
-              dayLandings: 0,
-              nightTakeoffs: 0,
-              nightLandings: 0,
-              autolands: 0,
-              remarks: `Imported from schedule: ${fullFlightNumber}`,
-              endorsements: "",
-              manualOverrides: {},
-              ifrTime: "00:00",
-              actualInstrumentTime: "00:00",
-              simulatedInstrumentTime: "00:00",
-              crossCountryTime: "00:00",
-              approaches: [],
-              holds: 0,
-              ipcIcc: false,
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-              syncStatus: "pending",
-            };
-
-            flightsToCreate.push(newFlight);
-            sector.linkedFlightId = newFlight.id;
-            result.draftsCreated++; // Using this counter for created flights
-
-            syncQueueEntries.push({
-              id: crypto.randomUUID(),
-              type: "create",
-              collection: "flights",
-              data: newFlight,
-              timestamp: Date.now(),
-            });
-        }
-      }  // end for (sector)
-
-      const entry: ScheduleEntry = {
-        id: crypto.randomUUID(),
-        date,
-        timeReference: header.timeReference,
-        reportTime: reportTime || undefined,
-        debriefTime: debriefTime || undefined,
-        dutyType: duty.dutyType,
-        dutyCode: duty.dutyCode,
-        dutyDescription:
-          duty.dutyDescription || cols[columnIndices.details]?.trim(),
-        sectors: duty.sectors,
-        crew, // Now only contains pilots
-        indicators: cols[columnIndices.indicators]?.trim()
-          ? [cols[columnIndices.indicators].trim()]
-          : undefined,
-        sourceFile,
-        linkedFlightIds: duty.sectors
-          .filter((s) => s.linkedFlightId)
-          .map((s) => s.linkedFlightId as string),
-        importedAt: Date.now(),
-        createdAt: Date.now(),
-        syncStatus: "pending",
-      };
-
-      entriesToSave.push(entry);
     }
 
-    onProgress?.(75, "Saving", "Writing to database...");
+    onProgress?.(50, "Normalizing", "Converting times to UTC...");
 
-    // Save to database in transaction
-    await userDb.transaction(
-      "rw",
-      [
-        userDb.scheduleEntries,
-        userDb.currencies,
-        userDb.personnel,
-        userDb.flights,
-        userDb.syncQueue,
-      ],
-      async () => {
-        //Apply the "Healed" names to local DB
-        for (const item of personnelToUpdate) {
-          await userDb.personnel.update(item.id, item.data);
-        }
+    // Stage B: normalize to UTC — sequential per sector
+    const parsedSectors: ParsedSector[] = [];
+    for (const raw of rawSectors) {
+      const normalized = await normalizeSector(
+        raw,
+        header,
+        lookupAirport,
+        baseTz,
+        plan.warnings
+      );
+      if (normalized) parsedSectors.push(normalized);
+    }
 
-        //Add brand new personnel to local DB
-        if (personnelToCreate.length > 0) {
-          await userDb.personnel.bulkAdd(personnelToCreate);
-        }
+    onProgress?.(75, "Reconciling", "Comparing against existing flights...");
 
-        // Create flights (from actual times)
-        if (flightsToCreate.length > 0) {
-          await userDb.flights.bulkAdd(flightsToCreate);
-        }
+    // Stage C: load existing flights within the CSV date range
+    const rangeStart = header.dateRange.start;
+    const rangeEnd = header.dateRange.end;
+    const allFlights = await userDb.flights.toArray();
+    const flightsInRange = allFlights.filter(
+      (f: FlightLog) => f.date >= rangeStart && f.date <= rangeEnd
+    );
 
-        // Upsert schedule entries
-        for (const entry of entriesToSave) {
-          const existing = await userDb.scheduleEntries
-            .where("date")
-            .equals(entry.date)
-            .filter((e: ScheduleEntry) => e.dutyCode === entry.dutyCode)
-            .first();
+    const operations = reconcileRoster({
+      sectors: parsedSectors,
+      existingFlights: flightsInRange,
+      csvDateRange: { start: rangeStart, end: rangeEnd },
+    });
 
-          if (existing) {
-            await userDb.scheduleEntries.update(existing.id, {
-              ...entry,
-              id: existing.id,
-              updatedAt: Date.now(),
-            });
-            result.entriesUpdated++;
-          } else {
-            await userDb.scheduleEntries.add(entry);
-            result.entriesCreated++;
-          }
-        }
+    // Apply default acceptance flags
+    plan.operations = operations.map((op) => ({
+      ...op,
+      accepted:
+        op.kind === "create" ||
+        op.kind === "skip_identical" ||
+        op.kind === "skip_non_airline",
+    }));
 
-        // Upsert currencies
-        for (const currency of currenciesToSave) {
-          const existing = await userDb.currencies
-            .where("code")
-            .equals(currency.code)
-            .first();
-
-          if (existing) {
-            if (existing.autoUpdate) {
-              await userDb.currencies.update(existing.id, {
-                expiryDate: currency.expiryDate,
-                description: currency.description,
-                lastUpdatedFrom: "schedule_csv",
-                updatedAt: Date.now(),
-              });
-              result.currenciesUpdated++;
-            }
-          } else {
-            await userDb.currencies.add({
-              ...currency,
-              id: crypto.randomUUID(),
-              createdAt: Date.now(),
-              syncStatus: "pending",
-            });
-            result.currenciesUpdated++;
-          }
-        }
-
-        // Add sync queue entries
-        if (syncQueueEntries.length > 0) {
-          await userDb.syncQueue.bulkAdd(syncQueueEntries);
-        }
+    // Summary counts
+    for (const op of plan.operations) {
+      switch (op.kind) {
+        case "create":
+          plan.summary.toCreate++;
+          break;
+        case "update_conflict":
+        case "edited_conflict":
+          plan.summary.toUpdate++;
+          break;
+        case "delete_missing":
+          plan.summary.toDelete++;
+          break;
+        case "skip_identical":
+          plan.summary.identical++;
+          break;
+        case "skip_non_airline":
+          plan.summary.ignored++;
+          break;
       }
-    );
+    }
 
-    onProgress?.(100, "Complete", `Imported ${result.entriesCreated} entries`);
+    // Currencies
+    onProgress?.(90, "Parsing", "Reading currency dates...");
+    if (currencyStartIdx > 0) {
+      plan.currencies = parseCurrencies(lines, currencyStartIdx);
+    }
 
-    result.success = true;
-
-    console.log(
-      `[Schedule Parser] Imported ${result.entriesCreated} entries, ${result.entriesUpdated} updated, ${result.draftsCreated} flights created, ${result.personnelCreated} crew`
-    );
+    onProgress?.(100, "Complete", "Plan ready for review");
+    plan.success = plan.errors.length === 0;
   } catch (error) {
-    result.errors.push({
+    plan.errors.push({
       line: 0,
       message: error instanceof Error ? error.message : "Unknown error",
     });
-    console.error("[Schedule Parser] Error:", error);
+    plan.success = false;
   }
 
-  return result;
+  return plan;
 }
 
-/**
- * Detect CSV type (schedule vs logbook)
- */
+// ============================================================
+// CSV type detector (unchanged from v1)
+// ============================================================
+
 export function detectCSVType(
   csvContent: string
 ): "schedule" | "logbook" | "unknown" {
@@ -1019,3 +729,4 @@ export function detectCSVType(
   if (firstLines.includes("Crew Logbook Report")) return "logbook";
   return "unknown";
 }
+

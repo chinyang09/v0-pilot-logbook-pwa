@@ -32,7 +32,7 @@ import {
   Unlock,
   Sun,
   Moon,
-  FileEdit,
+  Pen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SwipeableCard } from "@/components/swipeable-card";
@@ -104,6 +104,19 @@ function parseDateLocal(dateStr: string): Date {
   return new Date(year, month - 1, day);
 }
 
+function timeToMinutes(hhmm: string): number {
+  const parts = hhmm.split(":").map(Number);
+  return (parts[0] || 0) * 60 + (parts[1] || 0);
+}
+
+function formatScheduledDuration(scheduledOut: string, scheduledIn: string): string {
+  let diff = timeToMinutes(scheduledIn) - timeToMinutes(scheduledOut);
+  if (diff < 0) diff += 1440;
+  const h = Math.floor(diff / 60);
+  const m = diff % 60;
+  return `${h}:${m.toString().padStart(2, "0")}`;
+}
+
 interface SwipeableFlightCardProps {
   flight: FlightLog;
   onEdit: () => void;
@@ -124,7 +137,39 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   displayPrefs,
 }: SwipeableFlightCardProps) {
   const isLocked = flight.isLocked || false;
-  const isDraft = flight.isDraft || false;
+
+  const hasOut = !!flight.outTime;
+  const hasIn = !!flight.inTime;
+  const isScheduled = !hasOut || !hasIn;
+
+  const displayOut = hasOut
+    ? flight.outTime!.slice(0, 5)
+    : flight.scheduledOut
+      ? flight.scheduledOut.slice(0, 5)
+      : "";
+  const displayIn = hasIn
+    ? flight.inTime!.slice(0, 5)
+    : flight.scheduledIn
+      ? flight.scheduledIn.slice(0, 5)
+      : "";
+
+  const durationInfo = useMemo(() => {
+    if (hasOut && hasIn) {
+      return {
+        text: formatHHMMDisplay(flight.blockTime, displayPrefs?.timeFormat),
+        suffix: "hrs",
+        scheduled: false,
+      };
+    }
+    if (flight.scheduledOut && flight.scheduledIn) {
+      return {
+        text: formatScheduledDuration(flight.scheduledOut, flight.scheduledIn),
+        suffix: "sch",
+        scheduled: true,
+      };
+    }
+    return { text: "", suffix: "hrs", scheduled: false };
+  }, [hasOut, hasIn, flight.blockTime, flight.scheduledOut, flight.scheduledIn, displayPrefs?.timeFormat]);
 
   const flightDate = parseDateLocal(flight.date);
   const day = flightDate.getDate().toString().padStart(2, "0");
@@ -167,18 +212,18 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
         className={cn(
           "bg-card border-border cursor-pointer relative py-0 transition-all",
           isLocked && "opacity-75",
-          isDraft && "border-dashed border-primary/50",
+          isScheduled && "border-l-2 border-l-orange-400/70",
           isSelected && "bg-primary/20 border-primary",
           !isSelected && "hover:bg-muted/50"
         )}
       >
         <CardContent className="px-3 py-1">
-          <div className="flex items-start gap-2">
+          <div className={cn("flex items-start gap-2", isScheduled && "text-orange-400/80")}>
             <div className="flex flex-col items-center justify-start shrink-0 w-16">
               <div className="text-6xl font-bold leading-none tracking-tight">
                 {day}
               </div>
-              <div className="text-base text-muted-foreground mt-0.5 tracking-wide">
+              <div className={cn("text-base mt-0.5 tracking-wide", isScheduled ? "text-orange-400/60" : "text-muted-foreground")}>
                 {month} {year}
               </div>
             </div>
@@ -186,18 +231,24 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
             <div className="flex-1 min-w-0 flex flex-col justify-between">
               <div className="flex flex-col">
                 <div className="flex items-center justify-between gap-1">
-                  <span className="text-base font-semibold leading-tight">
-                    {flight.outTime?.slice(0, 5) || ""}
+                  <span className={cn(
+                    "text-base font-semibold leading-tight",
+                    isScheduled && hasOut && "text-foreground"
+                  )}>
+                    {displayOut}
                   </span>
                   <div className="flex items-center gap-1 flex-1 justify-center">
-                    <div className="h-px flex-1 bg-border " />
+                    <div className={cn("h-px flex-1", durationInfo.scheduled ? "bg-orange-400/30" : "bg-border")} />
                     <span className="text-base font-medium whitespace-nowrap px-1">
-                      {formatHHMMDisplay(flight.blockTime, displayPrefs?.timeFormat)} hrs
+                      {durationInfo.text}{durationInfo.text ? ` ${durationInfo.suffix}` : ""}
                     </span>
-                    <div className="h-px flex-1 bg-border " />
+                    <div className={cn("h-px flex-1", durationInfo.scheduled ? "bg-orange-400/30" : "bg-border")} />
                   </div>
-                  <span className="text-base font-semibold leading-tight">
-                    {flight.inTime?.slice(0, 5) || ""}
+                  <span className={cn(
+                    "text-base font-semibold leading-tight",
+                    isScheduled && hasIn && "text-foreground"
+                  )}>
+                    {displayIn}
                   </span>
                 </div>
 
@@ -211,7 +262,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground leading-tight mt-0.5">
+              <div className={cn("flex items-center gap-1.5 text-xs leading-tight mt-0.5", isScheduled ? "text-orange-400/60" : "text-muted-foreground")}>
                 <span>{flight.flightNumber || ""}</span>
                 <span>•</span>
                 <span>{flight.aircraftReg || ""}</span>
@@ -220,7 +271,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
               </div>
 
               <div className="flex items-center justify-between mt-0.5">
-                <div className="flex flex-1 min-w-0 text-xs text-muted-foreground leading-tight">
+                <div className={cn("flex flex-1 min-w-0 text-xs leading-tight", isScheduled ? "text-orange-400/60" : "text-muted-foreground")}>
                   {crewNames.map((name, i) => (
                     <span key={`${name}-${i}`} className="flex-1 min-w-0 truncate">
                       {i > 0 ? ", " : ""}{name}
@@ -241,7 +292,9 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
                       <span>{totalNightLandings}N</span>
                     </div>
                   )}
-                  {isDraft && <FileEdit className="h-3 w-3 text-primary" />}
+                  {flight.signature && (
+                    <Pen className="h-3 w-3 text-primary" />
+                  )}
                   {isLocked && (
                     <Lock className="h-3 w-3 text-muted-foreground" />
                   )}

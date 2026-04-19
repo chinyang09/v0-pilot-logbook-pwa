@@ -267,6 +267,33 @@ function createDutyPeriodFromFlightGroup(
     }
   }
 
+  // Fall back to scheduled times when actual times are missing
+  if (earliestOut === Infinity && earliestScheduledOut !== Infinity) {
+    earliestOut = earliestScheduledOut
+  }
+  if (latestIn === -Infinity) {
+    for (const flight of groupFlights) {
+      if (flight.scheduledIn) {
+        let inMin = hhmmToMinutes(flight.scheduledIn)
+        const outRef = flight.scheduledOut
+        if (outRef && inMin < hhmmToMinutes(outRef)) {
+          inMin += 1440
+        }
+        latestIn = Math.max(latestIn, inMin)
+      }
+    }
+  }
+
+  if (totalFlightMinutes === 0) {
+    for (const flight of groupFlights) {
+      if (flight.scheduledOut && flight.scheduledIn) {
+        let blockMin = hhmmToMinutes(flight.scheduledIn) - hhmmToMinutes(flight.scheduledOut)
+        if (blockMin < 0) blockMin += 1440
+        totalFlightMinutes += blockMin
+      }
+    }
+  }
+
   if (earliestOut === Infinity || latestIn === -Infinity) return null
 
   // Report = 1h before first gate-out. Debrief = last gate-in (no buffer).
@@ -332,7 +359,7 @@ function createDutyPeriodFromFlightGroup(
     departureTimezoneOffset: depTzOffset,
     effectiveSectors: fdpResult.effectiveSectors,
     source: "logbook",
-    isFuture: false,
+    isFuture: date > new Date().toISOString().split("T")[0],
     scheduleEntryIds: [],
     flightIds: groupFlights.map((f) => f.id),
     route,
@@ -376,6 +403,7 @@ export function mergeDutyPeriods(
     if (dp.date > today) {
       // Future: use schedule data, mark as future
       result.push({ ...dp, isFuture: true })
+      consumedDates.add(dp.date)
     } else if (logbookDPsForDate && !consumedDates.has(dp.date)) {
       // Past with both: prefer logbook DPs (may be multiple), mark as consumed
       for (const logDP of logbookDPsForDate) {

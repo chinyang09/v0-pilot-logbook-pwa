@@ -6,7 +6,18 @@ import { userDb } from "../../user-db"
 import type { UserPreferences } from "@/types/db/stores.types"
 import { DEFAULT_FIELD_ORDER } from "@/types/db/stores.types"
 import type { DraftGenerationConfig } from "@/types/entities/roster.types"
-import { DEFAULT_DRAFT_CONFIG } from "@/lib/utils/roster/draft-generator"
+
+const DEFAULT_DRAFT_CONFIG: DraftGenerationConfig = {
+  triggerMode: "day_of",
+  hoursBeforeReport: 2,
+  autoPopulate: {
+    crew: true,
+    scheduledTimes: true,
+    actualTimes: true,
+    flightNumber: true,
+    aircraftType: true,
+  },
+}
 
 /**
  * Get user preferences

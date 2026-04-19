@@ -17,8 +17,9 @@ import {
   Plus,
   Trash2,
   PenLine,
-  RefreshCw,
 } from "lucide-react";
+import { mutate } from "swr";
+import { CACHE_KEYS } from "@/hooks/data";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { TimePicker } from "@/components/time-picker";
@@ -356,7 +357,7 @@ export function FlightForm({
   const { airports } = useAirportDatabase();
   const { personnel } = usePersonnel();
   const { preferences } = usePreferences();
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [, setIsSubmitting] = useState(false);
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -806,6 +807,7 @@ export function FlightForm({
           manualOverrides,
         });
         lastSavedStateRef.current = currentState;
+        mutate(CACHE_KEYS.flights);
       } catch (error) {
         console.error("Auto-save failed:", error);
       }
@@ -1026,76 +1028,7 @@ export function FlightForm({
     [updateField]
   );
 
-  // Sync Flight: Mark as non-draft and sync to backend
-  const handleSyncFlight = async () => {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
 
-    try {
-      const flightData: FlightLog = {
-        id: formData.id || resolvedFlight?.id || flightIdProp || crypto.randomUUID(),
-        isDraft: false, // Mark as not a draft - will trigger sync
-        createdAt: resolvedFlight?.createdAt || Date.now(),
-        updatedAt: Date.now(),
-        syncStatus: "pending",
-        date: formData.date || new Date().toISOString().split("T")[0],
-        flightNumber: formData.flightNumber || "",
-        aircraftReg: formData.aircraftReg || "",
-        aircraftType: formData.aircraftType || "",
-        departureIcao: formData.departureIcao || "",
-        departureIata: formData.departureIata || "",
-        arrivalIcao: formData.arrivalIcao || "",
-        arrivalIata: formData.arrivalIata || "",
-        departureTimezone: formData.departureTimezone || 0,
-        arrivalTimezone: formData.arrivalTimezone || 0,
-        scheduledOut: formData.scheduledOut || "",
-        scheduledIn: formData.scheduledIn || "",
-        outTime: formData.outTime || "",
-        offTime: formData.offTime || "",
-        onTime: formData.onTime || "",
-        inTime: formData.inTime || "",
-        blockTime: formData.blockTime || "00:00",
-        flightTime: formData.flightTime || "00:00",
-        nightTime: formData.nightTime || "00:00",
-        dayTime: formData.dayTime || "00:00",
-        picId: formData.picId || "",
-        picName: formData.picName || "",
-        sicId: formData.sicId || "",
-        sicName: formData.sicName || "",
-        additionalCrew: formData.additionalCrew || [],
-        pilotFlying: formData.pilotFlying ?? true,
-        pilotRole: formData.pilotRole || "PIC",
-        picTime: formData.picTime || "00:00",
-        sicTime: formData.sicTime || "00:00",
-        picusTime: formData.picusTime || "00:00",
-        dualTime: formData.dualTime || "00:00",
-        instructorTime: formData.instructorTime || "00:00",
-        dayTakeoffs: formData.dayTakeoffs || 0,
-        dayLandings: formData.dayLandings || 0,
-        nightTakeoffs: formData.nightTakeoffs || 0,
-        nightLandings: formData.nightLandings || 0,
-        autolands: formData.autolands || 0,
-        remarks: formData.remarks || "",
-        endorsements: formData.endorsements || "",
-        manualOverrides,
-        ifrTime: formData.ifrTime || "00:00",
-        actualInstrumentTime: formData.actualInstrumentTime || "00:00",
-        simulatedInstrumentTime: formData.simulatedInstrumentTime || "00:00",
-        crossCountryTime: formData.crossCountryTime || "00:00",
-        approaches: formData.approaches || [],
-        holds: formData.holds || 0,
-        ipcIcc: formData.ipcIcc || false,
-        signature: formData.signature,
-      };
-
-      await updateFlight(flightData.id, flightData);
-      onFlightAdded(flightData);
-    } catch (error) {
-      console.error("Failed to sync flight:", error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   // Keep as Draft: Just close without marking as non-draft (auto-save already saved)
   const handleKeepAsDraft = () => {
@@ -1280,36 +1213,19 @@ export function FlightForm({
 
   const isDraft = resolvedFlight?.isDraft ?? true;
 
-  // Stable ref for sync handler to avoid re-renders in detail actions
-  const syncHandlerRef = useRef(handleSyncFlight);
-  syncHandlerRef.current = handleSyncFlight;
-
   // Register detail panel actions for the desktop floating glass bar
   const detailActions = useMemo(() => {
     return (
-      <>
-        <GlassContainer cornerRadius={28}>
-          <ImageImportButton
-            onDataExtracted={handleOCRDataExtracted}
-            variant="ghost"
-            size="icon"
-            className="h-14 w-14"
-          />
-        </GlassContainer>
-        <GlassContainer cornerRadius={28}>
-          <Button
-            onClick={() => syncHandlerRef.current()}
-            disabled={isSubmitting}
-            variant="ghost"
-            size="icon"
-            className="h-14 w-14"
-          >
-            <RefreshCw className={`h-5 w-5 ${isSubmitting ? "animate-spin" : ""}`} />
-          </Button>
-        </GlassContainer>
-      </>
+      <GlassContainer cornerRadius={28}>
+        <ImageImportButton
+          onDataExtracted={handleOCRDataExtracted}
+          variant="ghost"
+          size="icon"
+          className="h-14 w-14"
+        />
+      </GlassContainer>
     );
-  }, [handleOCRDataExtracted, isSubmitting]);
+  }, [handleOCRDataExtracted]);
 
   useRegisterDetailActions(detailActions, true);
 
