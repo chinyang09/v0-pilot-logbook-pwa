@@ -19,6 +19,7 @@
  */
 
 import type { FlightLog } from "../../../types/entities/flight.types";
+import type { ScheduledCrewMember } from "@/types/entities/roster.types";
 
 // ============================================================
 // Public types
@@ -41,6 +42,8 @@ export interface ParsedSector {
   actualIn?: string;
   /** Line number in source CSV — for error reporting. */
   sourceLine: number;
+  /** Crew from the CSV row — CPT/PIC and FO. */
+  crew?: ScheduledCrewMember[];
 }
 
 export interface FieldDiff {

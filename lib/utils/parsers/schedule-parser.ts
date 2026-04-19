@@ -277,6 +277,7 @@ interface RawSector {
   rawActualIn?: string;
   rowDate: string;
   sourceLine: number;
+  crew?: ScheduledCrewMember[];
 }
 
 function extractSectorsFromRow(
@@ -415,6 +416,7 @@ async function normalizeSector(
     actualOut: actOut?.utcTime,
     actualIn: actIn?.utcTime,
     sourceLine: raw.sourceLine,
+    crew: raw.crew,
   };
 }
 
@@ -573,7 +575,7 @@ export async function parseScheduleCSV(
       if (!duties.match(/\d+\s*\[/)) continue; // not a flight row
 
       try {
-        rawSectors.push(...extractSectorsFromRow(row, header, i + 1));
+        const sectors = extractSectorsFromRow(row, header, i + 1);
 
         // Crew → personnel diff
         const crewMembers = parseCrewColumn(
@@ -582,6 +584,7 @@ export async function parseScheduleCSV(
         for (const member of crewMembers) {
           const normalizedName = normalize(member.name);
           if (crewCache.has(normalizedName) || crewCache.has(member.crewId)) {
+            member.personnelId = crewCache.get(normalizedName) || crewCache.get(member.crewId);
             continue;
           }
           const truncatedMatch = existingPersonnel.find(
@@ -599,6 +602,7 @@ export async function parseScheduleCSV(
             });
             crewCache.set(normalizedName, truncatedMatch.id);
             crewCache.set(member.crewId, truncatedMatch.id);
+            member.personnelId = truncatedMatch.id;
           } else {
             const newPerson: Personnel = {
               id: crypto.randomUUID(),
@@ -613,8 +617,14 @@ export async function parseScheduleCSV(
             plan.personnelToCreate.push(newPerson);
             crewCache.set(normalizedName, newPerson.id);
             crewCache.set(member.crewId, newPerson.id);
+            member.personnelId = newPerson.id;
           }
         }
+
+        for (const sector of sectors) {
+          sector.crew = crewMembers;
+        }
+        rawSectors.push(...sectors);
       } catch (error) {
         plan.errors.push({
           line: i + 1,

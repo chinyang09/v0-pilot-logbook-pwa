@@ -61,6 +61,25 @@ async function hydrateFlightFromSector(
   const depOffset = depAirport ? getAirportTimeInfo(depAirport.tz).offset : 0;
   const arrOffset = arrAirport ? getAirportTimeInfo(arrAirport.tz).offset : 0;
 
+  const captain = sector.crew?.find(c => c.role === "CPT" || c.role === "PIC");
+  const fo = sector.crew?.find(c => c.role === "FO");
+  const isSelfCPT = captain && currentUser.crewId && captain.crewId === currentUser.crewId;
+  const isSelfFO = fo && currentUser.crewId && fo.crewId === currentUser.crewId;
+
+  let picId = captain?.personnelId || "";
+  let picName = captain?.name || "";
+  let sicId = fo?.personnelId || "";
+  let sicName = fo?.name || "";
+
+  if (isSelfCPT) {
+    picId = currentUser.id;
+    picName = "Self";
+  }
+  if (isSelfFO) {
+    sicId = currentUser.id;
+    sicName = "Self";
+  }
+
   return {
     isDraft: false,
     date: sector.date,
@@ -85,10 +104,10 @@ async function hydrateFlightFromSector(
     flightTime: "00:00",
     nightTime: "00:00",
     dayTime: "00:00",
-    picId: "",
-    picName: "",
-    sicId: currentUser.roles?.includes("SIC") ? currentUser.id : "",
-    sicName: currentUser.roles?.includes("SIC") ? "Self" : "",
+    picId,
+    picName,
+    sicId,
+    sicName,
     additionalCrew: [],
     pilotFlying: true,
     pilotRole: currentUser.roles?.includes("PIC") ? "PIC" : "SIC",
