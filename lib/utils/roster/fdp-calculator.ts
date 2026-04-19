@@ -332,7 +332,7 @@ function createDutyPeriodFromFlightGroup(
     departureTimezoneOffset: depTzOffset,
     effectiveSectors: fdpResult.effectiveSectors,
     source: "logbook",
-    isFuture: false,
+    isFuture: date > new Date().toISOString().split("T")[0],
     scheduleEntryIds: [],
     flightIds: groupFlights.map((f) => f.id),
     route,
@@ -376,6 +376,7 @@ export function mergeDutyPeriods(
     if (dp.date > today) {
       // Future: use schedule data, mark as future
       result.push({ ...dp, isFuture: true })
+      consumedDates.add(dp.date)
     } else if (logbookDPsForDate && !consumedDates.has(dp.date)) {
       // Past with both: prefer logbook DPs (may be multiple), mark as consumed
       for (const logDP of logbookDPsForDate) {
