@@ -217,10 +217,10 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           !isSelected && "hover:bg-muted/50"
         )}
       >
-        <CardContent className="px-2.5 py-0.5">
-          <div className={cn("flex items-start gap-1.5", isScheduled && "text-orange-400/80")}>
-            <div className="flex flex-col items-center justify-start shrink-0 w-14">
-              <div className="text-5xl font-bold leading-none tracking-tight">
+        <CardContent className="px-3 py-1">
+          <div className={cn("flex items-start gap-2", isScheduled && "text-orange-400/80")}>
+            <div className="flex flex-col items-center justify-start shrink-0 w-16">
+              <div className="text-6xl font-bold leading-none tracking-tight">
                 {day}
               </div>
               <div className={cn("text-base mt-0.5 tracking-wide", isScheduled ? "text-orange-400/60" : "text-muted-foreground")}>
@@ -262,7 +262,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
                 </div>
               </div>
 
-              <div className={cn("flex items-center gap-1.5 text-xs leading-tight", isScheduled ? "text-orange-400/60" : "text-muted-foreground")}>
+              <div className={cn("flex items-center gap-1.5 text-xs leading-tight mt-0.5", isScheduled ? "text-orange-400/60" : "text-muted-foreground")}>
                 <span>{flight.flightNumber || ""}</span>
                 <span>•</span>
                 <span>{flight.aircraftReg || ""}</span>
@@ -270,7 +270,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
                 <span>{flight.aircraftType || ""}</span>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between mt-0.5">
                 <div className={cn("flex flex-1 min-w-0 text-xs leading-tight", isScheduled ? "text-orange-400/60" : "text-muted-foreground")}>
                   {crewNames.map((name, i) => (
                     <span key={`${name}-${i}`} className="flex-1 min-w-0 truncate">

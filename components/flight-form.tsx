@@ -357,6 +357,7 @@ export function FlightForm({
   const { airports } = useAirportDatabase();
   const { personnel } = usePersonnel();
   const { preferences } = usePreferences();
+  const [, setIsSubmitting] = useState(false);
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
