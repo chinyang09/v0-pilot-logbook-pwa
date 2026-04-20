@@ -338,7 +338,6 @@ export async function processScootCSV(
     const flight: FlightLog = {
       ...existingDraft, // PRESERVE Flight Number (TRxxx) from Schedule
       id: flightId,
-      isDraft: false,
       date: flightDate,
       aircraftReg: matchedAc?.registration || rawReg,
       aircraftType: matchedAc?.typecode || cols[5] || "",

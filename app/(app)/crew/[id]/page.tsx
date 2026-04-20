@@ -27,7 +27,7 @@ export default function CrewDetailPage() {
   const id = params.id as string;
   const isNew = id === "new";
   const fieldType = searchParams.get("field");
-  const returnUrl = searchParams.get("return") || "/new-flight";
+  const returnUrl = searchParams.get("return") || "/logbook";
   const router = useRouter();
   const isDesktop = useIsDesktop();
 

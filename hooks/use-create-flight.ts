@@ -7,7 +7,6 @@ export function useCreateFlight() {
     const emptyFlight = createEmptyFlightLog()
     return addFlight({
       ...emptyFlight,
-      isDraft: true,
       date: date || new Date().toISOString().split("T")[0],
     })
   }, [])

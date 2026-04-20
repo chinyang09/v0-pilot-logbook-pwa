@@ -182,7 +182,7 @@ export function createDutyPeriodsFromFlights(flights: FlightLog[]): DutyPeriod[]
   // Group flights by date
   const byDate = new Map<string, FlightLog[]>()
   for (const flight of flights) {
-    if (!flight.date || flight.isDraft) continue
+    if (!flight.date) continue
     const existing = byDate.get(flight.date) || []
     existing.push(flight)
     byDate.set(flight.date, existing)
@@ -191,10 +191,15 @@ export function createDutyPeriodsFromFlights(flights: FlightLog[]): DutyPeriod[]
   const dutyPeriods: DutyPeriod[] = []
 
   for (const [date, dateFlights] of byDate) {
-    // Sort flights by OUT time within the date
+    // Sort flights by OUT time within the date.
+    // Future flights have no outTime, so fall back to scheduledOut; otherwise
+    // every future sector collapses to 0 and stays in insertion order, which
+    // reverses the route string when IndexedDB returns them out of order.
     const sorted = [...dateFlights].sort((a, b) => {
-      const aOut = a.outTime ? hhmmToMinutes(a.outTime) : 0
-      const bOut = b.outTime ? hhmmToMinutes(b.outTime) : 0
+      const aOut = a.outTime ? hhmmToMinutes(a.outTime)
+        : a.scheduledOut ? hhmmToMinutes(a.scheduledOut) : 0
+      const bOut = b.outTime ? hhmmToMinutes(b.outTime)
+        : b.scheduledOut ? hhmmToMinutes(b.scheduledOut) : 0
       return aOut - bOut
     })
 

@@ -247,11 +247,10 @@ export function getApproachCategory(type: string): Approach["category"] {
 }
 
 /**
- * Create a default/empty flight log for a new draft
+ * Create a default/empty flight log
  */
 export function createEmptyFlightLog(): Omit<FlightLog, "id" | "createdAt" | "updatedAt" | "syncStatus"> {
   return {
-    isDraft: true,
     date: new Date().toISOString().split("T")[0],
     flightNumber: "",
     aircraftReg: "",

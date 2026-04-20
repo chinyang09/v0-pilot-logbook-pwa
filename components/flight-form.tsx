@@ -36,7 +36,6 @@ import {
   updateFlight,
   updatePersonnel,
   getAirportByICAO,
-  deleteFlight,
 } from "@/lib/db";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useAirportDatabase } from "@/hooks/data";
@@ -1029,24 +1028,6 @@ export function FlightForm({
   );
 
 
-
-  // Keep as Draft: Just close without marking as non-draft (auto-save already saved)
-  const handleKeepAsDraft = () => {
-    onClose();
-  };
-
-  // Discard Draft: Delete the draft flight and close
-  const handleDiscardDraft = async () => {
-    if (resolvedFlight?.id && resolvedFlight.isDraft) {
-      try {
-        await deleteFlight(resolvedFlight.id);
-      } catch (error) {
-        console.error("Failed to delete draft:", error);
-      }
-    }
-    onClose();
-  };
-
   // Additional crew management
   const addAdditionalCrew = useCallback(() => {
     const newCrew: AdditionalCrew = {
@@ -1210,8 +1191,6 @@ export function FlightForm({
     }
     return arrTimezone;
   }, [activeTimePicker, depTimezone, arrTimezone]);
-
-  const isDraft = resolvedFlight?.isDraft ?? true;
 
   // Register detail panel actions for the desktop floating glass bar
   const detailActions = useMemo(() => {

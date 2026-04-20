@@ -4,10 +4,6 @@
  * Applies a reviewed-and-approved PlannedImport to IndexedDB. Each approved
  * flight operation goes through the standard flights.store.ts helpers, which
  * means EVERY change enters the sync queue and propagates to MongoDB.
- *
- * Unlike the v1 flow, roster-imported flights are NEVER marked isDraft.
- * They are first-class flights from the moment they're created, which is
- * what enables cross-device visibility.
  */
 
 import type {
@@ -81,7 +77,6 @@ async function hydrateFlightFromSector(
   }
 
   return {
-    isDraft: false,
     date: sector.date,
     flightNumber: sector.flightNumber.startsWith("TR")
       ? sector.flightNumber
