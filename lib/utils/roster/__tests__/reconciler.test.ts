@@ -16,7 +16,6 @@ import type { FlightLog } from "../../../../types/entities/flight.types";
 function makeFlight(overrides: Partial<FlightLog> = {}): FlightLog {
   const base: FlightLog = {
     id: crypto.randomUUID(),
-    isDraft: false,
     date: "2026-04-02",
     flightNumber: "TR638",
     aircraftReg: "",
@@ -317,20 +316,6 @@ describe("reconcileRoster — delete_missing", () => {
     expect(ops.filter((o) => o.kind === "delete_missing")).toHaveLength(0);
   });
 
-  it("does NOT flag drafts — drafts aren't yet committed", () => {
-    const draft = makeFlight({
-      id: "draft-1",
-      flightNumber: "TR777",
-      date: "2026-04-10",
-      isDraft: true,
-    });
-    const ops = reconcileRoster({
-      sectors: [makeSector()],
-      existingFlights: [makeFlight(), draft],
-      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
-    });
-    expect(ops.filter((o) => o.kind === "delete_missing")).toHaveLength(0);
-  });
 });
 
 // ============================================================

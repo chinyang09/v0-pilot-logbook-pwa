@@ -25,7 +25,7 @@ const PRECACHE_ASSETS = [
 const CDN_PATTERNS = ["cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic.com"]
 
 // Routes that should be cached when visited (runtime caching)
-const CACHEABLE_ROUTES = ["/", "/logbook", "/new-flight", "/aircraft", "/airports", "/crew", "/data", "/roster", "/fdp", "/currencies", "/discrepancies"]
+const CACHEABLE_ROUTES = ["/", "/logbook", "/aircraft", "/airports", "/crew", "/data", "/roster", "/fdp", "/currencies", "/discrepancies"]
 
 // Dynamic routes whose page shell is identical for all IDs (client-rendered).
 // We cache one shell instance and serve it for any matching request.

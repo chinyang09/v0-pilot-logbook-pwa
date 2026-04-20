@@ -294,7 +294,6 @@ export function reconcileRoster(
   // Pass 2: find DB flights inside the CSV range that weren't matched
   for (const flight of existingFlights) {
     if (matchedFlightIds.has(flight.id)) continue;
-    if (flight.isDraft) continue;
     if (!dateInRange(flight.date, csvDateRange)) continue;
 
     if (isAirlineFlight(flight.flightNumber)) {

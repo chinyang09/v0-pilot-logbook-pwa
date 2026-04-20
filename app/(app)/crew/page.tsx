@@ -136,7 +136,7 @@ export default function CrewPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const fieldType = searchParams.get("field");
-  const returnUrl = searchParams.get("return") || "/new-flight";
+  const returnUrl = searchParams.get("return") || "/logbook";
   const flightId = searchParams.get("flightId");
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const scrollContainerCallbackRef = useCallback((el: HTMLElement | null) => {

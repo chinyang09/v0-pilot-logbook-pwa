@@ -180,13 +180,15 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     }, [selectedMonth]);
 
     const flightDates = useMemo(() => {
-      const dates = new Map<string, { count: number; hasNight: boolean }>();
+      const dates = new Map<string, { count: number; hasNight: boolean; allFuture: boolean }>();
       flights.forEach((flight) => {
         const date = flight.date;
-        const existing = dates.get(date) || { count: 0, hasNight: false };
+        const isFuture = !flight.outTime || !flight.inTime;
+        const existing = dates.get(date) || { count: 0, hasNight: false, allFuture: true };
         existing.count++;
         if (flight.nightTime && flight.nightTime !== "00:00")
           existing.hasNight = true;
+        if (!isFuture) existing.allFuture = false;
         dates.set(date, existing);
       });
       return dates;
@@ -407,7 +409,11 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                     isCurrentMonth
                       ? "text-foreground/90"
                       : "text-foreground/[0.06]",
-                    flightInfo && isCurrentMonth && !isSelected && "font-semibold text-primary bg-primary/20",
+                    flightInfo && isCurrentMonth && !isSelected && (
+                      flightInfo.allFuture
+                        ? "font-semibold text-primary/70 ring-1 ring-inset ring-primary/50"
+                        : "font-semibold text-primary bg-primary/20"
+                    ),
                     isCurrentMonth && isToday && "ring-1.5 ring-primary/60",
                     isSelected && "bg-primary text-primary-foreground shadow-md z-10"
                   )}

@@ -8,7 +8,6 @@ import { addToSyncQueue } from "./sync-queue.store"
 
 /**
  * Add a new flight
- * If the flight is a draft (isDraft: true), it won't be added to sync queue
  */
 export async function addFlight(flight: FlightLogCreate): Promise<FlightLog> {
   const now = Date.now()
@@ -17,30 +16,22 @@ export async function addFlight(flight: FlightLogCreate): Promise<FlightLog> {
     id: crypto.randomUUID(),
     createdAt: now,
     updatedAt: now,
-    syncStatus: flight.isDraft ? "pending" : "pending",
+    syncStatus: "pending",
   }
 
   await userDb.flights.put(newFlight)
-
-  // Only add to sync queue if not a draft
-  if (!flight.isDraft) {
-    await addToSyncQueue("create", "flights", newFlight)
-  }
+  await addToSyncQueue("create", "flights", newFlight)
 
   return newFlight
 }
 
 /**
  * Update an existing flight
- * Handles draft-to-non-draft transitions by adding to sync queue only when:
- * - The flight is not a draft (isDraft: false), OR
- * - The flight was a draft and is now being finalized (wasDraft && !isDraft)
  */
 export async function updateFlight(id: string, updates: Partial<FlightLog>): Promise<FlightLog | null> {
   const flight = await userDb.flights.get(id)
   if (!flight) return null
 
-  const wasDraft = flight.isDraft
   const updatedFlight: FlightLog = {
     ...flight,
     ...updates,
@@ -49,33 +40,20 @@ export async function updateFlight(id: string, updates: Partial<FlightLog>): Pro
   }
 
   await userDb.flights.put(updatedFlight)
-
-  // Only add to sync queue if:
-  // 1. The updated flight is not a draft, OR
-  // 2. The flight was a draft and is now being finalized
-  if (!updatedFlight.isDraft) {
-    // Use "create" action if this is the first sync (was a draft), otherwise "update"
-    const action = wasDraft ? "create" : "update"
-    await addToSyncQueue(action, "flights", updatedFlight)
-  }
+  await addToSyncQueue("update", "flights", updatedFlight)
 
   return updatedFlight
 }
 
 /**
  * Delete a flight
- * Drafts are deleted without adding to sync queue since they were never synced
  */
 export async function deleteFlight(id: string): Promise<boolean> {
   const flight = await userDb.flights.get(id)
   if (!flight) return false
 
   await userDb.flights.delete(id)
-
-  // Only add to sync queue if the flight was not a draft (i.e., it was synced to server)
-  if (!flight.isDraft) {
-    await addToSyncQueue("delete", "flights", { id })
-  }
+  await addToSyncQueue("delete", "flights", { id })
 
   return true
 }
@@ -125,7 +103,6 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
   const normalized: FlightLog = {
     id: serverFlight.id,
     userId: serverFlight.userId,
-    isDraft: serverFlight.isDraft || false,
     date: serverFlight.date,
     flightNumber: serverFlight.flightNumber || "",
     aircraftReg: serverFlight.aircraftReg || "",

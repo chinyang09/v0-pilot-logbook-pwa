@@ -866,8 +866,8 @@ export function FDPTimelineChart({
             </div>
           ) : (
           <>
-            {/* Horizontal zoom controls row — sits between tabs and chart, right-aligned */}
-            <div className="flex items-center justify-end gap-0.5 py-1">
+            {/* Horizontal zoom controls row — sits between tabs and chart, left-aligned */}
+            <div className="flex items-center justify-start gap-0.5 py-1">
               <button
                 onClick={toggleMultiSelectMode}
                 className={cn(

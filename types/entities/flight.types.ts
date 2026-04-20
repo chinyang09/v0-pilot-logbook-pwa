@@ -93,7 +93,6 @@ export interface ManualOverrides {
 export interface FlightLog {
   id: string
   userId?: string
-  isDraft: boolean
   date: string
   flightNumber: string
   aircraftReg: string

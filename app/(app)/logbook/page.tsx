@@ -428,13 +428,13 @@ export default function LogbookPage() {
           size="icon"
           className="h-14 w-14 rounded-full"
           onClick={async () => {
-            const draftFlight = await createFlight(selectedDateRef.current || undefined)
+            const newFlight = await createFlight(selectedDateRef.current || undefined)
             mutate(
               CACHE_KEYS.flights,
-              (prev: FlightLog[] | undefined) => [draftFlight, ...(prev ?? [])],
+              (prev: FlightLog[] | undefined) => [newFlight, ...(prev ?? [])],
               { revalidate: false }
             )
-            setSelectedFlightId(draftFlight.id)
+            setSelectedFlightId(newFlight.id)
           }}
         >
           <Plus className="h-5 w-5" />

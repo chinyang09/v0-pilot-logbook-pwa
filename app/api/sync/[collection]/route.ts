@@ -183,9 +183,6 @@ export async function GET(
         if (typeof transformed.isLocked !== "boolean") {
           transformed.isLocked = false;
         }
-        if (typeof transformed.isDraft !== "boolean") {
-          transformed.isDraft = false;
-        }
         if (typeof transformed.pilotFlying !== "boolean") {
           transformed.pilotFlying = true;
         }

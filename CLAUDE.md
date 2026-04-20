@@ -62,7 +62,6 @@ app/                              # Next.js App Router
 └── (app)/                        # Authenticated app pages (route group)
     ├── layout.tsx                #   App layout with nav
     ├── logbook/                  #   Main flight logbook
-    ├── new-flight/               #   Flight creation
     ├── flights/[id]/             #   Flight detail & editing
     ├── aircraft/                 #   Aircraft management
     ├── airports/                 #   Airport reference
@@ -230,7 +229,7 @@ Four heavy pages are kept mounted across navigations for instant tab-switching a
 
 **Persistent pages** (`components/keep-alive-pages.tsx`):
 - `/logbook`, `/aircraft`, `/airports`, `/crew` — lazy-imported via `React.lazy()`, mounted on first visit, never unmounted
-- All other pages (new-flight, currencies, roster, etc.) unmount normally via Next.js `children`
+- All other pages (currencies, roster, etc.) unmount normally via Next.js `children`
 
 **How it works:**
 - `KeepAlivePages` wraps `children` in `app/(app)/layout.tsx`

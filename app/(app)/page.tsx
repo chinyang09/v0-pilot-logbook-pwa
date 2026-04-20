@@ -402,7 +402,7 @@ export default function Dashboard() {
                 <CardContent className="p-6 text-center">
                   <Plane className="h-8 w-8 mx-auto text-muted-foreground/50 mb-2" />
                   <p className="text-muted-foreground">No flights logged yet</p>
-                  <Link href="/new-flight">
+                  <Link href="/logbook">
                     <Button className="mt-4" size="sm">
                       Log Your First Flight
                     </Button>
