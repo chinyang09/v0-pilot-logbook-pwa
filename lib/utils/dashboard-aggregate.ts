@@ -3,11 +3,71 @@
  *
  * Computes period-bounded totals from FlightLog + Aircraft arrays.
  * Decoupled from React for predictability and easy testing.
+ *
+ * Only flown flights (both outTime + inTime set) are counted — scheduled
+ * placeholders in the logbook are excluded so the dashboard reflects
+ * actually-flown activity.
  */
 
 import type { FlightLog } from "@/types/entities/flight.types"
 import type { Aircraft } from "@/types/entities/aircraft.types"
+import type { AutoFillPreferences } from "@/types/db/stores.types"
 import { hhmmToMinutes } from "./time"
+import { isFlownFlight } from "./flight-calculations"
+
+export type AutoFillKey = keyof AutoFillPreferences
+
+/**
+ * Display order + label for each AutoFill-driven ring.
+ * Order matches the Settings → Auto-fill time fields list.
+ */
+export const AUTO_FILL_DISPLAY: ReadonlyArray<{ key: AutoFillKey; label: string }> = [
+  { key: "night", label: "Night" },
+  { key: "pic", label: "PIC" },
+  { key: "sic", label: "SIC" },
+  { key: "p1us", label: "P1US" },
+  { key: "dualRcvd", label: "Dual" },
+  { key: "dualGiven", label: "Instr" },
+  { key: "xc", label: "XC" },
+  { key: "ifr", label: "IFR" },
+  { key: "actualInst", label: "Actual" },
+  { key: "simInst", label: "Sim" },
+  { key: "multiPilot", label: "MPil" },
+  { key: "solo", label: "Solo" },
+  { key: "ground", label: "Gnd" },
+  { key: "nvg", label: "NVG" },
+  { key: "sfe", label: "SFE" },
+  { key: "flightEngineer", label: "FE" },
+]
+
+/**
+ * Maps each AutoFill key to the FlightLog field that stores its time.
+ * Keys whose FlightLog field does not (yet) exist are left out — their
+ * aggregated minutes stay 0 and the UI skips them.
+ */
+const AUTO_FILL_FIELD_MAP: Partial<Record<AutoFillKey, keyof FlightLog>> = {
+  night: "nightTime",
+  pic: "picTime",
+  sic: "sicTime",
+  p1us: "picusTime",
+  dualRcvd: "dualTime",
+  dualGiven: "instructorTime",
+  xc: "crossCountryTime",
+  ifr: "ifrTime",
+  actualInst: "actualInstrumentTime",
+  simInst: "simulatedInstrumentTime",
+}
+
+export type AutoFillMinutes = Record<AutoFillKey, number>
+
+function emptyAutoFillMinutes(): AutoFillMinutes {
+  return {
+    night: 0, pic: 0, sic: 0, p1us: 0,
+    dualRcvd: 0, dualGiven: 0, xc: 0, ifr: 0,
+    actualInst: 0, simInst: 0, multiPilot: 0, solo: 0,
+    ground: 0, nvg: 0, sfe: 0, flightEngineer: 0,
+  }
+}
 
 export interface DashboardAggregates {
   totals: {
@@ -40,6 +100,7 @@ export interface DashboardAggregates {
     me: number
     jet: number
   }
+  byAutoFillField: AutoFillMinutes
   topTypes: Array<{ type: string; minutes: number }>
 }
 
@@ -60,6 +121,7 @@ const EMPTY: DashboardAggregates = {
   landings: 0,
   byCategory: { airplane: 0, rotorcraft: 0, glider: 0, other: 0 },
   byEngine: { se: 0, me: 0, jet: 0 },
+  byAutoFillField: emptyAutoFillMinutes(),
   topTypes: [],
 }
 
@@ -159,6 +221,7 @@ export function aggregateDashboard({
     landings: 0,
     byCategory: { airplane: 0, rotorcraft: 0, glider: 0, other: 0 },
     byEngine: { se: 0, me: 0, jet: 0 },
+    byAutoFillField: emptyAutoFillMinutes(),
     topTypes: [],
   }
 
@@ -166,6 +229,9 @@ export function aggregateDashboard({
 
   for (const flight of flights) {
     if (!flight.date) continue
+    // Exclude scheduled / not-yet-flown placeholders.
+    if (!isFlownFlight(flight)) continue
+
     const inRange = flight.date >= fromIso && flight.date <= toIso
     const inWeek = week.has(flight.date)
 
@@ -197,6 +263,15 @@ export function aggregateDashboard({
     result.sicMinutes += hhmmToMinutes(flight.sicTime)
     result.takeoffs += (flight.dayTakeoffs || 0) + (flight.nightTakeoffs || 0)
     result.landings += (flight.dayLandings || 0) + (flight.nightLandings || 0)
+
+    for (const key of Object.keys(AUTO_FILL_FIELD_MAP) as AutoFillKey[]) {
+      const field = AUTO_FILL_FIELD_MAP[key]
+      if (!field) continue
+      const value = flight[field]
+      if (typeof value === "string") {
+        result.byAutoFillField[key] += hhmmToMinutes(value)
+      }
+    }
 
     const reg = (flight.aircraftReg || "").toUpperCase()
     const ac = regToAircraft.get(reg)

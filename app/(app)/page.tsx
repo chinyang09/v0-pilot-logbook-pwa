@@ -10,7 +10,6 @@ import { useAuth } from "@/components/providers/auth-provider"
 import { refreshAllData } from "@/hooks/data"
 
 import { DashboardPeriodProvider } from "@/hooks/use-dashboard-period"
-import { DashboardHeader } from "@/components/dashboard/dashboard-header"
 import { DashboardPeriodTabs } from "@/components/dashboard/dashboard-period-tabs"
 import { DashboardGrid } from "@/components/dashboard/dashboard-grid"
 
@@ -24,7 +23,6 @@ export default function Dashboard() {
     return unsubscribe
   }, [])
 
-  // Clear stale keep-alive page actions
   useRegisterMainActions(null, true)
 
   if (authLoading) {
@@ -45,11 +43,8 @@ export default function Dashboard() {
   return (
     <PageContainer>
       <DashboardPeriodProvider>
-        <div className="px-3 sm:px-4 pt-3 sm:pt-4 pb-safe space-y-4 max-w-[1600px] mx-auto">
-          <DashboardHeader />
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <DashboardPeriodTabs />
-          </div>
+        <div className="px-2 sm:px-3 pt-2 sm:pt-3 pb-safe space-y-2 sm:space-y-3 max-w-[1600px] mx-auto">
+          <DashboardPeriodTabs />
           <DashboardGrid />
         </div>
       </DashboardPeriodProvider>

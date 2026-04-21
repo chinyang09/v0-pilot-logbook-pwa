@@ -19,7 +19,7 @@ export function DashboardWidget({
   ...props
 }: DashboardWidgetProps) {
   const base = cn(
-    "group relative flex h-full w-full flex-col rounded-2xl border border-border/60 bg-card/70 p-3 sm:p-4 shadow-sm backdrop-blur-sm",
+    "group relative flex h-full w-full flex-col rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm backdrop-blur-sm",
     "transition-colors",
     href && "cursor-pointer hover:border-primary/40 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
     className,

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 
-export type DashboardPreset = "1w" | "28d" | "3m" | "6m" | "1y"
+export type DashboardPreset = "7d" | "14d" | "28d" | "1y"
 
 export type DashboardPeriod =
   | { kind: "preset"; preset: DashboardPreset }
@@ -12,7 +12,9 @@ export interface ResolvedPeriod {
   period: DashboardPeriod
   fromIso: string
   toIso: string
-  label: string
+  /** Human-friendly range text, e.g. "Apr 15 – Apr 21". */
+  rangeLabel: string
+  /** Short tab label, e.g. "7d", "14d", "Custom". */
   shortLabel: string
 }
 
@@ -24,12 +26,11 @@ interface DashboardPeriodContextValue {
 
 const DashboardPeriodContext = React.createContext<DashboardPeriodContextValue | null>(null)
 
-const PRESET_LABELS: Record<DashboardPreset, { short: string; long: string; days: number }> = {
-  "1w": { short: "1w", long: "Last 7 days", days: 7 },
-  "28d": { short: "28d", long: "Last 28 days", days: 28 },
-  "3m": { short: "3m", long: "Last 3 months", days: 90 },
-  "6m": { short: "6m", long: "Last 6 months", days: 180 },
-  "1y": { short: "1y", long: "Last 12 months", days: 365 },
+const PRESET_CONFIG: Record<DashboardPreset, { short: string; days: number }> = {
+  "7d": { short: "7d", days: 7 },
+  "14d": { short: "14d", days: 14 },
+  "28d": { short: "28d", days: 28 },
+  "1y": { short: "1y", days: 365 },
 }
 
 function todayIso(): string {
@@ -58,14 +59,14 @@ function formatRangeLabel(fromIso: string, toIso: string): string {
 
 export function resolvePeriod(period: DashboardPeriod): ResolvedPeriod {
   if (period.kind === "preset") {
-    const cfg = PRESET_LABELS[period.preset]
+    const cfg = PRESET_CONFIG[period.preset]
     const toIso = todayIso()
     const fromIso = isoDaysAgo(cfg.days - 1)
     return {
       period,
       fromIso,
       toIso,
-      label: cfg.long,
+      rangeLabel: formatRangeLabel(fromIso, toIso),
       shortLabel: cfg.short,
     }
   }
@@ -73,7 +74,7 @@ export function resolvePeriod(period: DashboardPeriod): ResolvedPeriod {
     period,
     fromIso: period.from,
     toIso: period.to,
-    label: formatRangeLabel(period.from, period.to),
+    rangeLabel: formatRangeLabel(period.from, period.to),
     shortLabel: "Custom",
   }
 }
@@ -112,9 +113,8 @@ export function useDashboardPeriod(): DashboardPeriodContextValue {
 }
 
 export const PERIOD_PRESETS: ReadonlyArray<{ value: DashboardPreset; label: string }> = [
-  { value: "1w", label: "1w" },
+  { value: "7d", label: "7d" },
+  { value: "14d", label: "14d" },
   { value: "28d", label: "28d" },
-  { value: "3m", label: "3m" },
-  { value: "6m", label: "6m" },
   { value: "1y", label: "1y" },
 ]

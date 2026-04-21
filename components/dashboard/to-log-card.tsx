@@ -21,7 +21,7 @@ export function ToLogCard({ takeoffs, landings, className }: ToLogCardProps) {
       href="/logbook"
       aria-label="Takeoffs and landings"
       className={cn(
-        "flex h-full items-center gap-3 rounded-2xl border border-border/60 bg-card/70 p-3 sm:p-4 shadow-sm backdrop-blur-sm transition-colors hover:border-primary/40",
+        "flex h-full items-center gap-3 rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm backdrop-blur-sm transition-colors hover:border-primary/40",
         className,
       )}
     >

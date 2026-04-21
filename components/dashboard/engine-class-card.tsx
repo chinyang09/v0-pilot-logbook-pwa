@@ -23,7 +23,7 @@ export function EngineClassCard({ byEngine, topTypes, className }: EngineClassCa
       href="/aircraft"
       aria-label="Engine class breakdown"
       className={cn(
-        "group flex h-full flex-col rounded-2xl border border-border/60 bg-card/70 p-3 sm:p-4 shadow-sm backdrop-blur-sm transition-colors hover:border-primary/40",
+        "group flex h-full flex-col rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm backdrop-blur-sm transition-colors hover:border-primary/40",
         className,
       )}
     >
