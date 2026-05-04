@@ -2,7 +2,7 @@
 
 import * as React from "react"
 
-export type DashboardPreset = "7d" | "14d" | "28d" | "1y"
+export type DashboardPreset = "7d" | "28d" | "1y" | "all"
 
 export type DashboardPeriod =
   | { kind: "preset"; preset: DashboardPreset }
@@ -12,9 +12,9 @@ export interface ResolvedPeriod {
   period: DashboardPeriod
   fromIso: string
   toIso: string
-  /** Human-friendly range text, e.g. "Apr 15 – Apr 21". */
+  /** Human-friendly range text, e.g. "Apr 15 – Apr 21" or "All time". */
   rangeLabel: string
-  /** Short tab label, e.g. "7d", "14d", "Custom". */
+  /** Short tab label, e.g. "7d", "All", "Custom". */
   shortLabel: string
 }
 
@@ -22,16 +22,27 @@ interface DashboardPeriodContextValue {
   period: DashboardPeriod
   resolved: ResolvedPeriod
   setPeriod: (period: DashboardPeriod) => void
+  /** Whether the action-bar filter pills are expanded. */
+  showFilter: boolean
+  setShowFilter: (open: boolean) => void
+  /** Whether the action-bar calendar popover is open. */
+  showCalendar: boolean
+  setShowCalendar: (open: boolean) => void
 }
 
 const DashboardPeriodContext = React.createContext<DashboardPeriodContextValue | null>(null)
 
-const PRESET_CONFIG: Record<DashboardPreset, { short: string; days: number }> = {
+const PRESET_CONFIG: Record<DashboardPreset, { short: string; days: number | "all" }> = {
   "7d": { short: "7d", days: 7 },
-  "14d": { short: "14d", days: 14 },
   "28d": { short: "28d", days: 28 },
   "1y": { short: "1y", days: 365 },
+  "all": { short: "All", days: "all" },
 }
+
+/** Far-back fromIso used for the "all" preset. Earlier than any plausible
+ *  logbook entry; the aggregator filters on string comparison so any prefix
+ *  before real flight dates is fine. */
+const ALL_TIME_FROM_ISO = "1970-01-01"
 
 function todayIso(): string {
   const now = new Date()
@@ -61,6 +72,15 @@ export function resolvePeriod(period: DashboardPeriod): ResolvedPeriod {
   if (period.kind === "preset") {
     const cfg = PRESET_CONFIG[period.preset]
     const toIso = todayIso()
+    if (cfg.days === "all") {
+      return {
+        period,
+        fromIso: ALL_TIME_FROM_ISO,
+        toIso,
+        rangeLabel: "All time",
+        shortLabel: cfg.short,
+      }
+    }
     const fromIso = isoDaysAgo(cfg.days - 1)
     return {
       period,
@@ -89,12 +109,14 @@ export function DashboardPeriodProvider({
   const [period, setPeriod] = React.useState<DashboardPeriod>(
     defaultPeriod ?? { kind: "preset", preset: "28d" },
   )
+  const [showFilter, setShowFilter] = React.useState(false)
+  const [showCalendar, setShowCalendar] = React.useState(false)
 
   const resolved = React.useMemo(() => resolvePeriod(period), [period])
 
   const value = React.useMemo<DashboardPeriodContextValue>(
-    () => ({ period, resolved, setPeriod }),
-    [period, resolved],
+    () => ({ period, resolved, setPeriod, showFilter, setShowFilter, showCalendar, setShowCalendar }),
+    [period, resolved, showFilter, showCalendar],
   )
 
   return (
@@ -114,7 +136,7 @@ export function useDashboardPeriod(): DashboardPeriodContextValue {
 
 export const PERIOD_PRESETS: ReadonlyArray<{ value: DashboardPreset; label: string }> = [
   { value: "7d", label: "7d" },
-  { value: "14d", label: "14d" },
   { value: "28d", label: "28d" },
   { value: "1y", label: "1y" },
+  { value: "all", label: "All" },
 ]

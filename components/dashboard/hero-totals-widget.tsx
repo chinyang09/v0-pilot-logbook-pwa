@@ -9,42 +9,45 @@ import { formatDecimalHours } from "@/lib/utils/dashboard-aggregate"
 import { cn } from "@/lib/utils"
 
 interface HeroTotalsWidgetProps {
-  flightMinutes: number
-  simMinutes: number
+  /** Block time — chocks-off to chocks-on. Airlines log this as "flight time". */
   blockMinutes: number
+  simMinutes: number
   flightCount: number
   dayMinutes: number
   nightMinutes: number
+  /** Used as the ring's max so the ring fills meaningfully on small periods. */
+  periodTargetMinutes?: number
   className?: string
 }
 
 export function HeroTotalsWidget({
-  flightMinutes,
-  simMinutes,
   blockMinutes,
+  simMinutes,
   flightCount,
   dayMinutes,
   nightMinutes,
+  periodTargetMinutes,
   className,
 }: HeroTotalsWidgetProps) {
   const { resolved } = useDashboardPeriod()
-  const total = flightMinutes + simMinutes
-  const flightRatio = total > 0 ? flightMinutes / total : 1
-  const simRatio = total > 0 ? simMinutes / total : 0
 
-  const size = 180
+  // The ring fills proportionally to the larger of the period's actual block
+  // time and a sensible reference (default 100h) so a busy 28-day window
+  // doesn't look identical to a quiet 28-day window.
+  const max = Math.max(periodTargetMinutes ?? 100 * 60, blockMinutes, 1)
+  const ratio = Math.min(1, blockMinutes / max)
+
+  const size = 132
   const stroke = 10
-  const r1 = (size - stroke) / 2
-  const r2 = (size - stroke) / 2 - (stroke + 6)
-  const c1 = 2 * Math.PI * r1
-  const c2 = 2 * Math.PI * r2
+  const r = (size - stroke) / 2
+  const c = 2 * Math.PI * r
 
   return (
     <Link
-      href={`/logbook`}
+      href="/logbook"
       aria-label={`View logbook for ${resolved.rangeLabel}`}
       className={cn(
-        "group relative flex flex-col items-center justify-center overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-card/90 via-card/70 to-card/40 p-3 sm:p-4 shadow-sm backdrop-blur-sm",
+        "group relative flex flex-col overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-card/90 via-card/70 to-card/40 p-3 sm:p-4 shadow-sm backdrop-blur-sm",
         "transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
@@ -57,84 +60,62 @@ export function HeroTotalsWidget({
         <ArrowUpRight className="h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
 
-      <div className="relative flex items-center justify-center">
-        <svg
-          width={size}
-          height={size}
-          viewBox={`0 0 ${size} ${size}`}
-          className="-rotate-90"
-          aria-hidden="true"
-        >
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r1}
-            fill="none"
-            strokeWidth={stroke}
-            className="stroke-muted/40"
-          />
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r1}
-            fill="none"
-            strokeWidth={stroke}
-            strokeLinecap="round"
-            strokeDasharray={c1}
-            strokeDashoffset={c1 * (1 - flightRatio)}
-            className="stroke-chart-2 transition-[stroke-dashoffset] duration-500 motion-reduce:transition-none"
-          />
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r2}
-            fill="none"
-            strokeWidth={stroke}
-            className="stroke-muted/40"
-          />
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r2}
-            fill="none"
-            strokeWidth={stroke}
-            strokeLinecap="round"
-            strokeDasharray={c2}
-            strokeDashoffset={c2 * (1 - simRatio)}
-            className="stroke-chart-4 transition-[stroke-dashoffset] duration-500 motion-reduce:transition-none"
-          />
-        </svg>
-
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-chart-2">
-            Flight
-          </p>
-          <p className="font-mono tabular-nums text-2xl sm:text-3xl font-bold text-foreground leading-none">
-            {formatDecimalHours(flightMinutes)}
-          </p>
-          <div className="mt-1.5 h-px w-10 bg-border/80" />
-          <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-wider text-chart-4">
-            Sim
-          </p>
-          <p className="font-mono tabular-nums text-base font-semibold text-foreground/90 leading-none">
-            {formatDecimalHours(simMinutes)}
-          </p>
+      <div className="flex flex-1 items-center justify-center gap-3">
+        <div className="relative shrink-0">
+          <svg
+            width={size}
+            height={size}
+            viewBox={`0 0 ${size} ${size}`}
+            className="-rotate-90"
+            aria-hidden="true"
+          >
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={r}
+              fill="none"
+              strokeWidth={stroke}
+              className="stroke-muted/40"
+            />
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={r}
+              fill="none"
+              strokeWidth={stroke}
+              strokeLinecap="round"
+              strokeDasharray={c}
+              strokeDashoffset={c * (1 - ratio)}
+              className="stroke-chart-2 transition-[stroke-dashoffset] duration-500 motion-reduce:transition-none"
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-chart-2">
+              Flight
+            </p>
+            <p className="font-mono tabular-nums text-2xl font-bold text-foreground leading-none">
+              {formatDecimalHours(blockMinutes)}
+            </p>
+            <p className="mt-1 text-[9px] uppercase tracking-wider text-muted-foreground">
+              hours
+            </p>
+          </div>
         </div>
-      </div>
 
-      <div className="mt-3 grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
-        <StatTile label="Block" value={formatDecimalHours(blockMinutes)} />
-        <StatTile label="Flights" value={String(flightCount)} />
-        <StatTile
-          label="Day"
-          value={formatDecimalHours(dayMinutes)}
-          icon={<Sun className="h-3 w-3 text-chart-4" />}
-        />
-        <StatTile
-          label="Night"
-          value={formatDecimalHours(nightMinutes)}
-          icon={<Moon className="h-3 w-3 text-chart-3" />}
-        />
+        <div className="grid flex-1 grid-cols-2 gap-1.5">
+          <StatTile label="Flights" value={String(flightCount)} />
+          <StatTile label="Sim" value={formatDecimalHours(simMinutes)} />
+          <StatTile
+            label="Day"
+            value={formatDecimalHours(dayMinutes)}
+            icon={<Sun className="h-3 w-3 text-chart-4" />}
+          />
+          <StatTile
+            label="Night"
+            value={formatDecimalHours(nightMinutes)}
+            icon={<Moon className="h-3 w-3 text-chart-3" />}
+          />
+        </div>
       </div>
     </Link>
   )
@@ -150,12 +131,12 @@ function StatTile({
   icon?: React.ReactNode
 }) {
   return (
-    <div className="rounded-xl border border-border/40 bg-background/40 px-2 py-1.5">
-      <p className="flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="rounded-xl border border-border/40 bg-background/40 px-2 py-1">
+      <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         {icon}
         {label}
       </p>
-      <p className="text-center font-mono tabular-nums text-sm font-semibold text-foreground">
+      <p className="font-mono tabular-nums text-sm font-semibold text-foreground">
         {value}
       </p>
     </div>

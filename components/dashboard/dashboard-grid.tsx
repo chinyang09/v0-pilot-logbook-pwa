@@ -32,12 +32,12 @@ export function DashboardGrid({ className }: { className?: string }) {
         className,
       )}
     >
-      {/* Hero showpiece — ring + Block / Flights / Day / Night */}
+      {/* Hero showpiece — ring + Flights / Sim / Day / Night.
+          "Flight" hours = block time (chocks-off to chocks-on). */}
       <div className="md:col-span-3 xl:col-span-6 xl:row-span-2">
         <HeroTotalsWidget
-          flightMinutes={aggregates.totals.flightMinutes}
-          simMinutes={aggregates.totals.simMinutes}
           blockMinutes={aggregates.totals.blockMinutes}
+          simMinutes={aggregates.totals.simMinutes}
           flightCount={aggregates.totals.flightCount}
           dayMinutes={aggregates.dayMinutes}
           nightMinutes={aggregates.nightMinutes}
@@ -63,11 +63,13 @@ export function DashboardGrid({ className }: { className?: string }) {
         />
       </div>
 
-      {/* Take-offs / Landings */}
+      {/* Take-offs / Landings — last 3 events + 90-day currency status */}
       <div className="md:col-span-3 xl:col-span-4">
         <ToLogCard
           takeoffs={aggregates.takeoffs}
           landings={aggregates.landings}
+          recentEvents={aggregates.recentTLEvents}
+          currency={aggregates.ninetyDayCurrency}
           className="h-full"
         />
       </div>

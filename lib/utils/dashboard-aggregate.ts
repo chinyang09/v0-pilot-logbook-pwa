@@ -102,6 +102,28 @@ export interface DashboardAggregates {
   }
   byAutoFillField: AutoFillMinutes
   topTypes: Array<{ type: string; minutes: number }>
+  /** Most recent (up to 3) flown flights with non-zero T/O or LDG counts.
+   *  Always computed against the full flight history, NOT the period filter,
+   *  because the dashboard uses these for currency tracking. */
+  recentTLEvents: TLEvent[]
+  /** Rolling 90-day takeoff + landing currency status per FAA 14 CFR 61.57.
+   *  Always computed against the full flight history. */
+  ninetyDayCurrency: NinetyDayCurrency
+}
+
+export interface TLEvent {
+  flightId: string
+  date: string
+  flightNumber: string
+  aircraftReg: string
+  takeoffs: number
+  landings: number
+}
+
+export interface NinetyDayCurrency {
+  takeoffs: number
+  landings: number
+  current: boolean
 }
 
 const EMPTY: DashboardAggregates = {
@@ -123,6 +145,8 @@ const EMPTY: DashboardAggregates = {
   byEngine: { se: 0, me: 0, jet: 0 },
   byAutoFillField: emptyAutoFillMinutes(),
   topTypes: [],
+  recentTLEvents: [],
+  ninetyDayCurrency: { takeoffs: 0, landings: 0, current: false },
 }
 
 function classifyCategory(category: string | undefined): keyof DashboardAggregates["byCategory"] {
@@ -223,7 +247,43 @@ export function aggregateDashboard({
     byEngine: { se: 0, me: 0, jet: 0 },
     byAutoFillField: emptyAutoFillMinutes(),
     topTypes: [],
+    recentTLEvents: [],
+    ninetyDayCurrency: { takeoffs: 0, landings: 0, current: false },
   }
+
+  // Compute 90-day currency + last-3 T/O+LDG events from the full flown
+  // history (independent of the period filter).
+  const ninetyDaysAgo = new Date(now)
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
+  const ninetyAgoIso = `${ninetyDaysAgo.getFullYear()}-${(ninetyDaysAgo.getMonth() + 1)
+    .toString()
+    .padStart(2, "0")}-${ninetyDaysAgo.getDate().toString().padStart(2, "0")}`
+
+  const tlCandidates: TLEvent[] = []
+  for (const flight of flights) {
+    if (!flight.date) continue
+    if (!isFlownFlight(flight)) continue
+    const to = (flight.dayTakeoffs || 0) + (flight.nightTakeoffs || 0)
+    const ldg = (flight.dayLandings || 0) + (flight.nightLandings || 0)
+    if (to === 0 && ldg === 0) continue
+    tlCandidates.push({
+      flightId: flight.id,
+      date: flight.date,
+      flightNumber: flight.flightNumber || "",
+      aircraftReg: flight.aircraftReg || "",
+      takeoffs: to,
+      landings: ldg,
+    })
+    if (flight.date >= ninetyAgoIso) {
+      result.ninetyDayCurrency.takeoffs += to
+      result.ninetyDayCurrency.landings += ldg
+    }
+  }
+  result.ninetyDayCurrency.current =
+    result.ninetyDayCurrency.takeoffs >= 3 && result.ninetyDayCurrency.landings >= 3
+  result.recentTLEvents = tlCandidates
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+    .slice(0, 3)
 
   const typeMinutes = new Map<string, number>()
 
