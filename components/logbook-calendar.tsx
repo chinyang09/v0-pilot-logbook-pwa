@@ -43,6 +43,9 @@ interface LogbookCalendarProps {
    *  rangeEnd, cells in the range are tinted. Independent of selectedDate. */
   rangeStart?: string | null;
   rangeEnd?: string | null;
+  /** Optional content rendered above the calendar grid, inside the glass
+   *  material when glass mode is active. Use for a date range label etc. */
+  header?: React.ReactNode;
 }
 
 export interface CalendarHandle {
@@ -113,6 +116,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       dualMonth = false,
       rangeStart = null,
       rangeEnd = null,
+      header,
     },
     ref
   ) {
@@ -437,7 +441,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                     isCurrentMonth
                       ? "text-foreground/90"
                       : "text-foreground/[0.06]",
-                    flightInfo && isCurrentMonth && !isSelected && !isRangeStart && !isRangeEnd && (
+                    // Suppress flight-date highlighting when the calendar is
+                    // in range-pick mode; only the range pill should colour
+                    // cells, so the highlighted period reads as one shape.
+                    !rangeStart && !rangeEnd && flightInfo && isCurrentMonth && !isSelected && (
                       flightInfo.allFuture
                         ? "font-semibold text-primary/70 ring-1 ring-inset ring-primary/50"
                         : "font-semibold text-primary bg-primary/20"
@@ -631,6 +638,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 borderRadius: "inherit",
               }}
             />
+            {header && <div className="relative">{header}</div>}
             {activeContent}
           </div>
           <div className="GlassMaterial">
@@ -652,6 +660,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       <div
         className={cn("flex flex-col w-full pb-0 overflow-hidden", className)}
       >
+        {header}
         {activeContent}
       </div>
     );

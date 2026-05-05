@@ -76,8 +76,6 @@ export interface DashboardAggregates {
     blockMinutes: number
     flightCount: number
   }
-  weekdayFlightMinutes: number[] // length 7, Mon→Sun (current calendar week)
-  weekdaySimMinutes: number[]
   dayMinutes: number
   nightMinutes: number
   xcMinutes: number
@@ -109,6 +107,19 @@ export interface DashboardAggregates {
   /** Rolling 90-day takeoff + landing currency status per FAA 14 CFR 61.57.
    *  Always computed against the full flight history. */
   ninetyDayCurrency: NinetyDayCurrency
+  /** Flown flights inside the period filter, newest first. */
+  periodFlights: PeriodFlight[]
+}
+
+export interface PeriodFlight {
+  id: string
+  date: string
+  flightNumber: string
+  departureIcao: string
+  arrivalIcao: string
+  departureIata: string
+  arrivalIata: string
+  blockMinutes: number
 }
 
 export interface TLEvent {
@@ -128,8 +139,6 @@ export interface NinetyDayCurrency {
 
 const EMPTY: DashboardAggregates = {
   totals: { flightMinutes: 0, simMinutes: 0, blockMinutes: 0, flightCount: 0 },
-  weekdayFlightMinutes: [0, 0, 0, 0, 0, 0, 0],
-  weekdaySimMinutes: [0, 0, 0, 0, 0, 0, 0],
   dayMinutes: 0,
   nightMinutes: 0,
   xcMinutes: 0,
@@ -147,6 +156,7 @@ const EMPTY: DashboardAggregates = {
   topTypes: [],
   recentTLEvents: [],
   ninetyDayCurrency: { takeoffs: 0, landings: 0, current: false },
+  periodFlights: [],
 }
 
 function classifyCategory(category: string | undefined): keyof DashboardAggregates["byCategory"] {
@@ -174,36 +184,6 @@ function classifyEngine(engineType: string | undefined): keyof DashboardAggregat
   }
 }
 
-/**
- * Compute Monday-based weekday index (0 = Mon, 6 = Sun) from YYYY-MM-DD string.
- */
-function weekdayIndex(dateStr: string): number {
-  const d = new Date(`${dateStr}T00:00:00`)
-  const js = d.getDay() // 0 = Sun
-  return (js + 6) % 7
-}
-
-/**
- * Returns ISO date strings for the current calendar week (Mon → Sun).
- */
-export function currentWeekIsoDates(now: Date = new Date()): string[] {
-  const dayJs = now.getDay() // 0 Sun
-  const monOffset = (dayJs + 6) % 7
-  const monday = new Date(now)
-  monday.setDate(now.getDate() - monOffset)
-  monday.setHours(0, 0, 0, 0)
-  const out: string[] = []
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday)
-    d.setDate(monday.getDate() + i)
-    const y = d.getFullYear()
-    const m = (d.getMonth() + 1).toString().padStart(2, "0")
-    const day = d.getDate().toString().padStart(2, "0")
-    out.push(`${y}-${m}-${day}`)
-  }
-  return out
-}
-
 export interface AggregateInput {
   flights: FlightLog[]
   aircraft: Aircraft[]
@@ -226,12 +206,8 @@ export function aggregateDashboard({
     if (a.registration) regToAircraft.set(a.registration.toUpperCase(), a)
   }
 
-  const week = new Set(currentWeekIsoDates(now))
-
   const result: DashboardAggregates = {
     totals: { flightMinutes: 0, simMinutes: 0, blockMinutes: 0, flightCount: 0 },
-    weekdayFlightMinutes: [0, 0, 0, 0, 0, 0, 0],
-    weekdaySimMinutes: [0, 0, 0, 0, 0, 0, 0],
     dayMinutes: 0,
     nightMinutes: 0,
     xcMinutes: 0,
@@ -249,6 +225,7 @@ export function aggregateDashboard({
     topTypes: [],
     recentTLEvents: [],
     ninetyDayCurrency: { takeoffs: 0, landings: 0, current: false },
+    periodFlights: [],
   }
 
   // Compute 90-day currency + last-3 T/O+LDG events from the full flown
@@ -293,19 +270,11 @@ export function aggregateDashboard({
     if (!isFlownFlight(flight)) continue
 
     const inRange = flight.date >= fromIso && flight.date <= toIso
-    const inWeek = week.has(flight.date)
+    if (!inRange) continue
 
     const blockM = hhmmToMinutes(flight.blockTime)
     const flightM = hhmmToMinutes(flight.flightTime) || blockM
     const simM = hhmmToMinutes(flight.simulatedInstrumentTime)
-
-    if (inWeek) {
-      const idx = weekdayIndex(flight.date)
-      result.weekdayFlightMinutes[idx] += flightM
-      result.weekdaySimMinutes[idx] += simM
-    }
-
-    if (!inRange) continue
 
     result.totals.flightMinutes += flightM
     result.totals.simMinutes += simM
@@ -323,6 +292,17 @@ export function aggregateDashboard({
     result.sicMinutes += hhmmToMinutes(flight.sicTime)
     result.takeoffs += (flight.dayTakeoffs || 0) + (flight.nightTakeoffs || 0)
     result.landings += (flight.dayLandings || 0) + (flight.nightLandings || 0)
+
+    result.periodFlights.push({
+      id: flight.id,
+      date: flight.date,
+      flightNumber: flight.flightNumber || "",
+      departureIcao: flight.departureIcao || "",
+      arrivalIcao: flight.arrivalIcao || "",
+      departureIata: flight.departureIata || "",
+      arrivalIata: flight.arrivalIata || "",
+      blockMinutes: blockM,
+    })
 
     for (const key of Object.keys(AUTO_FILL_FIELD_MAP) as AutoFillKey[]) {
       const field = AUTO_FILL_FIELD_MAP[key]
@@ -351,6 +331,11 @@ export function aggregateDashboard({
     .map(([type, minutes]) => ({ type, minutes }))
     .sort((a, b) => b.minutes - a.minutes)
     .slice(0, 3)
+
+  // Newest first; tie-break is undefined but stable enough for display.
+  result.periodFlights.sort((a, b) =>
+    a.date < b.date ? 1 : a.date > b.date ? -1 : 0,
+  )
 
   return result
 }

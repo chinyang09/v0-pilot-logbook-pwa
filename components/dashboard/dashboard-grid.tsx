@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 
 import { HeroTotalsWidget } from "./hero-totals-widget"
-import { WeeklyGaugePanel } from "./weekly-gauge-panel"
+import { PeriodFlightsCard } from "./period-flights-card"
 import { ProgressRingGrid } from "./progress-ring-grid"
 import { EngineClassCard } from "./engine-class-card"
 import { ToLogCard } from "./to-log-card"
@@ -45,11 +45,10 @@ export function DashboardGrid({ className }: { className?: string }) {
         />
       </div>
 
-      {/* Weekly gauges */}
+      {/* Per-flight breakdown for the active period */}
       <div className="md:col-span-3 xl:col-span-6">
-        <WeeklyGaugePanel
-          title="This Week — Flight"
-          values={aggregates.weekdayFlightMinutes}
+        <PeriodFlightsCard
+          flights={aggregates.periodFlights}
           className="h-full"
         />
       </div>

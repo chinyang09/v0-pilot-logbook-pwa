@@ -12,7 +12,7 @@ function todayMonth() {
   return { year: d.getFullYear(), month: d.getMonth() }
 }
 
-function formatShortDate(iso: string | null): string {
+function formatShortDate(iso: string | null | undefined): string {
   if (!iso) return "…"
   const d = new Date(`${iso}T00:00:00`)
   return new Intl.DateTimeFormat(undefined, {
@@ -23,58 +23,77 @@ function formatShortDate(iso: string | null): string {
 }
 
 /**
- * Range-mode wrapper around the logbook calendar. Tapping a day sets the
- * range start; tapping a second day sets the end (auto-ordered) and applies
- * the custom period immediately. A third tap starts a new range.
+ * Range-mode wrapper around the logbook calendar.
  *
- * Anchored as `position: absolute` to the dashboard's main-panel relative
- * container (NOT the viewport), so on split-pane layouts the picker stays
- * centered over the dashboard panel and never overlaps the detail panel.
- * Positioned at `top: 4rem` to drop down beneath the AppShell action bar.
+ * - When no tap is in progress, the picker mirrors the active period
+ *   (preset or custom): the range pill spans `resolved.fromIso` →
+ *   `resolved.toIso` and the header shows the same. Switching preset in
+ *   the action bar instantly updates the picker.
+ * - First tap starts a new pick: the range pill clears and only the tapped
+ *   day is highlighted while the user picks the other endpoint.
+ * - Second tap completes the range, auto-orders, and commits to the period.
+ * - Date range header is injected inside the glass material so it visually
+ *   belongs to the picker.
  */
 export function DashboardCalendarPanel() {
   const { resolved, period, setPeriod, showCalendar } = useDashboardPeriod()
   const { flights } = useFlights()
 
-  const [draftStart, setDraftStart] = React.useState<string | null>(
-    period.kind === "custom" ? resolved.fromIso : null,
-  )
-  const [draftEnd, setDraftEnd] = React.useState<string | null>(
-    period.kind === "custom" ? resolved.toIso : null,
-  )
+  const [midPickStart, setMidPickStart] = React.useState<string | null>(null)
   const [selectedMonth, setSelectedMonth] = React.useState(todayMonth)
 
+  // Clearing rules:
+  // - Closing the picker discards any in-progress pick.
+  // - Externally changing the period (preset selection from the action bar,
+  //   or the second-tap commit) also discards mid-pick state so the picker
+  //   re-syncs with the live period.
+  React.useEffect(() => {
+    if (!showCalendar) setMidPickStart(null)
+  }, [showCalendar])
+
+  React.useEffect(() => {
+    setMidPickStart(null)
+  }, [period])
+
+  // Anchor the visible month on the active period's end whenever the picker
+  // opens or the period changes externally.
   React.useEffect(() => {
     if (!showCalendar) return
-    if (period.kind === "custom") {
-      setDraftStart(resolved.fromIso)
-      setDraftEnd(resolved.toIso)
-    } else {
-      setDraftStart(null)
-      setDraftEnd(null)
-    }
     const anchor = new Date(`${resolved.toIso}T00:00:00`)
     setSelectedMonth({ year: anchor.getFullYear(), month: anchor.getMonth() })
-  }, [showCalendar, period.kind, resolved.fromIso, resolved.toIso])
+  }, [showCalendar, resolved.toIso])
 
   const handleDateSelect = React.useCallback(
     (dateStr: string) => {
-      if (draftStart && draftEnd) {
-        setDraftStart(dateStr)
-        setDraftEnd(null)
+      if (midPickStart === null) {
+        // First tap of a new range — pause range pill, mark the start.
+        setMidPickStart(dateStr)
         return
       }
-      if (!draftStart) {
-        setDraftStart(dateStr)
-        return
-      }
-      const a = dateStr < draftStart ? dateStr : draftStart
-      const b = dateStr < draftStart ? draftStart : dateStr
-      setDraftStart(a)
-      setDraftEnd(b)
+      // Second tap completes the range, auto-ordering. Commit to the period;
+      // the period-change effect above clears midPickStart.
+      const a = dateStr < midPickStart ? dateStr : midPickStart
+      const b = dateStr < midPickStart ? midPickStart : dateStr
       setPeriod({ kind: "custom", from: a, to: b })
     },
-    [draftStart, draftEnd, setPeriod],
+    [midPickStart, setPeriod],
+  )
+
+  // What the calendar visualises: when a tap is in progress, only the start
+  // of the new pick. Otherwise the live period.
+  const displayStart = midPickStart ?? resolved.fromIso
+  const displayEnd = midPickStart ? null : resolved.toIso
+
+  const headerLabel = (
+    <div className="relative flex items-center justify-center gap-2 px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <span className="text-foreground tabular-nums">
+        {formatShortDate(displayStart)}
+      </span>
+      <span aria-hidden>→</span>
+      <span className="text-foreground tabular-nums">
+        {formatShortDate(displayEnd)}
+      </span>
+    </div>
   )
 
   return (
@@ -89,22 +108,14 @@ export function DashboardCalendarPanel() {
           className="pointer-events-none absolute inset-x-0 top-16 z-[60] flex justify-center px-2"
         >
           <div className="pointer-events-auto w-full max-w-md">
-            <div className="flex items-center justify-center gap-2 px-3 pt-1 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <span className="text-foreground tabular-nums">
-                {formatShortDate(draftStart)}
-              </span>
-              <span aria-hidden>→</span>
-              <span className="text-foreground tabular-nums">
-                {formatShortDate(draftEnd)}
-              </span>
-            </div>
             <LogbookCalendar
               flights={flights}
               selectedMonth={selectedMonth}
               onMonthChange={(year, month) => setSelectedMonth({ year, month })}
               onDateSelect={handleDateSelect}
-              rangeStart={draftStart}
-              rangeEnd={draftEnd}
+              rangeStart={displayStart}
+              rangeEnd={displayEnd}
+              header={headerLabel}
               glass
               cornerRadius={24}
             />
