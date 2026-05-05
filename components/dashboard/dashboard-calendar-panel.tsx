@@ -4,7 +4,6 @@ import * as React from "react"
 import { motion, AnimatePresence } from "framer-motion"
 
 import { LogbookCalendar } from "@/components/logbook-calendar"
-import { Button } from "@/components/ui/button"
 import { useFlights } from "@/hooks/data/use-flights"
 import { useDashboardPeriod } from "@/hooks/use-dashboard-period"
 
@@ -13,93 +12,95 @@ function todayMonth() {
   return { year: d.getFullYear(), month: d.getMonth() }
 }
 
+function formatShortDate(iso: string | null): string {
+  if (!iso) return "…"
+  const d = new Date(`${iso}T00:00:00`)
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(d)
+}
+
 /**
  * Range-mode wrapper around the logbook calendar. Tapping a day sets the
- * range start; tapping a second day sets the end (auto-ordered). A third
- * tap resets to a new start.
+ * range start; tapping a second day sets the end (auto-ordered) and applies
+ * the custom period immediately. A third tap starts a new range.
  *
- * Rendered inside the dashboard page body and absolute-positioned to drop
- * down beneath the action bar — same pattern the logbook page uses for its
- * single-month picker, so the calendar can never overflow the viewport.
+ * Rendered as a fixed-position overlay just below the AppShell action bar so
+ * it stays accessible regardless of page scroll. Closing is handled by the
+ * calendar action button toggling `showCalendar` back off.
  */
 export function DashboardCalendarPanel() {
-  const { resolved, setPeriod, showCalendar, setShowCalendar } =
-    useDashboardPeriod()
+  const { resolved, period, setPeriod, showCalendar } = useDashboardPeriod()
   const { flights } = useFlights()
 
   const [draftStart, setDraftStart] = React.useState<string | null>(
-    resolved.fromIso,
+    period.kind === "custom" ? resolved.fromIso : null,
   )
   const [draftEnd, setDraftEnd] = React.useState<string | null>(
-    resolved.toIso,
+    period.kind === "custom" ? resolved.toIso : null,
   )
   const [selectedMonth, setSelectedMonth] = React.useState(todayMonth)
 
-  // Reset draft state to mirror the live period whenever the panel opens.
+  // Sync draft state to the live period each time the panel opens, and
+  // anchor the visible month on the range end.
   React.useEffect(() => {
-    if (showCalendar) {
+    if (!showCalendar) return
+    if (period.kind === "custom") {
       setDraftStart(resolved.fromIso)
       setDraftEnd(resolved.toIso)
-      const end = new Date(`${resolved.toIso}T00:00:00`)
-      setSelectedMonth({ year: end.getFullYear(), month: end.getMonth() })
+    } else {
+      setDraftStart(null)
+      setDraftEnd(null)
     }
-  }, [showCalendar, resolved.fromIso, resolved.toIso])
+    const anchor = new Date(`${resolved.toIso}T00:00:00`)
+    setSelectedMonth({ year: anchor.getFullYear(), month: anchor.getMonth() })
+  }, [showCalendar, period.kind, resolved.fromIso, resolved.toIso])
 
   const handleDateSelect = React.useCallback(
     (dateStr: string) => {
-      // Two-tap range logic: if no start, or both already set → start fresh.
-      if (!draftStart || (draftStart && draftEnd)) {
+      // Both endpoints already set → restart with a new first tap.
+      if (draftStart && draftEnd) {
         setDraftStart(dateStr)
         setDraftEnd(null)
         return
       }
-      // Otherwise complete the range, auto-ordering.
-      if (dateStr < draftStart) {
-        setDraftEnd(draftStart)
+      // No start yet → first tap of a new range.
+      if (!draftStart) {
         setDraftStart(dateStr)
-      } else {
-        setDraftEnd(dateStr)
+        return
       }
+      // Second tap: complete the range, auto-order, and commit immediately.
+      const a = dateStr < draftStart ? dateStr : draftStart
+      const b = dateStr < draftStart ? draftStart : dateStr
+      setDraftStart(a)
+      setDraftEnd(b)
+      setPeriod({ kind: "custom", from: a, to: b })
     },
-    [draftStart, draftEnd],
+    [draftStart, draftEnd, setPeriod],
   )
-
-  const canApply = !!draftStart
-  const handleApply = () => {
-    if (!draftStart) return
-    const from = draftStart
-    const to = draftEnd ?? draftStart
-    setPeriod({ kind: "custom", from, to })
-    setShowCalendar(false)
-  }
 
   return (
     <AnimatePresence initial={false}>
       {showCalendar && (
         <motion.div
           key="dashboard-calendar"
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: "auto", opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          transition={{ type: "spring", stiffness: 360, damping: 32 }}
-          className="overflow-hidden"
+          initial={{ y: -16, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: -16, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 380, damping: 32 }}
+          className="pointer-events-none fixed inset-x-0 top-16 z-[60] flex justify-center px-2"
         >
-          <div className="mx-auto mt-2 max-w-md rounded-2xl border border-border/60 bg-card/95 shadow-lg backdrop-blur-sm">
-            <div className="flex items-center justify-between gap-2 px-3 pt-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {draftStart && draftEnd
-                  ? "Tap any day to start a new range"
-                  : draftStart
-                    ? "Tap second day to set end"
-                    : "Tap a day to start"}
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowCalendar(false)}
-                className="text-xs font-medium text-muted-foreground hover:text-foreground"
-              >
-                Close
-              </button>
+          <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/60 bg-card/95 shadow-xl backdrop-blur-sm">
+            <div className="flex items-center justify-center gap-2 px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <span className="font-mono tabular-nums text-foreground">
+                {formatShortDate(draftStart)}
+              </span>
+              <span aria-hidden>→</span>
+              <span className="font-mono tabular-nums text-foreground">
+                {formatShortDate(draftEnd)}
+              </span>
             </div>
             <LogbookCalendar
               flights={flights}
@@ -109,15 +110,6 @@ export function DashboardCalendarPanel() {
               rangeStart={draftStart}
               rangeEnd={draftEnd}
             />
-            <div className="flex items-center justify-between gap-2 border-t border-border/40 px-3 py-2">
-              <p className="font-mono tabular-nums text-xs text-muted-foreground">
-                {draftStart ?? "—"}
-                {draftEnd ? `  →  ${draftEnd}` : ""}
-              </p>
-              <Button size="sm" onClick={handleApply} disabled={!canApply}>
-                Apply
-              </Button>
-            </div>
           </div>
         </motion.div>
       )}
