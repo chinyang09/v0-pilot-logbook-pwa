@@ -27,9 +27,10 @@ function formatShortDate(iso: string | null): string {
  * range start; tapping a second day sets the end (auto-ordered) and applies
  * the custom period immediately. A third tap starts a new range.
  *
- * Rendered as a fixed-position overlay just below the AppShell action bar so
- * it stays accessible regardless of page scroll. Closing is handled by the
- * calendar action button toggling `showCalendar` back off.
+ * Anchored as `position: absolute` to the dashboard's main-panel relative
+ * container (NOT the viewport), so on split-pane layouts the picker stays
+ * centered over the dashboard panel and never overlaps the detail panel.
+ * Positioned at `top: 4rem` to drop down beneath the AppShell action bar.
  */
 export function DashboardCalendarPanel() {
   const { resolved, period, setPeriod, showCalendar } = useDashboardPeriod()
@@ -43,8 +44,6 @@ export function DashboardCalendarPanel() {
   )
   const [selectedMonth, setSelectedMonth] = React.useState(todayMonth)
 
-  // Sync draft state to the live period each time the panel opens, and
-  // anchor the visible month on the range end.
   React.useEffect(() => {
     if (!showCalendar) return
     if (period.kind === "custom") {
@@ -60,18 +59,15 @@ export function DashboardCalendarPanel() {
 
   const handleDateSelect = React.useCallback(
     (dateStr: string) => {
-      // Both endpoints already set → restart with a new first tap.
       if (draftStart && draftEnd) {
         setDraftStart(dateStr)
         setDraftEnd(null)
         return
       }
-      // No start yet → first tap of a new range.
       if (!draftStart) {
         setDraftStart(dateStr)
         return
       }
-      // Second tap: complete the range, auto-order, and commit immediately.
       const a = dateStr < draftStart ? dateStr : draftStart
       const b = dateStr < draftStart ? draftStart : dateStr
       setDraftStart(a)
@@ -90,15 +86,15 @@ export function DashboardCalendarPanel() {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: -16, opacity: 0 }}
           transition={{ type: "spring", stiffness: 380, damping: 32 }}
-          className="pointer-events-none fixed inset-x-0 top-16 z-[60] flex justify-center px-2"
+          className="pointer-events-none absolute inset-x-0 top-16 z-[60] flex justify-center px-2"
         >
-          <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/60 bg-card/95 shadow-xl backdrop-blur-sm">
-            <div className="flex items-center justify-center gap-2 px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <span className="font-mono tabular-nums text-foreground">
+          <div className="pointer-events-auto w-full max-w-md">
+            <div className="flex items-center justify-center gap-2 px-3 pt-1 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <span className="text-foreground tabular-nums">
                 {formatShortDate(draftStart)}
               </span>
               <span aria-hidden>→</span>
-              <span className="font-mono tabular-nums text-foreground">
+              <span className="text-foreground tabular-nums">
                 {formatShortDate(draftEnd)}
               </span>
             </div>
@@ -109,6 +105,8 @@ export function DashboardCalendarPanel() {
               onDateSelect={handleDateSelect}
               rangeStart={draftStart}
               rangeEnd={draftEnd}
+              glass
+              cornerRadius={24}
             />
           </div>
         </motion.div>

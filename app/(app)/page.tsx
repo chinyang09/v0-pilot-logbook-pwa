@@ -42,11 +42,17 @@ export default function Dashboard() {
   }
 
   return (
-    <PageContainer>
-      <div className="px-2 sm:px-3 pt-2 sm:pt-3 pb-safe space-y-2 sm:space-y-3 max-w-[1600px] mx-auto">
-        <DashboardCalendarPanel />
-        <DashboardGrid />
-      </div>
-    </PageContainer>
+    // Outer relative wrapper anchors the calendar overlay to the main panel
+    // (so on split-pane layouts the picker stays centered over the dashboard,
+    // not the entire viewport). Calendar is rendered as a sibling of
+    // PageContainer's scrolling main, so it never scrolls with content.
+    <div className="h-full relative">
+      <PageContainer>
+        <div className="px-2 sm:px-3 pt-2 sm:pt-3 pb-safe space-y-2 sm:space-y-3 max-w-[1600px] mx-auto">
+          <DashboardGrid />
+        </div>
+      </PageContainer>
+      <DashboardCalendarPanel />
+    </div>
   )
 }

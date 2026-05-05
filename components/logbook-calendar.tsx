@@ -403,14 +403,17 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             const isToday = dayInfo.dateStr === today;
             const isSelected = isCurrentMonth && dayInfo.dateStr === selectedDate;
 
-            // Range visualization (only when both endpoints provided).
-            const hasRange = !!(rangeStart && rangeEnd);
+            // Range visualization. Endpoints highlight whenever they match,
+            // even with only one tap; the connecting tint draws only when
+            // both endpoints exist and span more than a single day.
+            const hasFullRange =
+              !!(rangeStart && rangeEnd) && rangeStart !== rangeEnd;
             const isRangeStart =
-              hasRange && isCurrentMonth && dayInfo.dateStr === rangeStart;
+              isCurrentMonth && !!rangeStart && dayInfo.dateStr === rangeStart;
             const isRangeEnd =
-              hasRange && isCurrentMonth && dayInfo.dateStr === rangeEnd;
+              isCurrentMonth && !!rangeEnd && dayInfo.dateStr === rangeEnd;
             const isInRange =
-              hasRange &&
+              hasFullRange &&
               isCurrentMonth &&
               dayInfo.dateStr >= rangeStart! &&
               dayInfo.dateStr <= rangeEnd!;
@@ -422,10 +425,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 onClick={() => handleDateClick(dayInfo.dateStr, isCurrentMonth)}
                 className={cn(
                   "relative flex items-center justify-center aspect-square p-px",
-                  isRangeMiddle && "bg-primary/15",
-                  isInRange && rangeStart === rangeEnd && "bg-transparent",
-                  isRangeStart && !isRangeEnd && "bg-primary/15",
-                  isRangeEnd && !isRangeStart && "bg-primary/15",
+                  // Continuous pill behind the row of in-range cells.
+                  isRangeMiddle && "bg-primary/20",
+                  hasFullRange && isRangeStart && "bg-primary/20 rounded-l-full",
+                  hasFullRange && isRangeEnd && "bg-primary/20 rounded-r-full",
                 )}
               >
                 <div
