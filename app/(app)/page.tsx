@@ -10,6 +10,7 @@ import { useAuth } from "@/components/providers/auth-provider"
 import { refreshAllData } from "@/hooks/data"
 
 import { DashboardActions } from "@/components/dashboard/dashboard-actions"
+import { DashboardCalendarPanel } from "@/components/dashboard/dashboard-calendar-panel"
 import { DashboardGrid } from "@/components/dashboard/dashboard-grid"
 
 export default function Dashboard() {
@@ -43,6 +44,7 @@ export default function Dashboard() {
   return (
     <PageContainer>
       <div className="px-2 sm:px-3 pt-2 sm:pt-3 pb-safe space-y-2 sm:space-y-3 max-w-[1600px] mx-auto">
+        <DashboardCalendarPanel />
         <DashboardGrid />
       </div>
     </PageContainer>

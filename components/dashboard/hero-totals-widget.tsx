@@ -31,13 +31,10 @@ export function HeroTotalsWidget({
 }: HeroTotalsWidgetProps) {
   const { resolved } = useDashboardPeriod()
 
-  // The ring fills proportionally to the larger of the period's actual block
-  // time and a sensible reference (default 100h) so a busy 28-day window
-  // doesn't look identical to a quiet 28-day window.
   const max = Math.max(periodTargetMinutes ?? 100 * 60, blockMinutes, 1)
   const ratio = Math.min(1, blockMinutes / max)
 
-  const size = 132
+  const size = 156
   const stroke = 10
   const r = (size - stroke) / 2
   const c = 2 * Math.PI * r
@@ -52,7 +49,7 @@ export function HeroTotalsWidget({
         className,
       )}
     >
-      <div className="mb-2 flex w-full items-center justify-between text-xs text-muted-foreground">
+      <div className="flex w-full items-center justify-between text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1.5 font-medium uppercase tracking-wider">
           <Plane className="h-3 w-3" />
           {resolved.rangeLabel}
@@ -60,8 +57,8 @@ export function HeroTotalsWidget({
         <ArrowUpRight className="h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
 
-      <div className="flex flex-1 items-center justify-center gap-3">
-        <div className="relative shrink-0">
+      <div className="my-3 flex justify-center">
+        <div className="relative">
           <svg
             width={size}
             height={size}
@@ -93,29 +90,32 @@ export function HeroTotalsWidget({
             <p className="text-[10px] font-semibold uppercase tracking-wider text-chart-2">
               Flight
             </p>
-            <p className="font-mono tabular-nums text-2xl font-bold text-foreground leading-none">
+            <p className="font-mono tabular-nums text-3xl font-bold text-foreground leading-none">
               {formatDecimalHours(blockMinutes)}
             </p>
-            <p className="mt-1 text-[9px] uppercase tracking-wider text-muted-foreground">
-              hours
+            <div className="my-1 h-px w-10 bg-border/80" />
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-chart-4">
+              Sim
+            </p>
+            <p className="font-mono tabular-nums text-base font-semibold text-foreground/90 leading-none">
+              {formatDecimalHours(simMinutes)}
             </p>
           </div>
         </div>
+      </div>
 
-        <div className="grid flex-1 grid-cols-2 gap-1.5">
-          <StatTile label="Flights" value={String(flightCount)} />
-          <StatTile label="Sim" value={formatDecimalHours(simMinutes)} />
-          <StatTile
-            label="Day"
-            value={formatDecimalHours(dayMinutes)}
-            icon={<Sun className="h-3 w-3 text-chart-4" />}
-          />
-          <StatTile
-            label="Night"
-            value={formatDecimalHours(nightMinutes)}
-            icon={<Moon className="h-3 w-3 text-chart-3" />}
-          />
-        </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        <StatTile label="Flights" value={String(flightCount)} />
+        <StatTile
+          label="Day"
+          value={formatDecimalHours(dayMinutes)}
+          icon={<Sun className="h-3 w-3 text-chart-4" />}
+        />
+        <StatTile
+          label="Night"
+          value={formatDecimalHours(nightMinutes)}
+          icon={<Moon className="h-3 w-3 text-chart-3" />}
+        />
       </div>
     </Link>
   )
@@ -131,8 +131,8 @@ function StatTile({
   icon?: React.ReactNode
 }) {
   return (
-    <div className="rounded-xl border border-border/40 bg-background/40 px-2 py-1">
-      <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="rounded-xl border border-border/40 bg-background/40 px-2 py-1.5 text-center">
+      <p className="flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         {icon}
         {label}
       </p>

@@ -39,6 +39,10 @@ interface LogbookCalendarProps {
   onYearChange?: (year: number) => void;
   /** Show two consecutive months side by side (for wide panels ~750px) */
   dualMonth?: boolean;
+  /** Inclusive start of a date range (YYYY-MM-DD). When set together with
+   *  rangeEnd, cells in the range are tinted. Independent of selectedDate. */
+  rangeStart?: string | null;
+  rangeEnd?: string | null;
 }
 
 export interface CalendarHandle {
@@ -107,6 +111,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       onMonthSelect,
       onYearChange,
       dualMonth = false,
+      rangeStart = null,
+      rangeEnd = null,
     },
     ref
   ) {
@@ -397,11 +403,30 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             const isToday = dayInfo.dateStr === today;
             const isSelected = isCurrentMonth && dayInfo.dateStr === selectedDate;
 
+            // Range visualization (only when both endpoints provided).
+            const hasRange = !!(rangeStart && rangeEnd);
+            const isRangeStart =
+              hasRange && isCurrentMonth && dayInfo.dateStr === rangeStart;
+            const isRangeEnd =
+              hasRange && isCurrentMonth && dayInfo.dateStr === rangeEnd;
+            const isInRange =
+              hasRange &&
+              isCurrentMonth &&
+              dayInfo.dateStr >= rangeStart! &&
+              dayInfo.dateStr <= rangeEnd!;
+            const isRangeMiddle = isInRange && !isRangeStart && !isRangeEnd;
+
             return (
               <button
                 key={`${keyPrefix}${dayIndex}`}
                 onClick={() => handleDateClick(dayInfo.dateStr, isCurrentMonth)}
-                className="flex items-center justify-center aspect-square p-px"
+                className={cn(
+                  "relative flex items-center justify-center aspect-square p-px",
+                  isRangeMiddle && "bg-primary/15",
+                  isInRange && rangeStart === rangeEnd && "bg-transparent",
+                  isRangeStart && !isRangeEnd && "bg-primary/15",
+                  isRangeEnd && !isRangeStart && "bg-primary/15",
+                )}
               >
                 <div
                   className={cn(
@@ -409,13 +434,14 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                     isCurrentMonth
                       ? "text-foreground/90"
                       : "text-foreground/[0.06]",
-                    flightInfo && isCurrentMonth && !isSelected && (
+                    flightInfo && isCurrentMonth && !isSelected && !isRangeStart && !isRangeEnd && (
                       flightInfo.allFuture
                         ? "font-semibold text-primary/70 ring-1 ring-inset ring-primary/50"
                         : "font-semibold text-primary bg-primary/20"
                     ),
-                    isCurrentMonth && isToday && "ring-1.5 ring-primary/60",
-                    isSelected && "bg-primary text-primary-foreground shadow-md z-10"
+                    isCurrentMonth && isToday && !isRangeStart && !isRangeEnd && "ring-1.5 ring-primary/60",
+                    isSelected && "bg-primary text-primary-foreground shadow-md z-10",
+                    (isRangeStart || isRangeEnd) && "bg-primary text-primary-foreground shadow-md z-10",
                   )}
                 >
                   {dayInfo.date.getDate()}
