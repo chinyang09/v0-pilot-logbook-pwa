@@ -10,6 +10,15 @@ import type { FlightLog, Approach, PilotRole, ManualOverrides } from "@/types/en
 import type { AutoFillPreferences } from "@/types/db/stores.types"
 
 /**
+ * A flight is "flown" once both OOOI gate times are populated.
+ * Scheduled/placeholder entries without outTime or inTime are excluded
+ * from dashboard totals and FDP current-window calculations.
+ */
+export function isFlownFlight(flight: Pick<FlightLog, "outTime" | "inTime">): boolean {
+  return Boolean(flight.outTime && flight.inTime)
+}
+
+/**
  * Calculate block time from out/in times
  */
 export function calculateBlockTime(outTime: string, inTime: string): string {

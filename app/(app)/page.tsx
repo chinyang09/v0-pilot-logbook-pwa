@@ -1,63 +1,20 @@
 "use client"
 
 import { useEffect, useMemo } from "react"
+import { Loader2 } from "lucide-react"
+
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
-import { StatsDashboard } from "@/components/stats-dashboard"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Card, CardContent } from "@/components/ui/card"
 import { syncService } from "@/lib/sync"
 import { useAuth } from "@/components/providers/auth-provider"
-import { useFlights, useFlightStats, refreshAllData, useDBReady, useExpiringCurrencies } from "@/hooks/data"
-import { useUnresolvedDiscrepancies } from "@/hooks/data/use-discrepancies"
-import { useScheduleEntries } from "@/hooks/data/use-schedule"
-import { AlertCircle, Plane, Calendar, TrendingUp, Loader2, ShieldAlert } from "lucide-react"
-import { getDutyPeriodsFromSchedule, calculateCumulativeLimits, getComplianceStatus } from "@/lib/utils/roster/fdp-calculator"
-import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
-import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
-import { getDepartureDisplay, getArrivalDisplay } from "@/lib/utils/airport-display"
-import { usePreferences } from "@/components/providers/preferences-provider"
-import Link from "next/link"
-import { cn } from "@/lib/utils"
+import { refreshAllData } from "@/hooks/data"
+
+import { DashboardActions } from "@/components/dashboard/dashboard-actions"
+import { DashboardCalendarPanel } from "@/components/dashboard/dashboard-calendar-panel"
+import { DashboardGrid } from "@/components/dashboard/dashboard-grid"
 
 export default function Dashboard() {
-  const { user, isLoading: authLoading, isAuthenticated } = useAuth()
-  const { preferences } = usePreferences()
-  const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
-  const { flights, isLoading: flightsLoading } = useFlights()
-  const { stats, isLoading: statsLoading, refresh: refreshStats } = useFlightStats()
-  const { expiringCurrencies, isLoading: currenciesLoading } = useExpiringCurrencies()
-  const { unresolvedDiscrepancies, isLoading: discrepanciesLoading } = useUnresolvedDiscrepancies()
-  const { scheduleEntries, isLoading: scheduleLoading } = useScheduleEntries()
-
-  // Calculate FDP compliance
-  const fdpCompliance = useMemo(() => {
-    const dutyPeriods = getDutyPeriodsFromSchedule(scheduleEntries)
-    if (dutyPeriods.length === 0) return null
-
-    const limits = calculateCumulativeLimits(dutyPeriods, new Date(), DEFAULT_FTL_LIMITS)
-    const compliance14Days = getComplianceStatus(limits.last14Days.utilizationPercent)
-    const compliance28Days = getComplianceStatus(limits.last28Days.utilizationPercent)
-    const compliance365Days = getComplianceStatus(limits.last365Days.utilizationPercent)
-
-    // Find the worst compliance status
-    const allCompliance = [compliance14Days, compliance28Days, compliance365Days]
-    const statusOrder = ["ok", "warning", "critical", "exceeded"]
-    const worstCompliance = allCompliance.reduce((worst, current) => {
-      const worstIndex = statusOrder.indexOf(worst.status)
-      const currentIndex = statusOrder.indexOf(current.status)
-      return currentIndex > worstIndex ? current : worst
-    })
-
-    return {
-      limits,
-      worstCompliance,
-      compliance14Days,
-      compliance28Days,
-      compliance365Days,
-    }
-  }, [scheduleEntries])
+  const { isLoading: authLoading, isAuthenticated } = useAuth()
 
   useEffect(() => {
     const unsubscribe = syncService.onDataChanged(() => {
@@ -66,15 +23,9 @@ export default function Dashboard() {
     return unsubscribe
   }, [])
 
-  // Clear stale keep-alive page actions
-  useRegisterMainActions(null, true)
+  const dashboardActions = useMemo(() => <DashboardActions />, [])
+  useRegisterMainActions(dashboardActions, true)
 
-  const isLoading = dbLoading || !dbReady
-  const recentFlights = flights.slice(0, 5)
-  const thisMonth = new Date().toISOString().slice(0, 7)
-  const thisMonthFlights = flights.filter((f) => f.date.startsWith(thisMonth))
-
-  // Show loading state while checking auth
   if (authLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -86,363 +37,22 @@ export default function Dashboard() {
     )
   }
 
-  // Don't render if not authenticated (redirect happens in AuthProvider)
   if (!isAuthenticated) {
     return null
   }
 
   return (
-    <PageContainer
-    >
-      {
-        <div className="px-4 pt-4 pb-safe space-y-6">
-          {/* Welcome Message */}
-          {user && (
-            <div className="text-muted-foreground">
-              Welcome back, <span className="text-foreground font-medium">{user.callsign}</span>
-            </div>
-          )}
-          {/* Overview Section */}
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-4">Overview</h2>
-            {statsLoading || isLoading ? (
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                {Array.from({ length: 10 }).map((_, i) => (
-                  <Card key={i} className="bg-card border-border">
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-3">
-                        <Skeleton className="h-8 w-8 rounded-lg" />
-                        <div className="space-y-1.5">
-                          <Skeleton className="h-5 w-14" />
-                          <Skeleton className="h-3 w-16" />
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : (
-              <StatsDashboard stats={stats} />
-            )}
-          </section>
-          {/* This Month Summary */}
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-4">This Month</h2>
-            <div className="grid grid-cols-2 gap-4">
-              <Card className="bg-card border-border">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                      <Plane className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold text-foreground">{thisMonthFlights.length}</p>
-                      <p className="text-xs text-muted-foreground">Flights</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="bg-card border-border">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-chart-2/10 text-chart-2">
-                      <TrendingUp className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold text-foreground font-mono">
-                        {minutesToHHMM(
-                          thisMonthFlights.reduce((acc, f) => {
-                            const [h, m] = (f.blockTime || "00:00").split(":").map(Number)
-                            return acc + h * 60 + m
-                          }, 0),
-                        )}
-                      </p>
-                      <p className="text-xs text-muted-foreground">Flight Hours</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </section>
-
-          {/* Currency Warnings */}
-          {expiringCurrencies.length > 0 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-foreground">Currency Warnings</h2>
-                <Link href="/currencies">
-                  <Button variant="ghost" size="sm" className="gap-2">
-                    <ShieldAlert className="h-4 w-4" />
-                    View All
-                  </Button>
-                </Link>
-              </div>
-              <div className="space-y-2">
-                {expiringCurrencies.slice(0, 3).map((currency) => {
-                  const isExpired = currency.daysRemaining < 0
-                  const isCritical = currency.status === "critical"
-                  const bgColor = isExpired
-                    ? "bg-red-500/10 border-red-500/20"
-                    : isCritical
-                      ? "bg-orange-500/10 border-orange-500/20"
-                      : "bg-yellow-500/10 border-yellow-500/20"
-                  const textColor = isExpired
-                    ? "text-red-500"
-                    : isCritical
-                      ? "text-orange-500"
-                      : "text-yellow-500"
-
-                  return (
-                    <Card key={currency.id} className={cn("border", bgColor)}>
-                      <CardContent className="p-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3 flex-1 min-w-0">
-                            <ShieldAlert className={cn("h-4 w-4 flex-shrink-0", textColor)} />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-foreground truncate">
-                                {currency.description}
-                              </p>
-                              <p className={cn("text-xs", textColor)}>
-                                {isExpired
-                                  ? `Expired ${Math.abs(currency.daysRemaining)} day${Math.abs(currency.daysRemaining) === 1 ? "" : "s"} ago`
-                                  : currency.daysRemaining === 0
-                                    ? "Expires today"
-                                    : currency.daysRemaining === 1
-                                      ? "Expires tomorrow"
-                                      : `${currency.daysRemaining} days remaining`}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <p className="text-xs text-muted-foreground">
-                              {new Date(currency.expiryDate + "T00:00:00").toLocaleDateString("en-US", {
-                                month: "short",
-                                day: "numeric",
-                              })}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )
-                })}
-                {expiringCurrencies.length > 3 && (
-                  <p className="text-center text-sm text-muted-foreground">
-                    +{expiringCurrencies.length - 3} more expiring soon
-                  </p>
-                )}
-              </div>
-            </section>
-          )}
-
-          {/* Discrepancy Warnings */}
-          {unresolvedDiscrepancies.length > 0 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-foreground">Discrepancies</h2>
-                <Link href="/discrepancies">
-                  <Button variant="ghost" size="sm" className="gap-2">
-                    <AlertCircle className="h-4 w-4" />
-                    View All
-                  </Button>
-                </Link>
-              </div>
-              <div className="space-y-2">
-                {unresolvedDiscrepancies.slice(0, 3).map((discrepancy) => {
-                  const severityColors = {
-                    error: {
-                      bg: "bg-red-500/10 border-red-500/20",
-                      text: "text-red-500",
-                    },
-                    warning: {
-                      bg: "bg-yellow-500/10 border-yellow-500/20",
-                      text: "text-yellow-500",
-                    },
-                    info: {
-                      bg: "bg-blue-500/10 border-blue-500/20",
-                      text: "text-blue-500",
-                    },
-                  }
-                  const colors = severityColors[discrepancy.severity]
-
-                  const typeLabels: Record<string, string> = {
-                    duplicate: "Duplicate Flight",
-                    time_mismatch: "Time Mismatch",
-                    crew_mismatch: "Crew Mismatch",
-                    route_mismatch: "Route Mismatch",
-                    missing_in_logbook: "Missing in Logbook",
-                    missing_in_schedule: "Missing in Schedule",
-                  }
-
-                  return (
-                    <Card key={discrepancy.id} className={cn("border", colors.bg)}>
-                      <CardContent className="p-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3 flex-1 min-w-0">
-                            <AlertCircle className={cn("h-4 w-4 flex-shrink-0", colors.text)} />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-foreground truncate">
-                                {typeLabels[discrepancy.type] || discrepancy.type}
-                              </p>
-                              <p className="text-xs text-muted-foreground truncate">
-                                {discrepancy.message || "Detected during schedule import"}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <p className={cn("text-xs font-medium uppercase", colors.text)}>
-                              {discrepancy.severity}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )
-                })}
-                {unresolvedDiscrepancies.length > 3 && (
-                  <p className="text-center text-sm text-muted-foreground">
-                    +{unresolvedDiscrepancies.length - 3} more to resolve
-                  </p>
-                )}
-              </div>
-            </section>
-          )}
-
-          {/* FDP Compliance Warnings */}
-          {fdpCompliance && fdpCompliance.worstCompliance.status !== "ok" && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-foreground">FDP Compliance</h2>
-                <Link href="/fdp">
-                  <Button variant="ghost" size="sm" className="gap-2">
-                    <TrendingUp className="h-4 w-4" />
-                    View Dashboard
-                  </Button>
-                </Link>
-              </div>
-              <div className="space-y-2">
-                {[
-                  { period: "14 Days", compliance: fdpCompliance.compliance14Days, stats: fdpCompliance.limits.last14Days },
-                  { period: "28 Days", compliance: fdpCompliance.compliance28Days, stats: fdpCompliance.limits.last28Days },
-                  { period: "12 Months", compliance: fdpCompliance.compliance365Days, stats: { dutyHours: undefined, flightHours: fdpCompliance.limits.last365Days.flightHours, utilizationPercent: fdpCompliance.limits.last365Days.utilizationPercent } },
-                ]
-                  .filter((item) => item.compliance.status !== "ok")
-                  .slice(0, 3)
-                  .map((item, idx) => {
-                    const colors = {
-                      exceeded: { bg: "bg-red-500/10 border-red-500/20", text: "text-red-500" },
-                      critical: { bg: "bg-orange-500/10 border-orange-500/20", text: "text-orange-500" },
-                      warning: { bg: "bg-yellow-500/10 border-yellow-500/20", text: "text-yellow-500" },
-                      ok: { bg: "bg-green-500/10 border-green-500/20", text: "text-green-500" },
-                    }
-                    const color = colors[item.compliance.status]
-
-                    return (
-                      <Card key={idx} className={cn("border", color.bg)}>
-                        <CardContent className="p-3">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3 flex-1 min-w-0">
-                              <TrendingUp className={cn("h-4 w-4 flex-shrink-0", color.text)} />
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-foreground truncate">
-                                  Last {item.period}
-                                </p>
-                                <p className="text-xs text-muted-foreground truncate">
-                                  {item.stats.dutyHours != null ? `${item.stats.dutyHours.toFixed(1)}h duty · ` : ""}{item.stats.flightHours.toFixed(1)}h flight
-                                </p>
-                              </div>
-                            </div>
-                            <div className="text-right flex-shrink-0">
-                              <p className={cn("text-xs font-medium", color.text)}>
-                                {item.stats.utilizationPercent.toFixed(0)}%
-                              </p>
-                              <p className="text-xs text-muted-foreground">{item.compliance.label}</p>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )
-                  })}
-              </div>
-            </section>
-          )}
-
-          {/* Recent Flights Preview */}
-          <section>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-foreground">Recent Flights</h2>
-              <Link href="/logbook">
-                <Button variant="ghost" size="sm" className="gap-2">
-                  <Calendar className="h-4 w-4" />
-                  View All
-                </Button>
-              </Link>
-            </div>
-            {flightsLoading || isLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <Card key={i} className="bg-card border-border">
-                    <CardContent className="p-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <Skeleton className="h-4 w-24" />
-                          <Skeleton className="h-3 w-12" />
-                        </div>
-                        <div className="text-right space-y-1">
-                          <Skeleton className="h-4 w-12 ml-auto" />
-                          <Skeleton className="h-3 w-10 ml-auto" />
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : recentFlights.length === 0 ? (
-              <Card className="bg-card border-border">
-                <CardContent className="p-6 text-center">
-                  <Plane className="h-8 w-8 mx-auto text-muted-foreground/50 mb-2" />
-                  <p className="text-muted-foreground">No flights logged yet</p>
-                  <Link href="/logbook">
-                    <Button className="mt-4" size="sm">
-                      Log Your First Flight
-                    </Button>
-                  </Link>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="space-y-2">
-                {recentFlights.map((flight) => (
-                  <Card key={flight.id} className="bg-card border-border">
-                    <CardContent className="p-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="text-sm">
-                            <span className="font-semibold text-foreground">{getDepartureDisplay(flight, preferences.display.airportIdentifier)}</span>
-                            <span className="text-muted-foreground mx-2">→</span>
-                            <span className="font-semibold text-foreground">{getArrivalDisplay(flight, preferences.display.airportIdentifier)}</span>
-                          </div>
-                          {flight.flightNumber && (
-                            <span className="text-xs text-muted-foreground">{flight.flightNumber}</span>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm font-mono text-foreground">{formatHHMMDisplay(flight.flightTime, preferences.display.timeFormat)}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {new Date(flight.date).toLocaleDateString(undefined, {
-                              month: "short",
-                              day: "numeric",
-                            })}
-                          </p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </section>
+    // Outer relative wrapper anchors the calendar overlay to the main panel
+    // (so on split-pane layouts the picker stays centered over the dashboard,
+    // not the entire viewport). Calendar is rendered as a sibling of
+    // PageContainer's scrolling main, so it never scrolls with content.
+    <div className="h-full relative">
+      <PageContainer>
+        <div className="px-2 sm:px-3 pt-2 sm:pt-3 pb-safe space-y-2 sm:space-y-3 max-w-[1600px] mx-auto">
+          <DashboardGrid />
         </div>
-      }
-    </PageContainer>
+      </PageContainer>
+      <DashboardCalendarPanel />
+    </div>
   )
 }

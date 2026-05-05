@@ -21,6 +21,7 @@ import {
 import type { RestUntilLegalResult, TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
 import { getAirportByIata } from "@/lib/db/stores/reference/airports.store"
 import { getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
+import { isFlownFlight } from "@/lib/utils/flight-calculations"
 
 /** Safe empty defaults — avoids recreating objects on every render */
 const EMPTY_CAPACITY = {
@@ -137,7 +138,11 @@ export function useFDPData() {
     if (!dbReady) return EMPTY_RESULT
 
     try {
-      const logbookDPs = mergeAdjacentDutyPeriods(createDutyPeriodsFromFlights(flights))
+      // Only flown logbook entries count toward duty periods. Placeholder /
+      // scheduled flights without OOOI times would otherwise create spurious
+      // duty periods and inflate cumulative limits.
+      const flownFlights = flights.filter(isFlownFlight)
+      const logbookDPs = mergeAdjacentDutyPeriods(createDutyPeriodsFromFlights(flownFlights))
       const scheduleDPs = mergeAdjacentDutyPeriods(
         getDutyPeriodsFromSchedule(scheduleEntries, airportTimezones)
       )
