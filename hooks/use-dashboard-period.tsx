@@ -28,6 +28,14 @@ interface DashboardPeriodContextValue {
   /** Whether the action-bar calendar popover is open. */
   showCalendar: boolean
   setShowCalendar: (open: boolean) => void
+  /** Visible month in the calendar picker (lifted so the action bar can
+   *  render the "MMM YY" label beside the calendar icon). */
+  selectedMonth: { year: number; month: number }
+  setSelectedMonth: (m: { year: number; month: number }) => void
+  /** Calendar view — day grid (default) or month/year picker, toggled by
+   *  tapping the "MMM YY" label in the action bar. */
+  monthYearView: boolean
+  setMonthYearView: (open: boolean) => void
 }
 
 const DashboardPeriodContext = React.createContext<DashboardPeriodContextValue | null>(null)
@@ -99,6 +107,11 @@ export function resolvePeriod(period: DashboardPeriod): ResolvedPeriod {
   }
 }
 
+function thisMonth(): { year: number; month: number } {
+  const d = new Date()
+  return { year: d.getFullYear(), month: d.getMonth() }
+}
+
 export function DashboardPeriodProvider({
   children,
   defaultPeriod,
@@ -109,14 +122,40 @@ export function DashboardPeriodProvider({
   const [period, setPeriod] = React.useState<DashboardPeriod>(
     defaultPeriod ?? { kind: "preset", preset: "28d" },
   )
-  const [showFilter, setShowFilter] = React.useState(false)
-  const [showCalendar, setShowCalendar] = React.useState(false)
+  const [showFilter, setShowFilterRaw] = React.useState(false)
+  const [showCalendar, setShowCalendarRaw] = React.useState(false)
+  const [selectedMonth, setSelectedMonth] = React.useState(thisMonth)
+  const [monthYearView, setMonthYearView] = React.useState(false)
+
+  // Mutual exclusion: opening one panel closes the other so the action bar
+  // never shows both filter pills and the "MMM YY" label at once.
+  const setShowFilter = React.useCallback((open: boolean) => {
+    setShowFilterRaw(open)
+    if (open) setShowCalendarRaw(false)
+  }, [])
+  const setShowCalendar = React.useCallback((open: boolean) => {
+    setShowCalendarRaw(open)
+    if (open) setShowFilterRaw(false)
+    if (!open) setMonthYearView(false)
+  }, [])
 
   const resolved = React.useMemo(() => resolvePeriod(period), [period])
 
   const value = React.useMemo<DashboardPeriodContextValue>(
-    () => ({ period, resolved, setPeriod, showFilter, setShowFilter, showCalendar, setShowCalendar }),
-    [period, resolved, showFilter, showCalendar],
+    () => ({
+      period,
+      resolved,
+      setPeriod,
+      showFilter,
+      setShowFilter,
+      showCalendar,
+      setShowCalendar,
+      selectedMonth,
+      setSelectedMonth,
+      monthYearView,
+      setMonthYearView,
+    }),
+    [period, resolved, showFilter, setShowFilter, showCalendar, setShowCalendar, selectedMonth, monthYearView],
   )
 
   return (

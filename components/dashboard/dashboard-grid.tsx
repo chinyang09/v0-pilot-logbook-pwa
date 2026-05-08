@@ -14,6 +14,9 @@ import { EngineClassCard } from "./engine-class-card"
 import { ToLogCard } from "./to-log-card"
 import { FDPLimitsStack } from "./fdp-limits-stack"
 
+// One layout for all viewport sizes — mirrors the desktop main panel
+// (6-col grid). Cards span half (3) or full (6) columns regardless of
+// breakpoint.
 export function DashboardGrid({ className }: { className?: string }) {
   const { resolved } = useDashboardPeriod()
   const { aggregates, isLoading } = useDashboardAggregates({
@@ -26,15 +29,10 @@ export function DashboardGrid({ className }: { className?: string }) {
   }
 
   return (
-    <div
-      className={cn(
-        "grid grid-cols-1 gap-2 md:grid-cols-6 md:gap-3 xl:grid-cols-12",
-        className,
-      )}
-    >
+    <div className={cn("grid grid-cols-6 gap-3", className)}>
       {/* Hero showpiece — ring + Flights / Sim / Day / Night.
           "Flight" hours = block time (chocks-off to chocks-on). */}
-      <div className="md:col-span-3 xl:col-span-6 xl:row-span-2">
+      <div className="col-span-3 row-span-2">
         <HeroTotalsWidget
           blockMinutes={aggregates.totals.blockMinutes}
           simMinutes={aggregates.totals.simMinutes}
@@ -45,8 +43,8 @@ export function DashboardGrid({ className }: { className?: string }) {
         />
       </div>
 
-      {/* Per-flight breakdown for the active period */}
-      <div className="md:col-span-3 xl:col-span-6">
+      {/* Per-flight breakdown — same height as hero, scrollable list */}
+      <div className="col-span-3 row-span-2">
         <PeriodFlightsCard
           flights={aggregates.periodFlights}
           className="h-full"
@@ -54,7 +52,7 @@ export function DashboardGrid({ className }: { className?: string }) {
       </div>
 
       {/* Progress rings — auto-fill-driven */}
-      <div className="md:col-span-6 xl:col-span-6">
+      <div className="col-span-6">
         <ProgressRingGrid
           byAutoFillField={aggregates.byAutoFillField}
           totalFlightMinutes={aggregates.totals.flightMinutes}
@@ -63,7 +61,7 @@ export function DashboardGrid({ className }: { className?: string }) {
       </div>
 
       {/* Take-offs / Landings — last 3 events + 90-day currency status */}
-      <div className="md:col-span-3 xl:col-span-4">
+      <div className="col-span-3">
         <ToLogCard
           takeoffs={aggregates.takeoffs}
           landings={aggregates.landings}
@@ -74,7 +72,7 @@ export function DashboardGrid({ className }: { className?: string }) {
       </div>
 
       {/* Engine class breakdown */}
-      <div className="md:col-span-3 xl:col-span-8">
+      <div className="col-span-3">
         <EngineClassCard
           byEngine={aggregates.byEngine}
           topTypes={aggregates.topTypes}
@@ -83,7 +81,7 @@ export function DashboardGrid({ className }: { className?: string }) {
       </div>
 
       {/* FDP cumulative limits stack */}
-      <div className="md:col-span-6 xl:col-span-12">
+      <div className="col-span-6">
         <FDPLimitsStack className="h-full" />
       </div>
     </div>
@@ -92,18 +90,13 @@ export function DashboardGrid({ className }: { className?: string }) {
 
 function DashboardGridSkeleton({ className }: { className?: string }) {
   return (
-    <div
-      className={cn(
-        "grid grid-cols-1 gap-2 md:grid-cols-6 md:gap-3 xl:grid-cols-12",
-        className,
-      )}
-    >
-      <Skeleton className="h-72 rounded-2xl md:col-span-3 xl:col-span-6 xl:row-span-2" />
-      <Skeleton className="h-40 rounded-2xl md:col-span-3 xl:col-span-6" />
-      <Skeleton className="h-28 rounded-2xl md:col-span-6 xl:col-span-6" />
-      <Skeleton className="h-32 rounded-2xl md:col-span-3 xl:col-span-4" />
-      <Skeleton className="h-32 rounded-2xl md:col-span-3 xl:col-span-8" />
-      <Skeleton className="h-44 rounded-2xl md:col-span-6 xl:col-span-12" />
+    <div className={cn("grid grid-cols-6 gap-3", className)}>
+      <Skeleton className="h-72 rounded-2xl col-span-3 row-span-2" />
+      <Skeleton className="h-72 rounded-2xl col-span-3 row-span-2" />
+      <Skeleton className="h-28 rounded-2xl col-span-6" />
+      <Skeleton className="h-32 rounded-2xl col-span-3" />
+      <Skeleton className="h-32 rounded-2xl col-span-3" />
+      <Skeleton className="h-44 rounded-2xl col-span-6" />
     </div>
   )
 }
