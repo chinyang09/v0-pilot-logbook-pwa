@@ -53,7 +53,7 @@ export function PeriodFlightsCard({ flights, className }: PeriodFlightsCardProps
           No flights in this period
         </div>
       ) : (
-        <ul className="flex-1 space-y-1 overflow-y-auto">
+        <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
           {flights.map((f) => (
             <li key={f.id}>
               <Link

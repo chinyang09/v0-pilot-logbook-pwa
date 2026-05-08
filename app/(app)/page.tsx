@@ -48,7 +48,7 @@ export default function Dashboard() {
     // PageContainer's scrolling main, so it never scrolls with content.
     <div className="h-full relative">
       <PageContainer>
-        <div className="px-2 sm:px-3 pt-2 sm:pt-3 pb-safe space-y-2 sm:space-y-3 max-w-[1600px] mx-auto">
+        <div className="px-3 pt-3 pb-safe max-w-[1600px] mx-auto">
           <DashboardGrid />
         </div>
       </PageContainer>

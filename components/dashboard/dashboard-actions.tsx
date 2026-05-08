@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Calendar, SlidersHorizontal } from "lucide-react"
+import { Calendar, ChevronDown, SlidersHorizontal } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -16,6 +16,11 @@ import { cn } from "@/lib/utils"
 
 const SPRING = { type: "spring" as const, stiffness: 360, damping: 32 }
 
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+]
+
 export function DashboardActions() {
   const {
     period,
@@ -25,6 +30,9 @@ export function DashboardActions() {
     setShowFilter,
     showCalendar,
     setShowCalendar,
+    selectedMonth,
+    monthYearView,
+    setMonthYearView,
   } = useDashboardPeriod()
 
   const activePreset: DashboardPreset | null =
@@ -107,6 +115,31 @@ export function DashboardActions() {
           >
             <Calendar className="h-5 w-5" />
           </Button>
+
+          <AnimatePresence initial={false}>
+            {showCalendar && (
+              <motion.button
+                key="month-year-label"
+                type="button"
+                onClick={() => setMonthYearView(!monthYearView)}
+                aria-label="Choose month"
+                aria-expanded={monthYearView}
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: "auto", opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={SPRING}
+                className="flex items-center gap-1 overflow-hidden whitespace-nowrap rounded-full px-2 py-1 text-sm font-medium text-foreground/80 transition-colors hover:bg-foreground/5"
+              >
+                {MONTHS[selectedMonth.month]} {selectedMonth.year}
+                <ChevronDown
+                  className={cn(
+                    "h-3 w-3 opacity-50 transition-transform",
+                    monthYearView && "rotate-180",
+                  )}
+                />
+              </motion.button>
+            )}
+          </AnimatePresence>
         </div>
       </GlassContainer>
 
