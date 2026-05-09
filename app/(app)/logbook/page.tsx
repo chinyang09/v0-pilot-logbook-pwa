@@ -24,7 +24,7 @@ import { Calendar, Plus, Search, X, ChevronDown } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { CSVImportButton } from "@/components/csv-import-button"
+import { UnifiedImportButton } from "@/components/import/unified-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useSearchParams } from "next/navigation"
 import { usePageActive } from "@/hooks/use-page-active"
@@ -414,7 +414,8 @@ export default function LogbookPage() {
             </button>
           )}
 
-          <CSVImportButton
+          <UnifiedImportButton
+            context="logbook"
             onComplete={() => {
               refreshAllData()
             }}

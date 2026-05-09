@@ -42,6 +42,9 @@ import {
   type ParsedSector,
   type ReconcilerOperation,
 } from "@/lib/utils/roster/reconciler";
+import { splitCsvRows, parseCSVLine, parseDDMMYYYY } from "./shared/csv-split";
+import { normalize } from "./shared/name-normalize";
+import { parseGeneratedAt } from "./shared/generated-at";
 
 // ============================================================
 // Public types
@@ -51,6 +54,11 @@ export interface PlannedImport {
   success: boolean;
   timeReference: TimeReference;
   dateRange: { start: string; end: string };
+  /**
+   * "Generated on..." footer of the source report (epoch ms in UTC).
+   * Null when the footer wasn't found — stale-report gating disabled.
+   */
+  generatedAt: number | null;
   crewMember: {
     crewId: string;
     name: string;
@@ -73,6 +81,7 @@ export interface PlannedImport {
     toDelete: number;
     identical: number;
     ignored: number;
+    staleSkipped: number;
   };
 }
 
@@ -93,63 +102,6 @@ const CREW_ROLE_MAP: Record<string, CrewRole> = {
   PIC: "PIC",
   FO: "FO",
 };
-
-const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-// ============================================================
-// CSV splitter (quote-aware)
-// ============================================================
-
-function splitCsvRows(csvContent: string): string[] {
-  const rows: string[] = [];
-  let currentRow = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < csvContent.length; i++) {
-    const char = csvContent[i];
-    if (char === '"') inQuotes = !inQuotes;
-    if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (currentRow.trim()) rows.push(currentRow);
-      currentRow = "";
-    } else {
-      currentRow += char;
-    }
-  }
-  if (currentRow.trim()) rows.push(currentRow);
-  return rows;
-}
-
-function parseCSVLine(line: string): string[] {
-  const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === "," && !inQuotes) {
-      result.push(current.trim());
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-  result.push(current.trim());
-  return result.map((s) => s.replace(/^"|"$/g, "").trim());
-}
-
-function parseDDMMYYYY(dateStr: string): string {
-  const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-  if (!match) return "";
-  const [, dd, mm, yyyy] = match;
-  return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-}
 
 // ============================================================
 // Header parsing
@@ -500,6 +452,7 @@ export async function parseScheduleCSV(
     success: false,
     timeReference: "UTC",
     dateRange: { start: "", end: "" },
+    generatedAt: null,
     crewMember: { crewId: "", name: "", base: "", role: "", aircraftType: "" },
     operations: [],
     currencies: [],
@@ -513,11 +466,20 @@ export async function parseScheduleCSV(
       toDelete: 0,
       identical: 0,
       ignored: 0,
+      staleSkipped: 0,
     },
   };
 
   try {
     onProgress?.(5, "Parsing", "Reading CSV header...");
+    plan.generatedAt = parseGeneratedAt(csvContent);
+    if (plan.generatedAt === null) {
+      plan.warnings.push({
+        line: 0,
+        message:
+          "Could not find a 'Generated on' footer — stale-report protection is disabled for this import.",
+      });
+    }
     const header = parseHeader(lines);
     plan.timeReference = header.timeReference;
     plan.dateRange = header.dateRange;
@@ -665,6 +627,7 @@ export async function parseScheduleCSV(
       sectors: parsedSectors,
       existingFlights: flightsInRange,
       csvDateRange: { start: rangeStart, end: rangeEnd },
+      reportGeneratedAt: plan.generatedAt,
     });
 
     // Apply default acceptance flags
@@ -673,7 +636,9 @@ export async function parseScheduleCSV(
       accepted:
         op.kind === "create" ||
         op.kind === "skip_identical" ||
-        op.kind === "skip_non_airline",
+        op.kind === "skip_non_airline" ||
+        op.kind === "skip_stale_report" ||
+        op.kind === "update_safe",
     }));
 
     // Summary counts
@@ -684,6 +649,8 @@ export async function parseScheduleCSV(
           break;
         case "update_conflict":
         case "edited_conflict":
+        case "update_safe":
+        case "update_consult":
           plan.summary.toUpdate++;
           break;
         case "delete_missing":
@@ -694,6 +661,9 @@ export async function parseScheduleCSV(
           break;
         case "skip_non_airline":
           plan.summary.ignored++;
+          break;
+        case "skip_stale_report":
+          plan.summary.staleSkipped++;
           break;
       }
     }

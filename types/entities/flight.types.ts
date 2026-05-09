@@ -162,6 +162,9 @@ export interface FlightLog {
   // Sync metadata
   syncStatus: SyncStatus
   lastSyncedAt?: number
+  // Import provenance — used to gate older reports from regressing newer data
+  reportGeneratedAt?: number
+  importSource?: "logbook" | "schedule" | "cross_hydrated" | "manual"
 }
 
 export type FlightLogCreate = Omit<FlightLog, "id" | "createdAt" | "updatedAt" | "syncStatus">

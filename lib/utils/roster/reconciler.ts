@@ -1,25 +1,34 @@
 /**
  * Roster Reconciler
  *
- * Given parsed-and-normalized CSV sectors and the current set of flights in
- * IndexedDB, classify each into an operation:
+ * Given parsed-and-normalized CSV/PDF sectors and the current set of flights
+ * in IndexedDB, classify each into an operation:
  *
- *   - create          → CSV sector with no match; new flight to be inserted
- *   - skip_identical  → match found and all relevant fields already agree
- *   - update_conflict → match found, fields differ, flight looks unedited
- *   - edited_conflict → match found, fields differ, flight has user edits
- *                       (user must choose per-flight whether to overwrite)
- *   - delete_missing  → DB flight within CSV date range, matches airline
- *                       pattern (TR###), and has no matching sector in CSV
- *   - skip_non_airline → DB flight within CSV date range but flight number
- *                       doesn't match airline pattern — ignored silently
+ *   - create            → no DB match; insert
+ *   - skip_identical    → match found, all relevant fields already agree
+ *   - skip_stale_report → existing flight was imported from a NEWER report
+ *                         than this one — refuse to overwrite
+ *   - update_safe       → match found, only safe-bucket fields differ OR
+ *                         it's a future flight (auto-applied)
+ *   - update_consult    → match found, ≥1 critical-bucket field differs and
+ *                         the flight is a past flight without edits
+ *                         (user opts in per-row in the review modal)
+ *   - edited_conflict   → match found, fields differ, flight has user edits
+ *                         (signature / remarks / manual overrides)
+ *   - delete_missing    → DB flight inside report range with no match
+ *   - skip_non_airline  → DB flight inside range but not a TR-prefixed flight
+ *
+ *   - update_conflict   → DEPRECATED alias kept for the existing modal/tests
+ *                         until the v2 UI ships. Behaves identically to
+ *                         update_consult.
  *
  * The reconciler performs NO DB writes. It only classifies. The executor
- * applies the user-approved subset of operations.
+ * applies the user-approved subset.
  */
 
 import type { FlightLog } from "../../../types/entities/flight.types";
 import type { ScheduledCrewMember } from "@/types/entities/roster.types";
+import { classifyChanges } from "./classification";
 
 // ============================================================
 // Public types
@@ -44,6 +53,23 @@ export interface ParsedSector {
   sourceLine: number;
   /** Crew from the CSV row — CPT/PIC and FO. */
   crew?: ScheduledCrewMember[];
+
+  // ------------------------------------------------------------
+  // Optional fields populated by the logbook parser / cross-hydration.
+  // The executor reads these when present; the schedule-only path leaves
+  // them undefined and the executor falls back to the original behavior.
+  // ------------------------------------------------------------
+  aircraftReg?: string;
+  dayTakeoffs?: number;
+  nightTakeoffs?: number;
+  dayLandings?: number;
+  nightLandings?: number;
+  blockTime?: string;
+  picRawName?: string;
+  isUserPic?: boolean;
+  picPersonnelId?: string;
+  picResolvedName?: string;
+  remarks?: string;
 }
 
 export interface FieldDiff {
@@ -55,6 +81,29 @@ export interface FieldDiff {
 export type ReconcilerOperation =
   | { kind: "create"; sector: ParsedSector }
   | { kind: "skip_identical"; flight: FlightLog; sector: ParsedSector }
+  | {
+      kind: "skip_stale_report";
+      flight: FlightLog;
+      sector: ParsedSector;
+      existingGeneratedAt: number;
+      reportGeneratedAt: number;
+    }
+  | {
+      kind: "update_safe";
+      flight: FlightLog;
+      sector: ParsedSector;
+      changes: FieldDiff[];
+    }
+  | {
+      kind: "update_consult";
+      flight: FlightLog;
+      sector: ParsedSector;
+      changes: FieldDiff[];
+    }
+  /**
+   * @deprecated kept for the legacy review modal — same semantics as
+   *             update_consult. New code should prefer update_consult.
+   */
   | {
       kind: "update_conflict";
       flight: FlightLog;
@@ -78,12 +127,32 @@ export type ReconcilerOperation =
 export type EditReason =
   | "has_signature"
   | "user_modified_after_sync"
-  | "has_remarks";
+  | "has_remarks"
+  | "has_manual_overrides";
 
 export interface ReconcileInput {
   sectors: ParsedSector[];
   existingFlights: FlightLog[];
   csvDateRange: { start: string; end: string };
+  /**
+   * "Generated on..." footer of the report being imported (epoch ms).
+   * When provided, the reconciler refuses to update flights whose
+   * `reportGeneratedAt` is strictly newer.
+   */
+  reportGeneratedAt?: number | null;
+  /**
+   * Today's UTC date in YYYY-MM-DD. Defaulted from `new Date()`. Exposed
+   * for tests so they can pin "today".
+   */
+  todayUtc?: string;
+  /**
+   * Use legacy `update_conflict` op kind instead of the new
+   * `update_safe` / `update_consult` split. Defaults to `true` so existing
+   * callers (schedule import handler, v1 review modal, existing tests) keep
+   * working without modification. The unified import flow explicitly sets
+   * this to `false`.
+   */
+  useLegacyUpdateConflict?: boolean;
 }
 
 // ============================================================
@@ -91,12 +160,6 @@ export interface ReconcileInput {
 // ============================================================
 
 const AIRLINE_FLIGHT_NUMBER_RE = /^TR\d+$/i;
-/**
- * How much clock skew between createdAt and updatedAt we tolerate before
- * calling a flight "edited". A freshly-inserted flight may get a near-instant
- * updatedAt bump from a downstream recompute; anything beyond this window
- * almost certainly represents a deliberate user action.
- */
 const EDIT_DETECTION_BUFFER_MS = 60_000;
 
 // ============================================================
@@ -120,28 +183,43 @@ function dateInRange(
 
 /**
  * Find the best match for a parsed sector in the existing flights.
- * Primary: same date + same numeric flight number.
- * Fallback: same date + same route (dep/arr IATA).
+ *   1. Same date + same numeric flight number
+ *   2. Same date + same dep/arr IATA
+ *   3. Same date + dep IATA + aircraft registration (logbook fallback)
  */
 function findMatch(
   sector: ParsedSector,
   flights: FlightLog[]
 ): FlightLog | undefined {
-  const csvNumeric = normalizeFlightNumber(sector.flightNumber);
+  const csvNumeric = normalizeFlightNumber(sector.flightNumber || "");
 
-  const byNumber = flights.find(
-    (f) =>
-      f.date === sector.date &&
-      normalizeFlightNumber(f.flightNumber) === csvNumeric
-  );
-  if (byNumber) return byNumber;
+  if (csvNumeric) {
+    const byNumber = flights.find(
+      (f) =>
+        f.date === sector.date &&
+        normalizeFlightNumber(f.flightNumber) === csvNumeric
+    );
+    if (byNumber) return byNumber;
+  }
 
-  return flights.find(
+  const byRoute = flights.find(
     (f) =>
       f.date === sector.date &&
       f.departureIata === sector.departureIata &&
       f.arrivalIata === sector.arrivalIata
   );
+  if (byRoute) return byRoute;
+
+  if (sector.aircraftReg) {
+    const regUpper = sector.aircraftReg.toUpperCase();
+    return flights.find(
+      (f) =>
+        f.date === sector.date &&
+        (f.aircraftReg || "").toUpperCase() === regUpper
+    );
+  }
+
+  return undefined;
 }
 
 // ============================================================
@@ -163,9 +241,16 @@ function detectEditReasons(flight: FlightLog): EditReason[] {
     reasons.push("user_modified_after_sync");
   }
 
-  // Freeform text that couldn't have come from the schedule CSV
   if (flight.remarks && !flight.remarks.startsWith("Draft from schedule:")) {
     reasons.push("has_remarks");
+  }
+
+  if (
+    flight.manualOverrides &&
+    Object.keys(flight.manualOverrides).length > 0 &&
+    Object.values(flight.manualOverrides).some(Boolean)
+  ) {
+    reasons.push("has_manual_overrides");
   }
 
   return reasons;
@@ -181,13 +266,17 @@ function diffSectorVsFlight(
 ): FieldDiff[] {
   const changes: FieldDiff[] = [];
 
-  const csvFullFlightNum = sector.flightNumber.startsWith("TR")
-    ? sector.flightNumber
-    : `TR${normalizeFlightNumber(sector.flightNumber)}`;
+  const csvFullFlightNum =
+    sector.flightNumber && sector.flightNumber.startsWith("TR")
+      ? sector.flightNumber
+      : sector.flightNumber
+        ? `TR${normalizeFlightNumber(sector.flightNumber)}`
+        : "";
 
   if (
+    csvFullFlightNum &&
     normalizeFlightNumber(flight.flightNumber) !==
-    normalizeFlightNumber(sector.flightNumber)
+      normalizeFlightNumber(sector.flightNumber || "")
   ) {
     changes.push({
       field: "flightNumber",
@@ -211,9 +300,6 @@ function diffSectorVsFlight(
     });
   }
 
-  // Actual times only flag a diff when the CSV has an 'A' value AND it
-  // disagrees with what's stored. CSV-without-actuals vs DB-with-actuals is
-  // the normal "future-roster vs flown" case and is not a conflict.
   if (sector.actualOut && sector.actualOut !== flight.outTime) {
     changes.push({
       field: "outTime",
@@ -241,7 +327,88 @@ function diffSectorVsFlight(
     });
   }
 
+  if (
+    sector.aircraftReg &&
+    sector.aircraftReg.toUpperCase() !== (flight.aircraftReg || "").toUpperCase()
+  ) {
+    changes.push({
+      field: "aircraftReg",
+      from: flight.aircraftReg || "",
+      to: sector.aircraftReg.toUpperCase(),
+    });
+  }
+
+  // Logbook fields — only flag when sector carries a non-zero value AND the
+  // existing flight differs.
+  const numericPairs: Array<
+    [keyof FlightLog, keyof ParsedSector]
+  > = [
+    ["dayTakeoffs", "dayTakeoffs"],
+    ["nightTakeoffs", "nightTakeoffs"],
+    ["dayLandings", "dayLandings"],
+    ["nightLandings", "nightLandings"],
+  ];
+  for (const [flightField, sectorField] of numericPairs) {
+    const incoming = sector[sectorField] as number | undefined;
+    if (incoming === undefined) continue;
+    const existing = (flight[flightField] as number | undefined) ?? 0;
+    if (incoming !== existing) {
+      changes.push({
+        field: flightField as string,
+        from: String(existing),
+        to: String(incoming),
+      });
+    }
+  }
+
+  if (
+    sector.blockTime &&
+    sector.blockTime !== "00:00" &&
+    sector.blockTime !== flight.blockTime
+  ) {
+    changes.push({
+      field: "blockTime",
+      from: flight.blockTime || "",
+      to: sector.blockTime,
+    });
+  }
+
+  if (
+    sector.picResolvedName &&
+    sector.picResolvedName !== flight.picName &&
+    sector.picResolvedName.length > 0
+  ) {
+    changes.push({
+      field: "picName",
+      from: flight.picName || "",
+      to: sector.picResolvedName,
+    });
+  }
+
+  if (
+    sector.picPersonnelId &&
+    sector.picPersonnelId !== flight.picId &&
+    sector.picPersonnelId.length > 0
+  ) {
+    changes.push({
+      field: "picId",
+      from: flight.picId || "",
+      to: sector.picPersonnelId,
+    });
+  }
+
   return changes;
+}
+
+// ============================================================
+// Today helper
+// ============================================================
+
+function todayUtcDate(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    d.getUTCDate()
+  ).padStart(2, "0")}`;
 }
 
 // ============================================================
@@ -251,11 +418,17 @@ function diffSectorVsFlight(
 export function reconcileRoster(
   input: ReconcileInput
 ): ReconcilerOperation[] {
-  const { sectors, existingFlights, csvDateRange } = input;
+  const {
+    sectors,
+    existingFlights,
+    csvDateRange,
+    reportGeneratedAt,
+    useLegacyUpdateConflict = true,
+  } = input;
+  const todayUtc = input.todayUtc || todayUtcDate();
   const operations: ReconcilerOperation[] = [];
   const matchedFlightIds = new Set<string>();
 
-  // Pass 1: classify each CSV sector
   for (const sector of sectors) {
     const match = findMatch(sector, existingFlights);
 
@@ -266,6 +439,23 @@ export function reconcileRoster(
 
     matchedFlightIds.add(match.id);
 
+    // Stale-report gate: if the existing flight came from a NEWER report,
+    // refuse to update it. New flights (no match) always go through.
+    if (
+      reportGeneratedAt &&
+      match.reportGeneratedAt &&
+      match.reportGeneratedAt > reportGeneratedAt
+    ) {
+      operations.push({
+        kind: "skip_stale_report",
+        flight: match,
+        sector,
+        existingGeneratedAt: match.reportGeneratedAt,
+        reportGeneratedAt,
+      });
+      continue;
+    }
+
     const changes = diffSectorVsFlight(sector, match);
     if (changes.length === 0) {
       operations.push({ kind: "skip_identical", flight: match, sector });
@@ -273,25 +463,60 @@ export function reconcileRoster(
     }
 
     const editReasons = detectEditReasons(match);
-    if (editReasons.length > 0) {
-      operations.push({
-        kind: "edited_conflict",
-        flight: match,
-        sector,
-        changes,
-        editReasons,
-      });
-    } else {
-      operations.push({
-        kind: "update_conflict",
-        flight: match,
-        sector,
-        changes,
-      });
+
+    if (useLegacyUpdateConflict) {
+      // Legacy two-bucket mode used by the existing schedule import handler
+      // until the v2 UI ships.
+      if (editReasons.length > 0) {
+        operations.push({
+          kind: "edited_conflict",
+          flight: match,
+          sector,
+          changes,
+          editReasons,
+        });
+      } else {
+        operations.push({
+          kind: "update_conflict",
+          flight: match,
+          sector,
+          changes,
+        });
+      }
+      continue;
+    }
+
+    const classification = classifyChanges(match, changes, editReasons, todayUtc);
+    switch (classification) {
+      case "edited_conflict":
+        operations.push({
+          kind: "edited_conflict",
+          flight: match,
+          sector,
+          changes,
+          editReasons,
+        });
+        break;
+      case "update_consult":
+        operations.push({
+          kind: "update_consult",
+          flight: match,
+          sector,
+          changes,
+        });
+        break;
+      case "update_safe":
+      default:
+        operations.push({
+          kind: "update_safe",
+          flight: match,
+          sector,
+          changes,
+        });
+        break;
     }
   }
 
-  // Pass 2: find DB flights inside the CSV range that weren't matched
   for (const flight of existingFlights) {
     if (matchedFlightIds.has(flight.id)) continue;
     if (!dateInRange(flight.date, csvDateRange)) continue;
