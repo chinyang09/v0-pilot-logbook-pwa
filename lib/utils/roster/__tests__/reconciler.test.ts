@@ -338,3 +338,110 @@ describe("reconcileRoster — summary counts", () => {
     expect(ops).toHaveLength(3);
   });
 });
+
+// ============================================================
+// Turnaround disambiguation — both legs same date, same aircraft
+// ============================================================
+
+describe("reconcileRoster — turnaround matching", () => {
+  it("does NOT match a SIN→DVO logbook sector against an existing DVO→SIN flight on same day + same reg", () => {
+    // Existing flight: DVO→SIN turn (TR561)
+    const dvoSin = makeFlight({
+      id: "tr561",
+      flightNumber: "TR561",
+      departureIata: "DVO",
+      arrivalIata: "SIN",
+      aircraftReg: "9V-NCE",
+      date: "2026-04-08",
+    });
+    // Existing flight: SIN→DVO turn (TR560)
+    const sinDvo = makeFlight({
+      id: "tr560",
+      flightNumber: "TR560",
+      departureIata: "SIN",
+      arrivalIata: "DVO",
+      aircraftReg: "9V-NCE",
+      date: "2026-04-08",
+    });
+
+    // Logbook sector for SIN→DVO leg (no flight number, has reg).
+    const ops = reconcileRoster({
+      sectors: [
+        {
+          date: "2026-04-08",
+          flightNumber: "",
+          aircraftType: "A21N",
+          departureIata: "SIN",
+          arrivalIata: "DVO",
+          actualOut: "18:22",
+          actualIn: "21:57",
+          aircraftReg: "9V-NCE",
+          sourceLine: 10,
+        },
+      ],
+      existingFlights: [dvoSin, sinDvo],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+
+    // Should match TR560, NOT TR561.
+    const updateOp = ops.find(
+      (o) => o.kind === "update_conflict" || o.kind === "skip_identical"
+    );
+    expect(updateOp).toBeDefined();
+    if (
+      updateOp?.kind !== "update_conflict" &&
+      updateOp?.kind !== "skip_identical"
+    )
+      return;
+    expect(updateOp.flight.id).toBe("tr560");
+    expect(updateOp.flight.flightNumber).toBe("TR560");
+  });
+
+  it("falls back to date + arrival + reg when departure was stored wrong (XSP vs SIN)", () => {
+    // User's existing TR560 has stale departureIata "XSP" instead of "SIN".
+    const tr560StaleDep = makeFlight({
+      id: "tr560-stale",
+      flightNumber: "TR560",
+      departureIata: "XSP",
+      arrivalIata: "DVO",
+      aircraftReg: "9V-NCE",
+      date: "2026-04-08",
+    });
+    const tr561 = makeFlight({
+      id: "tr561",
+      flightNumber: "TR561",
+      departureIata: "DVO",
+      arrivalIata: "SIN",
+      aircraftReg: "9V-NCE",
+      date: "2026-04-08",
+    });
+
+    const ops = reconcileRoster({
+      sectors: [
+        {
+          date: "2026-04-08",
+          flightNumber: "",
+          aircraftType: "A21N",
+          departureIata: "SIN",
+          arrivalIata: "DVO",
+          actualOut: "18:22",
+          actualIn: "21:57",
+          aircraftReg: "9V-NCE",
+          sourceLine: 10,
+        },
+      ],
+      existingFlights: [tr560StaleDep, tr561],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+
+    // Should still match TR560 via the arrival+reg fallback so the user can
+    // accept the departureIata fix instead of seeing a spurious "missing
+    // from roster" delete suggestion.
+    const matchOp = ops.find((o) => o.kind === "update_conflict");
+    expect(matchOp).toBeDefined();
+    if (matchOp?.kind !== "update_conflict") return;
+    expect(matchOp.flight.id).toBe("tr560-stale");
+    // The diff should include the dep-airport correction.
+    expect(matchOp.changes.map((c) => c.field)).toContain("departureIata");
+  });
+});

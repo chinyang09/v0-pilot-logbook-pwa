@@ -185,9 +185,19 @@ function dateInRange(
 
 /**
  * Find the best match for a parsed sector in the existing flights.
- *   1. Same date + same numeric flight number
- *   2. Same date + same dep/arr IATA
- *   3. Same date + dep IATA + aircraft registration (logbook fallback)
+ *
+ * Order, strongest → weakest:
+ *   1. Date + flight number (when both sides have it).
+ *   2. Date + departure + arrival IATA (full route).
+ *   3. Date + arrival + aircraftReg — covers cases where the existing
+ *      flight has a stale departure airport (e.g. XSP vs SIN); arrival is
+ *      the disambiguator for a turnaround.
+ *   4. Date + departure + aircraftReg — same idea for arrival drift.
+ *
+ * Importantly, we never fall back to `date + aircraftReg` alone: a same-day
+ * turnaround uses one airframe for two legs, so that match would put
+ * Leg 1's data onto Leg 2's flight (the bug behind the user's "wrong leg
+ * picked for amendment" report).
  */
 function findMatch(
   sector: ParsedSector,
@@ -214,11 +224,29 @@ function findMatch(
 
   if (sector.aircraftReg) {
     const regUpper = sector.aircraftReg.toUpperCase();
-    return flights.find(
-      (f) =>
-        f.date === sector.date &&
-        (f.aircraftReg || "").toUpperCase() === regUpper
-    );
+
+    // (3) Same date + arrival + aircraft → handles legacy rows whose
+    // `departureIata` was stored wrong (e.g. "XSP" instead of "SIN").
+    if (sector.arrivalIata) {
+      const byArrAndReg = flights.find(
+        (f) =>
+          f.date === sector.date &&
+          f.arrivalIata === sector.arrivalIata &&
+          (f.aircraftReg || "").toUpperCase() === regUpper
+      );
+      if (byArrAndReg) return byArrAndReg;
+    }
+
+    // (4) Same date + departure + aircraft → covers arrival drift.
+    if (sector.departureIata) {
+      const byDepAndReg = flights.find(
+        (f) =>
+          f.date === sector.date &&
+          f.departureIata === sector.departureIata &&
+          (f.aircraftReg || "").toUpperCase() === regUpper
+      );
+      if (byDepAndReg) return byDepAndReg;
+    }
   }
 
   return undefined;
@@ -337,6 +365,39 @@ function diffSectorVsFlight(
       field: "aircraftReg",
       from: flight.aircraftReg || "",
       to: sector.aircraftReg.toUpperCase(),
+    });
+  }
+
+  if (
+    sector.departureIata &&
+    sector.departureIata !== flight.departureIata
+  ) {
+    changes.push({
+      field: "departureIata",
+      from: flight.departureIata || "",
+      to: sector.departureIata,
+    });
+  }
+
+  if (
+    sector.arrivalIata &&
+    sector.arrivalIata !== flight.arrivalIata
+  ) {
+    changes.push({
+      field: "arrivalIata",
+      from: flight.arrivalIata || "",
+      to: sector.arrivalIata,
+    });
+  }
+
+  if (
+    sector.isPilotFlying !== undefined &&
+    sector.isPilotFlying !== flight.pilotFlying
+  ) {
+    changes.push({
+      field: "pilotFlying",
+      from: String(flight.pilotFlying ?? true),
+      to: String(sector.isPilotFlying),
     });
   }
 

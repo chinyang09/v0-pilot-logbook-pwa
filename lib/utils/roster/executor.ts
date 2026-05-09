@@ -224,6 +224,9 @@ function buildUpdatePatch(op: AcceptableOperation): Partial<FlightLog> {
     ) {
       (patch as Record<string, unknown>)[change.field] =
         Number(value) || 0;
+    } else if (change.field === "pilotFlying") {
+      // FieldDiff carries strings; coerce back to boolean for storage.
+      (patch as Record<string, unknown>)[change.field] = value === "true";
     } else {
       (patch as Record<string, unknown>)[change.field] = value;
     }
