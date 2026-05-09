@@ -70,23 +70,8 @@ export function resolveCrewByName(
     };
   }
 
-  // Logbook PIC names are truncated to 20 chars — see if a full name in
-  // existingCrew starts with the same normalized prefix.
-  const prefixMatch = ctx.existingCrew.find((p) => {
-    const fullNorm = normalize(p.name);
-    return fullNorm.length > normalized.length && fullNorm.startsWith(normalized);
-  });
-  if (prefixMatch) {
-    ctx.crewCache.set(normalized, prefixMatch.id);
-    return {
-      personnelId: prefixMatch.id,
-      resolvedName: prefixMatch.name,
-      isUser: false,
-      upgradedFromTruncation: true,
-    };
-  }
-
-  // Reverse: logbook's truncated name exactly matches an existing truncated row.
+  // Direct (post-normalization) equality first — covers the case where the
+  // input's normalized form exactly matches an existing entry.
   const direct = ctx.existingCrew.find((p) => normalize(p.name) === normalized);
   if (direct) {
     ctx.crewCache.set(normalized, direct.id);
@@ -95,6 +80,46 @@ export function resolveCrewByName(
       resolvedName: direct.name,
       isUser: false,
       upgradedFromTruncation: false,
+    };
+  }
+
+  // Logbook PIC names are truncated to 20 chars. Match in BOTH directions:
+  // (a) existing full name starts with input (input is truncated logbook),
+  // (b) input starts with existing (existing was created truncated, input
+  //     is now the full schedule form).
+  // Pick the longest matching candidate — if multiple existing rows match
+  // by prefix, the longest-named one is most specific.
+  let bestPrefix: Personnel | null = null;
+  let bestPrefixLen = 0;
+  for (const p of ctx.existingCrew) {
+    const fullNorm = normalize(p.name);
+    if (!fullNorm) continue;
+
+    const aStartsWithB = fullNorm.startsWith(normalized);
+    const bStartsWithA = normalized.startsWith(fullNorm);
+    if (!aStartsWithB && !bStartsWithA) continue;
+    if (fullNorm.length === normalized.length) continue; // already direct-handled
+
+    // Require a meaningful overlap (at least 6 alphanumeric chars). This
+    // avoids matching e.g. "Tan" against every name starting with "tan".
+    const overlap = Math.min(fullNorm.length, normalized.length);
+    if (overlap < 6) continue;
+
+    if (fullNorm.length > bestPrefixLen) {
+      bestPrefix = p;
+      bestPrefixLen = fullNorm.length;
+    }
+  }
+  if (bestPrefix) {
+    ctx.crewCache.set(normalized, bestPrefix.id);
+    // Pick the longer of (existing, input) as the resolved canonical form.
+    const fullForm =
+      bestPrefix.name.length >= trimmed.length ? bestPrefix.name : trimmed;
+    return {
+      personnelId: bestPrefix.id,
+      resolvedName: fullForm,
+      isUser: false,
+      upgradedFromTruncation: bestPrefix.name.length > trimmed.length,
     };
   }
 

@@ -436,22 +436,65 @@ function diffSectorVsFlight(
     });
   }
 
+  // PIC name + id treatment for the logbook → schedule handshake.
+  //
+  // The Crew Logbook Report truncates names to 20 chars, while the Schedule
+  // Report has the full form. If a re-import resolves a row's PIC against
+  // an existing-flight value where the existing is the FULLER form
+  // ("Siah Yang Tek, Timothy" vs the logbook's "Siah Yang Tek, Timot"),
+  // treat them as the same person and skip the diff. Otherwise we'd
+  // downgrade the flight's nicely-resolved full name back to the truncated
+  // form on every logbook re-import, and along with it create a duplicate
+  // Personnel row.
+  const incomingPicName = sector.picResolvedName || "";
+  const existingPicName = flight.picName || "";
+  const incomingNorm = incomingPicName
+    ? incomingPicName.toLowerCase().replace(/[^a-z0-9]/g, "")
+    : "";
+  const existingNorm = existingPicName
+    ? existingPicName.toLowerCase().replace(/[^a-z0-9]/g, "")
+    : "";
+
+  const sameNormalizedPerson =
+    incomingNorm.length > 0 &&
+    existingNorm.length > 0 &&
+    (incomingNorm === existingNorm ||
+      // Existing is a fuller form of incoming (logbook truncation).
+      (existingNorm.length > incomingNorm.length &&
+        existingNorm.startsWith(incomingNorm)) ||
+      // Incoming is a fuller form of existing (legacy truncated row, schedule
+      // came along with the long form).
+      (incomingNorm.length > existingNorm.length &&
+        incomingNorm.startsWith(existingNorm)));
+
   if (
-    sector.picResolvedName &&
-    sector.picResolvedName !== flight.picName &&
-    sector.picResolvedName.length > 0
+    incomingPicName &&
+    incomingPicName !== existingPicName &&
+    !sameNormalizedPerson
   ) {
     changes.push({
       field: "picName",
-      from: flight.picName || "",
-      to: sector.picResolvedName,
+      from: existingPicName,
+      to: incomingPicName,
+    });
+  } else if (
+    incomingPicName &&
+    incomingPicName.length > existingPicName.length &&
+    sameNormalizedPerson
+  ) {
+    // Allow upgrade-only (truncated → full), never downgrade.
+    changes.push({
+      field: "picName",
+      from: existingPicName,
+      to: incomingPicName,
     });
   }
 
   if (
     sector.picPersonnelId &&
     sector.picPersonnelId !== flight.picId &&
-    sector.picPersonnelId.length > 0
+    sector.picPersonnelId.length > 0 &&
+    !sameNormalizedPerson
   ) {
     changes.push({
       field: "picId",

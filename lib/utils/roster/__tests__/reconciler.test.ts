@@ -340,6 +340,55 @@ describe("reconcileRoster — summary counts", () => {
 });
 
 // ============================================================
+// PIC truncation handshake — logbook 20-char limit vs schedule full names
+// ============================================================
+
+describe("reconcileRoster — picName truncation handshake", () => {
+  it("does NOT diff when sector resolved to a truncated form of the existing full name", () => {
+    const flight = makeFlight({
+      picName: "Siah Yang Tek, Timothy",
+      picId: "personnel-A",
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          // Sector resolved to truncated form (resolver couldn't find the
+          // existing personnel for some reason — e.g., legacy data).
+          picRawName: "Siah Yang Tek, Timot",
+          picResolvedName: "Siah Yang Tek, Timot",
+          picPersonnelId: "personnel-NEW",
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    // Should be skip_identical (no name/id diff and no other changes).
+    expect(ops[0].kind).toBe("skip_identical");
+  });
+
+  it("DOES diff when sector resolved to the longer/canonical form", () => {
+    const flight = makeFlight({
+      picName: "Siah Yang Tek, Timot",
+      picId: "personnel-OLD",
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          picResolvedName: "Siah Yang Tek, Timothy",
+          picPersonnelId: "personnel-A",
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    if (ops[0].kind !== "update_conflict") {
+      throw new Error(`expected update_conflict got ${ops[0].kind}`);
+    }
+    expect(ops[0].changes.map((c) => c.field)).toContain("picName");
+  });
+});
+
+// ============================================================
 // Turnaround disambiguation — both legs same date, same aircraft
 // ============================================================
 

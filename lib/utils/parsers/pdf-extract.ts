@@ -8,11 +8,12 @@
  *
  * Scanned/image-only PDFs throw — the user is asked to use the CSV export.
  *
- * Uses dynamic import so pdfjs-dist (~1MB) only loads when an import is
- * actually triggered.
+ * pdfjs-dist 5.x requires a worker URL. We bundle the worker into
+ * `public/workers/pdf.worker.min.mjs` via `scripts/copy-pdf-worker.mjs`
+ * (run on dev/build/postinstall) so the URL is stable and offline-safe.
  */
 
-const Y_BUCKET_TOLERANCE = 1.5;
+const WORKER_URL = "/workers/pdf.worker.min.mjs";
 
 interface TextItemLike {
   str: string;
@@ -29,29 +30,26 @@ export interface PdfExtractResult {
   pageCount: number;
 }
 
-export async function extractPdfText(file: File): Promise<PdfExtractResult> {
-  const pdfjsLib = await import("pdfjs-dist");
+const Y_BUCKET_TOLERANCE = 1.5;
 
-  // Tell pdfjs to inline the worker (no separate worker file to fetch).
-  // The legacy/build entry contains both worker + main; pointing the
-  // workerSrc at empty string makes pdfjs run in fakeWorker mode in the
-  // main thread, which works fine for our small reports.
-  // @ts-expect-error - GlobalWorkerOptions is a static property on the namespace
-  if (pdfjsLib.GlobalWorkerOptions) {
-    try {
-      const worker = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
-      // @ts-expect-error - dynamic worker URL import
-      pdfjsLib.GlobalWorkerOptions.workerSrc = worker.default;
-    } catch {
-      // Fall back to fake worker (main-thread parsing).
-      // @ts-expect-error - workerSrc may be undefined when fake-worker is used
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "";
-    }
+let workerConfigured = false;
+
+async function loadPdfjs(): Promise<typeof import("pdfjs-dist")> {
+  const pdfjs = await import("pdfjs-dist");
+  if (!workerConfigured && pdfjs.GlobalWorkerOptions) {
+    pdfjs.GlobalWorkerOptions.workerSrc = WORKER_URL;
+    workerConfigured = true;
   }
+  return pdfjs;
+}
+
+export async function extractPdfText(file: File): Promise<PdfExtractResult> {
+  const pdfjs = await loadPdfjs();
 
   const buffer = await file.arrayBuffer();
-  // @ts-expect-error - pdfjs types don't fully cover getDocument with Uint8Array
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+  });
   const pdf = await loadingTask.promise;
 
   const pages: string[] = [];
@@ -59,10 +57,9 @@ export async function extractPdfText(file: File): Promise<PdfExtractResult> {
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
     const content = await page.getTextContent();
-    const items = content.items as TextItemLike[];
+    const items = (content.items ?? []) as TextItemLike[];
 
-    if (!items || items.length === 0) {
-      // Image-only / scanned PDF.
+    if (items.length === 0) {
       pages.push("");
       continue;
     }
@@ -71,7 +68,7 @@ export async function extractPdfText(file: File): Promise<PdfExtractResult> {
     // page), so we sort rows in descending Y order to read top-to-bottom.
     const rows: { y: number; items: TextItemLike[] }[] = [];
     for (const item of items) {
-      if (!item.str) continue;
+      if (!item || !item.str || !item.transform) continue;
       const y = item.transform[5];
       let row = rows.find((r) => Math.abs(r.y - y) < Y_BUCKET_TOLERANCE);
       if (!row) {
@@ -88,10 +85,6 @@ export async function extractPdfText(file: File): Promise<PdfExtractResult> {
       // Sort tokens left-to-right by their X coordinate.
       row.items.sort((a, b) => a.transform[4] - b.transform[4]);
 
-      // Insert commas between items that are visibly separated. PDF tokens
-      // sometimes share an X bucket because they're in the same word, so we
-      // detect column gaps by looking at the horizontal gap relative to the
-      // previous token's right edge.
       let line = "";
       let prevRight = -Infinity;
       for (const item of row.items) {
@@ -104,8 +97,6 @@ export async function extractPdfText(file: File): Promise<PdfExtractResult> {
           line = text;
         } else {
           const gap = left - prevRight;
-          // Whitespace-y gap → space inside the same cell.
-          // Big gap → column boundary → comma.
           if (gap > 4) {
             line += "," + text;
           } else if (gap > 0.5) {
