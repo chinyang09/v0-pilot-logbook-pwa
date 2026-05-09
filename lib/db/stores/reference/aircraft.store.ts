@@ -186,30 +186,48 @@ export async function batchGetAircraftByRegistrations(
   const results = new Map<string, NormalizedAircraft>()
   if (registrations.length === 0) return results
 
-  const uniqueRegs = [...new Set(registrations.map((r) => r.toUpperCase()))]
-  const normalizedSet = new Set(uniqueRegs.map((r) => normalizeForSearch(r)))
-  const upperSet = new Set(uniqueRegs)
-  const found = new Set<string>()
+  // Build forward + reverse lookup maps so we can return results keyed by the
+  // caller's original casing/format.
+  const uniqueRegs = [...new Set(registrations.map((r) => r.toUpperCase().trim()))]
 
-  await referenceDb.aircraftDatabase
-    .until(() => found.size >= uniqueRegs.length)
-    .each((record) => {
-      const ac = parseRecordData(record)
-      if (!ac || !ac.registration) return
+  // The aircraftDatabase table is keyed by `registration` (its primary key,
+  // always stored uppercased). Use bulkGet — an indexed lookup of every
+  // requested registration in one round-trip — so we never have to scan the
+  // 615k-record table.
+  //
+  // Registrations may be stored with or without dashes depending on source
+  // (CDN vs custom-entered). Look up both the original form AND a dashless
+  // form for each input; the union covers both storage shapes.
+  const lookupKeys: string[] = []
+  const keyToOriginal = new Map<string, string>()
+  for (const orig of uniqueRegs) {
+    if (!keyToOriginal.has(orig)) {
+      keyToOriginal.set(orig, orig)
+      lookupKeys.push(orig)
+    }
+    const dashless = normalizeForSearch(orig)
+    if (dashless !== orig && !keyToOriginal.has(dashless)) {
+      keyToOriginal.set(dashless, orig)
+      lookupKeys.push(dashless)
+    }
+  }
 
-      const regUpper = ac.registration.toUpperCase()
-      const regNormalized = normalizeForSearch(ac.registration)
+  let records: (AircraftReference | undefined)[]
+  try {
+    records = await referenceDb.aircraftDatabase.bulkGet(lookupKeys)
+  } catch {
+    // bulkGet should always be available, but fail safe so an unexpected
+    // schema state doesn't blow up the whole import.
+    return results
+  }
 
-      if (normalizedSet.has(regNormalized) || upperSet.has(regUpper)) {
-        for (const searchReg of uniqueRegs) {
-          const searchNorm = normalizeForSearch(searchReg)
-          if (searchNorm === regNormalized || searchReg === regUpper) {
-            results.set(searchReg, ac)
-            found.add(searchReg)
-          }
-        }
-      }
-    })
+  records.forEach((record, i) => {
+    if (!record) return
+    const ac = parseRecordData(record)
+    if (!ac || !ac.registration) return
+    const orig = keyToOriginal.get(lookupKeys[i])
+    if (orig && !results.has(orig)) results.set(orig, ac)
+  })
 
   return results
 }
