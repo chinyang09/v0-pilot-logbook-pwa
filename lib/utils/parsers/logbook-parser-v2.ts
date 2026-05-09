@@ -26,6 +26,7 @@ import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time";
 import { splitCsvRows, parseCSVLine, parseDDMMYY } from "./shared/csv-split";
 import { normalize } from "./shared/name-normalize";
 import { parseGeneratedAt } from "./shared/generated-at";
+import { normalizeAircraftType } from "./shared/aircraft-type-map";
 import {
   enrichAircraftBatch,
   type EnrichResult,
@@ -62,6 +63,12 @@ export interface ParsedLogbookSector {
   nightTakeoffs: number;
   dayLandings: number;
   nightLandings: number;
+  /**
+   * Inferred from the logbook's TO/LDG columns: any takeoff or landing
+   * recorded for the user means they were the Pilot Flying for the leg.
+   * Zero TO/LDG means they were the Pilot Monitoring.
+   */
+  isPilotFlying: boolean;
   remarks: string;
   /** Source CSV/PDF line for diagnostics. */
   sourceLine: number;
@@ -376,7 +383,12 @@ export async function parseLogbookV2(
         }
 
         const matchedAc = enrichResult.enriched.get(row.rawReg);
-        const aircraftType = matchedAc?.typecode || row.aircraftType;
+        // Prefer the ICAO designator from the local/FR24 enrichment (already
+        // canonical). Fall back to the carrier-specific code from the CSV
+        // and normalize "32Q"/"32N"/"320" → "A21N"/"A20N"/"A320".
+        const aircraftType = normalizeAircraftType(
+          matchedAc?.typecode || row.aircraftType
+        );
 
         const crew = resolveCrewByName(row.picRawName, {
           existingCrew,
@@ -413,6 +425,19 @@ export async function parseLogbookV2(
         // recompute. Reference here keeps lint clean.
         void dayTime;
 
+        // The logbook's TO/LDG columns refer to the LOGGED user (the report
+        // subject). Any takeoff or landing recorded → user was Pilot Flying.
+        // No TO/LDG → user was Pilot Monitoring. This is independent of the
+        // PIC role (the user may be PF as SIC, or PM as PIC).
+        const totalUserTOLdg =
+          row.dayTakeoffs +
+          row.nightTakeoffs +
+          row.dayLandings +
+          row.nightLandings;
+        const isPilotFlying = crew.isUser
+          ? totalUserTOLdg > 0
+          : totalUserTOLdg > 0;
+
         plan.sectors.push({
           date: row.flightDate,
           aircraftReg: matchedAc?.registration || row.rawReg,
@@ -430,6 +455,7 @@ export async function parseLogbookV2(
           nightTakeoffs: row.nightTakeoffs,
           dayLandings: row.dayLandings,
           nightLandings: row.nightLandings,
+          isPilotFlying,
           remarks: row.remarks,
           sourceLine: row.sourceLine,
         });

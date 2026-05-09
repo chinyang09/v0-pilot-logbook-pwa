@@ -45,6 +45,7 @@ import {
 import { splitCsvRows, parseCSVLine, parseDDMMYYYY } from "./shared/csv-split";
 import { normalize } from "./shared/name-normalize";
 import { parseGeneratedAt } from "./shared/generated-at";
+import { normalizeAircraftType } from "./shared/aircraft-type-map";
 
 // ============================================================
 // Public types
@@ -273,7 +274,7 @@ function extractSectorsFromRow(
 
     const sector: RawSector = {
       flightNumber,
-      aircraftType: flightMatch[2],
+      aircraftType: normalizeAircraftType(flightMatch[2]),
       departureIata: routeMatch[1].toUpperCase(),
       arrivalIata: routeMatch[2].toUpperCase(),
       rowDate,

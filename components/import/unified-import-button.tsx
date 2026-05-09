@@ -306,6 +306,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             isUserPic: s.isUserPic,
             picPersonnelId: s.picPersonnelId,
             picResolvedName: s.picResolvedName,
+            isPilotFlying: s.isPilotFlying,
             remarks: s.remarks,
           }));
 

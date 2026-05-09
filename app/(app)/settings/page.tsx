@@ -16,6 +16,7 @@ import {
   Monitor, Clock, Plane, Loader2, Sun, Moon, Laptop,
   LayoutDashboard, Book, Calendar, Users, MapPin, Award,
   Settings, UserCircle, Navigation, ChevronRight, ChevronLeft,
+  Upload,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useTheme } from "next-themes"
@@ -59,7 +60,7 @@ const ALL_NAV_TABS: Array<{ value: BottomNavTab; label: string; icon: React.Comp
   { value: "account", label: "Account", icon: UserCircle },
 ]
 
-type SectionKey = "appearance" | "navigation" | "display" | "autofill" | "duty"
+type SectionKey = "appearance" | "navigation" | "display" | "autofill" | "duty" | "imports"
 
 interface SectionDef {
   key: SectionKey
@@ -74,6 +75,7 @@ const SECTIONS: SectionDef[] = [
   { key: "display", label: "Display Options", icon: Monitor, description: "Time, airport, coordinate format" },
   { key: "autofill", label: "Auto-Fill Fields", icon: Clock, description: "Auto-populate time fields" },
   { key: "duty", label: "Duty Time Defaults", icon: Plane, description: "Report and debrief times" },
+  { key: "imports", label: "Import Defaults", icon: Upload, description: "How CSV/PDF imports populate flights" },
 ]
 
 // ─── Detail panel wrapper with frosted header ───────────────
@@ -343,6 +345,49 @@ function DutyTimeSection({ preferences, updateDutyTimeDefaults }: {
   )
 }
 
+function ImportDefaultsSection({ preferences, updateImportDefaults }: {
+  preferences: ReturnType<typeof usePreferences>["preferences"]
+  updateImportDefaults: ReturnType<typeof usePreferences>["updateImportDefaults"]
+}) {
+  const role = preferences.importDefaults.nonPicPfRole
+  return (
+    <div className="p-4 space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold">Import Defaults</h2>
+        <p className="text-sm text-muted-foreground">
+          Settings used by the Crew Logbook / Schedule importer when populating
+          flights on your behalf.
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-0.5 flex-1">
+          <Label>Role when Pilot Flying but not PIC</Label>
+          <p className="text-xs text-muted-foreground">
+            For imported flights where you logged a takeoff/landing but
+            another pilot was PIC, log your role as PICUS (Pilot In Command
+            Under Supervision) or SIC.
+          </p>
+        </div>
+        <Select
+          value={role}
+          onValueChange={(v) =>
+            updateImportDefaults({ nonPicPfRole: v as "PICUS" | "SIC" })
+          }
+        >
+          <SelectTrigger className="w-[120px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="SIC">SIC</SelectItem>
+            <SelectItem value="PICUS">PICUS</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main page ──────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -382,6 +427,8 @@ export default function SettingsPage() {
         return wrap(<AutoFillSection preferences={preferences} updateAutoFill={prefs.updateAutoFill} />)
       case "duty":
         return wrap(<DutyTimeSection preferences={preferences} updateDutyTimeDefaults={prefs.updateDutyTimeDefaults} />)
+      case "imports":
+        return wrap(<ImportDefaultsSection preferences={preferences} updateImportDefaults={prefs.updateImportDefaults} />)
       default:
         return null
     }

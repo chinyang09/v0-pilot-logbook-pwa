@@ -49,6 +49,17 @@ export interface DutyTimeDefaults {
   regulationType?: "CAAS" | "FAA" | "EASA"
 }
 
+/** Defaults applied when imports populate a flight on the user's behalf. */
+export interface ImportDefaults {
+  /**
+   * Role to assign when the imported flight has the user marked as Pilot
+   * Flying but NOT as the Pilot in Command. PICUS = "Pilot In Command
+   * Under Supervision" (typically logged by an FO acting as PIC during
+   * training/line-check). SIC keeps the flight in the standard FO column.
+   */
+  nonPicPfRole: "PICUS" | "SIC"
+}
+
 export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   timeFormat: "24h",
   useZuluTime: true,
@@ -82,6 +93,10 @@ export const DEFAULT_DUTY_TIME_DEFAULTS: DutyTimeDefaults = {
   regulationType: "CAAS",
 }
 
+export const DEFAULT_IMPORT_DEFAULTS: ImportDefaults = {
+  nonPicPfRole: "SIC",
+}
+
 export type BottomNavTab =
   | "dashboard" | "logbook" | "roster" | "aircraft"
   | "crew" | "airports" | "currencies" | "settings" | "account"
@@ -106,6 +121,7 @@ export interface UserPreferences {
   autoFill?: AutoFillPreferences
   dutyTimeDefaults?: DutyTimeDefaults
   navigation?: NavigationPreferences
+  importDefaults?: ImportDefaults
   createdAt: number
   updatedAt: number
 }

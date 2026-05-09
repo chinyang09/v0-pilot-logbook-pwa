@@ -32,8 +32,11 @@ import {
   getAirportByIata,
   getAirportTimeInfo,
   getCurrentUserPersonnel,
+  getUserPreferences,
   userDb,
+  DEFAULT_IMPORT_DEFAULTS,
 } from "@/lib/db";
+import type { ImportDefaults } from "@/types/db/stores.types";
 import { addScheduleEntry } from "@/lib/db/stores/user/schedule.store";
 import { recalculateFlightFields } from "@/lib/utils/flight-calculations";
 import type { ParsedSector } from "@/lib/utils/roster/reconciler";
@@ -72,7 +75,8 @@ async function hydrateFlightFromSector(
   sector: ParsedSector,
   currentUser: Personnel,
   reportGeneratedAt: number | null | undefined,
-  importSource: FlightLog["importSource"]
+  importSource: FlightLog["importSource"],
+  importDefaults: ImportDefaults
 ): Promise<FlightLogCreate> {
   const [depAirport, arrAirport] = await Promise.all([
     getAirportByIata(sector.departureIata),
@@ -113,6 +117,25 @@ async function hydrateFlightFromSector(
     sicName = "Self";
   }
 
+  // PF inference: prefer the explicit logbook signal (TO/LDG-derived);
+  // schedule-only imports default to true (no actuals to infer from).
+  const pilotFlying = sector.isPilotFlying ?? true;
+
+  // Role assignment:
+  //   user is PIC                       → PIC
+  //   user not PIC, is PF               → PICUS or SIC (per preference)
+  //   user not PIC, is PM (not flying)  → SIC
+  //   user role unknown (no sector hint)→ user's primary role from profile
+  let pilotRole: FlightLog["pilotRole"];
+  if (isUserPic) {
+    pilotRole = "PIC";
+  } else if (sector.isUserPic === false || sector.isPilotFlying !== undefined) {
+    // Logbook-derived path: we know the user's flying status.
+    pilotRole = pilotFlying ? importDefaults.nonPicPfRole : "SIC";
+  } else {
+    pilotRole = currentUser.roles?.includes("PIC") ? "PIC" : "SIC";
+  }
+
   const remarks = sector.remarks
     ? sector.remarks
     : sector.flightNumber
@@ -149,12 +172,8 @@ async function hydrateFlightFromSector(
     sicId,
     sicName,
     additionalCrew: [],
-    pilotFlying: true,
-    pilotRole: isUserPic
-      ? "PIC"
-      : currentUser.roles?.includes("PIC")
-        ? "PIC"
-        : "SIC",
+    pilotFlying,
+    pilotRole,
     picTime: "00:00",
     sicTime: "00:00",
     picusTime: "00:00",
@@ -267,6 +286,13 @@ export async function executeRosterImport(
   const importSource: FlightLog["importSource"] =
     options.importSource ?? "schedule";
 
+  // Fetch user import preferences once — reused across every create op.
+  const storedPrefs = await getUserPreferences().catch(() => null);
+  const importDefaults: ImportDefaults = {
+    ...DEFAULT_IMPORT_DEFAULTS,
+    ...(storedPrefs?.importDefaults ?? {}),
+  };
+
   // ----- 1. Personnel (always applied; not part of user-reviewed diff) -----
   for (const person of plan.personnelToCreate) {
     try {
@@ -329,7 +355,8 @@ export async function executeRosterImport(
             op.sector,
             currentUser,
             reportGeneratedAt,
-            importSource
+            importSource,
+            importDefaults
           );
           const created = await addFlight(payload);
           touchedFlightIds.push(created.id);
@@ -343,7 +370,23 @@ export async function executeRosterImport(
           const patch = buildUpdatePatch(op);
           if (reportGeneratedAt) patch.reportGeneratedAt = reportGeneratedAt;
           patch.importSource = importSource;
-          await updateFlight(op.flight.id, patch);
+          const updated = await updateFlight(op.flight.id, patch);
+          if (!updated) {
+            // Row vanished between plan build and execute — surface so the
+            // user knows their accepted edit didn't actually take effect.
+            result.errors.push({
+              operation: `${op.kind} ${op.flight.flightNumber || op.flight.id}`,
+              message:
+                "Flight no longer exists in IndexedDB — accepted edit was not applied.",
+            });
+            break;
+          }
+          console.log(
+            `[Import] ${op.kind} applied to ${op.flight.flightNumber || op.flight.id}:`,
+            Object.keys(patch).filter(
+              (k) => k !== "reportGeneratedAt" && k !== "importSource"
+            )
+          );
           touchedFlightIds.push(op.flight.id);
           result.updated++;
           break;

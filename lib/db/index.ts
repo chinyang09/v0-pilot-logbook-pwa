@@ -36,7 +36,7 @@ export type {
 export type { Personnel, PersonnelCreate } from "@/types/entities/crew.types";
 export type { UserSession } from "@/types/entities/user.types";
 export type { UserPreferences, DisplayPreferences, AutoFillPreferences, DutyTimeDefaults, NavigationPreferences, BottomNavTab, ThemePreference } from "@/types/db/stores.types";
-export { DEFAULT_DISPLAY_PREFERENCES, DEFAULT_AUTO_FILL_PREFERENCES, DEFAULT_DUTY_TIME_DEFAULTS, DEFAULT_NAVIGATION_PREFERENCES } from "@/types/db/stores.types";
+export { DEFAULT_DISPLAY_PREFERENCES, DEFAULT_AUTO_FILL_PREFERENCES, DEFAULT_DUTY_TIME_DEFAULTS, DEFAULT_NAVIGATION_PREFERENCES, DEFAULT_IMPORT_DEFAULTS } from "@/types/db/stores.types";
 export type { SyncQueueItem, SyncMeta } from "@/types/sync/sync.types";
 export type {
   ScheduleEntry,

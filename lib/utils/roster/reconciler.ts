@@ -69,6 +69,8 @@ export interface ParsedSector {
   isUserPic?: boolean;
   picPersonnelId?: string;
   picResolvedName?: string;
+  /** Logbook-derived: true when user logged any TO or LDG for this leg. */
+  isPilotFlying?: boolean;
   remarks?: string;
 }
 

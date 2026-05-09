@@ -14,6 +14,10 @@
 
 import { hhmmToMinutes } from "@/lib/utils/time";
 import { normalize } from "./shared/name-normalize";
+import {
+  familyOfNormalizedType,
+  normalizeAircraftType,
+} from "./shared/aircraft-type-map";
 import type { ParsedSector } from "@/lib/utils/roster/reconciler";
 import type {
   PlannedLogbookImport,
@@ -27,15 +31,7 @@ import type {
 const MATCH_WINDOW_MIN = 90;
 
 function familyOf(typeCode: string): string {
-  if (!typeCode) return "";
-  const t = typeCode.toUpperCase();
-  // Logbook says "320" while schedule says "32N" / "32Q" for the same A320
-  // family — collapse to "A320" for matching.
-  if (/^32\w/.test(t) || t === "320") return "A320";
-  if (/^33\w/.test(t) || t === "330") return "A330";
-  if (/^77\w/.test(t) || t === "777") return "B777";
-  if (/^78\w/.test(t) || t === "787") return "B787";
-  return t;
+  return familyOfNormalizedType(normalizeAircraftType(typeCode));
 }
 
 function keyFor(
@@ -216,6 +212,7 @@ export function crossHydrate(
       isUserPic: log.isUserPic,
       picPersonnelId: log.picPersonnelId,
       picResolvedName: log.picResolvedName,
+      isPilotFlying: log.isPilotFlying,
       remarks: log.remarks,
     } as ParsedSector & Record<string, unknown>);
   }
