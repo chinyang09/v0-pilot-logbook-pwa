@@ -39,12 +39,12 @@ export interface PdfExtractResult {
 
 const Y_BUCKET_TOLERANCE = 1.5;
 
-let pdfjsCached: typeof import("pdfjs-dist") | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let pdfjsCached: any = null;
 let workerSetupPromise: Promise<void> | null = null;
 
-async function setupWorker(
-  pdfjs: typeof import("pdfjs-dist")
-): Promise<void> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function setupWorker(pdfjs: any): Promise<void> {
   // pdfjs.GlobalWorkerOptions is shared global state — only set up once.
   const opts = pdfjs.GlobalWorkerOptions;
   if (!opts) {
@@ -100,12 +100,16 @@ async function setupWorker(
   }
 }
 
-async function loadPdfjs(): Promise<typeof import("pdfjs-dist")> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function loadPdfjs(): Promise<any> {
   if (pdfjsCached) {
     if (workerSetupPromise) await workerSetupPromise;
     return pdfjsCached;
   }
-  pdfjsCached = await import("pdfjs-dist");
+  // Use the LEGACY build for the main library too — same reason as the
+  // worker: better browser/PWA compatibility, more permissive worker
+  // initialization, and a clearer error surface when something goes wrong.
+  pdfjsCached = await import("pdfjs-dist/legacy/build/pdf.mjs");
   workerSetupPromise = setupWorker(pdfjsCached);
   await workerSetupPromise;
   return pdfjsCached;

@@ -39,7 +39,25 @@ import {
 import type { ImportDefaults } from "@/types/db/stores.types";
 import { addScheduleEntry } from "@/lib/db/stores/user/schedule.store";
 import { recalculateFlightFields } from "@/lib/utils/flight-calculations";
-import type { ParsedSector } from "@/lib/utils/roster/reconciler";
+import {
+  TOLDG_DECISION_MARKER,
+  type ParsedSector,
+} from "@/lib/utils/roster/reconciler";
+
+const TOLDG_FIELDS = new Set([
+  "dayTakeoffs",
+  "nightTakeoffs",
+  "dayLandings",
+  "nightLandings",
+]);
+
+function appendToLdgMarker(remarks: string | undefined): string {
+  const base = remarks ?? "";
+  if (base.includes(TOLDG_DECISION_MARKER)) return base;
+  const today = new Date().toISOString().slice(0, 10);
+  const tag = `${TOLDG_DECISION_MARKER} ${today}`;
+  return base ? `${base}\n${tag}` : tag;
+}
 
 // ============================================================
 // Result type
@@ -327,6 +345,18 @@ export async function executeRosterImport(
   const touchedFlightIds: string[] = [];
 
   for (const op of plan.operations) {
+    // For any update op, work out whether the user was shown a TO/LDG diff
+    // (regardless of accept/reject). If so we must persist the decision in
+    // remarks so the next import doesn't ask the same question.
+    const opChanges =
+      op.kind === "update_conflict" ||
+      op.kind === "edited_conflict" ||
+      op.kind === "update_safe" ||
+      op.kind === "update_consult"
+        ? op.changes
+        : [];
+    const hasToLdgDiff = opChanges.some((c) => TOLDG_FIELDS.has(c.field));
+
     if (!op.accepted) {
       // Record discrepancies for declined updates so the audit trail captures
       // what the user said no to.
@@ -348,6 +378,28 @@ export async function executeRosterImport(
           createdAt: Date.now(),
         });
       }
+
+      // Even when rejected, persist the TO/LDG decision so subsequent
+      // imports don't keep raising the same question.
+      if (hasToLdgDiff && "flight" in op) {
+        try {
+          const fresh = await userDb.flights.get(op.flight.id);
+          if (fresh) {
+            const updatedRemarks = appendToLdgMarker(fresh.remarks);
+            if (updatedRemarks !== fresh.remarks) {
+              await updateFlight(op.flight.id, { remarks: updatedRemarks });
+              touchedFlightIds.push(op.flight.id);
+            }
+          }
+        } catch (error) {
+          result.errors.push({
+            operation: `mark TO/LDG decision on ${op.flight.flightNumber}`,
+            message:
+              error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+
       continue;
     }
 
@@ -373,6 +425,14 @@ export async function executeRosterImport(
           const patch = buildUpdatePatch(op);
           if (reportGeneratedAt) patch.reportGeneratedAt = reportGeneratedAt;
           patch.importSource = importSource;
+          // Persist the user's TO/LDG decision in remarks so subsequent
+          // imports skip the re-flag (see reconciler's
+          // hasToLdgDecisionMarker gate).
+          if (hasToLdgDiff) {
+            const baseRemarks =
+              patch.remarks !== undefined ? patch.remarks : op.flight.remarks;
+            patch.remarks = appendToLdgMarker(baseRemarks);
+          }
           const updated = await updateFlight(op.flight.id, patch);
           if (!updated) {
             // Row vanished between plan build and execute — surface so the

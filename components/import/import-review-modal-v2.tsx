@@ -595,19 +595,26 @@ function StaleRow({
 function ChangeList({
   changes,
 }: {
-  changes: Array<{ field: string; from: string; to: string }>;
+  changes: Array<{ field: string; from: string; to: string; note?: string }>;
 }) {
   return (
     <div className="mt-1 space-y-0.5">
       {changes.map((change) => (
         <div
           key={change.field}
-          className="text-xs text-muted-foreground flex items-center gap-1"
+          className="text-xs text-muted-foreground"
         >
-          <span className="font-mono">{change.field}:</span>
-          <span className="font-mono">{change.from || "—"}</span>
-          <ArrowRight className="h-3 w-3" />
-          <span className="font-mono text-foreground">{change.to}</span>
+          <div className="flex items-center gap-1">
+            <span className="font-mono">{change.field}:</span>
+            <span className="font-mono">{change.from || "—"}</span>
+            <ArrowRight className="h-3 w-3" />
+            <span className="font-mono text-foreground">{change.to}</span>
+          </div>
+          {change.note && (
+            <div className="pl-3 text-[11px] italic text-amber-700 dark:text-amber-400">
+              {change.note}
+            </div>
+          )}
         </div>
       ))}
     </div>

@@ -72,12 +72,38 @@ export interface ParsedSector {
   /** Logbook-derived: true when user logged any TO or LDG for this leg. */
   isPilotFlying?: boolean;
   remarks?: string;
+  // Sun-position-derived suggestion for day/night TO/LDG classification.
+  // Only populated when the parser computed a value that DIFFERS from the
+  // PDF/CSV. The reconciler surfaces this in the diff note so the user
+  // sees "logbook says day, sun says night — which is right?".
+  suggestedDayTakeoffs?: number;
+  suggestedNightTakeoffs?: number;
+  suggestedDayLandings?: number;
+  suggestedNightLandings?: number;
 }
 
 export interface FieldDiff {
   field: string;
   from: string;
   to: string;
+  /**
+   * Optional human-readable annotation rendered alongside the from→to
+   * arrow in the review modal. Used to surface a sun-position-derived
+   * suggestion next to a hand-entered TO/LDG value, etc.
+   */
+  note?: string;
+}
+
+/**
+ * Remarks marker appended by the executor when the user has been asked
+ * about (and made a decision on) TO/LDG values for a flight. The
+ * reconciler treats this as "user already decided; do not re-flag" so
+ * subsequent imports don't keep raising the same diff.
+ */
+export const TOLDG_DECISION_MARKER = "[TO/LDG decision recorded]";
+
+function hasToLdgDecisionMarker(flight: FlightLog): boolean {
+  return (flight.remarks || "").includes(TOLDG_DECISION_MARKER);
 }
 
 export type ReconcilerOperation =
@@ -403,24 +429,43 @@ function diffSectorVsFlight(
 
   // Logbook fields — only flag when sector carries a non-zero value AND the
   // existing flight differs.
+  //
+  // When the user has already decided on TO/LDG values for this flight in a
+  // previous import (marked in remarks by the executor), we skip these
+  // diffs entirely so the same imported row doesn't keep raising the same
+  // question every time. The user can still edit the flight manually.
+  const skipToLdg = hasToLdgDecisionMarker(flight);
   const numericPairs: Array<
-    [keyof FlightLog, keyof ParsedSector]
+    [keyof FlightLog, keyof ParsedSector, keyof ParsedSector | undefined]
   > = [
-    ["dayTakeoffs", "dayTakeoffs"],
-    ["nightTakeoffs", "nightTakeoffs"],
-    ["dayLandings", "dayLandings"],
-    ["nightLandings", "nightLandings"],
+    ["dayTakeoffs", "dayTakeoffs", "suggestedDayTakeoffs"],
+    ["nightTakeoffs", "nightTakeoffs", "suggestedNightTakeoffs"],
+    ["dayLandings", "dayLandings", "suggestedDayLandings"],
+    ["nightLandings", "nightLandings", "suggestedNightLandings"],
   ];
-  for (const [flightField, sectorField] of numericPairs) {
-    const incoming = sector[sectorField] as number | undefined;
-    if (incoming === undefined) continue;
-    const existing = (flight[flightField] as number | undefined) ?? 0;
-    if (incoming !== existing) {
-      changes.push({
-        field: flightField as string,
-        from: String(existing),
-        to: String(incoming),
-      });
+  if (!skipToLdg) {
+    for (const [flightField, sectorField, suggestedField] of numericPairs) {
+      const incoming = sector[sectorField] as number | undefined;
+      if (incoming === undefined) continue;
+      const existing = (flight[flightField] as number | undefined) ?? 0;
+      if (incoming !== existing) {
+        const suggested =
+          suggestedField !== undefined
+            ? (sector[suggestedField] as number | undefined)
+            : undefined;
+        const change: FieldDiff = {
+          field: flightField as string,
+          from: String(existing),
+          to: String(incoming),
+        };
+        // When the sun-position calc disagrees with the logbook value, tell
+        // the user — the captain hand-fills this column in eCrew and it's
+        // the most common manual-entry mistake we see.
+        if (suggested !== undefined && suggested !== incoming) {
+          change.note = `Sun-position calc suggests ${suggested} for this field.`;
+        }
+        changes.push(change);
+      }
     }
   }
 

@@ -340,6 +340,75 @@ describe("reconcileRoster — summary counts", () => {
 });
 
 // ============================================================
+// TO/LDG decision memory — once decided, don't re-flag
+// ============================================================
+
+describe("reconcileRoster — TO/LDG decision marker", () => {
+  it("does NOT diff TO/LDG when the existing flight remarks carry the decision marker", () => {
+    const flight = makeFlight({
+      remarks: "Some pilot note\n[TO/LDG decision recorded] 2026-04-15",
+      dayTakeoffs: 1,
+      nightTakeoffs: 0,
+      dayLandings: 1,
+      nightLandings: 0,
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          dayTakeoffs: 0,
+          nightTakeoffs: 1,
+          dayLandings: 0,
+          nightLandings: 1,
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    if (
+      ops[0].kind === "update_conflict" ||
+      ops[0].kind === "update_safe" ||
+      ops[0].kind === "update_consult" ||
+      ops[0].kind === "edited_conflict"
+    ) {
+      const toLdgFields = ops[0].changes
+        .map((c) => c.field)
+        .filter((f) =>
+          ["dayTakeoffs", "nightTakeoffs", "dayLandings", "nightLandings"].includes(f)
+        );
+      expect(toLdgFields).toHaveLength(0);
+    }
+  });
+
+  it("attaches a sun-position note to TO/LDG diffs when sector carries a suggestion", () => {
+    const flight = makeFlight({
+      dayTakeoffs: 0,
+      nightTakeoffs: 0,
+      dayLandings: 0,
+      nightLandings: 0,
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          dayTakeoffs: 1,
+          nightTakeoffs: 0,
+          dayLandings: 1,
+          nightLandings: 0,
+          suggestedDayTakeoffs: 0,
+          suggestedNightTakeoffs: 1,
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    if (ops[0].kind !== "update_conflict") {
+      throw new Error(`expected update_conflict got ${ops[0].kind}`);
+    }
+    const dayTo = ops[0].changes.find((c) => c.field === "dayTakeoffs");
+    expect(dayTo?.note).toContain("Sun-position calc suggests 0");
+  });
+});
+
+// ============================================================
 // PIC truncation handshake — logbook 20-char limit vs schedule full names
 // ============================================================
 

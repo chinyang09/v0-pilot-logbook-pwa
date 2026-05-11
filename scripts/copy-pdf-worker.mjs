@@ -17,9 +17,12 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
 
+// Use the LEGACY build of the pdfjs worker. The default build targets
+// modern engines only and removed several fallback paths that real-world
+// browsers (notably iOS Safari in a PWA-controlled context) still need.
 const SRC = resolve(
   repoRoot,
-  "node_modules/pdfjs-dist/build/pdf.worker.min.mjs"
+  "node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs"
 );
 const DEST_DIR = resolve(repoRoot, "public/workers");
 const DEST = resolve(DEST_DIR, "pdf.worker.min.mjs");

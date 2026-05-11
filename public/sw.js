@@ -42,6 +42,10 @@ const DYNAMIC_SHELL_ROUTES = [
 // Install event - precache static assets only (not protected routes)
 self.addEventListener("install", (event) => {
   console.log("[SW] Installing version:", CACHE_VERSION)
+  // Take over immediately so bug fixes (like the PDF.js worker route added
+  // in v5) reach the user on their next page load instead of waiting until
+  // every previously-controlled tab is closed.
+  self.skipWaiting()
   event.waitUntil(
     (async () => {
       const staticCache = await caches.open(STATIC_CACHE)

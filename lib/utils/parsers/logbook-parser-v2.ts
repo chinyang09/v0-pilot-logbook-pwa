@@ -435,23 +435,18 @@ export async function parseLogbookV2(
         // PIC role (the user may be PF as SIC, or PM as PIC).
         const totalUserTO = row.dayTakeoffs + row.nightTakeoffs;
         const totalUserLDG = row.dayLandings + row.nightLandings;
-        const totalUserTOLdg = totalUserTO + totalUserLDG;
-        const isPilotFlying = totalUserTOLdg > 0;
+        const isPilotFlying = totalUserTO + totalUserLDG > 0;
 
-        // Sun-position sanity check on the day/night classification.
-        //
-        // The PDF logbook is hand-filled by the operating captain, and the
-        // day/night column is the most common manual-entry mistake we see
-        // (e.g. "day takeoff + day landing" logged for a sector that
-        // actually departed at night per the dep airport's sunset). When
-        // we have all the inputs to compute it ourselves, we OVERRIDE the
-        // PDF split with the sun-based one — but only when the user was PF
-        // (totalTO/LDG > 0). The total count itself (which reflects whether
-        // the user was PF or PM) is taken from the PDF unchanged.
-        let resolvedDayTakeoffs = row.dayTakeoffs;
-        let resolvedNightTakeoffs = row.nightTakeoffs;
-        let resolvedDayLandings = row.dayLandings;
-        let resolvedNightLandings = row.nightLandings;
+        // Sun-position sanity check — both CSV and PDF are hand-entered in
+        // eCrew, so the day/night column is the most common manual-entry
+        // mistake we see. We DON'T silently override here; we compute the
+        // sun-based suggestion and surface it to the user via the diff so
+        // they can choose. The user's decision is then persisted in remarks
+        // (see executor) so subsequent imports don't re-flag the same row.
+        let suggestedDayTakeoffs: number | undefined;
+        let suggestedNightTakeoffs: number | undefined;
+        let suggestedDayLandings: number | undefined;
+        let suggestedNightLandings: number | undefined;
 
         if (depAp && arrAp && row.outT && row.inT) {
           if (totalUserTO > 0) {
@@ -460,8 +455,12 @@ export async function parseLogbookV2(
               row.outT,
               depAp
             );
-            resolvedDayTakeoffs = takeoffAtNight ? 0 : totalUserTO;
-            resolvedNightTakeoffs = takeoffAtNight ? totalUserTO : 0;
+            const sunDay = takeoffAtNight ? 0 : totalUserTO;
+            const sunNight = takeoffAtNight ? totalUserTO : 0;
+            if (sunDay !== row.dayTakeoffs || sunNight !== row.nightTakeoffs) {
+              suggestedDayTakeoffs = sunDay;
+              suggestedNightTakeoffs = sunNight;
+            }
           }
           if (totalUserLDG > 0) {
             const landingAtNight = isLandingAtNight(
@@ -470,26 +469,12 @@ export async function parseLogbookV2(
               row.inT,
               arrAp
             );
-            resolvedDayLandings = landingAtNight ? 0 : totalUserLDG;
-            resolvedNightLandings = landingAtNight ? totalUserLDG : 0;
-          }
-
-          const reclassified =
-            resolvedDayTakeoffs !== row.dayTakeoffs ||
-            resolvedNightTakeoffs !== row.nightTakeoffs ||
-            resolvedDayLandings !== row.dayLandings ||
-            resolvedNightLandings !== row.nightLandings;
-          if (reclassified) {
-            plan.warnings.push({
-              line: row.sourceLine,
-              message:
-                `Reclassified day/night TO/LDG for ${row.depIata}→${row.arrIata}: ` +
-                `PDF says (dayTO=${row.dayTakeoffs}, nightTO=${row.nightTakeoffs}, ` +
-                `dayLDG=${row.dayLandings}, nightLDG=${row.nightLandings}); ` +
-                `sun-position calc says (dayTO=${resolvedDayTakeoffs}, ` +
-                `nightTO=${resolvedNightTakeoffs}, dayLDG=${resolvedDayLandings}, ` +
-                `nightLDG=${resolvedNightLandings}).`,
-            });
+            const sunDay = landingAtNight ? 0 : totalUserLDG;
+            const sunNight = landingAtNight ? totalUserLDG : 0;
+            if (sunDay !== row.dayLandings || sunNight !== row.nightLandings) {
+              suggestedDayLandings = sunDay;
+              suggestedNightLandings = sunNight;
+            }
           }
         }
 
@@ -506,10 +491,17 @@ export async function parseLogbookV2(
           isUserPic: crew.isUser,
           picPersonnelId: crew.personnelId,
           picResolvedName: crew.resolvedName,
-          dayTakeoffs: resolvedDayTakeoffs,
-          nightTakeoffs: resolvedNightTakeoffs,
-          dayLandings: resolvedDayLandings,
-          nightLandings: resolvedNightLandings,
+          // PDF/CSV values as-entered. The sun-based suggestion travels
+          // alongside as `suggested*` so the reconciler can annotate the
+          // diff without silently rewriting the values.
+          dayTakeoffs: row.dayTakeoffs,
+          nightTakeoffs: row.nightTakeoffs,
+          dayLandings: row.dayLandings,
+          nightLandings: row.nightLandings,
+          suggestedDayTakeoffs,
+          suggestedNightTakeoffs,
+          suggestedDayLandings,
+          suggestedNightLandings,
           isPilotFlying,
           remarks: row.remarks,
           sourceLine: row.sourceLine,
