@@ -21,6 +21,10 @@
 import type { Personnel } from "@/types/entities/crew.types";
 import { getCurrentUserPersonnel, getAirportByIata, getAllPersonnel } from "@/lib/db";
 import { calculateNightTimeComplete } from "@/lib/utils/night-time";
+import {
+  isTakeoffAtNight,
+  isLandingAtNight,
+} from "@/lib/utils/flight-calculations";
 import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time";
 
 import { splitCsvRows, parseCSVLine, parseDDMMYY } from "./shared/csv-split";
@@ -429,14 +433,65 @@ export async function parseLogbookV2(
         // subject). Any takeoff or landing recorded → user was Pilot Flying.
         // No TO/LDG → user was Pilot Monitoring. This is independent of the
         // PIC role (the user may be PF as SIC, or PM as PIC).
-        const totalUserTOLdg =
-          row.dayTakeoffs +
-          row.nightTakeoffs +
-          row.dayLandings +
-          row.nightLandings;
-        const isPilotFlying = crew.isUser
-          ? totalUserTOLdg > 0
-          : totalUserTOLdg > 0;
+        const totalUserTO = row.dayTakeoffs + row.nightTakeoffs;
+        const totalUserLDG = row.dayLandings + row.nightLandings;
+        const totalUserTOLdg = totalUserTO + totalUserLDG;
+        const isPilotFlying = totalUserTOLdg > 0;
+
+        // Sun-position sanity check on the day/night classification.
+        //
+        // The PDF logbook is hand-filled by the operating captain, and the
+        // day/night column is the most common manual-entry mistake we see
+        // (e.g. "day takeoff + day landing" logged for a sector that
+        // actually departed at night per the dep airport's sunset). When
+        // we have all the inputs to compute it ourselves, we OVERRIDE the
+        // PDF split with the sun-based one — but only when the user was PF
+        // (totalTO/LDG > 0). The total count itself (which reflects whether
+        // the user was PF or PM) is taken from the PDF unchanged.
+        let resolvedDayTakeoffs = row.dayTakeoffs;
+        let resolvedNightTakeoffs = row.nightTakeoffs;
+        let resolvedDayLandings = row.dayLandings;
+        let resolvedNightLandings = row.nightLandings;
+
+        if (depAp && arrAp && row.outT && row.inT) {
+          if (totalUserTO > 0) {
+            const takeoffAtNight = isTakeoffAtNight(
+              row.flightDate,
+              row.outT,
+              depAp
+            );
+            resolvedDayTakeoffs = takeoffAtNight ? 0 : totalUserTO;
+            resolvedNightTakeoffs = takeoffAtNight ? totalUserTO : 0;
+          }
+          if (totalUserLDG > 0) {
+            const landingAtNight = isLandingAtNight(
+              row.flightDate,
+              row.outT,
+              row.inT,
+              arrAp
+            );
+            resolvedDayLandings = landingAtNight ? 0 : totalUserLDG;
+            resolvedNightLandings = landingAtNight ? totalUserLDG : 0;
+          }
+
+          const reclassified =
+            resolvedDayTakeoffs !== row.dayTakeoffs ||
+            resolvedNightTakeoffs !== row.nightTakeoffs ||
+            resolvedDayLandings !== row.dayLandings ||
+            resolvedNightLandings !== row.nightLandings;
+          if (reclassified) {
+            plan.warnings.push({
+              line: row.sourceLine,
+              message:
+                `Reclassified day/night TO/LDG for ${row.depIata}→${row.arrIata}: ` +
+                `PDF says (dayTO=${row.dayTakeoffs}, nightTO=${row.nightTakeoffs}, ` +
+                `dayLDG=${row.dayLandings}, nightLDG=${row.nightLandings}); ` +
+                `sun-position calc says (dayTO=${resolvedDayTakeoffs}, ` +
+                `nightTO=${resolvedNightTakeoffs}, dayLDG=${resolvedDayLandings}, ` +
+                `nightLDG=${resolvedNightLandings}).`,
+            });
+          }
+        }
 
         plan.sectors.push({
           date: row.flightDate,
@@ -451,10 +506,10 @@ export async function parseLogbookV2(
           isUserPic: crew.isUser,
           picPersonnelId: crew.personnelId,
           picResolvedName: crew.resolvedName,
-          dayTakeoffs: row.dayTakeoffs,
-          nightTakeoffs: row.nightTakeoffs,
-          dayLandings: row.dayLandings,
-          nightLandings: row.nightLandings,
+          dayTakeoffs: resolvedDayTakeoffs,
+          nightTakeoffs: resolvedNightTakeoffs,
+          dayLandings: resolvedDayLandings,
+          nightLandings: resolvedNightLandings,
           isPilotFlying,
           remarks: row.remarks,
           sourceLine: row.sourceLine,

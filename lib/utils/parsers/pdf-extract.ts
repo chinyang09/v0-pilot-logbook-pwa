@@ -8,12 +8,19 @@
  *
  * Scanned/image-only PDFs throw — the user is asked to use the CSV export.
  *
- * pdfjs-dist 5.x requires a worker URL. We bundle the worker into
- * `public/workers/pdf.worker.min.mjs` via `scripts/copy-pdf-worker.mjs`
- * (run on dev/build/postinstall) so the URL is stable and offline-safe.
+ * Worker setup:
+ *   pdfjs-dist 5.x requires a live worker; the v4 fake-worker fallback is
+ *   gone. We pre-create the Worker ourselves via `new Worker(url, { type:
+ *   "module" })` and hand it to pdfjs through `GlobalWorkerOptions
+ *   .workerPort`. This is more robust than letting pdfjs resolve the URL
+ *   itself, which has historically tripped on Next.js webpack bundling,
+ *   the app's service worker, and various MIME quirks.
+ *
+ *   The worker file is copied into `public/workers/pdf.worker.min.mjs`
+ *   by `scripts/copy-pdf-worker.mjs` (postinstall + dev + build).
  */
 
-const WORKER_URL = "/workers/pdf.worker.min.mjs";
+const WORKER_PATH = "/workers/pdf.worker.min.mjs";
 
 interface TextItemLike {
   str: string;
@@ -32,15 +39,76 @@ export interface PdfExtractResult {
 
 const Y_BUCKET_TOLERANCE = 1.5;
 
-let workerConfigured = false;
+let pdfjsCached: typeof import("pdfjs-dist") | null = null;
+let workerSetupPromise: Promise<void> | null = null;
+
+async function setupWorker(
+  pdfjs: typeof import("pdfjs-dist")
+): Promise<void> {
+  // pdfjs.GlobalWorkerOptions is shared global state — only set up once.
+  const opts = pdfjs.GlobalWorkerOptions;
+  if (!opts) {
+    throw new Error("pdfjs.GlobalWorkerOptions is not available");
+  }
+  // Already configured (re-import).
+  // @ts-expect-error workerPort exists in 5.x types
+  if (opts.workerPort || opts.workerSrc) return;
+
+  const absoluteUrl = new URL(
+    WORKER_PATH,
+    typeof window !== "undefined"
+      ? window.location.origin
+      : "http://localhost"
+  ).href;
+
+  // Preferred: create a module Worker ourselves and hand it to pdfjs.
+  // Avoids letting pdfjs's internal resolver fight Next.js's bundler or
+  // the app's service worker.
+  try {
+    if (typeof Worker !== "undefined") {
+      const worker = new Worker(absoluteUrl, { type: "module" });
+      // @ts-expect-error - workerPort is the recommended modern entrypoint
+      opts.workerPort = worker;
+      return;
+    }
+  } catch (err) {
+    console.warn(
+      "[pdf] workerPort setup failed, falling back to workerSrc:",
+      err
+    );
+  }
+
+  // Last resort: blob-URL the worker code so the import path doesn't
+  // matter (handles service-worker quirks and cross-origin oddities).
+  try {
+    const res = await fetch(WORKER_PATH);
+    if (!res.ok) {
+      throw new Error(`worker fetch ${res.status}`);
+    }
+    const code = await res.text();
+    const blob = new Blob([code], { type: "application/javascript" });
+    const blobUrl = URL.createObjectURL(blob);
+    // Pre-create the Worker so pdfjs doesn't re-resolve the URL.
+    const worker = new Worker(blobUrl, { type: "module" });
+    // @ts-expect-error - workerPort is the recommended modern entrypoint
+    opts.workerPort = worker;
+  } catch (err) {
+    // Give up — fall through and let pdfjs try workerSrc, which will
+    // surface a more descriptive error from pdfjs itself.
+    opts.workerSrc = absoluteUrl;
+    console.error("[pdf] all worker setup paths failed", err);
+  }
+}
 
 async function loadPdfjs(): Promise<typeof import("pdfjs-dist")> {
-  const pdfjs = await import("pdfjs-dist");
-  if (!workerConfigured && pdfjs.GlobalWorkerOptions) {
-    pdfjs.GlobalWorkerOptions.workerSrc = WORKER_URL;
-    workerConfigured = true;
+  if (pdfjsCached) {
+    if (workerSetupPromise) await workerSetupPromise;
+    return pdfjsCached;
   }
-  return pdfjs;
+  pdfjsCached = await import("pdfjs-dist");
+  workerSetupPromise = setupWorker(pdfjsCached);
+  await workerSetupPromise;
+  return pdfjsCached;
 }
 
 export async function extractPdfText(file: File): Promise<PdfExtractResult> {
@@ -57,9 +125,9 @@ export async function extractPdfText(file: File): Promise<PdfExtractResult> {
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
     const content = await page.getTextContent();
-    const items = (content.items ?? []) as TextItemLike[];
+    const items = (content?.items ?? []) as TextItemLike[];
 
-    if (items.length === 0) {
+    if (!Array.isArray(items) || items.length === 0) {
       pages.push("");
       continue;
     }
@@ -68,7 +136,9 @@ export async function extractPdfText(file: File): Promise<PdfExtractResult> {
     // page), so we sort rows in descending Y order to read top-to-bottom.
     const rows: { y: number; items: TextItemLike[] }[] = [];
     for (const item of items) {
-      if (!item || !item.str || !item.transform) continue;
+      if (!item || typeof item.str !== "string" || !Array.isArray(item.transform)) {
+        continue;
+      }
       const y = item.transform[5];
       let row = rows.find((r) => Math.abs(r.y - y) < Y_BUCKET_TOLERANCE);
       if (!row) {
