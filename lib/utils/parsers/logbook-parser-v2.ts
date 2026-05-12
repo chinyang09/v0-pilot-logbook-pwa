@@ -19,13 +19,26 @@
  */
 
 import type { Personnel } from "@/types/entities/crew.types";
-import { getCurrentUserPersonnel, getAirportByIata, getAllPersonnel } from "@/lib/db";
+import { getCurrentUserPersonnel, getAirportByIata, getAllPersonnel, getAirportTimeInfo } from "@/lib/db";
 import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
   isTakeoffAtNight,
   isLandingAtNight,
 } from "@/lib/utils/flight-calculations";
 import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time";
+import type { ParsedSector } from "@/lib/utils/roster/reconciler";
+
+/**
+ * Shift a UTC HH:MM string by an integer hour offset, wrapping into a
+ * 0–24 hour window. Used purely for the diff-note display — no date
+ * arithmetic, since the local-date drift is implicit in the offset sign.
+ */
+function shiftHHMM(hhmm: string, offsetHours: number): string {
+  const minutes = hhmmToMinutes(hhmm);
+  if (minutes < 0) return hhmm;
+  const shifted = ((minutes + offsetHours * 60) % (24 * 60) + 24 * 60) % (24 * 60);
+  return minutesToHHMM(shifted);
+}
 
 import { splitCsvRows, parseCSVLine, parseDDMMYY } from "./shared/csv-split";
 import { normalize } from "./shared/name-normalize";
@@ -447,14 +460,24 @@ export async function parseLogbookV2(
         let suggestedNightTakeoffs: number | undefined;
         let suggestedDayLandings: number | undefined;
         let suggestedNightLandings: number | undefined;
+        let toLdgContext: ParsedSector["toLdgContext"] | undefined;
 
         if (depAp && arrAp && row.outT && row.inT) {
+          const depOffset = getAirportTimeInfo(depAp.tz).offset;
+          const arrOffset = getAirportTimeInfo(arrAp.tz).offset;
+          const takeoffAtNight = isTakeoffAtNight(
+            row.flightDate,
+            row.outT,
+            depAp
+          );
+          const landingAtNight = isLandingAtNight(
+            row.flightDate,
+            row.outT,
+            row.inT,
+            arrAp
+          );
+
           if (totalUserTO > 0) {
-            const takeoffAtNight = isTakeoffAtNight(
-              row.flightDate,
-              row.outT,
-              depAp
-            );
             const sunDay = takeoffAtNight ? 0 : totalUserTO;
             const sunNight = takeoffAtNight ? totalUserTO : 0;
             if (sunDay !== row.dayTakeoffs || sunNight !== row.nightTakeoffs) {
@@ -463,12 +486,6 @@ export async function parseLogbookV2(
             }
           }
           if (totalUserLDG > 0) {
-            const landingAtNight = isLandingAtNight(
-              row.flightDate,
-              row.outT,
-              row.inT,
-              arrAp
-            );
             const sunDay = landingAtNight ? 0 : totalUserLDG;
             const sunNight = landingAtNight ? totalUserLDG : 0;
             if (sunDay !== row.dayLandings || sunNight !== row.nightLandings) {
@@ -476,6 +493,17 @@ export async function parseLogbookV2(
               suggestedNightLandings = sunNight;
             }
           }
+
+          toLdgContext = {
+            outUtc: row.outT,
+            inUtc: row.inT,
+            depLocal: shiftHHMM(row.outT, depOffset),
+            depTzOffset: depOffset,
+            depSunStatus: takeoffAtNight ? "night" : "day",
+            arrLocal: shiftHHMM(row.inT, arrOffset),
+            arrTzOffset: arrOffset,
+            arrSunStatus: landingAtNight ? "night" : "day",
+          };
         }
 
         plan.sectors.push({
@@ -502,6 +530,7 @@ export async function parseLogbookV2(
           suggestedNightTakeoffs,
           suggestedDayLandings,
           suggestedNightLandings,
+          toLdgContext,
           isPilotFlying,
           remarks: row.remarks,
           sourceLine: row.sourceLine,

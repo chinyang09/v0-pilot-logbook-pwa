@@ -466,6 +466,11 @@ function DiffRow({
       <div className="text-sm font-medium">
         {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
         {op.flight.departureIata}→{op.flight.arrivalIata}
+        {op.flight.outTime && op.flight.inTime && (
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            {op.flight.outTime}Z – {op.flight.inTime}Z
+          </span>
+        )}
       </div>
       <ChangeList changes={op.changes} />
     </div>
@@ -494,6 +499,11 @@ function ConsentRow({
         <div className="text-sm font-medium">
           {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
           {op.flight.departureIata}→{op.flight.arrivalIata}
+          {op.flight.outTime && op.flight.inTime && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {op.flight.outTime}Z – {op.flight.inTime}Z
+            </span>
+          )}
         </div>
         <ChangeList changes={op.changes} />
       </div>

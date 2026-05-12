@@ -1,6 +1,3 @@
 .next
 node_modules
 tsconfig.tsbuildinfo
-
-# Generated at build time by scripts/copy-pdf-worker.mjs
-public/workers/pdf.worker.min.mjs

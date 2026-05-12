@@ -106,29 +106,81 @@ async function loadPdfjs(): Promise<any> {
     if (workerSetupPromise) await workerSetupPromise;
     return pdfjsCached;
   }
-  // Use the LEGACY build for the main library too — same reason as the
-  // worker: better browser/PWA compatibility, more permissive worker
-  // initialization, and a clearer error surface when something goes wrong.
-  pdfjsCached = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  workerSetupPromise = setupWorker(pdfjsCached);
+  try {
+    // Use the LEGACY build for the main library too — same reason as the
+    // worker: better browser/PWA compatibility, more permissive worker
+    // initialization, and a clearer error surface when something goes wrong.
+    pdfjsCached = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  } catch (err) {
+    throw new Error(
+      `[pdf] failed to load pdfjs-dist module: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+  workerSetupPromise = setupWorker(pdfjsCached).catch((err) => {
+    // Re-throw with context so callers see a useful message rather than the
+    // raw worker init error.
+    throw new Error(
+      `[pdf] worker setup failed: ${err instanceof Error ? err.message : String(err)}`
+    );
+  });
   await workerSetupPromise;
   return pdfjsCached;
 }
 
 export async function extractPdfText(file: File): Promise<PdfExtractResult> {
-  const pdfjs = await loadPdfjs();
+  let pdfjs: typeof import("pdfjs-dist");
+  try {
+    pdfjs = await loadPdfjs();
+  } catch (err) {
+    // loadPdfjs already wrapped its own errors.
+    throw err;
+  }
 
-  const buffer = await file.arrayBuffer();
-  const loadingTask = pdfjs.getDocument({
-    data: new Uint8Array(buffer),
-  });
-  const pdf = await loadingTask.promise;
+  if (typeof pdfjs.getDocument !== "function") {
+    throw new Error(
+      "[pdf] pdfjs.getDocument is unavailable — module exports may be wrong"
+    );
+  }
+
+  let buffer: ArrayBuffer;
+  try {
+    buffer = await file.arrayBuffer();
+  } catch (err) {
+    throw new Error(
+      `[pdf] failed to read file bytes: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  let pdf: Awaited<ReturnType<typeof pdfjs.getDocument>["promise"]>;
+  try {
+    const loadingTask = pdfjs.getDocument({
+      data: new Uint8Array(buffer),
+    });
+    pdf = await loadingTask.promise;
+  } catch (err) {
+    throw new Error(
+      `[pdf] getDocument/parse failed: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  if (!pdf || typeof pdf.numPages !== "number") {
+    throw new Error("[pdf] document load returned no pages");
+  }
 
   const pages: string[] = [];
 
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-    const page = await pdf.getPage(pageNum);
-    const content = await page.getTextContent();
+    let page;
+    let content;
+    try {
+      page = await pdf.getPage(pageNum);
+      content = await page.getTextContent();
+    } catch (err) {
+      throw new Error(
+        `[pdf] page ${pageNum} text extraction failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+
     const items = (content?.items ?? []) as TextItemLike[];
 
     if (!Array.isArray(items) || items.length === 0) {

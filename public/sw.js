@@ -1,4 +1,4 @@
-const CACHE_VERSION = "v5"
+const CACHE_VERSION = "v6"
 const STATIC_CACHE = `skylog-static-${CACHE_VERSION}`
 const DYNAMIC_CACHE = `skylog-dynamic-${CACHE_VERSION}`
 const CDN_CACHE = `skylog-cdn-${CACHE_VERSION}`

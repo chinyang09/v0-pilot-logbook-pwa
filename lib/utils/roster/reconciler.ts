@@ -80,6 +80,23 @@ export interface ParsedSector {
   suggestedNightTakeoffs?: number;
   suggestedDayLandings?: number;
   suggestedNightLandings?: number;
+  /**
+   * Pre-computed day/night context for the TO/LDG diff note. Carries the
+   * out/in times in both UTC and local form plus the sun classification
+   * at the dep + arr airports so the review modal can show the user WHY
+   * the import value looks wrong (without each consumer having to redo
+   * the airport + sun lookup itself).
+   */
+  toLdgContext?: {
+    outUtc: string;
+    inUtc: string;
+    depLocal?: string;       // e.g. "15:24"
+    depTzOffset?: number;    // e.g. 7  (UTC+7)
+    depSunStatus?: "day" | "night";
+    arrLocal?: string;
+    arrTzOffset?: number;
+    arrSunStatus?: "day" | "night";
+  };
 }
 
 export interface FieldDiff {
@@ -444,6 +461,22 @@ function diffSectorVsFlight(
     ["nightLandings", "nightLandings", "suggestedNightLandings"],
   ];
   if (!skipToLdg) {
+    const ctx = sector.toLdgContext;
+    const fmtCtx = ctx
+      ? (() => {
+          const dep = ctx.depLocal
+            ? `${ctx.outUtc}Z / ${ctx.depLocal} local (UTC${ctx.depTzOffset! >= 0 ? "+" : ""}${ctx.depTzOffset})`
+            : `${ctx.outUtc}Z`;
+          const arr = ctx.arrLocal
+            ? `${ctx.inUtc}Z / ${ctx.arrLocal} local (UTC${ctx.arrTzOffset! >= 0 ? "+" : ""}${ctx.arrTzOffset})`
+            : `${ctx.inUtc}Z`;
+          return {
+            takeoff: `OUT ${dep} → sun says ${ctx.depSunStatus ?? "?"} at ${sector.departureIata}`,
+            landing: `IN  ${arr} → sun says ${ctx.arrSunStatus ?? "?"} at ${sector.arrivalIata}`,
+          };
+        })()
+      : null;
+
     for (const [flightField, sectorField, suggestedField] of numericPairs) {
       const incoming = sector[sectorField] as number | undefined;
       if (incoming === undefined) continue;
@@ -460,8 +493,19 @@ function diffSectorVsFlight(
         };
         // When the sun-position calc disagrees with the logbook value, tell
         // the user — the captain hand-fills this column in eCrew and it's
-        // the most common manual-entry mistake we see.
-        if (suggested !== undefined && suggested !== incoming) {
+        // the most common manual-entry mistake we see. We include the
+        // out/in times in both UTC and local form plus the sun status at
+        // dep and arr so the user can verify without leaving the modal.
+        if (fmtCtx) {
+          const isTakeoffField =
+            flightField === "dayTakeoffs" || flightField === "nightTakeoffs";
+          const sideLine = isTakeoffField ? fmtCtx.takeoff : fmtCtx.landing;
+          const suggestion =
+            suggested !== undefined && suggested !== incoming
+              ? `Sun-position calc suggests ${suggested}.`
+              : null;
+          change.note = suggestion ? `${suggestion} ${sideLine}` : sideLine;
+        } else if (suggested !== undefined && suggested !== incoming) {
           change.note = `Sun-position calc suggests ${suggested} for this field.`;
         }
         changes.push(change);
