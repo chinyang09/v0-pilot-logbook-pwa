@@ -544,6 +544,11 @@ function EditedRow({
         <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
           {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
           {op.flight.departureIata}→{op.flight.arrivalIata}
+          {op.flight.outTime && op.flight.inTime && (
+            <span className="text-xs font-normal text-muted-foreground">
+              {op.flight.outTime}Z – {op.flight.inTime}Z
+            </span>
+          )}
           <div className="flex gap-1">
             {op.editReasons.map((r) => (
               <Badge
