@@ -20,7 +20,10 @@
 
 import type { Personnel } from "@/types/entities/crew.types";
 import { getCurrentUserPersonnel, getAirportByIata, getAllPersonnel, getAirportTimeInfo } from "@/lib/db";
-import { calculateNightTimeComplete } from "@/lib/utils/night-time";
+import {
+  calculateNightTimeComplete,
+  findDayBoundariesUtc,
+} from "@/lib/utils/night-time";
 import {
   isTakeoffAtNight,
   isLandingAtNight,
@@ -494,15 +497,30 @@ export async function parseLogbookV2(
             }
           }
 
+          const depBounds = findDayBoundariesUtc(
+            row.flightDate,
+            depAp.latitude,
+            depAp.longitude
+          );
+          const arrBounds = findDayBoundariesUtc(
+            row.flightDate,
+            arrAp.latitude,
+            arrAp.longitude
+          );
+
           toLdgContext = {
             outUtc: row.outT,
             inUtc: row.inT,
             depLocal: shiftHHMM(row.outT, depOffset),
             depTzOffset: depOffset,
             depSunStatus: takeoffAtNight ? "night" : "day",
+            depSunriseUtc: depBounds.sunriseUtc,
+            depSunsetUtc: depBounds.sunsetUtc,
             arrLocal: shiftHHMM(row.inT, arrOffset),
             arrTzOffset: arrOffset,
             arrSunStatus: landingAtNight ? "night" : "day",
+            arrSunriseUtc: arrBounds.sunriseUtc,
+            arrSunsetUtc: arrBounds.sunsetUtc,
           };
         }
 

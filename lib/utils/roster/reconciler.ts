@@ -93,9 +93,14 @@ export interface ParsedSector {
     depLocal?: string;       // e.g. "15:24"
     depTzOffset?: number;    // e.g. 7  (UTC+7)
     depSunStatus?: "day" | "night";
+    /** UTC HH:MM of civil twilight crossings at the dep airport on `date`. */
+    depSunriseUtc?: string | null;
+    depSunsetUtc?: string | null;
     arrLocal?: string;
     arrTzOffset?: number;
     arrSunStatus?: "day" | "night";
+    arrSunriseUtc?: string | null;
+    arrSunsetUtc?: string | null;
   };
 }
 
@@ -121,6 +126,17 @@ export const TOLDG_DECISION_MARKER = "[TO/LDG decision recorded]";
 
 function hasToLdgDecisionMarker(flight: FlightLog): boolean {
   return (flight.remarks || "").includes(TOLDG_DECISION_MARKER);
+}
+
+function formatSunBounds(
+  sunriseUtc: string | null | undefined,
+  sunsetUtc: string | null | undefined
+): string {
+  if (!sunriseUtc && !sunsetUtc) return "";
+  const parts: string[] = [];
+  if (sunriseUtc) parts.push(`sunrise ${sunriseUtc}Z`);
+  if (sunsetUtc) parts.push(`sunset ${sunsetUtc}Z`);
+  return `(${parts.join(", ")})`;
 }
 
 export type ReconcilerOperation =
@@ -470,9 +486,21 @@ function diffSectorVsFlight(
           const arr = ctx.arrLocal
             ? `${ctx.inUtc}Z / ${ctx.arrLocal} local (UTC${ctx.arrTzOffset! >= 0 ? "+" : ""}${ctx.arrTzOffset})`
             : `${ctx.inUtc}Z`;
+          const depBounds = formatSunBounds(
+            ctx.depSunriseUtc,
+            ctx.depSunsetUtc
+          );
+          const arrBounds = formatSunBounds(
+            ctx.arrSunriseUtc,
+            ctx.arrSunsetUtc
+          );
           return {
-            takeoff: `OUT ${dep} → sun says ${ctx.depSunStatus ?? "?"} at ${sector.departureIata}`,
-            landing: `IN  ${arr} → sun says ${ctx.arrSunStatus ?? "?"} at ${sector.arrivalIata}`,
+            takeoff:
+              `OUT ${dep} → sun says ${ctx.depSunStatus ?? "?"} at ` +
+              `${sector.departureIata}${depBounds ? ` ${depBounds}` : ""}`,
+            landing:
+              `IN  ${arr} → sun says ${ctx.arrSunStatus ?? "?"} at ` +
+              `${sector.arrivalIata}${arrBounds ? ` ${arrBounds}` : ""}`,
           };
         })()
       : null;
