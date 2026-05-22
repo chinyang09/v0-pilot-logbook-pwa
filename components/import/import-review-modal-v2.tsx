@@ -151,7 +151,14 @@ export function ImportReviewModalV2({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+      <DialogContent
+        // Raise above the floating nav pill (z-[100]) so the modal header
+        // isn't hidden behind it. Constrain to the visible viewport with
+        // safe-area insets top + bottom so it never extends under the nav
+        // pill or the mobile bottom nav.
+        className="z-[110] flex max-w-3xl flex-col p-4 sm:p-6 max-h-[calc(100dvh-7rem)] top-[calc(env(safe-area-inset-top)+4.5rem)] translate-y-0 sm:top-[50%] sm:-translate-y-1/2"
+        overlayClassName="z-[105]"
+      >
         <DialogHeader>
           <DialogTitle>Review Import</DialogTitle>
           <DialogDescription>
@@ -472,6 +479,7 @@ function DiffRow({
           </span>
         )}
       </div>
+      <SunCheck op={op} />
       <ChangeList changes={op.changes} />
     </div>
   );
@@ -505,6 +513,7 @@ function ConsentRow({
             </span>
           )}
         </div>
+        <SunCheck op={op} />
         <ChangeList changes={op.changes} />
       </div>
     </label>
@@ -561,6 +570,7 @@ function EditedRow({
             ))}
           </div>
         </div>
+        <SunCheck op={op} />
         <ChangeList changes={op.changes} />
       </div>
     </label>
@@ -603,6 +613,81 @@ function StaleRow({
         existing report {new Date(op.existingGeneratedAt).toISOString()} &gt;
         this report {new Date(op.reportGeneratedAt).toISOString()}
       </span>
+    </div>
+  );
+}
+
+/**
+ * Day/night cutoff summary for a flight, shown whenever a TO/LDG diff is
+ * present so the user can sanity-check whether the imported value or the
+ * sun-position calc is right. Reads the pre-computed context the logbook
+ * parser attached to the sector.
+ */
+function SunCheck({
+  op,
+}: {
+  op: AcceptableOperation;
+}) {
+  if (
+    op.kind !== "update_safe" &&
+    op.kind !== "update_consult" &&
+    op.kind !== "update_conflict" &&
+    op.kind !== "edited_conflict"
+  ) {
+    return null;
+  }
+  const ctx = op.sector?.toLdgContext;
+  if (!ctx) return null;
+
+  const hasToLdgChange = op.changes.some((c) =>
+    ["dayTakeoffs", "nightTakeoffs", "dayLandings", "nightLandings"].includes(
+      c.field
+    )
+  );
+  if (!hasToLdgChange) return null;
+
+  const tz = (n?: number) =>
+    n === undefined ? "" : ` (UTC${n >= 0 ? "+" : ""}${n})`;
+  const bounds = (rise?: string | null, set?: string | null) => {
+    const parts: string[] = [];
+    if (rise) parts.push(`sunrise ${rise}Z`);
+    if (set) parts.push(`sunset ${set}Z`);
+    return parts.length ? ` · ${parts.join(", ")}` : "";
+  };
+
+  return (
+    <div className="mt-1 mb-1 rounded bg-muted/40 px-2 py-1 text-[11px] leading-relaxed">
+      <div className="font-medium text-foreground/80">Day/night check</div>
+      <div className="text-muted-foreground">
+        OUT {ctx.outUtc}Z
+        {ctx.depLocal ? ` / ${ctx.depLocal} local${tz(ctx.depTzOffset)}` : ""} @{" "}
+        {op.sector.departureIata} →{" "}
+        <span
+          className={
+            ctx.depSunStatus === "night"
+              ? "text-indigo-500 dark:text-indigo-300 font-medium"
+              : "text-amber-600 dark:text-amber-400 font-medium"
+          }
+        >
+          {ctx.depSunStatus ?? "?"}
+        </span>
+        {bounds(ctx.depSunriseUtc, ctx.depSunsetUtc)}
+      </div>
+      <div className="text-muted-foreground">
+        IN {ctx.inUtc}Z
+        {ctx.arrLocal ? ` / ${ctx.arrLocal} local${tz(ctx.arrTzOffset)}` : ""} @{" "}
+        {op.sector.arrivalIata} →{" "}
+        <span
+          className={
+            ctx.arrSunStatus === "night"
+              ? "text-indigo-500 dark:text-indigo-300 font-medium"
+              : "text-amber-600 dark:text-amber-400 font-medium"
+          }
+        >
+          {ctx.arrSunStatus ?? "?"}
+        </span>
+        {bounds(ctx.arrSunriseUtc, ctx.arrSunsetUtc)}
+      </div>
     </div>
   );
 }

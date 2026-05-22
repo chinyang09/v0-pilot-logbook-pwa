@@ -307,6 +307,14 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             picPersonnelId: s.picPersonnelId,
             picResolvedName: s.picResolvedName,
             isPilotFlying: s.isPilotFlying,
+            // Sun-position suggestion + day/night cutoff context — must be
+            // carried through so the reconciler can annotate TO/LDG diffs
+            // and the modal can render the day/night check.
+            suggestedDayTakeoffs: s.suggestedDayTakeoffs,
+            suggestedNightTakeoffs: s.suggestedNightTakeoffs,
+            suggestedDayLandings: s.suggestedDayLandings,
+            suggestedNightLandings: s.suggestedNightLandings,
+            toLdgContext: s.toLdgContext,
             remarks: s.remarks,
           }));
 

@@ -176,6 +176,12 @@ export function crossHydrate(
         isUserPic: log.isUserPic,
         picPersonnelId: log.picPersonnelId,
         picResolvedName: log.picResolvedName,
+        isPilotFlying: log.isPilotFlying,
+        suggestedDayTakeoffs: log.suggestedDayTakeoffs,
+        suggestedNightTakeoffs: log.suggestedNightTakeoffs,
+        suggestedDayLandings: log.suggestedDayLandings,
+        suggestedNightLandings: log.suggestedNightLandings,
+        toLdgContext: log.toLdgContext,
         remarks: log.remarks,
       } as ParsedSector & Record<string, unknown>);
       continue;
@@ -213,6 +219,11 @@ export function crossHydrate(
       picPersonnelId: log.picPersonnelId,
       picResolvedName: log.picResolvedName,
       isPilotFlying: log.isPilotFlying,
+      suggestedDayTakeoffs: log.suggestedDayTakeoffs,
+      suggestedNightTakeoffs: log.suggestedNightTakeoffs,
+      suggestedDayLandings: log.suggestedDayLandings,
+      suggestedNightLandings: log.suggestedNightLandings,
+      toLdgContext: log.toLdgContext,
       remarks: log.remarks,
     } as ParsedSector & Record<string, unknown>);
   }

@@ -458,6 +458,59 @@ describe("reconcileRoster — picName truncation handshake", () => {
 });
 
 // ============================================================
+// Sun-position day/night context on TO/LDG diffs
+// ============================================================
+
+describe("reconcileRoster — TO/LDG sun-position note", () => {
+  it("attaches OUT/IN times + sunrise/sunset cutoff to a TO/LDG diff", () => {
+    const flight = makeFlight({
+      arrivalIata: "CJB",
+      dayLandings: 1,
+      nightLandings: 0,
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          arrivalIata: "CJB",
+          // Logbook says night landing; existing flight has day landing.
+          dayLandings: 0,
+          nightLandings: 1,
+          suggestedDayLandings: 0,
+          suggestedNightLandings: 1,
+          toLdgContext: {
+            outUtc: "12:53",
+            inUtc: "17:13",
+            depLocal: "20:53",
+            depTzOffset: 8,
+            depSunStatus: "night",
+            depSunriseUtc: "22:55",
+            depSunsetUtc: "11:00",
+            arrLocal: "22:43",
+            arrTzOffset: 5.5,
+            arrSunStatus: "night",
+            arrSunriseUtc: "00:35",
+            arrSunsetUtc: "12:50",
+          },
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    if (
+      ops[0].kind !== "update_conflict" &&
+      ops[0].kind !== "update_consult"
+    ) {
+      throw new Error(`expected an update op, got ${ops[0].kind}`);
+    }
+    const dayLdg = ops[0].changes.find((c) => c.field === "dayLandings");
+    expect(dayLdg).toBeDefined();
+    expect(dayLdg?.note).toContain("sunset 12:50Z");
+    expect(dayLdg?.note).toContain("night");
+    expect(dayLdg?.note).toContain("CJB");
+  });
+});
+
+// ============================================================
 // Turnaround disambiguation — both legs same date, same aircraft
 // ============================================================
 

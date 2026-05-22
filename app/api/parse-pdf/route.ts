@@ -19,6 +19,37 @@ import { NextRequest, NextResponse } from "next/server"
 
 export const runtime = "nodejs"
 
+/**
+ * pdfjs-dist's build references a handful of browser globals at
+ * module-evaluation time (DOMMatrix for transforms, Path2D/ImageData for
+ * canvas rendering). None are needed for pure text extraction, but their
+ * mere absence throws "DOMMatrix is not defined" the moment the module is
+ * imported on Node. Define harmless stand-ins before the dynamic import.
+ */
+function installPdfjsDomShims() {
+  const g = globalThis as unknown as Record<string, unknown>
+  if (typeof g.DOMMatrix === "undefined") {
+    g.DOMMatrix = class {
+      // pdfjs only constructs and reads simple matrices for text transforms.
+      a = 1; b = 0; c = 0; d = 1; e = 0; f = 0
+      constructor(init?: number[]) {
+        if (Array.isArray(init) && init.length >= 6) {
+          ;[this.a, this.b, this.c, this.d, this.e, this.f] = init
+        }
+      }
+    }
+  }
+  if (typeof g.Path2D === "undefined") {
+    g.Path2D = class {}
+  }
+  if (typeof g.ImageData === "undefined") {
+    g.ImageData = class {
+      width = 0
+      height = 0
+    }
+  }
+}
+
 const Y_BUCKET_TOLERANCE = 1.5
 const COL_SNAP_TOLERANCE = 25
 const HEADER_TOKENS = new Set<string>([
@@ -59,7 +90,9 @@ let pdfjsModule: any = null
 
 async function loadPdfjs() {
   if (pdfjsModule) return pdfjsModule
-  // The legacy build supports running in Node out of the box.
+  installPdfjsDomShims()
+  // The legacy build supports running in Node once the DOM shims above
+  // are in place.
   pdfjsModule = await import("pdfjs-dist/legacy/build/pdf.mjs")
   return pdfjsModule
 }

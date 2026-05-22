@@ -89,6 +89,17 @@ export interface ParsedLogbookSector {
    * Zero TO/LDG means they were the Pilot Monitoring.
    */
   isPilotFlying: boolean;
+  /**
+   * Sun-position-derived TO/LDG suggestion + day/night cutoff context.
+   * Populated only when it differs from the hand-entered value, so the
+   * reconciler can annotate the diff and the modal can show the day/night
+   * check. Mirrors the optional fields on ParsedSector.
+   */
+  suggestedDayTakeoffs?: number;
+  suggestedNightTakeoffs?: number;
+  suggestedDayLandings?: number;
+  suggestedNightLandings?: number;
+  toLdgContext?: ParsedSector["toLdgContext"];
   remarks: string;
   /** Source CSV/PDF line for diagnostics. */
   sourceLine: number;
