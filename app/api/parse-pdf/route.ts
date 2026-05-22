@@ -94,6 +94,38 @@ async function loadPdfjs() {
   // The legacy build supports running in Node once the DOM shims above
   // are in place.
   pdfjsModule = await import("pdfjs-dist/legacy/build/pdf.mjs")
+
+  // Point pdfjs at the real worker file on disk. In a Vercel serverless
+  // bundle pdfjs's own attempt to locate ./pdf.worker.mjs resolves to a
+  // non-existent chunk path; resolving it via node's require (pdfjs-dist
+  // is kept external in next.config) gives the actual node_modules path,
+  // which is also force-traced into the function. Wrapped in try/catch so
+  // a resolution miss doesn't break local dev, where pdfjs finds it itself.
+  try {
+    const { createRequire } = await import("node:module")
+    const { pathToFileURL } = await import("node:url")
+    const require = createRequire(import.meta.url)
+    let workerPath: string | null = null
+    for (const candidate of [
+      "pdfjs-dist/legacy/build/pdf.worker.mjs",
+      "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
+    ]) {
+      try {
+        workerPath = require.resolve(candidate)
+        break
+      } catch {
+        // try next candidate
+      }
+    }
+    if (workerPath && pdfjsModule.GlobalWorkerOptions) {
+      // pdfjs does `await import(workerSrc)` in Node's fake-worker mode;
+      // an absolute path needs a file:// URL to import cleanly.
+      pdfjsModule.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href
+    }
+  } catch {
+    // Fall back to pdfjs's own worker resolution.
+  }
+
   return pdfjsModule
 }
 
