@@ -56,28 +56,13 @@ const nextConfig = {
       "public/models/**/*",
     ],
   },
-  // Force-include the pdfjs worker for the server-side /api/parse-pdf route.
-  // pdfjs spawns a "fake worker" in Node by dynamically importing
-  // pdf.worker.mjs; @vercel/nft can't follow that computed import, so we
-  // trace it explicitly here. (pdfjs-dist is also kept external below so the
-  // import resolves against real node_modules at runtime.)
-  outputFileTracingIncludes: {
-    "/api/parse-pdf": [
-      "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
-      "./node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs",
-    ],
-  },
-  // Enable server external packages for ocr-node dependencies + pdfjs.
-  // Keeping pdfjs-dist external (unbundled) means its internal
-  // `import('./pdf.worker.mjs')` resolves correctly relative to the real
-  // node_modules location instead of a non-existent bundled chunk path.
+  // Enable server external packages for ocr-node dependencies.
   serverExternalPackages: [
     '@gutenye/ocr-node',
     '@gutenye/ocr-common',
     '@gutenye/ocr-models',
     'onnxruntime-node',
     'sharp',
-    'pdfjs-dist',
   ],
 };
 

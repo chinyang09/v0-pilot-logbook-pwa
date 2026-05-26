@@ -41,6 +41,12 @@ import type { FlightLog } from "@/types/entities/flight.types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
 import { DetectedFilesChip } from "./detected-files-chip";
 
+// Stage 1: when true, a PDF import stops right after extraction and shows the
+// CSV-shaped text in a dialog (no parsing, no DB write) so the new client-side
+// extractor can be verified in isolation. Flip to false to wire PDFs into the
+// normal import path.
+const STAGE1_PDF_DEBUG = true;
+
 interface Props {
   /** Where the button is mounted — affects success-message wording. */
   context?: "logbook" | "roster" | "shared";
@@ -63,6 +69,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
   const [summary, setSummary] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [debugText, setDebugText] = useState<string | null>(null);
   const simSessionsRef = useRef<
     NonNullable<
       Parameters<typeof executeRosterImport>[1]
@@ -123,6 +130,16 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
 
       try {
         const extracted = await ingestFiles(files);
+
+        if (STAGE1_PDF_DEBUG) {
+          const pdfFile = extracted.find((f) => f.kind === "pdf");
+          if (pdfFile) {
+            setIsOpen(false);
+            setProgress(null);
+            setDebugText(pdfFile.text);
+            return;
+          }
+        }
 
         const logbooks = extracted.filter((f) => f.detected === "logbook");
         const schedules = extracted.filter((f) => f.detected === "schedule");
@@ -535,6 +552,35 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           )}
         </DialogContent>
       </Dialog>
+
+      {STAGE1_PDF_DEBUG && (
+        <Dialog
+          open={debugText !== null}
+          onOpenChange={(open) => {
+            if (!open) setDebugText(null);
+          }}
+        >
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>PDF Extraction Preview</DialogTitle>
+              <DialogDescription>
+                CSV-shaped text produced by the extractor. Compare against the
+                report&apos;s .csv export — nothing was imported.
+              </DialogDescription>
+            </DialogHeader>
+            <textarea
+              readOnly
+              value={debugText ?? ""}
+              className="h-[60vh] w-full resize-none rounded-md border bg-muted/30 p-3 font-mono text-xs"
+            />
+            <div className="flex justify-end pt-2">
+              <Button size="sm" onClick={() => setDebugText(null)}>
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <ImportReviewModalV2
         plan={pendingPlan}

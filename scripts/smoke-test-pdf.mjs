@@ -2,16 +2,17 @@
 /**
  * Smoke test for PDF parsing.
  *
- * Loads pdfjs-dist the same way `lib/utils/parsers/pdf-extract.ts` does
- * (legacy build, no worker) and runs the same column-anchor extraction
- * algorithm against a real Crew Logbook Report PDF. Verifies:
+ * Drives the same unpdf code path as `lib/utils/parsers/pdf-extract.ts`
+ * (unpdf is isomorphic — the browser and Node run identical extraction) and
+ * applies the same column-anchor algorithm against a real Crew Logbook
+ * Report PDF. Verifies:
  *
- *   - The library loads and parses the PDF without error.
+ *   - unpdf loads and parses the PDF without error (no worker, no DOM shims).
  *   - The header row is detected and column anchors derived from it.
- *   - At least one data row is produced with the expected 18 CSV columns
+ *   - At least one data row is produced with the expected CSV columns
  *     (so the existing logbook-parser-v2.ts column positions still apply).
  *   - The "Generated on …" footer is present so stale-report gating works.
- *   - The detect.ts equivalent returns "logbook".
+ *   - detect.ts's equivalent returns "logbook".
  *
  * Usage:
  *   node scripts/smoke-test-pdf.mjs <path-to.pdf>
@@ -20,11 +21,8 @@
  */
 
 import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(__dirname, "..");
+import { resolve } from "node:path";
+import { getDocumentProxy } from "unpdf";
 
 const pdfPath = process.argv[2];
 if (!pdfPath) {
@@ -35,25 +33,6 @@ if (!pdfPath) {
 const absPdfPath = resolve(pdfPath);
 console.log(`[pdf-smoke] Loading ${absPdfPath}`);
 const buffer = readFileSync(absPdfPath);
-
-// Shim minimal browser globals so pdfjs-dist's legacy build is importable
-// in Node.
-globalThis.window ??= globalThis;
-globalThis.navigator ??= { userAgent: "node" };
-globalThis.DOMMatrix ??= class {};
-globalThis.Path2D ??= class {};
-globalThis.ImageData ??= class {};
-
-const pdfjs = await import(
-  resolve(repoRoot, "node_modules/pdfjs-dist/legacy/build/pdf.mjs")
-);
-
-if (pdfjs.GlobalWorkerOptions) {
-  pdfjs.GlobalWorkerOptions.workerSrc = resolve(
-    repoRoot,
-    "node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs"
-  );
-}
 
 // Reproduce the same algorithm pdf-extract.ts uses on the browser side.
 
@@ -165,8 +144,7 @@ function rowToCsv(row, anchors) {
 }
 
 async function extractPdfText(uint8) {
-  const loadingTask = pdfjs.getDocument({ data: uint8 });
-  const pdf = await loadingTask.promise;
+  const pdf = await getDocumentProxy(uint8);
   const pages = [];
   let anchors = [];
   for (let p = 1; p <= pdf.numPages; p++) {

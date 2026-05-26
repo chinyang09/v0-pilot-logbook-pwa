@@ -1,4 +1,4 @@
-const CACHE_VERSION = "v6"
+const CACHE_VERSION = "v7"
 const STATIC_CACHE = `skylog-static-${CACHE_VERSION}`
 const DYNAMIC_CACHE = `skylog-dynamic-${CACHE_VERSION}`
 const CDN_CACHE = `skylog-cdn-${CACHE_VERSION}`
@@ -42,9 +42,8 @@ const DYNAMIC_SHELL_ROUTES = [
 // Install event - precache static assets only (not protected routes)
 self.addEventListener("install", (event) => {
   console.log("[SW] Installing version:", CACHE_VERSION)
-  // Take over immediately so bug fixes (like the PDF.js worker route added
-  // in v5) reach the user on their next page load instead of waiting until
-  // every previously-controlled tab is closed.
+  // Take over immediately so bug fixes reach the user on their next page
+  // load instead of waiting until every previously-controlled tab is closed.
   self.skipWaiting()
   event.waitUntil(
     (async () => {
@@ -137,14 +136,6 @@ function isNextStaticAsset(url) {
 // Helper: Check if URL is an OCR model file
 function isOCRModelRequest(url) {
   return url.includes("/models/") && (url.endsWith(".onnx") || url.endsWith(".txt"))
-}
-
-// Helper: Check if URL is the bundled PDF.js worker we serve from /workers/.
-// Must be served with the correct JS MIME type so the browser will spin up
-// a module Worker from it — go network-first, then cache, so a fresh build
-// always wins over a stale copy.
-function isPdfWorkerRequest(url) {
-  return url.endsWith("/workers/pdf.worker.min.mjs")
 }
 
 // Helper: Check if this is a cacheable app route
@@ -400,32 +391,6 @@ self.addEventListener("fetch", (event) => {
           return response
         } catch (e) {
           return new Response("Offline", { status: 503 })
-        }
-      })()
-    )
-    return
-  }
-
-  // Strategy 3.5: PDF.js worker — network-first so the import flow always
-  // picks up the latest pdfjs-dist version; falls back to cache when
-  // offline. Avoids the stale-cache pitfall where a previous bad copy
-  // (wrong MIME, partial bytes) would keep breaking PDF imports.
-  if (isPdfWorkerRequest(url)) {
-    event.respondWith(
-      (async () => {
-        const cache = await caches.open(STATIC_CACHE)
-        try {
-          const response = await fetch(request)
-          if (response.ok) {
-            cache.put(request, response.clone())
-            return response
-          }
-          const cached = await cache.match(request)
-          return cached || response
-        } catch (e) {
-          const cached = await cache.match(request)
-          if (cached) return cached
-          return new Response("PDF worker unavailable offline", { status: 503 })
         }
       })()
     )
