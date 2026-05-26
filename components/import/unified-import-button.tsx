@@ -24,7 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { ingestFiles } from "@/lib/utils/parsers/ingest";
+import { extractDocuments } from "@/lib/utils/parsers/extractors";
 import {
   parseScheduleCSV,
   type PlannedImport,
@@ -40,12 +40,6 @@ import { userDb } from "@/lib/db";
 import type { FlightLog } from "@/types/entities/flight.types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
 import { DetectedFilesChip } from "./detected-files-chip";
-
-// Stage 1: when true, a PDF import stops right after extraction and shows the
-// CSV-shaped text in a dialog (no parsing, no DB write) so the new client-side
-// extractor can be verified in isolation. Flip to false to wire PDFs into the
-// normal import path.
-const STAGE1_PDF_DEBUG = true;
 
 interface Props {
   /** Where the button is mounted — affects success-message wording. */
@@ -69,7 +63,6 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
   const [summary, setSummary] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [debugText, setDebugText] = useState<string | null>(null);
   const simSessionsRef = useRef<
     NonNullable<
       Parameters<typeof executeRosterImport>[1]
@@ -129,25 +122,15 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
       setProgress({ percent: 5, stage: "Reading", detail: `${files.length} file(s)` });
 
       try {
-        const extracted = await ingestFiles(files);
+        const docs = await extractDocuments(files);
 
-        if (STAGE1_PDF_DEBUG) {
-          const pdfFile = extracted.find((f) => f.kind === "pdf");
-          if (pdfFile) {
-            setIsOpen(false);
-            setProgress(null);
-            setDebugText(pdfFile.text);
-            return;
-          }
-        }
-
-        const logbooks = extracted.filter((f) => f.detected === "logbook");
-        const schedules = extracted.filter((f) => f.detected === "schedule");
-        const unknowns = extracted.filter((f) => f.detected === "unknown");
+        const logbooks = docs.filter((d) => d.reportType === "logbook");
+        const schedules = docs.filter((d) => d.reportType === "schedule");
+        const unknowns = docs.filter((d) => d.reportType === "unknown");
 
         if (unknowns.length > 0) {
           throw new Error(
-            `Could not detect report type for: ${unknowns.map((u) => u.file.name).join(", ")}`
+            `Could not detect report type for: ${unknowns.map((u) => u.fileName).join(", ")}`
           );
         }
         if (logbooks.length > 1 || schedules.length > 1) {
@@ -187,15 +170,14 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             detail: "Logbook + Schedule",
           });
 
-          const logbookPlan = await parseLogbookV2(logbooks[0].text, {
+          const logbookPlan = await parseLogbookV2(logbooks[0], {
             onProgress: onParseProgress,
           });
           simSessions = logbookPlan.simSessions;
 
-          const schedulePlan = await parseScheduleCSV(schedules[0].text, {
+          const schedulePlan = await parseScheduleCSV(schedules[0], {
             onProgress: (p, s, d) =>
               onParseProgress(50 + Math.floor(p * 0.4), s, d),
-            sourceFile: schedules[0].file.name,
           });
 
           // Cross-hydrate.
@@ -295,7 +277,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         } else if (logbooks.length === 1) {
           importSource = "logbook";
           setProgress({ percent: 15, stage: "Parsing", detail: "Logbook" });
-          const logbookPlan = await parseLogbookV2(logbooks[0].text, {
+          const logbookPlan = await parseLogbookV2(logbooks[0], {
             onProgress: onParseProgress,
           });
           simSessions = logbookPlan.simSessions;
@@ -408,9 +390,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           // Schedule-only path.
           importSource = "schedule";
           setProgress({ percent: 15, stage: "Parsing", detail: "Schedule" });
-          plan = await parseScheduleCSV(schedules[0].text, {
+          plan = await parseScheduleCSV(schedules[0], {
             onProgress: onParseProgress,
-            sourceFile: schedules[0].file.name,
           });
         }
 
@@ -552,35 +533,6 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           )}
         </DialogContent>
       </Dialog>
-
-      {STAGE1_PDF_DEBUG && (
-        <Dialog
-          open={debugText !== null}
-          onOpenChange={(open) => {
-            if (!open) setDebugText(null);
-          }}
-        >
-          <DialogContent className="sm:max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>PDF Extraction Preview</DialogTitle>
-              <DialogDescription>
-                CSV-shaped text produced by the extractor. Compare against the
-                report&apos;s .csv export — nothing was imported.
-              </DialogDescription>
-            </DialogHeader>
-            <textarea
-              readOnly
-              value={debugText ?? ""}
-              className="h-[60vh] w-full resize-none rounded-md border bg-muted/30 p-3 font-mono text-xs"
-            />
-            <div className="flex justify-end pt-2">
-              <Button size="sm" onClick={() => setDebugText(null)}>
-                Close
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
 
       <ImportReviewModalV2
         plan={pendingPlan}

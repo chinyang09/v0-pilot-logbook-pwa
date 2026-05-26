@@ -2,13 +2,13 @@
 
 import { FileText, FileWarning, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import type { ExtractedFile } from "@/lib/utils/parsers/ingest";
+import type { NormalizedDocument } from "@/lib/utils/parsers/types";
 
 interface DetectedFilesChipProps {
-  files: ExtractedFile[];
+  files: NormalizedDocument[];
 }
 
-const KIND_LABEL: Record<ExtractedFile["detected"], string> = {
+const KIND_LABEL: Record<NormalizedDocument["reportType"], string> = {
   logbook: "Logbook",
   schedule: "Schedule",
   unknown: "Unknown",
@@ -19,10 +19,10 @@ export function DetectedFilesChip({ files }: DetectedFilesChipProps) {
   return (
     <div className="flex flex-wrap gap-2">
       {files.map((f, idx) => {
-        const isUnknown = f.detected === "unknown";
+        const isUnknown = f.reportType === "unknown";
         return (
           <Badge
-            key={`${f.file.name}-${idx}`}
+            key={`${f.fileName}-${idx}`}
             variant={isUnknown ? "outline" : "secondary"}
             className="gap-1.5"
           >
@@ -31,12 +31,12 @@ export function DetectedFilesChip({ files }: DetectedFilesChipProps) {
             ) : (
               <FileText className="h-3 w-3" />
             )}
-            <span className="font-mono text-[11px]">{f.file.name}</span>
+            <span className="font-mono text-[11px]">{f.fileName}</span>
             <span className="text-[10px] uppercase opacity-70">
-              {f.kind}
+              {f.format}
             </span>
             <span>•</span>
-            <span className="text-[11px]">{KIND_LABEL[f.detected]}</span>
+            <span className="text-[11px]">{KIND_LABEL[f.reportType]}</span>
           </Badge>
         );
       })}

@@ -2,7 +2,7 @@
 /**
  * Smoke test for PDF parsing.
  *
- * Drives the same unpdf code path as `lib/utils/parsers/pdf-extract.ts`
+ * Drives the same unpdf code path as `extractors/pdf.extractor.ts`
  * (unpdf is isomorphic — the browser and Node run identical extraction) and
  * applies the same column-anchor algorithm against a real Crew Logbook
  * Report PDF. Verifies:

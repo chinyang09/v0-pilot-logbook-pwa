@@ -1,0 +1,45 @@
+/**
+ * Extractor orchestration — the single entry point the import UI calls.
+ *
+ * Classifies each file by format, runs the matching extractor to produce
+ * normalized rows + raw text, sniffs the report type, and assembles a
+ * NormalizedDocument. Adding a new input format means adding an extractor
+ * and a branch here — nothing downstream changes.
+ */
+
+import { detectReportType } from "../detect";
+import type { ImportFormat, NormalizedDocument } from "../types";
+import { extractCsvRows } from "./csv.extractor";
+import { extractPdfRows } from "./pdf.extractor";
+
+function classifyFormat(file: File): ImportFormat {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".pdf") || file.type === "application/pdf") return "pdf";
+  return "csv";
+}
+
+export async function extractDocument(file: File): Promise<NormalizedDocument> {
+  const format = classifyFormat(file);
+  const { rows, rawText } =
+    format === "pdf"
+      ? await extractPdfRows(file)
+      : extractCsvRows(await file.text());
+
+  return {
+    format,
+    reportType: detectReportType(rawText),
+    rows,
+    rawText,
+    fileName: file.name,
+  };
+}
+
+export async function extractDocuments(
+  files: File[],
+): Promise<NormalizedDocument[]> {
+  const out: NormalizedDocument[] = [];
+  for (const file of files) {
+    out.push(await extractDocument(file));
+  }
+  return out;
+}

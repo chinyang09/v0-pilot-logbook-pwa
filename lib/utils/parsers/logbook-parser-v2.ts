@@ -43,7 +43,8 @@ function shiftHHMM(hhmm: string, offsetHours: number): string {
   return minutesToHHMM(shifted);
 }
 
-import { splitCsvRows, parseCSVLine, parseDDMMYY } from "./shared/csv-split";
+import { parseDDMMYY } from "./shared/csv-split";
+import type { NormalizedDocument } from "./types";
 import { normalize } from "./shared/name-normalize";
 import { parseGeneratedAt } from "./shared/generated-at";
 import { normalizeAircraftType } from "./shared/aircraft-type-map";
@@ -195,8 +196,7 @@ function findRangeFromHeader(lines: string[]): { start: string; end: string } {
   return { start: "", end: "" };
 }
 
-function parseRawRow(line: string, lineNumber: number): RawRow | null {
-  const cols = parseCSVLine(line);
+function parseRawRow(cols: string[], lineNumber: number): RawRow | null {
   const rawDate = cols[0]?.trim() || "";
   if (!DATE_RE.test(rawDate)) return null;
 
@@ -249,7 +249,7 @@ function isSimRow(row: RawRow): boolean {
 // ============================================================
 
 export async function parseLogbookV2(
-  text: string,
+  doc: NormalizedDocument,
   options: ParseLogbookOptions = {}
 ): Promise<PlannedLogbookImport> {
   const { onProgress } = options;
@@ -270,7 +270,7 @@ export async function parseLogbookV2(
   try {
     onProgress?.(5, "Parsing", "Reading file...");
 
-    plan.generatedAt = parseGeneratedAt(text);
+    plan.generatedAt = parseGeneratedAt(doc.rawText);
     if (plan.generatedAt === null) {
       plan.warnings.push({
         line: 0,
@@ -279,7 +279,7 @@ export async function parseLogbookV2(
       });
     }
 
-    const lines = splitCsvRows(text);
+    const lines = doc.rows.map((r) => r.raw);
     const headerIdx = findHeaderIndex(lines);
     if (headerIdx === -1) {
       plan.errors.push({
@@ -306,7 +306,7 @@ export async function parseLogbookV2(
     const uniqueIatas = new Set<string>();
     const uniqueRegs = new Set<string>();
 
-    for (let i = dataStart; i < lines.length; i++) {
+    for (let i = dataStart; i < doc.rows.length; i++) {
       const line = lines[i].trim();
       if (
         !line ||
@@ -317,7 +317,7 @@ export async function parseLogbookV2(
         continue;
       }
 
-      const row = parseRawRow(line, i + 1);
+      const row = parseRawRow(doc.rows[i].cells, i + 1);
       if (!row) continue;
 
       if (row.depIata && row.depIata.length === 3) uniqueIatas.add(row.depIata);
