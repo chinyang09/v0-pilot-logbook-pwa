@@ -43,6 +43,7 @@ export type DiscrepancyType =
   | "route_mismatch"      // Airports differ
   | "missing_in_logbook"  // In schedule but not logged
   | "missing_in_schedule" // In logbook but not in schedule
+  | "stale_report"        // Older report tried to overwrite newer data
 
 // Only track flight crew (pilots) - cabin crew not tracked
 export type CrewRole = "CPT" | "PIC" | "FO"

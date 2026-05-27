@@ -338,3 +338,281 @@ describe("reconcileRoster — summary counts", () => {
     expect(ops).toHaveLength(3);
   });
 });
+
+// ============================================================
+// TO/LDG decision memory — once decided, don't re-flag
+// ============================================================
+
+describe("reconcileRoster — TO/LDG decision marker", () => {
+  it("does NOT diff TO/LDG when the existing flight remarks carry the decision marker", () => {
+    const flight = makeFlight({
+      remarks: "Some pilot note\n[TO/LDG decision recorded] 2026-04-15",
+      dayTakeoffs: 1,
+      nightTakeoffs: 0,
+      dayLandings: 1,
+      nightLandings: 0,
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          dayTakeoffs: 0,
+          nightTakeoffs: 1,
+          dayLandings: 0,
+          nightLandings: 1,
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    if (
+      ops[0].kind === "update_conflict" ||
+      ops[0].kind === "update_safe" ||
+      ops[0].kind === "update_consult" ||
+      ops[0].kind === "edited_conflict"
+    ) {
+      const toLdgFields = ops[0].changes
+        .map((c) => c.field)
+        .filter((f) =>
+          ["dayTakeoffs", "nightTakeoffs", "dayLandings", "nightLandings"].includes(f)
+        );
+      expect(toLdgFields).toHaveLength(0);
+    }
+  });
+
+  it("attaches a sun-position note to TO/LDG diffs when sector carries a suggestion", () => {
+    const flight = makeFlight({
+      dayTakeoffs: 0,
+      nightTakeoffs: 0,
+      dayLandings: 0,
+      nightLandings: 0,
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          dayTakeoffs: 1,
+          nightTakeoffs: 0,
+          dayLandings: 1,
+          nightLandings: 0,
+          suggestedDayTakeoffs: 0,
+          suggestedNightTakeoffs: 1,
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    if (ops[0].kind !== "update_conflict") {
+      throw new Error(`expected update_conflict got ${ops[0].kind}`);
+    }
+    const dayTo = ops[0].changes.find((c) => c.field === "dayTakeoffs");
+    expect(dayTo?.note).toContain("Sun-position calc suggests 0");
+  });
+});
+
+// ============================================================
+// PIC truncation handshake — logbook 20-char limit vs schedule full names
+// ============================================================
+
+describe("reconcileRoster — picName truncation handshake", () => {
+  it("does NOT diff when sector resolved to a truncated form of the existing full name", () => {
+    const flight = makeFlight({
+      picName: "Siah Yang Tek, Timothy",
+      picId: "personnel-A",
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          // Sector resolved to truncated form (resolver couldn't find the
+          // existing personnel for some reason — e.g., legacy data).
+          picRawName: "Siah Yang Tek, Timot",
+          picResolvedName: "Siah Yang Tek, Timot",
+          picPersonnelId: "personnel-NEW",
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    // Should be skip_identical (no name/id diff and no other changes).
+    expect(ops[0].kind).toBe("skip_identical");
+  });
+
+  it("DOES diff when sector resolved to the longer/canonical form", () => {
+    const flight = makeFlight({
+      picName: "Siah Yang Tek, Timot",
+      picId: "personnel-OLD",
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          picResolvedName: "Siah Yang Tek, Timothy",
+          picPersonnelId: "personnel-A",
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    if (ops[0].kind !== "update_conflict") {
+      throw new Error(`expected update_conflict got ${ops[0].kind}`);
+    }
+    expect(ops[0].changes.map((c) => c.field)).toContain("picName");
+  });
+});
+
+// ============================================================
+// Sun-position day/night context on TO/LDG diffs
+// ============================================================
+
+describe("reconcileRoster — TO/LDG sun-position note", () => {
+  it("attaches OUT/IN times + sunrise/sunset cutoff to a TO/LDG diff", () => {
+    const flight = makeFlight({
+      arrivalIata: "CJB",
+      dayLandings: 1,
+      nightLandings: 0,
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          arrivalIata: "CJB",
+          // Logbook says night landing; existing flight has day landing.
+          dayLandings: 0,
+          nightLandings: 1,
+          suggestedDayLandings: 0,
+          suggestedNightLandings: 1,
+          toLdgContext: {
+            outUtc: "12:53",
+            inUtc: "17:13",
+            depLocal: "20:53",
+            depTzOffset: 8,
+            depSunStatus: "night",
+            depSunriseUtc: "22:55",
+            depSunsetUtc: "11:00",
+            arrLocal: "22:43",
+            arrTzOffset: 5.5,
+            arrSunStatus: "night",
+            arrSunriseUtc: "00:35",
+            arrSunsetUtc: "12:50",
+          },
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    if (
+      ops[0].kind !== "update_conflict" &&
+      ops[0].kind !== "update_consult"
+    ) {
+      throw new Error(`expected an update op, got ${ops[0].kind}`);
+    }
+    const dayLdg = ops[0].changes.find((c) => c.field === "dayLandings");
+    expect(dayLdg).toBeDefined();
+    expect(dayLdg?.note).toContain("sunset 12:50Z");
+    expect(dayLdg?.note).toContain("night");
+    expect(dayLdg?.note).toContain("CJB");
+  });
+});
+
+// ============================================================
+// Turnaround disambiguation — both legs same date, same aircraft
+// ============================================================
+
+describe("reconcileRoster — turnaround matching", () => {
+  it("does NOT match a SIN→DVO logbook sector against an existing DVO→SIN flight on same day + same reg", () => {
+    // Existing flight: DVO→SIN turn (TR561)
+    const dvoSin = makeFlight({
+      id: "tr561",
+      flightNumber: "TR561",
+      departureIata: "DVO",
+      arrivalIata: "SIN",
+      aircraftReg: "9V-NCE",
+      date: "2026-04-08",
+    });
+    // Existing flight: SIN→DVO turn (TR560)
+    const sinDvo = makeFlight({
+      id: "tr560",
+      flightNumber: "TR560",
+      departureIata: "SIN",
+      arrivalIata: "DVO",
+      aircraftReg: "9V-NCE",
+      date: "2026-04-08",
+    });
+
+    // Logbook sector for SIN→DVO leg (no flight number, has reg).
+    const ops = reconcileRoster({
+      sectors: [
+        {
+          date: "2026-04-08",
+          flightNumber: "",
+          aircraftType: "A21N",
+          departureIata: "SIN",
+          arrivalIata: "DVO",
+          actualOut: "18:22",
+          actualIn: "21:57",
+          aircraftReg: "9V-NCE",
+          sourceLine: 10,
+        },
+      ],
+      existingFlights: [dvoSin, sinDvo],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+
+    // Should match TR560, NOT TR561.
+    const updateOp = ops.find(
+      (o) => o.kind === "update_conflict" || o.kind === "skip_identical"
+    );
+    expect(updateOp).toBeDefined();
+    if (
+      updateOp?.kind !== "update_conflict" &&
+      updateOp?.kind !== "skip_identical"
+    )
+      return;
+    expect(updateOp.flight.id).toBe("tr560");
+    expect(updateOp.flight.flightNumber).toBe("TR560");
+  });
+
+  it("falls back to date + arrival + reg when departure was stored wrong (XSP vs SIN)", () => {
+    // User's existing TR560 has stale departureIata "XSP" instead of "SIN".
+    const tr560StaleDep = makeFlight({
+      id: "tr560-stale",
+      flightNumber: "TR560",
+      departureIata: "XSP",
+      arrivalIata: "DVO",
+      aircraftReg: "9V-NCE",
+      date: "2026-04-08",
+    });
+    const tr561 = makeFlight({
+      id: "tr561",
+      flightNumber: "TR561",
+      departureIata: "DVO",
+      arrivalIata: "SIN",
+      aircraftReg: "9V-NCE",
+      date: "2026-04-08",
+    });
+
+    const ops = reconcileRoster({
+      sectors: [
+        {
+          date: "2026-04-08",
+          flightNumber: "",
+          aircraftType: "A21N",
+          departureIata: "SIN",
+          arrivalIata: "DVO",
+          actualOut: "18:22",
+          actualIn: "21:57",
+          aircraftReg: "9V-NCE",
+          sourceLine: 10,
+        },
+      ],
+      existingFlights: [tr560StaleDep, tr561],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+
+    // Should still match TR560 via the arrival+reg fallback so the user can
+    // accept the departureIata fix instead of seeing a spurious "missing
+    // from roster" delete suggestion.
+    const matchOp = ops.find((o) => o.kind === "update_conflict");
+    expect(matchOp).toBeDefined();
+    if (matchOp?.kind !== "update_conflict") return;
+    expect(matchOp.flight.id).toBe("tr560-stale");
+    // The diff should include the dep-airport correction.
+    expect(matchOp.changes.map((c) => c.field)).toContain("departureIata");
+  });
+});

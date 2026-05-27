@@ -60,6 +60,11 @@ const DISCREPANCY_TYPE_CONFIG: Record<
     label: "Missing in Schedule",
     description: "Logged flight not found in schedule",
   },
+  stale_report: {
+    icon: XCircle,
+    label: "Stale Report",
+    description: "Older report skipped to protect newer data",
+  },
 }
 
 const SEVERITY_CONFIG = {

@@ -137,6 +137,51 @@ export function isNight(date: Date, lat: number, lon: number): boolean {
 }
 
 /**
+ * Find the UTC times when solar elevation crosses ±6° (civil twilight)
+ * for a given UTC calendar date at the given coordinates. Used by the
+ * import-review UI to show the user the day/night cutoff alongside the
+ * actual OUT/IN times so they can sanity-check the imported TO/LDG
+ * day/night classification.
+ *
+ * Returns null for either bound if the location is in polar day/night
+ * for that 24-hour window (no crossing happens).
+ *
+ * Coarse 1-minute resolution — accuracy is fine for "should this row
+ * be a day or a night takeoff" judgements.
+ */
+export function findDayBoundariesUtc(
+  date: string,
+  lat: number,
+  lon: number
+): { sunriseUtc: string | null; sunsetUtc: string | null } {
+  const parts = date.split("-").map(Number)
+  if (parts.length !== 3 || parts.some(isNaN)) {
+    return { sunriseUtc: null, sunsetUtc: null }
+  }
+  const [y, m, d] = parts
+  if (isNaN(lat) || isNaN(lon)) return { sunriseUtc: null, sunsetUtc: null }
+
+  let prevNight = isNight(new Date(Date.UTC(y, m - 1, d, 0, 0)), lat, lon)
+  let sunrise: string | null = null
+  let sunset: string | null = null
+
+  for (let mins = 1; mins <= 24 * 60; mins++) {
+    const sample = new Date(Date.UTC(y, m - 1, d, 0, mins))
+    const currNight = isNight(sample, lat, lon)
+    if (prevNight !== currNight) {
+      const hh = Math.floor(mins / 60).toString().padStart(2, "0")
+      const mm = (mins % 60).toString().padStart(2, "0")
+      const stamp = `${hh}:${mm}`
+      if (prevNight && !currNight && !sunrise) sunrise = stamp
+      else if (!prevNight && currNight && !sunset) sunset = stamp
+    }
+    prevNight = currNight
+  }
+
+  return { sunriseUtc: sunrise, sunsetUtc: sunset }
+}
+
+/**
  * Handles overnight date wrapping
  */
 function parseTimeToUTC(dateStr: string, timeStr: string, prevTime?: Date): Date {

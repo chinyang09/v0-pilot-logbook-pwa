@@ -60,6 +60,21 @@ class UserDatabase extends Dexie {
       currencies: "id, code, expiryDate, syncStatus",
       discrepancies: "id, type, resolved, scheduleEntryId, flightLogId, createdAt",
     })
+
+    // Version 3: Add reportGeneratedAt + importSource on flights for stale-report gatekeeping.
+    // No upgrade body needed: both are optional, existing rows leave them undefined.
+    this.version(3).stores({
+      flights: "id, date, syncStatus, aircraftReg, userId, flightNumber, reportGeneratedAt",
+      aircraft: "id, registration, type, userId",
+      personnel: "id, name, userId, crewId",
+      preferences: "key",
+      syncQueue: "id, collection, timestamp",
+      syncMeta: "key",
+      userSession: "id",
+      scheduleEntries: "id, date, dutyType, syncStatus, [date+dutyType]",
+      currencies: "id, code, expiryDate, syncStatus",
+      discrepancies: "id, type, resolved, scheduleEntryId, flightLogId, createdAt",
+    })
   }
 
   /**

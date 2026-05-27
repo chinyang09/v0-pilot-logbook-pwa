@@ -56,7 +56,7 @@ const nextConfig = {
       "public/models/**/*",
     ],
   },
-  // Enable server external packages for ocr-node dependencies
+  // Enable server external packages for ocr-node dependencies.
   serverExternalPackages: [
     '@gutenye/ocr-node',
     '@gutenye/ocr-common',

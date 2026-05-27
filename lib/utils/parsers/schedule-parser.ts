@@ -42,6 +42,11 @@ import {
   type ParsedSector,
   type ReconcilerOperation,
 } from "@/lib/utils/roster/reconciler";
+import { parseDDMMYYYY } from "./shared/csv-split";
+import type { NormalizedDocument, NormalizedRow } from "./types";
+import { normalize } from "./shared/name-normalize";
+import { parseGeneratedAt } from "./shared/generated-at";
+import { normalizeAircraftType } from "./shared/aircraft-type-map";
 
 // ============================================================
 // Public types
@@ -51,6 +56,11 @@ export interface PlannedImport {
   success: boolean;
   timeReference: TimeReference;
   dateRange: { start: string; end: string };
+  /**
+   * "Generated on..." footer of the source report (epoch ms in UTC).
+   * Null when the footer wasn't found — stale-report gating disabled.
+   */
+  generatedAt: number | null;
   crewMember: {
     crewId: string;
     name: string;
@@ -73,6 +83,7 @@ export interface PlannedImport {
     toDelete: number;
     identical: number;
     ignored: number;
+    staleSkipped: number;
   };
 }
 
@@ -81,7 +92,6 @@ export type AcceptableOperation = ReconcilerOperation & { accepted: boolean };
 
 export interface ParseOptions {
   onProgress?: (percent: number, stage: string, detail?: string) => void;
-  sourceFile?: string;
 }
 
 // ============================================================
@@ -93,63 +103,6 @@ const CREW_ROLE_MAP: Record<string, CrewRole> = {
   PIC: "PIC",
   FO: "FO",
 };
-
-const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-// ============================================================
-// CSV splitter (quote-aware)
-// ============================================================
-
-function splitCsvRows(csvContent: string): string[] {
-  const rows: string[] = [];
-  let currentRow = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < csvContent.length; i++) {
-    const char = csvContent[i];
-    if (char === '"') inQuotes = !inQuotes;
-    if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (currentRow.trim()) rows.push(currentRow);
-      currentRow = "";
-    } else {
-      currentRow += char;
-    }
-  }
-  if (currentRow.trim()) rows.push(currentRow);
-  return rows;
-}
-
-function parseCSVLine(line: string): string[] {
-  const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === "," && !inQuotes) {
-      result.push(current.trim());
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-  result.push(current.trim());
-  return result.map((s) => s.replace(/^"|"$/g, "").trim());
-}
-
-function parseDDMMYYYY(dateStr: string): string {
-  const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-  if (!match) return "";
-  const [, dd, mm, yyyy] = match;
-  return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-}
 
 // ============================================================
 // Header parsing
@@ -172,11 +125,11 @@ interface ParsedHeader {
   dataStartIndex: number;
 }
 
-function parseHeader(lines: string[]): ParsedHeader {
+function parseHeader(rows: NormalizedRow[]): ParsedHeader {
   let timeReference: TimeReference = "UTC";
   let dateRange = { start: "", end: "" };
 
-  for (const line of lines.slice(0, 10)) {
+  for (const { raw: line } of rows.slice(0, 10)) {
     if (line.includes("All times in")) {
       if (line.includes("Local Base")) timeReference = "LOCAL_BASE";
       else if (line.includes("Local Station")) timeReference = "LOCAL_STATION";
@@ -203,7 +156,7 @@ function parseHeader(lines: string[]): ParsedHeader {
     role: "",
     aircraftType: "",
   };
-  for (const line of lines.slice(0, 10)) {
+  for (const { raw: line } of rows.slice(0, 10)) {
     const match = line.match(
       /^(\d+)\s+(.+?)\s+([A-Z]{3})-(\w+)-(\w+)/
     );
@@ -221,11 +174,11 @@ function parseHeader(lines: string[]): ParsedHeader {
 
   // Column header row
   let headerRowIndex = -1;
-  for (let i = 0; i < Math.min(lines.length, 20); i++) {
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
     if (
-      lines[i].includes("Date") &&
-      lines[i].includes("Duties") &&
-      lines[i].includes("Details")
+      rows[i].raw.includes("Date") &&
+      rows[i].raw.includes("Duties") &&
+      rows[i].raw.includes("Details")
     ) {
       headerRowIndex = i;
       break;
@@ -235,9 +188,7 @@ function parseHeader(lines: string[]): ParsedHeader {
     throw new Error("Could not locate schedule column header row");
   }
 
-  const headerCols = parseCSVLine(lines[headerRowIndex]).map((c) =>
-    c.toLowerCase()
-  );
+  const headerCols = rows[headerRowIndex].cells.map((c) => c.toLowerCase());
   const idx = (needle: string) =>
     headerCols.findIndex((c) => c.includes(needle));
 
@@ -281,11 +232,10 @@ interface RawSector {
 }
 
 function extractSectorsFromRow(
-  row: string,
+  cols: string[],
   header: ParsedHeader,
   lineNumber: number
 ): RawSector[] {
-  const cols = parseCSVLine(row);
   const rowDate = parseDDMMYYYY(cols[header.columnIndices.date] || "");
   if (!rowDate) return [];
 
@@ -321,7 +271,7 @@ function extractSectorsFromRow(
 
     const sector: RawSector = {
       flightNumber,
-      aircraftType: flightMatch[2],
+      aircraftType: normalizeAircraftType(flightMatch[2]),
       departureIata: routeMatch[1].toUpperCase(),
       arrivalIata: routeMatch[2].toUpperCase(),
       rowDate,
@@ -450,16 +400,16 @@ function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
 // ============================================================
 
 function parseCurrencies(
-  lines: string[],
+  rows: NormalizedRow[],
   startIndex: number
 ): Omit<Currency, "id" | "createdAt" | "syncStatus">[] {
   const currencies: Omit<Currency, "id" | "createdAt" | "syncStatus">[] = [];
 
-  for (let i = startIndex; i < lines.length; i++) {
-    const line = lines[i].trim();
+  for (let i = startIndex; i < rows.length; i++) {
+    const line = rows[i].raw.trim();
     if (!line || line.startsWith("Training") || line.startsWith("Memos")) break;
 
-    const cols = parseCSVLine(line);
+    const cols = rows[i].cells;
     const code = cols.find((c) => c && /^[A-Z]/.test(c));
     if (!code) continue;
 
@@ -490,16 +440,16 @@ function parseCurrencies(
 // ============================================================
 
 export async function parseScheduleCSV(
-  csvContent: string,
+  doc: NormalizedDocument,
   options: ParseOptions = {}
 ): Promise<PlannedImport> {
   const { onProgress } = options;
-  const lines = splitCsvRows(csvContent);
 
   const plan: PlannedImport = {
     success: false,
     timeReference: "UTC",
     dateRange: { start: "", end: "" },
+    generatedAt: null,
     crewMember: { crewId: "", name: "", base: "", role: "", aircraftType: "" },
     operations: [],
     currencies: [],
@@ -513,12 +463,21 @@ export async function parseScheduleCSV(
       toDelete: 0,
       identical: 0,
       ignored: 0,
+      staleSkipped: 0,
     },
   };
 
   try {
     onProgress?.(5, "Parsing", "Reading CSV header...");
-    const header = parseHeader(lines);
+    plan.generatedAt = parseGeneratedAt(doc.rawText);
+    if (plan.generatedAt === null) {
+      plan.warnings.push({
+        line: 0,
+        message:
+          "Could not find a 'Generated on' footer — stale-report protection is disabled for this import.",
+      });
+    }
+    const header = parseHeader(doc.rows);
     plan.timeReference = header.timeReference;
     plan.dateRange = header.dateRange;
     plan.crewMember = header.crewInfo;
@@ -562,20 +521,20 @@ export async function parseScheduleCSV(
     const currencyStartMarker = "Code,,,Description";
     let currencyStartIdx = -1;
 
-    for (let i = header.dataStartIndex; i < lines.length; i++) {
-      const row = lines[i];
-      if (row.includes(currencyStartMarker)) {
+    for (let i = header.dataStartIndex; i < doc.rows.length; i++) {
+      const { raw, cells } = doc.rows[i];
+      if (raw.includes(currencyStartMarker)) {
         currencyStartIdx = i + 1;
         break;
       }
-      if (!row.trim() || row.startsWith("Total Hours")) continue;
+      if (!raw.trim() || raw.startsWith("Total Hours")) continue;
 
-      const cols = parseCSVLine(row);
+      const cols = cells;
       const duties = cols[header.columnIndices.duties] || "";
       if (!duties.match(/\d+\s*\[/)) continue; // not a flight row
 
       try {
-        const sectors = extractSectorsFromRow(row, header, i + 1);
+        const sectors = extractSectorsFromRow(cols, header, i + 1);
 
         // Crew → personnel diff
         const crewMembers = parseCrewColumn(
@@ -665,6 +624,7 @@ export async function parseScheduleCSV(
       sectors: parsedSectors,
       existingFlights: flightsInRange,
       csvDateRange: { start: rangeStart, end: rangeEnd },
+      reportGeneratedAt: plan.generatedAt,
     });
 
     // Apply default acceptance flags
@@ -673,7 +633,9 @@ export async function parseScheduleCSV(
       accepted:
         op.kind === "create" ||
         op.kind === "skip_identical" ||
-        op.kind === "skip_non_airline",
+        op.kind === "skip_non_airline" ||
+        op.kind === "skip_stale_report" ||
+        op.kind === "update_safe",
     }));
 
     // Summary counts
@@ -684,6 +646,8 @@ export async function parseScheduleCSV(
           break;
         case "update_conflict":
         case "edited_conflict":
+        case "update_safe":
+        case "update_consult":
           plan.summary.toUpdate++;
           break;
         case "delete_missing":
@@ -695,13 +659,16 @@ export async function parseScheduleCSV(
         case "skip_non_airline":
           plan.summary.ignored++;
           break;
+        case "skip_stale_report":
+          plan.summary.staleSkipped++;
+          break;
       }
     }
 
     // Currencies
     onProgress?.(90, "Parsing", "Reading currency dates...");
     if (currencyStartIdx > 0) {
-      plan.currencies = parseCurrencies(lines, currencyStartIdx);
+      plan.currencies = parseCurrencies(doc.rows, currencyStartIdx);
     }
 
     onProgress?.(100, "Complete", "Plan ready for review");

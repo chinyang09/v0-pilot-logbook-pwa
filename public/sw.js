@@ -1,4 +1,4 @@
-const CACHE_VERSION = "v4"
+const CACHE_VERSION = "v7"
 const STATIC_CACHE = `skylog-static-${CACHE_VERSION}`
 const DYNAMIC_CACHE = `skylog-dynamic-${CACHE_VERSION}`
 const CDN_CACHE = `skylog-cdn-${CACHE_VERSION}`
@@ -42,6 +42,9 @@ const DYNAMIC_SHELL_ROUTES = [
 // Install event - precache static assets only (not protected routes)
 self.addEventListener("install", (event) => {
   console.log("[SW] Installing version:", CACHE_VERSION)
+  // Take over immediately so bug fixes reach the user on their next page
+  // load instead of waiting until every previously-controlled tab is closed.
+  self.skipWaiting()
   event.waitUntil(
     (async () => {
       const staticCache = await caches.open(STATIC_CACHE)

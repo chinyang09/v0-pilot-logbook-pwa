@@ -5,14 +5,10 @@ import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Progress } from "@/components/ui/progress"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Calendar as CalendarIcon,
-  Upload,
   AlertCircle,
-  CheckCircle2,
-  XCircle,
   RefreshCw,
   List,
   CalendarDays,
@@ -25,8 +21,8 @@ import type { ScheduleEntry } from "@/types"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
 import { DutyEntryCard, RosterCalendar } from "@/components/roster"
-import { FastScroll, generateDateItems, type FastScrollItem } from "@/components/ui/fast-scroll"
-import { useRosterImportHandler } from "./import-handler"
+import { FastScroll, generateDateItems } from "@/components/ui/fast-scroll"
+import { UnifiedImportButton } from "@/components/import/unified-import-button"
 
 type ViewMode = "list" | "calendar"
 
@@ -36,18 +32,8 @@ export default function RosterPage() {
   const [selectedEntries, setSelectedEntries] = useState<ScheduleEntry[]>([])
 
   const { scheduleEntries, isLoading: entriesLoading, refresh: refreshEntries } = useScheduleEntries()
-  const { currencies, isLoading: currenciesLoading } = useCurrencies()
+  const { currencies } = useCurrencies()
   const { counts: discrepancyCounts } = useDiscrepancyCounts()
-
-  const {
-    isImporting,
-    importProgress,
-    importStage,
-    importSummary,
-    fileInputRef,
-    handleFileImport,
-    ReviewModal,
-  } = useRosterImportHandler({ refreshEntries, refreshAllData })
 
   // Group schedule entries by date
   const entriesByDate = scheduleEntries.reduce(
@@ -126,60 +112,24 @@ export default function RosterPage() {
       </GlassContainer>
       <GlassContainer cornerRadius={28}>
         <div className="flex items-center gap-0.5 px-1 h-14">
-          <Button variant="ghost" size="icon" className="h-12 w-12" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
-            <Upload className="h-5 w-5" />
-          </Button>
+          <UnifiedImportButton
+            context="roster"
+            onComplete={() => {
+              refreshEntries()
+              refreshAllData()
+            }}
+          />
         </div>
       </GlassContainer>
     </>
-  ), [refreshEntries, entriesLoading, viewMode, isImporting, fileInputRef])
+  ), [refreshEntries, entriesLoading, viewMode])
 
   useRegisterMainActions(rosterActions, true)
 
   return (
     <>
-      {ReviewModal}
-
       <PageContainer>
         <div className="px-4 pt-4 pb-safe space-y-4">
-        <input
-          type="file"
-          ref={fileInputRef}
-          accept=".csv"
-          onChange={handleFileImport}
-          className="hidden"
-        />
-
-        {/* Import Progress */}
-        {isImporting && (
-          <Card>
-            <CardContent className="pt-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">{importStage}</span>
-                  <span className="font-medium">{importProgress}%</span>
-                </div>
-                <Progress value={importProgress} />
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Import Summary */}
-        {importSummary && !isImporting && (
-          <Card className={importSummary.toLowerCase().includes("fail") || importSummary.toLowerCase().includes("error") ? "border-destructive/50" : "border-green-500/50"}>
-            <CardContent className="pt-4">
-              <div className="flex items-center gap-2 text-sm">
-                {importSummary.toLowerCase().includes("fail") || importSummary.toLowerCase().includes("error") ? (
-                  <XCircle className="h-4 w-4 text-destructive" />
-                ) : (
-                  <CheckCircle2 className="h-4 w-4 text-green-500" />
-                )}
-                <span>{importSummary}</span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Stats Cards */}
         <div className="grid grid-cols-3 gap-2">
@@ -243,16 +193,14 @@ export default function RosterPage() {
         )}
 
         {/* Empty State */}
-        {scheduleEntries.length === 0 && !entriesLoading && !isImporting && (
+        {scheduleEntries.length === 0 && !entriesLoading && (
           <Card>
             <CardContent className="py-12 text-center">
               <CalendarIcon className="h-10 w-10 mx-auto text-muted-foreground/40 mb-3" />
               <p className="text-sm font-medium text-foreground mb-1">No Schedule Data</p>
-              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto mb-4">Import your crew schedule CSV to view your roster and track duty times.</p>
-              <Button size="sm" onClick={() => fileInputRef.current?.click()}>
-                <Upload className="h-4 w-4" />
-                Import Schedule CSV
-              </Button>
+              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto mb-4">
+                Use the upload button above to import your Crew Logbook or Schedule report (CSV/PDF).
+              </p>
             </CardContent>
           </Card>
         )}

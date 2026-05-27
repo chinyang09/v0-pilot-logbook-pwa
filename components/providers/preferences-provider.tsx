@@ -4,12 +4,19 @@ import type React from "react"
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
 import { useTheme } from "next-themes"
 import { getUserPreferences, saveUserPreferences } from "@/lib/db"
-import type { DisplayPreferences, AutoFillPreferences, DutyTimeDefaults, NavigationPreferences } from "@/types/db/stores.types"
+import type {
+  DisplayPreferences,
+  AutoFillPreferences,
+  DutyTimeDefaults,
+  NavigationPreferences,
+  ImportDefaults,
+} from "@/types/db/stores.types"
 import {
   DEFAULT_DISPLAY_PREFERENCES,
   DEFAULT_AUTO_FILL_PREFERENCES,
   DEFAULT_DUTY_TIME_DEFAULTS,
   DEFAULT_NAVIGATION_PREFERENCES,
+  DEFAULT_IMPORT_DEFAULTS,
 } from "@/types/db/stores.types"
 
 export interface ResolvedPreferences {
@@ -17,6 +24,7 @@ export interface ResolvedPreferences {
   autoFill: AutoFillPreferences
   dutyTimeDefaults: DutyTimeDefaults
   navigation: NavigationPreferences
+  importDefaults: ImportDefaults
 }
 
 interface PreferencesContextType {
@@ -26,6 +34,7 @@ interface PreferencesContextType {
   updateAutoFill: (partial: Partial<AutoFillPreferences>) => Promise<void>
   updateDutyTimeDefaults: (partial: Partial<DutyTimeDefaults>) => Promise<void>
   updateNavigation: (nav: NavigationPreferences) => Promise<void>
+  updateImportDefaults: (partial: Partial<ImportDefaults>) => Promise<void>
 }
 
 const defaultResolved: ResolvedPreferences = {
@@ -33,6 +42,7 @@ const defaultResolved: ResolvedPreferences = {
   autoFill: DEFAULT_AUTO_FILL_PREFERENCES,
   dutyTimeDefaults: DEFAULT_DUTY_TIME_DEFAULTS,
   navigation: DEFAULT_NAVIGATION_PREFERENCES,
+  importDefaults: DEFAULT_IMPORT_DEFAULTS,
 }
 
 const PreferencesContext = createContext<PreferencesContextType | undefined>(undefined)
@@ -51,6 +61,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
           autoFill: { ...DEFAULT_AUTO_FILL_PREFERENCES, ...prefs.autoFill },
           dutyTimeDefaults: { ...DEFAULT_DUTY_TIME_DEFAULTS, ...prefs.dutyTimeDefaults },
           navigation: { ...DEFAULT_NAVIGATION_PREFERENCES, ...prefs.navigation },
+          importDefaults: { ...DEFAULT_IMPORT_DEFAULTS, ...prefs.importDefaults },
         }
         setPreferences(resolved)
 
@@ -74,6 +85,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
         autoFill: updated.autoFill,
         dutyTimeDefaults: updated.dutyTimeDefaults,
         navigation: updated.navigation,
+        importDefaults: updated.importDefaults,
       })
     }, 500)
   }, [])
@@ -122,6 +134,17 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     })
   }, [persistPreferences])
 
+  const updateImportDefaults = useCallback(async (partial: Partial<ImportDefaults>) => {
+    setPreferences((prev) => {
+      const updated = {
+        ...prev,
+        importDefaults: { ...prev.importDefaults, ...partial },
+      }
+      persistPreferences(updated)
+      return updated
+    })
+  }, [persistPreferences])
+
   return (
     <PreferencesContext.Provider
       value={{
@@ -131,6 +154,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
         updateAutoFill,
         updateDutyTimeDefaults,
         updateNavigation,
+        updateImportDefaults,
       }}
     >
       {children}
