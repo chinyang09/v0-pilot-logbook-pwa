@@ -39,25 +39,11 @@ import {
 import type { ImportDefaults } from "@/types/db/stores.types";
 import { addScheduleEntry } from "@/lib/db/stores/user/schedule.store";
 import { recalculateFlightFields } from "@/lib/utils/flight-calculations";
+import { type ParsedSector } from "@/lib/utils/roster/reconciler";
 import {
-  TOLDG_DECISION_MARKER,
-  type ParsedSector,
-} from "@/lib/utils/roster/reconciler";
-
-const TOLDG_FIELDS = new Set([
-  "dayTakeoffs",
-  "nightTakeoffs",
-  "dayLandings",
-  "nightLandings",
-]);
-
-function appendToLdgMarker(remarks: string | undefined): string {
-  const base = remarks ?? "";
-  if (base.includes(TOLDG_DECISION_MARKER)) return base;
-  const today = new Date().toISOString().slice(0, 10);
-  const tag = `${TOLDG_DECISION_MARKER} ${today}`;
-  return base ? `${base}\n${tag}` : tag;
-}
+  buildDayNightRemark,
+  appendDayNightRemark,
+} from "@/lib/utils/roster/day-night-remark";
 
 // ============================================================
 // Result type
@@ -154,11 +140,15 @@ async function hydrateFlightFromSector(
     pilotRole = currentUser.roles?.includes("PIC") ? "PIC" : "SIC";
   }
 
-  const remarks = sector.remarks
+  const baseRemarks = sector.remarks
     ? sector.remarks
     : sector.flightNumber
       ? `Imported from roster: ${sector.flightNumber}`
       : "Imported from logbook";
+  // The sun-derived day/night split is applied below; record a concise marker
+  // when it differs from what the report logged so the reclassification is
+  // visible and not re-applied on a later import.
+  const remarks = appendDayNightRemark(baseRemarks, buildDayNightRemark(sector));
 
   const create: FlightLogCreate = {
     date: sector.date,
@@ -197,10 +187,14 @@ async function hydrateFlightFromSector(
     picusTime: "00:00",
     dualTime: "00:00",
     instructorTime: "00:00",
-    dayTakeoffs: sector.dayTakeoffs ?? 0,
-    dayLandings: sector.dayLandings ?? 0,
-    nightTakeoffs: sector.nightTakeoffs ?? 0,
-    nightLandings: sector.nightLandings ?? 0,
+    // Apply the sun-derived split (parser's suggestion) when it differs from
+    // the hand-entered value. recalc can't recompute it here because OFF/ON
+    // (airborne) times aren't in the crew logbook report. Totals preserved —
+    // only the day↔night bucket changes.
+    dayTakeoffs: sector.suggestedDayTakeoffs ?? sector.dayTakeoffs ?? 0,
+    dayLandings: sector.suggestedDayLandings ?? sector.dayLandings ?? 0,
+    nightTakeoffs: sector.suggestedNightTakeoffs ?? sector.nightTakeoffs ?? 0,
+    nightLandings: sector.suggestedNightLandings ?? sector.nightLandings ?? 0,
     autolands: 0,
     remarks,
     endorsements: "",
@@ -345,18 +339,6 @@ export async function executeRosterImport(
   const touchedFlightIds: string[] = [];
 
   for (const op of plan.operations) {
-    // For any update op, work out whether the user was shown a TO/LDG diff
-    // (regardless of accept/reject). If so we must persist the decision in
-    // remarks so the next import doesn't ask the same question.
-    const opChanges =
-      op.kind === "update_conflict" ||
-      op.kind === "edited_conflict" ||
-      op.kind === "update_safe" ||
-      op.kind === "update_consult"
-        ? op.changes
-        : [];
-    const hasToLdgDiff = opChanges.some((c) => TOLDG_FIELDS.has(c.field));
-
     if (!op.accepted) {
       // Record discrepancies for declined updates so the audit trail captures
       // what the user said no to.
@@ -377,27 +359,6 @@ export async function executeRosterImport(
           resolved: false,
           createdAt: Date.now(),
         });
-      }
-
-      // Even when rejected, persist the TO/LDG decision so subsequent
-      // imports don't keep raising the same question.
-      if (hasToLdgDiff && "flight" in op) {
-        try {
-          const fresh = await userDb.flights.get(op.flight.id);
-          if (fresh) {
-            const updatedRemarks = appendToLdgMarker(fresh.remarks);
-            if (updatedRemarks !== fresh.remarks) {
-              await updateFlight(op.flight.id, { remarks: updatedRemarks });
-              touchedFlightIds.push(op.flight.id);
-            }
-          }
-        } catch (error) {
-          result.errors.push({
-            operation: `mark TO/LDG decision on ${op.flight.flightNumber}`,
-            message:
-              error instanceof Error ? error.message : "Unknown error",
-          });
-        }
       }
 
       continue;
@@ -425,13 +386,40 @@ export async function executeRosterImport(
           const patch = buildUpdatePatch(op);
           if (reportGeneratedAt) patch.reportGeneratedAt = reportGeneratedAt;
           patch.importSource = importSource;
-          // Persist the user's TO/LDG decision in remarks so subsequent
-          // imports skip the re-flag (see reconciler's
-          // hasToLdgDecisionMarker gate).
-          if (hasToLdgDiff) {
-            const baseRemarks =
-              patch.remarks !== undefined ? patch.remarks : op.flight.remarks;
-            patch.remarks = appendToLdgMarker(baseRemarks);
+          // Apply the sun-derived day/night split (parser's suggestion) unless
+          // the user manually pinned these fields. recalc can't do it here
+          // because OFF/ON (airborne) times aren't in the crew logbook report.
+          // Totals are preserved — only the day↔night bucket changes — and a
+          // concise remark records the reclassification.
+          const mo = op.flight.manualOverrides || {};
+          let appliedDayNight = false;
+          if (
+            op.sector.suggestedDayTakeoffs !== undefined &&
+            op.sector.suggestedNightTakeoffs !== undefined &&
+            !mo.dayTakeoffs &&
+            !mo.nightTakeoffs
+          ) {
+            patch.dayTakeoffs = op.sector.suggestedDayTakeoffs;
+            patch.nightTakeoffs = op.sector.suggestedNightTakeoffs;
+            appliedDayNight = true;
+          }
+          if (
+            op.sector.suggestedDayLandings !== undefined &&
+            op.sector.suggestedNightLandings !== undefined &&
+            !mo.dayLandings &&
+            !mo.nightLandings
+          ) {
+            patch.dayLandings = op.sector.suggestedDayLandings;
+            patch.nightLandings = op.sector.suggestedNightLandings;
+            appliedDayNight = true;
+          }
+          if (appliedDayNight) {
+            const dayNightLine = buildDayNightRemark(op.sector);
+            if (dayNightLine) {
+              const baseRemarks =
+                patch.remarks !== undefined ? patch.remarks : op.flight.remarks;
+              patch.remarks = appendDayNightRemark(baseRemarks, dayNightLine);
+            }
           }
           const updated = await updateFlight(op.flight.id, patch);
           if (!updated) {

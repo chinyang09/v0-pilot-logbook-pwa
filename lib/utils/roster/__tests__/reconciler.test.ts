@@ -340,13 +340,14 @@ describe("reconcileRoster — summary counts", () => {
 });
 
 // ============================================================
-// TO/LDG decision memory — once decided, don't re-flag
+// Day/night TO/LDG is a derived field — never diffed or prompted. The
+// executor applies the sun-derived split via recalculateFlightFields and
+// records a concise remark; the reconciler must not surface it as a change.
 // ============================================================
 
-describe("reconcileRoster — TO/LDG decision marker", () => {
-  it("does NOT diff TO/LDG when the existing flight remarks carry the decision marker", () => {
+describe("reconcileRoster — day/night TO/LDG is derived, not diffed", () => {
+  it("does NOT create an update when only the day/night split differs", () => {
     const flight = makeFlight({
-      remarks: "Some pilot note\n[TO/LDG decision recorded] 2026-04-15",
       dayTakeoffs: 1,
       nightTakeoffs: 0,
       dayLandings: 1,
@@ -364,47 +365,48 @@ describe("reconcileRoster — TO/LDG decision marker", () => {
       existingFlights: [flight],
       csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
     });
-    if (
-      ops[0].kind === "update_conflict" ||
-      ops[0].kind === "update_safe" ||
-      ops[0].kind === "update_consult" ||
-      ops[0].kind === "edited_conflict"
-    ) {
-      const toLdgFields = ops[0].changes
-        .map((c) => c.field)
-        .filter((f) =>
-          ["dayTakeoffs", "nightTakeoffs", "dayLandings", "nightLandings"].includes(f)
-        );
-      expect(toLdgFields).toHaveLength(0);
-    }
+    // Everything else matches → the day/night split alone is owned by recalc.
+    expect(ops[0].kind).toBe("skip_identical");
   });
 
-  it("attaches a sun-position note to TO/LDG diffs when sector carries a suggestion", () => {
+  it("excludes day/night fields from changes even when another field forces an update", () => {
     const flight = makeFlight({
-      dayTakeoffs: 0,
-      nightTakeoffs: 0,
-      dayLandings: 0,
+      outTime: "04:00",
+      dayLandings: 1,
       nightLandings: 0,
     });
     const ops = reconcileRoster({
       sectors: [
         makeSector({
-          dayTakeoffs: 1,
-          nightTakeoffs: 0,
-          dayLandings: 1,
-          nightLandings: 0,
-          suggestedDayTakeoffs: 0,
-          suggestedNightTakeoffs: 1,
+          // Critical time change forces an update op...
+          actualOut: "04:49",
+          // ...but the day/night split (with a sun suggestion) must NOT appear.
+          dayLandings: 0,
+          nightLandings: 1,
+          suggestedDayLandings: 0,
+          suggestedNightLandings: 1,
         } as unknown as Parameters<typeof makeSector>[0]),
       ],
       existingFlights: [flight],
       csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
     });
-    if (ops[0].kind !== "update_conflict") {
-      throw new Error(`expected update_conflict got ${ops[0].kind}`);
+    if (
+      ops[0].kind !== "update_safe" &&
+      ops[0].kind !== "update_consult" &&
+      ops[0].kind !== "update_conflict" &&
+      ops[0].kind !== "edited_conflict"
+    ) {
+      throw new Error(`expected an update op, got ${ops[0].kind}`);
     }
-    const dayTo = ops[0].changes.find((c) => c.field === "dayTakeoffs");
-    expect(dayTo?.note).toContain("Sun-position calc suggests 0");
+    const fields = ops[0].changes.map((c) => c.field);
+    expect(fields).toContain("outTime");
+    expect(
+      fields.filter((f) =>
+        ["dayTakeoffs", "nightTakeoffs", "dayLandings", "nightLandings"].includes(
+          f
+        )
+      )
+    ).toHaveLength(0);
   });
 });
 
@@ -454,59 +456,6 @@ describe("reconcileRoster — picName truncation handshake", () => {
       throw new Error(`expected update_conflict got ${ops[0].kind}`);
     }
     expect(ops[0].changes.map((c) => c.field)).toContain("picName");
-  });
-});
-
-// ============================================================
-// Sun-position day/night context on TO/LDG diffs
-// ============================================================
-
-describe("reconcileRoster — TO/LDG sun-position note", () => {
-  it("attaches OUT/IN times + sunrise/sunset cutoff to a TO/LDG diff", () => {
-    const flight = makeFlight({
-      arrivalIata: "CJB",
-      dayLandings: 1,
-      nightLandings: 0,
-    });
-    const ops = reconcileRoster({
-      sectors: [
-        makeSector({
-          arrivalIata: "CJB",
-          // Logbook says night landing; existing flight has day landing.
-          dayLandings: 0,
-          nightLandings: 1,
-          suggestedDayLandings: 0,
-          suggestedNightLandings: 1,
-          toLdgContext: {
-            outUtc: "12:53",
-            inUtc: "17:13",
-            depLocal: "20:53",
-            depTzOffset: 8,
-            depSunStatus: "night",
-            depSunriseUtc: "22:55",
-            depSunsetUtc: "11:00",
-            arrLocal: "22:43",
-            arrTzOffset: 5.5,
-            arrSunStatus: "night",
-            arrSunriseUtc: "00:35",
-            arrSunsetUtc: "12:50",
-          },
-        } as unknown as Parameters<typeof makeSector>[0]),
-      ],
-      existingFlights: [flight],
-      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
-    });
-    if (
-      ops[0].kind !== "update_conflict" &&
-      ops[0].kind !== "update_consult"
-    ) {
-      throw new Error(`expected an update op, got ${ops[0].kind}`);
-    }
-    const dayLdg = ops[0].changes.find((c) => c.field === "dayLandings");
-    expect(dayLdg).toBeDefined();
-    expect(dayLdg?.note).toContain("sunset 12:50Z");
-    expect(dayLdg?.note).toContain("night");
-    expect(dayLdg?.note).toContain("CJB");
   });
 });
 

@@ -19,30 +19,13 @@
  */
 
 import type { Personnel } from "@/types/entities/crew.types";
-import { getCurrentUserPersonnel, getAirportByIata, getAllPersonnel, getAirportTimeInfo } from "@/lib/db";
-import {
-  calculateNightTimeComplete,
-  findDayBoundariesUtc,
-} from "@/lib/utils/night-time";
+import { getCurrentUserPersonnel, getAirportByIata, getAllPersonnel } from "@/lib/db";
+import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
   isTakeoffAtNight,
   isLandingAtNight,
 } from "@/lib/utils/flight-calculations";
 import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time";
-import type { ParsedSector } from "@/lib/utils/roster/reconciler";
-
-/**
- * Shift a UTC HH:MM string by an integer hour offset, wrapping into a
- * 0–24 hour window. Used purely for the diff-note display — no date
- * arithmetic, since the local-date drift is implicit in the offset sign.
- */
-function shiftHHMM(hhmm: string, offsetHours: number): string {
-  const minutes = hhmmToMinutes(hhmm);
-  if (minutes < 0) return hhmm;
-  const shifted = ((minutes + offsetHours * 60) % (24 * 60) + 24 * 60) % (24 * 60);
-  return minutesToHHMM(shifted);
-}
-
 import { parseDDMMYY } from "./shared/csv-split";
 import type { NormalizedDocument } from "./types";
 import { normalize } from "./shared/name-normalize";
@@ -93,14 +76,13 @@ export interface ParsedLogbookSector {
   /**
    * Sun-position-derived TO/LDG suggestion + day/night cutoff context.
    * Populated only when it differs from the hand-entered value, so the
-   * reconciler can annotate the diff and the modal can show the day/night
-   * check. Mirrors the optional fields on ParsedSector.
+   * executor can record a concise reclassification remark. Mirrors the
+   * optional fields on ParsedSector.
    */
   suggestedDayTakeoffs?: number;
   suggestedNightTakeoffs?: number;
   suggestedDayLandings?: number;
   suggestedNightLandings?: number;
-  toLdgContext?: ParsedSector["toLdgContext"];
   remarks: string;
   /** Source CSV/PDF line for diagnostics. */
   sourceLine: number;
@@ -464,21 +446,19 @@ export async function parseLogbookV2(
         const totalUserLDG = row.dayLandings + row.nightLandings;
         const isPilotFlying = totalUserTO + totalUserLDG > 0;
 
-        // Sun-position sanity check — both CSV and PDF are hand-entered in
+        // Sun-position day/night split — both CSV and PDF are hand-entered in
         // eCrew, so the day/night column is the most common manual-entry
-        // mistake we see. We DON'T silently override here; we compute the
-        // sun-based suggestion and surface it to the user via the diff so
-        // they can choose. The user's decision is then persisted in remarks
-        // (see executor) so subsequent imports don't re-flag the same row.
+        // mistake we see. We compute the sun-based split (preserving the
+        // TOTAL takeoffs/landings) and pass it alongside the raw values. The
+        // executor applies it via recalculateFlightFields and records a
+        // concise reclassification remark; it is never surfaced as a conflict.
+        // Only populated when it differs from the hand-entered value.
         let suggestedDayTakeoffs: number | undefined;
         let suggestedNightTakeoffs: number | undefined;
         let suggestedDayLandings: number | undefined;
         let suggestedNightLandings: number | undefined;
-        let toLdgContext: ParsedSector["toLdgContext"] | undefined;
 
         if (depAp && arrAp && row.outT && row.inT) {
-          const depOffset = getAirportTimeInfo(depAp.tz).offset;
-          const arrOffset = getAirportTimeInfo(arrAp.tz).offset;
           const takeoffAtNight = isTakeoffAtNight(
             row.flightDate,
             row.outT,
@@ -507,32 +487,6 @@ export async function parseLogbookV2(
               suggestedNightLandings = sunNight;
             }
           }
-
-          const depBounds = findDayBoundariesUtc(
-            row.flightDate,
-            depAp.latitude,
-            depAp.longitude
-          );
-          const arrBounds = findDayBoundariesUtc(
-            row.flightDate,
-            arrAp.latitude,
-            arrAp.longitude
-          );
-
-          toLdgContext = {
-            outUtc: row.outT,
-            inUtc: row.inT,
-            depLocal: shiftHHMM(row.outT, depOffset),
-            depTzOffset: depOffset,
-            depSunStatus: takeoffAtNight ? "night" : "day",
-            depSunriseUtc: depBounds.sunriseUtc,
-            depSunsetUtc: depBounds.sunsetUtc,
-            arrLocal: shiftHHMM(row.inT, arrOffset),
-            arrTzOffset: arrOffset,
-            arrSunStatus: landingAtNight ? "night" : "day",
-            arrSunriseUtc: arrBounds.sunriseUtc,
-            arrSunsetUtc: arrBounds.sunsetUtc,
-          };
         }
 
         plan.sectors.push({
@@ -548,9 +502,9 @@ export async function parseLogbookV2(
           isUserPic: crew.isUser,
           picPersonnelId: crew.personnelId,
           picResolvedName: crew.resolvedName,
-          // PDF/CSV values as-entered. The sun-based suggestion travels
-          // alongside as `suggested*` so the reconciler can annotate the
-          // diff without silently rewriting the values.
+          // PDF/CSV values as-entered. The sun-based split travels alongside
+          // as `suggested*` so the executor can apply it and record a concise
+          // reclassification remark.
           dayTakeoffs: row.dayTakeoffs,
           nightTakeoffs: row.nightTakeoffs,
           dayLandings: row.dayLandings,
@@ -559,7 +513,6 @@ export async function parseLogbookV2(
           suggestedNightTakeoffs,
           suggestedDayLandings,
           suggestedNightLandings,
-          toLdgContext,
           isPilotFlying,
           remarks: row.remarks,
           sourceLine: row.sourceLine,

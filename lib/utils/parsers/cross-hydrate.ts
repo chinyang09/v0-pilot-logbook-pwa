@@ -181,7 +181,6 @@ export function crossHydrate(
         suggestedNightTakeoffs: log.suggestedNightTakeoffs,
         suggestedDayLandings: log.suggestedDayLandings,
         suggestedNightLandings: log.suggestedNightLandings,
-        toLdgContext: log.toLdgContext,
         remarks: log.remarks,
       } as ParsedSector & Record<string, unknown>);
       continue;
@@ -223,7 +222,6 @@ export function crossHydrate(
       suggestedNightTakeoffs: log.suggestedNightTakeoffs,
       suggestedDayLandings: log.suggestedDayLandings,
       suggestedNightLandings: log.suggestedNightLandings,
-      toLdgContext: log.toLdgContext,
       remarks: log.remarks,
     } as ParsedSector & Record<string, unknown>);
   }

@@ -36,6 +36,42 @@ import type {
   AcceptableOperation,
   PlannedImport,
 } from "@/lib/utils/parsers/schedule-parser";
+import { usePreferences } from "@/components/providers/preferences-provider";
+import {
+  getAirportDisplayCode,
+  getDepartureDisplay,
+  getArrivalDisplay,
+} from "@/lib/utils/airport-display";
+import type { DisplayPreferences } from "@/types/db/stores.types";
+
+/**
+ * Format a stored UTC HH:MM as Zulu ("12:53Z") or airport-local ("20:53L")
+ * per the user's display preference. tzOffset is the airport's UTC offset in
+ * hours (may be fractional); when absent or Zulu is selected we show Zulu.
+ */
+function clockLabel(
+  hhmm: string | undefined,
+  tzOffset: number | undefined,
+  useZulu: boolean
+): string {
+  if (!hhmm) return "";
+  const t = hhmm.slice(0, 5);
+  if (useZulu || !tzOffset) return `${t}Z`;
+  const [h, m] = t.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return `${t}Z`;
+  const total = (((h * 60 + m + tzOffset * 60) % 1440) + 1440) % 1440;
+  const hh = String(Math.floor(total / 60)).padStart(2, "0");
+  const mm = String(total % 60).padStart(2, "0");
+  return `${hh}:${mm}L`;
+}
+
+/** Departure→arrival label honoring the ICAO/IATA/both preference. */
+function routeLabel(
+  flight: { departureIcao?: string; departureIata?: string; arrivalIcao?: string; arrivalIata?: string },
+  pref: DisplayPreferences["airportIdentifier"]
+): string {
+  return `${getDepartureDisplay(flight, pref)}→${getArrivalDisplay(flight, pref)}`;
+}
 
 interface Props {
   plan: PlannedImport | null;
@@ -455,10 +491,13 @@ function CreateRow({
     arrivalIata: string;
   };
 }) {
+  const { preferences } = usePreferences();
+  const pref = preferences.display.airportIdentifier;
   return (
     <div className="text-xs pl-6 text-muted-foreground">
-      {sector.date} · {sector.flightNumber || "—"} · {sector.departureIata}→
-      {sector.arrivalIata}
+      {sector.date} · {sector.flightNumber || "—"} ·{" "}
+      {getAirportDisplayCode(undefined, sector.departureIata, pref)}→
+      {getAirportDisplayCode(undefined, sector.arrivalIata, pref)}
     </div>
   );
 }
@@ -468,18 +507,21 @@ function DiffRow({
 }: {
   op: Extract<AcceptableOperation, { kind: "update_safe" }>;
 }) {
+  const { preferences } = usePreferences();
+  const d = preferences.display;
   return (
     <div className="pl-6 border-l-2 border-blue-200 py-1">
       <div className="text-sm font-medium">
         {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
-        {op.flight.departureIata}→{op.flight.arrivalIata}
+        {routeLabel(op.flight, d.airportIdentifier)}
         {op.flight.outTime && op.flight.inTime && (
           <span className="ml-2 text-xs font-normal text-muted-foreground">
-            {op.flight.outTime}Z – {op.flight.inTime}Z
+            {clockLabel(op.flight.outTime, op.flight.departureTimezone, d.useZuluTime)}
+            {" – "}
+            {clockLabel(op.flight.inTime, op.flight.arrivalTimezone, d.useZuluTime)}
           </span>
         )}
       </div>
-      <SunCheck op={op} />
       <ChangeList changes={op.changes} />
     </div>
   );
@@ -497,6 +539,8 @@ function ConsentRow({
   checked: boolean;
   onCheckedChange: (v: boolean) => void;
 }) {
+  const { preferences } = usePreferences();
+  const d = preferences.display;
   return (
     <label className="flex items-start gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer">
       <Checkbox
@@ -506,14 +550,15 @@ function ConsentRow({
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium">
           {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
-          {op.flight.departureIata}→{op.flight.arrivalIata}
+          {routeLabel(op.flight, d.airportIdentifier)}
           {op.flight.outTime && op.flight.inTime && (
             <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {op.flight.outTime}Z – {op.flight.inTime}Z
+              {clockLabel(op.flight.outTime, op.flight.departureTimezone, d.useZuluTime)}
+              {" – "}
+              {clockLabel(op.flight.inTime, op.flight.arrivalTimezone, d.useZuluTime)}
             </span>
           )}
         </div>
-        <SunCheck op={op} />
         <ChangeList changes={op.changes} />
       </div>
     </label>
@@ -529,6 +574,8 @@ function EditedRow({
   checked: boolean;
   onCheckedChange: (v: boolean) => void;
 }) {
+  const { preferences } = usePreferences();
+  const d = preferences.display;
   const reasonLabel = (r: string) => {
     switch (r) {
       case "has_signature":
@@ -552,10 +599,12 @@ function EditedRow({
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
           {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
-          {op.flight.departureIata}→{op.flight.arrivalIata}
+          {routeLabel(op.flight, d.airportIdentifier)}
           {op.flight.outTime && op.flight.inTime && (
             <span className="text-xs font-normal text-muted-foreground">
-              {op.flight.outTime}Z – {op.flight.inTime}Z
+              {clockLabel(op.flight.outTime, op.flight.departureTimezone, d.useZuluTime)}
+              {" – "}
+              {clockLabel(op.flight.inTime, op.flight.arrivalTimezone, d.useZuluTime)}
             </span>
           )}
           <div className="flex gap-1">
@@ -570,7 +619,6 @@ function EditedRow({
             ))}
           </div>
         </div>
-        <SunCheck op={op} />
         <ChangeList changes={op.changes} />
       </div>
     </label>
@@ -586,6 +634,7 @@ function DeletionRow({
   checked: boolean;
   onCheckedChange: (v: boolean) => void;
 }) {
+  const { preferences } = usePreferences();
   return (
     <label className="flex items-start gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer">
       <Checkbox
@@ -594,7 +643,7 @@ function DeletionRow({
       />
       <div className="text-sm">
         {op.flight.date} · {op.flight.flightNumber} ·{" "}
-        {op.flight.departureIata}→{op.flight.arrivalIata}
+        {routeLabel(op.flight, preferences.display.airportIdentifier)}
       </div>
     </label>
   );
@@ -605,10 +654,11 @@ function StaleRow({
 }: {
   op: Extract<AcceptableOperation, { kind: "skip_stale_report" }>;
 }) {
+  const { preferences } = usePreferences();
   return (
     <div className="text-xs pl-6 text-muted-foreground">
       {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
-      {op.flight.departureIata}→{op.flight.arrivalIata}
+      {routeLabel(op.flight, preferences.display.airportIdentifier)}
       <span className="ml-2 opacity-70">
         existing report {new Date(op.existingGeneratedAt).toISOString()} &gt;
         this report {new Date(op.reportGeneratedAt).toISOString()}
@@ -617,85 +667,10 @@ function StaleRow({
   );
 }
 
-/**
- * Day/night cutoff summary for a flight, shown whenever a TO/LDG diff is
- * present so the user can sanity-check whether the imported value or the
- * sun-position calc is right. Reads the pre-computed context the logbook
- * parser attached to the sector.
- */
-function SunCheck({
-  op,
-}: {
-  op: AcceptableOperation;
-}) {
-  if (
-    op.kind !== "update_safe" &&
-    op.kind !== "update_consult" &&
-    op.kind !== "update_conflict" &&
-    op.kind !== "edited_conflict"
-  ) {
-    return null;
-  }
-  const ctx = op.sector?.toLdgContext;
-  if (!ctx) return null;
-
-  const hasToLdgChange = op.changes.some((c) =>
-    ["dayTakeoffs", "nightTakeoffs", "dayLandings", "nightLandings"].includes(
-      c.field
-    )
-  );
-  if (!hasToLdgChange) return null;
-
-  const tz = (n?: number) =>
-    n === undefined ? "" : ` (UTC${n >= 0 ? "+" : ""}${n})`;
-  const bounds = (rise?: string | null, set?: string | null) => {
-    const parts: string[] = [];
-    if (rise) parts.push(`sunrise ${rise}Z`);
-    if (set) parts.push(`sunset ${set}Z`);
-    return parts.length ? ` · ${parts.join(", ")}` : "";
-  };
-
-  return (
-    <div className="mt-1 mb-1 rounded bg-muted/40 px-2 py-1 text-[11px] leading-relaxed">
-      <div className="font-medium text-foreground/80">Day/night check</div>
-      <div className="text-muted-foreground">
-        OUT {ctx.outUtc}Z
-        {ctx.depLocal ? ` / ${ctx.depLocal} local${tz(ctx.depTzOffset)}` : ""} @{" "}
-        {op.sector.departureIata} →{" "}
-        <span
-          className={
-            ctx.depSunStatus === "night"
-              ? "text-indigo-500 dark:text-indigo-300 font-medium"
-              : "text-amber-600 dark:text-amber-400 font-medium"
-          }
-        >
-          {ctx.depSunStatus ?? "?"}
-        </span>
-        {bounds(ctx.depSunriseUtc, ctx.depSunsetUtc)}
-      </div>
-      <div className="text-muted-foreground">
-        IN {ctx.inUtc}Z
-        {ctx.arrLocal ? ` / ${ctx.arrLocal} local${tz(ctx.arrTzOffset)}` : ""} @{" "}
-        {op.sector.arrivalIata} →{" "}
-        <span
-          className={
-            ctx.arrSunStatus === "night"
-              ? "text-indigo-500 dark:text-indigo-300 font-medium"
-              : "text-amber-600 dark:text-amber-400 font-medium"
-          }
-        >
-          {ctx.arrSunStatus ?? "?"}
-        </span>
-        {bounds(ctx.arrSunriseUtc, ctx.arrSunsetUtc)}
-      </div>
-    </div>
-  );
-}
-
 function ChangeList({
   changes,
 }: {
-  changes: Array<{ field: string; from: string; to: string; note?: string }>;
+  changes: Array<{ field: string; from: string; to: string }>;
 }) {
   return (
     <div className="mt-1 space-y-0.5">
@@ -710,11 +685,6 @@ function ChangeList({
             <ArrowRight className="h-3 w-3" />
             <span className="font-mono text-foreground">{change.to}</span>
           </div>
-          {change.note && (
-            <div className="pl-3 text-[11px] italic text-amber-700 dark:text-amber-400">
-              {change.note}
-            </div>
-          )}
         </div>
       ))}
     </div>

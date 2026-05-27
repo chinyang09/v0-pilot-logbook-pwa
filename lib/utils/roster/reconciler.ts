@@ -72,71 +72,20 @@ export interface ParsedSector {
   /** Logbook-derived: true when user logged any TO or LDG for this leg. */
   isPilotFlying?: boolean;
   remarks?: string;
-  // Sun-position-derived suggestion for day/night TO/LDG classification.
-  // Only populated when the parser computed a value that DIFFERS from the
-  // PDF/CSV. The reconciler surfaces this in the diff note so the user
-  // sees "logbook says day, sun says night — which is right?".
+  // Sun-position-derived day/night TO/LDG split. Only populated when the
+  // parser computed a split that DIFFERS from the PDF/CSV. The executor uses
+  // this to record a concise reclassification remark (the day/night split is
+  // never surfaced as a conflict — recalculateFlightFields owns it).
   suggestedDayTakeoffs?: number;
   suggestedNightTakeoffs?: number;
   suggestedDayLandings?: number;
   suggestedNightLandings?: number;
-  /**
-   * Pre-computed day/night context for the TO/LDG diff note. Carries the
-   * out/in times in both UTC and local form plus the sun classification
-   * at the dep + arr airports so the review modal can show the user WHY
-   * the import value looks wrong (without each consumer having to redo
-   * the airport + sun lookup itself).
-   */
-  toLdgContext?: {
-    outUtc: string;
-    inUtc: string;
-    depLocal?: string;       // e.g. "15:24"
-    depTzOffset?: number;    // e.g. 7  (UTC+7)
-    depSunStatus?: "day" | "night";
-    /** UTC HH:MM of civil twilight crossings at the dep airport on `date`. */
-    depSunriseUtc?: string | null;
-    depSunsetUtc?: string | null;
-    arrLocal?: string;
-    arrTzOffset?: number;
-    arrSunStatus?: "day" | "night";
-    arrSunriseUtc?: string | null;
-    arrSunsetUtc?: string | null;
-  };
 }
 
 export interface FieldDiff {
   field: string;
   from: string;
   to: string;
-  /**
-   * Optional human-readable annotation rendered alongside the from→to
-   * arrow in the review modal. Used to surface a sun-position-derived
-   * suggestion next to a hand-entered TO/LDG value, etc.
-   */
-  note?: string;
-}
-
-/**
- * Remarks marker appended by the executor when the user has been asked
- * about (and made a decision on) TO/LDG values for a flight. The
- * reconciler treats this as "user already decided; do not re-flag" so
- * subsequent imports don't keep raising the same diff.
- */
-export const TOLDG_DECISION_MARKER = "[TO/LDG decision recorded]";
-
-function hasToLdgDecisionMarker(flight: FlightLog): boolean {
-  return (flight.remarks || "").includes(TOLDG_DECISION_MARKER);
-}
-
-function formatSunBounds(
-  sunriseUtc: string | null | undefined,
-  sunsetUtc: string | null | undefined
-): string {
-  if (!sunriseUtc && !sunsetUtc) return "";
-  const parts: string[] = [];
-  if (sunriseUtc) parts.push(`sunrise ${sunriseUtc}Z`);
-  if (sunsetUtc) parts.push(`sunset ${sunsetUtc}Z`);
-  return `(${parts.join(", ")})`;
 }
 
 export type ReconcilerOperation =
@@ -460,86 +409,13 @@ function diffSectorVsFlight(
     });
   }
 
-  // Logbook fields — only flag when sector carries a non-zero value AND the
-  // existing flight differs.
-  //
-  // When the user has already decided on TO/LDG values for this flight in a
-  // previous import (marked in remarks by the executor), we skip these
-  // diffs entirely so the same imported row doesn't keep raising the same
-  // question every time. The user can still edit the flight manually.
-  const skipToLdg = hasToLdgDecisionMarker(flight);
-  const numericPairs: Array<
-    [keyof FlightLog, keyof ParsedSector, keyof ParsedSector | undefined]
-  > = [
-    ["dayTakeoffs", "dayTakeoffs", "suggestedDayTakeoffs"],
-    ["nightTakeoffs", "nightTakeoffs", "suggestedNightTakeoffs"],
-    ["dayLandings", "dayLandings", "suggestedDayLandings"],
-    ["nightLandings", "nightLandings", "suggestedNightLandings"],
-  ];
-  if (!skipToLdg) {
-    const ctx = sector.toLdgContext;
-    const fmtCtx = ctx
-      ? (() => {
-          const dep = ctx.depLocal
-            ? `${ctx.outUtc}Z / ${ctx.depLocal} local (UTC${ctx.depTzOffset! >= 0 ? "+" : ""}${ctx.depTzOffset})`
-            : `${ctx.outUtc}Z`;
-          const arr = ctx.arrLocal
-            ? `${ctx.inUtc}Z / ${ctx.arrLocal} local (UTC${ctx.arrTzOffset! >= 0 ? "+" : ""}${ctx.arrTzOffset})`
-            : `${ctx.inUtc}Z`;
-          const depBounds = formatSunBounds(
-            ctx.depSunriseUtc,
-            ctx.depSunsetUtc
-          );
-          const arrBounds = formatSunBounds(
-            ctx.arrSunriseUtc,
-            ctx.arrSunsetUtc
-          );
-          return {
-            takeoff:
-              `OUT ${dep} → sun says ${ctx.depSunStatus ?? "?"} at ` +
-              `${sector.departureIata}${depBounds ? ` ${depBounds}` : ""}`,
-            landing:
-              `IN  ${arr} → sun says ${ctx.arrSunStatus ?? "?"} at ` +
-              `${sector.arrivalIata}${arrBounds ? ` ${arrBounds}` : ""}`,
-          };
-        })()
-      : null;
-
-    for (const [flightField, sectorField, suggestedField] of numericPairs) {
-      const incoming = sector[sectorField] as number | undefined;
-      if (incoming === undefined) continue;
-      const existing = (flight[flightField] as number | undefined) ?? 0;
-      if (incoming !== existing) {
-        const suggested =
-          suggestedField !== undefined
-            ? (sector[suggestedField] as number | undefined)
-            : undefined;
-        const change: FieldDiff = {
-          field: flightField as string,
-          from: String(existing),
-          to: String(incoming),
-        };
-        // When the sun-position calc disagrees with the logbook value, tell
-        // the user — the captain hand-fills this column in eCrew and it's
-        // the most common manual-entry mistake we see. We include the
-        // out/in times in both UTC and local form plus the sun status at
-        // dep and arr so the user can verify without leaving the modal.
-        if (fmtCtx) {
-          const isTakeoffField =
-            flightField === "dayTakeoffs" || flightField === "nightTakeoffs";
-          const sideLine = isTakeoffField ? fmtCtx.takeoff : fmtCtx.landing;
-          const suggestion =
-            suggested !== undefined && suggested !== incoming
-              ? `Sun-position calc suggests ${suggested}.`
-              : null;
-          change.note = suggestion ? `${suggestion} ${sideLine}` : sideLine;
-        } else if (suggested !== undefined && suggested !== incoming) {
-          change.note = `Sun-position calc suggests ${suggested} for this field.`;
-        }
-        changes.push(change);
-      }
-    }
-  }
+  // Day/night takeoff/landing split is intentionally NOT diffed here. It is a
+  // derived field: recalculateFlightFields() recomputes it from sun position
+  // on every imported flight (honoring manualOverrides), and the executor
+  // records a concise remark when the sun-derived split differs from what the
+  // report logged. Surfacing it as a conflict would only prompt the user to
+  // approve a change the recalc makes anyway. Total takeoffs/landings are
+  // preserved — only the day↔night bucket changes.
 
   if (
     sector.blockTime &&
