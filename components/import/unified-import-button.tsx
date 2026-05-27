@@ -472,7 +472,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         open={isOpen && !showReview}
         onOpenChange={onDialogChange}
       >
-        <DialogContent className="sm:max-w-md" hideCloseButton>
+        <DialogContent className="sm:max-w-md" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>
               {progress
