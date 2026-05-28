@@ -8,6 +8,14 @@
 
 import { NextResponse } from "next/server"
 
+// Run on Vercel's Edge runtime. Edge fetch uses a different TLS stack than
+// Node, so its JA3/JA4 fingerprint differs — Cloudflare's bot-fight rules on
+// FR24's /v1/* endpoint reject Node's fetch with a 403 JS-challenge HTML page,
+// and Edge sometimes slips past. If this still 403s, escalate to a Cloudflare
+// Worker / paid scraper proxy (the only real options against Cloudflare JS
+// interstitials — no header tweak can solve them).
+export const runtime = "edge"
+
 // Force this route to run per-request — no Next.js fetch cache, no ISR.
 export const dynamic = "force-dynamic"
 export const revalidate = 0
