@@ -1,0 +1,7 @@
+name = "fr24-search-proxy"
+main = "worker.ts"
+compatibility_date = "2025-01-15"
+
+# Set the shared secret with:
+#   wrangler secret put PROXY_SECRET
+# Then set FR24_PROXY_SECRET to the same value in Vercel env vars.

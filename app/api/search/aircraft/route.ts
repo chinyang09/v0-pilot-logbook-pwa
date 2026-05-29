@@ -38,19 +38,32 @@ async function fetchFr24(query: string): Promise<{
   data: any
   results: FR24Hit[]
   error?: string
+  via: "direct" | "worker"
 }> {
-  // Match the airport route's minimal header set — it's known to work
-  // server-side. Adding Sec-Fetch-* / x-fetch headers from a non-browser
-  // origin can actually trip Cloudflare's bot-fight rules since the TLS
-  // fingerprint won't match what a real browser would send alongside them.
-  const fr24Url = `https://www.flightradar24.com/v1/search/web/find?query=${encodeURIComponent(query)}&limit=10`
+  // When FR24_PROXY_URL is set, route through the Cloudflare Worker
+  // (see cloudflare-worker/). Worker fetch lives on Cloudflare's network
+  // with a different TLS fingerprint, so it can sometimes bypass the
+  // bot-fight 403 that direct Node/Edge fetch hits. The Worker preserves
+  // the FR24 path (/v1/search/web/find) and the query string.
+  const proxyUrl = process.env.FR24_PROXY_URL
+  const proxySecret = process.env.FR24_PROXY_SECRET
+  const via: "direct" | "worker" = proxyUrl ? "worker" : "direct"
+
+  const upstreamUrl = proxyUrl
+    ? `${proxyUrl.replace(/\/$/, "")}/v1/search/web/find?query=${encodeURIComponent(query)}&limit=10`
+    : `https://www.flightradar24.com/v1/search/web/find?query=${encodeURIComponent(query)}&limit=10`
+
+  const headers: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json, text/plain, */*",
+  }
+  if (proxyUrl && proxySecret) {
+    headers["x-proxy-secret"] = proxySecret
+  }
 
   try {
-    const response = await fetch(fr24Url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json, text/plain, */*",
-      },
+    const response = await fetch(upstreamUrl, {
+      headers,
       cache: "no-store",
       signal: AbortSignal.timeout(8000),
     })
@@ -68,6 +81,7 @@ async function fetchFr24(query: string): Promise<{
         data: null,
         results: [],
         error: `HTTP ${response.status}`,
+        via,
       }
     }
 
@@ -84,6 +98,7 @@ async function fetchFr24(query: string): Promise<{
         data: null,
         results: [],
         error: `JSON parse failed: ${(err as Error).message}`,
+        via,
       }
     }
 
@@ -107,6 +122,7 @@ async function fetchFr24(query: string): Promise<{
       bodySnippet: body.slice(0, 500),
       data,
       results,
+      via,
     }
   } catch (err) {
     return {
@@ -118,6 +134,7 @@ async function fetchFr24(query: string): Promise<{
       data: null,
       results: [],
       error: `fetch threw: ${(err as Error).name}: ${(err as Error).message}`,
+      via,
     }
   }
 }
@@ -145,6 +162,7 @@ export async function GET(request: Request) {
     const attempt = await fetchFr24(variant)
     attempts.push({
       variant,
+      via: attempt.via,
       ok: attempt.ok,
       status: attempt.status,
       contentType: attempt.contentType,
@@ -159,6 +177,7 @@ export async function GET(request: Request) {
       "[FR24 Search]",
       JSON.stringify({
         variant,
+        via: attempt.via,
         ok: attempt.ok,
         status: attempt.status,
         contentType: attempt.contentType,
