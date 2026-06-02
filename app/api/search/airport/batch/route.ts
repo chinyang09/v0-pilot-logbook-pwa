@@ -2,11 +2,16 @@
  * Batch airport lookup from MongoDB enriched submissions
  *
  * POST /api/search/airport/batch
- * Body: { icaos: ["WSSS", "WMKK", ...] }
+ * Body: { codes: ["WSSS", "SIN", "WMKK", "KUL", ...] }
+ *
+ * Each code is matched against EITHER icao or iata so callers can mix
+ * the two without converting. Results are keyed by the caller's original
+ * code (uppercased), so a request with both "WSSS" and "SIN" returns two
+ * entries that happen to point at the same airport.
  *
  * Mirrors /api/search/aircraft/batch — checks airportSubmissions
- * (status: "enriched") for matching ICAO codes and returns a map keyed
- * by ICAO. No auth required (reference data).
+ * (status: "enriched") and returns enriched data. No auth required
+ * (reference data).
  *
  * Staleness: records older than AIRPORT_CACHE_TTL_MS are excluded so the
  * caller falls through to FR24 and refreshes the cache. Airport reference
@@ -34,24 +39,26 @@ export type EnrichedAirport = {
 }
 
 export async function POST(request: Request) {
-  let body: { icaos?: string[] }
+  let body: { codes?: string[]; icaos?: string[] }
   try {
     body = await request.json()
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
   }
 
-  const { icaos } = body
-  if (!icaos || !Array.isArray(icaos) || icaos.length === 0) {
+  // Accept either `codes` (mixed ICAO/IATA — preferred) or the older
+  // `icaos` shape for backward compatibility.
+  const rawCodes = body.codes || body.icaos
+  if (!rawCodes || !Array.isArray(rawCodes) || rawCodes.length === 0) {
     return NextResponse.json({ results: {} })
   }
 
-  const icaosNormalized = icaos
-    .slice(0, 100)
+  const codes = rawCodes
+    .slice(0, 200)
     .map((c) => c.toUpperCase().trim())
     .filter(Boolean)
 
-  if (icaosNormalized.length === 0) {
+  if (codes.length === 0) {
     return NextResponse.json({ results: {} })
   }
 
@@ -65,8 +72,11 @@ export async function POST(request: Request) {
     const enrichedDocs = await collection
       .find({
         status: "enriched",
-        icao: { $in: icaosNormalized },
         enrichedAt: { $gte: minEnrichedAt },
+        $or: [
+          { icao: { $in: codes } },
+          { iata: { $in: codes } },
+        ],
       })
       .project({
         icao: 1,
@@ -82,11 +92,14 @@ export async function POST(request: Request) {
       })
       .toArray()
 
+    // Index docs by both their icao and iata so callers get the same
+    // airport back regardless of which code they sent.
     const results: Record<string, EnrichedAirport> = {}
+    const codeSet = new Set(codes)
 
     for (const doc of enrichedDocs) {
-      results[doc.icao] = {
-        icao: doc.icao,
+      const airport: EnrichedAirport = {
+        icao: doc.icao || "",
         iata: doc.iata || "",
         name: doc.name || "",
         city: doc.city || "",
@@ -96,6 +109,12 @@ export async function POST(request: Request) {
         longitude: doc.longitude ?? 0,
         elevation: doc.elevation ?? 0,
         timezone: doc.enrichedTimezone || doc.timezone || "",
+      }
+      if (doc.icao && codeSet.has(doc.icao)) {
+        results[doc.icao] = airport
+      }
+      if (doc.iata && codeSet.has(doc.iata)) {
+        results[doc.iata] = airport
       }
     }
 

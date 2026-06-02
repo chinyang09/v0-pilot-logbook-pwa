@@ -47,6 +47,7 @@ import type { NormalizedDocument, NormalizedRow } from "./types";
 import { normalize } from "./shared/name-normalize";
 import { parseGeneratedAt } from "./shared/generated-at";
 import { normalizeAircraftType } from "./shared/aircraft-type-map";
+import { enrichAirportBatch } from "./shared/airport-enricher";
 
 // ============================================================
 // Public types
@@ -593,6 +594,30 @@ export async function parseScheduleCSV(
               : "Error parsing row",
         });
       }
+    }
+
+    // Pre-enrich airports referenced by the parsed sectors so the per-sector
+    // `lookupAirport` calls in Stage B hit local IndexedDB. Missing IATAs go
+    // through the same chain as logbook imports: MongoDB cache → FR24 →
+    // write back. Also hydrates the user's home base airport.
+    const uniqueIatasForEnrich = new Set<string>()
+    if (header.crewInfo?.base) uniqueIatasForEnrich.add(header.crewInfo.base.toUpperCase())
+    for (const s of rawSectors) {
+      if (s.departureIata) uniqueIatasForEnrich.add(s.departureIata.toUpperCase())
+      if (s.arrivalIata) uniqueIatasForEnrich.add(s.arrivalIata.toUpperCase())
+    }
+    if (uniqueIatasForEnrich.size > 0) {
+      onProgress?.(45, "Resolving airports", `${uniqueIatasForEnrich.size} unique codes...`)
+      await enrichAirportBatch(
+        Array.from(uniqueIatasForEnrich),
+        ({ current, total, code }) => {
+          const pct = 45 + Math.floor((current / total) * 5)
+          onProgress?.(pct, "Resolving airports", `${current}/${total}: ${code}`)
+        }
+      )
+      // The in-import airportCache inside lookupAirport will pick up the
+      // newly-written records on its next call — no need to invalidate it
+      // because it hasn't been populated yet (Stage B hasn't started).
     }
 
     onProgress?.(50, "Normalizing", "Converting times to UTC...");
