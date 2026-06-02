@@ -1,5 +1,5 @@
 name = "fr24-search-proxy"
-main = "worker.ts"
+main = "worker.js"
 compatibility_date = "2025-01-15"
 
 # Set the shared secret with:

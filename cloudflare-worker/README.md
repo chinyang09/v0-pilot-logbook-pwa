@@ -52,8 +52,11 @@ If you'd rather not use wrangler:
 
 1. Cloudflare dashboard → Workers & Pages → Create application → Create Worker.
 2. Name it `fr24-search-proxy`.
-3. Edit the Worker, paste the contents of `worker.ts` (the dashboard editor
-   accepts TS). Save and deploy.
+3. Edit the Worker, **delete the default code**, then paste the entire
+   contents of `worker.js` (plain JS — the dashboard's "Quick Edit"
+   reliably accepts JS but trips on TS type annotations). Save and deploy.
+   Make sure the Worker is using the **ES Module** format (the default
+   for new Workers — the file must start with `export default {`).
 4. Workers & Pages → your worker → Settings → Variables and Secrets →
    Add Variable → Type: Secret → Name: `PROXY_SECRET`, Value: your random
    string. Save.
