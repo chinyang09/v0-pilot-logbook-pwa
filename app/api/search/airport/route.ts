@@ -3,39 +3,119 @@
  * Bypasses CORS restrictions on the unofficial FR24 API
  *
  * GET /api/search/airport?q=WARR
+ * GET /api/search/airport?q=WARR&debug=1   ← surfaces the upstream payload
+ *
+ * Same proxy story as the aircraft route: Vercel server-side fetch is
+ * 403'd by Cloudflare's bot-fight rules on FR24's API. When FR24_PROXY_URL
+ * is set, requests go through the Cloudflare Worker (cloudflare-worker/)
+ * which fetches from inside Cloudflare's network with a different TLS
+ * fingerprint. Falls back to direct fetch when the env var is unset so
+ * local dev keeps working.
  */
 
 import { NextResponse } from "next/server"
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url)
-  const query = searchParams.get("q")
+export const runtime = "edge"
+export const dynamic = "force-dynamic"
+export const revalidate = 0
+export const fetchCache = "force-no-store"
 
-  if (!query || query.length < 3) {
-    return NextResponse.json({ result: null })
+type AirportResult = {
+  icao: string
+  iata: string
+  name: string
+  city: string
+  country: string
+  countryCode: string
+  latitude: number
+  longitude: number
+  elevation: number
+  timezone: string
+}
+
+async function fetchFr24Airport(query: string): Promise<{
+  ok: boolean
+  status: number
+  contentType: string
+  bodyLength: number
+  bodySnippet: string
+  data: any
+  result: AirportResult | null
+  error?: string
+  via: "direct" | "worker"
+}> {
+  const proxyUrl = process.env.FR24_PROXY_URL
+  const proxySecret = process.env.FR24_PROXY_SECRET
+  const via: "direct" | "worker" = proxyUrl ? "worker" : "direct"
+
+  const upstreamUrl = proxyUrl
+    ? `${proxyUrl.replace(/\/$/, "")}/airports/traffic-stats/?airport=${encodeURIComponent(query)}`
+    : `https://www.flightradar24.com/airports/traffic-stats/?airport=${encodeURIComponent(query)}`
+
+  const headers: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json, text/plain, */*",
+  }
+  if (proxyUrl && proxySecret) {
+    headers["x-proxy-secret"] = proxySecret
   }
 
   try {
-    const fr24Url = `https://www.flightradar24.com/airports/traffic-stats/?airport=${encodeURIComponent(query.toUpperCase())}`
-    const response = await fetch(fr24Url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-      },
-      signal: AbortSignal.timeout(5000),
+    const response = await fetch(upstreamUrl, {
+      headers,
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
     })
 
+    const contentType = response.headers.get("content-type") || ""
+    const body = await response.text()
+
     if (!response.ok) {
-      return NextResponse.json({ result: null })
+      return {
+        ok: false,
+        status: response.status,
+        contentType,
+        bodyLength: body.length,
+        bodySnippet: body.slice(0, 500),
+        data: null,
+        result: null,
+        error: `HTTP ${response.status}`,
+        via,
+      }
     }
 
-    const data = await response.json()
+    let data: any = null
+    try {
+      data = body ? JSON.parse(body) : null
+    } catch (err) {
+      return {
+        ok: true,
+        status: response.status,
+        contentType,
+        bodyLength: body.length,
+        bodySnippet: body.slice(0, 500),
+        data: null,
+        result: null,
+        error: `JSON parse failed: ${(err as Error).message}`,
+        via,
+      }
+    }
+
     const details = data?.details
-
     if (!details?.code?.icao) {
-      return NextResponse.json({ result: null })
+      return {
+        ok: true,
+        status: response.status,
+        contentType,
+        bodyLength: body.length,
+        bodySnippet: body.slice(0, 500),
+        data,
+        result: null,
+        via,
+      }
     }
 
-    const result = {
+    const result: AirportResult = {
       icao: details.code.icao || "",
       iata: details.code.iata || "",
       name: details.name || "",
@@ -48,9 +128,71 @@ export async function GET(request: Request) {
       timezone: details.timezone?.name || "",
     }
 
-    return NextResponse.json({ result })
-  } catch (error) {
-    console.error("[FR24 Airport Search] Failed:", error)
+    return {
+      ok: true,
+      status: response.status,
+      contentType,
+      bodyLength: body.length,
+      bodySnippet: body.slice(0, 500),
+      data,
+      result,
+      via,
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      contentType: "",
+      bodyLength: 0,
+      bodySnippet: "",
+      data: null,
+      result: null,
+      error: `fetch threw: ${(err as Error).name}: ${(err as Error).message}`,
+      via,
+    }
+  }
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const query = searchParams.get("q")
+  const debug = searchParams.get("debug") === "1"
+
+  if (!query || query.length < 3) {
     return NextResponse.json({ result: null })
   }
+
+  const attempt = await fetchFr24Airport(query.toUpperCase())
+
+  console.log(
+    "[FR24 Airport Search]",
+    JSON.stringify({
+      query,
+      via: attempt.via,
+      ok: attempt.ok,
+      status: attempt.status,
+      contentType: attempt.contentType,
+      bodyLength: attempt.bodyLength,
+      hasResult: !!attempt.result,
+      error: attempt.error,
+    })
+  )
+
+  if (debug) {
+    return NextResponse.json({
+      result: attempt.result,
+      debug: {
+        query,
+        via: attempt.via,
+        ok: attempt.ok,
+        status: attempt.status,
+        contentType: attempt.contentType,
+        bodyLength: attempt.bodyLength,
+        bodySnippet: attempt.bodySnippet,
+        error: attempt.error,
+      },
+    })
+  }
+
+  return NextResponse.json({ result: attempt.result })
 }

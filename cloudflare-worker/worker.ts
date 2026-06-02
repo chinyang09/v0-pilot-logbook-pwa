@@ -27,7 +27,10 @@ export interface Env {
 }
 
 const FR24_HOST = "https://www.flightradar24.com"
-const ALLOWED_PATHS = ["/v1/search/web/find"]
+const ALLOWED_PATHS = [
+  "/v1/search/web/find",
+  "/airports/traffic-stats/",
+]
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
