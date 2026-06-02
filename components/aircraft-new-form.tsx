@@ -174,11 +174,18 @@ export function AircraftNewForm({
     try {
       // Use FR24 data to populate if available, otherwise manual entry
       const finalReg = fr24Data?.registration || reg
-      const typeInfo = fr24TypeInfo || selectedType
+      const typecodeUpper = typecode.trim().toUpperCase()
+      // Re-lookup at save time rather than relying on the fr24TypeInfo effect
+      // having resolved — closes the race where the user clicks Save before
+      // the async lookup populates state, which would persist empty enrichment.
+      const typeInfo =
+        selectedType ||
+        fr24TypeInfo ||
+        (typecodeUpper ? await getAircraftType(typecodeUpper) : null)
       const record: AircraftRecord = {
         registration: finalReg,
         icao24: fr24Data?.icao24 || "",
-        typecode: typecode.trim().toUpperCase(),
+        typecode: typecodeUpper,
         operator: fr24Data?.operator || "",
         shortDescription: typeInfo?.description || "",
         wtc: typeInfo?.wtc || "",

@@ -109,7 +109,15 @@ export async function getAircraftType(designator: string): Promise<AircraftType 
   }
 
   // Try IndexedDB
-  const raw = await referenceDb.aircraftTypes.get(code)
+  const cached = await referenceDb.aircraftTypes.get(code)
+  if (cached) return expandAircraftType(cached)
+
+  // Cold cache: ensure the types are loaded (fetches public JSON on first call,
+  // populates memory + IndexedDB) and retry the lookup. Without this, callers
+  // like the FR24 enrichment path silently get null on a fresh page load,
+  // leaving aircraft records with empty description/wtc/wtg/manufacturer.
+  const types = await loadAircraftTypes()
+  const raw = types.find((t) => t.d === code)
   return raw ? expandAircraftType(raw) : null
 }
 
@@ -125,8 +133,11 @@ export async function getAircraftTypeRaw(designator: string): Promise<AircraftTy
     return typesCache.find((t) => t.d === code) || null
   }
 
-  const raw = await referenceDb.aircraftTypes.get(code)
-  return raw || null
+  const cached = await referenceDb.aircraftTypes.get(code)
+  if (cached) return cached
+
+  const types = await loadAircraftTypes()
+  return types.find((t) => t.d === code) || null
 }
 
 // ============================================
