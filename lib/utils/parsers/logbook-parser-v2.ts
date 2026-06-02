@@ -52,6 +52,7 @@ import {
   enrichAircraftBatch,
   type EnrichResult,
 } from "./shared/aircraft-enricher";
+import { enrichAirportBatch } from "./shared/airport-enricher";
 import { resolveCrewByName } from "./shared/crew-resolver";
 
 // ============================================================
@@ -339,14 +340,19 @@ export async function parseLogbookV2(
 
     onProgress?.(20, "Loading", "Resolving airports + aircraft...");
 
-    // Airports — local lookup is cheap, do all in parallel.
-    const airportEntries = await Promise.all(
-      Array.from(uniqueIatas).map(async (iata) => {
-        const a = await getAirportByIata(iata);
-        return [iata, a] as const;
-      })
+    // Airports — enrichment chain: local IDB → MongoDB cache → FR24.
+    // Hydrates any airports missing from the user's local DB before the
+    // sector loop runs, so timezone/coords are available for every IATA.
+    const airportEnrich = await enrichAirportBatch(
+      Array.from(uniqueIatas),
+      ({ current, total, code }) => {
+        const pct = 20 + Math.floor((current / total) * 5);
+        onProgress?.(pct, "Resolving airports", `${current}/${total}: ${code}`);
+      }
     );
-    const airportMap = new Map(airportEntries);
+    const airportMap = new Map(
+      Array.from(uniqueIatas).map((iata) => [iata, airportEnrich.enriched.get(iata)] as const)
+    );
 
     // Aircraft enrichment chain.
     let enrichResult: EnrichResult = {

@@ -1,9 +1,10 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PageContainer } from "@/components/page-container"
+import { GlassContainer } from "@/components/ui/glass-container"
 import { SettingsRow, ReadOnlyRow } from "@/components/ui/settings-row"
 import { Loader2, AlertCircle } from "lucide-react"
 import { useRouter } from "next/navigation"
@@ -19,6 +20,7 @@ import type { AircraftType } from "@/types/entities/aircraft-type.types"
 import type { AircraftRecord } from "@/types/entities/aircraft.types"
 import { formatAircraftType } from "@/lib/utils/aircraft-type-utils"
 import { useAircraftTypeSearch } from "@/hooks/use-aircraft-type-search"
+import { useRegisterDetailActions } from "@/hooks/use-page-actions"
 
 export interface AircraftNewFormProps {
   prefilledReg?: string
@@ -172,11 +174,18 @@ export function AircraftNewForm({
     try {
       // Use FR24 data to populate if available, otherwise manual entry
       const finalReg = fr24Data?.registration || reg
-      const typeInfo = fr24TypeInfo || selectedType
+      const typecodeUpper = typecode.trim().toUpperCase()
+      // Re-lookup at save time rather than relying on the fr24TypeInfo effect
+      // having resolved — closes the race where the user clicks Save before
+      // the async lookup populates state, which would persist empty enrichment.
+      const typeInfo =
+        selectedType ||
+        fr24TypeInfo ||
+        (typecodeUpper ? await getAircraftType(typecodeUpper) : null)
       const record: AircraftRecord = {
         registration: finalReg,
         icao24: fr24Data?.icao24 || "",
-        typecode: typecode.trim().toUpperCase(),
+        typecode: typecodeUpper,
         operator: fr24Data?.operator || "",
         shortDescription: typeInfo?.description || "",
         wtc: typeInfo?.wtc || "",
@@ -234,6 +243,46 @@ export function AircraftNewForm({
   const canSave = registration.trim().length > 0 && !isDuplicate && !isSaving
   // Show type code field only when FR24 search failed or returned no results
   const showManualTypeField = fr24Searched && !fr24Found && !existingAircraft
+
+  // Stable refs so the memoized actions don't recreate every keystroke
+  const saveRef = useRef(handleSave)
+  saveRef.current = handleSave
+  const cancelRef = useRef(handleCancel)
+  cancelRef.current = handleCancel
+
+  // Floating right-side action pills for the desktop detail panel
+  const detailActions = useMemo(() => {
+    return (
+      <>
+        <GlassContainer cornerRadius={28}>
+          <Button
+            variant="ghost"
+            className="h-14 px-4"
+            onClick={() => cancelRef.current()}
+          >
+            Cancel
+          </Button>
+        </GlassContainer>
+        <GlassContainer cornerRadius={28}>
+          <Button
+            variant="ghost"
+            className="h-14 px-4 text-primary font-semibold"
+            disabled={!canSave}
+            onClick={() => saveRef.current()}
+          >
+            {isSaving ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              "Save"
+            )}
+          </Button>
+        </GlassContainer>
+      </>
+    )
+  }, [canSave, isSaving])
+
+  // Only register actions in detail-panel mode; standalone route uses its own header
+  useRegisterDetailActions(detailActions, isDetailPanel)
 
   const formContent = (
     <div className="container mx-auto px-3 pt-4 pb-safe">
@@ -463,14 +512,12 @@ export function AircraftNewForm({
   )
 
   if (isDetailPanel) {
+    // Detail panel mode: actions live in the floating right-side glass bar,
+    // registered above via useRegisterDetailActions. Content scrolls behind
+    // the global header (matches AircraftDetailPanel layout).
     return (
       <div className="h-full relative flex flex-col">
-        {/* Header - absolute overlay for frosted glass (matches detail panel pattern) */}
-        <div className="absolute top-0 left-0 right-0 z-50">
-          {headerContent}
-        </div>
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-auto pt-12">
+        <div className="flex-1 overflow-y-auto pt-16">
           {formContent}
         </div>
       </div>
