@@ -216,7 +216,7 @@ export async function extractPdfRows(file: File): Promise<{
         const cells = rowToCells(r, anchors);
         const raw = cells.join(",");
         if (!raw) continue;
-        rows.push({ index: rows.length, raw, cells });
+        rows.push({ index: rows.length, raw, cells, y: r.y });
       }
     }
 

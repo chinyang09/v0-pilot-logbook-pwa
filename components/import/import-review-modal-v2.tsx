@@ -36,6 +36,8 @@ import type {
   AcceptableOperation,
   PlannedImport,
 } from "@/lib/utils/parsers/schedule-parser";
+import { usePreferences } from "@/components/providers/preferences-provider";
+import { getAirportDisplayCode } from "@/lib/utils/airport-display";
 
 interface Props {
   plan: PlannedImport | null;
@@ -55,6 +57,21 @@ type Bucket =
 
 type Entry = { op: AcceptableOperation; index: number };
 
+type AirportPref = "icao" | "iata" | "both";
+
+function depDisplay(
+  flight: { departureIcao?: string; departureIata?: string },
+  pref: AirportPref
+): string {
+  return getAirportDisplayCode(flight.departureIcao, flight.departureIata, pref);
+}
+function arrDisplay(
+  flight: { arrivalIcao?: string; arrivalIata?: string },
+  pref: AirportPref
+): string {
+  return getAirportDisplayCode(flight.arrivalIcao, flight.arrivalIata, pref);
+}
+
 export function ImportReviewModalV2({
   plan,
   isOpen,
@@ -62,6 +79,8 @@ export function ImportReviewModalV2({
   onCancel,
 }: Props) {
   const [acceptance, setAcceptance] = useState<Map<number, boolean>>(new Map());
+  const { preferences } = usePreferences();
+  const airportPref = preferences.display.airportIdentifier;
 
   const partitioned = useMemo(() => {
     const out: Record<Bucket, Entry[]> = {
@@ -192,6 +211,7 @@ export function ImportReviewModalV2({
                     <CreateRow
                       key={`${index}-${op.sector.sourceLine}`}
                       sector={op.sector}
+                      airportPref={airportPref}
                     />
                   ) : null
                 )}
@@ -216,7 +236,11 @@ export function ImportReviewModalV2({
               <div className="space-y-2">
                 {partitioned.safe.slice(0, 12).map(({ op, index }) =>
                   op.kind === "update_safe" ? (
-                    <DiffRow key={`${index}-${op.flight.id}`} op={op} />
+                    <DiffRow
+                      key={`${index}-${op.flight.id}`}
+                      op={op}
+                      airportPref={airportPref}
+                    />
                   ) : null
                 )}
                 {partitioned.safe.length > 12 && (
@@ -246,6 +270,7 @@ export function ImportReviewModalV2({
                       op={op}
                       checked={getAccept(index, false)}
                       onCheckedChange={(v) => setAccept(index, v)}
+                      airportPref={airportPref}
                     />
                   ) : null
                 )}
@@ -270,6 +295,7 @@ export function ImportReviewModalV2({
                       op={op}
                       checked={getAccept(index, false)}
                       onCheckedChange={(v) => setAccept(index, v)}
+                      airportPref={airportPref}
                     />
                   ) : null
                 )}
@@ -294,6 +320,7 @@ export function ImportReviewModalV2({
                       op={op}
                       checked={getAccept(index, false)}
                       onCheckedChange={(v) => setAccept(index, v)}
+                      airportPref={airportPref}
                     />
                   ) : null
                 )}
@@ -313,6 +340,7 @@ export function ImportReviewModalV2({
                     <StaleRow
                       key={`${index}-${op.flight.id}`}
                       op={op}
+                      airportPref={airportPref}
                     />
                   ) : null
                 )}
@@ -447,32 +475,38 @@ function SummaryBar(props: {
 
 function CreateRow({
   sector,
+  airportPref,
 }: {
   sector: {
     flightNumber: string;
     date: string;
     departureIata: string;
     arrivalIata: string;
+    departureIcao?: string;
+    arrivalIcao?: string;
   };
+  airportPref: AirportPref;
 }) {
   return (
     <div className="text-xs pl-6 text-muted-foreground">
-      {sector.date} · {sector.flightNumber || "—"} · {sector.departureIata}→
-      {sector.arrivalIata}
+      {sector.date} · {sector.flightNumber || "—"} ·{" "}
+      {depDisplay(sector, airportPref)}→{arrDisplay(sector, airportPref)}
     </div>
   );
 }
 
 function DiffRow({
   op,
+  airportPref,
 }: {
   op: Extract<AcceptableOperation, { kind: "update_safe" }>;
+  airportPref: AirportPref;
 }) {
   return (
     <div className="pl-6 border-l-2 border-blue-200 py-1">
       <div className="text-sm font-medium">
         {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
-        {op.flight.departureIata}→{op.flight.arrivalIata}
+        {depDisplay(op.flight, airportPref)}→{arrDisplay(op.flight, airportPref)}
         {op.flight.outTime && op.flight.inTime && (
           <span className="ml-2 text-xs font-normal text-muted-foreground">
             {op.flight.outTime}Z – {op.flight.inTime}Z
@@ -489,6 +523,7 @@ function ConsentRow({
   op,
   checked,
   onCheckedChange,
+  airportPref,
 }: {
   op: Extract<
     AcceptableOperation,
@@ -496,6 +531,7 @@ function ConsentRow({
   >;
   checked: boolean;
   onCheckedChange: (v: boolean) => void;
+  airportPref: AirportPref;
 }) {
   return (
     <label className="flex items-start gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer">
@@ -506,7 +542,7 @@ function ConsentRow({
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium">
           {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
-          {op.flight.departureIata}→{op.flight.arrivalIata}
+          {depDisplay(op.flight, airportPref)}→{arrDisplay(op.flight, airportPref)}
           {op.flight.outTime && op.flight.inTime && (
             <span className="ml-2 text-xs font-normal text-muted-foreground">
               {op.flight.outTime}Z – {op.flight.inTime}Z
@@ -524,10 +560,12 @@ function EditedRow({
   op,
   checked,
   onCheckedChange,
+  airportPref,
 }: {
   op: Extract<AcceptableOperation, { kind: "edited_conflict" }>;
   checked: boolean;
   onCheckedChange: (v: boolean) => void;
+  airportPref: AirportPref;
 }) {
   const reasonLabel = (r: string) => {
     switch (r) {
@@ -552,7 +590,7 @@ function EditedRow({
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
           {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
-          {op.flight.departureIata}→{op.flight.arrivalIata}
+          {depDisplay(op.flight, airportPref)}→{arrDisplay(op.flight, airportPref)}
           {op.flight.outTime && op.flight.inTime && (
             <span className="text-xs font-normal text-muted-foreground">
               {op.flight.outTime}Z – {op.flight.inTime}Z
@@ -581,10 +619,12 @@ function DeletionRow({
   op,
   checked,
   onCheckedChange,
+  airportPref,
 }: {
   op: Extract<AcceptableOperation, { kind: "delete_missing" }>;
   checked: boolean;
   onCheckedChange: (v: boolean) => void;
+  airportPref: AirportPref;
 }) {
   return (
     <label className="flex items-start gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer">
@@ -594,7 +634,7 @@ function DeletionRow({
       />
       <div className="text-sm">
         {op.flight.date} · {op.flight.flightNumber} ·{" "}
-        {op.flight.departureIata}→{op.flight.arrivalIata}
+        {depDisplay(op.flight, airportPref)}→{arrDisplay(op.flight, airportPref)}
       </div>
     </label>
   );
@@ -602,13 +642,15 @@ function DeletionRow({
 
 function StaleRow({
   op,
+  airportPref,
 }: {
   op: Extract<AcceptableOperation, { kind: "skip_stale_report" }>;
+  airportPref: AirportPref;
 }) {
   return (
     <div className="text-xs pl-6 text-muted-foreground">
       {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
-      {op.flight.departureIata}→{op.flight.arrivalIata}
+      {depDisplay(op.flight, airportPref)}→{arrDisplay(op.flight, airportPref)}
       <span className="ml-2 opacity-70">
         existing report {new Date(op.existingGeneratedAt).toISOString()} &gt;
         this report {new Date(op.reportGeneratedAt).toISOString()}

@@ -214,6 +214,165 @@ function parseHeader(rows: NormalizedRow[]): ParsedHeader {
 }
 
 // ============================================================
+// PDF row regrouping
+// ============================================================
+//
+// The schedule PDF renders each visual table row across 3 - 10 separate
+// Y-buckets (top sector, date row, bottom sector, plus crew lines above and
+// below). The PDF extractor preserves the underlying Y-coordinate on each
+// NormalizedRow, but only one of those buckets — the date row — carries the
+// date in the date column. The plain row iterator below was skipping every
+// other bucket, which produced "TR278/TR589/…" as orphan deletions because
+// the parser never saw the imported flights in the report.
+//
+// `mergePdfTableRows` walks the data section in document order, drops page
+// header / column header / footer artifacts, and groups consecutive PDF
+// rows whose Y-coordinates are within `BLOCK_GAP_PX` into a single merged
+// row whose cells are newline-joined. After merging, the downstream
+// `extractSectorsFromRow` logic — already designed for the multi-line CSV
+// cell format — works unchanged on both CSV and PDF inputs.
+//
+// Threshold tuning: empirical row spacing on Scoot's schedule export is
+// ~4 - 10 px between rows of the same entry (sector/date/sector are spaced
+// 4 - 5 px; crew lines 9 - 10 px), and 11 - 18 px between entries. 11.0
+// cleanly separates every observed boundary without bisecting any entry.
+
+const BLOCK_GAP_PX = 11.0;
+
+function isPdfArtifactRow(row: NormalizedRow): boolean {
+  const r = row.raw;
+  if (!r.trim()) return true;
+  if (r.includes("Personal Crew Schedule Report")) return true;
+  if (r.includes("Scoot Pte Ltd")) return true;
+  if (r.includes("Schedule Details")) return true;
+  if (r.includes("All times in")) return true;
+  if (r.startsWith("Generated on") || r.includes(",Generated on")) return true;
+  // Column header repeat on subsequent pages
+  if (
+    row.cells[0]?.trim() === "Date" &&
+    (row.cells[1]?.trim() === "Duties" || row.cells[1]?.trim() === "Time")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isScheduleDateRow(row: NormalizedRow, dateColIdx: number): boolean {
+  return /^\d{2}\/\d{2}\/\d{4}/.test((row.cells[dateColIdx] || "").trim());
+}
+
+/**
+ * Merge consecutive rows whose Y values fall within BLOCK_GAP_PX into a
+ * single row with newline-joined cells. CSV input — which has undefined `y`
+ * — passes through unchanged. The returned array is the same shape as the
+ * input so downstream code reads it identically.
+ */
+function mergePdfTableRows(
+  rows: NormalizedRow[],
+  header: ParsedHeader
+): NormalizedRow[] {
+  // Detect format from the first data row's Y. CSV rows have no Y and
+  // already pack multiple sectors into a single cell — no merge needed.
+  const firstDataRow = rows[header.dataStartIndex];
+  if (!firstDataRow || firstDataRow.y === undefined) return rows;
+
+  const dateColIdx = header.columnIndices.date;
+  const dataStart = header.dataStartIndex;
+
+  // Find the end of the schedule section. We stop at the "Total Hours and
+  // Statistics" or "Code,,,Description" marker, whichever appears first.
+  let dataEnd = rows.length;
+  for (let i = dataStart; i < rows.length; i++) {
+    const r = rows[i].raw;
+    if (
+      r.includes("Total Hours and Statistics") ||
+      r.startsWith("Total Hours") ||
+      r.includes("Code,,,Description") ||
+      r.includes("Expiry Dates")
+    ) {
+      dataEnd = i;
+      break;
+    }
+  }
+
+  const out: NormalizedRow[] = [];
+  for (let i = 0; i < dataStart; i++) out.push(rows[i]);
+
+  let block: NormalizedRow[] = [];
+  let lastY: number | null = null;
+
+  const flush = () => {
+    if (block.length === 0) return;
+    if (block.length === 1) {
+      out.push(block[0]);
+      block = [];
+      return;
+    }
+    const numCols = block.reduce((m, r) => Math.max(m, r.cells.length), 0);
+    const merged: string[] = new Array(numCols).fill("");
+    let dateRowsSeen = 0;
+    for (const r of block) {
+      if (isScheduleDateRow(r, dateColIdx)) dateRowsSeen++;
+      for (let j = 0; j < r.cells.length; j++) {
+        const v = (r.cells[j] || "").trim();
+        if (!v) continue;
+        merged[j] = merged[j] ? `${merged[j]}\n${v}` : v;
+      }
+    }
+    // Sanity: two date rows merged into one entry means the Y threshold is
+    // too lax. We log and split conservatively rather than corrupt the
+    // import. Each row is re-emitted standalone so downstream parsing at
+    // least picks up the date-bearing rows.
+    if (dateRowsSeen > 1) {
+      console.warn(
+        `[Schedule parser] Y-gap merge produced ${dateRowsSeen} date rows ` +
+          `in one block; splitting. Block size=${block.length}, Y range=` +
+          `[${block[0].y?.toFixed(1)}..${block[block.length - 1].y?.toFixed(1)}]`
+      );
+      for (const r of block) out.push(r);
+      block = [];
+      return;
+    }
+    out.push({
+      index: block[0].index,
+      raw: merged.join(","),
+      cells: merged,
+      y: block[0].y,
+    });
+    block = [];
+  };
+
+  for (let i = dataStart; i < dataEnd; i++) {
+    const row = rows[i];
+
+    if (isPdfArtifactRow(row)) {
+      flush();
+      lastY = null;
+      continue;
+    }
+
+    const y = row.y;
+    if (y === undefined) {
+      flush();
+      out.push(row);
+      lastY = null;
+      continue;
+    }
+
+    if (lastY !== null && Math.abs(lastY - y) > BLOCK_GAP_PX) {
+      flush();
+    }
+    block.push(row);
+    lastY = y;
+  }
+  flush();
+
+  for (let i = dataEnd; i < rows.length; i++) out.push(rows[i]);
+
+  return out;
+}
+
+// ============================================================
 // Sector extraction (raw, pre-normalization)
 // ============================================================
 
@@ -266,8 +425,10 @@ function extractSectorsFromRow(
     if (!routeMatch) continue;
 
     // Parse actual-times line — may be scheduled-only, actual-only, or mixed.
+    // Supports both day-shift markers: ⁺¹ rolls forward (late-night dep), ⁻¹
+    // rolls back (early-morning arr displayed under the next day's row).
     const timeMatch = actualLine.match(
-      /(A?\d{2}:\d{2}(?:⁺¹)?)\s*-\s*(A?\d{2}:\d{2}(?:⁺¹)?)/
+      /(A?\d{2}:\d{2}(?:⁺¹|⁻¹|\+1|-1)?)\s*-\s*(A?\d{2}:\d{2}(?:⁺¹|⁻¹|\+1|-1)?)/
     );
 
     const sector: RawSector = {
@@ -303,7 +464,7 @@ function extractSectorsFromRow(
 // ============================================================
 
 interface AirportLookup {
-  (iata: string): Promise<{ tz: string } | undefined>;
+  (iata: string): Promise<{ tz: string; icao?: string } | undefined>;
 }
 
 async function normalizeSector(
@@ -362,6 +523,8 @@ async function normalizeSector(
     aircraftType: raw.aircraftType,
     departureIata: raw.departureIata,
     arrivalIata: raw.arrivalIata,
+    departureIcao: dep?.icao,
+    arrivalIcao: arr?.icao,
     scheduledOut: schedOut?.utcTime,
     scheduledIn: schedIn?.utcTime,
     actualOut: actOut?.utcTime,
@@ -483,6 +646,11 @@ export async function parseScheduleCSV(
     plan.dateRange = header.dateRange;
     plan.crewMember = header.crewInfo;
 
+    // PDF rows arrive one-per-Y-bucket; regroup them so each table entry is
+    // a single row whose multi-line cells match the CSV format. No-op for
+    // CSV (rows have no Y).
+    const rowsForParse = mergePdfTableRows(doc.rows, header);
+
     onProgress?.(10, "Validating", "Checking user profile...");
     const currentUser = await getCurrentUserPersonnel();
     if (!currentUser) {
@@ -495,14 +663,19 @@ export async function parseScheduleCSV(
     const baseAirport = await getAirportByIata(header.crewInfo.base);
     const baseTz = baseAirport?.tz;
 
-    // Airport lookup with in-import cache
-    const airportCache = new Map<string, { tz: string } | undefined>();
+    // Airport lookup with in-import cache. Carries ICAO through so the
+    // sector record can render airport codes per the user's display
+    // preference without a second lookup downstream.
+    const airportCache = new Map<
+      string,
+      { tz: string; icao?: string } | undefined
+    >();
     const lookupAirport = async (
       iata: string
-    ): Promise<{ tz: string } | undefined> => {
+    ): Promise<{ tz: string; icao?: string } | undefined> => {
       if (airportCache.has(iata)) return airportCache.get(iata);
       const a = await getAirportByIata(iata);
-      const entry = a?.tz ? { tz: a.tz } : undefined;
+      const entry = a?.tz ? { tz: a.tz, icao: a.icao } : undefined;
       airportCache.set(iata, entry);
       return entry;
     };
@@ -522,8 +695,8 @@ export async function parseScheduleCSV(
     const currencyStartMarker = "Code,,,Description";
     let currencyStartIdx = -1;
 
-    for (let i = header.dataStartIndex; i < doc.rows.length; i++) {
-      const { raw, cells } = doc.rows[i];
+    for (let i = header.dataStartIndex; i < rowsForParse.length; i++) {
+      const { raw, cells } = rowsForParse[i];
       if (raw.includes(currencyStartMarker)) {
         currencyStartIdx = i + 1;
         break;
@@ -693,7 +866,7 @@ export async function parseScheduleCSV(
     // Currencies
     onProgress?.(90, "Parsing", "Reading currency dates...");
     if (currencyStartIdx > 0) {
-      plan.currencies = parseCurrencies(doc.rows, currencyStartIdx);
+      plan.currencies = parseCurrencies(rowsForParse, currencyStartIdx);
     }
 
     onProgress?.(100, "Complete", "Plan ready for review");
