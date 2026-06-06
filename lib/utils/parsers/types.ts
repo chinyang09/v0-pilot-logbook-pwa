@@ -41,6 +41,14 @@ export interface NormalizedRow {
   /** Quote-aware split cells. A cell may itself contain embedded newlines:
    *  schedule reports pack multiple sectors into a single cell. */
   cells: string[];
+  /**
+   * PDF Y-coordinate of this row (top-left origin). Set only by the PDF
+   * extractor; undefined for CSV. The schedule parser uses Y-gaps to group
+   * consecutive PDF rows back into single table entries — the schedule PDF
+   * splits one visual row across 3-10 Y-buckets (top sector, date row,
+   * bottom sector, crew lines), and the merge depends on Y proximity.
+   */
+  y?: number;
 }
 
 /**

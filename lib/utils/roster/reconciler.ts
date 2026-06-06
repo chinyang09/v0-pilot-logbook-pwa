@@ -43,6 +43,14 @@ export interface ParsedSector {
   aircraftType: string;
   departureIata: string;
   arrivalIata: string;
+  /**
+   * Optional ICAO codes resolved during sector normalization. The schedule
+   * parser populates these from the airport DB lookup it already does for
+   * timezone resolution, so the review modal can render airport codes
+   * according to the user's display preference (ICAO / IATA / both).
+   */
+  departureIcao?: string;
+  arrivalIcao?: string;
   /** UTC HH:MM. Present when CSV has scheduled times. */
   scheduledOut?: string;
   scheduledIn?: string;

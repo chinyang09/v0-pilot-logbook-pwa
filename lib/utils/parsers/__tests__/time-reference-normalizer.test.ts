@@ -31,22 +31,47 @@ const TZ_NYC = "America/New_York"; // UTC-5/-4, DST
 describe("parseTimeToken", () => {
   it("parses a plain scheduled time", () => {
     const r = parseTimeToken("18:00");
-    expect(r).toEqual({ time: "18:00", isActual: false, nextDay: false });
+    expect(r).toEqual({ time: "18:00", isActual: false, dayDelta: 0, nextDay: false });
   });
 
   it("recognises an actual-time 'A' prefix", () => {
     const r = parseTimeToken("A04:49");
-    expect(r).toEqual({ time: "04:49", isActual: true, nextDay: false });
+    expect(r).toEqual({ time: "04:49", isActual: true, dayDelta: 0, nextDay: false });
   });
 
   it("recognises a '⁺¹' next-day marker", () => {
     const r = parseTimeToken("02:20⁺¹");
-    expect(r).toEqual({ time: "02:20", isActual: false, nextDay: true });
+    expect(r).toEqual({ time: "02:20", isActual: false, dayDelta: 1, nextDay: true });
+  });
+
+  it("recognises a '⁻¹' previous-day marker", () => {
+    const r = parseTimeToken("23:50⁻¹");
+    expect(r).toEqual({ time: "23:50", isActual: false, dayDelta: -1, nextDay: false });
   });
 
   it("recognises actual + next-day together", () => {
     const r = parseTimeToken("A01:13⁺¹");
-    expect(r).toEqual({ time: "01:13", isActual: true, nextDay: true });
+    expect(r).toEqual({ time: "01:13", isActual: true, dayDelta: 1, nextDay: true });
+  });
+
+  it("recognises actual + previous-day together", () => {
+    const r = parseTimeToken("A23:50⁻¹");
+    expect(r).toEqual({ time: "23:50", isActual: true, dayDelta: -1, nextDay: false });
+  });
+
+  it("accepts ASCII +1 / -1 fallbacks", () => {
+    expect(parseTimeToken("02:20+1")).toEqual({
+      time: "02:20",
+      isActual: false,
+      dayDelta: 1,
+      nextDay: true,
+    });
+    expect(parseTimeToken("A23:50-1")).toEqual({
+      time: "23:50",
+      isActual: true,
+      dayDelta: -1,
+      nextDay: false,
+    });
   });
 
   it("returns null for an invalid token", () => {
@@ -57,7 +82,7 @@ describe("parseTimeToken", () => {
 
   it("tolerates surrounding whitespace", () => {
     const r = parseTimeToken(" A22:16 ");
-    expect(r).toEqual({ time: "22:16", isActual: true, nextDay: false });
+    expect(r).toEqual({ time: "22:16", isActual: true, dayDelta: 0, nextDay: false });
   });
 });
 

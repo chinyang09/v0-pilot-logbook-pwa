@@ -29,11 +29,23 @@ export type TimeReference = "UTC" | "LOCAL_BASE" | "LOCAL_STATION";
 export type TimeRole = "out" | "off" | "on" | "in";
 
 export interface ParsedTimeToken {
-  /** Canonical "HH:MM" with A and ⁺¹ stripped */
+  /** Canonical "HH:MM" with A and ⁺¹/⁻¹ stripped */
   time: string;
   /** True if the raw token was prefixed with 'A' (actual time) */
   isActual: boolean;
-  /** True if the raw token had the '⁺¹' next-day marker */
+  /**
+   * Integer day delta from the row date.
+   *   ⁺¹ → +1 (next day, e.g. midnight rollover after a late departure)
+   *   ⁻¹ → -1 (previous day, when the report displays an early-morning
+   *           sector under the next calendar day's row)
+   *    none → 0
+   */
+  dayDelta: number;
+  /**
+   * Convenience alias for `dayDelta > 0`. Kept for backwards compatibility
+   * with callers that only handle the +1 case.
+   * @deprecated read `dayDelta` instead — it carries both +1 and -1.
+   */
   nextDay: boolean;
 }
 
@@ -68,7 +80,11 @@ export interface NormalizedTime {
 // Token parsing
 // ============================================================
 
-const TIME_TOKEN_RE = /^A?(\d{1,2}):(\d{2})(⁺¹)?$/;
+// Accepts a trailing day-shift marker:
+//   ⁺¹  = next day (most common — late-night departure rolls over)
+//   ⁻¹  = previous day (early-morning sector shown under the next day's row)
+//   "+1" / "-1" ASCII fallbacks for CSV exports that strip the superscripts.
+const TIME_TOKEN_RE = /^A?(\d{1,2}):(\d{2})(⁺¹|⁻¹|\+1|-1)?$/;
 
 /**
  * Parse a raw CSV time token into its components.
@@ -91,12 +107,21 @@ export function parseTimeToken(raw: string): ParsedTimeToken | null {
     return null;
   }
 
+  const marker = match[3];
+  const dayDelta =
+    marker === "⁺¹" || marker === "+1"
+      ? 1
+      : marker === "⁻¹" || marker === "-1"
+        ? -1
+        : 0;
+
   return {
     time: `${hours.toString().padStart(2, "0")}:${minutes
       .toString()
       .padStart(2, "0")}`,
     isActual: trimmed.startsWith("A"),
-    nextDay: trimmed.includes("⁺¹"),
+    dayDelta,
+    nextDay: dayDelta > 0,
   };
 }
 
@@ -188,9 +213,9 @@ export function normalizeTimeToUTC(
   if (!isValidIsoDate(input.rowDate)) return null;
 
   // 1. Build local calendar position (in the appropriate source TZ).
-  //    Apply the ⁺¹ day marker BEFORE TZ subtraction — the marker is relative
-  //    to the row date in the source frame.
-  let localDayDelta = parsed.nextDay ? 1 : 0;
+  //    Apply the ⁺¹ / ⁻¹ day marker BEFORE TZ subtraction — the marker is
+  //    relative to the row date in the source frame.
+  let localDayDelta = parsed.dayDelta;
   const localMinutes = hhmmToMinutes(parsed.time);
 
   // 2. Determine offset (hours) to subtract to reach UTC, based on reference.
