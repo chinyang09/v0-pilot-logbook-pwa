@@ -13,22 +13,28 @@ function useMediaQuery(minWidth: number) {
     const evaluate = () => setMatches(window.innerWidth >= minWidth)
     evaluate()
 
-    // matchMedia is the efficient fast path — fires only on real transitions.
-    // iOS WebKit (PWA) can drop these events while backgrounded or during
-    // Stage Manager / Split View resizes, so we layer resize / orientation /
-    // visibility listeners as a safety net that re-reads window.innerWidth.
+    // matchMedia is the authoritative source — fires only on real breakpoint
+    // transitions. iOS WebKit (PWA) can drop these events while the PWA is
+    // backgrounded, so we re-read window.innerWidth on visibilitychange when
+    // the document becomes visible again.
+    //
+    // We intentionally do NOT listen to `resize` or `orientationchange`:
+    // when iOS captures the app-switcher thumbnail during a swipe-up gesture
+    // it transiently resizes the viewport while the document is still
+    // "visible", which would latch matches=false before the eventual restore.
     const mediaQuery = window.matchMedia(`(min-width: ${minWidth}px)`)
     const handleChange = (e: MediaQueryListEvent) => setMatches(e.matches)
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return
+      // Defer one frame so post-resume layout metrics are in place.
+      requestAnimationFrame(evaluate)
+    }
     mediaQuery.addEventListener("change", handleChange)
-    window.addEventListener("resize", evaluate)
-    window.addEventListener("orientationchange", evaluate)
-    document.addEventListener("visibilitychange", evaluate)
+    document.addEventListener("visibilitychange", handleVisibility)
 
     return () => {
       mediaQuery.removeEventListener("change", handleChange)
-      window.removeEventListener("resize", evaluate)
-      window.removeEventListener("orientationchange", evaluate)
-      document.removeEventListener("visibilitychange", evaluate)
+      document.removeEventListener("visibilitychange", handleVisibility)
     }
   }, [minWidth])
 
