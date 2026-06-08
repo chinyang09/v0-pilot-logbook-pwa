@@ -1,9 +1,14 @@
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { SwipeableCard } from "@/components/swipeable-card"
+import { cn } from "@/lib/utils"
 
 /**
  * A row displaying a label and value, optionally editable via an inline input.
  * Used across detail panels (aircraft, crew, flight) and new-entity forms.
+ *
+ * When editable, the row is swipeable to reveal a "Clear" action (set
+ * `swipeToClear={false}` to opt out — e.g. for fields that must stay filled).
  */
 export function SettingsRow({
   label,
@@ -15,6 +20,7 @@ export function SettingsRow({
   readOnly = false,
   required = false,
   uppercase = false,
+  swipeToClear = true,
 }: {
   label: string
   value: string
@@ -25,9 +31,18 @@ export function SettingsRow({
   readOnly?: boolean
   required?: boolean
   uppercase?: boolean
+  swipeToClear?: boolean
 }) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
+  const editable = !readOnly && !!onChange
+  const wrapped = editable && swipeToClear
+
+  const inner = (
+    <div
+      className={cn(
+        "flex items-center justify-between py-3",
+        !wrapped && "border-b border-border last:border-b-0"
+      )}
+    >
       <span className="text-foreground">
         {label}
         {required && <span className="text-destructive ml-0.5">*</span>}
@@ -45,6 +60,20 @@ export function SettingsRow({
         />
       )}
     </div>
+  )
+
+  if (!wrapped) return inner
+
+  return (
+    <SwipeableCard
+      variant="row"
+      containerClassName="border-b border-border last:border-b-0"
+      actions={[
+        { label: "Clear", variant: "destructive", onClick: () => onChange?.("") },
+      ]}
+    >
+      {inner}
+    </SwipeableCard>
   )
 }
 

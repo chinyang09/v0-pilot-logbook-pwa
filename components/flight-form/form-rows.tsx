@@ -1,10 +1,10 @@
 "use client"
 
 import type React from "react"
-import { useState, useRef } from "react"
 import { ChevronRight } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
+import { SwipeableCard } from "@/components/swipeable-card"
 import {
   formatTimeShort,
   utcToLocal,
@@ -13,7 +13,9 @@ import {
 } from "@/lib/utils/time"
 
 /**
- * Swipeable row component for clearing field values
+ * Swipeable row for clearing field values. Thin wrapper over the shared
+ * {@link SwipeableCard} primitive (inline "row" variant) so the flight form
+ * gets the same growing/spring swipe-to-reveal used across the app.
  */
 export function SwipeableRow({
   children,
@@ -22,56 +24,13 @@ export function SwipeableRow({
   children: React.ReactNode
   onClear: () => void
 }) {
-  const [offset, setOffset] = useState(0)
-  const [isDragging, setIsDragging] = useState(false)
-  const startX = useRef(0)
-  const currentOffset = useRef(0)
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    startX.current = e.touches[0].clientX
-    currentOffset.current = offset
-    setIsDragging(true)
-  }
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isDragging) return
-    const diff = startX.current - e.touches[0].clientX
-    const newOffset = Math.max(0, Math.min(80, currentOffset.current + diff))
-    setOffset(newOffset)
-  }
-
-  const handleTouchEnd = () => {
-    setIsDragging(false)
-    if (offset > 40) {
-      setOffset(80)
-    } else {
-      setOffset(0)
-    }
-  }
-
   return (
-    <div className="relative overflow-hidden">
-      <div
-        className="absolute right-0 top-0 bottom-0 w-20 bg-destructive flex items-center justify-center"
-        onClick={() => {
-          onClear()
-          setOffset(0)
-        }}
-      >
-        <span className="text-destructive-foreground text-sm font-medium">
-          Clear
-        </span>
-      </div>
-      <div
-        className="relative bg-card transition-transform"
-        style={{ transform: `translateX(-${offset}px)` }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-      >
-        {children}
-      </div>
-    </div>
+    <SwipeableCard
+      variant="row"
+      actions={[{ label: "Clear", onClick: onClear, variant: "destructive" }]}
+    >
+      {children}
+    </SwipeableCard>
   )
 }
 
