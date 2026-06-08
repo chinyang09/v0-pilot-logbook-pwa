@@ -10,12 +10,26 @@ function useMediaQuery(minWidth: number) {
   const [matches, setMatches] = useState(false)
 
   useEffect(() => {
-    setMatches(window.innerWidth >= minWidth)
+    const evaluate = () => setMatches(window.innerWidth >= minWidth)
+    evaluate()
 
+    // matchMedia is the efficient fast path — fires only on real transitions.
+    // iOS WebKit (PWA) can drop these events while backgrounded or during
+    // Stage Manager / Split View resizes, so we layer resize / orientation /
+    // visibility listeners as a safety net that re-reads window.innerWidth.
     const mediaQuery = window.matchMedia(`(min-width: ${minWidth}px)`)
     const handleChange = (e: MediaQueryListEvent) => setMatches(e.matches)
     mediaQuery.addEventListener("change", handleChange)
-    return () => mediaQuery.removeEventListener("change", handleChange)
+    window.addEventListener("resize", evaluate)
+    window.addEventListener("orientationchange", evaluate)
+    document.addEventListener("visibilitychange", evaluate)
+
+    return () => {
+      mediaQuery.removeEventListener("change", handleChange)
+      window.removeEventListener("resize", evaluate)
+      window.removeEventListener("orientationchange", evaluate)
+      document.removeEventListener("visibilitychange", evaluate)
+    }
   }, [minWidth])
 
   return matches
