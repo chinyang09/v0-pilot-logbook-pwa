@@ -13,28 +13,41 @@ function useMediaQuery(minWidth: number) {
     const evaluate = () => setMatches(window.innerWidth >= minWidth)
     evaluate()
 
-    // matchMedia is the authoritative source — fires only on real breakpoint
-    // transitions. iOS WebKit (PWA) can drop these events while the PWA is
-    // backgrounded, so we re-read window.innerWidth on visibilitychange when
-    // the document becomes visible again.
-    //
-    // We intentionally do NOT listen to `resize` or `orientationchange`:
-    // when iOS captures the app-switcher thumbnail during a swipe-up gesture
-    // it transiently resizes the viewport while the document is still
-    // "visible", which would latch matches=false before the eventual restore.
+    // matchMedia is the fast path on normal browser resizes.
     const mediaQuery = window.matchMedia(`(min-width: ${minWidth}px)`)
     const handleChange = (e: MediaQueryListEvent) => setMatches(e.matches)
-    const handleVisibility = () => {
-      if (document.visibilityState !== "visible") return
-      // Defer one frame so post-resume layout metrics are in place.
+
+    // iPadOS PWA quirk: when the user switches apps (Cmd+Tab, app switcher,
+    // background→foreground), iOS may freeze JS during a transient viewport
+    // shrink (app-switcher thumbnail). matchMedia events fired in that window
+    // are effectively lost, and window.innerWidth can take a few hundred ms
+    // to report the real restored viewport after resume. We re-read on every
+    // plausible resume signal across multiple frames so we catch the eventual
+    // restored width.
+    //
+    // Rotation alone won't recover hooks whose breakpoint isn't crossed
+    // (e.g. on iPad Pro 12.9" the 920 / 720 thresholds stay above on both
+    // orientations), which is why we don't rely on matchMedia events alone.
+    const resync = () => {
+      evaluate()
       requestAnimationFrame(evaluate)
+      setTimeout(evaluate, 250)
+      setTimeout(evaluate, 600)
     }
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") resync()
+    }
+
     mediaQuery.addEventListener("change", handleChange)
     document.addEventListener("visibilitychange", handleVisibility)
+    window.addEventListener("pageshow", resync)
+    window.addEventListener("focus", resync)
 
     return () => {
       mediaQuery.removeEventListener("change", handleChange)
       document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener("pageshow", resync)
+      window.removeEventListener("focus", resync)
     }
   }, [minWidth])
 
