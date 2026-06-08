@@ -47,7 +47,7 @@ interface SwipeableCardProps {
   onClick?: () => void
   /** Class applied to the moving content wrapper */
   className?: string
-  /** Class applied to the outer container (e.g. row dividers) */
+  /** Class applied to the outer container */
   containerClassName?: string
   disabled?: boolean
   id?: string
@@ -58,10 +58,16 @@ interface SwipeableCardProps {
   fullSwipe?: boolean
   /**
    * "card" (default) — standalone rounded card with its own background.
-   * "row" — inline divider row that lives inside a grouped section card
-   * (no per-row rounding; only an opaque background so actions stay hidden).
+   * "row" — inline divider row inside a grouped section card. On swipe the row
+   * morphs into a rounded, lifted card and (when {@link separated}) its divider
+   * line fades out.
    */
   variant?: "card" | "row"
+  /**
+   * Row variant only — render a bottom divider that disappears as the row morphs
+   * into a card on swipe. Use for grouped list/detail rows.
+   */
+  separated?: boolean
 }
 
 function variantClasses(variant?: SwipeAction["variant"]): string {
@@ -140,9 +146,10 @@ function SwipeActionButton({
  * A reusable swipe-to-reveal row.
  *
  * Actions are anchored to the trailing edge as separate, rounded buttons that
- * pop in with spring physics (Wear OS M2.5 / iOS feel). Release settles with a
- * spring. Vertical gestures are ignored via direction locking so the list keeps
- * scrolling cleanly. Use `variant="row"` for inline divider rows.
+ * pop in with spring physics (Wear OS M2.5 / iOS feel) and fill the row height.
+ * On swipe a "row" variant morphs into a rounded, lifted card and its divider
+ * fades out. Release settles with a spring. Vertical gestures are ignored via
+ * direction locking so the list keeps scrolling cleanly.
  */
 export function SwipeableCard({
   children,
@@ -154,6 +161,7 @@ export function SwipeableCard({
   id,
   fullSwipe = true,
   variant = "card",
+  separated = false,
 }: SwipeableCardProps) {
   const cardId = useRef(id || Math.random().toString(36).slice(2))
   const containerRef = useRef<HTMLDivElement>(null)
@@ -171,6 +179,8 @@ export function SwipeableCard({
   const panelWidth = useTransform(x, (v) => Math.max(0, -v))
   // 0 → 1 once dragged far enough that releasing fires the trailing action.
   const armed = useMotionValue(0)
+  // True while the row is swiped open or mid-gesture (drives the card morph).
+  const [active, setActive] = useState(false)
 
   // Measured row width, used for drag bounds and the full-swipe threshold.
   const [width, setWidth] = useState(0)
@@ -198,7 +208,14 @@ export function SwipeableCard({
 
   const settle = useCallback(
     (target: number, velocity = 0) => {
-      animate(x, target, { ...SPRING, velocity })
+      if (target !== 0) setActive(true)
+      animate(x, target, {
+        ...SPRING,
+        velocity,
+        onComplete: () => {
+          if (target === 0) setActive(false)
+        },
+      })
     },
     [x]
   )
@@ -209,7 +226,7 @@ export function SwipeableCard({
   useEffect(() => {
     const handler = (e: Event) => {
       if ((e as CustomEvent).detail?.id !== cardId.current) {
-        animate(x, 0, SPRING)
+        animate(x, 0, { ...SPRING, onComplete: () => setActive(false) })
       }
     }
     window.addEventListener(SWIPE_CLOSE_EVENT, handler)
@@ -224,6 +241,7 @@ export function SwipeableCard({
 
   const handleDragStart = useCallback(() => {
     movedRef.current = false
+    setActive(true)
     closeOthers()
   }, [closeOthers])
 
@@ -282,13 +300,15 @@ export function SwipeableCard({
       className={cn(
         "relative overflow-hidden",
         isCard && "rounded-lg",
+        separated && "border-b border-border last:border-b-0",
+        separated && active && "border-transparent",
         containerClassName
       )}
     >
-      {/* Separated, rounded action buttons that pop in with the swipe */}
+      {/* Separated, rounded action buttons that pop in and fill the row height */}
       {hasActions && (
         <motion.div
-          className="absolute inset-y-0 right-0 flex items-stretch justify-end gap-2 px-2 py-1.5 overflow-hidden"
+          className="absolute inset-y-0 right-0 flex items-stretch justify-end gap-2 px-2 overflow-hidden"
           style={{ width: panelWidth }}
         >
           {actions.map((action, index) => {
@@ -311,7 +331,7 @@ export function SwipeableCard({
         </motion.div>
       )}
 
-      {/* Swipeable content */}
+      {/* Swipeable content — morphs into a lifted card on swipe (row variant) */}
       <motion.div
         drag={hasActions ? "x" : false}
         dragDirectionLock
@@ -326,7 +346,15 @@ export function SwipeableCard({
         style={{ x, touchAction: "pan-y" }}
         className={cn("relative z-[1]", className)}
       >
-        <div className={cn("bg-card", isCard && "rounded-lg")}>{children}</div>
+        <div
+          className={cn(
+            "bg-card transition-[background-color,border-radius] duration-150",
+            isCard && "rounded-lg",
+            !isCard && active && "rounded-lg bg-secondary"
+          )}
+        >
+          {children}
+        </div>
       </motion.div>
     </div>
   )

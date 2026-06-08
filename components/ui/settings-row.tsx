@@ -56,7 +56,7 @@ export function SettingsRow({
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
           placeholder={placeholder}
-          className={`text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0${uppercase ? " uppercase" : ""}`}
+          className={`text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] touch-pan-y text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0${uppercase ? " uppercase" : ""}`}
         />
       )}
     </div>
@@ -67,7 +67,7 @@ export function SettingsRow({
   return (
     <SwipeableCard
       variant="row"
-      containerClassName="border-b border-border last:border-b-0"
+      separated
       actions={[
         { label: "Clear", variant: "destructive", onClick: () => onChange?.("") },
       ]}
