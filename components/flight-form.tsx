@@ -406,8 +406,8 @@ export function FlightForm({
     editingFlightInitializedRef.current = null;
     prevLiveFlightRef.current = undefined;
 
-    // Scroll to top on ID switch
-    scrollContainerRef.current?.scrollTo(0, 0);
+    // Intentionally keep the current scroll offset when switching flights so the
+    // same fields stay in view for side-by-side comparison (no jump to top).
   }, [flightIdProp]);
 
   // Update form data when resolvedFlight changes (e.g., after refresh or live query)

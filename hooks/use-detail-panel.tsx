@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, type ReactNode } from "react"
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 
@@ -75,84 +75,37 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     () => "/" + (pathname?.split("/").filter(Boolean)[0] || ""),
     [pathname]
   )
-  // Ref so effects can read current base without adding it to deps.
-  // useLayoutEffect ensures the ref is updated before the sessionStorage restoration
-  // layout effect (below) reads it, since layout effects fire in declaration order.
-  const currentBaseRef = useRef(currentBase)
-  useLayoutEffect(() => { currentBaseRef.current = currentBase })
+  // Per-route selection map: each base route remembers its own last selection,
+  // so switching keep-alive sections instantly re-derives the right selection
+  // with no empty flash and no stale cross-route leak. Seeded synchronously from
+  // sessionStorage (cleared on PWA close) plus any ?selected= in the current URL.
+  // The lazy initializer runs per-environment: on the server sessionStorage is
+  // empty ({}), on the client it reads the persisted selections.
+  const [selections, setSelections] = useState<Record<string, string | null>>(() => {
+    const stored = getStoredSelections()
+    const urlSelected = searchParams.get("selected")
+    return urlSelected ? { ...stored, [currentBase]: urlSelected } : stored
+  })
 
-  // Get selected ID from URL or sessionStorage
-  const selectedIdFromUrl = searchParams.get("selected")
-  const [selectedIdState, setSelectedIdState] = useState<string | null>(selectedIdFromUrl)
+  // Effective selectedId: derived during render from the current route's slot.
+  const selectedId = selections[currentBase] ?? null
 
-  // Track which base route "owns" the current selectedId.
-  // Exposed selectedId is null when the current route doesn't match the owner,
-  // preventing stale cross-route IDs from leaking into another page's detail panel.
-  const [selectedIdOwner, setSelectedIdOwner] = useState<string | null>(currentBase)
-
-  // Effective selectedId: derived synchronously during render (not in an effect)
-  const selectedId = selectedIdOwner === currentBase ? selectedIdState : null
-
-  // Track when we're updating URL to avoid sync race condition
-  const pendingUpdateRef = useRef<string | null | undefined>(undefined)
-
-  // Sync selectedId with URL params (only when URL changes externally).
-  // Uses a functional setState so `selectedId` does NOT need to be in deps —
-  // removing it prevents an extra re-run after our own setSelectedIdState call.
+  // Sync the current route's selection with external URL changes (back/forward,
+  // deep links). Only acts when ?selected= is present — when it's absent we must
+  // NOT clobber a sessionStorage-restored selection to null, otherwise the mobile
+  // overlay rule (showMobileOverlay requires searchParams.has("selected")) and the
+  // restored desktop detail would both break. The identity bail-out makes this
+  // idempotent, so it never reverts our own setSelectedId update.
   useEffect(() => {
     const urlSelected = searchParams.get("selected")
-    // Skip sync if we have a pending update that matches (our own update)
-    if (pendingUpdateRef.current !== undefined) {
-      if (pendingUpdateRef.current === urlSelected) {
-        // URL caught up with our update, clear pending
-        pendingUpdateRef.current = undefined
-      }
-      // Skip syncing while we have a pending update
-      return
-    }
-    // Functional update: React bails out (no re-render) if the value is unchanged,
-    // so calling this even when urlSelected === selectedIdState is safe and avoids
-    // needing selectedIdState in the dep array.
-    setSelectedIdState(prev => (prev === urlSelected ? prev : urlSelected))
-    if (urlSelected !== null) {
-      setSelectedIdOwner(currentBaseRef.current)
-    }
-  }, [searchParams])
-
-  // Track previous pathname so we only clear pendingUpdateRef on real page changes,
-  // not on every searchParams update (which would break race-condition protection).
-  const prevPathnameForPendingRef = useRef(pathname)
-
-  // On pathname change, restore selection from sessionStorage if not in URL.
-  // useLayoutEffect ensures selectedId is restored synchronously before paint and before
-  // any child useEffect (e.g. syncDetailPanel) fires, preventing the flash of null content
-  // that would otherwise appear while waiting for the async state update.
-  useLayoutEffect(() => {
-    // Clear pending update only when the actual page changes, not on every URL update.
-    // If we cleared on every searchParams change, every setSelectedId → router.replace
-    // would destroy the pending guard before the URL-sync effect above can use it.
-    if (prevPathnameForPendingRef.current !== pathname) {
-      prevPathnameForPendingRef.current = pathname
-      pendingUpdateRef.current = undefined
-    }
-
-    const urlSelected = searchParams.get("selected")
-    if (!urlSelected) {
-      const stored = getStoredSelections()
-      const basePath = pathname?.split("?")[0] || ""
-      if (stored[basePath]) {
-        setSelectedIdState(stored[basePath])
-        setSelectedIdOwner(currentBaseRef.current)
-        // Don't auto-update URL here - let the page decide
-      }
-    }
-  }, [pathname, searchParams])
+    if (urlSelected === null) return
+    setSelections(prev =>
+      prev[currentBase] === urlSelected ? prev : { ...prev, [currentBase]: urlSelected }
+    )
+  }, [searchParams, currentBase])
 
   const setSelectedId = useCallback((id: string | null) => {
-    // Mark that we're updating to this value (prevents sync effect from reverting)
-    pendingUpdateRef.current = id
-    setSelectedIdState(id)
-    setSelectedIdOwner(currentBaseRef.current)
+    setSelections(prev => ({ ...prev, [currentBase]: id }))
 
     // Update URL
     const params = new URLSearchParams(searchParams.toString())
@@ -165,12 +118,9 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname
     router.replace(newUrl || "/", { scroll: false })
 
-    // Save to sessionStorage
-    if (pathname) {
-      const basePath = pathname.split("?")[0]
-      saveSelection(basePath, id)
-    }
-  }, [pathname, router, searchParams])
+    // Persist to sessionStorage (keyed by base route, matching the map)
+    saveSelection(currentBase, id)
+  }, [currentBase, pathname, router, searchParams])
 
   // Routes that use KeepAlivePages — their detail content survives navigation
   // because the page stays mounted and will re-sync via usePageActive callback.
