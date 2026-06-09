@@ -657,6 +657,9 @@ textarea:focus-within {
   inset-inline: 1rem;
   bottom: 0;
   height: 1px;
+  /* Above the swipeable content (z-[1]) so the divider isn't hidden when a row
+     is wrapped for editing. */
+  z-index: 2;
   background: var(--border);
   pointer-events: none;
 }

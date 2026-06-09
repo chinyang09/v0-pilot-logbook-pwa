@@ -326,7 +326,7 @@ export function SwipeableCard({
       {/* Separated, rounded action buttons that pop in and fill the row height */}
       {hasActions && (
         <motion.div
-          className="absolute inset-y-0 right-0 flex items-stretch justify-end gap-2 pl-2 overflow-hidden"
+          className="absolute inset-y-0 right-0 flex items-stretch justify-end gap-2 overflow-hidden"
           style={{ width: panelWidth }}
         >
           {actions.map((action, index) => {

@@ -64,7 +64,7 @@ export function SettingsRow({
           className={cn(
             // Blend the input into the row: no box/shadow/border, and keep the
             // same font size as the read-only value (override the base md:text-sm).
-            "text-right border-0 bg-transparent shadow-none rounded-none h-auto p-0 w-auto max-w-[200px] md:text-base text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0",
+            "text-right border-0 bg-transparent dark:bg-transparent shadow-none rounded-none h-auto p-0 w-auto max-w-[200px] md:text-base text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0",
             uppercase && "uppercase"
           )}
         />
