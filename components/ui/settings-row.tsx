@@ -43,7 +43,7 @@ export function SettingsRow({
   const inner = (
     <div
       className={cn(
-        "flex items-center justify-between py-3",
+        "flex items-center justify-between px-4 py-3.5",
         !wrapped && "border-b border-border last:border-b-0"
       )}
     >
@@ -107,7 +107,7 @@ export function ToggleRow({
   disabled?: boolean
 }) {
   return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between px-4 py-3.5 border-b border-border last:border-b-0">
       <span className={disabled ? "text-muted-foreground" : "text-foreground"}>
         {label}
       </span>
@@ -125,7 +125,7 @@ export function ToggleRow({
  */
 export function ReadOnlyRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between px-4 py-3.5 border-b border-border last:border-b-0">
       <span className="text-foreground">{label}</span>
       <span className="text-muted-foreground">{value || "-"}</span>
     </div>
