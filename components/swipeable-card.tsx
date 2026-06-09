@@ -6,7 +6,6 @@ import {
   animate,
   motion,
   useMotionValue,
-  useMotionValueEvent,
   useSpring,
   useTransform,
   type MotionValue,
@@ -23,8 +22,6 @@ const GAP = 8
 /** Gap between the card and the buttons, on the leading (left) side only —
  *  the trailing button sits flush with the card's right edge. */
 const PANEL_PAD = 8
-/** Fraction of the row's width that arms the iOS-style full swipe */
-const FULL_SWIPE_RATIO = 0.6
 /** Elastic resistance once dragged past the natural open position */
 const DRAG_ELASTIC = 0.14
 /** Spring used for every snap/settle animation of the card */
@@ -52,11 +49,6 @@ interface SwipeableCardProps {
   containerClassName?: string
   disabled?: boolean
   id?: string
-  /**
-   * iOS-style full swipe: dragging past {@link FULL_SWIPE_RATIO} of the row and
-   * releasing triggers the trailing (last) action. Defaults to true.
-   */
-  fullSwipe?: boolean
   /**
    * "card" (default) — standalone rounded card with its own background.
    * "row" — inline divider row inside a grouped section card. On swipe the row
@@ -145,7 +137,6 @@ export function SwipeableCard({
   containerClassName,
   disabled = false,
   id,
-  fullSwipe = true,
   variant = "card",
   separated = false,
 }: SwipeableCardProps) {
@@ -163,32 +154,8 @@ export function SwipeableCard({
   // buttons are revealed out of the trailing edge as you swipe.
   const x = useMotionValue(0)
   const panelWidth = useTransform(x, (v) => Math.max(0, -v))
-  // True once dragged far enough that releasing fires the trailing action; also
-  // drives the iOS-style full-swipe overlay (trailing action fills the panel).
-  const [isArmed, setIsArmed] = useState(false)
   // True while the row is swiped open or mid-gesture (drives the card morph).
   const [active, setActive] = useState(false)
-
-  // Measured row width, used for drag bounds and the full-swipe threshold.
-  const [width, setWidth] = useState(0)
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const update = () => setWidth(el.offsetWidth)
-    update()
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-
-  useMotionValueEvent(x, "change", (v) => {
-    if (!fullSwipe || trailingIndex < 0) {
-      setIsArmed(false)
-      return
-    }
-    const w = containerRef.current?.offsetWidth ?? width
-    setIsArmed(w > 0 && -v >= w * FULL_SWIPE_RATIO)
-  })
 
   // Tracks whether the last pointer interaction actually moved (drag vs tap).
   const movedRef = useRef(false)
@@ -243,22 +210,12 @@ export function SwipeableCard({
 
   const handleDragEnd = useCallback(
     (_: unknown, info: PanInfo) => {
-      const w = containerRef.current?.offsetWidth ?? width
       const current = x.get()
       const velocity = info.velocity.x
-
-      // iOS-style full swipe → fire the trailing action, then settle closed.
-      if (fullSwipe && trailingIndex >= 0 && w > 0 && -current >= w * FULL_SWIPE_RATIO) {
-        const action = actions[trailingIndex]
-        settle(0)
-        if (!action.disabled) action.onClick()
-        return
-      }
-
       const shouldOpen = -current > openWidth / 2 || velocity < -500
       settle(shouldOpen ? -openWidth : 0, velocity)
     },
-    [actions, fullSwipe, openWidth, settle, trailingIndex, width, x]
+    [openWidth, settle, x]
   )
 
   // Capture-phase guard: swallow the click synthesised at the end of a drag, and
@@ -292,7 +249,6 @@ export function SwipeableCard({
 
   // Per-button stagger windows (in x space). The trailing button reveals first.
   const unit = count > 0 ? openWidth / count : 0
-  const maxDrag = (fullSwipe ? width : openWidth) || openWidth
 
   return (
     <div
@@ -330,37 +286,6 @@ export function SwipeableCard({
               />
             )
           })}
-
-          {/* iOS full swipe: the trailing action expands to fill the panel
-              (growing with the card) and covers the other actions. */}
-          {isArmed && trailingIndex >= 0 && (
-            <button
-              type="button"
-              onClick={(e: React.MouseEvent) => {
-                e.stopPropagation()
-                const action = actions[trailingIndex]
-                if (action.disabled) return
-                action.onClick()
-                close()
-              }}
-              className={cn(
-                "absolute inset-0 flex items-center justify-end",
-                variantClasses(actions[trailingIndex].variant)
-              )}
-            >
-              <span
-                className="flex flex-col items-center justify-center gap-0.5"
-                style={{ width: BUTTON_WIDTH }}
-              >
-                {actions[trailingIndex].icon}
-                {actions[trailingIndex].label && (
-                  <span className="text-xs font-medium leading-none">
-                    {actions[trailingIndex].label}
-                  </span>
-                )}
-              </span>
-            </button>
-          )}
         </motion.div>
       )}
 
@@ -369,7 +294,7 @@ export function SwipeableCard({
         ref={contentRef}
         drag={hasActions ? "x" : false}
         dragDirectionLock
-        dragConstraints={{ left: -maxDrag, right: 0 }}
+        dragConstraints={{ left: -openWidth, right: 0 }}
         dragElastic={DRAG_ELASTIC}
         dragMomentum={false}
         onDragStart={handleDragStart}
