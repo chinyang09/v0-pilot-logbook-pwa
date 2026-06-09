@@ -299,13 +299,13 @@ export function AircraftNewForm({
 
           {/* Duplicate detection banner */}
           {isDuplicateChecking && registration.trim().length >= 3 && (
-            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 px-4 py-2.5 row-divider text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
               Checking database...
             </div>
           )}
           {existingAircraft && (
-            <div className="px-4 py-2.5 border-b border-border">
+            <div className="px-4 py-2.5 row-divider">
               <div className="flex items-center justify-between">
                 <div className="text-xs">
                   <span className="text-amber-500 font-medium flex items-center gap-1">
@@ -333,7 +333,7 @@ export function AircraftNewForm({
 
           {/* FR24 auto-search status */}
           {!existingAircraft && isFr24Loading && registration.trim().length >= 3 && (
-            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 px-4 py-2.5 row-divider text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
               Searching...
             </div>
@@ -341,7 +341,7 @@ export function AircraftNewForm({
 
           {/* FR24 match found — show summary (auto-populated, no "Use" button needed) */}
           {!existingAircraft && !isFr24Loading && fr24Found && fr24Data && (
-            <div className="px-4 py-2.5 border-b border-border">
+            <div className="px-4 py-2.5 row-divider">
               <div className="text-xs">
                 <span className="text-primary font-medium">Found: </span>
                 <span className="text-foreground font-semibold">{fr24Data.registration}</span>
@@ -357,7 +357,7 @@ export function AircraftNewForm({
 
           {/* FR24 no results — editable type code field below */}
           {!existingAircraft && !isFr24Loading && !fr24Found && fr24Searched && registration.trim().length >= 3 && (
-            <div className="px-4 py-2.5 border-b border-border text-xs text-muted-foreground">
+            <div className="px-4 py-2.5 row-divider text-xs text-muted-foreground">
               Not found online — enter type code manually below.
             </div>
           )}
@@ -386,7 +386,7 @@ export function AircraftNewForm({
 
           {showManualTypeField && (
             <>
-              <div className="px-4 py-3.5 border-b border-border">
+              <div className="px-4 py-3.5 row-divider">
                 <div className="flex items-center justify-between">
                   <span className="text-foreground">Type Code</span>
                   <div className="flex items-center gap-2">

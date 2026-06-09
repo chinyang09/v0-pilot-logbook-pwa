@@ -44,7 +44,7 @@ export function SettingsRow({
     <div
       className={cn(
         "flex items-center justify-between px-4 py-3.5",
-        !wrapped && "border-b border-border last:border-b-0"
+        !wrapped && "row-divider"
       )}
     >
       <span className="text-foreground">
@@ -62,12 +62,10 @@ export function SettingsRow({
           onChange={(e) => onChange?.(e.target.value)}
           placeholder={placeholder}
           className={cn(
-            "text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0",
-            uppercase && "uppercase",
-            // When swipeable, the input ignores pointer events so a horizontal
-            // swipe always reaches the swipe layer; a clean tap focuses it via
-            // the row's onClick below.
-            wrapped ? "pointer-events-none" : "touch-pan-y"
+            // Blend the input into the row: no box/shadow/border, and keep the
+            // same font size as the read-only value (override the base md:text-sm).
+            "text-right border-0 bg-transparent shadow-none rounded-none h-auto p-0 w-auto max-w-[200px] md:text-base text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0",
+            uppercase && "uppercase"
           )}
         />
       )}
@@ -107,7 +105,7 @@ export function ToggleRow({
   disabled?: boolean
 }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3.5 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between px-4 py-3.5 row-divider">
       <span className={disabled ? "text-muted-foreground" : "text-foreground"}>
         {label}
       </span>
@@ -125,7 +123,7 @@ export function ToggleRow({
  */
 export function ReadOnlyRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3.5 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between px-4 py-3.5 row-divider">
       <span className="text-foreground">{label}</span>
       <span className="text-muted-foreground">{value || "-"}</span>
     </div>

@@ -341,13 +341,13 @@ export function AirportNewForm({
 
           {/* Duplicate detection banner */}
           {isDuplicateChecking && icao.trim().length >= 3 && (
-            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 px-4 py-2.5 row-divider text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
               Checking database...
             </div>
           )}
           {existingAirport && (
-            <div className="px-4 py-2.5 border-b border-border">
+            <div className="px-4 py-2.5 row-divider">
               <div className="flex items-center justify-between">
                 <div className="text-xs">
                   <span className="text-amber-500 font-medium flex items-center gap-1">
@@ -375,7 +375,7 @@ export function AirportNewForm({
 
           {/* FR24 auto-search status */}
           {!existingAirport && isFr24Loading && icao.trim().length >= 4 && (
-            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 px-4 py-2.5 row-divider text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
               Searching...
             </div>
@@ -383,7 +383,7 @@ export function AirportNewForm({
 
           {/* FR24 match found — show summary */}
           {!existingAirport && !isFr24Loading && fr24Found && fr24Data && (
-            <div className="px-4 py-2.5 border-b border-border">
+            <div className="px-4 py-2.5 row-divider">
               <div className="text-xs">
                 <span className="text-primary font-medium">Found: </span>
                 <span className="text-foreground font-semibold">{fr24Data.name}</span>
@@ -396,7 +396,7 @@ export function AirportNewForm({
 
           {/* FR24 no results — editable fields below */}
           {!existingAirport && !isFr24Loading && !fr24Found && fr24Searched && icao.trim().length >= 4 && (
-            <div className="px-4 py-2.5 border-b border-border text-xs text-muted-foreground">
+            <div className="px-4 py-2.5 row-divider text-xs text-muted-foreground">
               Not found online — enter details manually below.
             </div>
           )}
@@ -480,7 +480,7 @@ export function AirportNewForm({
               placeholder="e.g. 40"
               inputMode="numeric"
             />
-            <div className="flex items-center justify-between px-4 py-3.5 border-b border-border last:border-b-0">
+            <div className="flex items-center justify-between px-4 py-3.5 row-divider">
               <span className="text-foreground">Timezone</span>
               <div className="flex items-center gap-2">
                 {tzLoading && (

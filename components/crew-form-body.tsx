@@ -63,7 +63,7 @@ export function CrewFormBody({
         />
 
         {/* Type / roles */}
-        <div className="px-4 py-3.5 border-b border-border last:border-b-0">
+        <div className="px-4 py-3.5 row-divider">
           <span className="text-foreground block mb-2">Type</span>
           {isEditing ? (
             <div className="flex flex-wrap gap-2">

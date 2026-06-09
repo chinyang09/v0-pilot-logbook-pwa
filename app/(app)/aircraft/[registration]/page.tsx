@@ -232,7 +232,7 @@ export default function AircraftDetailPage() {
               />
 
               {isEditing ? (
-                <div className="px-4 py-3.5 border-b border-border last:border-b-0">
+                <div className="px-4 py-3.5 row-divider">
                   <div className="flex items-center justify-between">
                     <span className="text-foreground">Type Code</span>
                     <Input

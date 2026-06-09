@@ -103,7 +103,7 @@ function SettingsRow({
 }) {
   return (
     <div
-      className={`flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0 ${
+      className={`flex items-center justify-between py-3.5 px-4 row-divider ${
         onClick ? "cursor-pointer active:bg-muted/50" : ""
       }`}
       onClick={onClick}
@@ -145,7 +145,7 @@ function TimeRow({
   const hasValue = isValidHHMM(utcValue);
 
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-3">
         <div className="flex flex-col items-end cursor-pointer" onClick={onTap}>
@@ -208,7 +208,7 @@ function TimeDisplayRow({
   showUseButton?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-4">
         {secondaryLabel && secondaryValue ? (
@@ -252,7 +252,7 @@ function NumberRow({
   onChange: (value: number) => void;
 }) {
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-3">
         <Button
@@ -288,7 +288,7 @@ function ToggleRow({
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
       <span className="text-foreground">{label}</span>
       <Switch checked={checked} onCheckedChange={onCheckedChange} />
     </div>
@@ -1388,7 +1388,7 @@ export function FlightForm({
             />
           </SwipeableRow>
 
-          <div className="flex items-center justify-center py-3 border-b border-border last:border-b-0">
+          <div className="flex items-center justify-center py-3 row-divider">
             <Button
               variant="ghost"
               size="sm"

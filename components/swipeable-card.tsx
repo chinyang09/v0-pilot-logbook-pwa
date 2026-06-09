@@ -20,7 +20,8 @@ const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
 const BUTTON_WIDTH = 64
 /** Gap between adjacent action buttons (px, matches gap-2) */
 const GAP = 8
-/** Horizontal padding on each side of the action panel (px, matches px-2) */
+/** Gap between the card and the buttons, on the leading (left) side only —
+ *  the trailing button sits flush with the card's right edge. */
 const PANEL_PAD = 8
 /** Fraction of the row's width that arms the iOS-style full swipe */
 const FULL_SWIPE_RATIO = 0.6
@@ -171,7 +172,7 @@ export function SwipeableCard({
   const count = actions.length
   const trailingIndex = count - 1
   const openWidth =
-    count > 0 ? count * BUTTON_WIDTH + (count - 1) * GAP + 2 * PANEL_PAD : 0
+    count > 0 ? count * BUTTON_WIDTH + (count - 1) * GAP + PANEL_PAD : 0
 
   // x drives the card translation; the panel width derives from it so the
   // buttons are revealed out of the trailing edge as you swipe.
@@ -289,9 +290,18 @@ export function SwipeableCard({
     [close, x]
   )
 
+  const contentRef = useRef<HTMLDivElement>(null)
   const handleClick = useCallback(() => {
     closeOthers()
-    onClick?.()
+    if (onClick) {
+      onClick()
+      return
+    }
+    // No explicit handler: focus a blended inline input/textarea inside the row
+    // (its pointer events are disabled so the swipe can start over it).
+    contentRef.current
+      ?.querySelector<HTMLElement>("input, textarea")
+      ?.focus()
   }, [closeOthers, onClick])
 
   // Per-button stagger windows (in x space). The trailing button reveals first.
@@ -307,16 +317,16 @@ export function SwipeableCard({
       className={cn(
         "relative overflow-hidden",
         isCard && "rounded-lg",
-        // Divider that fades out (along with the one above) as the row morphs —
-        // see [data-swipe-active] rules in globals.css.
-        separated && "border-b border-border last:border-b-0",
+        // Inset divider that fades out (along with the one above) as the row
+        // morphs — see .row-divider / [data-swipe-active] rules in globals.css.
+        separated && "row-divider",
         containerClassName
       )}
     >
       {/* Separated, rounded action buttons that pop in and fill the row height */}
       {hasActions && (
         <motion.div
-          className="absolute inset-y-0 right-0 flex items-stretch justify-end gap-2 px-2 overflow-hidden"
+          className="absolute inset-y-0 right-0 flex items-stretch justify-end gap-2 pl-2 overflow-hidden"
           style={{ width: panelWidth }}
         >
           {actions.map((action, index) => {
@@ -341,6 +351,7 @@ export function SwipeableCard({
 
       {/* Swipeable content — morphs into a lifted card on swipe (row variant) */}
       <motion.div
+        ref={contentRef}
         drag={hasActions ? "x" : false}
         dragDirectionLock
         dragConstraints={{ left: -maxDrag, right: 0 }}

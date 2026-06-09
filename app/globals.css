@@ -646,13 +646,37 @@ textarea:focus-within {
   }
 }
 
+/* Inset row divider — a 1px line aligned with the row's px-4 content (iOS
+   style) rather than spanning the full card width. */
+.row-divider {
+  position: relative;
+}
+.row-divider::after {
+  content: "";
+  position: absolute;
+  inset-inline: 1rem;
+  bottom: 0;
+  height: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+.row-divider:last-child::after {
+  display: none;
+}
+
 /* Swipe-to-reveal: when a row morphs into a card on swipe, hide the dividers
    directly above and below it so the morphed card looks detached. The active
-   row hides its own bottom divider; the immediately-preceding row hides its
-   bottom divider (which is the divider above the active row). */
-[data-swipe-active="true"] {
-  border-bottom-color: transparent !important;
+   row hides its own divider; the immediately-preceding row hides its divider
+   (which is the divider above the active row). */
+[data-swipe-active="true"].row-divider::after,
+.row-divider:has(+ [data-swipe-active="true"])::after {
+  background: transparent;
 }
-[data-swipe-row]:has(+ [data-swipe-active="true"]) {
-  border-bottom-color: transparent !important;
+
+/* Swipeable rows manage focus on tap (see SwipeableCard), so inputs inside them
+   ignore pointer events — this lets a horizontal swipe start anywhere, even over
+   the input, while a clean tap still focuses it. */
+[data-swipe-row] input,
+[data-swipe-row] textarea {
+  pointer-events: none;
 }
