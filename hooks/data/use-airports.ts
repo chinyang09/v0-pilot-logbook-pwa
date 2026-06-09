@@ -69,10 +69,17 @@ export function useAirports() {
 /**
  * Hook for airport database (direct load without SWR)
  * Used for airport selection screens
+ *
+ * The loaded database is cached at module scope so that components which mount
+ * after the first load (e.g. the flight form re-opening when switching sections)
+ * get the data synchronously on their first render — preventing a flicker where
+ * timezone-derived fields (UTC offsets) briefly compute from an empty database.
  */
+let airportDbCache: Airport[] | null = null
+
 export function useAirportDatabase() {
-  const [airports, setAirports] = useState<Airport[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [airports, setAirports] = useState<Airport[]>(() => airportDbCache ?? [])
+  const [isLoading, setIsLoading] = useState(!airportDbCache)
   const [error, setError] = useState<Error | null>(null)
 
   useEffect(() => {
@@ -80,11 +87,13 @@ export function useAirportDatabase() {
 
     async function load() {
       try {
-        setIsLoading(true)
+        // Only show the loading state when we have nothing cached to render yet.
+        if (!airportDbCache) setIsLoading(true)
         const data = await getAirportDatabase()
+        airportDbCache = data as unknown as Airport[]
 
         if (mounted) {
-          setAirports(data as unknown as Airport[])
+          setAirports(airportDbCache)
           console.log("[Airport DB] Database ready with", data.length, "records")
         }
       } catch (err) {
@@ -107,7 +116,12 @@ export function useAirportDatabase() {
   }, [])
 
   const mutate = useCallback((updater: SetStateAction<Airport[]>) => {
-    setAirports(updater)
+    setAirports((prev) => {
+      const next = typeof updater === "function" ? (updater as (p: Airport[]) => Airport[])(prev) : updater
+      // Keep the module cache coherent with local mutations (e.g. adding a custom airport)
+      airportDbCache = next
+      return next
+    })
   }, [])
 
   return { airports, isLoading, error, mutate }

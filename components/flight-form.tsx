@@ -124,6 +124,13 @@ function SettingsRow({
   );
 }
 
+// Caches the last-known data for each flight at module scope so the form can
+// seed its initial state synchronously when it re-mounts (e.g. when switching
+// back to the logbook from another section). Without this, the form mounts with
+// empty data while useLiveQuery resolves asynchronously, briefly showing blank
+// times before snapping to the real values. Cleared when the PWA is closed.
+const flightDataCache = new Map<string, FlightLog>();
+
 // Time row with UTC and Local display
 function TimeRow({
   label,
@@ -335,11 +342,20 @@ export function FlightForm({
   // Resolve which flight data to use
   const resolvedFlight = editingFlight || liveFlight || null;
 
+  // Synchronous fallback for the first render after a re-mount, before
+  // useLiveQuery has resolved. Avoids the blank-then-populate flicker.
+  const cachedFlight = flightIdProp ? flightDataCache.get(flightIdProp) ?? null : null;
+
   // Initialize form data from resolvedFlight (draft or existing flight)
   const [formData, setFormData] = useState<Partial<FlightLog>>(() => {
     if (resolvedFlight) {
       editingFlightInitializedRef.current = resolvedFlight.id;
       return resolvedFlight;
+    }
+    // Seed from cache for an instant first paint. Leave editingFlightInitializedRef
+    // unset so the resolvedFlight effect still reconciles with live data once it loads.
+    if (cachedFlight) {
+      return cachedFlight;
     }
     return createEmptyFlightLog();
   });
@@ -347,7 +363,12 @@ export function FlightForm({
   // Track manual overrides state
   const [manualOverrides, setManualOverrides] = useState<
     FlightLog["manualOverrides"]
-  >(resolvedFlight?.manualOverrides || {});
+  >(resolvedFlight?.manualOverrides || cachedFlight?.manualOverrides || {});
+
+  // Keep the module cache current so the next re-mount can seed synchronously.
+  useEffect(() => {
+    if (liveFlight) flightDataCache.set(liveFlight.id, liveFlight);
+  }, [liveFlight]);
 
   // Inside FlightForm component...
 
