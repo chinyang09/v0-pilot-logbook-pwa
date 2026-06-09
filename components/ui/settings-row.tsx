@@ -1,3 +1,6 @@
+"use client"
+
+import { useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { SwipeableCard } from "@/components/swipeable-card"
@@ -35,6 +38,7 @@ export function SettingsRow({
 }) {
   const editable = !readOnly && !!onChange
   const wrapped = editable && swipeToClear
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const inner = (
     <div
@@ -51,12 +55,20 @@ export function SettingsRow({
         <span className="text-muted-foreground">{value || "-"}</span>
       ) : (
         <Input
+          ref={wrapped ? inputRef : undefined}
           type={type}
           inputMode={inputMode}
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
           placeholder={placeholder}
-          className={`text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] touch-pan-y text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0${uppercase ? " uppercase" : ""}`}
+          className={cn(
+            "text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0",
+            uppercase && "uppercase",
+            // When swipeable, the input ignores pointer events so a horizontal
+            // swipe always reaches the swipe layer; a clean tap focuses it via
+            // the row's onClick below.
+            wrapped ? "pointer-events-none" : "touch-pan-y"
+          )}
         />
       )}
     </div>
@@ -68,6 +80,7 @@ export function SettingsRow({
     <SwipeableCard
       variant="row"
       separated
+      onClick={() => inputRef.current?.focus()}
       actions={[
         { label: "Clear", variant: "destructive", onClick: () => onChange?.("") },
       ]}

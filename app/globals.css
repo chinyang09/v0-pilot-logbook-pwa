@@ -645,3 +645,14 @@ textarea:focus-within {
     transition: none !important;
   }
 }
+
+/* Swipe-to-reveal: when a row morphs into a card on swipe, hide the dividers
+   directly above and below it so the morphed card looks detached. The active
+   row hides its own bottom divider; the immediately-preceding row hides its
+   bottom divider (which is the divider above the active row). */
+[data-swipe-active="true"] {
+  border-bottom-color: transparent !important;
+}
+[data-swipe-row]:has(+ [data-swipe-active="true"]) {
+  border-bottom-color: transparent !important;
+}

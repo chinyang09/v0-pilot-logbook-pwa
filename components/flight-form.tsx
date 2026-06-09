@@ -76,6 +76,7 @@ function SwipeableRow({
   return (
     <SwipeableCard
       variant="row"
+      separated
       actions={[{ label: "Clear", onClick: onClear, variant: "destructive" }]}
     >
       {children}

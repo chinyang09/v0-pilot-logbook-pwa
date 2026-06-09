@@ -242,6 +242,11 @@ export function SwipeableCard({
   const handleDragStart = useCallback(() => {
     movedRef.current = false
     setActive(true)
+    // Swiping dismisses any focused field (e.g. a row's inline input).
+    if (typeof document !== "undefined") {
+      const el = document.activeElement
+      if (el instanceof HTMLElement) el.blur()
+    }
     closeOthers()
   }, [closeOthers])
 
@@ -297,11 +302,14 @@ export function SwipeableCard({
     <div
       ref={containerRef}
       id={id}
+      data-swipe-row={separated ? "" : undefined}
+      data-swipe-active={separated && active ? "true" : undefined}
       className={cn(
         "relative overflow-hidden",
         isCard && "rounded-lg",
+        // Divider that fades out (along with the one above) as the row morphs —
+        // see [data-swipe-active] rules in globals.css.
         separated && "border-b border-border last:border-b-0",
-        separated && active && "border-transparent",
         containerClassName
       )}
     >
