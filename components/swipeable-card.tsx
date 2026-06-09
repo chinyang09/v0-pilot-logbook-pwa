@@ -81,41 +81,26 @@ function variantClasses(variant?: SwipeAction["variant"]): string {
 
 /**
  * A single revealed action button that scales/pops in (with spring) as the card
- * is dragged open, staggered by its position. When the row is "armed" for a full
- * swipe, the trailing action emphasises while the rest recede.
+ * is dragged open, staggered by its position. Rests at opacity 0 when closed so
+ * nothing peeks at the card's edge.
  */
 function SwipeActionButton({
   action,
   x,
-  armed,
-  isTrailing,
   startX,
   endX,
   onClose,
 }: {
   action: SwipeAction
   x: MotionValue<number>
-  armed: MotionValue<number>
-  isTrailing: boolean
   startX: number
   endX: number
   onClose: () => void
 }) {
   // 0 (hidden) → 1 (fully revealed) across this button's stagger window.
   const reveal = useTransform(x, [endX, startX], [1, 0], { clamp: true })
-
-  const scaleTarget = useTransform([reveal, armed], ([r, a]: number[]) => {
-    const base = 0.5 + 0.5 * r
-    const armedFactor = isTrailing ? 1 + 0.12 * a : 1 - 0.55 * a
-    return base * armedFactor
-  })
-  const scale = useSpring(scaleTarget, POP_SPRING)
-
-  const opacityTarget = useTransform([reveal, armed], ([r, a]: number[]) => {
-    const base = 0.25 + 0.75 * r
-    return base * (isTrailing ? 1 : 1 - 0.7 * a)
-  })
-  const opacity = useSpring(opacityTarget, POP_SPRING)
+  const scale = useSpring(useTransform(reveal, [0, 1], [0.4, 1]), POP_SPRING)
+  const opacity = useSpring(reveal, POP_SPRING)
 
   return (
     <motion.button
@@ -178,8 +163,9 @@ export function SwipeableCard({
   // buttons are revealed out of the trailing edge as you swipe.
   const x = useMotionValue(0)
   const panelWidth = useTransform(x, (v) => Math.max(0, -v))
-  // 0 → 1 once dragged far enough that releasing fires the trailing action.
-  const armed = useMotionValue(0)
+  // True once dragged far enough that releasing fires the trailing action; also
+  // drives the iOS-style full-swipe overlay (trailing action fills the panel).
+  const [isArmed, setIsArmed] = useState(false)
   // True while the row is swiped open or mid-gesture (drives the card morph).
   const [active, setActive] = useState(false)
 
@@ -197,11 +183,11 @@ export function SwipeableCard({
 
   useMotionValueEvent(x, "change", (v) => {
     if (!fullSwipe || trailingIndex < 0) {
-      armed.set(0)
+      setIsArmed(false)
       return
     }
     const w = containerRef.current?.offsetWidth ?? width
-    armed.set(w > 0 && -v >= w * FULL_SWIPE_RATIO ? 1 : 0)
+    setIsArmed(w > 0 && -v >= w * FULL_SWIPE_RATIO)
   })
 
   // Tracks whether the last pointer interaction actually moved (drag vs tap).
@@ -338,14 +324,43 @@ export function SwipeableCard({
                 key={action.label ?? index}
                 action={action}
                 x={x}
-                armed={armed}
-                isTrailing={index === trailingIndex}
                 startX={-startReveal}
                 endX={-endReveal}
                 onClose={close}
               />
             )
           })}
+
+          {/* iOS full swipe: the trailing action expands to fill the panel
+              (growing with the card) and covers the other actions. */}
+          {isArmed && trailingIndex >= 0 && (
+            <button
+              type="button"
+              onClick={(e: React.MouseEvent) => {
+                e.stopPropagation()
+                const action = actions[trailingIndex]
+                if (action.disabled) return
+                action.onClick()
+                close()
+              }}
+              className={cn(
+                "absolute inset-0 flex items-center justify-end",
+                variantClasses(actions[trailingIndex].variant)
+              )}
+            >
+              <span
+                className="flex flex-col items-center justify-center gap-0.5"
+                style={{ width: BUTTON_WIDTH }}
+              >
+                {actions[trailingIndex].icon}
+                {actions[trailingIndex].label && (
+                  <span className="text-xs font-medium leading-none">
+                    {actions[trailingIndex].label}
+                  </span>
+                )}
+              </span>
+            </button>
+          )}
         </motion.div>
       )}
 

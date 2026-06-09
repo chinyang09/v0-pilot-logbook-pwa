@@ -215,7 +215,7 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
                       }
                     }}
                     placeholder="e.g. A359"
-                    className="text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[150px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 uppercase"
+                    className="text-right border-0 bg-transparent dark:bg-transparent shadow-none rounded-none md:text-base h-auto p-0 w-auto max-w-[150px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 uppercase"
                   />
                 </div>
                 {showTypeSearch && typeSearchResults.length > 0 && (
