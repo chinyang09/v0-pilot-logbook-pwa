@@ -223,6 +223,68 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 - Mobile uses bottom navbar with swipeable interactions
 - Responsive switching via `useIsDesktop()` hook
 
+### Swipe-to-Reveal Rows (`components/swipeable-card.tsx`)
+
+`SwipeableCard` is the single reusable swipe-to-reveal primitive used app-wide
+(flight/crew/aircraft lists, the flight form's field rows, and the crew/aircraft
+detail rows). Built on **framer-motion** (motion values → no per-frame React
+re-renders).
+
+- **Gesture:** `drag="x"` with `dragDirectionLock` + `touchAction: "pan-y"` — a
+  vertical gesture scrolls the list natively and never fights the horizontal
+  swipe. Release settles to open/closed with a spring (`SPRING`); a fast flick
+  opens via velocity.
+- **Actions** (`SwipeAction[]`): rendered as **separate, rounded buttons** that
+  **scale/pop in** (spring, staggered, trailing first) and fill the row height.
+  Buttons rest at `opacity 0` when closed so nothing peeks at the edge. The
+  trailing button sits **flush** with the card's right edge; the left gap comes
+  from `openWidth` via `justify-end` (the panel has no padding, so it collapses
+  to true 0 width when closed). `icon` is optional (label-only actions like
+  "Clear" are allowed).
+- **Variants:** `variant="card"` (default — standalone rounded card) and
+  `variant="row"` (inline divider row inside a grouped `FormSection`). A
+  swiped `row` **morphs** into a rounded, lifted card (`bg-secondary`).
+- **Dividers** (`separated` prop): inset `.row-divider` pseudo-element (see
+  `globals.css`) aligned to the row's `px-4` text, **not** full width. On morph,
+  the dividers directly above and below the swiped row fade out via
+  `[data-swipe-active]` + `:has(+ …)` rules. The pseudo-element uses `z-index:2`
+  so it shows above the `z-[1]` swipeable content (otherwise wrapped/editable
+  rows would hide it).
+- **Tap vs drag:** a capture-phase guard swallows the click synthesised at the
+  end of a drag and closes an open row instead of navigating. On a clean tap with
+  no `onClick`, the card focuses a blended inline `input`/`textarea` inside it
+  (those inputs are `pointer-events:none` via the `[data-swipe-row] input` rule,
+  so a swipe can start over them).
+- **Multi-card:** opening/tapping one card closes others via the
+  `swipe-card-close-others` window event.
+- **No full-swipe:** there is intentionally **no** "swipe past N% to auto-trigger
+  the primary action" behaviour — it was removed. Actions fire only on button tap.
+
+### Unified Settings/Form Layout
+
+Flight, crew, and aircraft detail/forms share one visual system so they look
+identical:
+
+- **`components/ui/form-section.tsx`** — `FormSection` renders the grouped card
+  (`rounded-xl bg-card border`) with an optional uppercase section header. Rows
+  go directly inside and bring their own `px-4` (so dividers/actions span the
+  full card width).
+- **`components/ui/settings-row.tsx`** — shared `SettingsRow` / `ToggleRow` /
+  `ReadOnlyRow` (`px-4 py-3.5`, inset `row-divider`). Editable `SettingsRow`s are
+  swipe-to-clear (wrapped in `SwipeableCard variant="row" separated`). Inline
+  inputs are styled to **blend** like the flight form's "Flight #" field —
+  `border-0 bg-transparent dark:bg-transparent shadow-none rounded-none
+  md:text-base` (no box, same font size in edit mode).
+- **Crew dedupe:** `hooks/use-crew-form.tsx` (`useCrewForm`) owns all crew form
+  state + persistence; `components/crew-form-body.tsx` (`CrewFormBody`) is the
+  shared presentational body. `components/crew-detail-panel.tsx` (desktop panel,
+  glass actions) and `app/(app)/crew/[id]/page.tsx` (full page, incl. "new"
+  mode) are thin chrome wrappers around them — navigation is delegated via the
+  hook's `onSaved` callback.
+- The flight form (`components/flight-form.tsx`) keeps its own inline row
+  primitives and complex auto-save/calculation logic, but its `SwipeableRow`
+  wraps the shared `SwipeableCard` and its rows use the same `.row-divider`.
+
 ### KeepAlive Navigation
 
 Four heavy pages are kept mounted across navigations for instant tab-switching and scroll preservation:
@@ -413,6 +475,13 @@ When making changes, be aware of these high-impact files:
 - `hooks/use-detail-panel.tsx` — Detail panel provider (keep-alive route awareness)
 - `components/desktop-layout.tsx` — Responsive app shell (sidebar + detail panel)
 
+**Swipe & Forms:**
+- `components/swipeable-card.tsx` — The single swipe-to-reveal primitive (framer-motion). Used by all lists, the flight form rows, and the crew/aircraft detail rows.
+- `components/ui/form-section.tsx` — Shared grouped section card + header.
+- `components/ui/settings-row.tsx` — Shared `SettingsRow`/`ToggleRow`/`ReadOnlyRow` (inset divider, blended inline inputs, swipe-to-clear).
+- `hooks/use-crew-form.tsx` + `components/crew-form-body.tsx` — Shared crew form state + body (crew detail panel and `[id]` page are thin wrappers).
+- `app/globals.css` — `.row-divider` inset divider rules, `[data-swipe-active]` morph rules, and `[data-swipe-row] input` pointer-events rule (changing these affects every swipe row).
+
 **Reference Data System:**
 - `lib/db/reference-db.ts` — Dexie reference database schema (airports, aircraft, types)
 - `lib/db/stores/reference/aircraft.store.ts` — CDN aircraft DB loader (615k records, web worker decompression)
@@ -438,3 +507,8 @@ When making changes, be aware of these high-impact files:
 - Do not bypass `recalculateFlightFields()` `manualOverrides` — users' manually entered field values must never be overwritten by enrichment
 - Do not add pages to `PERSISTENT_PAGES` in `keep-alive-pages.tsx` without considering memory impact — only heavy virtualized pages should be persistent
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
+- Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
+- Do not give `SwipeableCard` action panels horizontal padding — the panel must collapse to 0 width when closed (the left gap comes from `openWidth`/`justify-end`), otherwise a sliver of the action button peeks at the card edge
+- Do not put row dividers as a full-width `border-b` — use the inset `.row-divider` class so the line aligns with the `px-4` text
+- Do not give inline form inputs a visible box — keep `border-0 bg-transparent dark:bg-transparent shadow-none rounded-none` so they blend with the row (and `md:text-base` so the font doesn't shrink in edit mode)
+- Do not hardcode `orange-400` for scheduled flight cards — light and dark themes use separate colors (`orange-600` light / `orange-400` dark) for contrast

@@ -1,9 +1,17 @@
+"use client"
+
+import { useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { SwipeableCard } from "@/components/swipeable-card"
+import { cn } from "@/lib/utils"
 
 /**
  * A row displaying a label and value, optionally editable via an inline input.
  * Used across detail panels (aircraft, crew, flight) and new-entity forms.
+ *
+ * When editable, the row is swipeable to reveal a "Clear" action (set
+ * `swipeToClear={false}` to opt out — e.g. for fields that must stay filled).
  */
 export function SettingsRow({
   label,
@@ -15,6 +23,7 @@ export function SettingsRow({
   readOnly = false,
   required = false,
   uppercase = false,
+  swipeToClear = true,
 }: {
   label: string
   value: string
@@ -25,9 +34,19 @@ export function SettingsRow({
   readOnly?: boolean
   required?: boolean
   uppercase?: boolean
+  swipeToClear?: boolean
 }) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
+  const editable = !readOnly && !!onChange
+  const wrapped = editable && swipeToClear
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const inner = (
+    <div
+      className={cn(
+        "flex items-center justify-between px-4 py-3.5",
+        !wrapped && "row-divider"
+      )}
+    >
       <span className="text-foreground">
         {label}
         {required && <span className="text-destructive ml-0.5">*</span>}
@@ -36,15 +55,36 @@ export function SettingsRow({
         <span className="text-muted-foreground">{value || "-"}</span>
       ) : (
         <Input
+          ref={wrapped ? inputRef : undefined}
           type={type}
           inputMode={inputMode}
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
           placeholder={placeholder}
-          className={`text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[200px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0${uppercase ? " uppercase" : ""}`}
+          className={cn(
+            // Blend the input into the row: no box/shadow/border, and keep the
+            // same font size as the read-only value (override the base md:text-sm).
+            "text-right border-0 bg-transparent dark:bg-transparent shadow-none rounded-none h-auto p-0 w-auto max-w-[200px] md:text-base text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0",
+            uppercase && "uppercase"
+          )}
         />
       )}
     </div>
+  )
+
+  if (!wrapped) return inner
+
+  return (
+    <SwipeableCard
+      variant="row"
+      separated
+      onClick={() => inputRef.current?.focus()}
+      actions={[
+        { label: "Clear", variant: "destructive", onClick: () => onChange?.("") },
+      ]}
+    >
+      {inner}
+    </SwipeableCard>
   )
 }
 
@@ -65,7 +105,7 @@ export function ToggleRow({
   disabled?: boolean
 }) {
   return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between px-4 py-3.5 row-divider">
       <span className={disabled ? "text-muted-foreground" : "text-foreground"}>
         {label}
       </span>
@@ -83,7 +123,7 @@ export function ToggleRow({
  */
 export function ReadOnlyRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between px-4 py-3.5 row-divider">
       <span className="text-foreground">{label}</span>
       <span className="text-muted-foreground">{value || "-"}</span>
     </div>

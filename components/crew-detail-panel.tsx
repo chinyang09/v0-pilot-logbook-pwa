@@ -1,22 +1,12 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react"
+import { useMemo, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { GlassContainer } from "@/components/ui/glass-container"
-import { SettingsRow, ToggleRow } from "@/components/ui/settings-row"
 import { useRegisterDetailActions } from "@/hooks/use-page-actions"
-import {
-  getPersonnelById,
-  updatePersonnel,
-  getAllPersonnel,
-  type Personnel,
-} from "@/lib/db"
-import { Loader2, ChevronRight } from "lucide-react"
-import { mutate } from "swr"
-import { CACHE_KEYS } from "@/hooks/data"
-
-const ROLE_OPTIONS = ["PIC", "SIC", "Instructor", "Examiner"] as const
+import { useCrewForm } from "@/hooks/use-crew-form"
+import { CrewFormBody } from "@/components/crew-form-body"
+import { Loader2 } from "lucide-react"
 
 interface CrewDetailPanelProps {
   crewId: string
@@ -25,171 +15,20 @@ interface CrewDetailPanelProps {
   onBack?: () => void
 }
 
-export function CrewDetailPanel({ crewId, onUpdated, onBack }: CrewDetailPanelProps) {
-  const [crew, setCrew] = useState<Personnel | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
-  const [isEditing, setIsEditing] = useState(false)
-  const [existingSelfId, setExistingSelfId] = useState<string | null>(null)
-  const [formData, setFormData] = useState({
-    name: "",
-    crewId: "",
-    organization: "",
-    roles: [] as ("PIC" | "SIC" | "Instructor" | "Examiner")[],
-    licenceNumber: "",
-    email: "",
-    phone: "",
-    comment: "",
-    isMe: false,
-    favorite: false,
-    defaultPIC: false,
-    defaultSIC: false,
+export function CrewDetailPanel({ crewId, onUpdated }: CrewDetailPanelProps) {
+  const form = useCrewForm({
+    id: crewId,
+    isNew: false,
+    onSaved: () => onUpdated?.(),
   })
+  const { crew, isLoading, isEditing, isSaving, setIsEditing, formData } = form
 
-  const prevCrewIdRef = useRef(crewId);
-  useEffect(() => {
-    let mounted = true
-    const isIdChange = crewId !== prevCrewIdRef.current;
-    prevCrewIdRef.current = crewId;
+  // Stable refs so the memoised glass action bar always calls the latest handlers
+  const saveRef = useRef(form.handleSave)
+  saveRef.current = form.handleSave
+  const cancelRef = useRef(form.resetForm)
+  cancelRef.current = form.resetForm
 
-    // Only show loading on first mount, not on subsequent ID changes
-    if (!crew) setIsLoading(true)
-    if (isIdChange) {
-      setIsEditing(false)
-      setIsSaving(false)
-    }
-
-    const loadData = async () => {
-      const allPersonnel = await getAllPersonnel()
-      if (!mounted) return
-      const selfCrew = allPersonnel.find((p) => p.isMe && p.id !== crewId)
-      setExistingSelfId(selfCrew?.id || null)
-
-      try {
-        const data = await getPersonnelById(crewId)
-        if (!mounted) return
-        if (data) {
-          setCrew(data)
-          setFormData({
-            name: data.name || "",
-            crewId: data.crewId || "",
-            organization: data.organization || "",
-            roles: data.roles || [],
-            licenceNumber: data.licenceNumber || "",
-            email: data.contact?.email || "",
-            phone: data.contact?.phone || "",
-            comment: data.comment || "",
-            isMe: data.isMe || false,
-            favorite: data.favorite || false,
-            defaultPIC: data.defaultPIC || false,
-            defaultSIC: data.defaultSIC || false,
-          })
-        }
-      } catch (error) {
-        console.error("Failed to load crew:", error)
-      } finally {
-        if (mounted) setIsLoading(false)
-      }
-    }
-    loadData()
-    return () => { mounted = false }
-  }, [crewId])
-
-  const updateField = useCallback(
-    (field: string, value: string | boolean | string[]) => {
-      setFormData((prev) => ({ ...prev, [field]: value }))
-    },
-    []
-  )
-
-  const handleIsMeChange = useCallback(
-    async (checked: boolean) => {
-      if (checked && existingSelfId) {
-        await updatePersonnel(existingSelfId, { isMe: false })
-        setExistingSelfId(null)
-      }
-      setFormData((prev) => ({ ...prev, isMe: checked }))
-    },
-    [existingSelfId]
-  )
-
-  const handleSave = async () => {
-    if (!formData.name.trim()) return
-
-    setIsSaving(true)
-    try {
-      if (formData.isMe && existingSelfId) {
-        await updatePersonnel(existingSelfId, { isMe: false })
-      }
-
-      const personnelData = {
-        name: formData.name.trim(),
-        crewId: formData.crewId.trim() || undefined,
-        organization: formData.organization.trim() || undefined,
-        roles: formData.roles.length > 0 ? formData.roles : undefined,
-        licenceNumber: formData.licenceNumber.trim() || undefined,
-        contact:
-          formData.email.trim() || formData.phone.trim()
-            ? {
-                email: formData.email.trim() || undefined,
-                phone: formData.phone.trim() || undefined,
-              }
-            : undefined,
-        comment: formData.comment.trim() || undefined,
-        isMe: formData.isMe,
-        favorite: formData.favorite,
-        defaultPIC: formData.defaultPIC,
-        defaultSIC: formData.defaultSIC,
-      }
-
-      const savedCrew = await updatePersonnel(crewId, personnelData)
-      setCrew(savedCrew)
-      await mutate(CACHE_KEYS.personnel)
-      setIsEditing(false)
-      onUpdated?.()
-    } catch (error) {
-      console.error("Failed to save crew:", error)
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  const handleCancel = () => {
-    if (crew) {
-      setFormData({
-        name: crew.name || "",
-        crewId: crew.crewId || "",
-        organization: crew.organization || "",
-        roles: crew.roles || [],
-        licenceNumber: crew.licenceNumber || "",
-        email: crew.contact?.email || "",
-        phone: crew.contact?.phone || "",
-        comment: crew.comment || "",
-        isMe: crew.isMe || false,
-        favorite: crew.favorite || false,
-        defaultPIC: crew.defaultPIC || false,
-        defaultSIC: crew.defaultSIC || false,
-      })
-    }
-    setIsEditing(false)
-  }
-
-  const toggleRole = useCallback((role: (typeof ROLE_OPTIONS)[number]) => {
-    setFormData((prev) => ({
-      ...prev,
-      roles: prev.roles.includes(role)
-        ? prev.roles.filter((r) => r !== role)
-        : [...prev.roles, role],
-    }))
-  }, [])
-
-  // Stable refs for handlers
-  const saveRef = useRef(handleSave)
-  saveRef.current = handleSave
-  const cancelRef = useRef(handleCancel)
-  cancelRef.current = handleCancel
-
-  // Register detail panel actions for the floating glass bar
   const detailActions = useMemo(() => {
     return isEditing ? (
       <>
@@ -220,7 +59,7 @@ export function CrewDetailPanel({ crewId, onUpdated, onBack }: CrewDetailPanelPr
         </Button>
       </GlassContainer>
     )
-  }, [isEditing, isSaving, formData.name])
+  }, [isEditing, isSaving, formData.name, setIsEditing])
 
   useRegisterDetailActions(detailActions, true)
 
@@ -239,148 +78,16 @@ export function CrewDetailPanel({ crewId, onUpdated, onBack }: CrewDetailPanelPr
 
   return (
     <div className="h-full relative flex flex-col">
-      {/* Scrollable Content */}
       <div className="flex-1 overflow-auto pt-16">
-        <div className="px-4 pt-4 pb-safe">
-          {/* Main Info Card */}
-          <div className="bg-card rounded-xl overflow-hidden mb-6 border border-border">
-            <div className="px-4">
-              <SettingsRow
-                label="Name"
-                value={formData.name}
-                onChange={(value) => updateField("name", value)}
-                placeholder="Required"
-                readOnly={!isEditing}
-              />
-              <SettingsRow
-                label="ID"
-                value={formData.crewId}
-                onChange={(value) => updateField("crewId", value)}
-                placeholder="Crew ID"
-                readOnly={!isEditing}
-              />
-              <SettingsRow
-                label="Organization"
-                value={formData.organization}
-                onChange={(value) => updateField("organization", value)}
-                placeholder="Company"
-                readOnly={!isEditing}
-              />
-              <SettingsRow
-                label="Licence Number"
-                value={formData.licenceNumber}
-                onChange={(value) => updateField("licenceNumber", value)}
-                placeholder="Licence #"
-                readOnly={!isEditing}
-              />
-
-              {/* Type/Roles */}
-              <div className="py-3 border-b border-border">
-                <span className="text-foreground block mb-2">Type</span>
-                {isEditing ? (
-                  <div className="flex flex-wrap gap-2">
-                    {ROLE_OPTIONS.map((role) => (
-                      <Button
-                        key={role}
-                        type="button"
-                        variant={formData.roles.includes(role) ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => toggleRole(role)}
-                        className="h-8"
-                      >
-                        {role}
-                      </Button>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="text-muted-foreground">
-                    {formData.roles.length > 0 ? formData.roles.join(", ") : "-"}
-                  </span>
-                )}
-              </div>
-
-              <ToggleRow
-                label="This is Me"
-                checked={formData.isMe}
-                onCheckedChange={handleIsMeChange}
-                readOnly={!isEditing}
-              />
-              {isEditing && existingSelfId && !formData.isMe && (
-                <p className="text-xs text-muted-foreground -mt-2 mb-2 px-1">
-                  Another crew member is already marked as "Self". Enabling this
-                  will remove that designation.
-                </p>
-              )}
-
-              <SettingsRow
-                label="Email"
-                value={formData.email}
-                onChange={(value) => updateField("email", value)}
-                placeholder="email@example.com"
-                type="email"
-                readOnly={!isEditing}
-              />
-              <SettingsRow
-                label="Phone"
-                value={formData.phone}
-                onChange={(value) => updateField("phone", value)}
-                placeholder="+1 234 567 8900"
-                type="tel"
-                readOnly={!isEditing}
-              />
-
-              {/* Comment */}
-              <div className="flex items-center justify-between py-3">
-                <span className="text-foreground">Comment</span>
-                <div className="flex items-center gap-2">
-                  {isEditing ? (
-                    <Input
-                      value={formData.comment}
-                      onChange={(e) => updateField("comment", e.target.value)}
-                      placeholder="Add comment"
-                      className="text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[150px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0"
-                    />
-                  ) : (
-                    <span className="text-muted-foreground">
-                      {formData.comment || "-"}
-                    </span>
-                  )}
-                  {isEditing && (
-                    <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Options Section */}
-          <div className="mb-2">
-            <span className="text-xs text-muted-foreground uppercase tracking-wider px-4">
-              Options
-            </span>
-          </div>
-          <div className="bg-card rounded-xl overflow-hidden border border-border">
-            <div className="px-4">
-              <ToggleRow
-                label="Favorite"
-                checked={formData.favorite}
-                onCheckedChange={(checked) => updateField("favorite", checked)}
-                readOnly={!isEditing}
-              />
-              <ToggleRow
-                label="Default SIC"
-                checked={formData.defaultSIC}
-                onCheckedChange={(checked) => updateField("defaultSIC", checked)}
-                readOnly={!isEditing}
-              />
-              <ToggleRow
-                label="Default PIC"
-                checked={formData.defaultPIC}
-                onCheckedChange={(checked) => updateField("defaultPIC", checked)}
-                readOnly={!isEditing}
-              />
-            </div>
-          </div>
+        <div className="px-2 pt-4 pb-safe">
+          <CrewFormBody
+            formData={formData}
+            isEditing={isEditing}
+            existingSelfId={form.existingSelfId}
+            updateField={form.updateField}
+            handleIsMeChange={form.handleIsMeChange}
+            toggleRole={form.toggleRole}
+          />
         </div>
       </div>
     </div>

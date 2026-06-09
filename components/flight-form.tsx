@@ -60,10 +60,12 @@ import { usePersonnel } from "@/hooks/data";
 import { usePreferences } from "@/components/providers/preferences-provider";
 import { ImageImportButton } from "@/components/image-import-button";
 import { GlassContainer } from "@/components/ui/glass-container";
+import { SwipeableCard } from "@/components/swipeable-card";
 import { useRegisterDetailActions } from "@/hooks/use-page-actions";
 import type { ExtractedFlightData } from "@/lib/ocr";
 
-// Swipeable row component
+// Swipeable row — thin wrapper over the shared SwipeableCard primitive so the
+// flight form gets the same growing/spring swipe-to-reveal used across the app.
 function SwipeableRow({
   children,
   onClear,
@@ -71,56 +73,14 @@ function SwipeableRow({
   children: React.ReactNode;
   onClear: () => void;
 }) {
-  const [offset, setOffset] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const startX = useRef(0);
-  const currentOffset = useRef(0);
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    startX.current = e.touches[0].clientX;
-    currentOffset.current = offset;
-    setIsDragging(true);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isDragging) return;
-    const diff = startX.current - e.touches[0].clientX;
-    const newOffset = Math.max(0, Math.min(80, currentOffset.current + diff));
-    setOffset(newOffset);
-  };
-
-  const handleTouchEnd = () => {
-    setIsDragging(false);
-    if (offset > 40) {
-      setOffset(80);
-    } else {
-      setOffset(0);
-    }
-  };
-
   return (
-    <div className="relative overflow-hidden">
-      <div
-        className="absolute right-0 top-0 bottom-0 w-20 bg-destructive flex items-center justify-center"
-        onClick={() => {
-          onClear();
-          setOffset(0);
-        }}
-      >
-        <span className="text-destructive-foreground text-sm font-medium">
-          Clear
-        </span>
-      </div>
-      <div
-        className="relative bg-card transition-transform"
-        style={{ transform: `translateX(-${offset}px)` }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-      >
-        {children}
-      </div>
-    </div>
+    <SwipeableCard
+      variant="row"
+      separated
+      actions={[{ label: "Clear", onClick: onClear, variant: "destructive" }]}
+    >
+      {children}
+    </SwipeableCard>
   );
 }
 
@@ -143,7 +103,7 @@ function SettingsRow({
 }) {
   return (
     <div
-      className={`flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0 ${
+      className={`flex items-center justify-between py-3.5 px-4 row-divider ${
         onClick ? "cursor-pointer active:bg-muted/50" : ""
       }`}
       onClick={onClick}
@@ -185,7 +145,7 @@ function TimeRow({
   const hasValue = isValidHHMM(utcValue);
 
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-3">
         <div className="flex flex-col items-end cursor-pointer" onClick={onTap}>
@@ -248,7 +208,7 @@ function TimeDisplayRow({
   showUseButton?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-4">
         {secondaryLabel && secondaryValue ? (
@@ -292,7 +252,7 @@ function NumberRow({
   onChange: (value: number) => void;
 }) {
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-3">
         <Button
@@ -328,7 +288,7 @@ function ToggleRow({
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 border-b border-border last:border-b-0">
+    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
       <span className="text-foreground">{label}</span>
       <Switch checked={checked} onCheckedChange={onCheckedChange} />
     </div>
@@ -1428,7 +1388,7 @@ export function FlightForm({
             />
           </SwipeableRow>
 
-          <div className="flex items-center justify-center py-3 border-b border-border last:border-b-0">
+          <div className="flex items-center justify-center py-3 row-divider">
             <Button
               variant="ghost"
               size="sm"

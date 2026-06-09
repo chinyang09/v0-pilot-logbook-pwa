@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PageContainer } from "@/components/page-container"
 import { SettingsRow } from "@/components/ui/settings-row"
+import { FormSection } from "@/components/ui/form-section"
 import {
   getAircraftByRegistrationFromDB,
   addCustomAircraftToDatabase,
@@ -213,14 +214,14 @@ export default function AircraftDetailPage() {
         </header>
       }
     >
-      <div className="container mx-auto px-3 pt-4 pb-safe">
+      <div className="container mx-auto px-2 pt-4 pb-safe space-y-4">
         {!aircraft ? (
           <p className="text-center text-muted-foreground py-12">
             Aircraft not found: {registration}
           </p>
         ) : (
-          <div className="bg-card rounded-xl overflow-hidden mb-6 border border-border">
-            <div className="px-4">
+          <>
+            <FormSection title="Details">
               <SettingsRow
                 label="Registration"
                 value={formData.registration}
@@ -231,7 +232,7 @@ export default function AircraftDetailPage() {
               />
 
               {isEditing ? (
-                <div className="py-3 border-b border-border">
+                <div className="px-4 py-3.5 row-divider">
                   <div className="flex items-center justify-between">
                     <span className="text-foreground">Type Code</span>
                     <Input
@@ -250,7 +251,7 @@ export default function AircraftDetailPage() {
                         }
                       }}
                       placeholder="e.g. A359"
-                      className="text-right border-0 bg-transparent h-auto p-0 w-auto max-w-[150px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 uppercase"
+                      className="text-right border-0 bg-transparent dark:bg-transparent shadow-none rounded-none md:text-base h-auto p-0 w-auto max-w-[150px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 uppercase"
                     />
                   </div>
                   {showTypeSearch && typeSearchResults.length > 0 && (
@@ -292,31 +293,31 @@ export default function AircraftDetailPage() {
                 placeholder="Operator"
                 readOnly={!isEditing}
               />
+            </FormSection>
 
-              {displayType && (
-                <>
-                  <SettingsRow label="Description" value={displayType.description} readOnly />
-                  <SettingsRow label="WTC" value={displayType.wtc} readOnly />
-                  <SettingsRow label="WTG" value={displayType.wtg} readOnly />
-                  <SettingsRow label="Manufacturer" value={displayType.manufacturer} readOnly />
-                  <SettingsRow
-                    label="Category"
-                    value={`${displayType.category} · ${displayType.engineCount} × ${displayType.engineType}`}
-                    readOnly
-                  />
-                </>
-              )}
-
-              {!displayType && (aircraft.shortDescription || aircraft.wtc || aircraft.wtg) && (
-                <>
+            {displayType ? (
+              <FormSection title="Type Information">
+                <SettingsRow label="Description" value={displayType.description} readOnly />
+                <SettingsRow label="WTC" value={displayType.wtc} readOnly />
+                <SettingsRow label="WTG" value={displayType.wtg} readOnly />
+                <SettingsRow label="Manufacturer" value={displayType.manufacturer} readOnly />
+                <SettingsRow
+                  label="Category"
+                  value={`${displayType.category} · ${displayType.engineCount} × ${displayType.engineType}`}
+                  readOnly
+                />
+              </FormSection>
+            ) : (
+              (aircraft.shortDescription || aircraft.wtc || aircraft.wtg || aircraft.manufacturerCode) && (
+                <FormSection title="Type Information">
                   {aircraft.shortDescription && <SettingsRow label="Description" value={aircraft.shortDescription} readOnly />}
                   {aircraft.wtc && <SettingsRow label="WTC" value={aircraft.wtc} readOnly />}
                   {aircraft.wtg && <SettingsRow label="WTG" value={aircraft.wtg} readOnly />}
                   {aircraft.manufacturerCode && <SettingsRow label="Manufacturer" value={aircraft.manufacturerCode} readOnly />}
-                </>
-              )}
-            </div>
-          </div>
+                </FormSection>
+              )
+            )}
+          </>
         )}
       </div>
     </PageContainer>

@@ -212,18 +212,18 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
         className={cn(
           "bg-card border-border cursor-pointer relative py-0 transition-all",
           isLocked && "opacity-75",
-          isScheduled && "border-l-2 border-l-orange-400/70",
+          isScheduled && "border-l-2 border-l-orange-600/70 dark:border-l-orange-400/70",
           isSelected && "bg-primary/20 border-primary",
           !isSelected && "hover:bg-muted/50"
         )}
       >
         <CardContent className="px-3 py-1">
-          <div className={cn("flex items-start gap-2", isScheduled && "text-orange-400/80")}>
+          <div className={cn("flex items-start gap-2", isScheduled && "text-orange-600 dark:text-orange-400/80")}>
             <div className="flex flex-col items-center justify-start shrink-0 w-16">
               <div className="text-6xl font-bold leading-none tracking-tight">
                 {day}
               </div>
-              <div className={cn("text-base mt-0.5 tracking-wide", isScheduled ? "text-orange-400/60" : "text-muted-foreground")}>
+              <div className={cn("text-base mt-0.5 tracking-wide", isScheduled ? "text-orange-600/70 dark:text-orange-400/60" : "text-muted-foreground")}>
                 {month} {year}
               </div>
             </div>
@@ -238,11 +238,11 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
                     {displayOut}
                   </span>
                   <div className="flex items-center gap-1 flex-1 justify-center">
-                    <div className={cn("h-px flex-1", durationInfo.scheduled ? "bg-orange-400/30" : "bg-border")} />
+                    <div className={cn("h-px flex-1", durationInfo.scheduled ? "bg-orange-600/40 dark:bg-orange-400/30" : "bg-border")} />
                     <span className="text-base font-medium whitespace-nowrap px-1">
                       {durationInfo.text}{durationInfo.text ? ` ${durationInfo.suffix}` : ""}
                     </span>
-                    <div className={cn("h-px flex-1", durationInfo.scheduled ? "bg-orange-400/30" : "bg-border")} />
+                    <div className={cn("h-px flex-1", durationInfo.scheduled ? "bg-orange-600/40 dark:bg-orange-400/30" : "bg-border")} />
                   </div>
                   <span className={cn(
                     "text-base font-semibold leading-tight",
@@ -262,7 +262,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
                 </div>
               </div>
 
-              <div className={cn("flex items-center gap-1.5 text-xs leading-tight mt-0.5", isScheduled ? "text-orange-400/60" : "text-muted-foreground")}>
+              <div className={cn("flex items-center gap-1.5 text-xs leading-tight mt-0.5", isScheduled ? "text-orange-600/70 dark:text-orange-400/60" : "text-muted-foreground")}>
                 <span>{flight.flightNumber || ""}</span>
                 <span>•</span>
                 <span>{flight.aircraftReg || ""}</span>
@@ -271,7 +271,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
               </div>
 
               <div className="flex items-center justify-between mt-0.5">
-                <div className={cn("flex flex-1 min-w-0 text-xs leading-tight", isScheduled ? "text-orange-400/60" : "text-muted-foreground")}>
+                <div className={cn("flex flex-1 min-w-0 text-xs leading-tight", isScheduled ? "text-orange-600/70 dark:text-orange-400/60" : "text-muted-foreground")}>
                   {crewNames.map((name, i) => (
                     <span key={`${name}-${i}`} className="flex-1 min-w-0 truncate">
                       {i > 0 ? ", " : ""}{name}
