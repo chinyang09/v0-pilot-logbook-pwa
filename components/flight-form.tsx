@@ -877,42 +877,61 @@ export function FlightForm({
 
   const SCROLL_STORAGE_KEY = "flight-form-scroll";
 
-  // Track whether we need to restore scroll after returning from picker
-  const pendingScrollRestoreRef = useRef(false);
+  // Whether scroll has already been restored for the current mount. Restore runs
+  // once, then the user scrolls freely. A fresh mount (e.g. switching back into
+  // the logbook section, which re-mounts the form) resets this and restores again.
+  const didRestoreScrollRef = useRef(false);
+  // rAF throttle flag for persisting the scroll position.
+  const scrollSaveRafRef = useRef(false);
 
-  // Save scroll position before navigating to picker
+  // Persist the current scroll position (throttled to once per frame) so it can be
+  // restored when the form re-mounts — switching out of the logbook section and
+  // back, or returning from a picker on mobile. Kept current on every scroll so the
+  // latest position is already saved by the time the form unmounts.
+  const handleScrollSave = useCallback(() => {
+    if (scrollSaveRafRef.current) return;
+    scrollSaveRafRef.current = true;
+    requestAnimationFrame(() => {
+      scrollSaveRafRef.current = false;
+      if (scrollContainerRef.current) {
+        sessionStorage.setItem(SCROLL_STORAGE_KEY, String(scrollContainerRef.current.scrollTop));
+      }
+    });
+  }, []);
+
+  // Save scroll position immediately (used right before navigating to a picker).
   const saveScrollPosition = useCallback(() => {
     if (scrollContainerRef.current) {
       sessionStorage.setItem(SCROLL_STORAGE_KEY, String(scrollContainerRef.current.scrollTop));
-      pendingScrollRestoreRef.current = true;
     }
   }, []);
 
-  // Restore scroll position after returning from picker.
-  // Uses double-rAF to ensure the DOM has painted with updated content.
+  // Restore the saved scroll position. Double-rAF ensures the DOM has painted with
+  // the flight's content (seeded synchronously from the cache) before we set
+  // scrollTop. Does NOT clear the saved value, so it survives repeated section
+  // switches.
   const restoreScrollPosition = useCallback(() => {
     const saved = sessionStorage.getItem(SCROLL_STORAGE_KEY);
-    if (saved && scrollContainerRef.current) {
-      const scrollVal = Number(saved);
-      // Double rAF: first waits for React commit, second waits for browser paint
+    if (!saved || !scrollContainerRef.current) return;
+    const scrollVal = Number(saved);
+    if (!Number.isFinite(scrollVal) || scrollVal <= 0) return;
+    // Double rAF: first waits for React commit, second waits for browser paint
+    requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (scrollContainerRef.current) {
-            scrollContainerRef.current.scrollTop = scrollVal;
-          }
-          sessionStorage.removeItem(SCROLL_STORAGE_KEY);
-          pendingScrollRestoreRef.current = false;
-        });
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollVal;
+        }
       });
-    }
+    });
   }, []);
 
-  // Check for saved scroll on mount (mobile: form remounts after picker)
-  // and also whenever liveFlight arrives/updates (data ready → content rendered)
+  // Restore once per mount, after flight data is ready so the content has its full
+  // height. Switching between flights keeps the form mounted, so this does not fire
+  // then — the live scroll offset is preserved as-is.
   useEffect(() => {
-    if (!pendingScrollRestoreRef.current && !sessionStorage.getItem(SCROLL_STORAGE_KEY)) return;
+    if (didRestoreScrollRef.current) return;
     if (!liveFlight) return; // Wait for data to be ready before restoring
-    pendingScrollRestoreRef.current = true;
+    didRestoreScrollRef.current = true;
     restoreScrollPosition();
   }, [liveFlight, restoreScrollPosition]);
 
@@ -1220,7 +1239,7 @@ export function FlightForm({
 
   return (
     <div className="h-full relative">
-    <div ref={scrollContainerRef} className="h-full overflow-y-auto bg-background">
+    <div ref={scrollContainerRef} onScroll={handleScrollSave} className="h-full overflow-y-auto bg-background">
       <div className="min-h-full pt-16 pb-20">
 
       {/* Form Content */}
