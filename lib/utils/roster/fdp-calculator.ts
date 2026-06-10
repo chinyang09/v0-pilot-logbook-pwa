@@ -1378,8 +1378,8 @@ export function simulateHypotheticalDuty(
   }
   const maxFdpCheck = {
     dutyMinutes,
-    maxFdpMinutes,
-    compliant: dutyMinutes <= maxFdpMinutes,
+    maxFdpMinutes: fdpResult.maxFdpMinutes,
+    compliant: dutyMinutes <= fdpResult.maxFdpMinutes,
   }
 
   const overallCompliant =

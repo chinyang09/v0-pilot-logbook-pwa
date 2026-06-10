@@ -26,6 +26,16 @@ export interface OcrResult {
 }
 
 export interface ExtractedFlightData {
+  date?: string
+  flightNumber?: string
+  aircraftReg?: string
+  aircraftType?: string
+  departureIcao?: string
+  departureIata?: string
+  arrivalIcao?: string
+  arrivalIata?: string
+  scheduledOut?: string
+  scheduledIn?: string
   outTime?: string
   offTime?: string
   onTime?: string

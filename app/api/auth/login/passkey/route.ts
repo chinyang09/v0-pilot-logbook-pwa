@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     const db = await getDB()
 
     // ✅ Store expiresAt as a Date object
-    await db.collection("challenges").insertOne({
+    await db.collection<{ _id: string; [key: string]: unknown }>("challenges").insertOne({
       _id: challengeBase64,
       challenge: challengeBase64,
       expiresAt: new Date(Date.now() + 60000),

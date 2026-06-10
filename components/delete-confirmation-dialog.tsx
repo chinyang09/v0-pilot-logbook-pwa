@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, type ReactElement } from "react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -67,7 +67,7 @@ export interface UseDeleteConfirmationReturn<T> {
   /** Handle the actual deletion */
   handleDelete: (deleteFn: (item: T) => Promise<void> | void) => Promise<void>
   /** Dialog component to render */
-  DeleteDialog: (props: Omit<DeleteConfirmationDialogProps, "open" | "onOpenChange" | "isDeleting"> & { onConfirm: () => void | Promise<void> }) => JSX.Element
+  DeleteDialog: (props: Omit<DeleteConfirmationDialogProps, "open" | "onOpenChange" | "isDeleting"> & { onConfirm: () => void | Promise<void> }) => ReactElement
 }
 
 /**

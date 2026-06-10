@@ -225,7 +225,7 @@ export async function checkOCRModelsCached(): Promise<{
     }
 
     navigator.serviceWorker.addEventListener("message", messageHandler)
-    registration.active.postMessage({ type: "CHECK_OCR_MODELS_CACHED" })
+    registration.active?.postMessage({ type: "CHECK_OCR_MODELS_CACHED" })
 
     // Timeout after 5 seconds
     setTimeout(() => {
@@ -264,7 +264,7 @@ export async function ensureOCRModelsCached(): Promise<{
     }
 
     navigator.serviceWorker.addEventListener("message", messageHandler)
-    registration.active.postMessage({ type: "CACHE_OCR_MODELS" })
+    registration.active?.postMessage({ type: "CACHE_OCR_MODELS" })
 
     // Timeout after 60 seconds (models are large)
     setTimeout(() => {

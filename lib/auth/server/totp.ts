@@ -15,7 +15,7 @@ export function generateTOTPSecret(length = 20): string {
 }
 
 // Decode Base32 to Uint8Array
-function base32Decode(encoded: string): Uint8Array {
+function base32Decode(encoded: string): Uint8Array<ArrayBuffer> {
   const cleaned = encoded.toUpperCase().replace(/[^A-Z2-7]/g, "")
   const output = new Uint8Array(Math.floor((cleaned.length * 5) / 8))
 

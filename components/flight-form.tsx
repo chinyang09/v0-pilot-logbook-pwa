@@ -484,7 +484,7 @@ export function FlightForm({
           (!prev.departureIata || prev.departureTimezone === undefined)
         ) {
           updated.departureIata = airport.iata || "";
-          updated.departureTimezone = airport.timezone || 0;
+          updated.departureTimezone = getNumericOffset(airport.tz);
           changed = true;
         }
       }
@@ -496,7 +496,7 @@ export function FlightForm({
           (!prev.arrivalIata || prev.arrivalTimezone === undefined)
         ) {
           updated.arrivalIata = airport.iata || "";
-          updated.arrivalTimezone = airport.timezone || 0;
+          updated.arrivalTimezone = getNumericOffset(airport.tz);
           changed = true;
         }
       }
@@ -599,8 +599,8 @@ export function FlightForm({
         const nightResult = calculateNightTimeComplete(
           formData.date,
           formData.outTime,
-          formData.offTime, // Pass raw values, helper handles the fallback
-          formData.onTime,
+          formData.offTime ?? "", // Pass raw values, helper handles the fallback
+          formData.onTime ?? "",
           formData.inTime,
           { lat: depLat, lon: depLon }, // Pass as object
           { lat: arrLat, lon: arrLon } // Pass as object
@@ -1689,7 +1689,7 @@ export function FlightForm({
                 <select
                   value={approach.type}
                   onChange={(e) =>
-                    updateApproach(approach.id, { type: e.target.value })
+                    updateApproach(approach.id, { type: e.target.value as Approach["type"] })
                   }
                   className="bg-transparent text-foreground outline-none text-sm"
                 >

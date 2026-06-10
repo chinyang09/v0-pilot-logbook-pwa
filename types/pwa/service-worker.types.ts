@@ -7,7 +7,7 @@ export interface SWMessage {
   payload?: any
 }
 
-export interface SWMessageEvent extends ExtendableMessageEvent {
+export interface SWMessageEvent extends MessageEvent {
   data: SWMessage
 }
 

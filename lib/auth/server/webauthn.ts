@@ -10,7 +10,7 @@ export function base64URLEncode(buffer: ArrayBuffer | Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
 }
 
-export function base64URLDecode(str: string): Uint8Array {
+export function base64URLDecode(str: string): Uint8Array<ArrayBuffer> {
   const base64 = str.replace(/-/g, "+").replace(/_/g, "/")
   const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4)
   const binary = atob(padded)
@@ -238,7 +238,7 @@ function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 // Convert DER signature to raw format
-function derToRaw(derSig: Uint8Array): Uint8Array {
+function derToRaw(derSig: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
   // DER format: 0x30 [total-length] 0x02 [r-length] [r] 0x02 [s-length] [s]
   if (derSig[0] !== 0x30) {
     // Already in raw format or invalid

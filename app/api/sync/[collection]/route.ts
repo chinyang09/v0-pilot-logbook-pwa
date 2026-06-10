@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import type { Sort } from "mongodb";
 import { getMongoClient } from "@/lib/mongodb";
 import { validateSessionFromHeader } from "@/lib/auth/server/session";
 
@@ -53,7 +54,7 @@ export async function GET(
       ];
     }
 
-    const sortCriteria =
+    const sortCriteria: Sort =
       collection === "flights"
         ? { date: -1, updatedAt: -1, createdAt: -1 }
         : { updatedAt: -1, createdAt: -1 };

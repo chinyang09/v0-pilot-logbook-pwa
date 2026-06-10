@@ -29,3 +29,8 @@ export * from "./api/errors.types"
 
 // PWA types
 export * from "./pwa/service-worker.types"
+
+// Disambiguate names intentionally defined in more than one module so the barrel
+// has a single, unambiguous export for each.
+export type { SyncStatus } from "./entities/flight.types"
+export type { AuthResponse } from "./auth/session.types"
