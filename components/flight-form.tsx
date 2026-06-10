@@ -2,7 +2,7 @@
 
 import type React from "react";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
@@ -414,22 +414,10 @@ export function FlightForm({
     () => getNumericOffset(arrAirport?.tz),
     [arrAirport]
   );
-  // Reset all transient state when flightIdProp changes (hot-swap instead of remount)
+  // Tracks the flight currently loaded into the form. The instant-swap handling
+  // when this changes lives in a useLayoutEffect defined after forceSave (below),
+  // so it can flush the outgoing flight before swapping.
   const prevFlightIdRef = useRef(flightIdProp);
-  useEffect(() => {
-    if (flightIdProp === prevFlightIdRef.current) return;
-    prevFlightIdRef.current = flightIdProp;
-
-    // Reset transient UI state
-    setIsSubmitting(false);
-    setActiveTimePicker(null);
-    setDatePickerOpen(false);
-    editingFlightInitializedRef.current = null;
-    prevLiveFlightRef.current = undefined;
-
-    // Intentionally keep the current scroll offset when switching flights so the
-    // same fields stay in view for side-by-side comparison (no jump to top).
-  }, [flightIdProp]);
 
   // Update form data when resolvedFlight changes (e.g., after refresh or live query)
   useEffect(() => {
@@ -942,6 +930,41 @@ export function FlightForm({
       console.error("Force save before picker navigation failed:", error);
     }
   }, [formData, resolvedFlight?.id, flightIdProp, manualOverrides]);
+
+  // Instant in-logbook flight switching. When the selected flight changes while
+  // the form stays mounted, flush the outgoing flight's edits, then seed the
+  // incoming flight from the module cache synchronously BEFORE the browser paints.
+  // useLayoutEffect re-renders with the new data before paint, so the user never
+  // sees the previous flight's values (or a blank frame) during the switch.
+  // The scroll offset is intentionally preserved for side-by-side comparison.
+  useLayoutEffect(() => {
+    if (flightIdProp === prevFlightIdRef.current) return;
+    const outgoingId = prevFlightIdRef.current;
+    prevFlightIdRef.current = flightIdProp;
+
+    // Persist any unsaved edits to the flight we're leaving. forceSave reads the
+    // outgoing formData synchronously and dedupes against lastSavedStateRef.
+    if (outgoingId) void forceSave();
+
+    // Reset transient UI + reconciliation refs for the incoming flight.
+    setIsSubmitting(false);
+    setActiveTimePicker(null);
+    setDatePickerOpen(false);
+    editingFlightInitializedRef.current = null;
+    prevLiveFlightRef.current = undefined;
+
+    // Seed the incoming flight from cache for an instant, correct first paint.
+    // If it was never opened this session, fall back to an empty form — the
+    // resolvedFlight effect then populates it once useLiveQuery resolves.
+    const cached = flightIdProp ? flightDataCache.get(flightIdProp) : null;
+    if (cached) {
+      setFormData(cached);
+      setManualOverrides(cached.manualOverrides ?? {});
+    } else {
+      setFormData(createEmptyFlightLog());
+      setManualOverrides({});
+    }
+  }, [flightIdProp, forceSave]);
 
   // Navigate to picker pages for aircraft/airport/crew selection.
   // Both mobile and desktop navigate to the same pages. On desktop, the page
