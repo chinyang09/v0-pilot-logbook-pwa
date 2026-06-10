@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo } from "react"
+import { useSessionState } from "@/hooks/use-session-state"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -23,7 +24,7 @@ type FilterType = "all" | "unresolved" | "resolved" | DiscrepancyType
 
 export default function DiscrepanciesPage() {
   const { discrepancies, isLoading, refresh } = useDiscrepancies()
-  const [filterType, setFilterType] = useState<FilterType>("unresolved")
+  const [filterType, setFilterType] = useSessionState<FilterType>("discrepancies:filter", "unresolved")
   const [discrepancyToResolve, setDiscrepancyToResolve] = useState<Discrepancy | null>(null)
 
   // Filter discrepancies

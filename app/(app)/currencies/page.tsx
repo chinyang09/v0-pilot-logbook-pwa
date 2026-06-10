@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo } from "react"
+import { useSessionState } from "@/hooks/use-session-state"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -37,7 +38,7 @@ type FilterStatus = "all" | CurrencyStatus
 
 export default function CurrenciesPage() {
   const { currencies, isLoading, refresh } = useCurrencies()
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>("all")
+  const [filterStatus, setFilterStatus] = useSessionState<FilterStatus>("currencies:filter", "all")
   const [currencyToDelete, setCurrencyToDelete] = useState<CurrencyWithStatus | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [currencyToEdit, setCurrencyToEdit] = useState<CurrencyWithStatus | null>(null)
