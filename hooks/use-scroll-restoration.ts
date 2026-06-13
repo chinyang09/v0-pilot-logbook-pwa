@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, type RefCallback, type UIEvent } from "react"
+import { useCallback, useRef, type RefCallback, type UIEvent } from "react"
 
 const PREFIX = "scroll-pos:"
 
@@ -14,9 +14,11 @@ const PREFIX = "scroll-pos:"
  * Returns a `ref` to attach to the scroll element and an `onScroll` handler to
  * wire onto it. Both compose cleanly with a page's existing ref/onScroll.
  *
- * Restoration uses a double requestAnimationFrame (matching the proven pattern in
- * flight-form.tsx): the first waits for React's commit, the second for the browser
- * paint, so the content has laid out before we set scrollTop.
+ * Restoration happens inside the ref callback, which React invokes during the
+ * commit — AFTER the element's children (page content, rendered synchronously
+ * from the SWR/Dexie cache) are in the DOM but BEFORE the browser paints. Setting
+ * scrollTop there is invisible, so there is no flash at the top before jumping to
+ * the saved offset. (The ref callback also never runs during SSR.)
  *
  * @param key Stable key for this scroll context, or null to disable.
  */
@@ -24,40 +26,37 @@ export function useScrollRestoration(key: string | null) {
   const elRef = useRef<HTMLElement | null>(null)
   const latestTopRef = useRef(0)
   const rafPendingRef = useRef(false)
+  const didRestoreRef = useRef(false)
   const storageKey = key ? PREFIX + key : null
 
-  // Restore on mount (and whenever the key changes).
-  useEffect(() => {
-    if (!storageKey) return
-
-    const saved = sessionStorage.getItem(storageKey)
-    const top = saved === null ? 0 : Number(saved)
-    latestTopRef.current = Number.isFinite(top) ? top : 0
-
-    let raf2 = 0
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => {
-        if (elRef.current && latestTopRef.current > 0) {
-          elRef.current.scrollTop = latestTopRef.current
+  const ref = useCallback<RefCallback<HTMLElement>>(
+    (node) => {
+      if (node) {
+        elRef.current = node
+        // Restore once, synchronously, before the first paint of this mount.
+        if (storageKey && !didRestoreRef.current) {
+          didRestoreRef.current = true
+          const saved = sessionStorage.getItem(storageKey)
+          const top = saved === null ? 0 : Number(saved)
+          latestTopRef.current = Number.isFinite(top) ? top : 0
+          if (latestTopRef.current > 0) {
+            node.scrollTop = latestTopRef.current
+          }
         }
-      })
-    })
-
-    return () => {
-      cancelAnimationFrame(raf1)
-      if (raf2) cancelAnimationFrame(raf2)
-      // Flush the latest position on unmount so navigating away always saves.
-      try {
-        sessionStorage.setItem(storageKey, String(latestTopRef.current))
-      } catch {
-        // Ignore storage errors
+      } else {
+        // Unmount: persist the final position so navigating away always saves.
+        if (storageKey) {
+          try {
+            sessionStorage.setItem(storageKey, String(latestTopRef.current))
+          } catch {
+            // Ignore storage errors
+          }
+        }
+        elRef.current = null
       }
-    }
-  }, [storageKey])
-
-  const ref = useCallback<RefCallback<HTMLElement>>((node) => {
-    elRef.current = node
-  }, [])
+    },
+    [storageKey]
+  )
 
   const onScroll = useCallback(
     (e: UIEvent<HTMLElement>) => {

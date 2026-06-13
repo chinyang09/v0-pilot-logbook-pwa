@@ -906,34 +906,27 @@ export function FlightForm({
     }
   }, []);
 
-  // Restore the saved scroll position. Double-rAF ensures the DOM has painted with
-  // the flight's content (seeded synchronously from the cache) before we set
-  // scrollTop. Does NOT clear the saved value, so it survives repeated section
-  // switches.
-  const restoreScrollPosition = useCallback(() => {
-    const saved = sessionStorage.getItem(SCROLL_STORAGE_KEY);
-    if (!saved || !scrollContainerRef.current) return;
-    const scrollVal = Number(saved);
-    if (!Number.isFinite(scrollVal) || scrollVal <= 0) return;
-    // Double rAF: first waits for React commit, second waits for browser paint
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (scrollContainerRef.current) {
-          scrollContainerRef.current.scrollTop = scrollVal;
-        }
-      });
-    });
-  }, []);
-
-  // Restore once per mount, after flight data is ready so the content has its full
-  // height. Switching between flights keeps the form mounted, so this does not fire
-  // then — the live scroll offset is preserved as-is.
-  useEffect(() => {
+  // Restore the saved scroll position synchronously, BEFORE the browser paints,
+  // so there is no flash at the top before jumping to the saved offset.
+  // useLayoutEffect runs after the DOM is committed (with the flight's content,
+  // seeded synchronously from the cache) but before paint, so the set is invisible.
+  // Restores once per mount; switching between flights keeps the form mounted, so
+  // this does not fire then — the live offset is preserved as-is.
+  useLayoutEffect(() => {
     if (didRestoreScrollRef.current) return;
-    if (!liveFlight) return; // Wait for data to be ready before restoring
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    // Wait until the content is backed by data (cache or live query) so it has its
+    // full height; otherwise the saved offset would clamp to a short page.
+    if (!cachedFlight && !liveFlight) return;
     didRestoreScrollRef.current = true;
-    restoreScrollPosition();
-  }, [liveFlight, restoreScrollPosition]);
+    const saved = sessionStorage.getItem(SCROLL_STORAGE_KEY);
+    if (!saved) return;
+    const scrollVal = Number(saved);
+    if (Number.isFinite(scrollVal) && scrollVal > 0) {
+      el.scrollTop = scrollVal;
+    }
+  }, [liveFlight]);
 
   // Force-save current form data before navigating away (bypasses debounce)
   // Skips save if nothing changed from last saved state to avoid sync queue bloat

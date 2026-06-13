@@ -22,21 +22,7 @@
 
 import { NextResponse } from "next/server"
 import { getMongoClient } from "@/lib/mongodb"
-
-export const AIRPORT_CACHE_TTL_MS = 180 * 24 * 60 * 60 * 1000 // 180 days
-
-export type EnrichedAirport = {
-  icao: string
-  iata: string
-  name: string
-  city: string
-  country: string
-  countryCode: string
-  latitude: number
-  longitude: number
-  elevation: number
-  timezone: string
-}
+import { AIRPORT_CACHE_TTL_MS, type EnrichedAirport } from "../shared"
 
 export async function POST(request: Request) {
   let body: { codes?: string[]; icaos?: string[] }
