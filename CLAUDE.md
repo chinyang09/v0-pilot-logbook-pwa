@@ -19,7 +19,7 @@ Deployed on **Vercel** and synced from [v0.app](https://v0.app/chat/eXgJay4h1Jy)
 | Cloud DB | MongoDB 6 |
 | Auth | WebAuthn passkeys + TOTP 2FA |
 | Data Fetching | SWR + Dexie React hooks |
-| Forms | React Hook Form + Zod validation |
+| Forms | Custom hooks (`useFormSubmit`, `useCrewForm`) — no form library |
 | OCR | @gutenye/ocr-browser with ONNX Runtime |
 | Charts | Recharts |
 | Package Manager | pnpm (not npm) |
@@ -103,6 +103,7 @@ lib/                              # Core utilities and services
 │   ├── reference-db.ts           #   Reference data DB (airports, aircraft, types)
 │   └── stores/                   #   CRUD operations by collection
 │       ├── user/                 #     flights.store, aircraft.store, etc.
+│       │   └── crud-helpers.ts    #       Generic sync-aware CRUD (create/update/delete/upsertFromServer) shared by user stores
 │       └── reference/            #     Reference data stores
 │           ├── aircraft.store.ts #       Aircraft DB (FR24/MongoDB-synced + custom)
 │           ├── airports.store.ts #       Airport reference data
@@ -119,7 +120,7 @@ lib/                              # Core utilities and services
 ├── ocr/                          # OCR service & flight data extraction
 └── utils/                        # Utility functions
     ├── flight-calculations.ts    #   Time calculations
-    ├── night-time.ts             #   Night time rules
+    ├── night-time.ts             #   Night time rules + the single per-minute night-time calculator (calculateNightTimeComplete)
     ├── time.ts                   #   Time formatting
     ├── aircraft-type-utils.ts    #   ICAO type code parsing & display
     ├── roster/                   #   FDP calculator, draft generator
@@ -388,7 +389,7 @@ const { flights, isLoading } = useFlights();
 
 ### Forms
 
-Forms use React Hook Form with Zod schemas for runtime validation. Schemas are defined separately from TypeScript types.
+Forms use lightweight custom hooks (`hooks/use-form-submit.ts`, `hooks/use-crew-form.tsx`) for submission/loading/error state rather than a form library. Validation is hand-rolled where needed. There is no React Hook Form or Zod dependency.
 
 ### API Routes
 
