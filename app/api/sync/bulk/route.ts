@@ -66,7 +66,9 @@ export async function POST(request: NextRequest) {
     for (const [collectionName, collectionItems] of Object.entries(itemsByCollection)) {
       const coll = db.collection(collectionName);
       const bulkOps: any[] = [];
-      const itemMap = new Map<number, SyncQueueItem>();
+      // Queue-item id for each bulkOps entry, kept parallel so partial-failure
+      // handling can map a writeError back to the right item by op index.
+      const opItemIds: string[] = [];
 
       // Batch fetch all record IDs to check tombstones
       const recordIds = collectionItems.map(item => item.data.id);
@@ -87,7 +89,6 @@ export async function POST(request: NextRequest) {
       // Prepare bulk operations
       for (let i = 0; i < collectionItems.length; i++) {
         const item = collectionItems[i];
-        itemMap.set(i, item);
 
         const { syncStatus, ...dataWithoutSyncStatus } = item.data;
         const dataWithUser = {
@@ -119,13 +120,15 @@ export async function POST(request: NextRequest) {
             // Only proceed if incoming is newer or equal
             if (incomingTime >= existingTime) {
               if (existing) {
-                // Update existing
+                // Update existing. Preserve the server's original createdAt —
+                // never let a client-supplied createdAt overwrite it.
+                const { createdAt: _ignoredCreatedAt, ...dataWithoutCreatedAt } = dataWithUser;
                 bulkOps.push({
                   updateOne: {
                     filter: { id: item.data.id, userId: session.userId },
                     update: {
                       $set: {
-                        ...dataWithUser,
+                        ...dataWithoutCreatedAt,
                         updatedAt: item.data.updatedAt || Date.now(),
                         syncedAt: Date.now(),
                       },
@@ -146,6 +149,7 @@ export async function POST(request: NextRequest) {
                   },
                 });
               }
+              opItemIds.push(item.id);
 
               results.push({
                 queueItemId: item.id,
@@ -170,8 +174,8 @@ export async function POST(request: NextRequest) {
                 },
               },
             });
+            opItemIds.push(item.id);
 
-            // Add tombstone operation
             results.push({
               queueItemId: item.id,
               success: true,
@@ -180,35 +184,12 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Execute bulk operations if any
-      if (bulkOps.length > 0) {
-        try {
-          const bulkResult = await coll.bulkWrite(bulkOps, { ordered: false });
-          console.log(`[v0] Bulk write for ${collectionName}: inserted ${bulkResult.insertedCount}, updated ${bulkResult.modifiedCount}, deleted ${bulkResult.deletedCount}`);
-        } catch (bulkError: any) {
-          console.error(`[v0] Bulk write error for ${collectionName}:`, bulkError);
-
-          // Handle partial failures
-          if (bulkError.writeErrors) {
-            for (const writeError of bulkError.writeErrors) {
-              const failedItem = itemMap.get(writeError.index);
-              if (failedItem) {
-                const resultIndex = results.findIndex(r => r.queueItemId === failedItem.id);
-                if (resultIndex !== -1) {
-                  results[resultIndex] = {
-                    queueItemId: failedItem.id,
-                    success: false,
-                    reason: writeError.errmsg || "Write error",
-                  };
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // Handle tombstones for deletions
+      // Write tombstones BEFORE deleting the records. A deletion must never be
+      // applied on the server without a matching tombstone, otherwise the
+      // record resurrects on other devices (they never learn it was deleted).
+      // A tombstone that briefly precedes its delete is harmless.
       const deleteItems = collectionItems.filter(item => item.type === "delete");
+      let tombstonesOk = true;
       if (deleteItems.length > 0) {
         const tombstoneOps = deleteItems.map(item => ({
           updateOne: {
@@ -234,6 +215,59 @@ export async function POST(request: NextRequest) {
           console.log(`[v0] Created ${tombstoneOps.length} tombstones for ${collectionName}`);
         } catch (tombstoneError) {
           console.error(`[v0] Tombstone bulk write error for ${collectionName}:`, tombstoneError);
+          tombstonesOk = false;
+        }
+      }
+
+      // If tombstones failed, drop the delete ops so we don't delete without a
+      // tombstone, and mark those items failed so the client retries them.
+      let opsToRun = bulkOps;
+      let opIds = opItemIds;
+      if (!tombstonesOk) {
+        opsToRun = [];
+        opIds = [];
+        for (let k = 0; k < bulkOps.length; k++) {
+          if (bulkOps[k].deleteOne) {
+            const resultIndex = results.findIndex(r => r.queueItemId === opItemIds[k]);
+            if (resultIndex !== -1) {
+              results[resultIndex] = {
+                queueItemId: opItemIds[k],
+                success: false,
+                reason: "Tombstone write failed",
+              };
+            }
+          } else {
+            opsToRun.push(bulkOps[k]);
+            opIds.push(opItemIds[k]);
+          }
+        }
+      }
+
+      // Execute bulk operations if any
+      if (opsToRun.length > 0) {
+        try {
+          const bulkResult = await coll.bulkWrite(opsToRun, { ordered: false });
+          console.log(`[v0] Bulk write for ${collectionName}: inserted ${bulkResult.insertedCount}, updated ${bulkResult.modifiedCount}, deleted ${bulkResult.deletedCount}`);
+        } catch (bulkError: any) {
+          console.error(`[v0] Bulk write error for ${collectionName}:`, bulkError);
+
+          // Handle partial failures — writeError.index is the position in the
+          // ops array we passed to bulkWrite, mapped back via opIds.
+          if (bulkError.writeErrors) {
+            for (const writeError of bulkError.writeErrors) {
+              const failedId = opIds[writeError.index];
+              if (failedId) {
+                const resultIndex = results.findIndex(r => r.queueItemId === failedId);
+                if (resultIndex !== -1) {
+                  results[resultIndex] = {
+                    queueItemId: failedId,
+                    success: false,
+                    reason: writeError.errmsg || "Write error",
+                  };
+                }
+              }
+            }
+          }
         }
       }
     }
