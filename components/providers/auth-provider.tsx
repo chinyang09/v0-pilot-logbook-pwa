@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
+import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { getUserSession, saveUserSession, clearAllUserData, type UserSession } from "@/lib/db"
 import { resetDBState } from "@/hooks/data/use-db"
@@ -213,21 +213,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user, isLoading, pathname])
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isLoading,
-        isAuthenticated: !!user,
-        login,
-        logout,
-        silentReauth,
-        updateCallsign,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({
+      user,
+      isLoading,
+      isAuthenticated: !!user,
+      login,
+      logout,
+      silentReauth,
+      updateCallsign,
+    }),
+    [user, isLoading, login, logout, silentReauth, updateCallsign]
   )
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

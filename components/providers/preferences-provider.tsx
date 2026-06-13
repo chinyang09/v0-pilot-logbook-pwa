@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
+import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { useTheme } from "next-themes"
 import { getUserPreferences, saveUserPreferences } from "@/lib/db"
 import type {
@@ -145,21 +145,28 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     })
   }, [persistPreferences])
 
-  return (
-    <PreferencesContext.Provider
-      value={{
-        preferences,
-        isLoading,
-        updateDisplay,
-        updateAutoFill,
-        updateDutyTimeDefaults,
-        updateNavigation,
-        updateImportDefaults,
-      }}
-    >
-      {children}
-    </PreferencesContext.Provider>
+  const value = useMemo(
+    () => ({
+      preferences,
+      isLoading,
+      updateDisplay,
+      updateAutoFill,
+      updateDutyTimeDefaults,
+      updateNavigation,
+      updateImportDefaults,
+    }),
+    [
+      preferences,
+      isLoading,
+      updateDisplay,
+      updateAutoFill,
+      updateDutyTimeDefaults,
+      updateNavigation,
+      updateImportDefaults,
+    ]
   )
+
+  return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>
 }
 
 export function usePreferences() {
