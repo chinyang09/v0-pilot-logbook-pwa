@@ -94,7 +94,9 @@ export function useFlights() {
 
   const refresh = useCallback(() => {
     console.log("[Flights] Refreshing...")
-    return mutateFlights(undefined, { revalidate: true })
+    // Revalidate WITHOUT clearing data — passing `undefined` would wipe the cache
+    // and flip isLoading true, flashing the skeleton on every switch back to the page.
+    return mutateFlights()
   }, [mutateFlights])
 
   return {
@@ -126,7 +128,8 @@ export function useFlightStats() {
   })
 
   const refresh = useCallback(() => {
-    return mutateStats(undefined, { revalidate: true })
+    // Revalidate without clearing existing data to avoid a loading flash.
+    return mutateStats()
   }, [mutateStats])
 
   return {
