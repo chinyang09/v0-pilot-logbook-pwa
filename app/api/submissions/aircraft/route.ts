@@ -16,10 +16,7 @@ import { getMongoClient } from "@/lib/mongodb"
 import { validateSessionFromHeader } from "@/lib/auth/server/session"
 import { enrichAircraftFromFR24 } from "@/lib/enrichment/aircraft-enrichment"
 import { getICAOTypeByDesignator } from "@/lib/icao-types/icao-types-server"
-
-function normalizeRegistration(reg: string): string {
-  return reg.replace(/[^A-Z0-9]/gi, "").toUpperCase()
-}
+import { normalizeRegistration } from "@/lib/utils/string"
 
 export async function POST(request: Request) {
   const session = await validateSessionFromHeader(request)

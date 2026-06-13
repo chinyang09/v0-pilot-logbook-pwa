@@ -17,6 +17,7 @@ import {
   type NormalizedAircraft,
 } from "@/lib/db/stores/reference/aircraft.store";
 import { submitAircraftToServer } from "@/lib/submissions/submit";
+import { normalizeRegistration } from "@/lib/utils/string";
 import type { AircraftRecord } from "@/types/entities/aircraft.types";
 
 export interface EnrichProgress {
@@ -40,9 +41,7 @@ export interface EnrichResult {
   };
 }
 
-function normalizeReg(reg: string): string {
-  return reg.replace(/[^A-Z0-9]/gi, "").toUpperCase();
-}
+const normalizeReg = normalizeRegistration;
 
 export async function enrichAircraftBatch(
   registrations: string[],

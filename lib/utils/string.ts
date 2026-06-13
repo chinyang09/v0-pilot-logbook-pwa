@@ -21,11 +21,16 @@ export function normalizeAirportCode(code: string): string {
 }
 
 /**
- * Normalize an aircraft registration
- * Converts to uppercase and trims whitespace
+ * Canonical aircraft-registration key for dedup and lookup matching.
+ *
+ * Uppercases and strips EVERY non-alphanumeric character, so "VH-ABC",
+ * "vh abc" and "VHABC" all collapse to the same key. This must be identical
+ * on the client (local IndexedDB matching) and the server (the submission
+ * dedup key `registrationNormalized`) — diverging forms cause lookup misses
+ * and duplicate submissions. Keep this the single source of truth.
  */
 export function normalizeRegistration(reg: string): string {
-  return reg ? reg.trim().toUpperCase() : ""
+  return reg ? reg.toUpperCase().replace(/[^A-Z0-9]/g, "") : ""
 }
 
 /**
