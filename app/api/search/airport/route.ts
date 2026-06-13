@@ -20,7 +20,7 @@
 
 import { NextResponse } from "next/server"
 import { getMongoClient } from "@/lib/mongodb"
-import { AIRPORT_CACHE_TTL_MS, type EnrichedAirport } from "./batch/route"
+import { AIRPORT_CACHE_TTL_MS, type EnrichedAirport } from "./shared"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
