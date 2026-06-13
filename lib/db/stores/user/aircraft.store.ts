@@ -4,23 +4,13 @@
 
 import { userDb } from "../../user-db";
 import type { Aircraft, AircraftCreate } from "@/types/entities/aircraft.types";
-import { addToSyncQueue } from "./sync-queue.store";
+import { createEntity, updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers";
 
 /**
  * Add new aircraft
  */
 export async function addAircraft(aircraft: AircraftCreate): Promise<Aircraft> {
-  const newAircraft: Aircraft = {
-    ...aircraft,
-    id: crypto.randomUUID(),
-    createdAt: Date.now(),
-    syncStatus: "pending",
-  };
-
-  await userDb.aircraft.put(newAircraft);
-  await addToSyncQueue("create", "aircraft", newAircraft);
-
-  return newAircraft;
+  return createEntity<Aircraft>(userDb.aircraft, "aircraft", aircraft, { includeUpdatedAt: false });
 }
 
 /**
@@ -30,51 +20,21 @@ export async function updateAircraft(
   id: string,
   updates: Partial<Aircraft>
 ): Promise<Aircraft | null> {
-  const aircraft = await userDb.aircraft.get(id);
-  if (!aircraft) return null;
-
-  const updatedAircraft: Aircraft = {
-    ...aircraft,
-    ...updates,
-    updatedAt: Date.now(),
-    syncStatus: "pending",
-  };
-
-  await userDb.aircraft.put(updatedAircraft);
-  await addToSyncQueue("update", "aircraft", updatedAircraft);
-
-  return updatedAircraft;
+  return updateEntity<Aircraft>(userDb.aircraft, "aircraft", id, updates);
 }
 
 /**
  * Delete aircraft
  */
 export async function deleteAircraft(id: string): Promise<boolean> {
-  const aircraft = await userDb.aircraft.get(id);
-  if (!aircraft) return false;
-
-  await userDb.aircraft.delete(id);
-  await addToSyncQueue("delete", "aircraft", { id });
-  return true;
+  return deleteEntity<Aircraft>(userDb.aircraft, "aircraft", id);
 }
 
 /**
  * Delete aircraft without adding to sync queue
  */
 export async function silentDeleteAircraft(id: string): Promise<boolean> {
-  const aircraft = await userDb.aircraft.get(id);
-  if (!aircraft) {
-    const byMongoPattern = await userDb.aircraft
-      .filter((a) => a.id === id )
-      .first();
-    if (byMongoPattern) {
-      await userDb.aircraft.delete(byMongoPattern.id);
-      return true;
-    }
-    return false;
-  }
-  await userDb.aircraft.delete(id);
-  return true;
+  return silentDeleteEntity<Aircraft>(userDb.aircraft, id);
 }
 
 /**
@@ -94,12 +54,10 @@ export async function getAircraftById(
 }
 
 /**
- * Upsert aircraft from server (for sync)
+ * Normalize a server aircraft record, filling defaults for any missing fields
  */
-export async function upsertAircraftFromServer(
-  serverAircraft: Aircraft
-): Promise<void> {
-  const normalized: Aircraft = {
+function normalizeAircraftFromServer(serverAircraft: Aircraft): Aircraft {
+  return {
     id: serverAircraft.id,
     userId: serverAircraft.userId,
     registration: serverAircraft.registration,
@@ -114,22 +72,13 @@ export async function upsertAircraftFromServer(
     updatedAt: serverAircraft.updatedAt,
     syncStatus: "synced",
   };
+}
 
-  let existing: Aircraft | undefined;
-  if (normalized.id) {
-    existing = await userDb.aircraft.where("id").equals(normalized.id).first();
-  }
-  if (!existing && normalized.id) {
-    existing = await userDb.aircraft.get(normalized.id);
-  }
-
-  if (existing) {
-    const serverTime = normalized.updatedAt || normalized.createdAt;
-    const localTime = existing.updatedAt || existing.createdAt;
-    if (serverTime >= localTime) {
-      await userDb.aircraft.put({ ...normalized, id: existing.id });
-    }
-  } else {
-    await userDb.aircraft.put(normalized);
-  }
+/**
+ * Upsert aircraft from server (for sync)
+ */
+export async function upsertAircraftFromServer(
+  serverAircraft: Aircraft
+): Promise<void> {
+  return upsertFromServer<Aircraft>(userDb.aircraft, serverAircraft, normalizeAircraftFromServer);
 }

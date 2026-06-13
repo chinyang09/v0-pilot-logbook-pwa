@@ -4,75 +4,34 @@
 
 import { userDb } from "../../user-db"
 import type { FlightLog, FlightLogCreate } from "@/types/entities/flight.types"
-import { addToSyncQueue } from "./sync-queue.store"
+import { createEntity, updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
 
 /**
  * Add a new flight
  */
 export async function addFlight(flight: FlightLogCreate): Promise<FlightLog> {
-  const now = Date.now()
-  const newFlight: FlightLog = {
-    ...flight,
-    id: crypto.randomUUID(),
-    createdAt: now,
-    updatedAt: now,
-    syncStatus: "pending",
-  }
-
-  await userDb.flights.put(newFlight)
-  await addToSyncQueue("create", "flights", newFlight)
-
-  return newFlight
+  return createEntity<FlightLog>(userDb.flights, "flights", flight)
 }
 
 /**
  * Update an existing flight
  */
 export async function updateFlight(id: string, updates: Partial<FlightLog>): Promise<FlightLog | null> {
-  const flight = await userDb.flights.get(id)
-  if (!flight) return null
-
-  const updatedFlight: FlightLog = {
-    ...flight,
-    ...updates,
-    updatedAt: Date.now(),
-    syncStatus: "pending",
-  }
-
-  await userDb.flights.put(updatedFlight)
-  await addToSyncQueue("update", "flights", updatedFlight)
-
-  return updatedFlight
+  return updateEntity<FlightLog>(userDb.flights, "flights", id, updates)
 }
 
 /**
  * Delete a flight
  */
 export async function deleteFlight(id: string): Promise<boolean> {
-  const flight = await userDb.flights.get(id)
-  if (!flight) return false
-
-  await userDb.flights.delete(id)
-  await addToSyncQueue("delete", "flights", { id })
-
-  return true
+  return deleteEntity<FlightLog>(userDb.flights, "flights", id)
 }
 
 /**
  * Delete a flight without adding to sync queue (for server-initiated deletes)
  */
 export async function silentDeleteFlight(id: string): Promise<boolean> {
-  const flight = await userDb.flights.get(id)
-  if (!flight) {
-    const byMongoPattern = await userDb.flights.filter((f) => f.id === id ).first()
-    if (byMongoPattern) {
-      await userDb.flights.delete(byMongoPattern.id)
-      return true
-    }
-    return false
-  }
-  await userDb.flights.delete(id)
-  return true
+  return silentDeleteEntity<FlightLog>(userDb.flights, id)
 }
 
 /**
@@ -97,10 +56,10 @@ export async function getPendingFlights(): Promise<FlightLog[]> {
 }
 
 /**
- * Upsert a flight from server (for sync)
+ * Normalize a server flight record, filling defaults for any missing fields
  */
-export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<void> {
-  const normalized: FlightLog = {
+function normalizeFlightFromServer(serverFlight: FlightLog): FlightLog {
+  return {
     id: serverFlight.id,
     userId: serverFlight.userId,
     date: serverFlight.date,
@@ -157,28 +116,13 @@ export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<v
     isLocked: serverFlight.isLocked,
     lastSyncedAt: serverFlight.lastSyncedAt,
   }
+}
 
-  let existingFlight: FlightLog | undefined
-  if (normalized.id) {
-    existingFlight = await userDb.flights.where("id").equals(normalized.id).first()
-  }
-  if (!existingFlight && normalized.id) {
-    existingFlight = await userDb.flights.get(normalized.id)
-  }
-
-  if (existingFlight) {
-    const serverTime = normalized.updatedAt || normalized.createdAt
-    const localTime = existingFlight.updatedAt || existingFlight.createdAt
-
-    if (serverTime >= localTime) {
-      await userDb.flights.put({
-        ...normalized,
-        id: existingFlight.id,
-      })
-    }
-  } else {
-    await userDb.flights.put(normalized)
-  }
+/**
+ * Upsert a flight from server (for sync)
+ */
+export async function upsertFlightFromServer(serverFlight: FlightLog): Promise<void> {
+  return upsertFromServer<FlightLog>(userDb.flights, serverFlight, normalizeFlightFromServer)
 }
 
 /**
