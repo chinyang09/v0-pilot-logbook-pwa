@@ -48,7 +48,6 @@ app/                              # Next.js App Router
 ├── api/                          # API routes
 │   ├── auth/                     #   Registration, login, passkey, session
 │   ├── sync/                     #   Bulk sync, per-collection sync, TTL setup
-│   ├── flights/                  #   Flight CRUD
 │   ├── ocr/                      #   Image OCR processing
 │   ├── search/                   #   FR24 proxy routes
 │   │   ├── aircraft/             #     Aircraft search + batch lookup
@@ -87,7 +86,6 @@ components/                       # React components
 ├── airport-new-form.tsx          # New airport form (FR24 auto-populate)
 ├── aircraft-detail-panel.tsx     # Aircraft detail view (desktop panel)
 ├── airport-detail-panel.tsx      # Airport detail view (desktop panel)
-├── aircraft-preloader.tsx        # Background aircraft DB preloader
 ├── service-worker-register.tsx   # SW registration
 └── pwa-install-prompt.tsx        # PWA install prompts
 
@@ -106,7 +104,7 @@ lib/                              # Core utilities and services
 │   └── stores/                   #   CRUD operations by collection
 │       ├── user/                 #     flights.store, aircraft.store, etc.
 │       └── reference/            #     Reference data stores
-│           ├── aircraft.store.ts #       CDN aircraft DB (615k records)
+│           ├── aircraft.store.ts #       Aircraft DB (FR24/MongoDB-synced + custom)
 │           ├── airports.store.ts #       Airport reference data
 │           └── aircraft-types.store.ts # ICAO DOC 8643 type designators
 ├── submissions/                  # Client-side submission helpers
@@ -142,8 +140,7 @@ public/
 ├── sw.js                         # Service worker
 ├── airports.min.json             # Airport reference database
 ├── aircraft-types.json           # ICAO DOC 8643 type designators
-├── models/                       # OCR ONNX models (~16MB)
-└── workers/                      # Web workers (aircraft DB decompression)
+└── models/                       # OCR ONNX models (~16MB)
 ```
 
 ## Architecture
@@ -155,8 +152,18 @@ All user data is stored locally in **IndexedDB via Dexie** and synced to **Mongo
 - Data hooks read from Dexie first, not the server
 - Mutations write to Dexie and enqueue a sync item
 - The sync engine batches and pushes changes to MongoDB
-- Server timestamps win on conflicts (last-write-wins)
-- Tombstone records track deletions to prevent re-syncing
+- Last-write-wins conflict resolution. The delta-pull watermark is **server-authored**:
+  `/api/sync/[collection]` filters on the server-assigned `syncedAt` and returns
+  the server clock as the new `since`, so device clock skew can't drop updates.
+  The client only advances `lastSyncTime` when every collection pulled cleanly.
+- Tombstone records track deletions to prevent re-syncing. On the server, the
+  tombstone is written **before** the record is deleted (in `/api/sync/bulk`) —
+  if the tombstone write fails the delete is skipped and the client retries, so
+  a deletion can never be applied without a tombstone (which would resurrect the
+  record on other devices).
+- Failed push items are retried each cycle and **dead-lettered** after
+  `MAX_SYNC_RETRIES` (5) so a poison item can't loop forever; transient
+  network/offline failures are not counted toward the cap.
 
 ### Sync Triggers
 
@@ -175,14 +182,14 @@ Sessions are stored in MongoDB (with TTL) and mirrored to IndexedDB. Cookies are
 Aircraft and airport reference data is managed through a multi-tier lookup and enrichment pipeline:
 
 **Data Sources:**
-- **CDN Aircraft Database** (~615k records): Loaded from `chinyang09/Aircraft-Database` via gzip-compressed chunks, decompressed in a web worker, stored in IndexedDB (`referenceDb.aircraftDatabase`)
+- **Aircraft Database** (IndexedDB `referenceDb.aircraftDatabase`): there is **no** bulk CDN download. The table is populated on demand from FR24 search results, custom user entries, and the shared MongoDB enriched pool synced via `/api/sync/aircraft-reference` (per-user cursor)
 - **Airport Database**: Loaded from `public/airports.min.json` into IndexedDB
 - **ICAO DOC 8643 Aircraft Types**: Loaded from `public/aircraft-types.json` with memory + IndexedDB two-level caching
 - **FR24 APIs** (live): Aircraft search via `/v1/search/web/find`, airport lookup via `/airports/traffic-stats/`
 - **Server Enrichment DB** (MongoDB): User-submitted aircraft/airports enriched and shared across users
 
 **Lookup Chain (aircraft):**
-1. Local IndexedDB (`referenceDb.aircraftDatabase`) — includes CDN + FR24 + custom records in one unified table
+1. Local IndexedDB (`referenceDb.aircraftDatabase`) — FR24 + custom + MongoDB-synced records in one unified table
 2. Server batch lookup (`/api/search/aircraft/batch`) — checks enriched submissions from other users
 3. FR24 live search (`/api/search/aircraft`) — server-side proxy to bypass CORS
 4. Manual entry (user types registration + type code)
@@ -211,7 +218,10 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 - `batchGetAircraftByRegistrations(regs)` — bulk lookup for CSV imports
 - `submitAircraftToServer()` / `submitAirportToServer()` — fire-and-forget enrichment
 - `searchAircraftTypes(query, limit)` — ICAO DOC 8643 type code search
-- `normalizeReg(reg)` — strips dashes, uppercases for consistent matching
+- `normalizeRegistration(reg)` (`lib/utils/string.ts`) — the **single canonical**
+  registration key: uppercases and strips **all** non-alphanumeric characters.
+  Used identically on the client (local matching) and server (the
+  `registrationNormalized` dedup key). Do not reintroduce per-file copies.
 - `recalculateFlightFields()` — respects `manualOverrides`, won't overwrite user's manual entries
 
 ### Component Architecture
@@ -393,7 +403,7 @@ Notable route groups:
 | `/api/search/airport?q=` | GET | No | FR24 airport lookup proxy |
 | `/api/submissions/aircraft` | POST | Yes | Submit custom aircraft for enrichment |
 | `/api/submissions/airport` | POST | Yes | Submit custom airport for enrichment |
-| `/api/enrichment/batch` | GET | CRON_SECRET | Background enrichment of pending submissions |
+| `/api/enrichment/batch` | POST | CRON_SECRET (required) | Background enrichment of pending submissions; fails closed if `CRON_SECRET` is unset |
 | `/api/timezone?lat=&lng=` | GET | No | Coordinate → IANA timezone via geo-tz |
 
 ### Console Logging
@@ -442,7 +452,7 @@ Debug logs use prefixed format: `[v0]`, `[Auth]`, `[SW]`, `[UserDB]`, `[Sync]`, 
 | Table | Purpose | Key Indexes |
 |---|---|---|
 | `airports` | Airport reference data (~10k) | icao, iata, [icao+iata] |
-| `aircraftDatabase` | Unified aircraft DB (~615k CDN + FR24 + custom) | icao24, registration |
+| `aircraftDatabase` | Unified aircraft DB (FR24 + custom + MongoDB-synced enriched) | icao24, registration |
 | `aircraftTypes` | ICAO DOC 8643 type designators | designator |
 | `metadata` | Version tracking for cache invalidation | key |
 
@@ -453,7 +463,16 @@ Debug logs use prefixed format: `[v0]`, `[Auth]`, `[SW]`, `[UserDB]`, `[Sync]`, 
 | `aircraftSubmissions` | User-submitted aircraft with enrichment status (pending/enriched/failed) |
 | `airportSubmissions` | User-submitted airports with enrichment status |
 | `sessions` | User sessions with TTL |
+| `deletions` | Tombstones (TTL 30d) for propagating deletes across devices |
 | `flights`, `aircraft`, `personnel`, etc. | Synced user data collections |
+
+**Indexes:** `lib/mongodb/client.ts` runs an idempotent, best-effort
+`ensureIndexes()` once per warm process after `connect()` — `{userId,id}` (unique)
+and `{userId,syncedAt}` on the data collections, the `deletions` TTL/dedup/delta
+indexes, and unique dedup indexes on the submission collections. (The
+`/api/sync/setup-ttl` route still creates the `deletions` indexes too.) Index
+creation is fire-and-forget and never blocks a query; a failure (e.g. a
+pre-existing duplicate blocking a unique index) is logged, not thrown.
 
 ## Critical Files
 
@@ -484,14 +503,14 @@ When making changes, be aware of these high-impact files:
 
 **Reference Data System:**
 - `lib/db/reference-db.ts` — Dexie reference database schema (airports, aircraft, types)
-- `lib/db/stores/reference/aircraft.store.ts` — CDN aircraft DB loader (615k records, web worker decompression)
+- `lib/db/stores/reference/aircraft.store.ts` — unified aircraft reference store (FR24 + custom + MongoDB-synced; no CDN download)
 - `lib/db/stores/reference/airports.store.ts` — Airport reference data, favorites, timezone utilities
 - `lib/db/stores/reference/aircraft-types.store.ts` — ICAO DOC 8643 type designator lookup
 - `lib/submissions/submit.ts` — Fire-and-forget client→server submission with flight reconciliation
 - `lib/utils/aircraft-type-utils.ts` — ICAO type code parsing (description → category/engines)
 - `components/aircraft-new-form.tsx` — Aircraft creation form with FR24 auto-populate
 - `components/airport-new-form.tsx` — Airport creation form with FR24 auto-populate
-- `components/aircraft-preloader.tsx` — Background aircraft DB initializer (in root layout)
+- `lib/utils/string.ts` — `normalizeRegistration` canonical registration key (shared client/server)
 
 ## Things to Avoid
 
@@ -499,6 +518,10 @@ When making changes, be aware of these high-impact files:
 - Do not add a test framework without discussion — none exists currently
 - Do not modify the Dexie schema without considering IndexedDB migration implications
 - Do not change sync conflict resolution strategy without understanding the tombstone system
+- Do not advance the sync watermark from the client clock — `lastSyncTime` must come from the server-returned `syncedAt`, and only after every collection pulls cleanly
+- Do not delete a record on the server before its tombstone is written (`/api/sync/bulk`) — that order prevents deleted records resurrecting on other devices
+- Do not reintroduce per-file registration normalizers — use the canonical `normalizeRegistration` in `lib/utils/string.ts` on both client and server
+- Do not re-add a bulk CDN aircraft download — the aircraft DB is populated from FR24, custom entries, and the MongoDB enriched pool only
 - Do not remove `"use client"` directives — server/client boundary is intentionally designed
 - Do not commit `.env` files or MongoDB credentials
 - Do not use `npm install` or `npm add` — always use `pnpm` to keep `pnpm-lock.yaml` in sync (Vercel uses frozen-lockfile)
