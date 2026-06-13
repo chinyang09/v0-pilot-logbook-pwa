@@ -201,10 +201,7 @@ export async function GET(
   } catch (error) {
     console.error("Fetch collection error:", error);
     return NextResponse.json(
-      {
-        error: "Failed to fetch records",
-        message: error instanceof Error ? error.message : "Unknown error",
-      },
+      { error: "Failed to fetch records" },
       { status: 500 }
     );
   }

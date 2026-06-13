@@ -255,10 +255,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("[v0] Bulk sync error:", error);
     return NextResponse.json(
-      {
-        error: "Bulk sync failed",
-        message: error instanceof Error ? error.message : "Unknown error",
-      },
+      { error: "Bulk sync failed" },
       { status: 500 }
     );
   }
