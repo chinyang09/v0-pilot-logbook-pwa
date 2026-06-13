@@ -44,8 +44,9 @@ export function hhmmToMinutes(hhmm: string | undefined | null): number {
  */
 export function minutesToHHMM(totalMinutes: number): string {
   if (!totalMinutes || totalMinutes <= 0 || !Number.isFinite(totalMinutes)) return "00:00"
-  const hours = Math.floor(totalMinutes / 60)
-  const minutes = Math.round(totalMinutes % 60)
+  const total = Math.round(totalMinutes)
+  const hours = Math.floor(total / 60)
+  const minutes = total % 60
   return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
 }
 
