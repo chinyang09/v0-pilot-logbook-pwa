@@ -144,7 +144,9 @@ export class SyncTriggerManager {
 
     try {
       const registration = await navigator.serviceWorker.ready
-      await registration.sync.register("sync-flights")
+      // Background Sync API is not in the standard TS DOM lib; guarded by the
+      // feature check above.
+      await (registration as unknown as { sync: { register: (tag: string) => Promise<void> } }).sync.register("sync-flights")
       console.log("[v0] Background sync registered")
     } catch (error) {
       console.error("[v0] Failed to register background sync:", error)

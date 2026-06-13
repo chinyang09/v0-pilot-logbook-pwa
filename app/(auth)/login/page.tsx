@@ -302,17 +302,15 @@ export default function LoginPage() {
             authenticatorAttachment: "platform",
           },
           excludeCredentials:
-            options.excludeCredentials?.map(
-              (cred: {
-                id: string
-                type: "public-key"
-                transports?: AuthenticatorTransport[]
-              }) => ({
+            (options.excludeCredentials as Array<{
+              id: string
+              type: "public-key"
+              transports?: AuthenticatorTransport[]
+            }> | undefined)?.map((cred) => ({
                 id: base64URLDecode(cred.id as unknown as string),
                 type: cred.type,
                 transports: cred.transports,
-              }),
-            ) || [],
+              })) || [],
         },
       })
 

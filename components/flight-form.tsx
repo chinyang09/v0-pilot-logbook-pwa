@@ -2,7 +2,7 @@
 
 import type React from "react";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
@@ -123,6 +123,13 @@ function SettingsRow({
     </div>
   );
 }
+
+// Caches the last-known data for each flight at module scope so the form can
+// seed its initial state synchronously when it re-mounts (e.g. when switching
+// back to the logbook from another section). Without this, the form mounts with
+// empty data while useLiveQuery resolves asynchronously, briefly showing blank
+// times before snapping to the real values. Cleared when the PWA is closed.
+const flightDataCache = new Map<string, FlightLog>();
 
 // Time row with UTC and Local display
 function TimeRow({
@@ -335,11 +342,20 @@ export function FlightForm({
   // Resolve which flight data to use
   const resolvedFlight = editingFlight || liveFlight || null;
 
+  // Synchronous fallback for the first render after a re-mount, before
+  // useLiveQuery has resolved. Avoids the blank-then-populate flicker.
+  const cachedFlight = flightIdProp ? flightDataCache.get(flightIdProp) ?? null : null;
+
   // Initialize form data from resolvedFlight (draft or existing flight)
   const [formData, setFormData] = useState<Partial<FlightLog>>(() => {
     if (resolvedFlight) {
       editingFlightInitializedRef.current = resolvedFlight.id;
       return resolvedFlight;
+    }
+    // Seed from cache for an instant first paint. Leave editingFlightInitializedRef
+    // unset so the resolvedFlight effect still reconciles with live data once it loads.
+    if (cachedFlight) {
+      return cachedFlight;
     }
     return createEmptyFlightLog();
   });
@@ -347,7 +363,12 @@ export function FlightForm({
   // Track manual overrides state
   const [manualOverrides, setManualOverrides] = useState<
     FlightLog["manualOverrides"]
-  >(resolvedFlight?.manualOverrides || {});
+  >(resolvedFlight?.manualOverrides || cachedFlight?.manualOverrides || {});
+
+  // Keep the module cache current so the next re-mount can seed synchronously.
+  useEffect(() => {
+    if (liveFlight) flightDataCache.set(liveFlight.id, liveFlight);
+  }, [liveFlight]);
 
   // Inside FlightForm component...
 
@@ -393,22 +414,10 @@ export function FlightForm({
     () => getNumericOffset(arrAirport?.tz),
     [arrAirport]
   );
-  // Reset all transient state when flightIdProp changes (hot-swap instead of remount)
+  // Tracks the flight currently loaded into the form. The instant-swap handling
+  // when this changes lives in a useLayoutEffect defined after forceSave (below),
+  // so it can flush the outgoing flight before swapping.
   const prevFlightIdRef = useRef(flightIdProp);
-  useEffect(() => {
-    if (flightIdProp === prevFlightIdRef.current) return;
-    prevFlightIdRef.current = flightIdProp;
-
-    // Reset transient UI state
-    setIsSubmitting(false);
-    setActiveTimePicker(null);
-    setDatePickerOpen(false);
-    editingFlightInitializedRef.current = null;
-    prevLiveFlightRef.current = undefined;
-
-    // Scroll to top on ID switch
-    scrollContainerRef.current?.scrollTo(0, 0);
-  }, [flightIdProp]);
 
   // Update form data when resolvedFlight changes (e.g., after refresh or live query)
   useEffect(() => {
@@ -475,7 +484,7 @@ export function FlightForm({
           (!prev.departureIata || prev.departureTimezone === undefined)
         ) {
           updated.departureIata = airport.iata || "";
-          updated.departureTimezone = airport.timezone || 0;
+          updated.departureTimezone = getNumericOffset(airport.tz);
           changed = true;
         }
       }
@@ -487,7 +496,7 @@ export function FlightForm({
           (!prev.arrivalIata || prev.arrivalTimezone === undefined)
         ) {
           updated.arrivalIata = airport.iata || "";
-          updated.arrivalTimezone = airport.timezone || 0;
+          updated.arrivalTimezone = getNumericOffset(airport.tz);
           changed = true;
         }
       }
@@ -590,8 +599,8 @@ export function FlightForm({
         const nightResult = calculateNightTimeComplete(
           formData.date,
           formData.outTime,
-          formData.offTime, // Pass raw values, helper handles the fallback
-          formData.onTime,
+          formData.offTime ?? "", // Pass raw values, helper handles the fallback
+          formData.onTime ?? "",
           formData.inTime,
           { lat: depLat, lon: depLon }, // Pass as object
           { lat: arrLat, lon: arrLon } // Pass as object
@@ -868,42 +877,61 @@ export function FlightForm({
 
   const SCROLL_STORAGE_KEY = "flight-form-scroll";
 
-  // Track whether we need to restore scroll after returning from picker
-  const pendingScrollRestoreRef = useRef(false);
+  // Whether scroll has already been restored for the current mount. Restore runs
+  // once, then the user scrolls freely. A fresh mount (e.g. switching back into
+  // the logbook section, which re-mounts the form) resets this and restores again.
+  const didRestoreScrollRef = useRef(false);
+  // rAF throttle flag for persisting the scroll position.
+  const scrollSaveRafRef = useRef(false);
 
-  // Save scroll position before navigating to picker
+  // Persist the current scroll position (throttled to once per frame) so it can be
+  // restored when the form re-mounts — switching out of the logbook section and
+  // back, or returning from a picker on mobile. Kept current on every scroll so the
+  // latest position is already saved by the time the form unmounts.
+  const handleScrollSave = useCallback(() => {
+    if (scrollSaveRafRef.current) return;
+    scrollSaveRafRef.current = true;
+    requestAnimationFrame(() => {
+      scrollSaveRafRef.current = false;
+      if (scrollContainerRef.current) {
+        sessionStorage.setItem(SCROLL_STORAGE_KEY, String(scrollContainerRef.current.scrollTop));
+      }
+    });
+  }, []);
+
+  // Save scroll position immediately (used right before navigating to a picker).
   const saveScrollPosition = useCallback(() => {
     if (scrollContainerRef.current) {
       sessionStorage.setItem(SCROLL_STORAGE_KEY, String(scrollContainerRef.current.scrollTop));
-      pendingScrollRestoreRef.current = true;
     }
   }, []);
 
-  // Restore scroll position after returning from picker.
-  // Uses double-rAF to ensure the DOM has painted with updated content.
+  // Restore the saved scroll position. Double-rAF ensures the DOM has painted with
+  // the flight's content (seeded synchronously from the cache) before we set
+  // scrollTop. Does NOT clear the saved value, so it survives repeated section
+  // switches.
   const restoreScrollPosition = useCallback(() => {
     const saved = sessionStorage.getItem(SCROLL_STORAGE_KEY);
-    if (saved && scrollContainerRef.current) {
-      const scrollVal = Number(saved);
-      // Double rAF: first waits for React commit, second waits for browser paint
+    if (!saved || !scrollContainerRef.current) return;
+    const scrollVal = Number(saved);
+    if (!Number.isFinite(scrollVal) || scrollVal <= 0) return;
+    // Double rAF: first waits for React commit, second waits for browser paint
+    requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (scrollContainerRef.current) {
-            scrollContainerRef.current.scrollTop = scrollVal;
-          }
-          sessionStorage.removeItem(SCROLL_STORAGE_KEY);
-          pendingScrollRestoreRef.current = false;
-        });
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollVal;
+        }
       });
-    }
+    });
   }, []);
 
-  // Check for saved scroll on mount (mobile: form remounts after picker)
-  // and also whenever liveFlight arrives/updates (data ready → content rendered)
+  // Restore once per mount, after flight data is ready so the content has its full
+  // height. Switching between flights keeps the form mounted, so this does not fire
+  // then — the live scroll offset is preserved as-is.
   useEffect(() => {
-    if (!pendingScrollRestoreRef.current && !sessionStorage.getItem(SCROLL_STORAGE_KEY)) return;
+    if (didRestoreScrollRef.current) return;
     if (!liveFlight) return; // Wait for data to be ready before restoring
-    pendingScrollRestoreRef.current = true;
+    didRestoreScrollRef.current = true;
     restoreScrollPosition();
   }, [liveFlight, restoreScrollPosition]);
 
@@ -921,6 +949,41 @@ export function FlightForm({
       console.error("Force save before picker navigation failed:", error);
     }
   }, [formData, resolvedFlight?.id, flightIdProp, manualOverrides]);
+
+  // Instant in-logbook flight switching. When the selected flight changes while
+  // the form stays mounted, flush the outgoing flight's edits, then seed the
+  // incoming flight from the module cache synchronously BEFORE the browser paints.
+  // useLayoutEffect re-renders with the new data before paint, so the user never
+  // sees the previous flight's values (or a blank frame) during the switch.
+  // The scroll offset is intentionally preserved for side-by-side comparison.
+  useLayoutEffect(() => {
+    if (flightIdProp === prevFlightIdRef.current) return;
+    const outgoingId = prevFlightIdRef.current;
+    prevFlightIdRef.current = flightIdProp;
+
+    // Persist any unsaved edits to the flight we're leaving. forceSave reads the
+    // outgoing formData synchronously and dedupes against lastSavedStateRef.
+    if (outgoingId) void forceSave();
+
+    // Reset transient UI + reconciliation refs for the incoming flight.
+    setIsSubmitting(false);
+    setActiveTimePicker(null);
+    setDatePickerOpen(false);
+    editingFlightInitializedRef.current = null;
+    prevLiveFlightRef.current = undefined;
+
+    // Seed the incoming flight from cache for an instant, correct first paint.
+    // If it was never opened this session, fall back to an empty form — the
+    // resolvedFlight effect then populates it once useLiveQuery resolves.
+    const cached = flightIdProp ? flightDataCache.get(flightIdProp) : null;
+    if (cached) {
+      setFormData(cached);
+      setManualOverrides(cached.manualOverrides ?? {});
+    } else {
+      setFormData(createEmptyFlightLog());
+      setManualOverrides({});
+    }
+  }, [flightIdProp, forceSave]);
 
   // Navigate to picker pages for aircraft/airport/crew selection.
   // Both mobile and desktop navigate to the same pages. On desktop, the page
@@ -1176,7 +1239,7 @@ export function FlightForm({
 
   return (
     <div className="h-full relative">
-    <div ref={scrollContainerRef} className="h-full overflow-y-auto bg-background">
+    <div ref={scrollContainerRef} onScroll={handleScrollSave} className="h-full overflow-y-auto bg-background">
       <div className="min-h-full pt-16 pb-20">
 
       {/* Form Content */}
@@ -1645,7 +1708,7 @@ export function FlightForm({
                 <select
                   value={approach.type}
                   onChange={(e) =>
-                    updateApproach(approach.id, { type: e.target.value })
+                    updateApproach(approach.id, { type: e.target.value as Approach["type"] })
                   }
                   className="bg-transparent text-foreground outline-none text-sm"
                 >

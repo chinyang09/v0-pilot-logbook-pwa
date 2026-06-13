@@ -60,6 +60,7 @@ export interface FlightSignature {
 }
 
 export interface Approach {
+  id: string
   type: "ILS" | "VOR" | "NDB" | "RNAV" | "LOC" | "LDA" | "SDF" | "GPS" | "VISUAL" | "OTHER"
   category: "precision" | "non-precision"
   runway?: string
@@ -88,6 +89,9 @@ export interface ManualOverrides {
   dayLandings?: boolean
   nightTakeoffs?: boolean
   nightLandings?: boolean
+  dualTime?: boolean
+  instructorTime?: boolean
+  simulatedInstrumentTime?: boolean
 }
 
 export interface FlightLog {

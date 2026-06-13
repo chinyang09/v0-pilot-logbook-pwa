@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     const results: BulkSyncResult[] = [];
 
     // Group items by collection for efficient batch processing
-    const itemsByCollection = items.reduce((acc, item: SyncQueueItem) => {
+    const itemsByCollection: Record<string, SyncQueueItem[]> = (items as SyncQueueItem[]).reduce((acc: Record<string, SyncQueueItem[]>, item: SyncQueueItem) => {
       if (!acc[item.collection]) {
         acc[item.collection] = [];
       }

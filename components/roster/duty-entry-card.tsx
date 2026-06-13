@@ -108,7 +108,7 @@ export function DutyEntryCard({ entry, onClick, compact = false }: DutyEntryCard
               {hasLinkedFlights && (
                 <Badge variant="secondary" className="text-xs">
                   <Plane className="h-3 w-3 mr-1" />
-                  {entry.linkedFlightIds.length}
+                  {entry.linkedFlightIds?.length}
                 </Badge>
               )}
             </div>
@@ -174,7 +174,9 @@ export function DutyEntryCard({ entry, onClick, compact = false }: DutyEntryCard
                   </span>
                 )}
                 {sector.linkedFlightId && (
-                  <Plane className="h-3.5 w-3.5 text-green-500" title="Linked to flight" />
+                  <span title="Linked to flight" className="inline-flex">
+                    <Plane className="h-3.5 w-3.5 text-green-500" />
+                  </span>
                 )}
               </div>
             ))}

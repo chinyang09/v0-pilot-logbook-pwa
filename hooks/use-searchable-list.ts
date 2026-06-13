@@ -34,7 +34,7 @@ export interface UseSearchableListReturn<T> {
   /** Whether there are more items to load */
   hasMore: boolean
   /** Ref for infinite scroll observer target */
-  observerTarget: React.RefObject<HTMLDivElement>
+  observerTarget: React.RefObject<HTMLDivElement | null>
   /** Whether currently loading */
   isLoading: boolean
   /** Manually set display count */

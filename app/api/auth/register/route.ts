@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
       registrationOptions.challenge as Uint8Array
     );
 
-    await db.collection("challenges").insertOne({
+    await db.collection<{ _id: string; [key: string]: unknown }>("challenges").insertOne({
       _id: challengeBase64,
       challenge: challengeBase64,
       expiresAt: new Date(Date.now() + 60000), // 1 minute expiry
@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
   const { getDB } = await import("@/lib/mongodb");
   const db = await getDB();
 
-  const storedChallenge = await db.collection("challenges").findOne({
+  const storedChallenge = await db.collection<{ _id: string; [key: string]: unknown }>("challenges").findOne({
     _id: challengeId,
     expiresAt: { $gt: new Date() },
   });

@@ -2,6 +2,7 @@
 
 import { useMemo } from "react"
 import type { FlightLog, Airport } from "@/lib/db"
+import type { PilotRole } from "@/types"
 import {
   calculateBlockTime,
   calculateFlightTime,
@@ -131,8 +132,8 @@ export function useFlightCalculations(
         const nightResult = calculateNightTimeComplete(
           date,
           outTime,
-          offTime,
-          onTime,
+          offTime ?? "",
+          onTime ?? "",
           inTime,
           { lat: depLat, lon: depLon },
           { lat: arrLat, lon: arrLon }
@@ -164,7 +165,7 @@ export function useFlightCalculations(
           }
 
     // Calculate role-based times
-    const roleTimes = calculateRoleTimes(blockTime, pilotRole)
+    const roleTimes = calculateRoleTimes(blockTime, pilotRole as PilotRole)
 
     return {
       blockTime,

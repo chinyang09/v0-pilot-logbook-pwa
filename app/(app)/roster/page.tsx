@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo, useCallback } from "react"
+import { useSessionState } from "@/hooks/use-session-state"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -27,8 +28,8 @@ import { UnifiedImportButton } from "@/components/import/unified-import-button"
 type ViewMode = "list" | "calendar"
 
 export default function RosterPage() {
-  const [viewMode, setViewMode] = useState<ViewMode>("list")
-  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useSessionState<ViewMode>("roster:viewMode", "list")
+  const [selectedDate, setSelectedDate] = useSessionState<string | null>("roster:selectedDate", null)
   const [selectedEntries, setSelectedEntries] = useState<ScheduleEntry[]>([])
 
   const { scheduleEntries, isLoading: entriesLoading, refresh: refreshEntries } = useScheduleEntries()

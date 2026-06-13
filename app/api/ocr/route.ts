@@ -18,8 +18,9 @@ interface OcrLine {
 }
 
 // Lazy-loaded OCR instance (singleton)
-let ocrInstance: { detect: (image: string) => Promise<OcrLine[]> } | null = null
-let ocrInitPromise: Promise<typeof ocrInstance> | null = null
+type OcrInstance = { detect: (image: string) => Promise<OcrLine[]> }
+let ocrInstance: OcrInstance | null = null
+let ocrInitPromise: Promise<OcrInstance | null> | null = null
 
 async function getOcrInstance() {
   if (ocrInstance) return ocrInstance
