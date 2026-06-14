@@ -3,7 +3,12 @@ export const revalidate = 0
 
 import { type NextRequest, NextResponse } from "next/server"
 import { getDB } from "@/lib/mongodb"
-import { generateAuthenticationOptions, base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
+import {
+  generateAuthenticationOptions,
+  base64URLEncode,
+  base64URLDecode,
+  verifyAuthenticationResponse,
+} from "@/lib/auth/server/webauthn"
 import type { User } from "@/lib/auth/types"
 import { cookies } from "next/headers"
 import { createId } from "@/lib/auth/shared/cuid"
@@ -65,10 +70,40 @@ export async function POST(request: NextRequest) {
     const passkey = user.auth.passkeys.find((p) => p.id === credentialId)
     if (!passkey) return NextResponse.json({ error: "Passkey not found" }, { status: 401 })
 
-    const authData = base64URLDecode(credential.response.authenticatorData)
-    const newCounter = new DataView(authData.buffer, authData.byteOffset + 33, 4).getUint32(0, false)
+    // Cryptographically verify the assertion. Without this, anyone who knows a
+    // (non-secret) credential ID could forge a login by sending a fresh
+    // challenge and arbitrary authenticatorData. The challenge above is only
+    // proof the request is recent — not proof of possession of the private key.
+    const assertion = credential?.response
+    if (!assertion?.authenticatorData || !assertion?.clientDataJSON || !assertion?.signature) {
+      return NextResponse.json({ error: "Invalid credential" }, { status: 400 })
+    }
 
-    const finalCounter = Math.max(newCounter, passkey.counter)
+    let verification: { verified: boolean; newCounter: number }
+    try {
+      verification = await verifyAuthenticationResponse(
+        {
+          response: {
+            authenticatorData: base64URLDecode(assertion.authenticatorData),
+            clientDataJSON: base64URLDecode(assertion.clientDataJSON),
+            signature: base64URLDecode(assertion.signature),
+          },
+        },
+        base64URLDecode(challenge),
+        passkey,
+      )
+    } catch (err) {
+      console.error("Passkey verification error:", err)
+      return NextResponse.json({ error: "Verification failed" }, { status: 401 })
+    }
+
+    if (!verification.verified) {
+      return NextResponse.json({ error: "Verification failed" }, { status: 401 })
+    }
+
+    // Persist the highest counter seen so a real cloned-authenticator rollback
+    // is still caught on the next login.
+    const finalCounter = Math.max(verification.newCounter, passkey.counter)
 
     await db.collection<User>("users").updateOne(
       { _id: user._id, "auth.passkeys.id": credentialId },
