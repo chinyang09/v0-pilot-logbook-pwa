@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
       _id: challengeBase64,
       userId: user._id!.toString(),
       expiresAt: new Date(Date.now() + 60000),
+      type: "add-passkey",
     } as any)
 
     return NextResponse.json({
@@ -115,6 +116,20 @@ export async function POST(request: NextRequest) {
     if (!session || session.userId.toString() !== storedChallenge.userId.toString()) {
       console.log("[v0] Session/challenge mismatch")
       return NextResponse.json({ error: "Invalid session" }, { status: 401 })
+    }
+
+    // Bind the attestation to the issued challenge and ensure it is a creation
+    // ceremony. Without this an authenticated user could attach a credential
+    // that was never produced by this ceremony (e.g. a replayed clientDataJSON).
+    try {
+      const clientData = JSON.parse(
+        new TextDecoder().decode(base64URLDecode(credential.response.clientDataJSON)),
+      )
+      if (clientData.type !== "webauthn.create" || clientData.challenge !== challenge) {
+        return NextResponse.json({ error: "Invalid credential" }, { status: 400 })
+      }
+    } catch {
+      return NextResponse.json({ error: "Invalid credential" }, { status: 400 })
     }
 
     const credentialData = await parseClientCredential(credential)

@@ -64,7 +64,7 @@ export interface StoredChallenge {
   _id: string; // The challenge string (base64url)
   userId: string;
   expiresAt: Date; // Date for TTL cleanup
-  type: "registration" | "authentication";
+  type: "registration" | "authentication" | "add-passkey";
 }
 
 // Legacy/Ceremony type for API responses
