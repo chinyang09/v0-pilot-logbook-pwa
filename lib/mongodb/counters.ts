@@ -12,7 +12,14 @@
 import type { Db, ClientSession } from "mongodb";
 
 /** Collections that participate in server-authored sequencing. */
-export const SEQ_COLLECTIONS = ["flights", "aircraft", "personnel"] as const;
+export const SEQ_COLLECTIONS = [
+  "flights",
+  "aircraft",
+  "personnel",
+  "scheduleEntries",
+  "currencies",
+  "discrepancies",
+] as const;
 
 const COUNTERS = "counters";
 

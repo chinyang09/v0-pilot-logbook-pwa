@@ -150,6 +150,8 @@ export interface ScheduleEntry {
   updatedAt?: number
   deleteddAt?: number
   syncStatus: SyncStatus
+  serverSeq?: number
+  deviceId?: string
 }
 
 // ============================================
@@ -183,6 +185,8 @@ export interface Currency {
   updatedAt?: number
   deleteddAt?: number
   syncStatus: SyncStatus
+  serverSeq?: number
+  deviceId?: string
 }
 
 export type CurrencyStatus = "valid" | "warning" | "critical" | "expired"
@@ -325,7 +329,14 @@ export interface Discrepancy {
   resolvedBy?: "keep_logbook" | "keep_schedule" | "merged" | "ignored"
   resolutionNotes?: string
 
+  // Sync
+  userId?: string
   createdAt: number
+  updatedAt?: number
+  deleteddAt?: number
+  syncStatus?: SyncStatus
+  serverSeq?: number
+  deviceId?: string
 }
 
 // ============================================

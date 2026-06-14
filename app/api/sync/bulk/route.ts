@@ -113,9 +113,16 @@ export async function POST(request: NextRequest) {
       (itemsByCollection[raw.collection] ||= []).push(raw);
     }
 
-    // Process dependency-light collections (aircraft, personnel) before flights
-    // so a flight never lands referencing an aircraft/crew the server hasn't seen.
-    const order = ["aircraft", "personnel", "flights"];
+    // Process dependency-light collections before flights so a flight never
+    // lands referencing an aircraft/crew the server hasn't seen.
+    const order = [
+      "aircraft",
+      "personnel",
+      "scheduleEntries",
+      "currencies",
+      "discrepancies",
+      "flights",
+    ];
     const presentCollections = order.filter((c) => itemsByCollection[c]?.length);
 
     for (const collectionName of presentCollections) {

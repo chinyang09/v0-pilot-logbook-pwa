@@ -43,6 +43,7 @@ export class SyncTriggerManager {
   private appJustForegrounded: boolean = false
   private networkJustOnline: boolean = false
   private syncCallback: (() => Promise<void>) | null = null
+  private unloadCallback: (() => void) | null = null
   private isInitialized: boolean = false
 
   // Bound event listeners for proper cleanup
@@ -64,8 +65,13 @@ export class SyncTriggerManager {
     this.checkAndTriggerSync("window-focus")
   }
   private onBeforeUnload = () => {
-    console.log("[v0] App closing - triggering final sync (best effort)")
-    this.triggerSyncImmediate("app-closing")
+    // Use the dedicated keepalive flush (a normal async fullSync would be
+    // aborted on unload). Falls back to a best-effort immediate sync.
+    if (this.unloadCallback) {
+      this.unloadCallback()
+    } else {
+      this.triggerSyncImmediate("app-closing")
+    }
   }
 
   constructor(config: Partial<SyncTriggerConfig> = {}) {
@@ -75,13 +81,14 @@ export class SyncTriggerManager {
   /**
    * Initialize the trigger manager with a sync callback
    */
-  initialize(syncCallback: () => Promise<void>) {
+  initialize(syncCallback: () => Promise<void>, unloadCallback?: () => void) {
     if (this.isInitialized) {
       console.log("[v0] SyncTriggerManager already initialized")
       return
     }
 
     this.syncCallback = syncCallback
+    this.unloadCallback = unloadCallback ?? null
     this.isInitialized = true
 
     console.log("[v0] Initializing SyncTriggerManager with config:", this.config)
@@ -309,6 +316,7 @@ export class SyncTriggerManager {
 
     this.isInitialized = false
     this.syncCallback = null
+    this.unloadCallback = null
   }
 
   /**

@@ -165,6 +165,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  // Register silent reauth with the sync engine so a 401 mid-sync refreshes the
+  // session once and retries, instead of failing the sync.
+  useEffect(() => {
+    let active = true
+    import("@/lib/sync").then(({ syncService }) => {
+      if (active) syncService.setReauthHandler(silentReauth)
+    })
+    return () => {
+      active = false
+      import("@/lib/sync").then(({ syncService }) => syncService.setReauthHandler(null))
+    }
+  }, [silentReauth])
+
   // Check authentication on mount
   useEffect(() => {
     const checkAuth = async () => {

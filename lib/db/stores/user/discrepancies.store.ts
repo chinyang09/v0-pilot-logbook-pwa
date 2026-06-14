@@ -8,6 +8,8 @@ import type {
   DiscrepancyCreate,
   DiscrepancyType,
 } from "@/types/entities/roster.types"
+import { addToSyncQueue, enqueueMany, getDeviceId } from "./sync-queue.store"
+import { updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
 
 /**
  * Add new discrepancy
@@ -17,9 +19,13 @@ export async function addDiscrepancy(discrepancy: DiscrepancyCreate): Promise<Di
     ...discrepancy,
     id: crypto.randomUUID(),
     createdAt: Date.now(),
+    updatedAt: Date.now(),
+    deviceId: await getDeviceId(),
+    syncStatus: "pending",
   }
 
   await userDb.discrepancies.put(newDiscrepancy)
+  await addToSyncQueue("create", "discrepancies", newDiscrepancy)
   return newDiscrepancy
 }
 
@@ -29,13 +35,21 @@ export async function addDiscrepancy(discrepancy: DiscrepancyCreate): Promise<Di
 export async function bulkAddDiscrepancies(
   discrepancies: DiscrepancyCreate[]
 ): Promise<Discrepancy[]> {
+  const now = Date.now()
+  const deviceId = await getDeviceId()
   const newDiscrepancies: Discrepancy[] = discrepancies.map((d) => ({
     ...d,
     id: crypto.randomUUID(),
-    createdAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
+    deviceId,
+    syncStatus: "pending",
   }))
 
   await userDb.discrepancies.bulkPut(newDiscrepancies)
+  await enqueueMany(
+    newDiscrepancies.map((data) => ({ type: "create" as const, collection: "discrepancies" as const, data }))
+  )
   return newDiscrepancies
 }
 
@@ -54,38 +68,24 @@ export async function resolveDiscrepancy(
   resolution: Discrepancy["resolvedBy"],
   notes?: string
 ): Promise<Discrepancy | null> {
-  const discrepancy = await userDb.discrepancies.get(id)
-  if (!discrepancy) return null
-
-  const updated: Discrepancy = {
-    ...discrepancy,
+  return updateEntity<Discrepancy>(userDb.discrepancies, "discrepancies", id, {
     resolved: true,
     resolvedAt: Date.now(),
     resolvedBy: resolution,
     resolutionNotes: notes,
-  }
-
-  await userDb.discrepancies.put(updated)
-  return updated
+  })
 }
 
 /**
  * Unresolve discrepancy (reopen)
  */
 export async function unresolveDiscrepancy(id: string): Promise<Discrepancy | null> {
-  const discrepancy = await userDb.discrepancies.get(id)
-  if (!discrepancy) return null
-
-  const updated: Discrepancy = {
-    ...discrepancy,
+  return updateEntity<Discrepancy>(userDb.discrepancies, "discrepancies", id, {
     resolved: false,
     resolvedAt: undefined,
     resolvedBy: undefined,
     resolutionNotes: undefined,
-  }
-
-  await userDb.discrepancies.put(updated)
-  return updated
+  })
 }
 
 /**
@@ -139,11 +139,34 @@ export async function getDiscrepanciesByFlightLog(flightLogId: string): Promise<
  * Delete discrepancy
  */
 export async function deleteDiscrepancy(id: string): Promise<boolean> {
-  const discrepancy = await userDb.discrepancies.get(id)
-  if (!discrepancy) return false
+  return deleteEntity<Discrepancy>(userDb.discrepancies, "discrepancies", id)
+}
 
-  await userDb.discrepancies.delete(id)
-  return true
+/**
+ * Delete discrepancy without enqueuing (server-initiated)
+ */
+export async function silentDeleteDiscrepancy(id: string): Promise<boolean> {
+  return silentDeleteEntity<Discrepancy>(userDb.discrepancies, id)
+}
+
+/**
+ * Normalize a server discrepancy record.
+ */
+function normalizeDiscrepancyFromServer(server: Discrepancy): Discrepancy {
+  return {
+    ...server,
+    resolved: server.resolved ?? false,
+    createdAt: server.createdAt || Date.now(),
+    updatedAt: server.updatedAt,
+    syncStatus: "synced",
+  }
+}
+
+/**
+ * Upsert a discrepancy from server (for sync)
+ */
+export async function upsertDiscrepancyFromServer(server: Discrepancy): Promise<void> {
+  return upsertFromServer<Discrepancy>(userDb.discrepancies, server, normalizeDiscrepancyFromServer)
 }
 
 /**

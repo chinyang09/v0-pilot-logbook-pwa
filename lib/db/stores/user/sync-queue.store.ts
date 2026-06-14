@@ -9,37 +9,110 @@ import type {
   SyncOperationType,
   CollectionCursor,
 } from "@/types/sync/sync.types";
-import type { FlightLog } from "@/types/entities/flight.types";
-import type { Aircraft } from "@/types/entities/aircraft.types";
-import type { Personnel } from "@/types/entities/crew.types";
+
+type SyncQueueData = SyncQueueItem["data"];
+
+function notifySyncService() {
+  if (typeof window !== "undefined") {
+    // Dynamically import to avoid circular dependency
+    import("@/lib/sync")
+      .then(({ syncService }) => syncService.notifyDataChange())
+      .catch((err) => console.warn("[v0] Failed to notify sync service:", err));
+  }
+}
 
 /**
- * Add item to sync queue
- * Also notifies the sync trigger manager for intelligent sync scheduling
+ * Add an item to the sync queue, deduplicating to ONE live row per record
+ * (via the `[collection+recordId]` index):
+ * - create/update: collapse into the existing pending row (keeping a "create"
+ *   type sticky), refreshing data + timestamp. N rapid edits → 1 row.
+ * - delete: drop any pending rows for the record; if a not-yet-pushed CREATE
+ *   was pending the create+delete cancel out entirely (nothing to send),
+ *   otherwise a single delete row is enqueued.
+ * Also notifies the sync trigger manager for intelligent scheduling.
  */
 export async function addToSyncQueue(
   type: SyncOperationType,
   collection: SyncCollection,
-  data: FlightLog | Aircraft | Personnel | { id: string }
+  data: SyncQueueData
 ): Promise<void> {
+  const recordId = (data as { id?: string }).id;
+
+  if (recordId) {
+    const existingRows = await userDb.syncQueue
+      .where("[collection+recordId]")
+      .equals([collection, recordId])
+      .toArray();
+
+    if (type === "delete") {
+      const keys = existingRows.map((r) => r.id);
+      if (keys.length) await userDb.syncQueue.bulkDelete(keys);
+      const hadPendingCreate = existingRows.some((r) => r.type === "create");
+      // A record created but never pushed → fully cancel; nothing to delete.
+      if (!hadPendingCreate) {
+        await userDb.syncQueue.put({
+          id: crypto.randomUUID(),
+          type: "delete",
+          collection,
+          recordId,
+          data: { id: recordId },
+          timestamp: Date.now(),
+          retryCount: 0,
+        });
+      }
+      notifySyncService();
+      return;
+    }
+
+    // create / update — collapse into an existing pending (non-delete) row.
+    const existing = existingRows.find((r) => r.type !== "delete");
+    if (existing) {
+      await userDb.syncQueue.put({
+        ...existing,
+        // A pending create stays a create even after later edits.
+        type: existing.type === "create" ? "create" : type,
+        data,
+        timestamp: Date.now(),
+        retryCount: 0,
+      });
+      notifySyncService();
+      return;
+    }
+  }
+
   await userDb.syncQueue.put({
     id: crypto.randomUUID(),
     type,
     collection,
+    recordId,
     data,
     timestamp: Date.now(),
     retryCount: 0,
   });
+  notifySyncService();
+}
 
-  // Notify sync service of data change (for intelligent triggers)
-  if (typeof window !== "undefined") {
-    // Dynamically import to avoid circular dependency
-    import("@/lib/sync").then(({ syncService }) => {
-      syncService.notifyDataChange();
-    }).catch(err => {
-      console.warn("[v0] Failed to notify sync service:", err);
-    });
-  }
+/**
+ * Bulk-enqueue many sync operations in one write (used by CSV/import paths that
+ * write records inside their own Dexie transaction, then enqueue afterwards).
+ * Appends rows; the next push compaction collapses any same-record duplicates.
+ */
+export async function enqueueMany(
+  items: { type: SyncOperationType; collection: SyncCollection; data: SyncQueueData }[]
+): Promise<void> {
+  if (items.length === 0) return;
+  const now = Date.now();
+  const rows: SyncQueueItem[] = items.map((it) => ({
+    id: crypto.randomUUID(),
+    type: it.type,
+    collection: it.collection,
+    recordId: (it.data as { id?: string }).id,
+    data: it.data,
+    timestamp: now,
+    retryCount: 0,
+  }));
+  await userDb.syncQueue.bulkPut(rows);
+  notifySyncService();
 }
 
 /**
@@ -234,12 +307,9 @@ export async function reconcilePushedRecords(
       // what we pushed. Rows enqueued AFTER the push snapshot have a larger
       // timestamp and are intentionally preserved so the new edit re-syncs.
       const staleRows = await userDb.syncQueue
-        .where("collection")
-        .equals(collection)
-        .filter((row) => {
-          const rowId = (row.data as { id?: string })?.id;
-          return rowId === entry.id && row.timestamp <= entry.pushedTimestamp;
-        })
+        .where("[collection+recordId]")
+        .equals([collection, entry.id])
+        .filter((row) => row.timestamp <= entry.pushedTimestamp)
         .primaryKeys();
       if (staleRows.length > 0) {
         await userDb.syncQueue.bulkDelete(staleRows);

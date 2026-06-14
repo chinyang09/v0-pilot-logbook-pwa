@@ -121,6 +121,7 @@ export {
   getLastSyncTime,
   setLastSyncTime,
   markRecordSynced,
+  enqueueMany,
   getDeviceId,
   getMetaValue,
   setMetaValue,
@@ -149,6 +150,8 @@ export {
   clearAllScheduleEntries,
   getScheduleEntriesCount,
   getScheduleDateRange,
+  silentDeleteScheduleEntry,
+  upsertScheduleEntryFromServer,
 } from "./stores/user/schedule.store";
 
 // Re-export roster stores - currencies
@@ -168,6 +171,8 @@ export {
   bulkUpsertCurrencies,
   clearAllCurrencies,
   getCurrenciesCount,
+  silentDeleteCurrency,
+  upsertCurrencyFromServer,
 } from "./stores/user/currencies.store";
 
 // Re-export roster stores - discrepancies
@@ -187,6 +192,8 @@ export {
   clearAllDiscrepancies,
   getDiscrepanciesCount,
   getDiscrepanciesBySeverity,
+  silentDeleteDiscrepancy,
+  upsertDiscrepancyFromServer,
 } from "./stores/user/discrepancies.store";
 
 // Re-export reference stores - airports

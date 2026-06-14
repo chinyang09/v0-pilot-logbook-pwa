@@ -75,6 +75,28 @@ class UserDatabase extends Dexie {
       currencies: "id, code, expiryDate, syncStatus",
       discrepancies: "id, type, resolved, scheduleEntryId, flightLogId, createdAt",
     })
+
+    // Version 4 (additive): bring roster collections into sync.
+    // - syncQueue gains a denormalized `recordId` + [collection+recordId] index
+    //   so enqueue can dedup to one live row per record (bounds offline growth).
+    // - aircraft/personnel/discrepancies gain a syncStatus index for pending scans.
+    // The upgrade backfills `recordId` on existing queue rows from data.id.
+    this.version(4)
+      .stores({
+        aircraft: "id, registration, type, userId, syncStatus",
+        personnel: "id, name, userId, crewId, syncStatus",
+        syncQueue: "id, collection, timestamp, [collection+recordId]",
+        discrepancies:
+          "id, type, resolved, scheduleEntryId, flightLogId, createdAt, syncStatus",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("syncQueue")
+          .toCollection()
+          .modify((row: { recordId?: string; data?: { id?: string } }) => {
+            row.recordId = row?.data?.id
+          })
+      })
   }
 
   /**

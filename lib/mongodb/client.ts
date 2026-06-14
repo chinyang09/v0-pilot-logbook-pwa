@@ -42,7 +42,7 @@ async function ensureIndexes(mongoClient: MongoClient): Promise<void> {
   }
 
   await Promise.all([
-    ...["flights", "aircraft", "personnel"].flatMap((coll) => [
+    ...["flights", "aircraft", "personnel", "scheduleEntries", "currencies", "discrepancies"].flatMap((coll) => [
       safe(`${coll}.userId+id`, () =>
         db.collection(coll).createIndex({ userId: 1, id: 1 }, { unique: true }),
       ),

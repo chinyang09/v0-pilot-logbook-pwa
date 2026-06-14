@@ -39,7 +39,13 @@ export function compareAuthorship(a: SyncableEntity, b: SyncableEntity): number 
 /**
  * Table name type for sync queue operations
  */
-export type SyncableTableName = "flights" | "personnel" | "aircraft"
+export type SyncableTableName =
+  | "flights"
+  | "personnel"
+  | "aircraft"
+  | "scheduleEntries"
+  | "currencies"
+  | "discrepancies"
 
 /**
  * Generic add operation for syncable entities

@@ -12,6 +12,12 @@ import {
   silentDeleteFlight,
   silentDeleteAircraft,
   silentDeletePersonnel,
+  silentDeleteScheduleEntry,
+  silentDeleteCurrency,
+  silentDeleteDiscrepancy,
+  upsertScheduleEntryFromServer,
+  upsertCurrencyFromServer,
+  upsertDiscrepancyFromServer,
   bulkUpsertAircraftReferences,
   getCollectionCursor,
   setCollectionCursor,
@@ -23,9 +29,11 @@ import {
   type Aircraft,
   type Personnel,
 } from "@/lib/db"
+import type { ScheduleEntry, Currency, Discrepancy } from "@/types/entities/roster.types"
 import { referenceDb } from "@/lib/db/reference-db"
 import type { SyncQueueItem, SyncCollection } from "@/types/sync/sync.types"
 import { getSyncTriggerManager } from "./sync-trigger-manager"
+import { compactSyncQueue } from "./compact"
 
 // Max attempts before a per-item sync failure is dead-lettered so a poison item
 // can't loop forever. Transient network/outage/5xx failures are NOT counted.
@@ -34,9 +42,35 @@ const MAX_SYNC_RETRIES = 5
 // Collections covered by the user-data sync engine, in push/pull order
 // (dependency-light collections first so a flight never references an unseen
 // aircraft/crew member).
-const SYNC_COLLECTIONS: readonly SyncCollection[] = ["aircraft", "personnel", "flights"]
+const SYNC_COLLECTIONS: readonly SyncCollection[] = [
+  "aircraft",
+  "personnel",
+  "scheduleEntries",
+  "currencies",
+  "discrepancies",
+  "flights",
+]
 
 const PAGE_SIZE = 500
+
+// Abort any sync request that hangs, so a stalled fetch can't wedge the
+// in-flight mutex or the unload flush.
+const FETCH_TIMEOUT_MS = 30000
+
+async function fetchWithTimeout(input: RequestInfo, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Guard a server-supplied cursor value against NaN/negative/over-range poison. */
+function isSaneSeq(n: unknown): n is number {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= Number.MAX_SAFE_INTEGER
+}
 
 type SyncStatus = "online" | "offline" | "syncing"
 
@@ -61,6 +95,11 @@ class SyncService {
   // and await its real result, instead of returning a misleading no-op.
   private inFlight: Promise<{ pushed: number; pulled: number; failed: number }> | null = null
   private onDataChangedCallbacks: Set<() => void> = new Set()
+  // Registered by the auth provider; called once on a 401 to silently refresh
+  // the session before retrying the sync.
+  private reauthHandler: (() => Promise<boolean>) | null = null
+  // Set when any sync request returns 401 during the current cycle.
+  private got401 = false
 
   constructor() {
     if (typeof window !== "undefined") {
@@ -79,9 +118,12 @@ class SyncService {
   initializeTriggers() {
     if (typeof window === "undefined") return
     const triggerManager = getSyncTriggerManager()
-    triggerManager.initialize(async () => {
-      await this.fullSync()
-    })
+    triggerManager.initialize(
+      async () => {
+        await this.fullSync()
+      },
+      () => this.flushForUnload()
+    )
     console.log("[Sync] triggers initialized")
   }
 
@@ -99,6 +141,11 @@ class SyncService {
 
   destroyTriggers() {
     getSyncTriggerManager().destroy()
+  }
+
+  /** Register a silent reauth handler (the auth provider's passkey reauth). */
+  setReauthHandler(fn: (() => Promise<boolean>) | null) {
+    this.reauthHandler = fn
   }
 
   private setStatus(status: SyncStatus) {
@@ -166,39 +213,23 @@ class SyncService {
     this.setStatus("syncing")
     console.log(`[Sync ${correlationId}] start for ${session.callsign}`)
 
-    let pushed = 0
-    let pulled = 0
-    let failed = 0
+    let result = { pushed: 0, pulled: 0, failed: 0 }
 
     try {
-      const pushResult = await this.pushPendingChanges(correlationId)
-      pushed = pushResult.success
-      failed = pushResult.failed
-      console.log(`[Sync ${correlationId}] pushed ${pushed}, failed ${failed}`)
+      this.got401 = false
+      result = await this.runPushPull(session.userId, correlationId)
 
-      let pullResult = await this.pullFromServer(false, correlationId)
-
-      if (pullResult.requiresFullResync) {
-        console.log(`[Sync ${correlationId}] full resync required - clearing data (queue preserved)`)
-        await userDb.clearDataTablesForResync()
-        await resetAllCollectionCursors(SYNC_COLLECTIONS)
-        await setLastSyncTime(0)
-        await referenceDb.setMetadata(`aircraft-ref-last-sync-${session.userId}`, 0)
-        pullResult = await this.pullFromServer(true, correlationId)
-      }
-      pulled = pullResult.count
-      console.log(`[Sync ${correlationId}] pulled ${pulled}`)
-
-      const refPulled = await this.pullAircraftReference(session.userId)
-      if (refPulled > 0) console.log(`[Sync ${correlationId}] pulled ${refPulled} aircraft refs`)
-
-      // Advance the wall-clock tombstone watermark only when every collection
-      // drained cleanly, using the server-authored time. Per-collection record
-      // cursors are advanced incrementally inside pullFromServer.
-      if (pullResult.allOk && pullResult.serverNow !== undefined) {
-        await setLastSyncTime(pullResult.serverNow)
-      } else if (!pullResult.allOk) {
-        console.warn(`[Sync ${correlationId}] pull incomplete - watermark unchanged`)
+      // If the session expired mid-sync, refresh it once via the registered
+      // reauth handler and retry the whole cycle a single time.
+      if (this.got401 && this.reauthHandler) {
+        console.warn(`[Sync ${correlationId}] 401 - attempting silent reauth`)
+        const ok = await this.reauthHandler().catch(() => false)
+        if (ok) {
+          this.got401 = false
+          result = await this.runPushPull(session.userId, correlationId)
+        } else {
+          console.warn(`[Sync ${correlationId}] reauth failed - session expired`)
+        }
       }
 
       this.notifyDataChanged()
@@ -209,38 +240,45 @@ class SyncService {
       this.setStatus(navigator.onLine ? "online" : "offline")
     }
 
-    return { pushed, pulled, failed }
+    return result
   }
 
-  /**
-   * Compact the queue by merging multiple operations on the same record.
-   */
+  /** One push → pull → reference-pull → watermark cycle. */
+  private async runPushPull(
+    userId: string,
+    correlationId: string
+  ): Promise<{ pushed: number; pulled: number; failed: number }> {
+    const pushResult = await this.pushPendingChanges(correlationId)
+    console.log(`[Sync ${correlationId}] pushed ${pushResult.success}, failed ${pushResult.failed}`)
+
+    let pullResult = await this.pullFromServer(false, correlationId)
+
+    if (pullResult.requiresFullResync) {
+      console.log(`[Sync ${correlationId}] full resync required - clearing data (queue preserved)`)
+      await userDb.clearDataTablesForResync()
+      await resetAllCollectionCursors(SYNC_COLLECTIONS)
+      await setLastSyncTime(0)
+      await referenceDb.setMetadata(`aircraft-ref-cursor-${userId}`, { enrichedAt: 0, id: "" })
+      pullResult = await this.pullFromServer(true, correlationId)
+    }
+    console.log(`[Sync ${correlationId}] pulled ${pullResult.count}`)
+
+    const refPulled = await this.pullAircraftReference(userId)
+    if (refPulled > 0) console.log(`[Sync ${correlationId}] pulled ${refPulled} aircraft refs`)
+
+    // Advance the wall-clock tombstone watermark only when every collection
+    // drained cleanly. Per-collection record cursors advance inside pullFromServer.
+    if (pullResult.allOk && pullResult.serverNow !== undefined) {
+      await setLastSyncTime(pullResult.serverNow)
+    } else if (!pullResult.allOk) {
+      console.warn(`[Sync ${correlationId}] pull incomplete - watermark unchanged`)
+    }
+
+    return { pushed: pushResult.success, pulled: pullResult.count, failed: pushResult.failed }
+  }
+
   private compactSyncQueue(queue: SyncQueueItem[]): SyncQueueItem[] {
-    const recordOps = new Map<string, SyncQueueItem[]>()
-    for (const item of queue) {
-      const recordId = (item.data as { id?: string })?.id
-      if (!recordId) continue
-      const key = `${item.collection}:${recordId}`
-      if (!recordOps.has(key)) recordOps.set(key, [])
-      recordOps.get(key)!.push(item)
-    }
-
-    const compacted: SyncQueueItem[] = []
-    for (const operations of recordOps.values()) {
-      operations.sort((a, b) => a.timestamp - b.timestamp)
-      const latest = operations[operations.length - 1]
-
-      if (latest.type === "delete") {
-        // Created and deleted before ever syncing → nothing to send.
-        if (operations.some((op) => op.type === "create")) continue
-        compacted.push(latest)
-        continue
-      }
-
-      const finalType = operations.some((op) => op.type === "create") ? "create" : latest.type
-      compacted.push({ ...latest, type: finalType })
-    }
-    return compacted
+    return compactSyncQueue(queue)
   }
 
   async pushPendingChanges(correlationId = "push"): Promise<PushResult> {
@@ -262,18 +300,24 @@ class SyncService {
 
     let response: Response
     try {
-      response = await fetch("/api/sync/bulk", {
+      response = await fetchWithTimeout("/api/sync/bulk", {
         method: "POST",
         headers: await this.getAuthHeaders(),
         body: JSON.stringify({ items: compacted }),
       })
     } catch (error) {
-      // Transient network failure — keep the queue intact, do NOT count retries.
+      // Transient network failure / abort — keep the queue intact, no retries.
       console.warn(`[Sync ${correlationId}] push network error (will retry):`, error)
       return { success: 0, failed: compacted.length }
     }
 
     if (!response.ok) {
+      // 401 → session expired; never dead-letter, signal for one reauth+retry.
+      if (response.status === 401) {
+        this.got401 = true
+        console.warn(`[Sync ${correlationId}] push 401 - will reauth`)
+        return { success: 0, failed: compacted.length }
+      }
       const transient = response.status >= 500 || response.status === 429
       if (transient) {
         console.warn(`[Sync ${correlationId}] push transient ${response.status} (will retry)`)
@@ -317,6 +361,15 @@ class SyncService {
               break
             case "personnel":
               await silentDeletePersonnel(recordId)
+              break
+            case "scheduleEntries":
+              await silentDeleteScheduleEntry(recordId)
+              break
+            case "currencies":
+              await silentDeleteCurrency(recordId)
+              break
+            case "discrepancies":
+              await silentDeleteDiscrepancy(recordId)
               break
           }
         }
@@ -400,10 +453,11 @@ class SyncService {
             `/api/sync/${collection}?seq=${cursor.seq}` +
             `&seqId=${encodeURIComponent(cursor.id)}` +
             `&since=${since}&limit=${PAGE_SIZE}`
-          const response = await fetch(url, { headers })
+          const response = await fetchWithTimeout(url, { headers })
 
           if (response.status === 401) {
             allOk = false
+            this.got401 = true
             console.error(`[Sync ${correlationId}] unauthorized pulling ${collection}`)
             break
           }
@@ -423,6 +477,9 @@ class SyncService {
               if (collection === "flights") await silentDeleteFlight(deletedId)
               else if (collection === "aircraft") await silentDeleteAircraft(deletedId)
               else if (collection === "personnel") await silentDeletePersonnel(deletedId)
+              else if (collection === "scheduleEntries") await silentDeleteScheduleEntry(deletedId)
+              else if (collection === "currencies") await silentDeleteCurrency(deletedId)
+              else if (collection === "discrepancies") await silentDeleteDiscrepancy(deletedId)
             } catch (e) {
               console.error(`[Sync ${correlationId}] delete ${collection} error:`, e)
             }
@@ -433,17 +490,29 @@ class SyncService {
               if (collection === "flights") await upsertFlightFromServer(record as FlightLog)
               else if (collection === "aircraft") await upsertAircraftFromServer(record as Aircraft)
               else if (collection === "personnel") await upsertPersonnelFromServer(record as Personnel)
+              else if (collection === "scheduleEntries") await upsertScheduleEntryFromServer(record as ScheduleEntry)
+              else if (collection === "currencies") await upsertCurrencyFromServer(record as Currency)
+              else if (collection === "discrepancies") await upsertDiscrepancyFromServer(record as Discrepancy)
               count++
             } catch (e) {
               console.error(`[Sync ${correlationId}] upsert ${collection} error:`, e, record)
             }
           }
 
-          if (typeof data.serverNow === "number") {
+          if (isSaneSeq(data.serverNow)) {
             maxServerNow = Math.max(maxServerNow, data.serverNow)
           }
-          if (data.nextCursor && typeof data.nextCursor.seq === "number") {
-            cursor = { seq: data.nextCursor.seq, id: data.nextCursor.id || "" }
+          // Cursor sanity guard: a malformed/over-range seq must not poison the
+          // watermark. Only advance on a finite, non-decreasing seq.
+          if (
+            data.nextCursor &&
+            isSaneSeq(data.nextCursor.seq) &&
+            data.nextCursor.seq >= cursor.seq
+          ) {
+            cursor = {
+              seq: data.nextCursor.seq,
+              id: typeof data.nextCursor.id === "string" ? data.nextCursor.id : "",
+            }
             // Persist progress per page — keyset is monotonic and upserts are
             // idempotent, so a mid-pull failure simply resumes from here.
             await setCollectionCursor(collection, cursor)
@@ -472,27 +541,42 @@ class SyncService {
   private async pullAircraftReference(userId: string): Promise<number> {
     if (!navigator.onLine) return 0
     try {
-      const metaKey = `aircraft-ref-last-sync-${userId}`
-      const lastRefSync = await referenceDb.getMetadata(metaKey)
-      const since = lastRefSync ? Number(lastRefSync) : 0
+      const metaKey = `aircraft-ref-cursor-${userId}`
+      const legacyKey = `aircraft-ref-last-sync-${userId}`
+      const stored = await referenceDb.getMetadata(metaKey)
+      // Migrate from the old single-number cursor if present.
+      let cursor: { enrichedAt: number; id: string } =
+        stored && typeof stored === "object" && isSaneSeq((stored as { enrichedAt?: number }).enrichedAt)
+          ? { enrichedAt: (stored as { enrichedAt: number }).enrichedAt, id: (stored as { id?: string }).id || "" }
+          : { enrichedAt: Number((await referenceDb.getMetadata(legacyKey)) || 0) || 0, id: "" }
 
-      const response = await fetch(`/api/sync/aircraft-reference?since=${since}`, {
-        headers: await this.getAuthHeaders(),
-      })
-      if (!response.ok) {
-        console.error("[Sync] aircraft reference pull failed:", response.status)
-        return 0
+      let total = 0
+      let pages = 0
+      while (true) {
+        const url =
+          `/api/sync/aircraft-reference?since=${cursor.enrichedAt}` +
+          `&sinceId=${encodeURIComponent(cursor.id)}`
+        const response = await fetchWithTimeout(url, { headers: await this.getAuthHeaders() })
+        if (!response.ok) {
+          console.error("[Sync] aircraft reference pull failed:", response.status)
+          break
+        }
+        const data = await response.json()
+        const records = data.records || []
+        if (records.length > 0) total += await bulkUpsertAircraftReferences(records)
+
+        if (
+          data.nextCursor &&
+          isSaneSeq(data.nextCursor.enrichedAt) &&
+          typeof data.nextCursor.id === "string"
+        ) {
+          cursor = { enrichedAt: data.nextCursor.enrichedAt, id: data.nextCursor.id }
+          await referenceDb.setMetadata(metaKey, cursor)
+        }
+        pages++
+        if (!data.hasMore || pages > 10000) break
       }
-
-      const data = await response.json()
-      const records = data.records || []
-      if (records.length === 0) return 0
-
-      const count = await bulkUpsertAircraftReferences(records)
-      if (typeof data.lastUpdated === "number") {
-        await referenceDb.setMetadata(metaKey, data.lastUpdated)
-      }
-      return count
+      return total
     } catch (error) {
       console.error("[Sync] aircraft reference pull error:", error)
       return 0
@@ -502,6 +586,33 @@ class SyncService {
   async syncPendingChanges(): Promise<{ success: number; failed: number }> {
     const result = await this.fullSync()
     return { success: result.pushed, failed: result.failed }
+  }
+
+  /**
+   * Best-effort final push on page unload. Uses `fetch(..., {keepalive:true})`
+   * — NOT `sendBeacon`, which can't attach the `Authorization` header the bulk
+   * endpoint requires. Fire-and-forget and push-only: the response is ignored
+   * and queue rows are cleared on the NEXT confirmed sync, never on send, so a
+   * dropped unload request can't lose data.
+   */
+  flushForUnload(): void {
+    if (typeof navigator === "undefined" || !navigator.onLine) return
+    void (async () => {
+      try {
+        const queue = await getSyncQueue()
+        if (queue.length === 0) return
+        const compacted = this.compactSyncQueue(queue)
+        if (compacted.length === 0) return
+        await fetch("/api/sync/bulk", {
+          method: "POST",
+          headers: await this.getAuthHeaders(),
+          body: JSON.stringify({ items: compacted }),
+          keepalive: true,
+        })
+      } catch {
+        // Unload path — nothing we can do; next session's sync will retry.
+      }
+    })()
   }
 }
 

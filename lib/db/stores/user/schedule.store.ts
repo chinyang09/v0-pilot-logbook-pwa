@@ -8,7 +8,8 @@ import type {
   ScheduleEntryCreate,
   DutyType,
 } from "@/types/entities/roster.types"
-import { addToSyncQueue } from "./sync-queue.store"
+import { addToSyncQueue, enqueueMany, getDeviceId } from "./sync-queue.store"
+import { updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
 
 /**
  * Add new schedule entry
@@ -18,12 +19,13 @@ export async function addScheduleEntry(entry: ScheduleEntryCreate): Promise<Sche
     ...entry,
     id: crypto.randomUUID(),
     createdAt: Date.now(),
+    updatedAt: Date.now(),
+    deviceId: await getDeviceId(),
     syncStatus: "pending",
   }
 
   await userDb.scheduleEntries.put(newEntry)
-  // Note: Schedule entries are local-only for now, not synced to server
-  // await addToSyncQueue("create", "scheduleEntries", newEntry)
+  await addToSyncQueue("create", "scheduleEntries", newEntry)
 
   return newEntry
 }
@@ -35,28 +37,21 @@ export async function updateScheduleEntry(
   id: string,
   updates: Partial<ScheduleEntry>
 ): Promise<ScheduleEntry | null> {
-  const entry = await userDb.scheduleEntries.get(id)
-  if (!entry) return null
-
-  const updatedEntry: ScheduleEntry = {
-    ...entry,
-    ...updates,
-    updatedAt: Date.now(),
-  }
-
-  await userDb.scheduleEntries.put(updatedEntry)
-  return updatedEntry
+  return updateEntity<ScheduleEntry>(userDb.scheduleEntries, "scheduleEntries", id, updates)
 }
 
 /**
  * Delete schedule entry
  */
 export async function deleteScheduleEntry(id: string): Promise<boolean> {
-  const entry = await userDb.scheduleEntries.get(id)
-  if (!entry) return false
+  return deleteEntity<ScheduleEntry>(userDb.scheduleEntries, "scheduleEntries", id)
+}
 
-  await userDb.scheduleEntries.delete(id)
-  return true
+/**
+ * Delete schedule entry without enqueuing (server-initiated)
+ */
+export async function silentDeleteScheduleEntry(id: string): Promise<boolean> {
+  return silentDeleteEntity<ScheduleEntry>(userDb.scheduleEntries, id)
 }
 
 /**
@@ -125,12 +120,8 @@ export async function linkFlightsToScheduleEntry(
   entryId: string,
   flightIds: string[]
 ): Promise<void> {
-  const entry = await userDb.scheduleEntries.get(entryId)
-  if (!entry) return
-
-  await userDb.scheduleEntries.update(entryId, {
+  await updateEntity<ScheduleEntry>(userDb.scheduleEntries, "scheduleEntries", entryId, {
     linkedFlightIds: flightIds,
-    updatedAt: Date.now(),
   })
 }
 
@@ -145,6 +136,8 @@ export async function bulkUpsertScheduleEntries(
 }> {
   let created = 0
   let updated = 0
+  const deviceId = await getDeviceId()
+  const toEnqueue: { type: "create" | "update"; collection: "scheduleEntries"; data: ScheduleEntry }[] = []
 
   await userDb.transaction("rw", [userDb.scheduleEntries], async () => {
     for (const entry of entries) {
@@ -155,22 +148,34 @@ export async function bulkUpsertScheduleEntries(
         .first()
 
       if (existing) {
-        await userDb.scheduleEntries.update(existing.id, {
+        const merged: ScheduleEntry = {
+          ...existing,
           ...entry,
           updatedAt: Date.now(),
-        })
+          deviceId,
+          syncStatus: "pending",
+        }
+        await userDb.scheduleEntries.put(merged)
+        toEnqueue.push({ type: "update", collection: "scheduleEntries", data: merged })
         updated++
       } else {
-        await userDb.scheduleEntries.add({
+        const newEntry: ScheduleEntry = {
           ...entry,
           id: crypto.randomUUID(),
           createdAt: Date.now(),
+          updatedAt: Date.now(),
+          deviceId,
           syncStatus: "pending",
-        })
+        }
+        await userDb.scheduleEntries.add(newEntry)
+        toEnqueue.push({ type: "create", collection: "scheduleEntries", data: newEntry })
         created++
       }
     }
   })
+
+  // Enqueue AFTER the data transaction commits (syncQueue is a separate table).
+  await enqueueMany(toEnqueue)
 
   return { created, updated }
 }
@@ -200,4 +205,30 @@ export async function getScheduleDateRange(): Promise<{ start: string; end: stri
     start: entries[0].date,
     end: entries[entries.length - 1].date,
   }
+}
+
+/**
+ * Normalize a server schedule entry (fill required defaults).
+ */
+function normalizeScheduleEntryFromServer(server: ScheduleEntry): ScheduleEntry {
+  return {
+    ...server,
+    sectors: server.sectors || [],
+    crew: server.crew || [],
+    importedAt: server.importedAt || server.createdAt || Date.now(),
+    createdAt: server.createdAt || Date.now(),
+    updatedAt: server.updatedAt,
+    syncStatus: "synced",
+  }
+}
+
+/**
+ * Upsert a schedule entry from server (for sync)
+ */
+export async function upsertScheduleEntryFromServer(server: ScheduleEntry): Promise<void> {
+  return upsertFromServer<ScheduleEntry>(
+    userDb.scheduleEntries,
+    server,
+    normalizeScheduleEntryFromServer
+  )
 }
