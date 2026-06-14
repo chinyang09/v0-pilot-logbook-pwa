@@ -11,10 +11,7 @@
 
 import { NextResponse } from "next/server"
 import { getMongoClient } from "@/lib/mongodb"
-
-function normalizeRegistration(reg: string): string {
-  return reg.replace(/[^A-Z0-9]/gi, "").toUpperCase()
-}
+import { normalizeRegistration } from "@/lib/utils/string"
 
 export async function POST(request: Request) {
   let body: { registrations?: string[] }

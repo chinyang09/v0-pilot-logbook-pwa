@@ -9,11 +9,8 @@
 
 import { userDb } from "@/lib/db/user-db"
 import { updateFlight } from "@/lib/db/stores/user/flights.store"
+import { normalizeRegistration as normalizeReg } from "@/lib/utils/string"
 import type { FlightLog } from "@/types/entities/flight.types"
-
-function normalizeReg(reg: string): string {
-  return reg.toUpperCase().replace(/[^A-Z0-9]/g, "")
-}
 
 /**
  * Reconcile flights when aircraft enrichment data arrives.

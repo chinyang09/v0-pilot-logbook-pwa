@@ -59,6 +59,11 @@ export async function POST(request: NextRequest) {
       challenge: challengeBase64,
       expiresAt: new Date(Date.now() + 60000), // 1 minute expiry
       userId,
+      // Bind the identity + TOTP secret to the challenge so register/complete
+      // uses server-authored values instead of trusting the client.
+      callsign: callsign.trim(),
+      searchKey: normalizedCallsign,
+      totpSecret,
       type: "registration",
     });
 

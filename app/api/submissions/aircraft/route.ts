@@ -16,10 +16,7 @@ import { getMongoClient } from "@/lib/mongodb"
 import { validateSessionFromHeader } from "@/lib/auth/server/session"
 import { enrichAircraftFromFR24 } from "@/lib/enrichment/aircraft-enrichment"
 import { getICAOTypeByDesignator } from "@/lib/icao-types/icao-types-server"
-
-function normalizeRegistration(reg: string): string {
-  return reg.replace(/[^A-Z0-9]/gi, "").toUpperCase()
-}
+import { normalizeRegistration } from "@/lib/utils/string"
 
 export async function POST(request: Request) {
   const session = await validateSessionFromHeader(request)
@@ -47,10 +44,8 @@ export async function POST(request: Request) {
   const db = client.db("skylog")
   const collection = db.collection("aircraftSubmissions")
 
-  // Dedup: check if this registration already exists
-  const existing = await collection.findOne({ registrationNormalized: regNormalized })
-  if (existing) {
-    return NextResponse.json({
+  const existingResponse = (existing: any) =>
+    NextResponse.json({
       success: true,
       data: {
         submissionId: existing.submissionId,
@@ -69,7 +64,6 @@ export async function POST(request: Request) {
           : null,
       },
     })
-  }
 
   // Hydrate typecode with ICAO type data if available
   const typeInfo = typecode ? getICAOTypeByDesignator(typecode) : null
@@ -92,7 +86,24 @@ export async function POST(request: Request) {
     submittedAt: now,
   }
 
-  await collection.insertOne(doc)
+  // Atomic dedup: only inserts when no doc with this normalized registration
+  // exists (relies on the unique index). Two concurrent submits can't both
+  // create a record.
+  const upsertResult = await collection.updateOne(
+    { registrationNormalized: regNormalized },
+    { $setOnInsert: doc },
+    { upsert: true }
+  ).catch((err: any) => {
+    // Duplicate-key from a racing upsert — treat as "already exists".
+    if (err?.code === 11000) return null
+    throw err
+  })
+
+  if (!upsertResult || upsertResult.upsertedCount === 0) {
+    // Already existed (or lost the insert race) — return the canonical doc.
+    const existing = await collection.findOne({ registrationNormalized: regNormalized })
+    if (existing) return existingResponse(existing)
+  }
 
   // Attempt real-time FR24 enrichment (includes ICAO type hydration)
   const enriched = await enrichAircraftFromFR24(registration)

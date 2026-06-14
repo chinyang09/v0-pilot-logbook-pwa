@@ -20,6 +20,66 @@ const options = {
   maxPoolSize: 10,
 }
 
+let indexesEnsured = false
+
+/**
+ * Idempotently create the indexes the sync/submission paths rely on.
+ * `createIndex` is a no-op when the index already exists, and each call is
+ * isolated so one failure (e.g. a pre-existing duplicate blocking a unique
+ * index) never prevents the others. Best-effort: never blocks a request.
+ */
+async function ensureIndexes(mongoClient: MongoClient): Promise<void> {
+  if (indexesEnsured) return
+  indexesEnsured = true
+
+  const db = mongoClient.db("skylog")
+  const safe = async (label: string, fn: () => Promise<unknown>) => {
+    try {
+      await fn()
+    } catch (err) {
+      console.error(`[Mongo] ensureIndexes(${label}) failed:`, err)
+    }
+  }
+
+  await Promise.all([
+    ...["flights", "aircraft", "personnel"].flatMap((coll) => [
+      safe(`${coll}.userId+id`, () =>
+        db.collection(coll).createIndex({ userId: 1, id: 1 }, { unique: true }),
+      ),
+      // Server-assigned watermark used by delta-sync (see /api/sync/[collection]).
+      safe(`${coll}.userId+syncedAt`, () =>
+        db.collection(coll).createIndex({ userId: 1, syncedAt: 1 }),
+      ),
+    ]),
+    // Tombstones — TTL + delta-sync lookups (mirrors /api/sync/setup-ttl).
+    safe("deletions.ttl", () =>
+      db
+        .collection("deletions")
+        .createIndex({ deletedAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 }),
+    ),
+    safe("deletions.unique", () =>
+      db
+        .collection("deletions")
+        .createIndex({ userId: 1, collection: 1, recordId: 1 }, { unique: true }),
+    ),
+    safe("deletions.delta", () =>
+      db.collection("deletions").createIndex({ userId: 1, collection: 1, deletedAt: 1 }),
+    ),
+    // Submission dedup — back the upsert-by-key race fix.
+    safe("aircraftSubmissions.reg", () =>
+      db
+        .collection("aircraftSubmissions")
+        .createIndex({ registrationNormalized: 1 }, { unique: true }),
+    ),
+    safe("airportSubmissions.icao", () =>
+      db.collection("airportSubmissions").createIndex({ icao: 1 }, { unique: true }),
+    ),
+    safe("airportSubmissions.status", () =>
+      db.collection("airportSubmissions").createIndex({ status: 1, enrichedAt: -1 }),
+    ),
+  ])
+}
+
 export async function getMongoClient(): Promise<MongoClient> {
   if (!uri) {
     throw new Error("MONGODB_URI environment variable is not set")
@@ -31,7 +91,11 @@ export async function getMongoClient(): Promise<MongoClient> {
 
   if (!clientPromise) {
     client = new MongoClient(uri, options)
-    clientPromise = client.connect()
+    clientPromise = client.connect().then((connected) => {
+      // Fire-and-forget; index creation must not block the first query.
+      void ensureIndexes(connected)
+      return connected
+    })
   }
 
   return clientPromise

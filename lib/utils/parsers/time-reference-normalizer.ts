@@ -182,8 +182,9 @@ function hhmmToMinutes(hhmm: string): number {
 }
 
 function minutesToHHMM(totalMinutes: number): string {
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
+  const total = Math.round(totalMinutes);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
 }
 

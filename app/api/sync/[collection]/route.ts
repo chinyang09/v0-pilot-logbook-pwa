@@ -30,6 +30,12 @@ export async function GET(
     const mongoClient = await getMongoClient();
     const db = mongoClient.db("skylog");
 
+    // Capture the server clock at the start of the request. This is returned
+    // as the new watermark so the client's `since` is always server-authored,
+    // immune to device clock skew. Captured before the query so any write that
+    // lands during the request is picked up next sync (at worst re-pulled).
+    const serverNow = Date.now();
+
     const tombstoneRetentionCutoff = Date.now() - TOMBSTONE_RETENTION_MS;
     if (since > 0 && since < tombstoneRetentionCutoff) {
       console.log(
@@ -47,10 +53,13 @@ export async function GET(
 
     const query: Record<string, unknown> = { userId: session.userId };
     if (since > 0) {
+      // Delta is driven by the server-assigned `syncedAt` (set on every write
+      // in /api/sync/bulk) so it stays consistent with the server-authored
+      // watermark. `createdAt` is only a fallback for legacy docs that predate
+      // syncedAt; once any such doc is rewritten it joins the clean path.
       query.$or = [
-        { updatedAt: { $gt: since } },
-        { createdAt: { $gt: since } },
         { syncedAt: { $gt: since } },
+        { syncedAt: { $exists: false }, createdAt: { $gt: since } },
       ];
     }
 
@@ -195,16 +204,13 @@ export async function GET(
     return NextResponse.json({
       records: transformedRecords,
       deletions, // Include deletions array in response
-      syncedAt: Date.now(),
+      syncedAt: serverNow, // Server-authored watermark for the client's next `since`
       count: transformedRecords.length,
     });
   } catch (error) {
     console.error("Fetch collection error:", error);
     return NextResponse.json(
-      {
-        error: "Failed to fetch records",
-        message: error instanceof Error ? error.message : "Unknown error",
-      },
+      { error: "Failed to fetch records" },
       { status: 500 }
     );
   }

@@ -8,13 +8,56 @@ import { createId } from "@/lib/auth/shared/cuid"
 // POST /api/auth/register/complete - Complete passkey registration
 export async function POST(request: NextRequest) {
   try {
-    const { userId, callsign, totpSecret, credential, challenge } = await request.json()
+    const { credential, challenge } = await request.json()
 
-    if (!userId || !callsign || !totpSecret || !credential || !challenge) {
+    if (!credential || !challenge) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
     const db = await getDB()
+
+    // Consume the server-issued registration challenge. This proves the request
+    // belongs to a ceremony we actually started and lets us trust the
+    // server-authored userId/callsign/totpSecret instead of whatever the client
+    // posts (which previously allowed forging accounts with a chosen userId and
+    // an unverified challenge).
+    const stored = await db.collection("challenges").findOneAndDelete({
+      _id: challenge,
+      type: "registration",
+      expiresAt: { $gt: new Date() },
+    })
+    const raw = stored as unknown as (Record<string, unknown> & { value?: Record<string, unknown> }) | null
+    const challengeDoc: Record<string, unknown> | null = raw ? raw.value ?? raw : null
+    if (!challengeDoc) {
+      return NextResponse.json({ error: "Challenge expired or invalid" }, { status: 400 })
+    }
+
+    // Bind the attestation to our challenge and ensure it is a creation ceremony.
+    try {
+      const clientData = JSON.parse(
+        new TextDecoder().decode(base64URLDecode(credential.response.clientDataJSON)),
+      )
+      if (clientData.type !== "webauthn.create" || clientData.challenge !== challenge) {
+        return NextResponse.json({ error: "Invalid credential" }, { status: 400 })
+      }
+    } catch {
+      return NextResponse.json({ error: "Invalid credential" }, { status: 400 })
+    }
+
+    const userId = challengeDoc.userId as string | undefined
+    const totpSecret = challengeDoc.totpSecret as string | undefined
+    const callsign = challengeDoc.callsign as string | undefined
+    if (!userId || !totpSecret || !callsign) {
+      return NextResponse.json({ error: "Challenge missing registration context" }, { status: 400 })
+    }
+    const searchKey =
+      (challengeDoc.searchKey as string | undefined) || callsign.toLowerCase().replace(/\s+/g, "")
+
+    // Guard against the callsign being claimed between begin and complete.
+    const existing = await db.collection<User>("users").findOne({ "identity.searchKey": searchKey })
+    if (existing) {
+      return NextResponse.json({ error: "This callsign is already taken" }, { status: 409 })
+    }
 
     // Parse the credential
     const credentialData = await parseClientCredential(credential)
@@ -35,8 +78,8 @@ export async function POST(request: NextRequest) {
     const user: User = {
       _id: userId,
       identity: {
-        callsign: callsign.trim(),
-        searchKey: callsign.toLowerCase().replace(/\s+/g, ""),
+        callsign,
+        searchKey,
       },
       auth: {
         totpSecret,

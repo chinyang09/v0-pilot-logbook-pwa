@@ -170,20 +170,28 @@ export async function parseRegistrationResponse(credential: PublicKeyCredential)
 }
 
 // Verify authentication response
+//
+// The browser sends the assertion as base64url strings; API routes decode them
+// to byte arrays before calling this. This routine MUST be invoked on every
+// passkey login — it binds the assertion to the server-issued challenge and
+// cryptographically verifies the signature against the stored public key.
 export async function verifyAuthenticationResponse(
-  credential: PublicKeyCredential,
+  credential: { response: { authenticatorData: Uint8Array; clientDataJSON: Uint8Array; signature: Uint8Array } },
   expectedChallenge: Uint8Array,
   storedCredential: PasskeyCredential,
 ): Promise<{ verified: boolean; newCounter: number }> {
-  const response = credential.response as AuthenticatorAssertionResponse
+  const response = credential.response
 
   // Get authenticator data and client data
   const authData = new Uint8Array(response.authenticatorData)
   const clientDataJSON = new Uint8Array(response.clientDataJSON)
   const signature = new Uint8Array(response.signature)
 
-  // Verify the challenge in clientDataJSON
+  // Verify the assertion is an authentication ceremony bound to our challenge
   const clientData = JSON.parse(new TextDecoder().decode(clientDataJSON))
+  if (clientData.type !== "webauthn.get") {
+    return { verified: false, newCounter: 0 }
+  }
   const receivedChallenge = base64URLDecode(clientData.challenge)
 
   if (!arraysEqual(receivedChallenge, expectedChallenge)) {
@@ -215,9 +223,13 @@ export async function verifyAuthenticationResponse(
     // Extract counter from authenticator data (bytes 33-36)
     const newCounter = new DataView(authData.buffer, authData.byteOffset + 33, 4).getUint32(0, false)
 
-    // Counter should be greater than stored counter
-    if (newCounter <= storedCredential.counter) {
-      console.warn("Possible replay attack: counter not incremented")
+    // Counter / cloned-authenticator check.
+    // Many platform/synced passkeys (iCloud Keychain, Google Password Manager)
+    // never implement a signature counter and always report 0. Enforcing strict
+    // monotonicity in that case would reject every login after the first. Only
+    // enforce it when a counter is actually in use (either side non-zero).
+    if ((newCounter > 0 || storedCredential.counter > 0) && newCounter <= storedCredential.counter) {
+      console.warn("Possible cloned authenticator: counter did not increase")
       return { verified: false, newCounter: 0 }
     }
 

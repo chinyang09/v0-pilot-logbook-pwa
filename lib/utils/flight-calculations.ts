@@ -3,8 +3,8 @@
  * Handles automatic calculation of derived fields
  */
 
-import { calculateDuration, subtractHHMM, minutesToHHMM, isValidHHMM } from "./time"
-import { isNight } from "./night-time"
+import { calculateDuration, subtractHHMM, isValidHHMM } from "./time"
+import { isNight, calculateNightTimeComplete } from "./night-time"
 import type { Airport } from "@/types/entities/airport.types"
 import type { FlightLog, Approach, PilotRole, ManualOverrides } from "@/types/entities/flight.types"
 import type { AutoFillPreferences } from "@/types/db/stores.types"
@@ -30,79 +30,6 @@ export function calculateBlockTime(outTime: string, inTime: string): string {
  */
 export function calculateFlightTime(offTime: string, onTime: string): string {
   return calculateDuration(offTime, onTime)
-}
-
-/**
- * Calculate night time based on OUT/IN times using linear interpolation of flight path
- */
-export function calculateNightTimeFromFlight(
-  date: string,
-  outTime: string,
-  inTime: string,
-  depAirport: Airport | null,
-  arrAirport: Airport | null
-): string {
-  if (!date || !outTime || !inTime || !depAirport || !arrAirport) {
-    return "00:00"
-  }
-
-  if (!isValidHHMM(outTime) || !isValidHHMM(inTime)) {
-    return "00:00"
-  }
-
-  const depLat = depAirport.latitude
-  const depLon = depAirport.longitude
-  const arrLat = arrAirport.latitude
-  const arrLon = arrAirport.longitude
-
-  if (
-    typeof depLat !== "number" ||
-    typeof depLon !== "number" ||
-    typeof arrLat !== "number" ||
-    typeof arrLon !== "number" ||
-    isNaN(depLat) ||
-    isNaN(depLon) ||
-    isNaN(arrLat) ||
-    isNaN(arrLon)
-  ) {
-    return "00:00"
-  }
-
-  const dateParts = date.split("-")
-  const year = Number.parseInt(dateParts[0], 10)
-  const month = Number.parseInt(dateParts[1], 10) - 1
-  const day = Number.parseInt(dateParts[2], 10)
-
-  const [outHours, outMins] = outTime.split(":").map(Number)
-  const [inHours, inMins] = inTime.split(":").map(Number)
-
-  const outDate = new Date(Date.UTC(year, month, day, outHours, outMins, 0, 0))
-  let inDate = new Date(Date.UTC(year, month, day, inHours, inMins, 0, 0))
-
-  // Handle overnight flights
-  if (inDate <= outDate) {
-    inDate.setUTCDate(inDate.getUTCDate() + 1)
-  }
-
-  const totalMinutes = (inDate.getTime() - outDate.getTime()) / (1000 * 60)
-  if (totalMinutes <= 0) return "00:00"
-
-  const samples = 20
-  let nightMinutes = 0
-
-  for (let i = 0; i <= samples; i++) {
-    const progress = i / samples
-    const sampleTime = new Date(outDate.getTime() + progress * (inDate.getTime() - outDate.getTime()))
-
-    const lat = depLat + progress * (arrLat - depLat)
-    const lon = depLon + progress * (arrLon - depLon)
-
-    if (isNight(sampleTime, lat, lon)) {
-      nightMinutes += totalMinutes / samples
-    }
-  }
-
-  return minutesToHHMM(Math.round(nightMinutes))
 }
 
 /**
@@ -354,13 +281,16 @@ export function recalculateFlightFields(
     depAirport &&
     arrAirport
   ) {
-    updates.nightTime = calculateNightTimeFromFlight(
+    const nightResult = calculateNightTimeComplete(
       flight.date,
       flight.outTime,
+      flight.offTime || "",
+      flight.onTime || "",
       flight.inTime,
-      depAirport,
-      arrAirport
+      { lat: depAirport.latitude ?? NaN, lon: depAirport.longitude ?? NaN },
+      { lat: arrAirport.latitude ?? NaN, lon: arrAirport.longitude ?? NaN }
     )
+    updates.nightTime = nightResult.nightTimeHHMM
   }
 
   const blockTime = updates.blockTime || flight.blockTime || "00:00"

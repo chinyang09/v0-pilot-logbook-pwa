@@ -9,6 +9,7 @@ export interface User {
     totpSecret: string; // Base32 secret for Authenticator apps
     totpEnabled: boolean; // Whether TOTP is set up
     passkeys: PasskeyCredential[]; // Array of registered passkeys
+    lastTotpCounter?: number; // Highest accepted TOTP time-step (replay guard)
   };
   createdAt: number;
   updatedAt: number;
@@ -63,7 +64,7 @@ export interface StoredChallenge {
   _id: string; // The challenge string (base64url)
   userId: string;
   expiresAt: Date; // Date for TTL cleanup
-  type: "registration" | "authentication";
+  type: "registration" | "authentication" | "add-passkey";
 }
 
 // Legacy/Ceremony type for API responses

@@ -18,6 +18,7 @@ import {
 } from "@/lib/db"
 import { useReferenceAircraft, useFlights } from "@/hooks/data"
 import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
+import { normalizeRegistration } from "@/lib/utils/string"
 import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
@@ -355,9 +356,10 @@ export default function AircraftPage() {
   const selectedAircraft = useMemo(() => {
     if (!selectedAircraftReg) return null
     const regUpper = selectedAircraftReg.toUpperCase()
+    const regKey = normalizeRegistration(selectedAircraftReg)
     return allAircraft.find((a) =>
       a.registration.toUpperCase() === regUpper ||
-      a.registration.toUpperCase().replace(/-/g, "") === regUpper.replace(/-/g, "")
+      normalizeRegistration(a.registration) === regKey
     ) || null
   }, [selectedAircraftReg, allAircraft])
 

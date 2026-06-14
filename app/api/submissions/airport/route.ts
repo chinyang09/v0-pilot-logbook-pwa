@@ -41,10 +41,8 @@ export async function POST(request: Request) {
   const db = client.db("skylog")
   const collection = db.collection("airportSubmissions")
 
-  // Dedup: check if this ICAO already exists
-  const existing = await collection.findOne({ icao: icaoNormalized })
-  if (existing) {
-    return NextResponse.json({
+  const existingResponse = (existing: any) =>
+    NextResponse.json({
       success: true,
       data: {
         submissionId: existing.submissionId,
@@ -64,7 +62,6 @@ export async function POST(request: Request) {
           : null,
       },
     })
-  }
 
   // Derive timezone from coordinates if available
   let derivedTimezone = timezone || ""
@@ -106,7 +103,21 @@ export async function POST(request: Request) {
       : {}),
   }
 
-  await collection.insertOne(doc)
+  // Atomic dedup: only inserts when no doc with this ICAO exists (relies on the
+  // unique index). Two concurrent submits can't both create a record.
+  const upsertResult = await collection.updateOne(
+    { icao: icaoNormalized },
+    { $setOnInsert: doc },
+    { upsert: true }
+  ).catch((err: any) => {
+    if (err?.code === 11000) return null
+    throw err
+  })
+
+  if (!upsertResult || upsertResult.upsertedCount === 0) {
+    const existing = await collection.findOne({ icao: icaoNormalized })
+    if (existing) return existingResponse(existing)
+  }
 
   return NextResponse.json({
     success: true,

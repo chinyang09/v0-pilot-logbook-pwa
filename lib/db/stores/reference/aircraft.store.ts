@@ -7,6 +7,7 @@
  */
 
 import { referenceDb } from "../../reference-db"
+import { normalizeRegistration } from "@/lib/utils/string"
 import type { AircraftReference, AircraftRecord } from "@/types/entities/aircraft.types"
 
 // ============================================
@@ -28,8 +29,10 @@ export interface NormalizedAircraft {
 // Helpers
 // ============================================
 
+// Canonical registration key (strips all non-alphanumeric), shared with the
+// server dedup key so local lookups never miss a record the server stored.
 function normalizeForSearch(str: string): string {
-  return str.toUpperCase().replace(/-/g, "")
+  return normalizeRegistration(str)
 }
 
 export function normalizeAircraft(data: {

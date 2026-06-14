@@ -1,6 +1,7 @@
 import {
   getSyncQueue,
   clearSyncQueueItem,
+  incrementRetryCount,
   markRecordSynced,
   upsertFlightFromServer,
   upsertAircraftFromServer,
@@ -21,6 +22,11 @@ import {
 import { referenceDb } from "@/lib/db/reference-db"
 import type { SyncQueueItem } from "@/types/sync/sync.types"
 import { getSyncTriggerManager } from "./sync-trigger-manager"
+
+// Max attempts before a per-item sync failure is dead-lettered (dropped from
+// the queue) so a poison item can't loop forever. Transient network/outage
+// failures are not counted toward this.
+const MAX_SYNC_RETRIES = 5
 
 // Wrapper for clearing all local data except preferences
 async function clearAllLocalData(): Promise<void> {
@@ -193,27 +199,36 @@ class SyncService {
       await new Promise((resolve) => setTimeout(resolve, 100))
 
       console.log("[v0] Step 2: Pulling from server...")
-      const pullResult = await this.pullFromServer()
+      let pullResult = await this.pullFromServer()
       pulled = pullResult.count
 
       if (pullResult.requiresFullResync) {
         console.log("[v0] Server requires full resync - clearing local data")
         await clearAllLocalData()
+        // Reference cursor must be reset too, or stale reference data lingers.
+        await referenceDb.setMetadata(`aircraft-ref-last-sync-${session.userId}`, 0)
         // Re-pull with since=0
-        const freshPull = await this.pullFromServer(true)
-        pulled = freshPull.count
+        pullResult = await this.pullFromServer(true)
+        pulled = pullResult.count
       }
 
       console.log("[v0] Pulled", pulled, "records from server")
 
       // Step 3: Pull shared aircraft reference data from MongoDB
       console.log("[v0] Step 3: Pulling aircraft reference data...")
-      const refPulled = await this.pullAircraftReference()
+      const refPulled = await this.pullAircraftReference(session.userId)
       if (refPulled > 0) {
         console.log("[v0] Pulled", refPulled, "aircraft references")
       }
 
-      await setLastSyncTime(Date.now())
+      // Advance the watermark only when every collection pulled cleanly, using
+      // the server-authored timestamp. Advancing on a partial failure (or with
+      // a client clock) would silently skip a collection's delta next sync.
+      if (pullResult.allOk && pullResult.serverWatermark !== undefined) {
+        await setLastSyncTime(pullResult.serverWatermark)
+      } else {
+        console.warn("[v0] Pull incomplete - leaving last sync time unchanged")
+      }
 
       this.notifyDataChanged()
       console.log("[v0] Full sync complete")
@@ -381,6 +396,23 @@ class SyncService {
             success++
           } else {
             console.error(`[v0] Bulk sync item failed:`, itemResult.reason)
+            // Bump the retry count on the contributing queue items and
+            // dead-letter (drop) any that exceed the cap, so a poison item
+            // can't re-send forever. Transient outages take the network/non-ok
+            // branches below and are intentionally NOT counted here.
+            const recordId = (originalItem.data as { id: string }).id
+            const itemsForRecord = queue.filter(item => {
+              const itemRecordId = (item.data as { id: string }).id
+              return item.collection === originalItem.collection && itemRecordId === recordId
+            })
+            for (const item of itemsForRecord) {
+              if ((item.retryCount || 0) + 1 >= MAX_SYNC_RETRIES) {
+                console.warn(`[v0] Dead-lettering sync item ${item.id} after ${MAX_SYNC_RETRIES} failed attempts`)
+                await clearSyncQueueItem(item.id)
+              } else {
+                await incrementRetryCount(item.id)
+              }
+            }
             failed++
           }
         }
@@ -401,13 +433,21 @@ class SyncService {
   async pullFromServer(forceFullSync = false): Promise<{
     count: number
     requiresFullResync?: boolean
+    // Server-authored watermark (min syncedAt across collections) to persist as
+    // the next `since`. undefined if no collection returned one.
+    serverWatermark?: number
+    // True only if every collection pulled cleanly; when false the caller must
+    // NOT advance the watermark or it would skip the failed collection's delta.
+    allOk?: boolean
   }> {
     if (!navigator.onLine) {
       console.log("[v0] Offline - skipping pull")
-      return { count: 0 }
+      return { count: 0, allOk: false }
     }
 
     let count = 0
+    let minWatermark = Number.POSITIVE_INFINITY
+    let allOk = true
     const rawLastSyncTime = await getLastSyncTime()
     const lastSyncTime = forceFullSync ? 0 : rawLastSyncTime ? Number(rawLastSyncTime) : 0
     console.log(
@@ -433,6 +473,10 @@ class SyncService {
             if (data.requiresFullResync) {
               console.log("[v0] Server requires full resync:", data.reason)
               return { count: 0, requiresFullResync: true }
+            }
+
+            if (typeof data.syncedAt === "number") {
+              minWatermark = Math.min(minWatermark, data.syncedAt)
             }
 
             const records = data.records || []
@@ -478,31 +522,42 @@ class SyncService {
               }
             }
           } else if (response.status === 401) {
+            allOk = false
             console.error("[v0] Unauthorized - session may be invalid")
           } else {
+            allOk = false
             console.error(`[v0] Failed to fetch ${collection}:`, response.status, await response.text())
           }
         } catch (fetchError) {
+          allOk = false
           console.error(`[v0] Error fetching ${collection}:`, fetchError)
         }
       }
     } catch (error) {
+      allOk = false
       console.error("[v0] Pull sync error:", error)
     }
 
     console.log("[v0] Pull complete - total records:", count)
-    return { count }
+    return {
+      count,
+      allOk,
+      serverWatermark: minWatermark === Number.POSITIVE_INFINITY ? undefined : minWatermark,
+    }
   }
 
   /**
    * Pull shared aircraft reference data from MongoDB
    * Uses a separate sync timestamp (not tied to user data sync)
    */
-  private async pullAircraftReference(): Promise<number> {
+  private async pullAircraftReference(userId: string): Promise<number> {
     if (!navigator.onLine) return 0
 
     try {
-      const lastRefSync = await referenceDb.getMetadata("aircraft-ref-last-sync")
+      // Per-user key — the reference DB is shared across accounts on a device,
+      // so a single global cursor lets one user clobber another's.
+      const metaKey = `aircraft-ref-last-sync-${userId}`
+      const lastRefSync = await referenceDb.getMetadata(metaKey)
       const since = lastRefSync ? Number(lastRefSync) : 0
 
       const response = await fetch(`/api/sync/aircraft-reference?since=${since}`)
@@ -517,7 +572,7 @@ class SyncService {
       if (records.length === 0) return 0
 
       const count = await bulkUpsertAircraftReferences(records)
-      await referenceDb.setMetadata("aircraft-ref-last-sync", data.lastUpdated || Date.now())
+      await referenceDb.setMetadata(metaKey, data.lastUpdated || Date.now())
 
       return count
     } catch (error) {

@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Setup TTL error:", error)
     return NextResponse.json(
-      { error: "Failed to setup TTL", message: error instanceof Error ? error.message : "Unknown error" },
+      { error: "Failed to setup TTL" },
       { status: 500 },
     )
   }

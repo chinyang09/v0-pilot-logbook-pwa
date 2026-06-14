@@ -8,7 +8,7 @@ import type {
   PersonnelCreate,
   PersonnelRole,
 } from "@/types/entities/crew.types";
-import { addToSyncQueue } from "./sync-queue.store";
+import { createEntity, updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers";
 
 /**
  * Add new personnel
@@ -16,17 +16,7 @@ import { addToSyncQueue } from "./sync-queue.store";
 export async function addPersonnel(
   personnel: PersonnelCreate
 ): Promise<Personnel> {
-  const newPersonnel: Personnel = {
-    ...personnel,
-    id: crypto.randomUUID(),
-    createdAt: Date.now(),
-    syncStatus: "pending",
-  };
-
-  await userDb.personnel.put(newPersonnel);
-  await addToSyncQueue("create", "personnel", newPersonnel);
-
-  return newPersonnel;
+  return createEntity<Personnel>(userDb.personnel, "personnel", personnel, { includeUpdatedAt: false });
 }
 
 /**
@@ -36,51 +26,21 @@ export async function updatePersonnel(
   id: string,
   updates: Partial<Personnel>
 ): Promise<Personnel | null> {
-  const person = await userDb.personnel.get(id);
-  if (!person) return null;
-
-  const updatedPersonnel: Personnel = {
-    ...person,
-    ...updates,
-    updatedAt: Date.now(),
-    syncStatus: "pending",
-  };
-
-  await userDb.personnel.put(updatedPersonnel);
-  await addToSyncQueue("update", "personnel", updatedPersonnel);
-
-  return updatedPersonnel;
+  return updateEntity<Personnel>(userDb.personnel, "personnel", id, updates);
 }
 
 /**
  * Delete personnel
  */
 export async function deletePersonnel(id: string): Promise<boolean> {
-  const person = await userDb.personnel.get(id);
-  if (!person) return false;
-
-  await userDb.personnel.delete(id);
-  await addToSyncQueue("delete", "personnel", { id });
-  return true;
+  return deleteEntity<Personnel>(userDb.personnel, "personnel", id);
 }
 
 /**
  * Delete personnel without adding to sync queue
  */
 export async function silentDeletePersonnel(id: string): Promise<boolean> {
-  const person = await userDb.personnel.get(id);
-  if (!person) {
-    const byMongoPattern = await userDb.personnel
-      .filter((p) => p.id === id)
-      .first();
-    if (byMongoPattern) {
-      await userDb.personnel.delete(byMongoPattern.id);
-      return true;
-    }
-    return false;
-  }
-  await userDb.personnel.delete(id);
-  return true;
+  return silentDeleteEntity<Personnel>(userDb.personnel, id);
 }
 
 /**
@@ -121,12 +81,10 @@ export async function getPersonnelByRole(
 }
 
 /**
- * Upsert personnel from server (for sync)
+ * Normalize a server personnel record, filling defaults for any missing fields
  */
-export async function upsertPersonnelFromServer(
-  serverPersonnel: Personnel
-): Promise<void> {
-  const normalized: Personnel = {
+function normalizePersonnelFromServer(serverPersonnel: Personnel): Personnel {
+  return {
     id: serverPersonnel.id,
     userId: serverPersonnel.userId,
     name: serverPersonnel.name || "",
@@ -144,22 +102,13 @@ export async function upsertPersonnelFromServer(
     updatedAt: serverPersonnel.updatedAt,
     syncStatus: "synced",
   };
+}
 
-  let existing: Personnel | undefined;
-  if (normalized.id) {
-    existing = await userDb.personnel.where("id").equals(normalized.id).first();
-  }
-  if (!existing && normalized.id) {
-    existing = await userDb.personnel.get(normalized.id);
-  }
-
-  if (existing) {
-    const serverTime = normalized.updatedAt || normalized.createdAt;
-    const localTime = existing.updatedAt || existing.createdAt;
-    if (serverTime >= localTime) {
-      await userDb.personnel.put({ ...normalized, id: existing.id });
-    }
-  } else {
-    await userDb.personnel.put(normalized);
-  }
+/**
+ * Upsert personnel from server (for sync)
+ */
+export async function upsertPersonnelFromServer(
+  serverPersonnel: Personnel
+): Promise<void> {
+  return upsertFromServer<Personnel>(userDb.personnel, serverPersonnel, normalizePersonnelFromServer);
 }
