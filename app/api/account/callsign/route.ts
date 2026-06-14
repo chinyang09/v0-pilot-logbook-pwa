@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { validateSession } from "@/lib/auth/server/session"
-import { verifyTOTP } from "@/lib/auth/server/totp"
+import { verifyTOTPWithCounter } from "@/lib/auth/server/totp"
 import { normalizeCallsign } from "@/lib/auth/shared/cuid"
 import { getDB } from "@/lib/mongodb/client"
 
@@ -36,11 +36,19 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "TOTP not configured" }, { status: 400 })
   }
 
-  // Verify TOTP code
-  const isValid = await verifyTOTP(user.auth.totpSecret, totpCode)
-  if (!isValid) {
+  // Verify TOTP code (with single-use replay protection shared across flows)
+  const { valid, counter } = await verifyTOTPWithCounter(user.auth.totpSecret, totpCode)
+  if (!valid) {
     return NextResponse.json({ error: "Invalid TOTP code" }, { status: 403 })
   }
+  const lastCounter = (user.auth?.lastTotpCounter as number | undefined) ?? -1
+  if (counter <= lastCounter) {
+    return NextResponse.json({ error: "Invalid TOTP code" }, { status: 403 })
+  }
+  await db.collection("users").updateOne(
+    { _id: session.userId as unknown as import("mongodb").ObjectId },
+    { $set: { "auth.lastTotpCounter": counter } }
+  )
 
   // Check if callsign is already taken by another user
   const existing = await db.collection("users").findOne({

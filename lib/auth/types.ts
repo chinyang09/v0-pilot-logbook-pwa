@@ -9,6 +9,7 @@ export interface User {
     totpSecret: string; // Base32 secret for Authenticator apps
     totpEnabled: boolean; // Whether TOTP is set up
     passkeys: PasskeyCredential[]; // Array of registered passkeys
+    lastTotpCounter?: number; // Highest accepted TOTP time-step (replay guard)
   };
   createdAt: number;
   updatedAt: number;

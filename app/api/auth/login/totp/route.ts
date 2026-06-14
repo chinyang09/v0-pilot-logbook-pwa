@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getDB } from "@/lib/mongodb";
-import { verifyTOTP } from "@/lib/auth/server/totp";
+import { verifyTOTPWithCounter } from "@/lib/auth/server/totp";
 import { normalizeCallsign, createId } from "@/lib/auth/shared/cuid";
 import type { User } from "@/lib/auth/types";
 import { cookies } from "next/headers";
@@ -31,14 +31,27 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify TOTP code
-    const isValid = await verifyTOTP(user.auth.totpSecret, code);
+    const { valid, counter } = await verifyTOTPWithCounter(user.auth.totpSecret, code);
 
-    if (!isValid) {
+    if (!valid) {
       return NextResponse.json(
         { error: "Invalid verification code" },
         { status: 401 }
       );
     }
+
+    // Replay protection: reject a code whose time-step was already used.
+    const lastCounter = user.auth.lastTotpCounter ?? -1;
+    if (counter <= lastCounter) {
+      return NextResponse.json(
+        { error: "Invalid verification code" },
+        { status: 401 }
+      );
+    }
+    await db.collection<User>("users").updateOne(
+      { _id: user._id },
+      { $set: { "auth.lastTotpCounter": counter } }
+    );
 
     // Create session identifiers and dates
     const sessionId = createId();

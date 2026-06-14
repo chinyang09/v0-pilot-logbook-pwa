@@ -63,11 +63,34 @@ export async function generateTOTP(secret: string, timeStep = 30): Promise<strin
   return otp.toString().padStart(6, "0")
 }
 
-// Verify TOTP code (checks current and adjacent windows for clock drift)
-export async function verifyTOTP(secret: string, token: string, window = 1, timeStep = 30): Promise<boolean> {
+// Length-independent constant-time string comparison for short codes.
+// Avoids leaking how many leading digits matched via early-exit timing.
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let mismatch = 0
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  }
+  return mismatch === 0
+}
+
+/**
+ * Verify a TOTP code and return the time-step counter it matched.
+ *
+ * The returned `counter` lets callers enforce single-use semantics: persist
+ * it per user and reject any future code whose counter is <= the last one
+ * accepted, so an intercepted code can't be replayed within its validity
+ * window. Returns counter -1 when the code is invalid.
+ */
+export async function verifyTOTPWithCounter(
+  secret: string,
+  token: string,
+  window = 1,
+  timeStep = 30,
+): Promise<{ valid: boolean; counter: number }> {
   const cleanToken = token.replace(/\s/g, "")
   if (!/^\d{6}$/.test(cleanToken)) {
-    return false
+    return { valid: false, counter: -1 }
   }
 
   const currentTime = Math.floor(Date.now() / 1000 / timeStep)
@@ -93,12 +116,18 @@ export async function verifyTOTP(secret: string, token: string, window = 1, time
 
     const expectedOtp = (binary % 1000000).toString().padStart(6, "0")
 
-    if (expectedOtp === cleanToken) {
-      return true
+    if (timingSafeEqual(expectedOtp, cleanToken)) {
+      return { valid: true, counter }
     }
   }
 
-  return false
+  return { valid: false, counter: -1 }
+}
+
+// Verify TOTP code (checks current and adjacent windows for clock drift).
+// Prefer verifyTOTPWithCounter where replay protection is needed.
+export async function verifyTOTP(secret: string, token: string, window = 1, timeStep = 30): Promise<boolean> {
+  return (await verifyTOTPWithCounter(secret, token, window, timeStep)).valid
 }
 
 // Generate otpauth:// URI for QR codes
