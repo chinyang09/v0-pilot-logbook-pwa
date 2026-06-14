@@ -71,6 +71,8 @@ function normalizeAircraftFromServer(serverAircraft: Aircraft): Aircraft {
     createdAt: serverAircraft.createdAt || Date.now(),
     updatedAt: serverAircraft.updatedAt,
     syncStatus: "synced",
+    serverSeq: serverAircraft.serverSeq,
+    deviceId: serverAircraft.deviceId,
   };
 }
 

@@ -1,10 +1,21 @@
 import { type NextRequest, NextResponse } from "next/server";
-import type { Sort } from "mongodb";
-import { getMongoClient } from "@/lib/mongodb";
+import { ObjectId } from "mongodb";
+import { getMongoClient, ensureBackfilled, SEQ_COLLECTIONS } from "@/lib/mongodb";
 import { validateSessionFromHeader } from "@/lib/auth/server/session";
 
 const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_PAGE_SIZE = 500;
+const MAX_PAGE_SIZE = 1000;
 
+const VALID_COLLECTIONS = new Set<string>(SEQ_COLLECTIONS);
+
+/**
+ * Delta pull. Records are paginated by a server-authored keyset cursor
+ * `(serverSeq, _id)` — immune to device clock skew and the multi-instance
+ * "syncedAt < serverNow" missed-pull window. Deletions are still delivered by
+ * wall-clock `deletedAt` against `since`, which also drives the 30-day
+ * full-resync gate.
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ collection: string }> }
@@ -16,202 +27,95 @@ export async function GET(
     }
 
     const { collection } = await params;
-    const { searchParams } = new URL(request.url);
-    const since = Number.parseInt(searchParams.get("since") || "0");
-
-    const validCollections = ["flights", "aircraft", "personnel"];
-    if (!validCollections.includes(collection)) {
-      return NextResponse.json(
-        { error: "Invalid collection" },
-        { status: 400 }
-      );
+    if (!VALID_COLLECTIONS.has(collection)) {
+      return NextResponse.json({ error: "Invalid collection" }, { status: 400 });
     }
+
+    const { searchParams } = new URL(request.url);
+    const cursorSeq = Number.parseInt(searchParams.get("seq") || "0", 10) || 0;
+    const cursorIdRaw = searchParams.get("seqId") || "";
+    const since = Number.parseInt(searchParams.get("since") || "0", 10) || 0;
+    const limit = Math.min(
+      Math.max(Number.parseInt(searchParams.get("limit") || `${DEFAULT_PAGE_SIZE}`, 10) || DEFAULT_PAGE_SIZE, 1),
+      MAX_PAGE_SIZE
+    );
 
     const mongoClient = await getMongoClient();
     const db = mongoClient.db("skylog");
+    const userId = session.userId;
 
-    // Capture the server clock at the start of the request. This is returned
-    // as the new watermark so the client's `since` is always server-authored,
-    // immune to device clock skew. Captured before the query so any write that
-    // lands during the request is picked up next sync (at worst re-pulled).
-    const serverNow = Date.now();
+    await ensureBackfilled(db, userId);
 
-    const tombstoneRetentionCutoff = Date.now() - TOMBSTONE_RETENTION_MS;
-    if (since > 0 && since < tombstoneRetentionCutoff) {
-      console.log(
-        "[v0] Client lastSyncTime is older than tombstone retention - requiring full resync"
-      );
+    // Full-resync gate: if the client's wall-clock tombstone watermark predates
+    // tombstone retention, it may have missed deletions → require a clean resync.
+    const retentionCutoff = Date.now() - TOMBSTONE_RETENTION_MS;
+    if (since > 0 && since < retentionCutoff) {
+      console.log("[Sync] client tombstone watermark older than retention - full resync required");
       return NextResponse.json({
         requiresFullResync: true,
         reason: "Your last sync was too long ago. A full re-sync is required.",
         records: [],
         deletions: [],
-        syncedAt: Date.now(),
+        nextCursor: { seq: 0, id: "" },
+        hasMore: false,
+        serverNow: Date.now(),
         count: 0,
       });
     }
 
-    const query: Record<string, unknown> = { userId: session.userId };
-    if (since > 0) {
-      // Delta is driven by the server-assigned `syncedAt` (set on every write
-      // in /api/sync/bulk) so it stays consistent with the server-authored
-      // watermark. `createdAt` is only a fallback for legacy docs that predate
-      // syncedAt; once any such doc is rewritten it joins the clean path.
-      query.$or = [
-        { syncedAt: { $gt: since } },
-        { syncedAt: { $exists: false }, createdAt: { $gt: since } },
-      ];
-    }
+    const serverNow = Date.now();
 
-    const sortCriteria: Sort =
-      collection === "flights"
-        ? { date: -1, updatedAt: -1, createdAt: -1 }
-        : { updatedAt: -1, createdAt: -1 };
+    // Build the keyset query. seq===0 && no id => first page (all docs).
+    const cursorId =
+      cursorIdRaw && ObjectId.isValid(cursorIdRaw) ? new ObjectId(cursorIdRaw) : null;
+    const query: Record<string, unknown> = { userId };
+    if (cursorSeq > 0 || cursorId) {
+      query.$or = cursorId
+        ? [{ serverSeq: { $gt: cursorSeq } }, { serverSeq: cursorSeq, _id: { $gt: cursorId } }]
+        : [{ serverSeq: { $gt: cursorSeq } }];
+    }
 
     const records = await db
       .collection(collection)
       .find(query)
-      .sort(sortCriteria)
+      .sort({ serverSeq: 1, _id: 1 })
+      .limit(limit)
       .toArray();
 
+    const hasMore = records.length === limit;
+    const last = records[records.length - 1];
+    const nextCursor = last
+      ? { seq: (last.serverSeq as number) ?? cursorSeq, id: (last._id as ObjectId).toString() }
+      : { seq: cursorSeq, id: cursorIdRaw };
+
+    // Deletions delta (wall-clock). Returned on every page; small and applied
+    // idempotently on the client.
     let deletions: string[] = [];
     if (since > 0) {
       const tombstones = await db
         .collection("deletions")
-        .find({
-          userId: session.userId,
-          collection,
-          deletedAt: { $gt: new Date(since) },
-        })
+        .find({ userId, collection, deletedAt: { $gt: new Date(since) } })
+        .project({ recordId: 1 })
         .toArray();
-
       deletions = tombstones.map((t) => t.recordId);
-      console.log(
-        `[v0] Found ${
-          deletions.length
-        } deletions for ${collection} since ${new Date(since).toISOString()}`
-      );
     }
 
+    // Lean payload: strip Mongo internals; the client normalizer fills defaults.
     const transformedRecords = records.map((record) => {
       const { _id, syncedAt, ...rest } = record;
-
-      // Create base record
-      const transformed: Record<string, unknown> = {
-        ...rest,
-        syncStatus: "synced",
-      };
-
-      if (collection === "flights") {
-        // Ensure HH:MM time fields default to "00:00" if missing
-        const timeFields = [
-          "blockTime",
-          "flightTime",
-          "nightTime",
-          "dayTime",
-          "picTime",
-          "sicTime",
-          "picusTime",
-          "dualTime",
-          "instructorTime",
-          "ifrTime",
-          "actualInstrumentTime",
-          "simulatedInstrumentTime",
-          "crossCountryTime",
-        ];
-        for (const field of timeFields) {
-          if (!transformed[field]) {
-            transformed[field] = "00:00";
-          }
-        }
-
-        // Ensure number fields default to 0
-        const numberFields = [
-          "dayTakeoffs",
-          "dayLandings",
-          "nightTakeoffs",
-          "nightLandings",
-          "autolands",
-          "holds",
-        ];
-        for (const field of numberFields) {
-          if (typeof transformed[field] !== "number") {
-            transformed[field] = Number(transformed[field]) || 0;
-          }
-        }
-
-        // Ensure string fields exist
-        const stringFields = [
-          "flightNumber",
-          "aircraftReg",
-          "aircraftType",
-          "departureIcao",
-          "departureIata",
-          "arrivalIcao",
-          "arrivalIata",
-          "scheduledOut",
-          "scheduledIn",
-          "outTime",
-          "offTime",
-          "onTime",
-          "inTime",
-          "picId",
-          "picName",
-          "sicId",
-          "sicName",
-          "remarks",
-          "endorsements",
-        ];
-        for (const field of stringFields) {
-          if (!transformed[field]) {
-            transformed[field] = "";
-          }
-        }
-
-        // Ensure pilotRole has valid default
-        if (!transformed.pilotRole) {
-          transformed.pilotRole = "SIC";
-        }
-
-        // Ensure manualOverrides object exists
-        if (!transformed.manualOverrides) {
-          transformed.manualOverrides = {};
-        }
-
-        // Ensure array fields
-        if (!Array.isArray(transformed.approaches)) {
-          transformed.approaches = [];
-        }
-        if (!Array.isArray(transformed.additionalCrew)) {
-          transformed.additionalCrew = [];
-        }
-
-        // Ensure boolean fields
-        if (typeof transformed.ipcIcc !== "boolean") {
-          transformed.ipcIcc = false;
-        }
-        if (typeof transformed.isLocked !== "boolean") {
-          transformed.isLocked = false;
-        }
-        if (typeof transformed.pilotFlying !== "boolean") {
-          transformed.pilotFlying = true;
-        }
-      }
-
-      return transformed;
+      return { ...rest, syncStatus: "synced" };
     });
 
     return NextResponse.json({
       records: transformedRecords,
-      deletions, // Include deletions array in response
-      syncedAt: serverNow, // Server-authored watermark for the client's next `since`
+      deletions,
+      nextCursor,
+      hasMore,
+      serverNow,
       count: transformedRecords.length,
     });
   } catch (error) {
-    console.error("Fetch collection error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch records" },
-      { status: 500 }
-    );
+    console.error("[Sync] delta pull error:", error);
+    return NextResponse.json({ error: "Failed to fetch records" }, { status: 500 });
   }
 }

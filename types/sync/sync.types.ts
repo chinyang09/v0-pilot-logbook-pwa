@@ -21,7 +21,21 @@ export interface SyncQueueItem {
 
 export interface SyncMeta {
   key: string;
-  lastSyncAt: number;
+  // Legacy time-based watermark (now used as the wall-clock tombstone watermark).
+  lastSyncAt?: number;
+  // Generic value slot for sync-engine metadata: device id, per-collection
+  // delta cursors, audit counters, etc. Keyed records, no schema change needed.
+  value?: unknown;
+}
+
+/**
+ * Per-collection delta-pull cursor. `seq` is the server-authored monotonic
+ * version watermark; `id` is the stringified Mongo `_id` tiebreaker for keyset
+ * pagination across records that share a `seq`.
+ */
+export interface CollectionCursor {
+  seq: number;
+  id: string;
 }
 
 export interface SyncResult {

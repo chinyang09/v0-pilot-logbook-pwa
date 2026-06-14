@@ -2,7 +2,6 @@ import {
   getSyncQueue,
   clearSyncQueueItem,
   incrementRetryCount,
-  markRecordSynced,
   upsertFlightFromServer,
   upsertAircraftFromServer,
   upsertPersonnelFromServer,
@@ -14,95 +13,92 @@ import {
   silentDeleteAircraft,
   silentDeletePersonnel,
   bulkUpsertAircraftReferences,
+  getCollectionCursor,
+  setCollectionCursor,
+  resetAllCollectionCursors,
+  reconcilePushedRecords,
+  bumpSyncAudit,
   userDb,
   type FlightLog,
   type Aircraft,
   type Personnel,
 } from "@/lib/db"
 import { referenceDb } from "@/lib/db/reference-db"
-import type { SyncQueueItem } from "@/types/sync/sync.types"
+import type { SyncQueueItem, SyncCollection } from "@/types/sync/sync.types"
 import { getSyncTriggerManager } from "./sync-trigger-manager"
 
-// Max attempts before a per-item sync failure is dead-lettered (dropped from
-// the queue) so a poison item can't loop forever. Transient network/outage
-// failures are not counted toward this.
+// Max attempts before a per-item sync failure is dead-lettered so a poison item
+// can't loop forever. Transient network/outage/5xx failures are NOT counted.
 const MAX_SYNC_RETRIES = 5
 
-// Wrapper for clearing all local data except preferences
-async function clearAllLocalData(): Promise<void> {
-  await userDb.clearLocalDataForResync()
-}
+// Collections covered by the user-data sync engine, in push/pull order
+// (dependency-light collections first so a flight never references an unseen
+// aircraft/crew member).
+const SYNC_COLLECTIONS: readonly SyncCollection[] = ["aircraft", "personnel", "flights"]
+
+const PAGE_SIZE = 500
 
 type SyncStatus = "online" | "offline" | "syncing"
+
+interface PushResult {
+  success: number
+  failed: number
+}
+
+interface PullResult {
+  count: number
+  requiresFullResync?: boolean
+  // Server wall-clock (max across pages) used as the next tombstone watermark.
+  serverNow?: number
+  // True only if every collection drained cleanly; gates the watermark advance.
+  allOk: boolean
+}
 
 class SyncService {
   private status: SyncStatus = "offline"
   private listeners: Set<(status: SyncStatus) => void> = new Set()
-  private syncInProgress = false
-  private syncLock: Promise<void> = Promise.resolve()
+  // Single-flight guard: concurrent triggers coalesce onto the in-flight sync
+  // and await its real result, instead of returning a misleading no-op.
+  private inFlight: Promise<{ pushed: number; pulled: number; failed: number }> | null = null
   private onDataChangedCallbacks: Set<() => void> = new Set()
 
   constructor() {
     if (typeof window !== "undefined") {
       this.status = navigator.onLine ? "online" : "offline"
-
-      // Note: Network event handling is now managed by SyncTriggerManager
-      // Keep status updates here for UI
       window.addEventListener("online", () => {
-        console.log("[v0] Network online - updating status")
+        console.log("[Sync] network online")
         this.setStatus("online")
       })
-
       window.addEventListener("offline", () => {
-        console.log("[v0] Network offline - updating status")
+        console.log("[Sync] network offline")
         this.setStatus("offline")
       })
     }
   }
 
-  /**
-   * Initialize sync with intelligent triggers
-   */
   initializeTriggers() {
     if (typeof window === "undefined") return
-
     const triggerManager = getSyncTriggerManager()
     triggerManager.initialize(async () => {
       await this.fullSync()
     })
-    console.log("[v0] Sync triggers initialized")
+    console.log("[Sync] triggers initialized")
   }
 
-  /**
-   * Notify trigger manager of data change (for debounce)
-   */
   notifyDataChange() {
-    const triggerManager = getSyncTriggerManager()
-    triggerManager.notifyDataChanged()
+    getSyncTriggerManager().notifyDataChanged()
   }
 
-  /**
-   * Force sync immediately (called by user)
-   */
   async forceSyncNow() {
-    const triggerManager = getSyncTriggerManager()
-    await triggerManager.forceSyncNow()
+    await getSyncTriggerManager().forceSyncNow()
   }
 
-  /**
-   * Sync before logout
-   */
   async syncBeforeLogout() {
-    const triggerManager = getSyncTriggerManager()
-    await triggerManager.syncBeforeLogout()
+    await getSyncTriggerManager().syncBeforeLogout()
   }
 
-  /**
-   * Destroy sync triggers (cleanup timers and event listeners)
-   */
   destroyTriggers() {
-    const triggerManager = getSyncTriggerManager()
-    triggerManager.destroy()
+    getSyncTriggerManager().destroy()
   }
 
   private setStatus(status: SyncStatus) {
@@ -139,103 +135,77 @@ class SyncService {
     }
   }
 
-  async fullSync(): Promise<{
-    pushed: number
-    pulled: number
-    failed: number
-  }> {
+  async fullSync(): Promise<{ pushed: number; pulled: number; failed: number }> {
     if (!navigator.onLine) {
-      console.log("[v0] Skipping sync - offline")
       return { pushed: 0, pulled: 0, failed: 0 }
     }
-
-    // Use a lock to prevent concurrent sync operations
-    if (this.syncInProgress) {
-      console.log("[v0] Skipping sync - sync already in progress")
-      return { pushed: 0, pulled: 0, failed: 0 }
+    // Coalesce: if a sync is already running, return its in-flight promise so
+    // every caller awaits the same real result.
+    if (this.inFlight) {
+      return this.inFlight
     }
-
-    this.syncInProgress = true
-
-    const result = await this.executeFullSync()
-    return result
+    this.inFlight = this.executeFullSync().finally(() => {
+      this.inFlight = null
+    })
+    return this.inFlight
   }
 
-  private async executeFullSync(): Promise<{
-    pushed: number
-    pulled: number
-    failed: number
-  }> {
+  private async executeFullSync(): Promise<{ pushed: number; pulled: number; failed: number }> {
     const session = await getUserSession()
-
     if (!session || (session.expiresAt && session.expiresAt < Date.now())) {
-      console.log("[v0] Skipping sync - no valid or active session")
-      this.syncInProgress = false
       return { pushed: 0, pulled: 0, failed: 0 }
     }
 
     const dbReady = await initializeDB()
     if (!dbReady) {
-      console.error("[v0] DB not ready for sync")
-      this.syncInProgress = false
+      console.error("[Sync] DB not ready")
       return { pushed: 0, pulled: 0, failed: 0 }
     }
 
+    const correlationId = crypto.randomUUID().slice(0, 8)
     this.setStatus("syncing")
-
-    console.log("[v0] Starting full sync for user:", session.callsign)
+    console.log(`[Sync ${correlationId}] start for ${session.callsign}`)
 
     let pushed = 0
     let pulled = 0
     let failed = 0
 
     try {
-      console.log("[v0] Step 1: Pushing pending changes...")
-      const pushResult = await this.pushPendingChanges()
+      const pushResult = await this.pushPendingChanges(correlationId)
       pushed = pushResult.success
       failed = pushResult.failed
-      console.log("[v0] Pushed", pushed, "records, failed", failed)
+      console.log(`[Sync ${correlationId}] pushed ${pushed}, failed ${failed}`)
 
-      await new Promise((resolve) => setTimeout(resolve, 100))
-
-      console.log("[v0] Step 2: Pulling from server...")
-      let pullResult = await this.pullFromServer()
-      pulled = pullResult.count
+      let pullResult = await this.pullFromServer(false, correlationId)
 
       if (pullResult.requiresFullResync) {
-        console.log("[v0] Server requires full resync - clearing local data")
-        await clearAllLocalData()
-        // Reference cursor must be reset too, or stale reference data lingers.
+        console.log(`[Sync ${correlationId}] full resync required - clearing data (queue preserved)`)
+        await userDb.clearDataTablesForResync()
+        await resetAllCollectionCursors(SYNC_COLLECTIONS)
+        await setLastSyncTime(0)
         await referenceDb.setMetadata(`aircraft-ref-last-sync-${session.userId}`, 0)
-        // Re-pull with since=0
-        pullResult = await this.pullFromServer(true)
-        pulled = pullResult.count
+        pullResult = await this.pullFromServer(true, correlationId)
       }
+      pulled = pullResult.count
+      console.log(`[Sync ${correlationId}] pulled ${pulled}`)
 
-      console.log("[v0] Pulled", pulled, "records from server")
-
-      // Step 3: Pull shared aircraft reference data from MongoDB
-      console.log("[v0] Step 3: Pulling aircraft reference data...")
       const refPulled = await this.pullAircraftReference(session.userId)
-      if (refPulled > 0) {
-        console.log("[v0] Pulled", refPulled, "aircraft references")
-      }
+      if (refPulled > 0) console.log(`[Sync ${correlationId}] pulled ${refPulled} aircraft refs`)
 
-      // Advance the watermark only when every collection pulled cleanly, using
-      // the server-authored timestamp. Advancing on a partial failure (or with
-      // a client clock) would silently skip a collection's delta next sync.
-      if (pullResult.allOk && pullResult.serverWatermark !== undefined) {
-        await setLastSyncTime(pullResult.serverWatermark)
-      } else {
-        console.warn("[v0] Pull incomplete - leaving last sync time unchanged")
+      // Advance the wall-clock tombstone watermark only when every collection
+      // drained cleanly, using the server-authored time. Per-collection record
+      // cursors are advanced incrementally inside pullFromServer.
+      if (pullResult.allOk && pullResult.serverNow !== undefined) {
+        await setLastSyncTime(pullResult.serverNow)
+      } else if (!pullResult.allOk) {
+        console.warn(`[Sync ${correlationId}] pull incomplete - watermark unchanged`)
       }
 
       this.notifyDataChanged()
-      console.log("[v0] Full sync complete")
+      console.log(`[Sync ${correlationId}] complete`)
     } catch (error) {
-      console.error("[v0] Full sync error:", error)
+      console.error(`[Sync ${correlationId}] error:`, error)
     } finally {
-      this.syncInProgress = false
       this.setStatus(navigator.onLine ? "online" : "offline")
     }
 
@@ -243,340 +213,288 @@ class SyncService {
   }
 
   /**
-   * Compact sync queue by merging multiple operations on the same record
-   * Rules:
-   * - create → update → update = single create with latest data
-   * - create → delete = just delete
-   * - update → delete = just delete
-   * - update → update = single update with latest data
-   * - Multiple operations on same record = keep latest operation with latest data
+   * Compact the queue by merging multiple operations on the same record.
    */
   private compactSyncQueue(queue: SyncQueueItem[]): SyncQueueItem[] {
-    console.log(`[v0] Compacting sync queue: ${queue.length} items`)
-
-    // Group by collection and record ID
     const recordOps = new Map<string, SyncQueueItem[]>()
-
     for (const item of queue) {
-      const recordId = (item.data as { id: string }).id
+      const recordId = (item.data as { id?: string })?.id
+      if (!recordId) continue
       const key = `${item.collection}:${recordId}`
-
-      if (!recordOps.has(key)) {
-        recordOps.set(key, [])
-      }
+      if (!recordOps.has(key)) recordOps.set(key, [])
       recordOps.get(key)!.push(item)
     }
 
     const compacted: SyncQueueItem[] = []
-
-    for (const [key, operations] of recordOps.entries()) {
-      // Sort by timestamp to get chronological order
+    for (const operations of recordOps.values()) {
       operations.sort((a, b) => a.timestamp - b.timestamp)
-
-      // Get the latest operation
       const latest = operations[operations.length - 1]
 
-      // Determine the final operation type
-      let finalType = latest.type
-      let finalData = latest.data
-
-      // If the latest is a delete, that's the final operation
       if (latest.type === "delete") {
-        // Check if there was a create before - if yes, we can skip entirely
-        const hasCreate = operations.some(op => op.type === "create")
-        if (hasCreate) {
-          // Created then deleted in same sync - skip this record entirely
-          console.log(`[v0] Skipping ${key} - created and deleted in same batch`)
-          continue
-        }
-        // Otherwise, keep the delete
+        // Created and deleted before ever syncing → nothing to send.
+        if (operations.some((op) => op.type === "create")) continue
         compacted.push(latest)
         continue
       }
 
-      // If there's a create anywhere in the operations, treat as create with latest data
-      const hasCreate = operations.some(op => op.type === "create")
-      if (hasCreate) {
-        finalType = "create"
-      }
-
-      // Use the latest data
-      compacted.push({
-        ...latest,
-        type: finalType,
-        data: finalData,
-      })
+      const finalType = operations.some((op) => op.type === "create") ? "create" : latest.type
+      compacted.push({ ...latest, type: finalType })
     }
-
-    console.log(`[v0] Compacted to ${compacted.length} items (${queue.length - compacted.length} items merged)`)
     return compacted
   }
 
-  async pushPendingChanges(): Promise<{ success: number; failed: number }> {
-    if (!navigator.onLine) {
-      return { success: 0, failed: 0 }
-    }
+  async pushPendingChanges(correlationId = "push"): Promise<PushResult> {
+    if (!navigator.onLine) return { success: 0, failed: 0 }
 
     const queue = await getSyncQueue()
-    if (queue.length === 0) {
-      return { success: 0, failed: 0 }
-    }
+    if (queue.length === 0) return { success: 0, failed: 0 }
 
-    // Compact the queue to reduce operations
-    const compactedQueue = this.compactSyncQueue(queue)
+    const compacted = this.compactSyncQueue(queue)
 
-    if (compactedQueue.length === 0) {
-      console.log("[v0] All operations cancelled out - clearing queue")
-      // Clear all original queue items since they cancelled out
-      for (const item of queue) {
-        await clearSyncQueueItem(item.id)
-      }
+    if (compacted.length === 0) {
+      // Everything cancelled out (created + deleted before syncing). Clear only
+      // the snapshot rows so any edit enqueued after this snapshot survives.
+      await userDb.syncQueue.bulkDelete(queue.map((q) => q.id))
       return { success: queue.length, failed: 0 }
     }
 
-    let success = 0
-    let failed = 0
+    await bumpSyncAudit("pushAttempted", compacted.length)
 
-    const headers = await this.getAuthHeaders()
-
-    // Use bulk sync endpoint
+    let response: Response
     try {
-      console.log(`[v0] Sending bulk sync request with ${compactedQueue.length} items`)
-
-      const response = await fetch("/api/sync/bulk", {
+      response = await fetch("/api/sync/bulk", {
         method: "POST",
-        headers,
-        body: JSON.stringify({ items: compactedQueue }),
+        headers: await this.getAuthHeaders(),
+        body: JSON.stringify({ items: compacted }),
       })
-
-      if (response.ok) {
-        const result = await response.json()
-        console.log(`[v0] Bulk sync response:`, result.summary)
-
-        // Process results
-        for (const itemResult of result.results) {
-          const originalItem = compactedQueue.find(item => item.id === itemResult.queueItemId)
-          if (!originalItem) continue
-
-          if (itemResult.success) {
-            // Handle rejection (tombstoned)
-            if (itemResult.rejected) {
-              console.log(`[v0] Record rejected by server: ${itemResult.reason}`)
-              // Delete locally to sync with server state
-              const data = originalItem.data as { id: string }
-              switch (originalItem.collection) {
-                case "flights":
-                  await silentDeleteFlight(data.id)
-                  break
-                case "aircraft":
-                  await silentDeleteAircraft(data.id)
-                  break
-                case "personnel":
-                  await silentDeletePersonnel(data.id)
-                  break
-              }
-            } else if (originalItem.type === "create" || originalItem.type === "update") {
-              // Mark record as synced
-              const data = originalItem.data as { id: string }
-              await markRecordSynced(originalItem.collection, data.id)
-            }
-
-            // Clear all original queue items that contributed to this compacted item
-            // Find all queue items for the same record
-            const recordId = (originalItem.data as { id: string }).id
-            const itemsToClear = queue.filter(item => {
-              const itemRecordId = (item.data as { id: string }).id
-              return item.collection === originalItem.collection && itemRecordId === recordId
-            })
-
-            for (const item of itemsToClear) {
-              await clearSyncQueueItem(item.id)
-            }
-
-            success++
-          } else {
-            console.error(`[v0] Bulk sync item failed:`, itemResult.reason)
-            // Bump the retry count on the contributing queue items and
-            // dead-letter (drop) any that exceed the cap, so a poison item
-            // can't re-send forever. Transient outages take the network/non-ok
-            // branches below and are intentionally NOT counted here.
-            const recordId = (originalItem.data as { id: string }).id
-            const itemsForRecord = queue.filter(item => {
-              const itemRecordId = (item.data as { id: string }).id
-              return item.collection === originalItem.collection && itemRecordId === recordId
-            })
-            for (const item of itemsForRecord) {
-              if ((item.retryCount || 0) + 1 >= MAX_SYNC_RETRIES) {
-                console.warn(`[v0] Dead-lettering sync item ${item.id} after ${MAX_SYNC_RETRIES} failed attempts`)
-                await clearSyncQueueItem(item.id)
-              } else {
-                await incrementRetryCount(item.id)
-              }
-            }
-            failed++
-          }
-        }
-      } else {
-        const errorText = await response.text()
-        console.error("[v0] Bulk sync request failed:", response.status, errorText)
-        failed = compactedQueue.length
-      }
     } catch (error) {
-      console.error("[v0] Bulk sync error:", error)
-      failed = compactedQueue.length
+      // Transient network failure — keep the queue intact, do NOT count retries.
+      console.warn(`[Sync ${correlationId}] push network error (will retry):`, error)
+      return { success: 0, failed: compacted.length }
     }
 
-    console.log(`[v0] Bulk sync complete: ${success} succeeded, ${failed} failed`)
+    if (!response.ok) {
+      const transient = response.status >= 500 || response.status === 429
+      if (transient) {
+        console.warn(`[Sync ${correlationId}] push transient ${response.status} (will retry)`)
+        return { success: 0, failed: compacted.length }
+      }
+      // Persistent (4xx) → poison. Bump retry / dead-letter the whole batch.
+      console.error(`[Sync ${correlationId}] push poison ${response.status}`)
+      for (const item of compacted) await this.retryOrDeadLetter(queue, item)
+      return { success: 0, failed: compacted.length }
+    }
+
+    const result = await response.json()
+    let success = 0
+    let failed = 0
+    let confirmed = 0
+    const reconcileByCollection = new Map<
+      SyncCollection,
+      { id: string; pushedUpdatedAt?: number; pushedTimestamp: number }[]
+    >()
+
+    for (const itemResult of result.results as {
+      queueItemId: string
+      success: boolean
+      rejected?: boolean
+      reason?: string
+    }[]) {
+      const original = compacted.find((c) => c.id === itemResult.queueItemId)
+      if (!original) continue
+      const recordId = (original.data as { id: string }).id
+
+      if (itemResult.success) {
+        confirmed++
+        if (itemResult.rejected) {
+          // Tombstoned on another device → delete locally and clear its rows.
+          switch (original.collection) {
+            case "flights":
+              await silentDeleteFlight(recordId)
+              break
+            case "aircraft":
+              await silentDeleteAircraft(recordId)
+              break
+            case "personnel":
+              await silentDeletePersonnel(recordId)
+              break
+          }
+        }
+        // Reconcile (compare-and-set mark-synced + clear stale rows) runs even
+        // for deletes/rejections: the record is gone so no mark happens, but its
+        // queue rows up to this push are cleared.
+        const entries = reconcileByCollection.get(original.collection) ?? []
+        entries.push({
+          id: recordId,
+          pushedUpdatedAt: (original.data as { updatedAt?: number }).updatedAt,
+          pushedTimestamp: original.timestamp,
+        })
+        reconcileByCollection.set(original.collection, entries)
+        success++
+      } else {
+        await this.retryOrDeadLetter(queue, original)
+        failed++
+      }
+    }
+
+    for (const [collection, entries] of reconcileByCollection) {
+      await reconcilePushedRecords(collection, entries)
+    }
+
+    await bumpSyncAudit("pushConfirmed", confirmed)
+    console.log(`[Sync ${correlationId}] push results: ${success} ok, ${failed} failed`)
     return { success, failed }
   }
 
-  async pullFromServer(forceFullSync = false): Promise<{
-    count: number
-    requiresFullResync?: boolean
-    // Server-authored watermark (min syncedAt across collections) to persist as
-    // the next `since`. undefined if no collection returned one.
-    serverWatermark?: number
-    // True only if every collection pulled cleanly; when false the caller must
-    // NOT advance the watermark or it would skip the failed collection's delta.
-    allOk?: boolean
-  }> {
-    if (!navigator.onLine) {
-      console.log("[v0] Offline - skipping pull")
-      return { count: 0, allOk: false }
-    }
-
-    let count = 0
-    let minWatermark = Number.POSITIVE_INFINITY
-    let allOk = true
-    const rawLastSyncTime = await getLastSyncTime()
-    const lastSyncTime = forceFullSync ? 0 : rawLastSyncTime ? Number(rawLastSyncTime) : 0
-    console.log(
-      "[v0] Last sync time:",
-      lastSyncTime,
-      lastSyncTime > 0 ? new Date(lastSyncTime).toISOString() : "N/A (full sync)",
+  /**
+   * Per-item poison handling: bump retry counts on the contributing snapshot
+   * rows; once a row passes MAX_SYNC_RETRIES, dead-letter it (drop the row AND
+   * flag the record `syncStatus:"error"` so it surfaces rather than silently
+   * staying pending forever).
+   */
+  private async retryOrDeadLetter(queue: SyncQueueItem[], compactedItem: SyncQueueItem) {
+    const recordId = (compactedItem.data as { id: string }).id
+    const rows = queue.filter(
+      (row) =>
+        row.collection === compactedItem.collection &&
+        (row.data as { id?: string })?.id === recordId &&
+        row.timestamp <= compactedItem.timestamp
     )
-
-    const headers = await this.getAuthHeaders()
-
-    try {
-      const collections = ["flights", "aircraft", "personnel"] as const
-
-      for (const collection of collections) {
-        try {
-          const url = `/api/sync/${collection}?since=${lastSyncTime}`
-          console.log("[v0] Fetching from:", url)
-          const response = await fetch(url, { headers })
-
-          if (response.ok) {
-            const data = await response.json()
-
-            if (data.requiresFullResync) {
-              console.log("[v0] Server requires full resync:", data.reason)
-              return { count: 0, requiresFullResync: true }
-            }
-
-            if (typeof data.syncedAt === "number") {
-              minWatermark = Math.min(minWatermark, data.syncedAt)
-            }
-
-            const records = data.records || []
-            const deletions = data.deletions || []
-
-            console.log("[v0] Received", records.length, collection, "and", deletions.length, "deletions from server")
-
-            for (const deletedId of deletions) {
-              try {
-                switch (collection) {
-                  case "flights":
-                    await silentDeleteFlight(deletedId)
-                    break
-                  case "aircraft":
-                    await silentDeleteAircraft(deletedId)
-                    break
-                  case "personnel":
-                    await silentDeletePersonnel(deletedId)
-                    break
-                }
-                console.log(`[v0] Silently deleted ${collection} record: ${deletedId}`)
-              } catch (deleteError) {
-                console.error(`[v0] Error deleting ${collection} record:`, deleteError)
-              }
-            }
-
-            for (const record of records) {
-              try {
-                switch (collection) {
-                  case "flights":
-                    await upsertFlightFromServer(record as FlightLog)
-                    break
-                  case "aircraft":
-                    await upsertAircraftFromServer(record as Aircraft)
-                    break
-                  case "personnel":
-                    await upsertPersonnelFromServer(record as Personnel)
-                    break
-                }
-                count++
-              } catch (upsertError) {
-                console.error(`[v0] Error upserting ${collection} record:`, upsertError, record)
-              }
-            }
-          } else if (response.status === 401) {
-            allOk = false
-            console.error("[v0] Unauthorized - session may be invalid")
-          } else {
-            allOk = false
-            console.error(`[v0] Failed to fetch ${collection}:`, response.status, await response.text())
-          }
-        } catch (fetchError) {
-          allOk = false
-          console.error(`[v0] Error fetching ${collection}:`, fetchError)
-        }
+    let deadLettered = false
+    for (const row of rows) {
+      if ((row.retryCount || 0) + 1 >= MAX_SYNC_RETRIES) {
+        console.warn(`[Sync] dead-lettering ${row.id} after ${MAX_SYNC_RETRIES} attempts`)
+        await clearSyncQueueItem(row.id)
+        deadLettered = true
+      } else {
+        await incrementRetryCount(row.id)
       }
-    } catch (error) {
-      allOk = false
-      console.error("[v0] Pull sync error:", error)
     }
-
-    console.log("[v0] Pull complete - total records:", count)
-    return {
-      count,
-      allOk,
-      serverWatermark: minWatermark === Number.POSITIVE_INFINITY ? undefined : minWatermark,
+    if (deadLettered) {
+      try {
+        const table = userDb[compactedItem.collection]
+        const record = await table.get(recordId)
+        if (record) await table.put({ ...record, syncStatus: "error" } as never)
+      } catch (e) {
+        console.error("[Sync] failed to flag dead-lettered record:", e)
+      }
     }
   }
 
+  async pullFromServer(forceFullSync = false, correlationId = "pull"): Promise<PullResult> {
+    if (!navigator.onLine) return { count: 0, allOk: false }
+
+    let count = 0
+    let allOk = true
+    let maxServerNow = 0
+    const since = forceFullSync ? 0 : await getLastSyncTime()
+    const headers = await this.getAuthHeaders()
+
+    for (const collection of SYNC_COLLECTIONS) {
+      try {
+        let cursor = forceFullSync ? { seq: 0, id: "" } : await getCollectionCursor(collection)
+        let pages = 0
+
+        while (true) {
+          const url =
+            `/api/sync/${collection}?seq=${cursor.seq}` +
+            `&seqId=${encodeURIComponent(cursor.id)}` +
+            `&since=${since}&limit=${PAGE_SIZE}`
+          const response = await fetch(url, { headers })
+
+          if (response.status === 401) {
+            allOk = false
+            console.error(`[Sync ${correlationId}] unauthorized pulling ${collection}`)
+            break
+          }
+          if (!response.ok) {
+            allOk = false
+            console.error(`[Sync ${correlationId}] pull ${collection} failed: ${response.status}`)
+            break
+          }
+
+          const data = await response.json()
+          if (data.requiresFullResync) {
+            return { count: 0, requiresFullResync: true, allOk: false }
+          }
+
+          for (const deletedId of data.deletions || []) {
+            try {
+              if (collection === "flights") await silentDeleteFlight(deletedId)
+              else if (collection === "aircraft") await silentDeleteAircraft(deletedId)
+              else if (collection === "personnel") await silentDeletePersonnel(deletedId)
+            } catch (e) {
+              console.error(`[Sync ${correlationId}] delete ${collection} error:`, e)
+            }
+          }
+
+          for (const record of data.records || []) {
+            try {
+              if (collection === "flights") await upsertFlightFromServer(record as FlightLog)
+              else if (collection === "aircraft") await upsertAircraftFromServer(record as Aircraft)
+              else if (collection === "personnel") await upsertPersonnelFromServer(record as Personnel)
+              count++
+            } catch (e) {
+              console.error(`[Sync ${correlationId}] upsert ${collection} error:`, e, record)
+            }
+          }
+
+          if (typeof data.serverNow === "number") {
+            maxServerNow = Math.max(maxServerNow, data.serverNow)
+          }
+          if (data.nextCursor && typeof data.nextCursor.seq === "number") {
+            cursor = { seq: data.nextCursor.seq, id: data.nextCursor.id || "" }
+            // Persist progress per page — keyset is monotonic and upserts are
+            // idempotent, so a mid-pull failure simply resumes from here.
+            await setCollectionCursor(collection, cursor)
+          }
+
+          pages++
+          if (!data.hasMore) break
+          if (pages > 10000) {
+            console.error(`[Sync ${correlationId}] pull ${collection} exceeded page cap`)
+            allOk = false
+            break
+          }
+        }
+      } catch (error) {
+        allOk = false
+        console.error(`[Sync ${correlationId}] error pulling ${collection}:`, error)
+      }
+    }
+
+    return { count, allOk, serverNow: maxServerNow > 0 ? maxServerNow : undefined }
+  }
+
   /**
-   * Pull shared aircraft reference data from MongoDB
-   * Uses a separate sync timestamp (not tied to user data sync)
+   * Pull shared aircraft reference data from MongoDB (separate per-user cursor).
    */
   private async pullAircraftReference(userId: string): Promise<number> {
     if (!navigator.onLine) return 0
-
     try {
-      // Per-user key — the reference DB is shared across accounts on a device,
-      // so a single global cursor lets one user clobber another's.
       const metaKey = `aircraft-ref-last-sync-${userId}`
       const lastRefSync = await referenceDb.getMetadata(metaKey)
       const since = lastRefSync ? Number(lastRefSync) : 0
 
-      const response = await fetch(`/api/sync/aircraft-reference?since=${since}`)
+      const response = await fetch(`/api/sync/aircraft-reference?since=${since}`, {
+        headers: await this.getAuthHeaders(),
+      })
       if (!response.ok) {
-        console.error("[v0] Aircraft reference sync failed:", response.status)
+        console.error("[Sync] aircraft reference pull failed:", response.status)
         return 0
       }
 
       const data = await response.json()
       const records = data.records || []
-
       if (records.length === 0) return 0
 
       const count = await bulkUpsertAircraftReferences(records)
-      await referenceDb.setMetadata(metaKey, data.lastUpdated || Date.now())
-
+      if (typeof data.lastUpdated === "number") {
+        await referenceDb.setMetadata(metaKey, data.lastUpdated)
+      }
       return count
     } catch (error) {
-      console.error("[v0] Aircraft reference sync error:", error)
+      console.error("[Sync] aircraft reference pull error:", error)
       return 0
     }
   }

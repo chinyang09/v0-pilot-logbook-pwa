@@ -121,6 +121,15 @@ export {
   getLastSyncTime,
   setLastSyncTime,
   markRecordSynced,
+  getDeviceId,
+  getMetaValue,
+  setMetaValue,
+  getCollectionCursor,
+  setCollectionCursor,
+  resetAllCollectionCursors,
+  bumpSyncAudit,
+  getSyncAudit,
+  reconcilePushedRecords,
 } from "./stores/user/sync-queue.store";
 
 // Re-export roster stores - schedule entries

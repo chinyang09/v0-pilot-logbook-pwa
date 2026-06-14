@@ -50,6 +50,14 @@ async function ensureIndexes(mongoClient: MongoClient): Promise<void> {
       safe(`${coll}.userId+syncedAt`, () =>
         db.collection(coll).createIndex({ userId: 1, syncedAt: 1 }),
       ),
+      // Server-authored monotonic version — the delta-pull keyset cursor.
+      safe(`${coll}.userId+serverSeq+_id`, () =>
+        db.collection(coll).createIndex({ userId: 1, serverSeq: 1, _id: 1 }),
+      ),
+      // Backs the legacy createdAt fallback branch of the delta query.
+      safe(`${coll}.userId+createdAt`, () =>
+        db.collection(coll).createIndex({ userId: 1, createdAt: 1 }),
+      ),
     ]),
     // Tombstones — TTL + delta-sync lookups (mirrors /api/sync/setup-ttl).
     safe("deletions.ttl", () =>
