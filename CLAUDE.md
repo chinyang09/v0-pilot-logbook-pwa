@@ -440,10 +440,59 @@ Debug logs use prefixed format: `[v0]`, `[Auth]`, `[SW]`, `[UserDB]`, `[Sync]`, 
 
 - **Webpack** is used explicitly (`--webpack` flag), not Turbopack
 - **TypeScript build errors are ignored** (`ignoreBuildErrors: true` in next.config.mjs)
+- **ESLint errors are ignored during build** (`eslint.ignoreDuringBuilds: true`) — lint runs only via `pnpm lint`, never blocking a Vercel deploy (mirrors the TS setting)
 - **8GB heap** allocated for builds due to OCR model processing
 - **shadcn/ui** uses the New York style with CSS variables and RSC support
 - **Tailwind CSS v4** via `@tailwindcss/postcss` PostCSS plugin
 - **Dark mode** is class-based via `next-themes`
+
+## Linting
+
+ESLint uses a **flat config** (`eslint.config.mjs`) that spreads
+`eslint-config-next/core-web-vitals` **directly** — `eslint-config-next@16`
+ships native flat-config arrays, so wrapping them in `FlatCompat` double-wraps
+the plugins and throws a "Converting circular structure to JSON" error. `eslint`
+and `eslint-config-next` are declared devDependencies (keep `pnpm-lock.yaml` in
+sync; Vercel uses frozen-lockfile). `pnpm lint` should stay **green (0 errors)**.
+
+### The advisory react-hooks v6 warnings (~54, intentionally `warn`)
+
+Next 16 bundles **`eslint-plugin-react-hooks` v6**, which ships the **React
+Compiler** rule suite (`set-state-in-effect`, `refs`, `immutability`, `purity`,
+`static-components`, `incompatible-library`). This codebase predates the
+compiler, so these fire on patterns that are **correct in standard React**. They
+are downgraded to **warnings** in `eslint.config.mjs` on purpose — do **not**
+re-promote them to errors or mass-refactor to silence them. The classic
+load-bearing rules (`rules-of-hooks`, `exhaustive-deps`) keep their default
+severities.
+
+Why each is left (they are resolvable, but the fix is a real refactor with
+regression risk, and several are false positives for our constraints):
+
+- **`set-state-in-effect`** — flags SSR-hydration effects (read `localStorage`
+  then `setState`, which *must* be post-mount, e.g. `use-sidebar-context`) and
+  reset-on-prop-change effects. "Compliant" rewrites mean `useSyncExternalStore`
+  / derived state per hook — easy to introduce hydration mismatches.
+- **`refs`** — flags the deliberate `ref.current = latest` write during render
+  (e.g. `use-page-actions`) used to avoid effect-dependency churn / button
+  flicker. The "fix" reintroduces the flicker.
+- **`incompatible-library`** — `@tanstack/react-virtual`; not fixable in our code.
+- **`immutability` / `purity`** — conservative compiler analysis (e.g. the login
+  TOTP auto-submit effect); not real mutations.
+- **`static-components`** — a Recharts `content={<CustomTooltip/>}` defined in
+  render (closes over theme); hoisting means threading every prop back through.
+- **`@next/next/no-page-custom-font`** — Inter is loaded via a Google Fonts
+  `<link>`; the family is hardcoded in a Tailwind v4 `@theme` block, so a
+  `next/font` migration is fiddly and risks a wrong font shipping.
+
+When **genuinely** missing a stable dep (a `useCallback`/`useMemo`/router/setState
+dispatcher), add it. When excluding a dep is intentional (the flight-form
+re-init/auto-save effects keyed on `resolvedFlight?.id` — depending on the full
+object clobbers in-progress edits on every reactive Dexie write), add an
+`// eslint-disable-next-line react-hooks/exhaustive-deps` **with a rationale**.
+
+Clearing the remaining warnings is a deliberate "adopt the React Compiler"
+project, individually tested — not a piecemeal lint cleanup.
 
 ## Environment Variables
 

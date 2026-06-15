@@ -10,6 +10,9 @@ import { writeFile, unlink, mkdir } from "fs/promises"
 import { join } from "path"
 import { randomUUID } from "crypto"
 import { tmpdir } from "os"
+import { validateSession } from "@/lib/auth/server/session"
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // 10MB
 
 interface OcrLine {
   text: string
@@ -44,6 +47,23 @@ async function getOcrInstance() {
 }
 
 export async function POST(request: NextRequest) {
+  // OCR runs a CPU/memory-heavy ONNX model server-side. Require a valid session
+  // (cookie-based — the client posts FormData from the browser) so it can't be
+  // used as an unauthenticated compute/DoS vector.
+  const session = await validateSession()
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  // Reject oversized uploads up front, before buffering/parsing the body.
+  const contentLength = Number(request.headers.get("content-length") || "0")
+  if (Number.isFinite(contentLength) && contentLength > MAX_IMAGE_BYTES * 1.4) {
+    return NextResponse.json(
+      { error: "Image too large. Maximum size is 10MB" },
+      { status: 413 }
+    )
+  }
+
   let tempFilePath: string | null = null
 
   try {
@@ -86,8 +106,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate image size (max 10MB)
-    if (imageBuffer.length > 10 * 1024 * 1024) {
+    // Validate decoded image size (max 10MB)
+    if (imageBuffer.length > MAX_IMAGE_BYTES) {
       return NextResponse.json(
         { error: "Image too large. Maximum size is 10MB" },
         { status: 400 }

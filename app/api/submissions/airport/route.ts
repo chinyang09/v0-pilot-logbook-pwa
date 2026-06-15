@@ -29,7 +29,14 @@ export async function POST(request: Request) {
   }
 
   const { submissionId, icao, name, iata, city, country, timezone, latitude, longitude, elevation } = body
-  if (!submissionId || !icao) {
+  // Type-check before string ops (.toUpperCase) so a non-string body field
+  // yields a clean 400 rather than a 500 TypeError.
+  if (
+    typeof submissionId !== "string" ||
+    !submissionId.trim() ||
+    typeof icao !== "string" ||
+    !icao.trim()
+  ) {
     return NextResponse.json(
       { error: "submissionId and icao are required" },
       { status: 400 }

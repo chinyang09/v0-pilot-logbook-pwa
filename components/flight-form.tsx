@@ -623,6 +623,10 @@ export function FlightForm({
           },
           result: nightResult,
         });
+      } else {
+        // Airports are present but lack usable coordinates: still split day time
+        // from block − night instead of leaving dayTime at the "00:00" default.
+        dayTime = calculateDayTime(blockTime, nightTime);
       }
     } else {
       // Fallback: calculate day as block - night
