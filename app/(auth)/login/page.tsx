@@ -470,11 +470,16 @@ export default function LoginPage() {
           userVerification: "required",
         },
         excludeCredentials:
-          options.excludeCredentials?.map((cred: any) => ({
-            id: typeof cred.id === "string" ? base64URLDecode(cred.id) : new Uint8Array(Object.values(cred.id)),
-            type: "public-key" as const,
-            transports: cred.transports,
-          })) || [],
+          options.excludeCredentials?.map((cred: any) => {
+            const desc: PublicKeyCredentialDescriptor = {
+              id: typeof cred.id === "string" ? base64URLDecode(cred.id) : new Uint8Array(Object.values(cred.id)),
+              type: "public-key",
+            }
+            if (Array.isArray(cred.transports) && cred.transports.every((t: unknown) => typeof t === "string")) {
+              desc.transports = cred.transports as AuthenticatorTransport[]
+            }
+            return desc
+          }) || [],
       }
 
       console.log("[v0] Calling navigator.credentials.create...")
