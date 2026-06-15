@@ -540,16 +540,17 @@ worse than the current behavior. Do **not** change these casually.
   Scoot "Crew Logbook Report" export: that format has **18 columns and no
   remarks column** (col 16/17 are SYNTH. DEVICES Time/Type). So this is harmless
   redundancy, not data loss — left as-is.
-- **CSV import stores LOCAL station times as OUT/IN** (`logbook-parser-v2.ts`
-  ~:62-63 + `lib/utils/roster/executor.ts` ~:178-183) — the Scoot report's
-  dep/arr times are **local**, but they are stored verbatim (the parser even
-  comments "logbook is already UTC"). Block time is unaffected (local−local
-  delta), but the absolute UTC instants are wrong, so the night/day split and
-  sun-position TO/LDG come out wrong. The executor already fetches
-  `depOffset`/`arrOffset` for the timezone fields but doesn't apply them to the
-  gate times. **Deferred** with the FDP/timezone work — it's a data-convention
-  decision (does the app store OUT/IN as UTC or local everywhere?) that needs
-  review before changing, since it affects every existing flight's alignment.
+- **Crew logbook CSV times are UTC** (`logbook-parser-v2.ts` ~:62-63) — verified
+  by cross-referencing the crew logbook export against the three **labeled**
+  schedule reports (UTC / Local Base / Local Station) for the same flights: the
+  logbook's dep/arr times match the **UTC** report exactly (e.g. 02/04 SIN→BKK
+  `04:49→07:22`; 03/04 SIN→CJB arrival `17:13`, and `17:13 UTC + 5:30 = 22:43` =
+  the Local-Station CJB local arrival). So storing them verbatim as UTC (the
+  parser's `// logbook is already UTC` comment) is **correct** — there is no
+  local→UTC conversion to apply here, unlike the schedule report which carries an
+  explicit time-frame header and is normalized via `time-reference-normalizer`.
+  (An earlier audit guessed these were local station times; that was a false
+  positive.)
 - **Service worker** (`public/sw.js`) — three items needing offline testing
   before any change (a bad SW is hard to roll back): (1) `install` calls
   `self.skipWaiting()` unconditionally while the registration
