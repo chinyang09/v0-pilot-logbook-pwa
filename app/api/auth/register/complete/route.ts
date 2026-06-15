@@ -87,8 +87,17 @@ export async function POST(request: NextRequest) {
       updatedAt: nowTimestamp,
     }
 
-    // Insert user into database
-    await db.collection<User>("users").insertOne(user)
+    // Insert user into database. The unique index on identity.searchKey is the
+    // authoritative guard against a callsign claimed concurrently between the
+    // begin and complete steps — translate its duplicate-key error into a 409.
+    try {
+      await db.collection<User>("users").insertOne(user)
+    } catch (err) {
+      if ((err as { code?: number }).code === 11000) {
+        return NextResponse.json({ error: "This callsign is already taken" }, { status: 409 })
+      }
+      throw err
+    }
 
     const sessionId = createId()
     const now = new Date() 

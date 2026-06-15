@@ -55,7 +55,7 @@ export function getRP(requestHost?: string) {
     }
 
     return {
-      name: "SkyLog Pilot Logbook",
+      name: "OOOI Pilot Logbook",
       id: hostname === "localhost" ? "localhost" : hostname,
     }
   }
@@ -63,7 +63,7 @@ export function getRP(requestHost?: string) {
   // Client-side: use window.location
   const hostname = window.location.hostname
   return {
-    name: "SkyLog Pilot Logbook",
+    name: "OOOI Pilot Logbook",
     id: hostname === "localhost" ? "localhost" : hostname,
   }
 }

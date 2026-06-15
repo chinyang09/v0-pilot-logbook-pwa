@@ -57,7 +57,10 @@ export async function POST(request: NextRequest) {
     await db.collection<{ _id: string; [key: string]: unknown }>("challenges").insertOne({
       _id: challengeBase64,
       challenge: challengeBase64,
-      expiresAt: new Date(Date.now() + 60000), // 1 minute expiry
+      // 10-minute window: the setup screen asks the user to configure their
+      // authenticator app (TOTP) before creating the passkey, which routinely
+      // takes longer than a minute. The challenge is still single-use.
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       userId,
       // Bind the identity + TOTP secret to the challenge so register/complete
       // uses server-authored values instead of trusting the client.
