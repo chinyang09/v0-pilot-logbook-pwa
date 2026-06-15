@@ -19,9 +19,15 @@ import { getMongoClient } from "@/lib/mongodb"
 import { enrichAircraftFromFR24 } from "@/lib/enrichment/aircraft-enrichment"
 import { find } from "geo-tz"
 
+// Bound the function's wall clock (each FR24 call can take up to 8s).
+export const maxDuration = 60
+
 const MAX_AIRCRAFT_PER_RUN = 20
 const MAX_AIRPORTS_PER_RUN = 50
 const MAX_RETRIES = 3
+// Stop starting new FR24 lookups past this point so the run finishes cleanly
+// within maxDuration; unprocessed pending docs are simply retried next run.
+const AIRCRAFT_TIME_BUDGET_MS = 45_000
 
 export async function POST(request: Request) {
   // Auth: check cron secret or admin session
@@ -33,6 +39,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
+  const startedAt = Date.now()
   const client = await getMongoClient()
   const db = client.db("skylog")
   const results = { aircraft: { processed: 0, enriched: 0, failed: 0 }, airport: { processed: 0, enriched: 0 } }
@@ -52,6 +59,9 @@ export async function POST(request: Request) {
     .toArray()
 
   for (const doc of pendingAircraft) {
+    // Leave the rest pending (retryCount untouched) for the next run rather than
+    // risk the platform killing the function mid-write.
+    if (Date.now() - startedAt > AIRCRAFT_TIME_BUDGET_MS) break
     results.aircraft.processed++
     const enriched = await enrichAircraftFromFR24(doc.registration)
 

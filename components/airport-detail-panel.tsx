@@ -33,6 +33,9 @@ export function AirportDetailPanel({ icao, onBack }: AirportDetailPanelProps) {
       }
     })
     return () => { mounted = false }
+    // Re-fetch only when icao changes. `airport` is read solely to gate the
+    // first-mount spinner; adding it would retrigger the fetch on every result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [icao])
 
   // Dynamic local time calculation

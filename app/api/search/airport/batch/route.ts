@@ -40,6 +40,7 @@ export async function POST(request: Request) {
   }
 
   const codes = rawCodes
+    .filter((c): c is string => typeof c === "string")
     .slice(0, 200)
     .map((c) => c.toUpperCase().trim())
     .filter(Boolean)

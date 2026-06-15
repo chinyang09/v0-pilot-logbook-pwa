@@ -25,6 +25,10 @@ const DetailPanelContext = createContext<DetailPanelContextType | null>(null)
 
 const SELECTION_STORAGE_KEY = "detail-panel-selections"
 
+// Routes that use KeepAlivePages — their detail content survives navigation
+// because the page stays mounted and will re-sync via the usePageActive callback.
+const KEEPALIVE_ROUTES = ["/logbook", "/aircraft", "/airports", "/crew"]
+
 // Get stored selections from sessionStorage
 function getStoredSelections(): Record<string, string> {
   if (typeof window === "undefined") return {}
@@ -121,10 +125,6 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     // Persist to sessionStorage (keyed by base route, matching the map)
     saveSelection(currentBase, id)
   }, [currentBase, pathname, router, searchParams])
-
-  // Routes that use KeepAlivePages — their detail content survives navigation
-  // because the page stays mounted and will re-sync via usePageActive callback.
-  const KEEPALIVE_ROUTES = ["/logbook", "/aircraft", "/airports", "/crew"]
 
   // Reset state when pathname changes (different page)
   // If pinned, skip one reset so detail content survives picker navigation.

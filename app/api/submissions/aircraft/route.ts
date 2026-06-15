@@ -32,7 +32,14 @@ export async function POST(request: Request) {
   }
 
   const { submissionId, registration, typecode, icao24, operator } = body
-  if (!submissionId || !registration) {
+  // Type-check before any string ops (normalizeRegistration/.toUpperCase) so a
+  // non-string body field yields a clean 400 rather than a 500 TypeError.
+  if (
+    typeof submissionId !== "string" ||
+    !submissionId.trim() ||
+    typeof registration !== "string" ||
+    !registration.trim()
+  ) {
     return NextResponse.json(
       { error: "submissionId and registration are required" },
       { status: 400 }

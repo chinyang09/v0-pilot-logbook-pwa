@@ -427,6 +427,10 @@ export function FlightForm({
     editingFlightInitializedRef.current = resolvedFlight.id;
     setFormData(resolvedFlight);
     setManualOverrides(resolvedFlight.manualOverrides || {});
+    // Re-init only on flight identity change. Depending on the full
+    // resolvedFlight would re-run on every reactive useLiveQuery write and
+    // clobber the user's in-progress edits (manualOverrides protection).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedFlight?.id]);
 
   // --- Detect external DB changes (picker writes) via useLiveQuery ---
@@ -530,6 +534,7 @@ export function FlightForm({
   // Use resolvedFlight?.id (not the full object) so this effect only re-runs when
   // the flight identity changes, not on every useLiveQuery reactive update.
   // Avoids spurious self-crew default applications during sync Dexie writes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedFlight?.id, personnel]);
 
   // Calculate derived fields
@@ -618,6 +623,10 @@ export function FlightForm({
           },
           result: nightResult,
         });
+      } else {
+        // Airports are present but lack usable coordinates: still split day time
+        // from block − night instead of leaving dayTime at the "00:00" default.
+        dayTime = calculateDayTime(blockTime, nightTime);
       }
     } else {
       // Fallback: calculate day as block - night
@@ -782,6 +791,9 @@ export function FlightForm({
     };
 
     autoSave();
+    // Keyed on the debounced form data + flight identity. Depending on the full
+    // resolvedFlight would retrigger auto-save on every reactive DB write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedFormData, resolvedFlight?.id, flightIdProp, manualOverrides]);
 
   // Update field helper
@@ -926,6 +938,9 @@ export function FlightForm({
     if (Number.isFinite(scrollVal) && scrollVal > 0) {
       el.scrollTop = scrollVal;
     }
+    // One-shot scroll restore (guarded by didRestoreScrollRef). `cachedFlight`
+    // is only read to confirm content is backed by data before restoring.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveFlight]);
 
   // Force-save current form data before navigating away (bypasses debounce)

@@ -123,7 +123,7 @@ export default function RosterPage() {
         </div>
       </GlassContainer>
     </>
-  ), [refreshEntries, entriesLoading, viewMode])
+  ), [refreshEntries, entriesLoading, viewMode, setViewMode])
 
   useRegisterMainActions(rosterActions, true)
 

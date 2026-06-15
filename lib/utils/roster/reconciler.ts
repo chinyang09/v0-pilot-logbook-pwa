@@ -661,7 +661,13 @@ export function reconcileRoster(
   const matchedFlightIds = new Set<string>();
 
   for (const sector of sectors) {
-    const match = findMatch(sector, existingFlights);
+    // Exclude flights already claimed by an earlier sector so two same-route
+    // legs on one day (e.g. SIN→BKK twice) each bind to a distinct flight
+    // instead of both matching — then clobbering — the first one.
+    const match = findMatch(
+      sector,
+      existingFlights.filter((f) => !matchedFlightIds.has(f.id))
+    );
 
     if (!match) {
       operations.push({ kind: "create", sector });

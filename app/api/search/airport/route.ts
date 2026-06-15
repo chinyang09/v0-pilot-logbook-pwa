@@ -196,7 +196,9 @@ async function fetchFr24Airport(query: string): Promise<{
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const query = searchParams.get("q")
-  const debug = searchParams.get("debug") === "1"
+  // Debug surfaces raw upstream payloads — gate behind an operator env flag so
+  // arbitrary callers can't read upstream response bodies in production.
+  const debug = process.env.FR24_DEBUG === "1" && searchParams.get("debug") === "1"
 
   if (!query || query.length < 3) {
     return NextResponse.json({ result: null })

@@ -60,7 +60,6 @@ export function useRegisterMainActions(actions: ReactNode, isActive: boolean) {
     return () => setMainActions(null)
     // Deliberately excluding `actions` — the ref tracks the latest value without
     // triggering cleanup→re-register cycles that flash buttons off momentarily.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, setMainActions])
 
   // Sync ref-held actions to context when the ReactNode identity changes
@@ -82,7 +81,6 @@ export function useRegisterDetailActions(actions: ReactNode, isActive: boolean) 
       setDetailActions(actionsRef.current)
     }
     return () => setDetailActions(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, setDetailActions])
 
   useEffect(() => {
