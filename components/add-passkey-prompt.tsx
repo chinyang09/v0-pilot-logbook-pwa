@@ -42,10 +42,13 @@ export function AddPasskeyPrompt() {
             ...options.user,
             id: base64URLDecode(options.user.id),
           },
-          excludeCredentials: options.excludeCredentials?.map((c: { id: string }) => ({
-            ...c,
-            id: base64URLDecode(c.id),
-          })),
+          excludeCredentials: options.excludeCredentials?.map((c: { id: string; transports?: unknown }) => {
+            const desc: PublicKeyCredentialDescriptor = { id: base64URLDecode(c.id), type: "public-key" }
+            if (Array.isArray(c.transports) && c.transports.every((t) => typeof t === "string")) {
+              desc.transports = c.transports as AuthenticatorTransport[]
+            }
+            return desc
+          }),
         },
       })
 

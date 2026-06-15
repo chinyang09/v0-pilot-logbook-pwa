@@ -264,11 +264,15 @@ export default function AccountPage() {
             residentKey: "required",
             userVerification: "required",
           },
-          excludeCredentials: (options.excludeCredentials || []).map((c: { id: string; transports?: AuthenticatorTransport[] }) => ({
-            id: base64URLDecode(c.id),
-            type: "public-key" as const,
-            transports: c.transports,
-          })),
+          excludeCredentials: (options.excludeCredentials || []).map((c: { id: string; transports?: unknown }) => {
+            const desc: PublicKeyCredentialDescriptor = { id: base64URLDecode(c.id), type: "public-key" }
+            // Pass transports only when valid — a null/garbage value makes
+            // create() throw "value is not a sequence".
+            if (Array.isArray(c.transports) && c.transports.every((t) => typeof t === "string")) {
+              desc.transports = c.transports as AuthenticatorTransport[]
+            }
+            return desc
+          }),
         },
       })) as PublicKeyCredential | null
 

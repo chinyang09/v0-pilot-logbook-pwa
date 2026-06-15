@@ -75,7 +75,12 @@ export async function GET(request: NextRequest) {
       excludeCredentials: user.auth.passkeys.map((p) => ({
         id: p.id,
         type: "public-key",
-        transports: p.transports,
+        // Only emit transports when it's a valid non-empty string array.
+        // Older/synced passkeys can carry a null/garbage value, which makes the
+        // browser's credentials.create() reject with "value is not a sequence".
+        ...(Array.isArray(p.transports) && p.transports.every((t) => typeof t === "string")
+          ? { transports: p.transports }
+          : {}),
       })),
     })
   } catch (error) {
