@@ -217,14 +217,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     checkAuth()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- intentional: run once on mount; authCheckDone.current guards against double execution
+  }, []) // intentional: run once on mount; authCheckDone.current guards against double execution
 
   // Protect routes
   useEffect(() => {
     if (!isLoading && !user && pathname !== "/login") {
       router.push("/login")
     }
-  }, [user, isLoading, pathname])
+  }, [user, isLoading, pathname, router])
 
   const value = useMemo(
     () => ({

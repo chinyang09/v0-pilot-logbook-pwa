@@ -12,6 +12,8 @@ const eslintConfig = [
       "next-env.d.ts",
       "public/**",
       "node_modules/**",
+      // Separate Cloudflare Worker sub-project with its own tsconfig/runtime.
+      "cloudflare-worker/**",
     ],
   },
   ...nextCoreWebVitals,

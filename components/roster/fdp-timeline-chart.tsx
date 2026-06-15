@@ -554,7 +554,7 @@ export function FDPTimelineChart({
       }
       return out as typeof d
     })
-  }, [activeData, viewWindow, hasScenario, scenarioModifiedDates, scenarioRemovedDates, selectedNonRestViews])
+  }, [activeData, viewWindow, hasScenario, scenarioModifiedDates, scenarioRemovedDates, selectedNonRestViews, defaultWindowRange])
 
   // Effective window for gesture calculations — mirrors slicedData's default.
   const effectiveWindow = useMemo(() => {

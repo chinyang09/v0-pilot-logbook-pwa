@@ -79,6 +79,9 @@ export default function LoginPage() {
     if (totpCode.length < 6) {
       autoSubmitRef.current = false
     }
+    // Auto-submit is keyed on the code/step; the submit handlers are recreated
+    // each render and intentionally excluded so this doesn't fire every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totpCode, step, isLoading])
 
   // Show the passkey button whenever the browser supports WebAuthn. Gating on

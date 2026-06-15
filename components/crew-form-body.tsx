@@ -95,7 +95,7 @@ export function CrewFormBody({
         />
         {isEditing && existingSelfId && !formData.isMe && (
           <p className="text-xs text-muted-foreground px-4 pb-3 -mt-1">
-            Another crew member is already marked as "Self". Enabling this will
+            Another crew member is already marked as &quot;Self&quot;. Enabling this will
             remove that designation.
           </p>
         )}

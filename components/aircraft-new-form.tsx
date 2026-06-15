@@ -151,7 +151,7 @@ export function AircraftNewForm({
       }
     }, 500)
     return () => clearTimeout(timer)
-  }, [registration])
+  }, [registration, resetTypeSearch])
 
   // Look up ICAO type info when FR24 returns a typecode
   useEffect(() => {

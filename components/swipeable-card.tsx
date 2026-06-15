@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useRef, useState } from "react"
 import {
   animate,
   motion,
@@ -140,7 +140,10 @@ export function SwipeableCard({
   variant = "card",
   separated = false,
 }: SwipeableCardProps) {
-  const cardId = useRef(id || Math.random().toString(36).slice(2))
+  // Stable, SSR-safe identity for the multi-card close-others coordination —
+  // useId avoids calling Math.random() during every render.
+  const autoId = useId()
+  const cardId = useRef(id || autoId)
   const containerRef = useRef<HTMLDivElement>(null)
   const isCard = variant === "card"
 
