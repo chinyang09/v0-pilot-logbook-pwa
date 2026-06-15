@@ -7,6 +7,7 @@
  */
 
 import { getICAOTypeByDesignator } from "@/lib/icao-types/icao-types-server"
+import { fr24Find } from "@/lib/fr24/find"
 
 export interface EnrichedAircraftData {
   registration: string
@@ -21,46 +22,34 @@ export interface EnrichedAircraftData {
 }
 
 /**
- * Attempt to enrich an aircraft registration via FR24 search API.
+ * Attempt to enrich an aircraft registration via FR24 search.
+ * Routes through the shared proxy-aware client so enrichment succeeds in the
+ * same proxied environments the search route was engineered for (previously
+ * this hit flightradar24.com directly and silently failed behind Cloudflare).
  * If a typecode is found, also hydrates with ICAO DOC 8643 type data.
  * Returns enriched data if found, null otherwise.
  */
 export async function enrichAircraftFromFR24(
   registration: string
 ): Promise<EnrichedAircraftData | null> {
-  try {
-    const url = `https://www.flightradar24.com/v1/search/web/find?query=${encodeURIComponent(registration)}&limit=10`
-    const response = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      signal: AbortSignal.timeout(5000),
-    })
+  const result = await fr24Find(registration)
+  const aircraft = result.results[0]
+  if (!aircraft) return null
 
-    if (!response.ok) return null
+  const typecode = aircraft.typecode || ""
 
-    const data = await response.json()
-    const aircraft = data.results?.find(
-      (r: any) => r.type === "aircraft"
-    )
+  // Hydrate with ICAO DOC 8643 type data
+  const typeInfo = getICAOTypeByDesignator(typecode)
 
-    if (!aircraft) return null
-
-    const typecode = aircraft.detail?.equip || ""
-
-    // Hydrate with ICAO DOC 8643 type data
-    const typeInfo = getICAOTypeByDesignator(typecode)
-
-    return {
-      registration: aircraft.id || registration,
-      icao24: aircraft.detail?.hex || "",
-      typecode,
-      operator: aircraft.detail?.owner || "",
-      source: "fr24",
-      shortDescription: typeInfo?.description || "",
-      wtc: typeInfo?.wtc || "",
-      wtg: typeInfo?.wtg || "",
-      manufacturerCode: typeInfo?.manufacturerCode || "",
-    }
-  } catch {
-    return null
+  return {
+    registration: aircraft.registration || registration,
+    icao24: aircraft.icao24 || "",
+    typecode,
+    operator: aircraft.operator || "",
+    source: "fr24",
+    shortDescription: typeInfo?.description || "",
+    wtc: typeInfo?.wtc || "",
+    wtg: typeInfo?.wtg || "",
+    manufacturerCode: typeInfo?.manufacturerCode || "",
   }
 }

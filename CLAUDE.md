@@ -498,6 +498,49 @@ project, individually tested — not a piecemeal lint cleanup.
 
 - `MONGODB_URI` — MongoDB connection string (required)
 
+## Known Issues & Deferred Work
+
+### FDP / roster legality calculations (DEFERRED — needs domain review before changing)
+
+A subsystem audit surfaced three issues in `lib/utils/roster/fdp-calculator.ts`.
+These drive the **legality/limits dashboard**, so they are intentionally left
+untouched until reviewed with the user — a wrong "fix" to regulatory math is
+worse than the current behavior. Do **not** change these casually.
+
+1. **Rolling-limit windows mix UTC and local date parsing** (`~:787`).
+   `calculateRollingStats` parses duty dates with `new Date(dp.date +
+   "T00:00:00")` (runtime-local TZ), but callers build the as-of date in UTC
+   (`generateTimelineData ~:1080`, `simulateScenario ~:1560`,
+   `simulateHypotheticalDuty ~:1354` all use `…T23:59:59Z`), while
+   `forecastExceedances ~:928` uses local `…T23:59:59`. For a non-UTC user
+   (the app targets SGT/UTC+8) a duty period on the inclusive/exclusive window
+   boundary can be silently included or excluded. Fix is to settle on one date
+   convention end-to-end.
+2. **`includesLocalNight` ignores a past-midnight debrief** (`~:641-668`, called
+   from `calculateRestPeriod ~:711`). The raw `previous.debriefTime` + un-wrapped
+   `previous.date` are passed even when the prior duty crossed midnight, so the
+   rest-window night test runs against the wrong day → wrong rest rule (3a vs 3b).
+   `calculateRestPeriod` already wraps `prevDebriefAbsolute` for the rest-minutes
+   math but not before this call.
+3. **`mergeAdjacentDutyPeriods` drops the long-sector FDP adjustment**
+   (`~:499-503`). The merged-duty max-FDP recompute omits `longestSectorMinutes`
+   (the `DutyPeriod` type doesn't even carry it), so `applyLongSectorAdjustment`
+   never runs on a merged overnight duty — an over-long merged duty can read as
+   compliant.
+
+### Lower-priority items (not yet actioned)
+
+- **`discrepancies.resolved` boolean secondary index** (`lib/db/user-db.ts`) —
+  IndexedDB can't key a boolean, so the index is inert (same class as the
+  airports `isFavorite` bug already fixed). Not a live bug today (all readers use
+  `.filter()`, not `.where()`), but removing it needs a Dexie version bump, so
+  it's deferred. Do **not** add a `where("resolved")` query against it.
+- **Logbook CSV `remarks`** (`lib/utils/parsers/logbook-parser-v2.ts:224-225`) —
+  `synthType` and `remarks` both read `cols[17]`. Confirmed against the real
+  Scoot "Crew Logbook Report" export: that format has **18 columns and no
+  remarks column** (col 16/17 are SYNTH. DEVICES Time/Type). So this is harmless
+  redundancy, not data loss — left as-is.
+
 ## PWA Details
 
 - **Service worker** (`public/sw.js`): precaches static assets, login page, and OCR models; runtime caches app routes and CDN resources; versioned caches (v4)

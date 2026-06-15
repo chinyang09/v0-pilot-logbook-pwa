@@ -26,8 +26,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ results: {} })
   }
 
-  // Cap at 100 to prevent abuse
-  const regsToCheck = registrations.slice(0, 100)
+  // Cap at 100 to prevent abuse; drop non-string elements so normalizeRegistration
+  // can't throw a TypeError → 500 on a malformed array.
+  const regsToCheck = registrations.filter((r): r is string => typeof r === "string").slice(0, 100)
   const normalizedRegs = regsToCheck.map(normalizeRegistration)
 
   try {

@@ -12,6 +12,10 @@ import { randomUUID } from "crypto"
 import { tmpdir } from "os"
 import { validateSession } from "@/lib/auth/server/session"
 
+// Bound execution (also gives the cold ONNX model load enough headroom vs the
+// short serverless default).
+export const maxDuration = 60
+
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // 10MB
 
 interface OcrLine {
