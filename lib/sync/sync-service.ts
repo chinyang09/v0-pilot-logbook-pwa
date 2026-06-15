@@ -25,11 +25,7 @@ import {
   reconcilePushedRecords,
   bumpSyncAudit,
   userDb,
-  type FlightLog,
-  type Aircraft,
-  type Personnel,
 } from "@/lib/db"
-import type { ScheduleEntry, Currency, Discrepancy } from "@/types/entities/roster.types"
 import { referenceDb } from "@/lib/db/reference-db"
 import type { SyncQueueItem, SyncCollection } from "@/types/sync/sync.types"
 import { getSyncTriggerManager } from "./sync-trigger-manager"
@@ -71,6 +67,33 @@ async function fetchWithTimeout(input: RequestInfo, init?: RequestInit): Promise
 function isSaneSeq(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= Number.MAX_SAFE_INTEGER
 }
+
+/**
+ * Per-collection store handlers, keyed by the closed `SyncCollection` union.
+ * Centralizes the silent-delete and upsert-from-server dispatch that was
+ * previously duplicated across three parallel switch/if-else chains (the
+ * push-reject delete, the pull delete, and the pull upsert). Because the key
+ * type is the union, adding a collection is a single compile-checked entry
+ * here instead of three sites that could silently drift. The `upsertFromServer`
+ * param is typed `never` (contravariance) so each store's strongly-typed
+ * function slots in without a per-entry cast; callers cast the untyped JSON
+ * record once at the call site.
+ */
+const COLLECTION_HANDLERS: Record<
+  SyncCollection,
+  {
+    silentDelete: (id: string) => Promise<unknown>
+    upsertFromServer: (record: never) => Promise<unknown>
+  }
+> = {
+  flights: { silentDelete: silentDeleteFlight, upsertFromServer: upsertFlightFromServer },
+  aircraft: { silentDelete: silentDeleteAircraft, upsertFromServer: upsertAircraftFromServer },
+  personnel: { silentDelete: silentDeletePersonnel, upsertFromServer: upsertPersonnelFromServer },
+  scheduleEntries: { silentDelete: silentDeleteScheduleEntry, upsertFromServer: upsertScheduleEntryFromServer },
+  currencies: { silentDelete: silentDeleteCurrency, upsertFromServer: upsertCurrencyFromServer },
+  discrepancies: { silentDelete: silentDeleteDiscrepancy, upsertFromServer: upsertDiscrepancyFromServer },
+}
+
 
 type SyncStatus = "online" | "offline" | "syncing"
 
@@ -352,26 +375,7 @@ class SyncService {
         confirmed++
         if (itemResult.rejected) {
           // Tombstoned on another device → delete locally and clear its rows.
-          switch (original.collection) {
-            case "flights":
-              await silentDeleteFlight(recordId)
-              break
-            case "aircraft":
-              await silentDeleteAircraft(recordId)
-              break
-            case "personnel":
-              await silentDeletePersonnel(recordId)
-              break
-            case "scheduleEntries":
-              await silentDeleteScheduleEntry(recordId)
-              break
-            case "currencies":
-              await silentDeleteCurrency(recordId)
-              break
-            case "discrepancies":
-              await silentDeleteDiscrepancy(recordId)
-              break
-          }
+          await COLLECTION_HANDLERS[original.collection].silentDelete(recordId)
         }
         // Reconcile (compare-and-set mark-synced + clear stale rows) runs even
         // for deletes/rejections: the record is gone so no mark happens, but its
@@ -445,6 +449,7 @@ class SyncService {
 
     for (const collection of SYNC_COLLECTIONS) {
       try {
+        const handlers = COLLECTION_HANDLERS[collection]
         let cursor = forceFullSync ? { seq: 0, id: "" } : await getCollectionCursor(collection)
         let pages = 0
 
@@ -474,12 +479,7 @@ class SyncService {
 
           for (const deletedId of data.deletions || []) {
             try {
-              if (collection === "flights") await silentDeleteFlight(deletedId)
-              else if (collection === "aircraft") await silentDeleteAircraft(deletedId)
-              else if (collection === "personnel") await silentDeletePersonnel(deletedId)
-              else if (collection === "scheduleEntries") await silentDeleteScheduleEntry(deletedId)
-              else if (collection === "currencies") await silentDeleteCurrency(deletedId)
-              else if (collection === "discrepancies") await silentDeleteDiscrepancy(deletedId)
+              await handlers.silentDelete(deletedId)
             } catch (e) {
               console.error(`[Sync ${correlationId}] delete ${collection} error:`, e)
             }
@@ -487,12 +487,7 @@ class SyncService {
 
           for (const record of data.records || []) {
             try {
-              if (collection === "flights") await upsertFlightFromServer(record as FlightLog)
-              else if (collection === "aircraft") await upsertAircraftFromServer(record as Aircraft)
-              else if (collection === "personnel") await upsertPersonnelFromServer(record as Personnel)
-              else if (collection === "scheduleEntries") await upsertScheduleEntryFromServer(record as ScheduleEntry)
-              else if (collection === "currencies") await upsertCurrencyFromServer(record as Currency)
-              else if (collection === "discrepancies") await upsertDiscrepancyFromServer(record as Discrepancy)
+              await handlers.upsertFromServer(record as never)
               count++
             } catch (e) {
               console.error(`[Sync ${correlationId}] upsert ${collection} error:`, e, record)
