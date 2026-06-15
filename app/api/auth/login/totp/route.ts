@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getDB } from "@/lib/mongodb";
 import { verifyTOTPWithCounter } from "@/lib/auth/server/totp";
-import { normalizeCallsign, createId } from "@/lib/auth/shared/cuid";
+import { normalizeCallsign } from "@/lib/auth/shared/cuid";
 import type { User } from "@/lib/auth/types";
-import { cookies } from "next/headers";
+import { issueSession, setSessionCookie } from "@/lib/auth/server/session";
 
 // POST /api/auth/login/totp - Recovery login with TOTP
 export async function POST(request: NextRequest) {
@@ -73,42 +73,15 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    // Create session identifiers and dates
-    const sessionId = createId();
-    const now = new Date(); // Use Date Object
-    const sessionExpiry = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // Use Date Object
+    // Issue a recovery session (drives the "add a passkey" nudge afterwards).
     const userIdString = user._id.toString();
-
-    // Store session in MongoDB
-    await db.collection("sessions").updateOne(
-      {
-        userId: userIdString,
-        deviceId: deviceId || "unknown_device",
-      },
-      {
-        $set: {
-          // Use 'token' to match the lookup in lib/session.ts
-          token: sessionId, //_id
-          userId: userIdString,
-          callsign: user.identity.callsign,
-          expiresAt: sessionExpiry, // Stored as BSON Date
-          lastAccessedAt: now, // Stored as BSON Date
-          updatedAt: now,
-          recoveryLogin: true,
-        },
-      },
-      { upsert: true }
-    );
-
-    // Set session cookie
-    const cookieStore = await cookies();
-    cookieStore.set("session", sessionId, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 30 * 24 * 60 * 60,
-      path: "/",
+    const { token: sessionId, expiresAt: sessionExpiry } = await issueSession(db, {
+      userId: userIdString,
+      callsign: user.identity.callsign,
+      deviceId: deviceId || "unknown_device",
+      recoveryLogin: true,
     });
+    await setSessionCookie(sessionId);
 
     return NextResponse.json({
       success: true,

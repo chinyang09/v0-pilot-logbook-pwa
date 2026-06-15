@@ -1,5 +1,17 @@
 import type { PasskeyCredential, AuthenticatorTransport } from "@/lib/auth/types"
 
+// Friendly default passkey label derived from the request's user-agent. Shared
+// by every registration/add-passkey route so the naming stays consistent.
+export function getDeviceNameFromUA(ua: string): string {
+  if (ua.includes("iPhone")) return "iPhone"
+  if (ua.includes("iPad")) return "iPad"
+  if (ua.includes("Macintosh") || ua.includes("Mac OS X")) return "Mac"
+  if (ua.includes("Android")) return "Android Device"
+  if (ua.includes("Windows")) return "Windows PC"
+  if (ua.includes("Linux")) return "Linux Device"
+  return "New Device"
+}
+
 // Base64URL encoding/decoding utilities
 export function base64URLEncode(buffer: ArrayBuffer | Uint8Array): string {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)

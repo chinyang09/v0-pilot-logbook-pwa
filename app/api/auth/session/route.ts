@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDB } from "@/lib/mongodb";
 import { cookies } from "next/headers";
-import type { User } from "@/lib/auth/types";
+import { setSessionCookie, clearSessionCookie } from "@/lib/auth/server/session";
 
 // GET /api/auth/session - Get current session
 export async function GET() {
@@ -23,7 +23,7 @@ export async function GET() {
 
     if (!session) {
       // Clear invalid cookie
-      cookieStore.delete("session");
+      await clearSessionCookie();
       return NextResponse.json({ authenticated: false });
     }
 
@@ -37,7 +37,7 @@ export async function GET() {
       const newExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
       await db.collection("sessions").updateOne(
-        { token: sessionId }, 
+        { token: sessionId },
         {
           $set: {
             expiresAt: newExpiry,
@@ -47,13 +47,7 @@ export async function GET() {
         }
       );
 
-      cookieStore.set("session", sessionId, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 30 * 24 * 60 * 60,
-        path: "/",
-      });
+      await setSessionCookie(sessionId);
     }
 
     return NextResponse.json({
@@ -79,7 +73,7 @@ export async function DELETE() {
     if (sessionId) {
       const db = await getDB();
       await db.collection("sessions").deleteOne({ token: sessionId });
-      cookieStore.delete("session");
+      await clearSessionCookie();
     }
 
     return NextResponse.json({ success: true });

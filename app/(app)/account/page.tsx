@@ -237,7 +237,7 @@ export default function AccountPage() {
     setIsAddingPasskey(true)
     try {
       // 1. Get registration options
-      const optionsRes = await fetch("/api/auth/passkey/add", { cache: "no-store" })
+      const optionsRes = await fetch("/api/auth/register/add-passkey", { cache: "no-store" })
       if (!optionsRes.ok) {
         const err = await optionsRes.json().catch(() => ({}))
         throw new Error(err.error || "Failed to start passkey setup")
@@ -276,7 +276,7 @@ export default function AccountPage() {
       const response = credential.response as AuthenticatorAttestationResponse
 
       // 3. Verify + persist server-side
-      const saveRes = await fetch("/api/auth/passkey/add", {
+      const saveRes = await fetch("/api/auth/register/add-passkey", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

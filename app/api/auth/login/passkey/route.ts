@@ -12,8 +12,7 @@ import {
   getExpectedOrigin,
 } from "@/lib/auth/server/webauthn"
 import type { User } from "@/lib/auth/types"
-import { cookies } from "next/headers"
-import { createId } from "@/lib/auth/shared/cuid"
+import { issueSession, setSessionCookie } from "@/lib/auth/server/session"
 
 // GET /api/auth/login/passkey
 export async function GET(request: Request) {
@@ -122,37 +121,12 @@ export async function POST(request: NextRequest) {
       },
     )
 
-    const sessionId = createId()
-    const now = new Date()
-    const sessionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-    const userIdString = user._id.toString()
-
-    await db.collection("sessions").updateOne(
-      {
-        userId: userIdString,
-        deviceId: deviceId || "unknown_device",
-      },
-      {
-        $set: {
-          token: sessionId, // token field for session lookup
-          userId: userIdString,
-          callsign: user.identity.callsign,
-          expiresAt: sessionExpiry, 
-          lastAccessedAt: now,
-          updatedAt: now,
-        },
-      },
-      { upsert: true },
-    )
-
-    const cookieStore = await cookies()
-    cookieStore.set("session", sessionId, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 30 * 24 * 60 * 60,
-      path: "/",
+    const { token: sessionId, expiresAt: sessionExpiry } = await issueSession(db, {
+      userId: user._id.toString(),
+      callsign: user.identity.callsign,
+      deviceId: deviceId || "unknown_device",
     })
+    await setSessionCookie(sessionId)
 
     return NextResponse.json({
       success: true,

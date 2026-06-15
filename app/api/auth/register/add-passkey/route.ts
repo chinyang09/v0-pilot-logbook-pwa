@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic"
+
 import { type NextRequest, NextResponse } from "next/server"
 import { getDB } from "@/lib/mongodb"
 import {
@@ -6,6 +8,7 @@ import {
   getRP,
   getExpectedOrigin,
   verifyRegistrationAttestation,
+  getDeviceNameFromUA,
 } from "@/lib/auth/server/webauthn"
 import type { User, PasskeyCredential, StoredChallenge } from "@/lib/auth/types"
 import { cookies } from "next/headers"
@@ -135,7 +138,7 @@ export async function POST(request: NextRequest) {
       backedUp: attestation.backedUp,
       transports: attestation.transports,
       createdAt: Date.now(),
-      name: name || getDeviceName(userAgent),
+      name: name || getDeviceNameFromUA(userAgent),
     }
 
     // Idempotent add: never push a duplicate credential id (e.g. user re-runs the
@@ -165,14 +168,4 @@ export async function POST(request: NextRequest) {
     console.error("[v0] Add passkey POST error:", error)
     return NextResponse.json({ error: "Failed to add passkey" }, { status: 500 })
   }
-}
-
-function getDeviceName(ua: string): string {
-  if (ua.includes("iPhone")) return "iPhone"
-  if (ua.includes("iPad")) return "iPad"
-  if (ua.includes("Macintosh") || ua.includes("Mac OS X")) return "Mac"
-  if (ua.includes("Android")) return "Android Device"
-  if (ua.includes("Windows")) return "Windows PC"
-  if (ua.includes("Linux")) return "Linux Device"
-  return "New Device"
 }

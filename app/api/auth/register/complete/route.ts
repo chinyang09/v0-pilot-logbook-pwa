@@ -1,9 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getDB } from "@/lib/mongodb"
-import { getRP, getExpectedOrigin, verifyRegistrationAttestation } from "@/lib/auth/server/webauthn"
+import { getRP, getExpectedOrigin, verifyRegistrationAttestation, getDeviceNameFromUA } from "@/lib/auth/server/webauthn"
 import type { User, PasskeyCredential } from "@/lib/auth/types"
-import { cookies } from "next/headers"
-import { createId } from "@/lib/auth/shared/cuid"
+import { issueSession, setSessionCookie } from "@/lib/auth/server/session"
 
 // POST /api/auth/register/complete - Complete passkey registration
 export async function POST(request: NextRequest) {
@@ -68,7 +67,7 @@ export async function POST(request: NextRequest) {
       backedUp: attestation.backedUp,
       transports: attestation.transports,
       createdAt: Date.now(),
-      name: getDeviceName(userAgent),
+      name: getDeviceNameFromUA(userAgent),
     }
 
     const nowTimestamp = Date.now()
@@ -99,29 +98,11 @@ export async function POST(request: NextRequest) {
       throw err
     }
 
-    const sessionId = createId()
-    const now = new Date() 
-    const sessionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-
-    await db.collection("sessions").insertOne({
-      // We use 'token' for lookups, but keep _id as unique identifier
-      token: sessionId, 
+    const { token: sessionId, expiresAt: sessionExpiry } = await issueSession(db, {
       userId,
       callsign: user.identity.callsign,
-      createdAt: now,
-      lastAccessedAt: now,
-      expiresAt: sessionExpiry,
     })
-
-    // Set session cookie
-    const cookieStore = await cookies()
-    cookieStore.set("session", sessionId, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 30 * 24 * 60 * 60,
-      path: "/",
-    })
+    await setSessionCookie(sessionId)
 
     return NextResponse.json({
       success: true,
@@ -139,14 +120,4 @@ export async function POST(request: NextRequest) {
     console.error("Registration complete error:", error)
     return NextResponse.json({ error: "Registration failed" }, { status: 500 })
   }
-}
-
-function getDeviceName(ua: string): string {
-  if (ua.includes("iPhone")) return "iPhone";
-  if (ua.includes("iPad")) return "iPad";
-  if (ua.includes("Macintosh") || ua.includes("Mac OS X")) return "Mac";
-  if (ua.includes("Android")) return "Android Device";
-  if (ua.includes("Windows")) return "Windows PC";
-  if (ua.includes("Linux")) return "Linux Device";
-  return "New Device";
 }
