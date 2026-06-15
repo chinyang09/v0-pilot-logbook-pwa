@@ -130,18 +130,16 @@ export function parseTimeToken(raw: string): ParsedTimeToken | null {
 // ============================================================
 
 /**
- * Get the UTC offset (in hours) for an IANA timezone at a specific date.
+ * Get the UTC offset (in MINUTES) for an IANA timezone at a specific date.
  *
  * Uses Intl.DateTimeFormat with longOffset to resolve offsets accurately for
- * the given date, so DST transitions are handled correctly.
- *
- * Limitation: offsets that are not whole-hour (e.g., IST UTC+5:30) are
- * truncated to whole hours. For the Scoot route network this is acceptable,
- * but it means times in IST-based stations carry 30 minutes of systematic
- * error. If/when half-hour TZs become relevant, switch the return type to
- * minutes and propagate through the downstream math.
+ * the given date, so DST transitions are handled correctly. Returns total
+ * minutes including the fractional part, so half-/quarter-hour zones common in
+ * the Scoot network — India (UTC+5:30: CJB/TRV/TRZ/MAA), Nepal (+5:45),
+ * Myanmar (+6:30), Iran, Afghanistan — convert exactly rather than landing
+ * 30/45 minutes off.
  */
-export function getOffsetForDate(tz: string, isoDate: string): number {
+export function getOffsetMinutesForDate(tz: string, isoDate: string): number {
   if (!tz || !isoDate) return 0;
   try {
     // Anchor on midday UTC to avoid landing exactly on a DST transition instant
@@ -156,15 +154,15 @@ export function getOffsetForDate(tz: string, isoDate: string): number {
     const offsetPart = parts.find((p) => p.type === "timeZoneName")?.value;
     if (!offsetPart) return 0;
 
-    // longOffset yields strings like "GMT+08:00", "GMT-05:00", or just "GMT"
+    // longOffset yields strings like "GMT+08:00", "GMT+05:30", "GMT-05:00", or just "GMT"
     if (offsetPart === "GMT") return 0;
     const match = offsetPart.match(/([+-])(\d{1,2})(?::(\d{2}))?/);
     if (!match) return 0;
 
     const sign = match[1] === "-" ? -1 : 1;
     const hours = Number.parseInt(match[2], 10);
-    // Minutes are currently truncated — see doc comment.
-    return sign * hours;
+    const minutes = match[3] ? Number.parseInt(match[3], 10) : 0;
+    return sign * (hours * 60 + minutes);
   } catch {
     return 0;
   }
@@ -219,22 +217,22 @@ export function normalizeTimeToUTC(
   let localDayDelta = parsed.dayDelta;
   const localMinutes = hhmmToMinutes(parsed.time);
 
-  // 2. Determine offset (hours) to subtract to reach UTC, based on reference.
-  let offsetHours: number;
+  // 2. Determine offset (minutes) to subtract to reach UTC, based on reference.
+  let offsetMinutes: number;
   switch (input.timeReference) {
     case "UTC":
-      offsetHours = 0;
+      offsetMinutes = 0;
       break;
     case "LOCAL_BASE":
       if (!input.baseTz) return null;
-      offsetHours = getOffsetForDate(input.baseTz, input.rowDate);
+      offsetMinutes = getOffsetMinutesForDate(input.baseTz, input.rowDate);
       break;
     case "LOCAL_STATION": {
       const tz =
         input.role === "out" || input.role === "off"
           ? input.depTz
           : input.arrTz;
-      offsetHours = getOffsetForDate(tz, input.rowDate);
+      offsetMinutes = getOffsetMinutesForDate(tz, input.rowDate);
       break;
     }
     default:
@@ -242,7 +240,7 @@ export function normalizeTimeToUTC(
   }
 
   // 3. Subtract offset — local time becomes UTC. Normalize into [0, 1440).
-  let utcTotalMinutes = localMinutes - offsetHours * 60;
+  let utcTotalMinutes = localMinutes - offsetMinutes;
 
   while (utcTotalMinutes < 0) {
     utcTotalMinutes += MINUTES_PER_DAY;

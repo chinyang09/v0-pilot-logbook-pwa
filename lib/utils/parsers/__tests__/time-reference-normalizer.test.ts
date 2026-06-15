@@ -12,7 +12,7 @@
 import { describe, it, expect } from "vitest";
 import {
   normalizeTimeToUTC,
-  getOffsetForDate,
+  getOffsetMinutesForDate,
   parseTimeToken,
 } from "../time-reference-normalizer";
 
@@ -23,6 +23,8 @@ import {
 const TZ_SIN = "Asia/Singapore"; // UTC+8, no DST
 const TZ_BKK = "Asia/Bangkok"; //   UTC+7, no DST
 const TZ_NYC = "America/New_York"; // UTC-5/-4, DST
+const TZ_CJB = "Asia/Kolkata"; //   UTC+5:30 (India — half-hour offset)
+const TZ_KTM = "Asia/Kathmandu"; // UTC+5:45 (Nepal — quarter-hour offset)
 
 // ============================================================
 // parseTimeToken — isolates the "A" prefix + "⁺¹" rollover
@@ -87,30 +89,38 @@ describe("parseTimeToken", () => {
 });
 
 // ============================================================
-// getOffsetForDate — DST-aware offset lookup
+// getOffsetMinutesForDate — DST-aware offset lookup (in minutes)
 // ============================================================
 
-describe("getOffsetForDate", () => {
-  it("returns +8 for Singapore (no DST)", () => {
-    expect(getOffsetForDate(TZ_SIN, "2026-04-02")).toBe(8);
-    expect(getOffsetForDate(TZ_SIN, "2026-12-25")).toBe(8);
+describe("getOffsetMinutesForDate", () => {
+  it("returns +480 for Singapore (no DST)", () => {
+    expect(getOffsetMinutesForDate(TZ_SIN, "2026-04-02")).toBe(480);
+    expect(getOffsetMinutesForDate(TZ_SIN, "2026-12-25")).toBe(480);
   });
 
-  it("returns +7 for Bangkok (no DST)", () => {
-    expect(getOffsetForDate(TZ_BKK, "2026-04-02")).toBe(7);
+  it("returns +420 for Bangkok (no DST)", () => {
+    expect(getOffsetMinutesForDate(TZ_BKK, "2026-04-02")).toBe(420);
   });
 
-  it("returns -4 for New York in summer (EDT)", () => {
+  it("returns -240 for New York in summer (EDT)", () => {
     // Mid-July 2026 — squarely within US DST
-    expect(getOffsetForDate(TZ_NYC, "2026-07-15")).toBe(-4);
+    expect(getOffsetMinutesForDate(TZ_NYC, "2026-07-15")).toBe(-240);
   });
 
-  it("returns -5 for New York in winter (EST)", () => {
-    expect(getOffsetForDate(TZ_NYC, "2026-01-15")).toBe(-5);
+  it("returns -300 for New York in winter (EST)", () => {
+    expect(getOffsetMinutesForDate(TZ_NYC, "2026-01-15")).toBe(-300);
+  });
+
+  it("preserves the half-hour for India (+5:30 → 330)", () => {
+    expect(getOffsetMinutesForDate(TZ_CJB, "2026-04-03")).toBe(330);
+  });
+
+  it("preserves the quarter-hour for Nepal (+5:45 → 345)", () => {
+    expect(getOffsetMinutesForDate(TZ_KTM, "2026-04-03")).toBe(345);
   });
 
   it("returns 0 on unknown timezone string", () => {
-    expect(getOffsetForDate("Not/A_Zone", "2026-04-02")).toBe(0);
+    expect(getOffsetMinutesForDate("Not/A_Zone", "2026-04-02")).toBe(0);
   });
 });
 
@@ -272,6 +282,21 @@ describe("normalizeTimeToUTC — Local Station source (dual TZ per leg)", () => 
       baseTz: TZ_SIN,
     });
     expect(r).toEqual({ utcTime: "22:39", utcDate: "2026-04-03" });
+  });
+
+  it("converts a real half-hour station (CJB +5:30) without dropping the :30", () => {
+    // Local Station 03/04 SIN→CJB: arrival CJB local A22:43 → UTC 17:13
+    // (22:43 − 5:30). The whole-hour-truncation bug would have produced 17:43.
+    const r = normalizeTimeToUTC({
+      rawTime: "A22:43",
+      rowDate: "2026-04-03",
+      timeReference: "LOCAL_STATION",
+      role: "in",
+      depTz: TZ_SIN,
+      arrTz: TZ_CJB,
+      baseTz: TZ_SIN,
+    });
+    expect(r).toEqual({ utcTime: "17:13", utcDate: "2026-04-03" });
   });
 
   it("handles date-shift for outbound across midnight in station local", () => {
