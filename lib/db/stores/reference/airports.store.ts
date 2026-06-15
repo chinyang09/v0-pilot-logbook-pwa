@@ -41,6 +41,54 @@ const DATA_VERSION = "2025.10.27-min"
 // Public API - Data Loading
 // ============================================
 
+/** Map the raw airports JSON into our Airport rows, re-flagging known favorites. */
+function mapRawAirports(rawData: Record<string, any>, favoriteIcaos: Set<string>): Airport[] {
+  return Object.values(rawData)
+    .map((airport: any, index: number) => ({
+      id: index + 1,
+      icao: airport.icao || "",
+      iata: airport.iata || "",
+      name: airport.name || "",
+      city: airport.city || "",
+      state: airport.state || "",
+      country: airport.country || "",
+      latitude: airport.lat || 0,
+      longitude: airport.lon || 0,
+      elevation: airport.elevation || 0,
+      tz: airport.tz || "UTC",
+      isFavorite: favoriteIcaos.has(airport.icao) ? true : undefined,
+    }))
+    .filter((a) => a.icao)
+}
+
+/**
+ * Rebuild the airports table from a fresh dataset, preserving the user's
+ * favorites and custom airports. Both are derived from a single full scan —
+ * the previous code scanned twice (once via a broken `where("isFavorite")
+ * .equals(1)` index query that never matched the boolean values actually
+ * stored, silently dropping favorites on every dataset version bump).
+ */
+async function rebuildAirportsTable(rawData: Record<string, any>): Promise<Airport[]> {
+  const existing = await referenceDb.airports.toArray()
+  const favoriteIcaos = new Set(existing.filter((a) => a.isFavorite).map((a) => a.icao))
+  const customAirports = existing.filter((a) => a.isCustom === true)
+
+  const airports = mapRawAirports(rawData, favoriteIcaos)
+  const newIcaos = new Set(airports.map((a) => a.icao))
+  const customToPreserve = customAirports.filter((a) => !newIcaos.has(a.icao))
+
+  await referenceDb.transaction("rw", referenceDb.airports, referenceDb.metadata, async () => {
+    await referenceDb.airports.clear()
+    await referenceDb.airports.bulkPut(airports)
+    if (customToPreserve.length > 0) {
+      await referenceDb.airports.bulkPut(customToPreserve)
+    }
+    await referenceDb.setMetadata("airport_version", DATA_VERSION)
+  })
+
+  return airports
+}
+
 /**
  * Get airports from cache or load from local public folder
  */
@@ -60,46 +108,7 @@ export async function getAirportDatabase(): Promise<Airport[]> {
     if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
 
     const rawData: Record<string, any> = await response.json()
-
-    // Preserve favorites and custom airports before clearing
-    const existingFavorites = await referenceDb.airports.where("isFavorite").equals(1).toArray()
-    const favoriteIcaos = new Set(existingFavorites.map((a) => a.icao))
-    const customAirports = await getCustomAirports()
-
-    // Map Object to Array and normalize keys
-    const airports: Airport[] = Object.values(rawData)
-      .map((airport: any, index: number) => ({
-        id: index + 1,
-        icao: airport.icao || "",
-        iata: airport.iata || "",
-        name: airport.name || "",
-        city: airport.city || "",
-        state: airport.state || "",
-        country: airport.country || "",
-        latitude: airport.lat || 0,
-        longitude: airport.lon || 0,
-        elevation: airport.elevation || 0,
-        tz: airport.tz || "UTC",
-        isFavorite: favoriteIcaos.has(airport.icao) ? true : undefined,
-      }))
-      .filter((a) => a.icao)
-
-    // Determine which custom airports are NOT in the new dataset
-    const newIcaos = new Set(airports.map((a) => a.icao))
-    const customToPreserve = customAirports.filter((a) => !newIcaos.has(a.icao))
-
-    // Update database
-    await referenceDb.transaction("rw", referenceDb.airports, referenceDb.metadata, async () => {
-      await referenceDb.airports.clear()
-      await referenceDb.airports.bulkPut(airports)
-      // Re-insert custom airports that aren't in the new dataset
-      if (customToPreserve.length > 0) {
-        await referenceDb.airports.bulkPut(customToPreserve)
-      }
-      await referenceDb.setMetadata("airport_version", DATA_VERSION)
-    })
-
-    return airports
+    return await rebuildAirportsTable(rawData)
   } catch (error) {
     console.error("[Airport DB] Critical failure:", error)
     return []
@@ -194,47 +203,7 @@ export async function getAirportById(id: number): Promise<Airport | undefined> {
  * Bulk load airports from JSON data
  */
 export async function bulkLoadAirports(rawData: Record<string, any>): Promise<void> {
-  // Preserve favorites and custom airports before clearing
-  const existingFavorites = await referenceDb.airports.where("isFavorite").equals(1).toArray()
-  const favoriteIcaos = new Set(existingFavorites.map((a) => a.icao))
-  const customAirports = await getCustomAirports()
-
-  const airports: Airport[] = Object.values(rawData)
-    .map((airport: any, index: number) => ({
-      id: index + 1,
-      icao: airport.icao || "",
-      iata: airport.iata || "",
-      name: airport.name || "",
-      city: airport.city || "",
-      state: airport.state || "",
-      country: airport.country || "",
-      latitude: airport.lat || 0,
-      longitude: airport.lon || 0,
-      elevation: airport.elevation || 0,
-      tz: airport.tz || "UTC",
-      isFavorite: favoriteIcaos.has(airport.icao) ? true : undefined,
-    }))
-    .filter((a) => a.icao)
-
-  const newIcaos = new Set(airports.map((a) => a.icao))
-  const customToPreserve = customAirports.filter((a) => !newIcaos.has(a.icao))
-
-  await referenceDb.transaction("rw", referenceDb.airports, referenceDb.metadata, async () => {
-    await referenceDb.airports.clear()
-    await referenceDb.airports.bulkPut(airports)
-    if (customToPreserve.length > 0) {
-      await referenceDb.airports.bulkPut(customToPreserve)
-    }
-    await referenceDb.setMetadata("airport_version", DATA_VERSION)
-  })
-}
-
-/**
- * Get all custom airports from the database
- */
-async function getCustomAirports(): Promise<Airport[]> {
-  const allAirports = await referenceDb.airports.toArray()
-  return allAirports.filter((a) => a.isCustom === true)
+  await rebuildAirportsTable(rawData)
 }
 
 /**
@@ -272,10 +241,13 @@ export async function toggleAirportFavorite(icao: string): Promise<boolean> {
 }
 
 /**
- * Get favorite airports
+ * Get favorite airports. Filters rather than using the `isFavorite` index,
+ * which never matched because favorites are stored as the boolean `true`
+ * (IndexedDB can't key a boolean) rather than the numeric 1 the index expects.
  */
 export async function getFavoriteAirports(): Promise<Airport[]> {
-  return referenceDb.airports.where("isFavorite").equals(1).toArray()
+  const all = await referenceDb.airports.toArray()
+  return all.filter((a) => !!a.isFavorite)
 }
 
 // ============================================
