@@ -170,6 +170,25 @@ All user data is stored locally in **IndexedDB via Dexie** and synced to **Mongo
 
 Sync runs automatically on: app focus, network online, debounced data changes (2-5s), manual trigger, and pre-logout.
 
+**Initialization is auth-driven, not mount-driven.** `SyncProvider`
+(`components/providers/sync-provider.tsx`) is mounted once at the root and never
+remounts across login/logout (those are route changes). It watches
+`useAuth().user`: when `userId` becomes non-null — on a boot-with-session **or
+any later login** — it calls `initializeTriggers()` and runs an initial
+`fullSync()`; when `userId` goes null (logout) it tears the triggers down so the
+next login re-initializes cleanly. A `syncedUserId` ref ensures this fires only
+on a real user transition (a callsign change or silent reauth keeps the same
+`userId`, so it does not resync). Do **not** revert this to a one-shot
+`getUserSession()` check at mount — that skips the initial sync *and the
+triggers* whenever the app is cold-opened logged-out and the user then logs in
+(only the manual sync button worked).
+
+**Per-collection dispatch** (delete/upsert from the server) goes through the
+single `COLLECTION_HANDLERS` registry in `sync-service.ts`, keyed by the closed
+`SyncCollection` union — add a collection in one compile-checked place, not in
+parallel switch/if-else chains.
+
+
 ### Authentication Flow
 
 1. **Registration**: Create callsign → server issues WebAuthn challenge (stores `userId`/`callsign`/`totpSecret` on the challenge doc with `type: "registration"`) → register passkey → `register/complete` consumes the challenge and creates the user from the **server-authored** values (it does not trust client-supplied `userId`/`callsign`/`totpSecret`) → setup TOTP
@@ -491,7 +510,7 @@ When making changes, be aware of these high-impact files:
 - `lib/db/user-db.ts` — Dexie user database schema (schema changes affect migrations)
 - `lib/sync/sync-service.ts` — Core sync logic (changes affect data integrity)
 - `components/providers/auth-provider.tsx` — Auth context, login/logout flows
-- `components/providers/sync-provider.tsx` — Sync initialization
+- `components/providers/sync-provider.tsx` — Sync initialization (auth-driven: (re)initializes triggers + initial sync when a user logs in, tears down on logout)
 - `public/sw.js` — Service worker caching strategies
 - `lib/mongodb/client.ts` — MongoDB connection pool (shared across API routes)
 
@@ -525,6 +544,8 @@ When making changes, be aware of these high-impact files:
 - Do not add a test framework without discussion — none exists currently
 - Do not modify the Dexie schema without considering IndexedDB migration implications
 - Do not change sync conflict resolution strategy without understanding the tombstone system
+- Do not gate `SyncProvider`'s init on a one-shot `getUserSession()` check at mount — drive it off `useAuth().user` so a login *after* mount (cold-open-logged-out, or logout→login) still initializes triggers and runs the initial sync
+- Do not re-fork the per-collection delete/upsert dispatch into switch/if-else chains — extend the single `COLLECTION_HANDLERS` registry in `sync-service.ts` instead
 - Do not advance the sync watermark from the client clock — `lastSyncTime` must come from the server-returned `syncedAt`, and only after every collection pulls cleanly
 - Do not delete a record on the server before its tombstone is written (`/api/sync/bulk`) — that order prevents deleted records resurrecting on other devices
 - Do not issue a session from a passkey route without calling `verifyAuthenticationResponse` — a `credential.id` lookup is not proof of possession (credential IDs aren't secret). Same for `register/complete`/`add-passkey`: bind the attestation to the server-issued challenge (`webauthn.create` + matching challenge)
