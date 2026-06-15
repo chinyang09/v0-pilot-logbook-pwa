@@ -3,6 +3,12 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  eslint: {
+    // Lint is run explicitly via `pnpm lint` (CI/local), not during the
+    // production build — mirrors typescript.ignoreBuildErrors so a lint warning
+    // never blocks a deploy.
+    ignoreDuringBuilds: true,
+  },
   images: {
     unoptimized: true,
   },
