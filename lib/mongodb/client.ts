@@ -42,13 +42,21 @@ async function ensureIndexes(mongoClient: MongoClient): Promise<void> {
   }
 
   await Promise.all([
-    ...["flights", "aircraft", "personnel"].flatMap((coll) => [
+    ...["flights", "aircraft", "personnel", "scheduleEntries", "currencies", "discrepancies"].flatMap((coll) => [
       safe(`${coll}.userId+id`, () =>
         db.collection(coll).createIndex({ userId: 1, id: 1 }, { unique: true }),
       ),
       // Server-assigned watermark used by delta-sync (see /api/sync/[collection]).
       safe(`${coll}.userId+syncedAt`, () =>
         db.collection(coll).createIndex({ userId: 1, syncedAt: 1 }),
+      ),
+      // Server-authored monotonic version — the delta-pull keyset cursor.
+      safe(`${coll}.userId+serverSeq+_id`, () =>
+        db.collection(coll).createIndex({ userId: 1, serverSeq: 1, _id: 1 }),
+      ),
+      // Backs the legacy createdAt fallback branch of the delta query.
+      safe(`${coll}.userId+createdAt`, () =>
+        db.collection(coll).createIndex({ userId: 1, createdAt: 1 }),
       ),
     ]),
     // Tombstones — TTL + delta-sync lookups (mirrors /api/sync/setup-ttl).

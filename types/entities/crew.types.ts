@@ -29,6 +29,9 @@ export interface Personnel {
   updatedAt?: number
   deleteddAt?: number
   syncStatus: SyncStatus
+  // Sync engine: server-authored monotonic version (delta cursor) + authoring device (LWW tiebreak)
+  serverSeq?: number
+  deviceId?: string
 }
 
 export type PersonnelCreate = Omit<Personnel, "id" | "createdAt" | "syncStatus">

@@ -24,6 +24,9 @@ export interface Aircraft {
   updatedAt?: number;
   deletedAt?: number;
   syncStatus: SyncStatus;
+  // Sync engine: server-authored monotonic version (delta cursor) + authoring device (LWW tiebreak)
+  serverSeq?: number;
+  deviceId?: string;
 }
 
 export type AircraftCreate = Omit<Aircraft, "id" | "createdAt" | "syncStatus">;

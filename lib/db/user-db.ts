@@ -75,6 +75,28 @@ class UserDatabase extends Dexie {
       currencies: "id, code, expiryDate, syncStatus",
       discrepancies: "id, type, resolved, scheduleEntryId, flightLogId, createdAt",
     })
+
+    // Version 4 (additive): bring roster collections into sync.
+    // - syncQueue gains a denormalized `recordId` + [collection+recordId] index
+    //   so enqueue can dedup to one live row per record (bounds offline growth).
+    // - aircraft/personnel/discrepancies gain a syncStatus index for pending scans.
+    // The upgrade backfills `recordId` on existing queue rows from data.id.
+    this.version(4)
+      .stores({
+        aircraft: "id, registration, type, userId, syncStatus",
+        personnel: "id, name, userId, crewId, syncStatus",
+        syncQueue: "id, collection, timestamp, [collection+recordId]",
+        discrepancies:
+          "id, type, resolved, scheduleEntryId, flightLogId, createdAt, syncStatus",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("syncQueue")
+          .toCollection()
+          .modify((row: { recordId?: string; data?: { id?: string } }) => {
+            row.recordId = row?.data?.id
+          })
+      })
   }
 
   /**
@@ -142,6 +164,38 @@ class UserDatabase extends Dexie {
       }
     )
     console.log("[UserDB] Cleared all local data for full resync")
+  }
+
+  /**
+   * Clear data tables for a full resync while PRESERVING the sync queue and
+   * sync metadata (device id, audit counters). Unpushed mutations are retained:
+   * create/update queue rows carry the full record payload, so a record cleared
+   * here is still re-pushed from its queue row and re-pulled from the server —
+   * a full resync therefore never destroys un-synced local edits.
+   */
+  async clearDataTablesForResync(): Promise<void> {
+    await this.transaction(
+      "rw",
+      [
+        this.flights,
+        this.aircraft,
+        this.personnel,
+        this.scheduleEntries,
+        this.currencies,
+        this.discrepancies,
+      ],
+      async () => {
+        await Promise.all([
+          this.flights.clear(),
+          this.aircraft.clear(),
+          this.personnel.clear(),
+          this.scheduleEntries.clear(),
+          this.currencies.clear(),
+          this.discrepancies.clear(),
+        ])
+      }
+    )
+    console.log("[UserDB] Cleared data tables for full resync (queue preserved)")
   }
 }
 

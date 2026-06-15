@@ -9,6 +9,8 @@ import type {
   CurrencyStatus,
   CurrencyWithStatus,
 } from "@/types/entities/roster.types"
+import { addToSyncQueue, getDeviceId } from "./sync-queue.store"
+import { updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
 
 /**
  * Calculate currency status based on expiry date
@@ -52,12 +54,13 @@ export async function addCurrency(currency: CurrencyCreate): Promise<Currency> {
     criticalDays: currency.criticalDays ?? 7,
     autoUpdate: currency.autoUpdate ?? true,
     createdAt: Date.now(),
+    updatedAt: Date.now(),
+    deviceId: await getDeviceId(),
     syncStatus: "pending",
   }
 
   await userDb.currencies.put(newCurrency)
-  // Note: Currencies are local-only for now, not synced to server
-  // await addToSyncQueue("create", "currencies", newCurrency)
+  await addToSyncQueue("create", "currencies", newCurrency)
 
   return newCurrency
 }
@@ -69,28 +72,21 @@ export async function updateCurrency(
   id: string,
   updates: Partial<Currency>
 ): Promise<Currency | null> {
-  const currency = await userDb.currencies.get(id)
-  if (!currency) return null
-
-  const updatedCurrency: Currency = {
-    ...currency,
-    ...updates,
-    updatedAt: Date.now(),
-  }
-
-  await userDb.currencies.put(updatedCurrency)
-  return updatedCurrency
+  return updateEntity<Currency>(userDb.currencies, "currencies", id, updates)
 }
 
 /**
  * Delete currency
  */
 export async function deleteCurrency(id: string): Promise<boolean> {
-  const currency = await userDb.currencies.get(id)
-  if (!currency) return false
+  return deleteEntity<Currency>(userDb.currencies, "currencies", id)
+}
 
-  await userDb.currencies.delete(id)
-  return true
+/**
+ * Delete currency without enqueuing (server-initiated)
+ */
+export async function silentDeleteCurrency(id: string): Promise<boolean> {
+  return silentDeleteEntity<Currency>(userDb.currencies, id)
 }
 
 /**
@@ -157,15 +153,12 @@ export async function upsertCurrency(
   if (existing) {
     // Only update if autoUpdate is enabled
     if (existing.autoUpdate) {
-      const updated: Currency = {
-        ...existing,
+      const updated = await updateEntity<Currency>(userDb.currencies, "currencies", existing.id, {
         expiryDate: currency.expiryDate,
         description: currency.description,
         lastUpdatedFrom: currency.lastUpdatedFrom,
-        updatedAt: Date.now(),
-      }
-      await userDb.currencies.put(updated)
-      return { currency: updated, isNew: false }
+      })
+      return { currency: updated ?? existing, isNew: false }
     }
     return { currency: existing, isNew: false }
   }
@@ -204,4 +197,26 @@ export async function clearAllCurrencies(): Promise<void> {
  */
 export async function getCurrenciesCount(): Promise<number> {
   return userDb.currencies.count()
+}
+
+/**
+ * Normalize a server currency record (fill required defaults).
+ */
+function normalizeCurrencyFromServer(server: Currency): Currency {
+  return {
+    ...server,
+    warningDays: server.warningDays ?? 30,
+    criticalDays: server.criticalDays ?? 7,
+    autoUpdate: server.autoUpdate ?? true,
+    createdAt: server.createdAt || Date.now(),
+    updatedAt: server.updatedAt,
+    syncStatus: "synced",
+  }
+}
+
+/**
+ * Upsert a currency from server (for sync)
+ */
+export async function upsertCurrencyFromServer(server: Currency): Promise<void> {
+  return upsertFromServer<Currency>(userDb.currencies, server, normalizeCurrencyFromServer)
 }

@@ -115,6 +115,8 @@ function normalizeFlightFromServer(serverFlight: FlightLog): FlightLog {
     syncStatus: "synced",
     isLocked: serverFlight.isLocked,
     lastSyncedAt: serverFlight.lastSyncedAt,
+    serverSeq: serverFlight.serverSeq,
+    deviceId: serverFlight.deviceId,
   }
 }
 

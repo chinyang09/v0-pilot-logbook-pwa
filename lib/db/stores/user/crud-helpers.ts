@@ -4,7 +4,7 @@
  */
 
 import type { Table } from "dexie"
-import { addToSyncQueue } from "./sync-queue.store"
+import { addToSyncQueue, getDeviceId } from "./sync-queue.store"
 
 /**
  * Base entity interface that all syncable entities must implement
@@ -15,12 +15,37 @@ export interface SyncableEntity {
   createdAt: number
   updatedAt?: number
   syncStatus?: "pending" | "synced" | "error"
+  // Sync engine: server-authored monotonic version (delta cursor)
+  serverSeq?: number
+  // Sync engine: authoring device, used as a deterministic LWW tiebreaker
+  deviceId?: string
+}
+
+/**
+ * Deterministic last-write-wins comparison. Orders by (updatedAt, deviceId) so
+ * two concurrent edits with the same timestamp resolve identically on every
+ * device instead of "whoever the server saw last" / "server always wins".
+ * Returns > 0 if `a` wins, < 0 if `b` wins, 0 if identical authorship.
+ */
+export function compareAuthorship(a: SyncableEntity, b: SyncableEntity): number {
+  const at = a.updatedAt ?? a.createdAt ?? 0
+  const bt = b.updatedAt ?? b.createdAt ?? 0
+  if (at !== bt) return at - bt
+  const ad = a.deviceId ?? ""
+  const bd = b.deviceId ?? ""
+  return ad < bd ? -1 : ad > bd ? 1 : 0
 }
 
 /**
  * Table name type for sync queue operations
  */
-export type SyncableTableName = "flights" | "personnel" | "aircraft"
+export type SyncableTableName =
+  | "flights"
+  | "personnel"
+  | "aircraft"
+  | "scheduleEntries"
+  | "currencies"
+  | "discrepancies"
 
 /**
  * Generic add operation for syncable entities
@@ -32,11 +57,13 @@ export async function createEntity<T extends SyncableEntity>(
   options?: { includeUpdatedAt?: boolean }
 ): Promise<T> {
   const now = Date.now()
+  const deviceId = await getDeviceId()
   const newEntity = {
     ...data,
     id: crypto.randomUUID(),
     createdAt: now,
     ...(options?.includeUpdatedAt !== false && { updatedAt: now }),
+    deviceId,
     syncStatus: "pending" as const,
   } as unknown as T
 
@@ -58,10 +85,12 @@ export async function updateEntity<T extends SyncableEntity>(
   const existing = await table.get(id)
   if (!existing) return null
 
+  const deviceId = await getDeviceId()
   const updatedEntity = {
     ...existing,
     ...updates,
     updatedAt: Date.now(),
+    deviceId,
     syncStatus: "pending",
   } as T
 
@@ -134,11 +163,11 @@ export async function upsertFromServer<T extends SyncableEntity>(
   }
 
   if (existing) {
-    // Last-write-wins conflict resolution
-    const serverTime = normalized.updatedAt || normalized.createdAt
-    const localTime = existing.updatedAt || existing.createdAt
-
-    if (serverTime >= localTime) {
+    // Deterministic last-write-wins by (updatedAt, deviceId). A locally-newer
+    // PENDING edit (higher updatedAt) is preserved — the server version is only
+    // applied when it wins the comparison, so unsynced local edits are never
+    // clobbered by an older server record.
+    if (compareAuthorship(normalized, existing) >= 0) {
       await table.put({
         ...normalized,
         id: existing.id,

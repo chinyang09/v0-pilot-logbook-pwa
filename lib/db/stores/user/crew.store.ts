@@ -101,6 +101,8 @@ function normalizePersonnelFromServer(serverPersonnel: Personnel): Personnel {
     createdAt: serverPersonnel.createdAt || Date.now(),
     updatedAt: serverPersonnel.updatedAt,
     syncStatus: "synced",
+    serverSeq: serverPersonnel.serverSeq,
+    deviceId: serverPersonnel.deviceId,
   };
 }
 

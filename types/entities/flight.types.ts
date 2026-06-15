@@ -166,6 +166,10 @@ export interface FlightLog {
   // Sync metadata
   syncStatus: SyncStatus
   lastSyncedAt?: number
+  // Sync engine: server-authored monotonic version used as the delta-pull cursor
+  serverSeq?: number
+  // Sync engine: authoring device id, used as a deterministic LWW tiebreaker
+  deviceId?: string
   // Import provenance — used to gate older reports from regressing newer data
   reportGeneratedAt?: number
   importSource?: "logbook" | "schedule" | "cross_hydrated" | "manual"

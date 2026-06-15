@@ -1,28 +1,37 @@
 /**
  * Aircraft reference sync API
  *
- * GET /api/sync/aircraft-reference?since=<timestamp>
+ * GET /api/sync/aircraft-reference?since=<enrichedAt>&sinceId=<_id>
  *
- * Returns enriched aircraft submissions updated after the given timestamp.
+ * Returns enriched aircraft submissions after the given keyset cursor.
  * No auth required — this is shared reference data.
- * Used by the sync engine to keep local IndexedDB up to date.
  */
 
 import { NextResponse } from "next/server"
+import { ObjectId } from "mongodb"
 import { getMongoClient } from "@/lib/mongodb"
+
+const PAGE_SIZE = 500
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
-  const since = parseInt(searchParams.get("since") || "0", 10) || 0
+  const sinceRaw = parseInt(searchParams.get("since") || "0", 10)
+  const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : 0
+  const sinceIdRaw = searchParams.get("sinceId") || ""
+  const sinceId = sinceIdRaw && ObjectId.isValid(sinceIdRaw) ? new ObjectId(sinceIdRaw) : null
 
   try {
     const client = await getMongoClient()
     const db = client.db("skylog")
     const collection = db.collection("aircraftSubmissions")
 
-    const query: Record<string, any> = { status: "enriched" }
+    // Keyset cursor on (enrichedAt, _id) so rows sharing a boundary enrichedAt
+    // past the page limit are not skipped (the old Math.max cursor dropped them).
+    const query: Record<string, unknown> = { status: "enriched" }
     if (since > 0) {
-      query.enrichedAt = { $gt: since }
+      query.$or = sinceId
+        ? [{ enrichedAt: { $gt: since } }, { enrichedAt: since, _id: { $gt: sinceId } }]
+        : [{ enrichedAt: { $gt: since } }]
     }
 
     const docs = await collection
@@ -38,8 +47,8 @@ export async function GET(request: Request) {
         manufacturerCode: 1,
         enrichedAt: 1,
       })
-      .sort({ enrichedAt: 1 })
-      .limit(500)
+      .sort({ enrichedAt: 1, _id: 1 })
+      .limit(PAGE_SIZE)
       .toArray()
 
     const records = docs.map((doc) => ({
@@ -53,14 +62,27 @@ export async function GET(request: Request) {
       manufacturerCode: doc.manufacturerCode || "",
     }))
 
-    // Track the latest enrichedAt for the client to use as next `since`
-    const lastUpdated = docs.length > 0
-      ? Math.max(...docs.map((d) => d.enrichedAt || 0))
-      : since
+    const hasMore = docs.length === PAGE_SIZE
+    const last = docs[docs.length - 1]
+    const nextCursor = last
+      ? { enrichedAt: (last.enrichedAt as number) || since, id: (last._id as ObjectId).toString() }
+      : { enrichedAt: since, id: sinceIdRaw }
 
-    return NextResponse.json({ records, lastUpdated })
+    return NextResponse.json({
+      records,
+      nextCursor,
+      hasMore,
+      // Back-compat field for older clients.
+      lastUpdated: nextCursor.enrichedAt,
+    })
   } catch (error) {
     console.error("[Aircraft Reference Sync] MongoDB error:", error)
-    return NextResponse.json({ records: [], lastUpdated: since })
+    return NextResponse.json({
+      records: [],
+      nextCursor: { enrichedAt: since, id: sinceIdRaw },
+      hasMore: false,
+      lastUpdated: since,
+    })
   }
 }
+
