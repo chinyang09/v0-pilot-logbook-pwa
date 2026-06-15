@@ -93,9 +93,14 @@ export function generateRegistrationOptions(
     timeout: 60000,
     attestation: "none",
     authenticatorSelection: {
-      residentKey: "preferred",
-      userVerification: "preferred",
-      authenticatorAttachment: "platform", 
+      // Username-less (discoverable) login requires a resident/discoverable
+      // credential, so demand it instead of "preferred" — otherwise some
+      // authenticators create a non-discoverable key and the passkey button
+      // silently finds nothing. No authenticatorAttachment lock so a passkey
+      // from a phone can be used on desktop via the hybrid/QR transport.
+      residentKey: "required",
+      requireResidentKey: true,
+      userVerification: "required",
     },
     excludeCredentials: existingCredentials.map((cred) => {
       // Handle both string IDs and Passkey Objects
@@ -169,16 +174,75 @@ export async function parseRegistrationResponse(credential: PublicKeyCredential)
   }
 }
 
+// Authenticator-data flag bits (WebAuthn §6.1).
+const FLAG_UP = 0x01 // User Present
+const FLAG_UV = 0x04 // User Verified
+const FLAG_BE = 0x08 // Backup Eligible (multi-device)
+const FLAG_BS = 0x10 // Backup State (currently backed up)
+
+// Derive the browser-equivalent origin from the request. Behind Vercel/any
+// proxy the original scheme arrives in x-forwarded-proto, and the Host header
+// already carries the port when non-default, so `${proto}://${host}` is exactly
+// what the browser puts in clientDataJSON.origin.
+export function getExpectedOrigin(requestHost?: string, forwardedProto?: string): string | undefined {
+  if (!requestHost) return undefined
+  const hostname = requestHost.split(":")[0]
+  const isLocal = hostname === "localhost" || hostname === "127.0.0.1"
+  const proto = (forwardedProto?.split(",")[0].trim() || (isLocal ? "http" : "https")).replace(/[^a-z]/gi, "")
+  return `${proto}://${requestHost}`
+}
+
+// The security-relevant property is that the assertion was produced for OUR
+// domain. The authenticator-signed rpIdHash already proves the rpId, so here we
+// only require the clientDataJSON origin's hostname to equal the rpId (tolerant
+// of scheme/port, which the rpIdHash check does not depend on).
+function originHostMatchesRpId(origin: string, rpId: string): boolean {
+  try {
+    return new URL(origin).hostname === rpId
+  } catch {
+    return false
+  }
+}
+
+// Detect the signature algorithm from the stored SPKI public key by scanning
+// for the algorithm-identifier OID. Avoids storing a separate `alg` field and
+// keeps every previously-registered credential verifiable.
+//   id-ecPublicKey  1.2.840.10045.2.1  → 06 07 2A 86 48 CE 3D 02 01
+//   rsaEncryption   1.2.840.113549.1.1.1 → 06 09 2A 86 48 86 F7 0D 01 01 01
+function detectSpkiAlg(spki: Uint8Array): "ES256" | "RS256" | null {
+  const EC_OID = [0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01]
+  const RSA_OID = [0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01]
+  const contains = (needle: number[]) => {
+    outer: for (let i = 0; i + needle.length <= spki.length; i++) {
+      for (let j = 0; j < needle.length; j++) {
+        if (spki[i + j] !== needle[j]) continue outer
+      }
+      return true
+    }
+    return false
+  }
+  if (contains(EC_OID)) return "ES256"
+  if (contains(RSA_OID)) return "RS256"
+  return null
+}
+
+export interface AuthnVerificationContext {
+  expectedRpId: string
+  expectedOrigin?: string
+}
+
 // Verify authentication response
 //
 // The browser sends the assertion as base64url strings; API routes decode them
 // to byte arrays before calling this. This routine MUST be invoked on every
-// passkey login — it binds the assertion to the server-issued challenge and
+// passkey login — it binds the assertion to the server-issued challenge, the
+// relying-party id and origin, requires user presence/verification, and
 // cryptographically verifies the signature against the stored public key.
 export async function verifyAuthenticationResponse(
   credential: { response: { authenticatorData: Uint8Array; clientDataJSON: Uint8Array; signature: Uint8Array } },
   expectedChallenge: Uint8Array,
   storedCredential: PasskeyCredential,
+  context: AuthnVerificationContext,
 ): Promise<{ verified: boolean; newCounter: number }> {
   const response = credential.response
 
@@ -187,38 +251,86 @@ export async function verifyAuthenticationResponse(
   const clientDataJSON = new Uint8Array(response.clientDataJSON)
   const signature = new Uint8Array(response.signature)
 
-  // Verify the assertion is an authentication ceremony bound to our challenge
-  const clientData = JSON.parse(new TextDecoder().decode(clientDataJSON))
-  if (clientData.type !== "webauthn.get") {
+  if (authData.length < 37) return { verified: false, newCounter: 0 }
+
+  // Verify the assertion is an authentication ceremony bound to our challenge.
+  let clientData: { type?: string; challenge?: string; origin?: string }
+  try {
+    clientData = JSON.parse(new TextDecoder().decode(clientDataJSON))
+  } catch {
     return { verified: false, newCounter: 0 }
   }
-  const receivedChallenge = base64URLDecode(clientData.challenge)
-
-  if (!arraysEqual(receivedChallenge, expectedChallenge)) {
+  if (clientData.type !== "webauthn.get") return { verified: false, newCounter: 0 }
+  if (!clientData.challenge || !arraysEqual(base64URLDecode(clientData.challenge), expectedChallenge)) {
     return { verified: false, newCounter: 0 }
   }
 
-  // Verify signature
-  const publicKeyBytes = base64URLDecode(storedCredential.publicKey)
+  // Bind to our origin/relying-party.
+  if (!clientData.origin || !originHostMatchesRpId(clientData.origin, context.expectedRpId)) {
+    console.warn("[WebAuthn] Origin mismatch:", clientData.origin)
+    return { verified: false, newCounter: 0 }
+  }
+  if (context.expectedOrigin && clientData.origin !== context.expectedOrigin) {
+    // Non-fatal (scheme/port can legitimately differ from our reconstruction),
+    // but worth surfacing.
+    console.warn("[WebAuthn] Origin not exact:", clientData.origin, "expected", context.expectedOrigin)
+  }
 
-  // Hash the clientDataJSON
+  // The authenticator signs rpIdHash || flags || counter; verifying rpIdHash
+  // proves the assertion was scoped to our domain.
+  const expectedRpIdHash = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(context.expectedRpId)),
+  )
+  if (!arraysEqual(authData.slice(0, 32), expectedRpIdHash)) {
+    console.warn("[WebAuthn] rpIdHash mismatch")
+    return { verified: false, newCounter: 0 }
+  }
+
+  // Require user presence and (since we always request UV "required") user
+  // verification.
+  const flags = authData[32]
+  if ((flags & FLAG_UP) === 0) return { verified: false, newCounter: 0 }
+  if ((flags & FLAG_UV) === 0) {
+    console.warn("[WebAuthn] User verification flag not set")
+    return { verified: false, newCounter: 0 }
+  }
+
+  // Hash the clientDataJSON and build the signed payload.
   const clientDataHash = await crypto.subtle.digest("SHA-256", clientDataJSON)
-
-  // Concatenate authenticatorData + hash(clientDataJSON)
   const signedData = new Uint8Array(authData.length + 32)
   signedData.set(authData)
   signedData.set(new Uint8Array(clientDataHash), authData.length)
 
-  // Import the public key and verify
+  const publicKeyBytes = base64URLDecode(storedCredential.publicKey)
+  if (publicKeyBytes.length === 0) {
+    console.error("[WebAuthn] Stored credential has no public key")
+    return { verified: false, newCounter: 0 }
+  }
+  const alg = detectSpkiAlg(publicKeyBytes) ?? "ES256"
+
   try {
-    const key = await crypto.subtle.importKey("spki", publicKeyBytes, { name: "ECDSA", namedCurve: "P-256" }, false, [
-      "verify",
-    ])
-
-    // Convert DER signature to raw format for WebCrypto
-    const rawSignature = derToRaw(signature)
-
-    const verified = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, rawSignature, signedData)
+    let verified = false
+    if (alg === "RS256") {
+      const key = await crypto.subtle.importKey(
+        "spki",
+        publicKeyBytes,
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+        false,
+        ["verify"],
+      )
+      // RSA signatures are not DER-wrapped — verify the raw signature directly.
+      verified = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, signature, signedData)
+    } else {
+      const key = await crypto.subtle.importKey(
+        "spki",
+        publicKeyBytes,
+        { name: "ECDSA", namedCurve: "P-256" },
+        false,
+        ["verify"],
+      )
+      const rawSignature = derToRaw(signature)
+      verified = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, rawSignature, signedData)
+    }
 
     // Extract counter from authenticator data (bytes 33-36)
     const newCounter = new DataView(authData.buffer, authData.byteOffset + 33, 4).getUint32(0, false)
@@ -240,13 +352,142 @@ export async function verifyAuthenticationResponse(
   }
 }
 
+// Parsed + verified attestation for a registration / add-passkey ceremony.
+export interface RegistrationAttestationResult {
+  verified: boolean
+  error?: string
+  credentialId: string
+  publicKey: string
+  counter: number
+  deviceType: "singleDevice" | "multiDevice"
+  backedUp: boolean
+  transports?: AuthenticatorTransport[]
+}
+
+interface RegistrationCredentialInput {
+  id: string
+  rawId?: string
+  response: {
+    clientDataJSON: string
+    attestationObject: string
+    publicKey?: string
+    transports?: string[]
+  }
+}
+
+// Verify a registration (create) ceremony for both new-account and add-passkey
+// flows. Binds the attestation to our challenge, origin and relying-party id,
+// requires user presence + verification, and returns the authenticator-derived
+// credential fields. The public key is taken from the browser-computed SPKI
+// (`getPublicKey()`); a credential without one is rejected rather than trusted.
+export async function verifyRegistrationAttestation(
+  credential: RegistrationCredentialInput,
+  expectedChallenge: string,
+  context: AuthnVerificationContext,
+): Promise<RegistrationAttestationResult> {
+  const fail = (error: string): RegistrationAttestationResult => ({
+    verified: false,
+    error,
+    credentialId: "",
+    publicKey: "",
+    counter: 0,
+    deviceType: "singleDevice",
+    backedUp: false,
+  })
+
+  let clientData: { type?: string; challenge?: string; origin?: string }
+  try {
+    clientData = JSON.parse(new TextDecoder().decode(base64URLDecode(credential.response.clientDataJSON)))
+  } catch {
+    return fail("Invalid clientDataJSON")
+  }
+
+  if (clientData.type !== "webauthn.create") return fail("Not a registration ceremony")
+  if (clientData.challenge !== expectedChallenge) return fail("Challenge mismatch")
+  if (!clientData.origin || !originHostMatchesRpId(clientData.origin, context.expectedRpId)) {
+    return fail("Origin mismatch")
+  }
+
+  const attestation = parseAttestationObject(base64URLDecode(credential.response.attestationObject))
+
+  // rpIdHash must match SHA-256(rpId).
+  const expectedRpIdHash = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(context.expectedRpId)),
+  )
+  if (!arraysEqual(base64URLDecode(attestation.rpIdHash), expectedRpIdHash)) {
+    return fail("rpIdHash mismatch")
+  }
+  if (!attestation.flags.up) return fail("User not present")
+  if (!attestation.flags.uv) return fail("User verification required")
+
+  // The browser-provided SPKI is the source of truth for the stored key. The
+  // signature check at login fails if it does not match the private key, so a
+  // forged value cannot help an attacker — but an empty one would break login.
+  const publicKey = credential.response.publicKey || ""
+  if (!publicKey) return fail("Missing public key")
+
+  return {
+    verified: true,
+    credentialId: credential.id,
+    publicKey,
+    counter: attestation.counter,
+    deviceType: attestation.flags.be ? "multiDevice" : "singleDevice",
+    backedUp: attestation.flags.bs,
+    transports: credential.response.transports as AuthenticatorTransport[] | undefined,
+  }
+}
+
+// Minimal CBOR walk to locate authData inside a "none"-attestation object and
+// extract rpIdHash, flags and the signature counter.
+function parseAttestationObject(attestationObject: Uint8Array) {
+  let offset = 0
+  while (offset < attestationObject.length) {
+    if (attestationObject[offset] === 0x68 && attestationObject[offset + 1] === 0x61) break // "authData" key
+    offset++
+  }
+  while (
+    offset < attestationObject.length &&
+    attestationObject[offset] !== 0x58 &&
+    attestationObject[offset] !== 0x59
+  ) {
+    offset++
+  }
+
+  let authDataLength = 0
+  if (attestationObject[offset] === 0x58) {
+    authDataLength = attestationObject[offset + 1]
+    offset += 2
+  } else if (attestationObject[offset] === 0x59) {
+    authDataLength = (attestationObject[offset + 1] << 8) | attestationObject[offset + 2]
+    offset += 3
+  }
+
+  const authData = attestationObject.slice(offset, offset + authDataLength)
+  const rpIdHash = authData.slice(0, 32)
+  const flags = authData[32]
+  const signCount = new DataView(authData.buffer, authData.byteOffset + 33, 4).getUint32(0, false)
+
+  return {
+    rpIdHash: base64URLEncode(rpIdHash),
+    flags: {
+      up: (flags & FLAG_UP) !== 0,
+      uv: (flags & FLAG_UV) !== 0,
+      be: (flags & FLAG_BE) !== 0,
+      bs: (flags & FLAG_BS) !== 0,
+      at: (flags & 0x40) !== 0,
+    },
+    counter: signCount,
+  }
+}
+
 // Helper to compare arrays
 function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false
+  let diff = 0
   for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false
+    diff |= a[i] ^ b[i]
   }
-  return true
+  return diff === 0
 }
 
 // Convert DER signature to raw format

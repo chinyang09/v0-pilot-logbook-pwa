@@ -297,9 +297,9 @@ export default function LoginPage() {
           timeout: options.timeout,
           attestation: options.attestation || "none",
           authenticatorSelection: {
-            residentKey: "preferred",
-            userVerification: "preferred",
-            authenticatorAttachment: "platform",
+            residentKey: "required",
+            requireResidentKey: true,
+            userVerification: "required",
           },
           excludeCredentials:
             (options.excludeCredentials as Array<{
@@ -471,9 +471,9 @@ export default function LoginPage() {
         timeout: options.timeout || 60000,
         attestation: "none",
         authenticatorSelection: {
-          residentKey: "preferred",
-          userVerification: "preferred",
-          authenticatorAttachment: "platform",
+          residentKey: "required",
+          requireResidentKey: true,
+          userVerification: "required",
         },
         excludeCredentials:
           options.excludeCredentials?.map((cred: any) => ({

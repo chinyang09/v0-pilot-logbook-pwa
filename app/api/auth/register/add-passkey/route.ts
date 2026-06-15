@@ -1,6 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getDB } from "@/lib/mongodb"
-import { base64URLDecode, base64URLEncode, generateRegistrationOptions } from "@/lib/auth/server/webauthn"
+import {
+  base64URLEncode,
+  generateRegistrationOptions,
+  getRP,
+  getExpectedOrigin,
+  verifyRegistrationAttestation,
+} from "@/lib/auth/server/webauthn"
 import type { User, PasskeyCredential, StoredChallenge } from "@/lib/auth/types"
 import { cookies } from "next/headers"
 
@@ -81,164 +87,83 @@ export async function POST(request: NextRequest) {
     const { credential, challenge, name } = await request.json()
     const db = await getDB()
 
-    console.log("[v0] Add passkey POST - challenge:", challenge)
-
-    const storedChallenge = await db.collection<StoredChallenge>("challenges").findOne({ _id: challenge })
-
-    console.log("[v0] Stored challenge found:", !!storedChallenge)
-
-    if (storedChallenge) {
-      await db.collection("challenges").deleteOne({ _id: challenge })
-    }
+    // Single-use challenge: consume it atomically and confirm it was issued for
+    // an add-passkey ceremony before doing anything else.
+    const storedChallenge = (await db
+      .collection<StoredChallenge>("challenges")
+      .findOneAndDelete({ _id: challenge })) as unknown as StoredChallenge | null
 
     if (!storedChallenge || storedChallenge.expiresAt < new Date()) {
       return NextResponse.json({ error: "Challenge expired" }, { status: 400 })
     }
+    if (storedChallenge.type && storedChallenge.type !== "add-passkey") {
+      return NextResponse.json({ error: "Invalid challenge" }, { status: 400 })
+    }
 
     const cookieStore = await cookies()
     const sessionId = cookieStore.get("session")?.value
-
-    console.log("[v0] POST sessionId from cookie:", sessionId)
 
     const session = await db.collection("sessions").findOne({
       token: sessionId,
       expiresAt: { $gt: new Date() },
     })
 
-    console.log("[v0] POST session lookup:", session ? { userId: session.userId } : "null")
-    console.log(
-      "[v0] Comparing session.userId:",
-      session?.userId,
-      "with storedChallenge.userId:",
-      storedChallenge.userId,
-    )
-
     if (!session || session.userId.toString() !== storedChallenge.userId.toString()) {
-      console.log("[v0] Session/challenge mismatch")
       return NextResponse.json({ error: "Invalid session" }, { status: 401 })
     }
 
-    // Bind the attestation to the issued challenge and ensure it is a creation
-    // ceremony. Without this an authenticated user could attach a credential
-    // that was never produced by this ceremony (e.g. a replayed clientDataJSON).
-    try {
-      const clientData = JSON.parse(
-        new TextDecoder().decode(base64URLDecode(credential.response.clientDataJSON)),
-      )
-      if (clientData.type !== "webauthn.create" || clientData.challenge !== challenge) {
-        return NextResponse.json({ error: "Invalid credential" }, { status: 400 })
-      }
-    } catch {
-      return NextResponse.json({ error: "Invalid credential" }, { status: 400 })
+    // Cryptographically bind the attestation to the issued challenge, origin and
+    // relying-party id, and require user presence + verification. Without this an
+    // authenticated user could attach a credential that was never produced by
+    // this ceremony (e.g. a replayed clientDataJSON).
+    const host = request.headers.get("host") || undefined
+    const attestation = await verifyRegistrationAttestation(credential, challenge, {
+      expectedRpId: getRP(host).id,
+      expectedOrigin: getExpectedOrigin(host, request.headers.get("x-forwarded-proto") || undefined),
+    })
+    if (!attestation.verified) {
+      return NextResponse.json({ error: attestation.error || "Invalid credential" }, { status: 400 })
     }
 
-    const credentialData = await parseClientCredential(credential)
     const userAgent = request.headers.get("user-agent") || ""
 
     const newPasskey: PasskeyCredential = {
-      id: credentialData.credentialId,
-      publicKey: credentialData.publicKey,
-      counter: credentialData.counter,
-      deviceType: credentialData.deviceType,
-      backedUp: credentialData.backedUp,
-      transports: credentialData.transports,
+      id: attestation.credentialId,
+      publicKey: attestation.publicKey,
+      counter: attestation.counter,
+      deviceType: attestation.deviceType,
+      backedUp: attestation.backedUp,
+      transports: attestation.transports,
       createdAt: Date.now(),
       name: name || getDeviceName(userAgent),
     }
 
+    // Idempotent add: never push a duplicate credential id (e.g. user re-runs the
+    // ceremony with an authenticator that already holds a key for this account).
     const updateResult = await db.collection("users").updateOne(
-      { _id: session.userId as any },
+      { _id: session.userId as any, "auth.passkeys.id": { $ne: attestation.credentialId } },
       {
         $push: { "auth.passkeys": newPasskey } as any,
         $set: { updatedAt: Date.now() },
       },
     )
 
-    console.log("[v0] Update by string userId matched:", updateResult.matchedCount)
-
     if (updateResult.matchedCount === 0) {
+      // Either the user is gone or the credential already exists — confirm which.
+      const exists = await db
+        .collection("users")
+        .findOne({ _id: session.userId as any, "auth.passkeys.id": attestation.credentialId })
+      if (exists) return NextResponse.json({ success: true, alreadyRegistered: true })
       return NextResponse.json({ error: "User not found for update" }, { status: 404 })
     }
 
     // Clear recovery flag in session
     await db.collection("sessions").updateOne({ token: sessionId }, { $unset: { recoveryLogin: "" } })
 
-    console.log("[v0] Passkey added successfully")
-
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error("[v0] Add passkey POST error:", error)
     return NextResponse.json({ error: "Failed to add passkey" }, { status: 500 })
-  }
-}
-
-async function parseClientCredential(credential: any) {
-  const attestationObject = base64URLDecode(credential.response.attestationObject)
-  const authData = parseAttestationObject(attestationObject)
-  return {
-    credentialId: credential.id,
-    publicKey: credential.response.publicKey || authData.publicKey,
-    counter: authData.counter,
-    deviceType: authData.flags.be ? ("multiDevice" as const) : ("singleDevice" as const),
-    backedUp: authData.flags.bs,
-    transports: credential.response.transports,
-  }
-}
-
-// Parse attestation object (CBOR)
-function parseAttestationObject(attestationObject: Uint8Array) {
-  let offset = 0
-
-  while (offset < attestationObject.length) {
-    if (attestationObject[offset] === 0x68 && attestationObject[offset + 1] === 0x61) {
-      break
-    }
-    offset++
-  }
-
-  while (
-    offset < attestationObject.length &&
-    attestationObject[offset] !== 0x58 &&
-    attestationObject[offset] !== 0x59
-  ) {
-    offset++
-  }
-
-  let authDataLength = 0
-  if (attestationObject[offset] === 0x58) {
-    authDataLength = attestationObject[offset + 1]
-    offset += 2
-  } else if (attestationObject[offset] === 0x59) {
-    authDataLength = (attestationObject[offset + 1] << 8) | attestationObject[offset + 2]
-    offset += 3
-  }
-
-  const authData = attestationObject.slice(offset, offset + authDataLength)
-
-  const rpIdHash = authData.slice(0, 32)
-  const flags = authData[32]
-  const signCount = new DataView(authData.buffer, authData.byteOffset + 33, 4).getUint32(0, false)
-
-  const up = (flags & 0x01) !== 0
-  const uv = (flags & 0x04) !== 0
-  const be = (flags & 0x08) !== 0
-  const bs = (flags & 0x10) !== 0
-  const at = (flags & 0x40) !== 0
-
-  let publicKey = ""
-  if (at && authData.length > 37) {
-    const aaguid = authData.slice(37, 53)
-    const credIdLength = (authData[53] << 8) | authData[54]
-    const credId = authData.slice(55, 55 + credIdLength)
-    const publicKeyBytes = authData.slice(55 + credIdLength)
-    publicKey = base64URLEncode(publicKeyBytes)
-  }
-
-  return {
-    rpIdHash: base64URLEncode(rpIdHash),
-    flags: { up, uv, be, bs, at },
-    counter: signCount,
-    publicKey,
   }
 }
 

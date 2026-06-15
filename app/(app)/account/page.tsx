@@ -34,6 +34,7 @@ import {
   Share,
   MoreVertical,
 } from "lucide-react"
+import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
 
 interface ProfileData {
   userId: string
@@ -80,6 +81,10 @@ export default function AccountPage() {
 
   // Passkey removal loading
   const [removingPasskey, setRemovingPasskey] = useState<string | null>(null)
+
+  // Add-passkey state
+  const [isAddingPasskey, setIsAddingPasskey] = useState(false)
+  const [addPasskeyError, setAddPasskeyError] = useState("")
 
   // PWA install state
   const [pwaInstalled, setPwaInstalled] = useState(false)
@@ -227,8 +232,84 @@ export default function AccountPage() {
     }
   }
 
-  const handleAddPasskey = () => {
-    window.location.href = "/api/auth/passkey/add"
+  const handleAddPasskey = async () => {
+    setAddPasskeyError("")
+    setIsAddingPasskey(true)
+    try {
+      // 1. Get registration options
+      const optionsRes = await fetch("/api/auth/passkey/add", { cache: "no-store" })
+      if (!optionsRes.ok) {
+        const err = await optionsRes.json().catch(() => ({}))
+        throw new Error(err.error || "Failed to start passkey setup")
+      }
+      const options = await optionsRes.json()
+
+      // 2. Run the WebAuthn create ceremony on this device
+      const credential = (await navigator.credentials.create({
+        publicKey: {
+          challenge: base64URLDecode(options.challenge),
+          rp: { name: options.rp?.name || "OOOI", id: window.location.hostname },
+          user: {
+            id: base64URLDecode(options.user.id),
+            name: options.user.name,
+            displayName: options.user.displayName || options.user.name,
+          },
+          pubKeyCredParams: options.pubKeyCredParams || [
+            { alg: -7, type: "public-key" },
+            { alg: -257, type: "public-key" },
+          ],
+          timeout: options.timeout || 60000,
+          attestation: "none",
+          authenticatorSelection: options.authenticatorSelection || {
+            residentKey: "required",
+            userVerification: "required",
+          },
+          excludeCredentials: (options.excludeCredentials || []).map((c: { id: string; transports?: AuthenticatorTransport[] }) => ({
+            id: base64URLDecode(c.id),
+            type: "public-key" as const,
+            transports: c.transports,
+          })),
+        },
+      })) as PublicKeyCredential | null
+
+      if (!credential) throw new Error("Passkey setup cancelled")
+      const response = credential.response as AuthenticatorAttestationResponse
+
+      // 3. Verify + persist server-side
+      const saveRes = await fetch("/api/auth/passkey/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challenge: options.challenge,
+          credential: {
+            id: credential.id,
+            rawId: base64URLEncode(credential.rawId),
+            response: {
+              clientDataJSON: base64URLEncode(response.clientDataJSON),
+              attestationObject: base64URLEncode(response.attestationObject),
+              publicKey: response.getPublicKey ? base64URLEncode(response.getPublicKey()!) : "",
+              transports: response.getTransports?.() || [],
+            },
+            type: credential.type,
+          },
+        }),
+      })
+
+      if (!saveRes.ok) {
+        const err = await saveRes.json().catch(() => ({}))
+        throw new Error(err.error || "Failed to save passkey")
+      }
+
+      await fetchProfile()
+    } catch (err) {
+      if (err instanceof Error && err.name === "NotAllowedError") {
+        setAddPasskeyError("Passkey setup was cancelled.")
+      } else {
+        setAddPasskeyError(err instanceof Error ? err.message : "Failed to add passkey")
+      }
+    } finally {
+      setIsAddingPasskey(false)
+    }
   }
 
   const formatDate = (dateInput: string | number) => {
@@ -474,8 +555,22 @@ export default function AccountPage() {
             </div>
           ))}
 
-          <Button variant="outline" size="sm" onClick={handleAddPasskey} className="mt-2">
-            <Plus className="h-4 w-4 mr-2" />
+          {addPasskeyError && (
+            <p className="text-sm text-destructive">{addPasskeyError}</p>
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleAddPasskey}
+            disabled={isAddingPasskey}
+            className="mt-2"
+          >
+            {isAddingPasskey ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4 mr-2" />
+            )}
             Add Passkey
           </Button>
         </CardContent>

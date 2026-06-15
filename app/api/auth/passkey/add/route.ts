@@ -1,6 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getDB } from "@/lib/mongodb";
-import { generateRegistrationOptions, base64URLEncode } from "@/lib/auth/server/webauthn";
+import {
+  generateRegistrationOptions,
+  base64URLEncode,
+  getRP,
+  getExpectedOrigin,
+  verifyRegistrationAttestation,
+} from "@/lib/auth/server/webauthn";
 import type {
   User,
   PasskeyCredential,
@@ -45,11 +51,11 @@ export async function GET(request: NextRequest) {
     );
     const challengeBase64 = base64URLEncode(options.challenge as Uint8Array);
 
-    // ✅ FIX 2: Store challenge expiresAt as a Date object
     await db.collection<StoredChallenge>("challenges").insertOne({
       _id: challengeBase64,
       userId: user._id,
       expiresAt: new Date(Date.now() + 60000),
+      type: "add-passkey",
     } as any);
 
     return NextResponse.json({
@@ -84,50 +90,71 @@ export async function POST(request: NextRequest) {
     const { credential, challenge, name } = await request.json();
     const db = await getDB();
 
-    // ✅ FIX 3: Query challenge using Date object
-    const storedChallenge = await db
+    // Single-use challenge: consume atomically and confirm it was issued for an
+    // add-passkey ceremony.
+    const storedChallenge = (await db
       .collection<StoredChallenge>("challenges")
-      .findOne({ _id: challenge });
-
-    if (storedChallenge) {
-      await db.collection("challenges").deleteOne({ _id: challenge });
-    }
+      .findOneAndDelete({ _id: challenge })) as unknown as StoredChallenge | null;
 
     if (!storedChallenge || storedChallenge.expiresAt < new Date()) {
       return NextResponse.json({ error: "Challenge expired" }, { status: 400 });
+    }
+    if (storedChallenge.type && storedChallenge.type !== "add-passkey") {
+      return NextResponse.json({ error: "Invalid challenge" }, { status: 400 });
     }
 
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("session")?.value;
 
-    // Use 'token' field to match session lookup (sessions are stored with token, not _id)
     const session = await db.collection("sessions").findOne({
       token: sessionId,
       expiresAt: { $gt: new Date() },
     });
 
-    if (!session || session.userId !== storedChallenge.userId) {
+    if (!session || session.userId.toString() !== storedChallenge.userId.toString()) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
+    // Cryptographically verify the attestation before trusting any field from
+    // the client (previously this route stored client-supplied values with no
+    // verification, counter 0, and a possibly-empty public key).
+    const host = request.headers.get("host") || undefined;
+    const attestation = await verifyRegistrationAttestation(credential, challenge, {
+      expectedRpId: getRP(host).id,
+      expectedOrigin: getExpectedOrigin(host, request.headers.get("x-forwarded-proto") || undefined),
+    });
+    if (!attestation.verified) {
+      return NextResponse.json({ error: attestation.error || "Invalid credential" }, { status: 400 });
+    }
+
+    const userAgent = request.headers.get("user-agent") || "";
+
     const newPasskey: PasskeyCredential = {
-      id: credential.id,
-      publicKey: credential.response.publicKey || "",
-      counter: 0,
-      deviceType: "singleDevice",
-      backedUp: false,
-      transports: credential.response.transports,
-      createdAt: Date.now(), // Passkey internal metadata can remain numbers or change to Dates
-      name: name || getDeviceName(),
+      id: attestation.credentialId,
+      publicKey: attestation.publicKey,
+      counter: attestation.counter,
+      deviceType: attestation.deviceType,
+      backedUp: attestation.backedUp,
+      transports: attestation.transports,
+      createdAt: Date.now(),
+      name: name || getDeviceName(userAgent),
     };
 
-    await db.collection<User>("users").updateOne(
-      { _id: session.userId },
+    const updateResult = await db.collection<User>("users").updateOne(
+      { _id: session.userId, "auth.passkeys.id": { $ne: attestation.credentialId } } as any,
       {
-        $push: { "auth.passkeys": newPasskey },
+        $push: { "auth.passkeys": newPasskey } as any,
         $set: { updatedAt: Date.now() },
       }
     );
+
+    if (updateResult.matchedCount === 0) {
+      const exists = await db
+        .collection("users")
+        .findOne({ _id: session.userId as any, "auth.passkeys.id": attestation.credentialId });
+      if (exists) return NextResponse.json({ success: true, alreadyRegistered: true });
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
 
     // Clear recovery flag from session
     await db
@@ -144,14 +171,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function getDeviceName(): string {
-  if (typeof navigator === "undefined") return "Unknown Device";
-
-  const ua = navigator.userAgent;
+function getDeviceName(ua: string): string {
   if (ua.includes("iPhone")) return "iPhone";
   if (ua.includes("iPad")) return "iPad";
-  if (ua.includes("Mac")) return "Mac";
+  if (ua.includes("Macintosh") || ua.includes("Mac OS X")) return "Mac";
   if (ua.includes("Android")) return "Android";
   if (ua.includes("Windows")) return "Windows PC";
-  return "Device";
+  if (ua.includes("Linux")) return "Linux Device";
+  return "New Device";
 }

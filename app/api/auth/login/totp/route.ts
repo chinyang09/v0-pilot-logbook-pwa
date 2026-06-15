@@ -30,27 +30,47 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Throttle brute-force: a 6-digit code with a ±1 window leaves only a
+    // handful of valid values at any instant, so cap wrong guesses.
+    const MAX_TOTP_ATTEMPTS = 5;
+    const LOCKOUT_MS = 15 * 60 * 1000;
+    const lockUntil = user.auth.totpLockUntil ?? 0;
+    if (lockUntil > Date.now()) {
+      return NextResponse.json(
+        { error: "Too many attempts. Try again later." },
+        { status: 429 }
+      );
+    }
+
     // Verify TOTP code
     const { valid, counter } = await verifyTOTPWithCounter(user.auth.totpSecret, code);
 
-    if (!valid) {
+    // Replay protection: reject a code whose time-step was already used.
+    const lastCounter = user.auth.lastTotpCounter ?? -1;
+    if (!valid || counter <= lastCounter) {
+      const failCount = (user.auth.totpFailCount ?? 0) + 1;
+      const lock = failCount >= MAX_TOTP_ATTEMPTS;
+      await db.collection<User>("users").updateOne(
+        { _id: user._id },
+        {
+          $set: lock
+            ? { "auth.totpFailCount": 0, "auth.totpLockUntil": Date.now() + LOCKOUT_MS }
+            : { "auth.totpFailCount": failCount },
+        }
+      );
       return NextResponse.json(
         { error: "Invalid verification code" },
         { status: 401 }
       );
     }
 
-    // Replay protection: reject a code whose time-step was already used.
-    const lastCounter = user.auth.lastTotpCounter ?? -1;
-    if (counter <= lastCounter) {
-      return NextResponse.json(
-        { error: "Invalid verification code" },
-        { status: 401 }
-      );
-    }
+    // Success: advance the replay counter and clear any failure state.
     await db.collection<User>("users").updateOne(
       { _id: user._id },
-      { $set: { "auth.lastTotpCounter": counter } }
+      {
+        $set: { "auth.lastTotpCounter": counter },
+        $unset: { "auth.totpFailCount": "", "auth.totpLockUntil": "" },
+      }
     );
 
     // Create session identifiers and dates

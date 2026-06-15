@@ -8,6 +8,8 @@ import {
   base64URLEncode,
   base64URLDecode,
   verifyAuthenticationResponse,
+  getRP,
+  getExpectedOrigin,
 } from "@/lib/auth/server/webauthn"
 import type { User } from "@/lib/auth/types"
 import { cookies } from "next/headers"
@@ -79,6 +81,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid credential" }, { status: 400 })
     }
 
+    const host = request.headers.get("host") || undefined
+    const expectedRpId = getRP(host).id
+    const expectedOrigin = getExpectedOrigin(host, request.headers.get("x-forwarded-proto") || undefined)
+
     let verification: { verified: boolean; newCounter: number }
     try {
       verification = await verifyAuthenticationResponse(
@@ -91,6 +97,7 @@ export async function POST(request: NextRequest) {
         },
         base64URLDecode(challenge),
         passkey,
+        { expectedRpId, expectedOrigin },
       )
     } catch (err) {
       console.error("Passkey verification error:", err)
