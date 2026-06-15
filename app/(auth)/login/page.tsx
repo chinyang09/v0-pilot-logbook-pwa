@@ -164,7 +164,7 @@ export default function LoginPage() {
       console.error("Passkey login error:", err)
       setStep("initial")
       if (err instanceof Error && err.name === "NotAllowedError") {
-        setError("No passkey found on this device. Try recovery or register.")
+        setError("Passkey sign-in was cancelled or no passkey was found. Use a recovery code or create an account.")
       } else {
         setError(err instanceof Error ? err.message : "Login failed")
       }

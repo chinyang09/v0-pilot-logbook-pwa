@@ -52,7 +52,7 @@ interface ProfileData {
 }
 
 interface SessionData {
-  token: string
+  id: string
   isCurrent: boolean
   createdAt: string
   lastAccessedAt: string
@@ -194,17 +194,17 @@ export default function AccountPage() {
     }
   }
 
-  const handleRevokeSession = async (token: string) => {
-    setRevokingToken(token)
+  const handleRevokeSession = async (id: string) => {
+    setRevokingToken(id)
     try {
       const res = await fetch("/api/account/sessions", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionToken: token }),
+        body: JSON.stringify({ sessionId: id }),
       })
 
       if (res.ok) {
-        setSessions((prev) => prev.filter((s) => s.token !== token))
+        setSessions((prev) => prev.filter((s) => s.id !== id))
       }
     } catch (error) {
       console.error("[Account] Failed to revoke session:", error)
@@ -555,6 +555,12 @@ export default function AccountPage() {
             </div>
           ))}
 
+          {(profile?.passkeys.length || 0) <= 1 && (
+            <p className="text-xs text-muted-foreground">
+              Add a passkey on a second device so you can still sign in if you lose this one.
+            </p>
+          )}
+
           {addPasskeyError && (
             <p className="text-sm text-destructive">{addPasskeyError}</p>
           )}
@@ -590,7 +596,7 @@ export default function AccountPage() {
         <CardContent className="space-y-3">
           {sessions.map((session) => (
             <div
-              key={session.token}
+              key={session.id}
               className="flex items-center justify-between py-2 border-b border-border last:border-0"
             >
               <div className="flex items-center gap-3">
@@ -614,10 +620,10 @@ export default function AccountPage() {
                   variant="ghost"
                   size="icon"
                   className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                  onClick={() => handleRevokeSession(session.token)}
-                  disabled={revokingToken === session.token}
+                  onClick={() => handleRevokeSession(session.id)}
+                  disabled={revokingToken === session.id}
                 >
-                  {revokingToken === session.token ? (
+                  {revokingToken === session.id ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Trash2 className="h-4 w-4" />
