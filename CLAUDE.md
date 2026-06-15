@@ -540,6 +540,25 @@ worse than the current behavior. Do **not** change these casually.
   Scoot "Crew Logbook Report" export: that format has **18 columns and no
   remarks column** (col 16/17 are SYNTH. DEVICES Time/Type). So this is harmless
   redundancy, not data loss — left as-is.
+- **CSV import stores LOCAL station times as OUT/IN** (`logbook-parser-v2.ts`
+  ~:62-63 + `lib/utils/roster/executor.ts` ~:178-183) — the Scoot report's
+  dep/arr times are **local**, but they are stored verbatim (the parser even
+  comments "logbook is already UTC"). Block time is unaffected (local−local
+  delta), but the absolute UTC instants are wrong, so the night/day split and
+  sun-position TO/LDG come out wrong. The executor already fetches
+  `depOffset`/`arrOffset` for the timezone fields but doesn't apply them to the
+  gate times. **Deferred** with the FDP/timezone work — it's a data-convention
+  decision (does the app store OUT/IN as UTC or local everywhere?) that needs
+  review before changing, since it affects every existing flight's alignment.
+- **Service worker** (`public/sw.js`) — three items needing offline testing
+  before any change (a bad SW is hard to roll back): (1) `install` calls
+  `self.skipWaiting()` unconditionally while the registration
+  (`hooks/use-service-worker.ts`) is built around an update-*prompt* flow, so
+  the prompt is effectively dead and a background update can auto-reload the page
+  mid-edit (auto-save mitigates data loss); (2) `DYNAMIC_CACHE` has no cap —
+  per-flight `/flights/<id>` shells accumulate unbounded until a `CACHE_VERSION`
+  bump; (3) the Strategy-6 catch-all caches any cross-origin `ok` GET (no
+  same-origin guard). All are latent/hardening, not active data bugs.
 
 ## PWA Details
 

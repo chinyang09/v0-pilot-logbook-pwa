@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { getErrorMessage, logError, SUCCESS_TIMEOUT_MS } from "@/lib/utils/error-handling"
 
 /**
@@ -68,6 +68,15 @@ export function useFormSubmit<T = void>(
   const [showSuccess, setShowSuccess] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Track the success timer so it's cancelled on unmount — otherwise the
+  // delayed setShowSuccess/onSuccess can fire after the form has closed.
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+    }
+  }, [])
+
   const reset = useCallback(() => {
     setIsSubmitting(false)
     setShowSuccess(false)
@@ -87,7 +96,9 @@ export function useFormSubmit<T = void>(
         const result = await submitFn()
 
         setShowSuccess(true)
-        setTimeout(() => {
+        if (successTimerRef.current) clearTimeout(successTimerRef.current)
+        successTimerRef.current = setTimeout(() => {
+          successTimerRef.current = null
           setShowSuccess(false)
           onSuccess?.()
         }, successTimeout)

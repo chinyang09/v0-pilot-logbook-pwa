@@ -146,13 +146,30 @@ function getColumnValue(row: OcrRow, side: "left" | "right"): string | undefined
 // ============================================
 
 /**
+ * Map the digits OCR most commonly confuses for letters back to digits. Only
+ * applied to strings already expected to be time tokens, so it can only rescue
+ * a parse that would otherwise return undefined — never corrupt a clean one.
+ */
+function normalizeTimeDigits(s: string): string {
+  return s
+    .replace(/[OoQ]/g, "0")
+    .replace(/[IilL]/g, "1")
+    .replace(/[Ss]/g, "5")
+    .replace(/B/g, "8")
+}
+
+/**
  * Format HHMM or HH:MM to HH:MM
  */
 function formatTime(raw: string | undefined): string | undefined {
   if (!raw) return undefined
 
-  // Remove leading 'A' (actual time prefix) and whitespace
-  const cleaned = raw.replace(/^A/i, "").trim()
+  // Remove leading 'A' (actual time prefix) and whitespace, then repair common
+  // OCR digit/letter confusions (e.g. "O340" → "0340").
+  let cleaned = normalizeTimeDigits(raw.replace(/^A/i, "").trim())
+
+  // Recover a dropped leading zero ("340" → "0340").
+  if (/^\d{3}$/.test(cleaned)) cleaned = "0" + cleaned
 
   // Match HHMM or HH:MM
   const match = cleaned.match(/^(\d{2}):?(\d{2})$/)
