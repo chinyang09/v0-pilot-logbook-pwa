@@ -73,6 +73,28 @@ async function ensureIndexes(mongoClient: MongoClient): Promise<void> {
     safe("deletions.delta", () =>
       db.collection("deletions").createIndex({ userId: 1, collection: 1, deletedAt: 1 }),
     ),
+    // Auth: expire WebAuthn challenges automatically (they are also consumed via
+    // findOneAndDelete, but this sweeps abandoned ceremonies). `expiresAt` is a
+    // BSON Date, so a 0-second TTL deletes each doc at its own expiry instant.
+    safe("challenges.ttl", () =>
+      db.collection("challenges").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    ),
+    // Auth: enforce one account per normalized callsign atomically (registration
+    // also checks, but the unique index closes the begin→complete race).
+    safe("users.searchKey", () =>
+      db.collection("users").createIndex({ "identity.searchKey": 1 }, { unique: true }),
+    ),
+    // Auth: passkey login looks up the owning user by credential id.
+    safe("users.passkeyId", () =>
+      db.collection("users").createIndex({ "auth.passkeys.id": 1 }),
+    ),
+    // Auth: session lookups by token (every authed request).
+    safe("sessions.token", () =>
+      db.collection("sessions").createIndex({ token: 1 }, { unique: true }),
+    ),
+    safe("sessions.userDevice", () =>
+      db.collection("sessions").createIndex({ userId: 1, deviceId: 1 }),
+    ),
     // Submission dedup — back the upsert-by-key race fix.
     safe("aircraftSubmissions.reg", () =>
       db

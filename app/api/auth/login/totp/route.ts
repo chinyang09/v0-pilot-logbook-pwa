@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getDB } from "@/lib/mongodb";
 import { verifyTOTPWithCounter } from "@/lib/auth/server/totp";
-import { normalizeCallsign, createId } from "@/lib/auth/shared/cuid";
+import { normalizeCallsign } from "@/lib/auth/shared/cuid";
 import type { User } from "@/lib/auth/types";
-import { cookies } from "next/headers";
+import { issueSession, setSessionCookie } from "@/lib/auth/server/session";
 
 // POST /api/auth/login/totp - Recovery login with TOTP
 export async function POST(request: NextRequest) {
@@ -30,65 +30,58 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Throttle brute-force: a 6-digit code with a ±1 window leaves only a
+    // handful of valid values at any instant, so cap wrong guesses.
+    const MAX_TOTP_ATTEMPTS = 5;
+    const LOCKOUT_MS = 15 * 60 * 1000;
+    const lockUntil = user.auth.totpLockUntil ?? 0;
+    if (lockUntil > Date.now()) {
+      return NextResponse.json(
+        { error: "Too many attempts. Try again later." },
+        { status: 429 }
+      );
+    }
+
     // Verify TOTP code
     const { valid, counter } = await verifyTOTPWithCounter(user.auth.totpSecret, code);
 
-    if (!valid) {
-      return NextResponse.json(
-        { error: "Invalid verification code" },
-        { status: 401 }
-      );
-    }
-
     // Replay protection: reject a code whose time-step was already used.
     const lastCounter = user.auth.lastTotpCounter ?? -1;
-    if (counter <= lastCounter) {
+    if (!valid || counter <= lastCounter) {
+      const failCount = (user.auth.totpFailCount ?? 0) + 1;
+      const lock = failCount >= MAX_TOTP_ATTEMPTS;
+      await db.collection<User>("users").updateOne(
+        { _id: user._id },
+        {
+          $set: lock
+            ? { "auth.totpFailCount": 0, "auth.totpLockUntil": Date.now() + LOCKOUT_MS }
+            : { "auth.totpFailCount": failCount },
+        }
+      );
       return NextResponse.json(
         { error: "Invalid verification code" },
         { status: 401 }
       );
     }
+
+    // Success: advance the replay counter and clear any failure state.
     await db.collection<User>("users").updateOne(
       { _id: user._id },
-      { $set: { "auth.lastTotpCounter": counter } }
+      {
+        $set: { "auth.lastTotpCounter": counter },
+        $unset: { "auth.totpFailCount": "", "auth.totpLockUntil": "" },
+      }
     );
 
-    // Create session identifiers and dates
-    const sessionId = createId();
-    const now = new Date(); // Use Date Object
-    const sessionExpiry = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // Use Date Object
+    // Issue a recovery session (drives the "add a passkey" nudge afterwards).
     const userIdString = user._id.toString();
-
-    // Store session in MongoDB
-    await db.collection("sessions").updateOne(
-      {
-        userId: userIdString,
-        deviceId: deviceId || "unknown_device",
-      },
-      {
-        $set: {
-          // Use 'token' to match the lookup in lib/session.ts
-          token: sessionId, //_id
-          userId: userIdString,
-          callsign: user.identity.callsign,
-          expiresAt: sessionExpiry, // Stored as BSON Date
-          lastAccessedAt: now, // Stored as BSON Date
-          updatedAt: now,
-          recoveryLogin: true,
-        },
-      },
-      { upsert: true }
-    );
-
-    // Set session cookie
-    const cookieStore = await cookies();
-    cookieStore.set("session", sessionId, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 30 * 24 * 60 * 60,
-      path: "/",
+    const { token: sessionId, expiresAt: sessionExpiry } = await issueSession(db, {
+      userId: userIdString,
+      callsign: user.identity.callsign,
+      deviceId: deviceId || "unknown_device",
+      recoveryLogin: true,
     });
+    await setSessionCookie(sessionId);
 
     return NextResponse.json({
       success: true,

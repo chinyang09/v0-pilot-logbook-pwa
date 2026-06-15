@@ -16,7 +16,7 @@ export async function GET() {
   }
 
   const passkeys = (user.auth?.passkeys || []).map((pk: Record<string, unknown>) => ({
-    credentialId: pk.credentialId,
+    credentialId: pk.id ?? pk.credentialId,
     name: pk.name || "Passkey",
     deviceType: pk.deviceType || "unknown",
     backedUp: pk.backedUp || false,
@@ -53,7 +53,9 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Cannot remove last passkey" }, { status: 400 })
   }
 
-  const filtered = passkeys.filter((pk: Record<string, unknown>) => pk.credentialId !== credentialId)
+  const filtered = passkeys.filter(
+    (pk: Record<string, unknown>) => (pk.id ?? pk.credentialId) !== credentialId,
+  )
 
   if (filtered.length === passkeys.length) {
     return NextResponse.json({ error: "Passkey not found" }, { status: 404 })

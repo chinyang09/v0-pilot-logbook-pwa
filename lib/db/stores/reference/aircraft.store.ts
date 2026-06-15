@@ -239,6 +239,26 @@ export async function batchGetAircraftByRegistrations(
 // Custom Aircraft Entry
 // ============================================
 
+/** Serialize an aircraft record into the stored JSON blob (single source of truth). */
+function buildAircraftData(
+  record: AircraftRecord,
+  source: string,
+  extra?: Record<string, unknown>,
+): string {
+  return JSON.stringify({
+    registration: record.registration.toUpperCase(),
+    icao24: record.icao24 || "",
+    typecode: record.typecode || "",
+    operator: record.operator || "",
+    shortDescription: record.shortDescription || "",
+    wtc: record.wtc || "",
+    wtg: record.wtg || "",
+    manufacturerCode: record.manufacturerCode || "",
+    source,
+    ...extra,
+  })
+}
+
 /**
  * Add or update an aircraft in the reference database
  * Used when adding aircraft from FR24 search, manual entry, or MongoDB sync
@@ -250,22 +270,9 @@ export async function addCustomAircraftToDatabase(
   const { createId } = await import("@/lib/auth/shared/cuid")
   const submissionId = record.submissionId || createId()
 
-  const data = {
-    registration: reg,
-    icao24: record.icao24 || "",
-    typecode: record.typecode || "",
-    operator: record.operator || "",
-    shortDescription: record.shortDescription || "",
-    wtc: record.wtc || "",
-    wtg: record.wtg || "",
-    manufacturerCode: record.manufacturerCode || "",
-    source: record.source || "custom",
-    submissionId,
-  }
-
   await referenceDb.aircraftDatabase.put({
     registration: reg,
-    data: JSON.stringify(data),
+    data: buildAircraftData(record, record.source || "custom", { submissionId }),
   })
 
   return submissionId
@@ -285,17 +292,7 @@ export async function bulkUpsertAircraftReferences(
 
   const entries: AircraftReference[] = records.map((record) => ({
     registration: record.registration.toUpperCase(),
-    data: JSON.stringify({
-      registration: record.registration.toUpperCase(),
-      icao24: record.icao24 || "",
-      typecode: record.typecode || "",
-      operator: record.operator || "",
-      shortDescription: record.shortDescription || "",
-      wtc: record.wtc || "",
-      wtg: record.wtg || "",
-      manufacturerCode: record.manufacturerCode || "",
-      source: "fr24",
-    }),
+    data: buildAircraftData(record, "fr24"),
   }))
 
   await referenceDb.aircraftDatabase.bulkPut(entries)

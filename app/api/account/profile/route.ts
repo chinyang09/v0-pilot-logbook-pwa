@@ -21,7 +21,9 @@ export async function GET() {
   })
 
   const passkeys = (user.auth?.passkeys || []).map((pk: Record<string, unknown>) => ({
-    credentialId: pk.credentialId,
+    // Stored passkeys key the credential id as `id`; older docs may have used
+    // `credentialId`. Expose it consistently as `credentialId` to the client.
+    credentialId: pk.id ?? pk.credentialId,
     name: pk.name || "Passkey",
     deviceType: pk.deviceType || "unknown",
     backedUp: pk.backedUp || false,

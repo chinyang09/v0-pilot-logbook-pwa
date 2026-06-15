@@ -81,23 +81,14 @@ export default function LoginPage() {
     }
   }, [totpCode, step, isLoading])
 
-  // Check passkey support on mount
+  // Show the passkey button whenever the browser supports WebAuthn. Gating on
+  // isConditionalMediationAvailable() (autofill support) was wrong — it hid the
+  // button on browsers that support passkeys but not conditional UI (Firefox,
+  // older Safari), funnelling those users into TOTP recovery unnecessarily. For
+  // a username-less discoverable login the button is the right entry point; if
+  // no passkey exists, get() rejects with NotAllowedError and we explain.
   useEffect(() => {
-    const checkPasskeySupport = async () => {
-      if (
-        typeof window !== "undefined" &&
-        window.PublicKeyCredential &&
-        PublicKeyCredential.isConditionalMediationAvailable
-      ) {
-        try {
-          const available = await PublicKeyCredential.isConditionalMediationAvailable()
-          setPasskeySupported(available)
-        } catch {
-          setPasskeySupported(false)
-        }
-      }
-    }
-    checkPasskeySupport()
+    setPasskeySupported(typeof window !== "undefined" && !!window.PublicKeyCredential)
   }, [])
 
   // Attempt passkey login (username-less)
@@ -173,7 +164,7 @@ export default function LoginPage() {
       console.error("Passkey login error:", err)
       setStep("initial")
       if (err instanceof Error && err.name === "NotAllowedError") {
-        setError("No passkey found on this device. Try recovery or register.")
+        setError("Passkey sign-in was cancelled or no passkey was found. Use a recovery code or create an account.")
       } else {
         setError(err instanceof Error ? err.message : "Login failed")
       }
@@ -285,7 +276,7 @@ export default function LoginPage() {
         publicKey: {
           challenge: base64URLDecode(options.challenge as unknown as string),
           rp: {
-            name: "SkyLog Pilot Logbook",
+            name: "OOOI Pilot Logbook",
             id: rpId,
           },
           user: {
@@ -297,9 +288,9 @@ export default function LoginPage() {
           timeout: options.timeout,
           attestation: options.attestation || "none",
           authenticatorSelection: {
-            residentKey: "preferred",
-            userVerification: "preferred",
-            authenticatorAttachment: "platform",
+            residentKey: "required",
+            requireResidentKey: true,
+            userVerification: "required",
           },
           excludeCredentials:
             (options.excludeCredentials as Array<{
@@ -456,7 +447,7 @@ export default function LoginPage() {
       const publicKeyOptions: PublicKeyCredentialCreationOptions = {
         challenge: base64URLDecode(options.challenge),
         rp: {
-          name: options.rp?.name || "SkyLog Pilot Logbook",
+          name: options.rp?.name || "OOOI Pilot Logbook",
           id: rpId,
         },
         user: {
@@ -471,9 +462,9 @@ export default function LoginPage() {
         timeout: options.timeout || 60000,
         attestation: "none",
         authenticatorSelection: {
-          residentKey: "preferred",
-          userVerification: "preferred",
-          authenticatorAttachment: "platform",
+          residentKey: "required",
+          requireResidentKey: true,
+          userVerification: "required",
         },
         excludeCredentials:
           options.excludeCredentials?.map((cred: any) => ({

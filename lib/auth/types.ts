@@ -10,6 +10,8 @@ export interface User {
     totpEnabled: boolean; // Whether TOTP is set up
     passkeys: PasskeyCredential[]; // Array of registered passkeys
     lastTotpCounter?: number; // Highest accepted TOTP time-step (replay guard)
+    totpFailCount?: number; // Consecutive failed TOTP attempts (brute-force guard)
+    totpLockUntil?: number; // Epoch ms until which TOTP recovery is locked out
   };
   createdAt: number;
   updatedAt: number;

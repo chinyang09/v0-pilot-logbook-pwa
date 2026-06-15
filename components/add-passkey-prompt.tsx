@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Fingerprint, Loader2, X } from "lucide-react"
-import { base64URLEncode } from "@/lib/auth/server/webauthn"
+import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
 
 export function AddPasskeyPrompt() {
   const searchParams = useSearchParams()
@@ -28,7 +28,7 @@ export function AddPasskeyPrompt() {
 
     try {
       // Get registration options
-      const optionsRes = await fetch("/api/auth/passkey/add")
+      const optionsRes = await fetch("/api/auth/register/add-passkey", { cache: "no-store" })
       if (!optionsRes.ok) throw new Error("Failed to get options")
 
       const options = await optionsRes.json()
@@ -55,7 +55,7 @@ export function AddPasskeyPrompt() {
       const response = pubKeyCred.response as AuthenticatorAttestationResponse
 
       // Save credential
-      const saveRes = await fetch("/api/auth/passkey/add", {
+      const saveRes = await fetch("/api/auth/register/add-passkey", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -120,15 +120,4 @@ export function AddPasskeyPrompt() {
       </DialogContent>
     </Dialog>
   )
-}
-
-function base64URLDecode(str: string): ArrayBuffer {
-  const base64 = str.replace(/-/g, "+").replace(/_/g, "/")
-  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4)
-  const binary = atob(padded)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
-  return bytes.buffer
 }
