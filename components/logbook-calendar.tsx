@@ -346,6 +346,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         <div className="flex items-center justify-between mb-3 px-1">
           <button
             onClick={() => onYearChange?.(selectedMonth.year - 1)}
+            aria-label="Previous year"
             className="h-9 w-9 flex items-center justify-center rounded-xl bg-foreground/5 active:scale-95 transition-all"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -353,6 +354,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
           <span className="text-base font-semibold tabular-nums">{selectedMonth.year}</span>
           <button
             onClick={() => onYearChange?.(selectedMonth.year + 1)}
+            aria-label="Next year"
             className="h-9 w-9 flex items-center justify-center rounded-xl bg-foreground/5 active:scale-95 transition-all"
           >
             <ChevronRight className="h-4 w-4" />

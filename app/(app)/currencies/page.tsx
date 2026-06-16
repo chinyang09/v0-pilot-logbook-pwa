@@ -7,6 +7,7 @@ import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
   SelectContent,
@@ -147,6 +148,15 @@ export default function CurrenciesPage() {
             </SelectContent>
           </Select>
         </div>
+
+        {/* First-load skeleton */}
+        {isLoading && currencies.length === 0 && (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-20 w-full rounded-xl" />
+            ))}
+          </div>
+        )}
 
         {/* Empty State */}
         {currencies.length === 0 && !isLoading && (

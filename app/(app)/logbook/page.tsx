@@ -393,6 +393,8 @@ export default function LogbookPage() {
           <Button
             variant="ghost"
             size="icon"
+            aria-label="Toggle calendar"
+            aria-pressed={showCalendar}
             className={cn("h-12 w-12 rounded-full", showCalendar && "text-primary bg-primary/15")}
             onClick={() => {
               toggleCalendar(!showCalendar)
@@ -407,6 +409,7 @@ export default function LogbookPage() {
           {showCalendar && (
             <button
               onClick={() => setShowMonthPicker(prev => !prev)}
+              aria-label="Select month"
               className="flex items-center gap-1 px-2 py-1 rounded-full text-sm font-medium text-foreground/80 hover:bg-foreground/5 transition-colors min-w-[5.5rem] justify-center"
             >
               {MONTHS[selectedMonth.month]} {selectedMonth.year}
@@ -427,6 +430,7 @@ export default function LogbookPage() {
         <Button
           variant="ghost"
           size="icon"
+          aria-label="Add flight"
           className="h-14 w-14 rounded-full"
           onClick={async () => {
             const newFlight = await createFlight(selectedDateRef.current || undefined)

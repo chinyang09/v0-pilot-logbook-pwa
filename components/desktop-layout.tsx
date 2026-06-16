@@ -360,6 +360,7 @@ function AppShellContent({ children }: AppShellProps) {
                 <Button
                   variant="ghost"
                   size="icon"
+                  aria-label="Back"
                   className="h-14 w-14"
                   onClick={() => {
                     // Remove ?selected= from URL to dismiss overlay
