@@ -25,6 +25,7 @@ import { usePageActions } from "@/hooks/use-page-actions"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
 import { syncService } from "@/lib/sync"
+import { findVisibleScrollTarget, smoothScrollElementToTop } from "@/lib/utils/scroll"
 
 /** Layout width of ResizableHandle (w-px) — used to convert between pixel widths and panel percentages */
 const HANDLE_WIDTH_PX = 1
@@ -124,6 +125,7 @@ function AppShellContent({ children }: AppShellProps) {
   // Refs for scroll-to-top tap zones
   const mainPanelRef = useRef<HTMLDivElement>(null)
   const detailPanelRef = useRef<HTMLDivElement>(null)
+  const overlayPanelRef = useRef<HTMLDivElement>(null)
 
   // Imperative panel handle — used to maintain main panel pixel width on sidebar toggle
   const mainPanelHandleRef = useRef<ImperativePanelHandle>(null)
@@ -227,30 +229,15 @@ function AppShellContent({ children }: AppShellProps) {
   }, [isDragging, isDesktop, snapTrigger])
 
   const smoothScrollToTop = useCallback((container: React.RefObject<HTMLDivElement | null>) => {
-    const candidates = container.current?.querySelectorAll("[data-scroll-container], .overflow-y-auto, .overflow-auto")
-    if (!candidates) return
-    let target: Element | null = null
-    for (const el of candidates) {
-      if (el.scrollTop > 0) { target = el; break }
-    }
-    if (!target && candidates.length > 0) target = candidates[0]
-    if (!target) return
-    const start = target.scrollTop
-    if (start === 0) return
-    const duration = 300
-    const startTime = performance.now()
-    const tick = (now: number) => {
-      const elapsed = now - startTime
-      const progress = Math.min(elapsed / duration, 1)
-      const ease = 1 - Math.pow(1 - progress, 3) // ease-out cubic
-      target!.scrollTop = start * (1 - ease)
-      if (progress < 1) requestAnimationFrame(tick)
-    }
-    requestAnimationFrame(tick)
+    // Scope to the given panel and skip mounted-but-hidden keep-alive pages so we
+    // scroll the container the user is actually looking at.
+    const target = container.current ? findVisibleScrollTarget(container.current) : null
+    if (target) smoothScrollElementToTop(target)
   }, [])
 
   const scrollMainToTop = useCallback(() => smoothScrollToTop(mainPanelRef), [smoothScrollToTop])
   const scrollDetailToTop = useCallback(() => smoothScrollToTop(detailPanelRef), [smoothScrollToTop])
+  const scrollMobileDetailToTop = useCallback(() => smoothScrollToTop(overlayPanelRef), [smoothScrollToTop])
 
   // Only show mobile overlay when the selection is explicit (in URL via ?selected=).
   // SessionStorage-restored selections set state but don't update the URL,
@@ -272,37 +259,45 @@ function AppShellContent({ children }: AppShellProps) {
             Hidden on mobile when detail overlay is shown (detail overlay has its own header). */}
         <div
           className={cn(
-            "absolute top-0 left-0 right-0 z-[99] flex cursor-pointer",
+            "absolute top-0 left-0 right-0 z-[99] flex",
             showMobileOverlay && "hidden md:flex"
           )}
           style={{
             background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
           }}
-          onClick={scrollMainToTop}
         >
-          <div className="flex items-center justify-between px-4 w-full h-16">
-            {/* Main panel actions — flush left on desktop, full-width on mobile for search expansion */}
-            <div className="flex items-center gap-2 md:flex-none flex-1 min-w-0" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center px-4 w-full h-16">
+            {/* Main panel actions — flush left on desktop, fills width on mobile (for
+                search expansion). Tapping its bare area scrolls the main panel to top
+                (the e.target===currentTarget guard excludes the action buttons). */}
+            <div
+              className="flex items-center gap-2 md:flex-none flex-1 min-w-0 h-full cursor-pointer"
+              onClick={(e) => { if (e.target === e.currentTarget) scrollMainToTop() }}
+            >
               {mainActions}
             </div>
 
-            {/* Spacer — taps fall through to parent scrollMainToTop (desktop only, mobile actions fill width) */}
-            <div className="hidden md:block flex-1 h-full" />
+            {/* Main fall-through strip — desktop only (on mobile the main wrapper above
+                owns the slack); tapping it scrolls the main panel to top. */}
+            <div
+              className="hidden md:block flex-1 h-full cursor-pointer"
+              onClick={(e) => { if (e.target === e.currentTarget) scrollMainToTop() }}
+            />
 
             {/* Nav pill placeholder — actual pill is fixed-positioned on top */}
             <div className="flex-shrink-0 w-0" />
 
-            {/* Right spacer — desktop only, scrolls detail panel to top */}
+            {/* Detail fall-through zone — desktop only; tapping it scrolls the detail panel to top */}
             {isDesktop && (
               <div
-                className="flex-1 h-full"
-                onClick={(e) => { e.stopPropagation(); scrollDetailToTop() }}
+                className="flex-1 h-full cursor-pointer"
+                onClick={(e) => { if (e.target === e.currentTarget) scrollDetailToTop() }}
               />
             )}
 
             {/* Detail panel actions — desktop only (mobile shows in overlay) */}
             {isDesktop && (
-              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center gap-2 h-full">
                 {detailActions}
               </div>
             )}
@@ -317,7 +312,7 @@ function AppShellContent({ children }: AppShellProps) {
             className="h-full md:min-w-[720px]"
           >
             <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={30} className="md:min-w-[360px]">
-              <div ref={mainPanelRef} data-app-main className="h-full flex flex-col overflow-hidden relative">
+              <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative">
                 {children}
               </div>
             </ResizablePanel>
@@ -339,6 +334,7 @@ function AppShellContent({ children }: AppShellProps) {
           z-[55] beats page headers (z-50), nav pill z-[60] wins. */}
       {showMobileOverlay && (
         <div
+          ref={overlayPanelRef}
           className="fixed inset-0 z-[55] bg-background md:hidden pt-safe"
           onScrollCapture={(e) => {
             const target = e.target as HTMLElement
@@ -373,7 +369,11 @@ function AppShellContent({ children }: AppShellProps) {
                   <ChevronLeft className="h-5 w-5" />
                 </Button>
               </GlassContainer>
-              <div className="flex-1" />
+              {/* Fall-through zone — tapping its bare area scrolls the detail overlay to top */}
+              <div
+                className="flex-1 h-full cursor-pointer"
+                onClick={(e) => { if (e.target === e.currentTarget) scrollMobileDetailToTop() }}
+              />
               {/* Detail actions — flush right */}
               <div className="flex items-center gap-2">
                 {detailActions}

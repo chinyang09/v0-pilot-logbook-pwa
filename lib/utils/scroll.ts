@@ -15,17 +15,15 @@ export function smoothScrollElementToTop(el: HTMLElement, duration = 300): void 
 }
 
 /**
- * Scroll the currently-visible page's scroll container back to the top.
+ * Find the scroll container the user is actually looking at within `root`.
  *
- * Scoped to the main content area (`[data-app-main]`) so it never grabs the
- * sidebar nav, and it skips the keep-alive pages that are mounted-but-hidden
- * (visibility:hidden) so we always target the page the user is actually looking
- * at. Used by the nav pill's "tap the active tab to scroll to top" gesture, the
- * mobile counterpart of the desktop tap-the-header behaviour.
+ * `root` can hold several stacked scroll containers (the keep-alive page stack):
+ * inactive pages stay mounted as `visibility:hidden` and keep their `scrollTop`,
+ * so a naive "first with scrollTop > 0" could lock onto a hidden page. We skip
+ * anything that is not currently visible and prefer the first scrolled one,
+ * falling back to the first visible candidate.
  */
-export function scrollActivePageToTop(): void {
-  if (typeof document === "undefined") return
-  const root = document.querySelector("[data-app-main]") ?? document
+export function findVisibleScrollTarget(root: ParentNode): HTMLElement | null {
   const candidates = root.querySelectorAll<HTMLElement>(
     "[data-scroll-container], .overflow-y-auto, .overflow-auto",
   )
@@ -33,11 +31,8 @@ export function scrollActivePageToTop(): void {
   for (const el of candidates) {
     if (el.getClientRects().length === 0) continue
     if (getComputedStyle(el).visibility === "hidden") continue
-    if (el.scrollTop > 0) {
-      smoothScrollElementToTop(el)
-      return
-    }
+    if (el.scrollTop > 0) return el
     if (!fallback) fallback = el
   }
-  if (fallback) smoothScrollElementToTop(fallback)
+  return fallback
 }
