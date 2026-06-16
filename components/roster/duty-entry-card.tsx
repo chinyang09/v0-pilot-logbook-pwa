@@ -59,8 +59,8 @@ export function DutyEntryCard({ entry, onClick, compact = false }: DutyEntryCard
     return (
       <div
         className={cn(
-          "flex items-center gap-3 p-2 rounded-lg bg-secondary/30 cursor-pointer hover:bg-secondary/50 transition-colors",
-          onClick && "cursor-pointer"
+          "flex items-center gap-3 p-2 rounded-lg bg-secondary/30 transition-colors",
+          onClick && "cursor-pointer hover:bg-secondary/50"
         )}
         onClick={onClick}
       >

@@ -99,6 +99,8 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
             <Button
               variant="ghost"
               size="icon"
+              aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+              aria-pressed={isFavorite}
               className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
               onClick={(e: React.MouseEvent) => {
                 e.preventDefault()
@@ -704,9 +706,9 @@ export default function AircraftPage() {
 
                   {filteredAircraft.length === 0 && !isFr24Loading && fr24Results.length > 0 && (
                     <div className="space-y-1">
-                      {fr24Results.map((record) => (
+                      {fr24Results.map((record, i) => (
                         <div
-                          key={record.registration || record.icao24}
+                          key={`${record.registration || record.icao24 || "fr24"}-${i}`}
                           onClick={() => handleSelectFr24(record)}
                           role="button"
                           tabIndex={0}

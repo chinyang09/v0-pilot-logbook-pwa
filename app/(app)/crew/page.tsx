@@ -106,6 +106,8 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
             <Button
               variant="ghost"
               size="icon"
+              aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+              aria-pressed={isFavorite}
               className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
               onClick={(e: React.MouseEvent) => {
                 e.preventDefault();

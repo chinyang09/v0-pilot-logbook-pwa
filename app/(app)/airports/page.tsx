@@ -80,6 +80,8 @@ const AirportCard = memo(function AirportCard({
         <Button
           variant="ghost"
           size="icon"
+          aria-label={airport.isFavorite ? "Remove from favorites" : "Add to favorites"}
+          aria-pressed={!!airport.isFavorite}
           className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
           onClick={(e: React.MouseEvent) => onToggleFavorite(e, airport.icao)}
         >
@@ -321,11 +323,21 @@ export default function AirportsPage() {
     }
 
     if (selectedAirport) {
-      setDetailContent(<AirportDetailPanel icao={selectedAirport.icao} onBack={() => setSelectedAirportIcao(null)} />);
+      setDetailContent(
+        <AirportDetailPanel
+          icao={selectedAirport.icao}
+          onBack={() => setSelectedAirportIcao(null)}
+          onToggleFavorite={(ic) =>
+            mutateAirports((prev) =>
+              prev.map((a) => (a.icao === ic ? { ...a, isFavorite: !a.isFavorite } : a))
+            )
+          }
+        />
+      );
     } else {
       setDetailContent(null);
     }
-  }, [isActive, fieldType, selectedAirport, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao]);
+  }, [isActive, fieldType, selectedAirport, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao, mutateAirports]);
 
   // Update detail content when selection, data, or active state changes
   useEffect(() => {
@@ -506,7 +518,17 @@ export default function AirportsPage() {
           }}
           onCancel={() => {
             if (selectedAirportIcao) {
-              setDetailContent(<AirportDetailPanel icao={selectedAirportIcao} onBack={() => setSelectedAirportIcao(null)} />);
+              setDetailContent(
+                <AirportDetailPanel
+                  icao={selectedAirportIcao}
+                  onBack={() => setSelectedAirportIcao(null)}
+                  onToggleFavorite={(ic) =>
+                    mutateAirports((prev) =>
+                      prev.map((a) => (a.icao === ic ? { ...a, isFavorite: !a.isFavorite } : a))
+                    )
+                  }
+                />
+              );
             } else {
               setDetailContent(null);
             }

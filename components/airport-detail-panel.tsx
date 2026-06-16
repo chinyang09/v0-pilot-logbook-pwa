@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
-import { getAirportByIcao, getAirportLocalTime, type Airport } from "@/lib/db"
+import { getAirportByIcao, getAirportLocalTime, toggleAirportFavorite, type Airport } from "@/lib/db"
 import {
   MapPin,
   Globe,
@@ -15,9 +15,11 @@ interface AirportDetailPanelProps {
   icao: string
   /** Called when back button is pressed (mobile overlay dismiss) */
   onBack?: () => void
+  /** Lets the parent list keep its own favorite state in sync after a toggle. */
+  onToggleFavorite?: (icao: string) => void
 }
 
-export function AirportDetailPanel({ icao, onBack }: AirportDetailPanelProps) {
+export function AirportDetailPanel({ icao, onBack, onToggleFavorite }: AirportDetailPanelProps) {
   const [airport, setAirport] = useState<Airport | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
@@ -43,6 +45,18 @@ export function AirportDetailPanel({ icao, onBack }: AirportDetailPanelProps) {
     if (!airport) return null
     return getAirportLocalTime(airport.tz)
   }, [airport])
+
+  const handleToggleFavorite = async () => {
+    if (!airport) return
+    const next = !airport.isFavorite
+    setAirport((a) => (a ? { ...a, isFavorite: next } : a)) // optimistic
+    try {
+      await toggleAirportFavorite(airport.icao)
+      onToggleFavorite?.(airport.icao)
+    } catch {
+      setAirport((a) => (a ? { ...a, isFavorite: !next } : a)) // revert on failure
+    }
+  }
 
   // Silent wait: return null to keep previous panel content visible (no flash)
   if (isLoading && !airport) {
@@ -140,8 +154,14 @@ export function AirportDetailPanel({ icao, onBack }: AirportDetailPanelProps) {
 
           {/* Action Bar */}
           <div className="pt-4 flex gap-2">
-            <Button className="flex-1 gap-2" variant="outline">
-              <Star className="h-4 w-4" /> Mark as Favourite
+            <Button
+              className="flex-1 gap-2"
+              variant={airport.isFavorite ? "default" : "outline"}
+              onClick={handleToggleFavorite}
+              aria-pressed={!!airport.isFavorite}
+            >
+              <Star className={`h-4 w-4 ${airport.isFavorite ? "fill-current" : ""}`} />
+              {airport.isFavorite ? "Favourited" : "Mark as Favourite"}
             </Button>
           </div>
         </div>

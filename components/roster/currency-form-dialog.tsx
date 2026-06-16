@@ -283,7 +283,7 @@ export function CurrencyFormDialog({
 
           {/* Save Button */}
           <div className="flex items-center gap-2 pt-4">
-            <Button onClick={handleSave} disabled={isSaving} className="flex-1">
+            <Button onClick={handleSave} disabled={isSaving || showSuccess} className="flex-1">
               {isSaving ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
