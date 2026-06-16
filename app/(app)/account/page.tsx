@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp"
 import {
   AlertDialog,
@@ -339,16 +340,6 @@ export default function AccountPage() {
     return `${diffDays}d ago`
   }
 
-  if (isLoading) {
-    return (
-      <PageContainer>
-        <div className="flex items-center justify-center min-h-[50vh]">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
-      </PageContainer>
-    )
-  }
-
   return (
     <PageContainer>
       <div className="px-4 pt-4 pb-safe space-y-6">
@@ -375,9 +366,13 @@ export default function AccountPage() {
           )}
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">2FA (TOTP)</span>
-            <Badge variant={profile?.totpEnabled ? "default" : "secondary"}>
-              {profile?.totpEnabled ? "Enabled" : "Disabled"}
-            </Badge>
+            {isLoading && !profile ? (
+              <Skeleton className="h-5 w-16 rounded-full" />
+            ) : (
+              <Badge variant={profile?.totpEnabled ? "default" : "secondary"}>
+                {profile?.totpEnabled ? "Enabled" : "Disabled"}
+              </Badge>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -512,6 +507,15 @@ export default function AccountPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          {isLoading && !profile && (
+            <div className="flex items-center gap-3 py-2">
+              <Skeleton className="h-4 w-4 rounded-full" />
+              <div className="space-y-1.5">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-3 w-40" />
+              </div>
+            </div>
+          )}
           {profile?.passkeys.map((pk) => (
             <div
               key={pk.credentialId}
@@ -598,6 +602,15 @@ export default function AccountPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          {isLoading && sessions.length === 0 && (
+            <div className="flex items-center gap-3 py-2">
+              <Skeleton className="h-4 w-4 rounded" />
+              <div className="space-y-1.5">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-3 w-36" />
+              </div>
+            </div>
+          )}
           {sessions.map((session) => (
             <div
               key={session.id}
@@ -636,7 +649,7 @@ export default function AccountPage() {
               )}
             </div>
           ))}
-          {sessions.length === 0 && (
+          {!isLoading && sessions.length === 0 && (
             <p className="text-sm text-muted-foreground">No active sessions found.</p>
           )}
         </CardContent>

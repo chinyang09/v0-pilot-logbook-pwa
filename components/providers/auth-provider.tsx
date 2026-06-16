@@ -6,6 +6,7 @@ import { useRouter, usePathname } from "next/navigation"
 import { getUserSession, saveUserSession, clearAllUserData, type UserSession } from "@/lib/db"
 import { resetDBState } from "@/hooks/data/use-db"
 import { startAuthentication } from "@simplewebauthn/browser"
+import { AppStatusOverlay } from "@/components/app-status-overlay"
 
 interface AuthContextType {
   user: UserSession | null
@@ -22,6 +23,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserSession | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
   const authCheckDone = useRef(false)
@@ -46,6 +48,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const logout = useCallback(async () => {
+    // Show immediate feedback — the pre-logout sync + session-delete below are
+    // async and otherwise leave the UI looking frozen / the tap ignored.
+    setIsLoggingOut(true)
+
     // Sync pending changes before logout to prevent data loss
     try {
       const { syncService } = await import("@/lib/sync")
@@ -76,6 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Reset DB initialization state so re-login re-initializes properly
     resetDBState()
+    setIsLoggingOut(false)
   }, [router])
 
   const updateCallsign = useCallback(async (newCallsign: string) => {
@@ -239,7 +246,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [user, isLoading, login, logout, silentReauth, updateCallsign]
   )
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      {isLoggingOut && (
+        <AppStatusOverlay title="Signing out…" description="Saving your changes" />
+      )}
+    </AuthContext.Provider>
+  )
 }
 
 export function useAuth() {

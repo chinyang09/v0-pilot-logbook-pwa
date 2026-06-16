@@ -12,7 +12,31 @@ export function getDeviceNameFromUA(ua: string): string {
   return "New Device"
 }
 
-// Base64URL encoding/decoding utilities
+// True when a passkey's `transports` is a usable value for WebAuthn descriptors
+// (omitted, or a string array). A malformed value — e.g. an array that became an
+// object `{"0":"internal"}` through a serialization round-trip — makes the
+// browser's credentials.create() throw "value is not a sequence".
+function isValidTransports(t: unknown): boolean {
+  return t === undefined || (Array.isArray(t) && t.every((x) => typeof x === "string"))
+}
+
+/**
+ * Strip malformed `transports` off a user's stored passkeys. Returns the
+ * (possibly) cleaned array plus whether anything changed, so a caller can write
+ * it back once and self-heal old records.
+ */
+export function sanitizePasskeyTransports(
+  passkeys: PasskeyCredential[],
+): { cleaned: PasskeyCredential[]; changed: boolean } {
+  let changed = false
+  const cleaned = passkeys.map((p) => {
+    if (isValidTransports(p.transports)) return p
+    changed = true
+    const { transports, ...rest } = p
+    return rest as PasskeyCredential
+  })
+  return { cleaned, changed }
+}
 export function base64URLEncode(buffer: ArrayBuffer | Uint8Array): string {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
   let binary = ""
