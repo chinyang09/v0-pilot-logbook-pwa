@@ -39,14 +39,27 @@ export function SyncStatus() {
     setPendingCount(queue.length)
   }
 
+  const busy = status === "offline" || status === "syncing"
+
   return (
     <button
       onClick={handleSync}
+      disabled={busy}
+      aria-label={
+        status === "syncing"
+          ? "Syncing"
+          : status === "offline"
+            ? "Offline"
+            : pendingCount > 0
+              ? `Sync now, ${pendingCount} pending`
+              : "Sync now"
+      }
+      title={status === "offline" ? "Offline" : status === "syncing" ? "Syncing…" : "Tap to sync"}
       className={cn(
         "relative p-1.5 rounded-full transition-colors",
         status === "online" && "text-[var(--status-synced)]",
-        status === "offline" && "text-[var(--status-offline)]",
-        status === "syncing" && "text-[var(--status-pending)]",
+        status === "offline" && "text-[var(--status-offline)] cursor-not-allowed",
+        status === "syncing" && "text-[var(--status-pending)] cursor-wait",
       )}
     >
       {status === "online" && <Cloud className="h-4 w-4" />}

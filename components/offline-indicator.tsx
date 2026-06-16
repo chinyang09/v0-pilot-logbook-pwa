@@ -1,26 +1,38 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Wifi, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function OfflineIndicator() {
   const [isOffline, setIsOffline] = useState(false);
   const [showBanner, setShowBanner] = useState(false);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // Initial check
     setIsOffline(!navigator.onLine);
 
+    const clearHideTimer = () => {
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+    };
+
     const handleOnline = () => {
+      // Cancel any pending "Back online" auto-hide first — otherwise a quick
+      // offline→online→offline flap fires a stale timer that hides the (still
+      // valid) offline banner. The returned closure was never invoked (this is
+      // an event handler, not an effect), so the old timer leaked.
+      clearHideTimer();
       setIsOffline(false);
       setShowBanner(true);
-      // Hide the "Back online" success message after 3s
-      const timer = setTimeout(() => setShowBanner(false), 3000);
-      return () => clearTimeout(timer);
+      hideTimerRef.current = setTimeout(() => setShowBanner(false), 3000);
     };
 
     const handleOffline = () => {
+      clearHideTimer();
       setIsOffline(true);
       setShowBanner(true);
     };
@@ -31,6 +43,7 @@ export function OfflineIndicator() {
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      clearHideTimer();
     };
   }, []);
 

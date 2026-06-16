@@ -29,6 +29,7 @@ import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { navSections, dashboardNavItem } from "@/components/nav-sections"
 import { useSyncStatus, useSyncTrigger } from "@/hooks/sync/use-sync-status"
+import { scrollActivePageToTop } from "@/lib/utils/scroll"
 import type { BottomNavTab } from "@/types/db/stores.types"
 
 // ─── Tab config ──────────────────────────────────────────────
@@ -187,7 +188,18 @@ function PillBarContent({
           const Icon = tab.icon
 
           return (
-            <Link key={tabKey} href={tab.href}>
+            <Link
+              key={tabKey}
+              href={tab.href}
+              onClick={(e) => {
+                // Tapping the already-active tab scrolls the current page back
+                // to the top (mobile counterpart of desktop's tap-the-header).
+                if (active) {
+                  e.preventDefault()
+                  scrollActivePageToTop()
+                }
+              }}
+            >
               {mode === "desktop" ? (
                 <span
                   className={cn(

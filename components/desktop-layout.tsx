@@ -317,7 +317,7 @@ function AppShellContent({ children }: AppShellProps) {
             className="h-full md:min-w-[720px]"
           >
             <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={30} className="md:min-w-[360px]">
-              <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative">
+              <div ref={mainPanelRef} data-app-main className="h-full flex flex-col overflow-hidden relative">
                 {children}
               </div>
             </ResizablePanel>
