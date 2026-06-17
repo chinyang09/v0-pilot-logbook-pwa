@@ -12,19 +12,9 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
-import {
   KeyRound,
   Monitor,
+  Trash2,
   LogOut,
   Plus,
   Loader2,
@@ -34,7 +24,8 @@ import {
   Share,
   MoreVertical,
 } from "lucide-react"
-import { FluidActionButton } from "@/components/ui/fluid-action-button"
+import { SwipeableCard } from "@/components/swipeable-card"
+import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button"
 import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
 
 interface ProfileData {
@@ -506,9 +497,9 @@ export default function AccountPage() {
             Manage the passkeys registered to your account.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="px-0">
           {isLoading && !profile && (
-            <div className="flex items-center gap-3 py-2">
+            <div className="flex items-center gap-3 py-2 px-6">
               <Skeleton className="h-4 w-4 rounded-full" />
               <div className="space-y-1.5">
                 <Skeleton className="h-4 w-28" />
@@ -516,56 +507,65 @@ export default function AccountPage() {
               </div>
             </div>
           )}
-          {profile?.passkeys.map((pk) => (
-            <div
-              key={pk.credentialId}
-              className="flex items-center justify-between py-2 border-b border-border last:border-0"
-            >
-              <div className="flex items-center gap-3">
-                <KeyRound className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-sm font-medium">{pk.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {pk.deviceType} {pk.backedUp && "· Synced"} · Added {formatDate(pk.createdAt)}
-                  </p>
+          {profile?.passkeys.map((pk) => {
+            const canRemove = (profile?.passkeys.length || 0) > 1
+            return (
+              <SwipeableCard
+                key={pk.credentialId}
+                variant="row"
+                separated
+                actions={[
+                  {
+                    icon: <Trash2 className="h-5 w-5" />,
+                    label: "Delete",
+                    variant: "destructive",
+                    holdToConfirm: true,
+                    disabled: !canRemove,
+                    onClick: () => handleRemovePasskey(pk.credentialId),
+                  },
+                ]}
+              >
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <KeyRound className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{pk.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {pk.deviceType} {pk.backedUp && "· Synced"} · Added {formatDate(pk.createdAt)}
+                    </p>
+                  </div>
+                  {removingPasskey === pk.credentialId && (
+                    <Loader2 className="h-4 w-4 animate-spin ml-auto text-muted-foreground" />
+                  )}
                 </div>
-              </div>
-              <FluidActionButton
-                aria-label="Remove passkey"
-                expand="left"
-                size="sm"
-                disabled={(profile?.passkeys.length || 0) <= 1}
-                disabledTitle="Add another passkey before removing this one"
-                loading={removingPasskey === pk.credentialId}
-                onConfirm={() => handleRemovePasskey(pk.credentialId)}
-              />
-            </div>
-          ))}
+              </SwipeableCard>
+            )
+          })}
 
-          {(profile?.passkeys.length || 0) <= 1 && (
-            <p className="text-xs text-muted-foreground">
-              Add a passkey on a second device so you can still sign in if you lose this one.
-            </p>
-          )}
-
-          {addPasskeyError && (
-            <p className="text-sm text-destructive">{addPasskeyError}</p>
-          )}
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleAddPasskey}
-            disabled={isAddingPasskey}
-            className="mt-2"
-          >
-            {isAddingPasskey ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Plus className="h-4 w-4 mr-2" />
+          <div className="px-6 pt-3 space-y-3">
+            {(profile?.passkeys.length || 0) <= 1 && (
+              <p className="text-xs text-muted-foreground">
+                Add a passkey on a second device so you can still sign in if you lose this one.
+              </p>
             )}
-            Add Passkey
-          </Button>
+
+            {addPasskeyError && (
+              <p className="text-sm text-destructive">{addPasskeyError}</p>
+            )}
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleAddPasskey}
+              disabled={isAddingPasskey}
+            >
+              {isAddingPasskey ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4 mr-2" />
+              )}
+              Add Passkey
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -580,9 +580,9 @@ export default function AccountPage() {
             Devices where you&apos;re currently signed in.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="px-0">
           {isLoading && sessions.length === 0 && (
-            <div className="flex items-center gap-3 py-2">
+            <div className="flex items-center gap-3 py-2 px-6">
               <Skeleton className="h-4 w-4 rounded" />
               <div className="space-y-1.5">
                 <Skeleton className="h-4 w-24" />
@@ -591,13 +591,27 @@ export default function AccountPage() {
             </div>
           )}
           {sessions.map((session) => (
-            <div
+            <SwipeableCard
               key={session.id}
-              className="flex items-center justify-between py-2 border-b border-border last:border-0"
+              variant="row"
+              separated
+              actions={
+                session.isCurrent
+                  ? []
+                  : [
+                      {
+                        icon: <Trash2 className="h-5 w-5" />,
+                        label: "Revoke",
+                        variant: "destructive",
+                        holdToConfirm: true,
+                        onClick: () => handleRevokeSession(session.id),
+                      },
+                    ]
+              }
             >
-              <div className="flex items-center gap-3">
-                <Monitor className="h-4 w-4 text-muted-foreground" />
-                <div>
+              <div className="flex items-center gap-3 px-4 py-3">
+                <Monitor className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium">
                       {session.recoveryLogin ? "Recovery Login" : "Session"}
@@ -610,20 +624,14 @@ export default function AccountPage() {
                     Active {formatRelativeTime(session.lastAccessedAt)} · Created {formatDate(session.createdAt)}
                   </p>
                 </div>
+                {revokingToken === session.id && (
+                  <Loader2 className="h-4 w-4 animate-spin ml-auto text-muted-foreground" />
+                )}
               </div>
-              {!session.isCurrent && (
-                <FluidActionButton
-                  aria-label="Revoke session"
-                  expand="left"
-                  size="sm"
-                  loading={revokingToken === session.id}
-                  onConfirm={() => handleRevokeSession(session.id)}
-                />
-              )}
-            </div>
+            </SwipeableCard>
           ))}
           {!isLoading && sessions.length === 0 && (
-            <p className="text-sm text-muted-foreground">No active sessions found.</p>
+            <p className="text-sm text-muted-foreground px-6">No active sessions found.</p>
           )}
         </CardContent>
       </Card>
@@ -634,26 +642,14 @@ export default function AccountPage() {
           <CardTitle className="text-lg text-destructive">Danger Zone</CardTitle>
         </CardHeader>
         <CardContent>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="destructive">
-                <LogOut className="h-4 w-4 mr-2" />
-                Log Out
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Log out?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will clear your local data and sign you out. Your data is safely stored in the cloud and will sync back when you log in again.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={logout}>Log Out</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          <HoldToConfirmButton
+            label="Hold to log out"
+            icon={<LogOut className="h-4 w-4" />}
+            onConfirm={logout}
+          />
+          <p className="text-xs text-muted-foreground mt-2">
+            Clears your local data and signs you out. Your data is safely stored in the cloud and syncs back when you log in again.
+          </p>
         </CardContent>
       </Card>
       </div>

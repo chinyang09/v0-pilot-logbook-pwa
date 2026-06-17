@@ -36,7 +36,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SwipeableCard } from "@/components/swipeable-card";
-import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
 import { FastScroll, type FastScrollItem } from "@/components/ui/fast-scroll";
 
 export interface FlightListRef {
@@ -204,6 +203,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           icon: <Trash2 className="h-5 w-5" />,
           onClick: onDelete,
           variant: "destructive",
+          holdToConfirm: true,
           disabled: isLocked,
         },
       ]}
@@ -368,7 +368,6 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     ref
   ) {
     const { preferences } = usePreferences();
-    const { confirmDelete, handleDelete, DeleteDialog } = useDeleteConfirmation<FlightLog>();
 
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const isExternalScrollRef = useRef(false);
@@ -753,7 +752,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                           <SwipeableFlightCard
                             flight={flight}
                             onEdit={() => onEdit?.(flight)}
-                            onDelete={() => confirmDelete(flight)}
+                            onDelete={() => performDelete(flight)}
                             onToggleLock={() => handleToggleLock(flight)}
                             personnel={personnel}
                             isSelected={selectedFlightId === flight.id}
@@ -791,12 +790,6 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             </div>
           )}
         </div>
-
-        <DeleteDialog
-          title="Delete Flight"
-          description="Are you sure you want to delete this flight? This action cannot be undone."
-          onConfirm={() => handleDelete(performDelete)}
-        />
       </>
     );
   }

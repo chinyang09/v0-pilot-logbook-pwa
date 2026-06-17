@@ -30,7 +30,6 @@ import { AircraftNewForm } from "@/components/aircraft-new-form"
 import { cn } from "@/lib/utils"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
 import { SwipeableCard } from "@/components/swipeable-card"
-import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog"
 import { usePageActive } from "@/hooks/use-page-active"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassSearchButton } from "@/components/glass-search-button"
@@ -65,6 +64,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
           icon: <Trash2 className="h-5 w-5" />,
           onClick: onDelete,
           variant: "destructive",
+          holdToConfirm: true,
         },
       ]}
     >
@@ -156,7 +156,6 @@ export default function AircraftPage() {
   const { flights } = useFlights()
 
   const [favoriteRegs, setFavoriteRegs] = useState<Set<string>>(new Set())
-  const { confirmDelete, handleDelete, DeleteDialog } = useDeleteConfirmation<NormalizedAircraft>()
 
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined)
   const isFastScrollingRef = useRef(false)
@@ -659,7 +658,7 @@ export default function AircraftPage() {
                             key={`fav-${aircraft.registration}`}
                             aircraft={aircraft}
                             onSelect={handleSelectAircraft}
-                            onDelete={() => confirmDelete(aircraft)}
+                            onDelete={() => performDelete(aircraft)}
                             isFavorite
                             onToggleFavorite={handleToggleFavorite}
                             isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
@@ -680,7 +679,7 @@ export default function AircraftPage() {
                             key={`recent-${aircraft.registration || aircraft.icao24}`}
                             aircraft={aircraft}
                             onSelect={handleSelectAircraft}
-                            onDelete={() => confirmDelete(aircraft)}
+                            onDelete={() => performDelete(aircraft)}
                             isRecent
                             isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
                             onToggleFavorite={handleToggleFavorite}
@@ -779,7 +778,7 @@ export default function AircraftPage() {
                         <SwipeableAircraftCard
                           aircraft={aircraft}
                           onSelect={handleSelectAircraft}
-                          onDelete={() => confirmDelete(aircraft)}
+                          onDelete={() => performDelete(aircraft)}
                           isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
                           onToggleFavorite={handleToggleFavorite}
                           isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
@@ -793,12 +792,6 @@ export default function AircraftPage() {
           </div>
         </div>
       )}
-
-      <DeleteDialog
-        title="Delete Aircraft"
-        description="Are you sure you want to remove this aircraft from your database? This action cannot be undone."
-        onConfirm={() => handleDelete(performDelete)}
-      />
     </PageContainer>
   )
 }
