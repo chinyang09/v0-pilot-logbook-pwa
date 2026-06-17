@@ -25,7 +25,6 @@ import {
 import {
   KeyRound,
   Monitor,
-  Trash2,
   LogOut,
   Plus,
   Loader2,
@@ -35,6 +34,7 @@ import {
   Share,
   MoreVertical,
 } from "lucide-react"
+import { FluidActionButton } from "@/components/ui/fluid-action-button"
 import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
 
 interface ProfileData {
@@ -530,36 +530,15 @@ export default function AccountPage() {
                   </p>
                 </div>
               </div>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                    disabled={(profile?.passkeys.length || 0) <= 1 || removingPasskey === pk.credentialId}
-                  >
-                    {removingPasskey === pk.credentialId ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Remove passkey?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will remove &ldquo;{pk.name}&rdquo; from your account. You won&apos;t be able to sign in with it anymore.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => handleRemovePasskey(pk.credentialId)}>
-                      Remove
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <FluidActionButton
+                aria-label="Remove passkey"
+                expand="left"
+                size="sm"
+                disabled={(profile?.passkeys.length || 0) <= 1}
+                disabledTitle="Add another passkey before removing this one"
+                loading={removingPasskey === pk.credentialId}
+                onConfirm={() => handleRemovePasskey(pk.credentialId)}
+              />
             </div>
           ))}
 
@@ -633,19 +612,13 @@ export default function AccountPage() {
                 </div>
               </div>
               {!session.isCurrent && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                  onClick={() => handleRevokeSession(session.id)}
-                  disabled={revokingToken === session.id}
-                >
-                  {revokingToken === session.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
-                  )}
-                </Button>
+                <FluidActionButton
+                  aria-label="Revoke session"
+                  expand="left"
+                  size="sm"
+                  loading={revokingToken === session.id}
+                  onConfirm={() => handleRevokeSession(session.id)}
+                />
               )}
             </div>
           ))}
