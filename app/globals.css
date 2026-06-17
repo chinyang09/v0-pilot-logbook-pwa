@@ -315,7 +315,7 @@ textarea:focus-within {
 }
 
 /* Login TOTP border feedback animations.
-   Loading uses the framer-motion <BorderBeam/> component, not CSS. */
+   Loading uses the framer-motion <BorderGlow/> component, not CSS. */
 @keyframes totp-border-shake {
   0%, 100% { transform: translateX(0); }
   20%, 60% { transform: translateX(-4px); }
