@@ -265,6 +265,7 @@ function NumberRow({
         <Button
           variant="outline"
           size="icon"
+          aria-label={`Decrease ${label}`}
           className="h-8 w-8 rounded-full bg-transparent"
           onClick={() => onChange(Math.max(0, value - 1))}
         >
@@ -274,6 +275,7 @@ function NumberRow({
         <Button
           variant="outline"
           size="icon"
+          aria-label={`Increase ${label}`}
           className="h-8 w-8 rounded-full bg-transparent"
           onClick={() => onChange(value + 1)}
         >

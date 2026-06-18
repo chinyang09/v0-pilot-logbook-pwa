@@ -13,6 +13,7 @@ import {
 } from "@/lib/auth/server/webauthn"
 import type { User } from "@/lib/auth/types"
 import { issueSession, setSessionCookie } from "@/lib/auth/server/session"
+import { normalizePasskeyTransports } from "@/lib/auth/server/passkey-maintenance"
 
 // GET /api/auth/login/passkey
 export async function GET(request: Request) {
@@ -120,6 +121,10 @@ export async function POST(request: NextRequest) {
         },
       },
     )
+
+    // Self-heal any malformed stored passkey transports (runs after the counter
+    // write, reads fresh, so it never reverts the counter). Fire-and-forget.
+    void normalizePasskeyTransports(db, user._id.toString())
 
     const { token: sessionId, expiresAt: sessionExpiry } = await issueSession(db, {
       userId: user._id.toString(),

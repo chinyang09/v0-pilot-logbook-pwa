@@ -652,8 +652,18 @@ function StaleRow({
       {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
       {depDisplay(op.flight, airportPref)}→{arrDisplay(op.flight, airportPref)}
       <span className="ml-2 opacity-70">
-        existing report {new Date(op.existingGeneratedAt).toISOString()} &gt;
-        this report {new Date(op.reportGeneratedAt).toISOString()}
+        existing report{" "}
+        {new Date(op.existingGeneratedAt).toLocaleString(undefined, {
+          timeZone: "UTC",
+          dateStyle: "medium",
+          timeStyle: "short",
+        })}{" "}
+        &gt; this report{" "}
+        {new Date(op.reportGeneratedAt).toLocaleString(undefined, {
+          timeZone: "UTC",
+          dateStyle: "medium",
+          timeStyle: "short",
+        })}
       </span>
     </div>
   );

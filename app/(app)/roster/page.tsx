@@ -7,6 +7,7 @@ import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Calendar as CalendarIcon,
   AlertCircle,
@@ -90,12 +91,14 @@ export default function RosterPage() {
     <>
       <GlassContainer cornerRadius={28}>
         <div className="flex items-center gap-0.5 px-1 h-14">
-          <Button variant="ghost" size="icon" className="h-12 w-12" onClick={() => refreshEntries()} disabled={entriesLoading}>
+          <Button variant="ghost" size="icon" aria-label="Refresh roster" className="h-12 w-12" onClick={() => refreshEntries()} disabled={entriesLoading}>
             <RefreshCw className={cn("h-5 w-5", entriesLoading && "animate-spin")} />
           </Button>
           <Button
             variant={viewMode === "list" ? "secondary" : "ghost"}
             size="icon"
+            aria-label="List view"
+            aria-pressed={viewMode === "list"}
             className="h-12 w-12"
             onClick={() => setViewMode("list")}
           >
@@ -104,6 +107,8 @@ export default function RosterPage() {
           <Button
             variant={viewMode === "calendar" ? "secondary" : "ghost"}
             size="icon"
+            aria-label="Calendar view"
+            aria-pressed={viewMode === "calendar"}
             className="h-12 w-12"
             onClick={() => setViewMode("calendar")}
           >
@@ -193,6 +198,23 @@ export default function RosterPage() {
           </div>
         )}
 
+        {/* First-load skeleton */}
+        {entriesLoading && scheduleEntries.length === 0 && (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <Card key={i}>
+                <CardHeader className="pb-2 pt-3 px-3">
+                  <Skeleton className="h-4 w-32" />
+                </CardHeader>
+                <CardContent className="px-3 pb-3 space-y-2">
+                  <Skeleton className="h-12 w-full rounded-lg" />
+                  <Skeleton className="h-12 w-full rounded-lg" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+
         {/* Empty State */}
         {scheduleEntries.length === 0 && !entriesLoading && (
           <Card>
@@ -236,8 +258,9 @@ export default function RosterPage() {
               </>
             ) : (
               <>
-                {/* All Dates List */}
-                {sortedDates.slice(0, 30).map((date) => (
+                {/* All Dates List — render every date so the FastScroll rail can
+                    reach any month (a 30-item cap left older months as dead taps). */}
+                {sortedDates.map((date) => (
                   <Card key={date} id={`roster-date-${date}`}>
                     <CardHeader className="pb-2 pt-3 px-3">
                       <CardTitle className="text-sm font-medium">
@@ -255,11 +278,6 @@ export default function RosterPage() {
                     </CardContent>
                   </Card>
                 ))}
-                {sortedDates.length > 30 && (
-                  <p className="text-center text-sm text-muted-foreground">
-                    Showing 30 most recent days. {sortedDates.length - 30} more days available.
-                  </p>
-                )}
               </>
             )}
           </div>

@@ -198,7 +198,7 @@ export function DiscrepancyResolutionDialog({
             >
               Cancel
             </Button>
-            <Button onClick={handleResolve} disabled={isResolving || !resolution} className="flex-1">
+            <Button onClick={handleResolve} disabled={isResolving || !resolution || showSuccess} className="flex-1">
               {isResolving ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />

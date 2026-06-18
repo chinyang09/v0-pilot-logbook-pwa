@@ -494,6 +494,14 @@ object clobbers in-progress edits on every reactive Dexie write), add an
 Clearing the remaining warnings is a deliberate "adopt the React Compiler"
 project, individually tested — not a piecemeal lint cleanup.
 
+**New code, however, must not add new advisory warnings** — write it
+compiler-clean and keep the ~54 baseline as a cap (`pnpm lint` should not grow).
+In practice: put `setState` inside callbacks / event handlers / subscription or
+timeout callbacks rather than synchronously in an effect body, derive state
+instead of effect-then-setState, and avoid `useLiveQuery` in new components
+(read counts via an async effect + the sync `onDataChanged` subscription, as
+`components/first-sync-splash.tsx` does).
+
 ## Environment Variables
 
 - `MONGODB_URI` — MongoDB connection string (required)

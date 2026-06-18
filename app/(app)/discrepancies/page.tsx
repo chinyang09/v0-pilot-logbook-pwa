@@ -7,6 +7,7 @@ import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
   SelectContent,
@@ -110,9 +111,19 @@ export default function DiscrepanciesPage() {
               <SelectItem value="route_mismatch">Route Mismatch</SelectItem>
               <SelectItem value="missing_in_logbook">Missing in Logbook</SelectItem>
               <SelectItem value="missing_in_schedule">Missing in Schedule</SelectItem>
+              <SelectItem value="stale_report">Stale Report</SelectItem>
             </SelectContent>
           </Select>
         </div>
+
+        {/* First-load skeleton */}
+        {isLoading && discrepancies.length === 0 && (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-24 w-full rounded-xl" />
+            ))}
+          </div>
+        )}
 
         {/* Empty State */}
         {discrepancies.length === 0 && !isLoading && (
@@ -152,7 +163,7 @@ export default function DiscrepanciesPage() {
           <Card>
             <CardContent className="py-12 text-center">
               <AlertCircle className="h-10 w-10 mx-auto text-muted-foreground/40 mb-3" />
-              <p className="text-sm font-medium text-foreground mb-1">No {filterType} discrepancies</p>
+              <p className="text-sm font-medium text-foreground mb-1">No {filterType.replace(/_/g, " ")} discrepancies</p>
               <p className="text-xs text-muted-foreground max-w-[240px] mx-auto">Try changing the filter to see more discrepancies.</p>
             </CardContent>
           </Card>

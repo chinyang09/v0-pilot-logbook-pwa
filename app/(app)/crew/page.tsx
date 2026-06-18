@@ -22,7 +22,6 @@ import { cn } from "@/lib/utils";
 import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
 import { SwipeableCard } from "@/components/swipeable-card";
-import { useDeleteConfirmation } from "@/components/delete-confirmation-dialog";
 import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { CrewDetailPanel } from "@/components/crew-detail-panel";
@@ -73,6 +72,7 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
           icon: <Trash2 className="h-5 w-5" />,
           onClick: onDelete,
           variant: "destructive",
+          holdToConfirm: true,
         },
       ]}
     >
@@ -106,6 +106,8 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
             <Button
               variant="ghost"
               size="icon"
+              aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+              aria-pressed={isFavorite}
               className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
               onClick={(e: React.MouseEvent) => {
                 e.preventDefault();
@@ -148,7 +150,6 @@ export default function CrewPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [desktopSearchOpen, setDesktopSearchOpen] = useState(false);
   const debouncedSearchQuery = useDebounce(searchQuery, 150);
-  const { confirmDelete, handleDelete, DeleteDialog } = useDeleteConfirmation<(typeof personnel)[0]>();
 
   // Detail panel integration
   const {
@@ -498,7 +499,7 @@ export default function CrewPage() {
                           key={crew.id}
                           crew={crew}
                           onSelect={() => handleCrewSelect(crew)}
-                          onDelete={() => confirmDelete(crew)}
+                          onDelete={() => performDelete(crew)}
                           isSelectMode={!!fieldType}
                           isSelected={!fieldType && selectedCrewId === crew.id}
                           isFavorite={!!crew.favorite}
@@ -522,7 +523,7 @@ export default function CrewPage() {
                             key={crew.id}
                             crew={crew}
                             onSelect={() => handleCrewSelect(crew)}
-                            onDelete={() => confirmDelete(crew)}
+                            onDelete={() => performDelete(crew)}
                             isSelectMode={!!fieldType}
                             isSelected={!fieldType && selectedCrewId === crew.id}
                             isFavorite
@@ -546,7 +547,7 @@ export default function CrewPage() {
                           key={`recent-${crew.id}`}
                           crew={crew}
                           onSelect={() => handleCrewSelect(crew)}
-                          onDelete={() => confirmDelete(crew)}
+                          onDelete={() => performDelete(crew)}
                           isSelectMode={!!fieldType}
                           isSelected={!fieldType && selectedCrewId === crew.id}
                           isRecent
@@ -614,7 +615,7 @@ export default function CrewPage() {
                         <SwipeableCrewCard
                           crew={crew}
                           onSelect={() => handleCrewSelect(crew)}
-                          onDelete={() => confirmDelete(crew)}
+                          onDelete={() => performDelete(crew)}
                           isSelectMode={!!fieldType}
                           isSelected={!fieldType && selectedCrewId === crew.id}
                           isRecent={recentCrewIds.has(crew.id)}
@@ -630,12 +631,6 @@ export default function CrewPage() {
           )}
         </div>
       </div>
-
-      <DeleteDialog
-        title="Delete Crew Member"
-        description="Are you sure you want to delete this crew member? This action cannot be undone."
-        onConfirm={() => handleDelete(performDelete)}
-      />
     </PageContainer>
   );
 }

@@ -314,52 +314,12 @@ textarea:focus-within {
   }
 }
 
-/* Login TOTP border feedback animations */
-@property --totp-beam-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
-@keyframes totp-beam-rotate {
-  from { --totp-beam-angle: 0deg; }
-  to { --totp-beam-angle: 360deg; }
-}
-
+/* Login TOTP border feedback animations.
+   Loading uses the framer-motion <BorderGlow/> component, not CSS. */
 @keyframes totp-border-shake {
   0%, 100% { transform: translateX(0); }
   20%, 60% { transform: translateX(-4px); }
   40%, 80% { transform: translateX(4px); }
-}
-
-.totp-loading {
-  position: relative;
-  border-radius: 0.5rem;
-  overflow: hidden;
-}
-
-.totp-loading::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: conic-gradient(
-    from var(--totp-beam-angle),
-    transparent 0deg,
-    transparent 260deg,
-    rgba(200, 160, 60, 0.8) 300deg,
-    rgba(255, 210, 80, 1) 330deg,
-    rgba(200, 160, 60, 0.8) 340deg,
-    transparent 360deg
-  );
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  animation: totp-beam-rotate 1.5s linear infinite;
-  pointer-events: none;
-  z-index: 10;
 }
 
 .totp-success {
@@ -375,7 +335,6 @@ textarea:focus-within {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .totp-loading::before { animation: none; }
   .totp-error { animation: none; }
 }
 

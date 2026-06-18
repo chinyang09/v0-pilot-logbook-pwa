@@ -7,7 +7,7 @@ import { memo } from "react"
 import type { CurrencyWithStatus, CurrencyStatus } from "@/types/entities/roster.types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { SwipeableCard, type SwipeAction } from "@/components/swipeable-card"
 import {
   Shield,
   ShieldAlert,
@@ -110,8 +110,28 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDel
     )
   }
 
+  const actions: SwipeAction[] = []
+  if (onEdit) {
+    actions.push({
+      icon: <Edit className="h-5 w-5" />,
+      label: "Edit",
+      variant: "secondary",
+      onClick: () => onEdit(currency),
+    })
+  }
+  if (onDelete) {
+    actions.push({
+      icon: <Trash2 className="h-5 w-5" />,
+      label: "Delete",
+      variant: "destructive",
+      holdToConfirm: true,
+      onClick: () => onDelete(currency),
+    })
+  }
+
   return (
-    <Card className={cn("overflow-hidden transition-all hover:shadow-md", config.border)}>
+    <SwipeableCard actions={actions}>
+      <Card className={cn("overflow-hidden transition-all hover:shadow-md", config.border)}>
       <CardContent className="p-4">
         {/* Header */}
         <div className="flex items-start gap-3 mb-3">
@@ -127,28 +147,6 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDel
             </div>
             {currency.code !== "CUSTOM" && (
               <p className="text-xs text-muted-foreground font-mono">{currency.code}</p>
-            )}
-          </div>
-          <div className="flex gap-1">
-            {onEdit && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => onEdit(currency)}
-                title="Edit currency"
-              >
-                <Edit className="h-3.5 w-3.5" />
-              </Button>
-            )}
-            {onDelete && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => onDelete(currency)}
-                title="Delete currency"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
             )}
           </div>
         </div>
@@ -200,6 +198,7 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDel
           </div>
         )}
       </CardContent>
-    </Card>
+      </Card>
+    </SwipeableCard>
   )
 })

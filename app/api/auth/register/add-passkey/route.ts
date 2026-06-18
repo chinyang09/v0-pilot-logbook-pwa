@@ -11,6 +11,7 @@ import {
   getDeviceNameFromUA,
 } from "@/lib/auth/server/webauthn"
 import type { User, PasskeyCredential, StoredChallenge } from "@/lib/auth/types"
+import { normalizePasskeyTransports } from "@/lib/auth/server/passkey-maintenance"
 import { cookies } from "next/headers"
 
 // GET: Generate options for an existing user to add a new device
@@ -167,6 +168,9 @@ export async function POST(request: NextRequest) {
 
     // Clear recovery flag in session
     await db.collection("sessions").updateOne({ token: sessionId }, { $unset: { recoveryLogin: "" } })
+
+    // Self-heal any pre-existing malformed passkey transports. Fire-and-forget.
+    void normalizePasskeyTransports(db, session.userId.toString())
 
     return NextResponse.json({ success: true })
   } catch (error) {

@@ -21,6 +21,7 @@ import { useAuth } from "@/components/providers/auth-provider"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
 import { motion, AnimatePresence } from "framer-motion"
 import { GlassContainer } from "@/components/ui/glass-container"
+import { BorderGlow } from "@/components/ui/border-glow"
 
 type Step =
   | "initial" // Choose login or register
@@ -61,10 +62,22 @@ export default function LoginPage() {
     setMounted(true)
   }, [])
 
-  // Auto-submit TOTP when all 6 digits are entered (typed or pasted)
+  // Auto-submit TOTP once BOTH the 6-digit code and (for recovery) the callsign
+  // are present — order-independent. Debounced so mid-typing the callsign never
+  // submits a partial value, and so entering the code first then the callsign
+  // still triggers login (the old version fired on code-complete only and got
+  // stuck on the empty-callsign early-return).
   const autoSubmitRef = useRef(false)
   useEffect(() => {
-    if (totpCode.length === 6 && !isLoading && !autoSubmitRef.current) {
+    if (totpCode.length < 6) {
+      autoSubmitRef.current = false
+      return
+    }
+    if (step !== "recovery" && step !== "register-verify") return
+    const callsignReady = step === "register-verify" || callsign.trim().length >= 2
+    if (!callsignReady || isLoading || autoSubmitRef.current) return
+
+    const timer = setTimeout(() => {
       autoSubmitRef.current = true
       // Blur OTP input to dismiss focus ring
       if (document.activeElement instanceof HTMLElement) {
@@ -72,17 +85,15 @@ export default function LoginPage() {
       }
       if (step === "recovery") {
         recoveryLogin()
-      } else if (step === "register-verify") {
+      } else {
         verifyTotpSetup()
       }
-    }
-    if (totpCode.length < 6) {
-      autoSubmitRef.current = false
-    }
-    // Auto-submit is keyed on the code/step; the submit handlers are recreated
-    // each render and intentionally excluded so this doesn't fire every render.
+    }, 300)
+    return () => clearTimeout(timer)
+    // The submit handlers are recreated each render and intentionally excluded so
+    // this doesn't fire every render; it's keyed on the code/callsign/step.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totpCode, step, isLoading])
+  }, [totpCode, callsign, step, isLoading])
 
   // Show the passkey button whenever the browser supports WebAuthn. Gating on
   // isConditionalMediationAvailable() (autofill support) was wrong — it hid the
@@ -543,9 +554,8 @@ export default function LoginPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  // TOTP status class for OTP input group
-  const totpInputClass = totpStatus === "loading" ? "totp-loading" :
-    totpStatus === "success" ? "totp-success" :
+  // TOTP status class for OTP input group (loading is handled by <BorderGlow/>)
+  const totpInputClass = totpStatus === "success" ? "totp-success" :
     totpStatus === "error" ? "totp-error" : ""
 
   return (
@@ -710,14 +720,16 @@ export default function LoginPage() {
 
                   <div className="flex justify-center">
                     <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
-                      <InputOTPGroup className={totpInputClass}>
-                        <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                        <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                        <InputOTPSlot index={2} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                        <InputOTPSlot index={3} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                        <InputOTPSlot index={4} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                        <InputOTPSlot index={5} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                      </InputOTPGroup>
+                      <BorderGlow active={totpStatus === "loading"} radius="0.5rem">
+                        <InputOTPGroup className={totpInputClass}>
+                          <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                          <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                          <InputOTPSlot index={2} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                          <InputOTPSlot index={3} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                          <InputOTPSlot index={4} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                          <InputOTPSlot index={5} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                        </InputOTPGroup>
+                      </BorderGlow>
                     </InputOTP>
                   </div>
                 </div>
@@ -897,14 +909,16 @@ export default function LoginPage() {
 
                   <div className="flex justify-center">
                     <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
-                      <InputOTPGroup className={totpInputClass}>
-                        <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                        <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                        <InputOTPSlot index={2} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                        <InputOTPSlot index={3} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                        <InputOTPSlot index={4} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                        <InputOTPSlot index={5} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
-                      </InputOTPGroup>
+                      <BorderGlow active={totpStatus === "loading"} radius="0.5rem">
+                        <InputOTPGroup className={totpInputClass}>
+                          <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                          <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                          <InputOTPSlot index={2} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                          <InputOTPSlot index={3} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                          <InputOTPSlot index={4} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                          <InputOTPSlot index={5} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
+                        </InputOTPGroup>
+                      </BorderGlow>
                     </InputOTP>
                   </div>
                 </div>

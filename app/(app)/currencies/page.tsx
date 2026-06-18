@@ -7,6 +7,7 @@ import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
   SelectContent,
@@ -15,18 +16,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
   Shield,
   RefreshCw,
   Plus,
   ShieldCheck,
-  Trash2,
 } from "lucide-react"
 import { useCurrencies } from "@/hooks/data"
 import { CurrencyCard, CurrencyFormDialog } from "@/components/roster"
@@ -39,8 +32,6 @@ type FilterStatus = "all" | CurrencyStatus
 export default function CurrenciesPage() {
   const { currencies, isLoading, refresh } = useCurrencies()
   const [filterStatus, setFilterStatus] = useSessionState<FilterStatus>("currencies:filter", "all")
-  const [currencyToDelete, setCurrencyToDelete] = useState<CurrencyWithStatus | null>(null)
-  const [isDeleting, setIsDeleting] = useState(false)
   const [currencyToEdit, setCurrencyToEdit] = useState<CurrencyWithStatus | null>(null)
   const [showAddDialog, setShowAddDialog] = useState(false)
 
@@ -64,18 +55,12 @@ export default function CurrenciesPage() {
     {} as Record<CurrencyStatus, number>
   )
 
-  const handleDelete = async () => {
-    if (!currencyToDelete) return
-
+  const handleDelete = async (currency: CurrencyWithStatus) => {
     try {
-      setIsDeleting(true)
-      await deleteCurrency(currencyToDelete.id)
+      await deleteCurrency(currency.id)
       await refresh()
-      setCurrencyToDelete(null)
     } catch (error) {
       console.error("Failed to delete currency:", error)
-    } finally {
-      setIsDeleting(false)
     }
   }
 
@@ -148,6 +133,15 @@ export default function CurrenciesPage() {
           </Select>
         </div>
 
+        {/* First-load skeleton */}
+        {isLoading && currencies.length === 0 && (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-20 w-full rounded-xl" />
+            ))}
+          </div>
+        )}
+
         {/* Empty State */}
         {currencies.length === 0 && !isLoading && (
           <Card>
@@ -173,7 +167,7 @@ export default function CurrenciesPage() {
                 key={currency.id}
                 currency={currency}
                 onEdit={(c) => setCurrencyToEdit(c)}
-                onDelete={(c) => setCurrencyToDelete(c)}
+                onDelete={(c) => handleDelete(c)}
               />
             ))}
           </div>
@@ -190,38 +184,6 @@ export default function CurrenciesPage() {
           </Card>
         )}
       </div>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={!!currencyToDelete} onOpenChange={() => setCurrencyToDelete(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Currency</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete{" "}
-              <span className="font-semibold">{currencyToDelete?.description}</span>? This action
-              cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex gap-2 justify-end mt-4">
-            <Button variant="outline" onClick={() => setCurrencyToDelete(null)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={isDeleting}>
-              {isDeleting ? (
-                <>
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                <>
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete
-                </>
-              )}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Add/Edit Dialog */}
       <CurrencyFormDialog

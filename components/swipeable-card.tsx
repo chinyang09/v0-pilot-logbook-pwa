@@ -12,6 +12,7 @@ import {
   type PanInfo,
 } from "framer-motion"
 import { cn } from "@/lib/utils"
+import { useHoldToConfirm } from "@/hooks/use-hold-to-confirm"
 
 const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
 
@@ -37,6 +38,14 @@ export interface SwipeAction {
   variant?: "default" | "destructive" | "secondary"
   className?: string
   disabled?: boolean
+  /**
+   * When true the action is not fired on a tap — the user must **press and
+   * hold** the button until it charges, which fills the row red. Releasing
+   * early cancels. Used for destructive actions (delete) in place of a dialog.
+   */
+  holdToConfirm?: boolean
+  /** Hold duration in ms (default 700). */
+  holdDuration?: number
 }
 
 interface SwipeableCardProps {
@@ -82,32 +91,48 @@ function SwipeActionButton({
   startX,
   endX,
   onClose,
+  chargeMV,
 }: {
   action: SwipeAction
   x: MotionValue<number>
   startX: number
   endX: number
   onClose: () => void
+  chargeMV: MotionValue<number>
 }) {
   // 0 (hidden) → 1 (fully revealed) across this button's stagger window.
   const reveal = useTransform(x, [endX, startX], [1, 0], { clamp: true })
   const scale = useSpring(useTransform(reveal, [0, 1], [0.4, 1]), POP_SPRING)
   const opacity = useSpring(reveal, POP_SPRING)
 
+  const isHold = !!action.holdToConfirm
+  // The hook is always called (hooks rule); its gesture handlers are only wired
+  // for hold actions. For a hold action it drives the shared row `chargeMV`.
+  const { handlers: holdHandlers } = useHoldToConfirm({
+    duration: action.holdDuration ?? 700,
+    disabled: action.disabled || !isHold,
+    progress: chargeMV,
+    onConfirm: useCallback(() => {
+      action.onClick()
+      onClose()
+    }, [action, onClose]),
+  })
+
   return (
     <motion.button
       type="button"
       onClick={(e: React.MouseEvent) => {
         e.stopPropagation()
-        if (action.disabled) return
+        if (action.disabled || isHold) return
         action.onClick()
         onClose()
       }}
+      {...(isHold ? holdHandlers : {})}
       disabled={action.disabled}
-      style={{ scale, opacity, width: BUTTON_WIDTH }}
+      style={{ scale, opacity, width: BUTTON_WIDTH, touchAction: "none" }}
       className={cn(
         "shrink-0 self-stretch flex flex-col items-center justify-center gap-0.5",
-        "rounded-lg overflow-hidden disabled:opacity-50",
+        "rounded-lg overflow-hidden disabled:opacity-50 select-none",
         variantClasses(action.variant),
         action.className
       )}
@@ -159,6 +184,12 @@ export function SwipeableCard({
   const panelWidth = useTransform(x, (v) => Math.max(0, -v))
   // True while the row is swiped open or mid-gesture (drives the card morph).
   const [active, setActive] = useState(false)
+
+  // Shared 0→1 charge for a press-and-hold (destructive) action — drives the
+  // red fill that sweeps across the row as the user holds the delete button.
+  const charge = useMotionValue(0)
+  const chargeOpacity = useTransform(charge, [0, 0.001, 1], [0, 1, 1])
+  const hasHoldAction = actions.some((a) => a.holdToConfirm && !a.disabled)
 
   // Tracks whether the last pointer interaction actually moved (drag vs tap).
   const movedRef = useRef(false)
@@ -286,6 +317,7 @@ export function SwipeableCard({
                 startX={-startReveal}
                 endX={-endReveal}
                 onClose={close}
+                chargeMV={charge}
               />
             )
           })}
@@ -310,12 +342,20 @@ export function SwipeableCard({
       >
         <div
           className={cn(
-            "bg-card transition-[background-color,border-radius] duration-150",
+            "relative overflow-hidden bg-card transition-[background-color,border-radius] duration-150",
             isCard && "rounded-lg",
             !isCard && active && "rounded-lg bg-secondary"
           )}
         >
           {children}
+          {/* Red charge fill that sweeps across the row as a hold action is held. */}
+          {hasHoldAction && (
+            <motion.div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 z-[2] origin-left bg-destructive"
+              style={{ scaleX: charge, opacity: chargeOpacity }}
+            />
+          )}
         </div>
       </motion.div>
     </div>
