@@ -27,6 +27,7 @@ export interface PasskeyCredential {
   transports?: AuthenticatorTransport[];
   createdAt: number; // Keep as number for easy client-side sorting
   name?: string; // User-friendly name (e.g., "iPhone", "MacBook")
+  deviceId?: string; // Opaque per-browser id (localStorage) of the device that registered this passkey
 }
 
 
@@ -66,7 +67,7 @@ export interface StoredChallenge {
   _id: string; // The challenge string (base64url)
   userId: string;
   expiresAt: Date; // Date for TTL cleanup
-  type: "registration" | "authentication" | "add-passkey";
+  type: "registration" | "authentication" | "add-passkey" | "step-up";
 }
 
 // Legacy/Ceremony type for API responses

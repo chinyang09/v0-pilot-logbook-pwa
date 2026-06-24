@@ -32,6 +32,12 @@ const POP_SPRING = { stiffness: 700, damping: 24, mass: 0.6 }
 
 export interface SwipeAction {
   label?: string
+  /**
+   * Accessible name for an icon-only action (no visible text). Delete/logout and
+   * similar destructive actions are icon-only app-wide; this keeps them labelled
+   * for screen readers.
+   */
+  ariaLabel?: string
   /** Optional — actions may be label-only (e.g. "Clear") */
   icon?: React.ReactNode
   onClick: () => void
@@ -121,6 +127,7 @@ function SwipeActionButton({
   return (
     <motion.button
       type="button"
+      aria-label={action.ariaLabel ?? action.label}
       onClick={(e: React.MouseEvent) => {
         e.stopPropagation()
         if (action.disabled || isHold) return
@@ -186,9 +193,12 @@ export function SwipeableCard({
   const [active, setActive] = useState(false)
 
   // Shared 0→1 charge for a press-and-hold (destructive) action — drives the
-  // red fill that sweeps across the row as the user holds the delete button.
+  // liquid red fill that sweeps across the row as the user holds the button.
   const charge = useMotionValue(0)
   const chargeOpacity = useTransform(charge, [0, 0.001, 1], [0, 1, 1])
+  // Width-based, eased sweep with a rounded leading edge (matches
+  // HoldToConfirmButton) instead of a hard left→right scaleX rectangle.
+  const chargeWidth = useTransform(charge, (v) => `${(1 - Math.pow(1 - v, 3)) * 100}%`)
   const hasHoldAction = actions.some((a) => a.holdToConfirm && !a.disabled)
 
   // Tracks whether the last pointer interaction actually moved (drag vs tap).
@@ -311,7 +321,7 @@ export function SwipeableCard({
             const endReveal = startReveal + unit
             return (
               <SwipeActionButton
-                key={action.label ?? index}
+                key={action.label ?? action.ariaLabel ?? index}
                 action={action}
                 x={x}
                 startX={-startReveal}
@@ -348,12 +358,13 @@ export function SwipeableCard({
           )}
         >
           {children}
-          {/* Red charge fill that sweeps across the row as a hold action is held. */}
+          {/* Liquid red charge fill that sweeps across the row as a hold action
+              is held (rounded leading edge, eased). */}
           {hasHoldAction && (
             <motion.div
               aria-hidden
-              className="pointer-events-none absolute inset-0 z-[2] origin-left bg-destructive"
-              style={{ scaleX: charge, opacity: chargeOpacity }}
+              className="pointer-events-none absolute inset-y-0 left-0 z-[2] rounded-r-xl bg-gradient-to-r from-destructive to-[color-mix(in_oklch,var(--destructive)_82%,black)]"
+              style={{ width: chargeWidth, opacity: chargeOpacity }}
             />
           )}
         </div>

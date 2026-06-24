@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from "@/components/ui/button"
 import { Fingerprint, Loader2, X } from "lucide-react"
 import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
+import { getOrCreateDeviceId } from "@/lib/utils/device"
 
 export function AddPasskeyPrompt() {
   const searchParams = useSearchParams()
@@ -62,6 +63,7 @@ export function AddPasskeyPrompt() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          deviceId: getOrCreateDeviceId(),
           credential: {
             id: pubKeyCred.id,
             rawId: base64URLEncode(pubKeyCred.rawId),

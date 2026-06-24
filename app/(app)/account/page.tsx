@@ -23,15 +23,21 @@ import {
   X,
   Download,
   CheckCircle2,
+  Check,
+  Copy,
   Share,
   MoreVertical,
   LogOut,
+  Fingerprint,
+  QrCode,
 } from "lucide-react"
+import { QRCodeSVG } from "qrcode.react"
 import { motion, AnimatePresence } from "framer-motion"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button"
 import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
 import { parseUserAgent } from "@/lib/utils/user-agent"
+import { getOrCreateDeviceId } from "@/lib/utils/device"
 
 interface ProfileData {
   userId: string
@@ -43,6 +49,7 @@ interface ProfileData {
     deviceType: string
     backedUp: boolean
     createdAt: number
+    deviceId: string | null
   }>
   sessionCount: number
   createdAt: number
@@ -58,6 +65,14 @@ interface SessionData {
   userAgent: string | null
 }
 
+interface StepUpAssertion {
+  challenge: string
+  credential: {
+    id: string
+    response: { authenticatorData: string; clientDataJSON: string; signature: string }
+  }
+}
+
 /** Pick an icon that roughly matches the device class parsed from the UA. */
 function deviceIconFor(os: string) {
   if (os === "iPhone" || os === "Android") return Smartphone
@@ -70,6 +85,11 @@ export default function AccountPage() {
   const [profile, setProfile] = useState<ProfileData | null>(null)
   const [sessions, setSessions] = useState<SessionData[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  // Read the per-browser device id lazily (localStorage). Only used in
+  // client-fetched comparisons, so the SSR/CSR null→id difference is invisible.
+  const [myDeviceId] = useState<string | null>(() =>
+    typeof window !== "undefined" ? getOrCreateDeviceId() : null,
+  )
 
   // Inline callsign edit (accordion inside the Profile card)
   const [isEditingCallsign, setIsEditingCallsign] = useState(false)
@@ -78,6 +98,15 @@ export default function AccountPage() {
   const [callsignError, setCallsignError] = useState("")
   const [callsignSuccess, setCallsignSuccess] = useState("")
   const [isChangingCallsign, setIsChangingCallsign] = useState(false)
+  const [isPasskeyVerifying, setIsPasskeyVerifying] = useState(false)
+
+  // TOTP re-add (reveal seed/QR) — gated by passkey step-up
+  const [totpReveal, setTotpReveal] = useState<{ secret: string; uri: string } | null>(null)
+  const [isRevealing, setIsRevealing] = useState(false)
+  const [revealError, setRevealError] = useState("")
+
+  // Copy-to-clipboard feedback (keyed so each button flips independently)
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
   // Clear stale keep-alive page actions
   useRegisterMainActions(null, true)
@@ -92,7 +121,10 @@ export default function AccountPage() {
   // Add-passkey state
   const [isAddingPasskey, setIsAddingPasskey] = useState(false)
   const [addPasskeyError, setAddPasskeyError] = useState("")
-  const [addPasskeyNotice, setAddPasskeyNotice] = useState("")
+  // Set when this device is detected to already hold a passkey that predates the
+  // deviceId tag (legacy) — the authenticator rejects a duplicate with
+  // InvalidStateError, which we treat as "already registered here".
+  const [devicePasskeyDetected, setDevicePasskeyDetected] = useState(false)
 
   // PWA install state
   const [pwaInstalled, setPwaInstalled] = useState(false)
@@ -188,44 +220,145 @@ export default function AccountPage() {
     }
   }, [fetchProfile, fetchSessions])
 
+  const copyToClipboard = useCallback(async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedKey(key)
+      setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500)
+    } catch (e) {
+      console.error("[Account] copy failed:", e)
+    }
+  }, [])
+
   const openCallsignEditor = () => {
     setCallsignError("")
     setCallsignSuccess("")
+    setRevealError("")
     setNewCallsign("")
     setTotpCode("")
+    setTotpReveal(null)
     setIsEditingCallsign((v) => !v)
   }
 
-  const handleChangeCallsign = async () => {
+  // Run a passkey "step-up" ceremony and return the assertion (or null if the
+  // user cancelled). Throws for setup/availability errors so callers can message.
+  const stepUpPasskey = useCallback(async (): Promise<StepUpAssertion | null> => {
+    const res = await fetch("/api/account/step-up", { cache: "no-store" })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.error || "Could not start passkey verification")
+    }
+    const options = await res.json()
+    const credential = (await navigator.credentials.get({
+      publicKey: {
+        challenge: base64URLDecode(options.challenge),
+        rpId: window.location.hostname,
+        timeout: options.timeout,
+        userVerification: options.userVerification,
+        allowCredentials: (options.allowCredentials || []).map((c: { id: string; transports?: unknown }) => {
+          const desc: PublicKeyCredentialDescriptor = { id: base64URLDecode(c.id), type: "public-key" }
+          if (Array.isArray(c.transports) && c.transports.every((t) => typeof t === "string")) {
+            desc.transports = c.transports as AuthenticatorTransport[]
+          }
+          return desc
+        }),
+      },
+    })) as PublicKeyCredential | null
+
+    if (!credential) return null
+    const r = credential.response as AuthenticatorAssertionResponse
+    return {
+      challenge: options.challenge,
+      credential: {
+        id: credential.id,
+        response: {
+          clientDataJSON: base64URLEncode(r.clientDataJSON),
+          authenticatorData: base64URLEncode(r.authenticatorData),
+          signature: base64URLEncode(r.signature),
+        },
+      },
+    }
+  }, [])
+
+  const applyCallsignResult = async (res: Response) => {
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setCallsignError(data.error || "Failed to change callsign")
+      return false
+    }
+    await updateCallsign(data.callsign)
+    setCallsignSuccess("Callsign updated")
+    setNewCallsign("")
+    setTotpCode("")
+    fetchProfile()
+    setTimeout(() => setIsEditingCallsign(false), 900)
+    return true
+  }
+
+  const handleChangeCallsignTotp = async () => {
     setCallsignError("")
     setCallsignSuccess("")
     setIsChangingCallsign(true)
-
     try {
       const res = await fetch("/api/account/callsign", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ newCallsign: newCallsign.trim(), totpCode }),
       })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        setCallsignError(data.error || "Failed to change callsign")
-        return
-      }
-
-      await updateCallsign(data.callsign)
-      setCallsignSuccess("Callsign updated")
-      setNewCallsign("")
-      setTotpCode("")
-      fetchProfile()
-      // Collapse the editor shortly after success.
-      setTimeout(() => setIsEditingCallsign(false), 900)
+      await applyCallsignResult(res)
     } catch {
       setCallsignError("Network error. Please try again.")
     } finally {
       setIsChangingCallsign(false)
+    }
+  }
+
+  const handleChangeCallsignPasskey = async () => {
+    setCallsignError("")
+    setCallsignSuccess("")
+    setIsPasskeyVerifying(true)
+    try {
+      const assertion = await stepUpPasskey()
+      if (!assertion) return // user cancelled
+      const res = await fetch("/api/account/callsign", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newCallsign: newCallsign.trim(), assertion }),
+      })
+      await applyCallsignResult(res)
+    } catch (err) {
+      if (err instanceof Error && err.name === "NotAllowedError") {
+        setCallsignError("Passkey verification was cancelled.")
+      } else {
+        setCallsignError(err instanceof Error ? err.message : "Passkey verification failed")
+      }
+    } finally {
+      setIsPasskeyVerifying(false)
+    }
+  }
+
+  const handleRevealTotp = async () => {
+    setRevealError("")
+    setIsRevealing(true)
+    try {
+      const assertion = await stepUpPasskey()
+      if (!assertion) return
+      const res = await fetch("/api/account/totp/reveal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assertion }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || "Could not reveal authenticator code")
+      setTotpReveal({ secret: data.secret, uri: data.uri })
+    } catch (err) {
+      if (err instanceof Error && err.name === "NotAllowedError") {
+        setRevealError("Passkey verification was cancelled.")
+      } else {
+        setRevealError(err instanceof Error ? err.message : "Could not reveal authenticator code")
+      }
+    } finally {
+      setIsRevealing(false)
     }
   }
 
@@ -240,8 +373,8 @@ export default function AccountPage() {
 
       if (res.ok) {
         const data = await res.json().catch(() => ({}))
-        // Revoking the current device's session is now allowed — when it's the
-        // one backing this request, finish by clearing local data + signing out.
+        // Revoking the current device's session is allowed — when it's the one
+        // backing this request, finish by clearing local data + signing out.
         if (data.loggedOutCurrent || session.isCurrent) {
           await logout()
           return
@@ -258,8 +391,6 @@ export default function AccountPage() {
   const handleLogoutAll = async () => {
     setIsLoggingOutAll(true)
     try {
-      // Drop every server session row, then run the local logout (clears the
-      // cookie + IndexedDB and redirects to the login flow).
       await fetch("/api/account/sessions", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
@@ -279,10 +410,7 @@ export default function AccountPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ credentialId }),
       })
-
-      if (res.ok) {
-        fetchProfile()
-      }
+      if (res.ok) fetchProfile()
     } catch (error) {
       console.error("[Account] Failed to remove passkey:", error)
     } finally {
@@ -292,10 +420,8 @@ export default function AccountPage() {
 
   const handleAddPasskey = async () => {
     setAddPasskeyError("")
-    setAddPasskeyNotice("")
     setIsAddingPasskey(true)
     try {
-      // 1. Get registration options
       const optionsRes = await fetch("/api/auth/register/add-passkey", { cache: "no-store" })
       if (!optionsRes.ok) {
         const err = await optionsRes.json().catch(() => ({}))
@@ -303,7 +429,6 @@ export default function AccountPage() {
       }
       const options = await optionsRes.json()
 
-      // 2. Run the WebAuthn create ceremony on this device
       const credential = (await navigator.credentials.create({
         publicKey: {
           challenge: base64URLDecode(options.challenge),
@@ -325,8 +450,6 @@ export default function AccountPage() {
           },
           excludeCredentials: (options.excludeCredentials || []).map((c: { id: string; transports?: unknown }) => {
             const desc: PublicKeyCredentialDescriptor = { id: base64URLDecode(c.id), type: "public-key" }
-            // Pass transports only when valid — a null/garbage value makes
-            // create() throw "value is not a sequence".
             if (Array.isArray(c.transports) && c.transports.every((t) => typeof t === "string")) {
               desc.transports = c.transports as AuthenticatorTransport[]
             }
@@ -338,12 +461,12 @@ export default function AccountPage() {
       if (!credential) throw new Error("Passkey setup cancelled")
       const response = credential.response as AuthenticatorAttestationResponse
 
-      // 3. Verify + persist server-side
       const saveRes = await fetch("/api/auth/register/add-passkey", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           challenge: options.challenge,
+          deviceId: getOrCreateDeviceId(),
           credential: {
             id: credential.id,
             rawId: base64URLEncode(credential.rawId),
@@ -365,12 +488,13 @@ export default function AccountPage() {
 
       await fetchProfile()
     } catch (err) {
-      // This device already holds a passkey for the account. The authenticator
-      // (via excludeCredentials) refuses to create a duplicate and throws
-      // InvalidStateError. That's not a failure — there's simply nothing to do,
-      // so notify politely and exit the flow cleanly.
+      // Shouldn't normally happen now that the UI hides "Add" once this device is
+      // registered, but keep it as a safety net: a duplicate on the device throws
+      // InvalidStateError — treat as a no-op with a gentle note, not an error.
       if (err instanceof Error && err.name === "InvalidStateError") {
-        setAddPasskeyNotice("A passkey for this device is already registered and active.")
+        setAddPasskeyError("")
+        setDevicePasskeyDetected(true)
+        await fetchProfile()
       } else if (err instanceof Error && err.name === "NotAllowedError") {
         setAddPasskeyError("Passkey setup was cancelled.")
       } else {
@@ -383,11 +507,7 @@ export default function AccountPage() {
 
   const formatDate = (dateInput: string | number) => {
     const date = new Date(dateInput)
-    return date.toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    })
+    return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
   }
 
   const formatRelativeTime = (dateInput: string | number) => {
@@ -397,16 +517,21 @@ export default function AccountPage() {
     const diffMins = Math.floor(diffMs / 60000)
     const diffHours = Math.floor(diffMs / 3600000)
     const diffDays = Math.floor(diffMs / 86400000)
-
     if (diffMins < 1) return "Just now"
     if (diffMins < 60) return `${diffMins}m ago`
     if (diffHours < 24) return `${diffHours}h ago`
     return `${diffDays}d ago`
   }
 
+  // Does the *current* browser already hold a passkey for this account? Either a
+  // stored deviceId matches, or a previous add attempt proved it (legacy keys).
+  const thisDeviceHasPasskey =
+    devicePasskeyDetected ||
+    (!!myDeviceId && !!profile?.passkeys.some((pk) => pk.deviceId && pk.deviceId === myDeviceId))
+
   return (
     <PageContainer>
-      <div className="px-4 pt-4 pb-safe space-y-4 max-w-2xl mx-auto w-full">
+      <div className="px-4 pt-4 space-y-4 max-w-2xl mx-auto w-full">
 
         {/* Global logout — prominent, at the very top */}
         <HoldToConfirmButton
@@ -450,9 +575,11 @@ export default function AccountPage() {
                   transition={{ duration: 0.2, ease: "easeOut" }}
                   className="overflow-hidden"
                 >
-                  <div className="space-y-3 rounded-lg bg-muted/40 p-3">
+                  {/* Styled as a continuation of the card (divider + rows), not a
+                      separate inner card. */}
+                  <div className="space-y-4 border-t border-border/60 pt-3">
                     <div className="space-y-1.5">
-                      <Label htmlFor="new-callsign" className="text-xs">New callsign</Label>
+                      <Label htmlFor="new-callsign" className="text-xs text-muted-foreground">New callsign</Label>
                       <Input
                         id="new-callsign"
                         value={newCallsign}
@@ -462,8 +589,33 @@ export default function AccountPage() {
                         className="h-9"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Authenticator code</Label>
+
+                    {/* Primary: authorize with a passkey (works even if the
+                        authenticator was lost). */}
+                    <Button
+                      className="w-full"
+                      size="sm"
+                      onClick={handleChangeCallsignPasskey}
+                      disabled={!newCallsign.trim() || isPasskeyVerifying || isChangingCallsign}
+                    >
+                      {isPasskeyVerifying ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Fingerprint className="h-4 w-4 mr-2" />
+                      )}
+                      Verify with passkey & save
+                    </Button>
+
+                    <div className="relative">
+                      <div className="absolute inset-0 flex items-center">
+                        <span className="w-full border-t border-border/60" />
+                      </div>
+                      <div className="relative flex justify-center text-[10px] uppercase tracking-wide">
+                        <span className="px-2 bg-card text-muted-foreground">or use authenticator code</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
                       <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode}>
                         <InputOTPGroup>
                           <InputOTPSlot index={0} />
@@ -474,31 +626,42 @@ export default function AccountPage() {
                           <InputOTPSlot index={5} />
                         </InputOTPGroup>
                       </InputOTP>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                        onClick={handleChangeCallsignTotp}
+                        disabled={!newCallsign.trim() || totpCode.length !== 6 || isChangingCallsign || isPasskeyVerifying}
+                      >
+                        {isChangingCallsign && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                        Save with code
+                      </Button>
                     </div>
 
                     {callsignError && <p className="text-sm text-destructive">{callsignError}</p>}
                     {callsignSuccess && (
                       <p className="text-sm text-green-600 dark:text-green-400">{callsignSuccess}</p>
                     )}
-
-                    <Button
-                      size="sm"
-                      onClick={handleChangeCallsign}
-                      disabled={!newCallsign.trim() || totpCode.length !== 6 || isChangingCallsign}
-                    >
-                      {isChangingCallsign && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                      Update callsign
-                    </Button>
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
 
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">User ID</span>
-              <span className="text-sm font-mono text-muted-foreground truncate max-w-[55%] text-right">
-                {profile?.userId || user?.userId}
-              </span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-muted-foreground shrink-0">User ID</span>
+              <button
+                type="button"
+                onClick={() => copyToClipboard(profile?.userId || user?.userId || "", "userId")}
+                className="flex items-center gap-1.5 min-w-0 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Copy User ID"
+              >
+                <span className="text-sm font-mono truncate">{profile?.userId || user?.userId}</span>
+                {copiedKey === "userId" ? (
+                  <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5 shrink-0" />
+                )}
+              </button>
             </div>
             {profile?.createdAt && (
               <div className="flex items-center justify-between">
@@ -508,14 +671,76 @@ export default function AccountPage() {
             )}
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">2FA (TOTP)</span>
-              {isLoading && !profile ? (
-                <Skeleton className="h-5 w-16 rounded-full" />
-              ) : (
-                <Badge variant={profile?.totpEnabled ? "default" : "secondary"}>
-                  {profile?.totpEnabled ? "Enabled" : "Disabled"}
-                </Badge>
-              )}
+              <div className="flex items-center gap-2">
+                {profile?.totpEnabled && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs text-muted-foreground"
+                    onClick={handleRevealTotp}
+                    disabled={isRevealing}
+                    aria-label="Re-add authenticator"
+                  >
+                    {isRevealing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <QrCode className="h-3.5 w-3.5" />}
+                    <span className="ml-1">Re-add</span>
+                  </Button>
+                )}
+                {isLoading && !profile ? (
+                  <Skeleton className="h-5 w-16 rounded-full" />
+                ) : (
+                  <Badge variant={profile?.totpEnabled ? "default" : "secondary"}>
+                    {profile?.totpEnabled ? "Enabled" : "Disabled"}
+                  </Badge>
+                )}
+              </div>
             </div>
+
+            {revealError && <p className="text-sm text-destructive">{revealError}</p>}
+
+            <AnimatePresence initial={false}>
+              {totpReveal && (
+                <motion.div
+                  key="totp-reveal"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                  className="overflow-hidden"
+                >
+                  <div className="space-y-3 border-t border-border/60 pt-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs text-muted-foreground">
+                        Scan this with your authenticator app to re-add your account, or copy the key manually.
+                      </p>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground shrink-0"
+                        aria-label="Hide authenticator code"
+                        onClick={() => setTotpReveal(null)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="flex justify-center p-3 bg-white rounded-lg w-fit mx-auto">
+                      <QRCodeSVG value={totpReveal.uri} size={150} />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(totpReveal.secret, "totpSecret")}
+                      className="flex items-center justify-center gap-2 w-full text-xs bg-muted px-3 py-2 rounded-md font-mono break-all text-muted-foreground hover:bg-muted/70 transition-colors"
+                    >
+                      {totpReveal.secret}
+                      {copiedKey === "totpSecret" ? (
+                        <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5 shrink-0" />
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </CardContent>
         </Card>
 
@@ -539,6 +764,7 @@ export default function AccountPage() {
             )}
             {profile?.passkeys.map((pk) => {
               const canRemove = (profile?.passkeys.length || 0) > 1
+              const isThisDevice = !!myDeviceId && pk.deviceId === myDeviceId
               return (
                 <SwipeableCard
                   key={pk.credentialId}
@@ -547,7 +773,7 @@ export default function AccountPage() {
                   actions={[
                     {
                       icon: <Trash2 className="h-5 w-5" />,
-                      label: "Delete",
+                      ariaLabel: "Delete passkey",
                       variant: "destructive",
                       holdToConfirm: true,
                       disabled: !canRemove,
@@ -558,7 +784,12 @@ export default function AccountPage() {
                   <div className="flex items-center gap-3 px-4 py-3">
                     <KeyRound className="h-4 w-4 text-muted-foreground shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{pk.name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium truncate">{pk.name}</p>
+                        {isThisDevice && (
+                          <Badge variant="secondary" className="text-xs shrink-0">This device</Badge>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">
                         {pk.deviceType} {pk.backedUp && "· Synced"} · Added {formatDate(pk.createdAt)}
                       </p>
@@ -573,21 +804,24 @@ export default function AccountPage() {
 
             <div className="px-4 pt-3 space-y-2">
               {addPasskeyError && <p className="text-sm text-destructive">{addPasskeyError}</p>}
-              {addPasskeyNotice && (
-                <p className="text-sm text-muted-foreground flex items-start gap-1.5">
-                  <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0 text-green-600 dark:text-green-400" />
-                  {addPasskeyNotice}
-                </p>
-              )}
 
-              <Button variant="outline" size="sm" onClick={handleAddPasskey} disabled={isAddingPasskey}>
-                {isAddingPasskey ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4 mr-2" />
-                )}
-                Add Passkey
-              </Button>
+              {/* Smart: only offer to add a passkey when THIS device doesn't have
+                  one. Otherwise confirm the device is already secured. */}
+              {thisDeviceHasPasskey ? (
+                <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+                  This device already has a passkey.
+                </p>
+              ) : (
+                <Button variant="outline" size="sm" onClick={handleAddPasskey} disabled={isAddingPasskey}>
+                  {isAddingPasskey ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4 mr-2" />
+                  )}
+                  Add passkey for this device
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -621,7 +855,7 @@ export default function AccountPage() {
                   actions={[
                     {
                       icon: session.isCurrent ? <LogOut className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />,
-                      label: session.isCurrent ? "Sign out" : "Revoke",
+                      ariaLabel: session.isCurrent ? "Sign out this device" : "Revoke session",
                       variant: "destructive",
                       holdToConfirm: true,
                       onClick: () => handleRevokeSession(session),
@@ -635,9 +869,6 @@ export default function AccountPage() {
                         <p className="text-sm font-medium truncate">{deviceName}</p>
                         {session.isCurrent && (
                           <Badge variant="secondary" className="text-xs shrink-0">This device</Badge>
-                        )}
-                        {session.recoveryLogin && (
-                          <Badge variant="outline" className="text-xs shrink-0">Recovery</Badge>
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground">
