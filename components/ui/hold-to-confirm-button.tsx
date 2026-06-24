@@ -7,16 +7,36 @@ import { cn } from "@/lib/utils"
 import { useHoldToConfirm } from "@/hooks/use-hold-to-confirm"
 
 /**
- * Press-and-hold-to-confirm button. While held, an SVG border draws *around* the
- * button over a faint track (radial progress) and thickens, with a growing glow
- * — the motion.dev "hold to confirm" pattern. The label/icon stay fully visible
- * (no fill overlay). Releasing early just resets the progress; a full hold fires
- * {@link onConfirm}. (Whoever renders it decides how it's dismissed.)
- *
- * The border is an SVG `<rect>` whose `pathLength` is normalised to 100, so a
- * `strokeDashoffset` driven by the hold progress reveals the stroke from 0 → the
- * full perimeter regardless of the button's real size. Size is measured with a
- * ResizeObserver (setState only in the RO callback, never in the effect body).
+ * Build a rounded-rect outline path that STARTS at the top-centre (12 o'clock),
+ * runs clockwise, and returns to the top-centre. Used so the progress stroke
+ * grows from 12 o'clock clockwise (a plain `<rect>` would start at a corner).
+ */
+function topCenterRoundedRectPath(x: number, y: number, w: number, h: number, radius: number): string {
+  const r = Math.max(0, Math.min(radius, w / 2, h / 2))
+  const right = x + w
+  const bottom = y + h
+  const cx = x + w / 2
+  return [
+    `M ${cx} ${y}`,
+    `L ${right - r} ${y}`,
+    `A ${r} ${r} 0 0 1 ${right} ${y + r}`,
+    `L ${right} ${bottom - r}`,
+    `A ${r} ${r} 0 0 1 ${right - r} ${bottom}`,
+    `L ${x + r} ${bottom}`,
+    `A ${r} ${r} 0 0 1 ${x} ${bottom - r}`,
+    `L ${x} ${y + r}`,
+    `A ${r} ${r} 0 0 1 ${x + r} ${y}`,
+    `L ${cx} ${y}`,
+    "Z",
+  ].join(" ")
+}
+
+/**
+ * Press-and-hold-to-confirm button. While held, a stroke draws *around* the
+ * button over a faint track, starting from 12 o'clock clockwise, thickening with
+ * a growing glow — the motion.dev "hold to confirm" pattern. The label/icon stay
+ * visible (no fill). The button does NOT depress/scale on press. Releasing early
+ * just resets the progress; a full hold fires {@link onConfirm}.
  */
 export function HoldToConfirmButton({
   label,
@@ -38,7 +58,7 @@ export function HoldToConfirmButton({
   /** Corner radius of the animated border (px) — match the surface. */
   radius?: number
 }) {
-  const { progress, isCharging, handlers } = useHoldToConfirm({ duration, disabled, onConfirm })
+  const { progress, handlers } = useHoldToConfirm({ duration, disabled, onConfirm })
 
   const ref = useRef<HTMLButtonElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
@@ -55,8 +75,10 @@ export function HoldToConfirmButton({
   const inset = 3.5
   const w = Math.max(0, size.w - inset * 2)
   const h = Math.max(0, size.h - inset * 2)
+  const path = w > 0 && h > 0 ? topCenterRoundedRectPath(inset, inset, w, h, radius) : ""
 
-  // pathLength is normalised to 100; offset 100 → 0 reveals the stroke fully.
+  // pathLength is normalised to 100; offset 100 → 0 reveals the stroke fully,
+  // growing forward from the path start (12 o'clock) clockwise.
   const dashOffset = useTransform(progress, [0, 1], [100, 0])
   const strokeWidth = useTransform(progress, [0, 1], [1.5, 3.5])
   const filter = useTransform(progress, (p) => `drop-shadow(0 0 ${6 * p}px var(--destructive))`)
@@ -65,15 +87,13 @@ export function HoldToConfirmButton({
   const trackOpacity = useTransform(progress, [0, 0.001, 1], [0, 0.16, 0.16])
 
   return (
-    <motion.button
+    <button
       ref={ref}
       type="button"
       disabled={disabled}
       aria-label={ariaLabel ?? label}
       {...handlers}
       style={{ touchAction: "none" }}
-      animate={{ scale: isCharging ? 0.985 : 1 }}
-      transition={{ type: "spring", stiffness: 500, damping: 30 }}
       className={cn(
         "relative inline-flex h-11 select-none items-center justify-center gap-2",
         "rounded-xl border border-border bg-secondary px-4 text-sm font-medium text-foreground",
@@ -81,7 +101,7 @@ export function HoldToConfirmButton({
         className,
       )}
     >
-      {size.w > 0 && (
+      {path && (
         <svg
           aria-hidden
           className="pointer-events-none absolute inset-0 overflow-visible"
@@ -89,26 +109,16 @@ export function HoldToConfirmButton({
           height={size.h}
         >
           {/* Track (appears on press) */}
-          <motion.rect
-            x={inset}
-            y={inset}
-            width={w}
-            height={h}
-            rx={radius}
-            ry={radius}
+          <motion.path
+            d={path}
             fill="none"
             stroke="var(--destructive)"
             strokeWidth={1.5}
             style={{ opacity: trackOpacity }}
           />
-          {/* Progress arc */}
-          <motion.rect
-            x={inset}
-            y={inset}
-            width={w}
-            height={h}
-            rx={radius}
-            ry={radius}
+          {/* Progress arc — from 12 o'clock, clockwise */}
+          <motion.path
+            d={path}
             pathLength={100}
             fill="none"
             stroke="var(--destructive)"
@@ -122,6 +132,6 @@ export function HoldToConfirmButton({
         {icon}
         {label}
       </span>
-    </motion.button>
+    </button>
   )
 }

@@ -257,7 +257,6 @@ export function SwipeableCard({
   const handleDragStart = useCallback(() => {
     movedRef.current = false
     setActive(true)
-    setConfirmingAction(null)
     // Swiping dismisses any focused field (e.g. a row's inline input).
     if (typeof document !== "undefined") {
       const el = document.activeElement
@@ -376,24 +375,25 @@ export function SwipeableCard({
           )}
         >
           {children}
-          {/* Hold-to-confirm overlay: a translucent glass button covering the
-              row, with an animated progress border. Hold to fire the action;
-              release just resets — it's dismissed by tapping outside (handled
-              above). Sits above the content (and the .row-divider z-2). */}
+          {/* Hold-to-confirm overlay: a slight red tint over the row (NO blur —
+              the user must still see exactly what they're about to delete), with
+              an animated progress border. Hold to fire; release just resets — it
+              is dismissed by tapping outside (handled above). Above the content
+              (and the .row-divider z-2). */}
           <AnimatePresence>
             {confirmingAction && (
               <motion.div
                 className="absolute inset-0 z-[3] flex"
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.98 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
                 transition={{ duration: 0.16, ease: "easeOut" }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <HoldToConfirmButton
                   className={cn(
                     "h-full w-full gap-2.5 border-0 font-semibold text-destructive",
-                    "bg-background/70 backdrop-blur-md",
+                    "bg-destructive/15",
                     isCard || active ? "rounded-lg" : "rounded-none"
                   )}
                   radius={isCard || active ? 8 : 0}
