@@ -4,6 +4,7 @@ import type React from "react"
 import { useCallback, useEffect, useId, useRef, useState } from "react"
 import {
   animate,
+  AnimatePresence,
   motion,
   useMotionValue,
   useSpring,
@@ -232,6 +233,21 @@ export function SwipeableCard({
     [settle]
   )
 
+  // The confirm overlay is dismissed only by interacting *outside* this card
+  // (release just resets the hold). A capture-phase pointerdown anywhere outside
+  // the container clears it. The listener is added after the overlay mounts, so
+  // the tap that opened it never self-dismisses.
+  useEffect(() => {
+    if (!confirmingAction) return
+    const onPointerDown = (e: PointerEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) {
+        setConfirmingAction(null)
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown, true)
+    return () => document.removeEventListener("pointerdown", onPointerDown, true)
+  }, [confirmingAction])
+
   const closeOthers = useCallback(() => {
     window.dispatchEvent(
       new CustomEvent(SWIPE_CLOSE_EVENT, { detail: { id: cardId.current } })
@@ -360,30 +376,40 @@ export function SwipeableCard({
           )}
         >
           {children}
-          {/* Hold-to-confirm overlay: a translucent button covering the row, with
-              an animated progress border. Hold to fire the action, release to
-              dismiss. Sits above the content (and the .row-divider z-2). */}
-          {confirmingAction && (
-            <div className="absolute inset-0 z-[3] flex">
-              <HoldToConfirmButton
-                className={cn(
-                  "h-full w-full border-0 bg-background/55 text-destructive backdrop-blur-[2px]",
-                  isCard ? "rounded-lg" : active ? "rounded-lg" : "rounded-none"
-                )}
-                radius={isCard || active ? 8 : 0}
-                ariaLabel={confirmingAction.ariaLabel ?? confirmingAction.label ?? "Hold to confirm"}
-                icon={confirmingAction.icon}
-                label="Hold to confirm"
-                duration={confirmingAction.holdDuration}
-                onConfirm={() => {
-                  const a = confirmingAction
-                  setConfirmingAction(null)
-                  a.onClick()
-                }}
-                onCancel={() => setConfirmingAction(null)}
-              />
-            </div>
-          )}
+          {/* Hold-to-confirm overlay: a translucent glass button covering the
+              row, with an animated progress border. Hold to fire the action;
+              release just resets — it's dismissed by tapping outside (handled
+              above). Sits above the content (and the .row-divider z-2). */}
+          <AnimatePresence>
+            {confirmingAction && (
+              <motion.div
+                className="absolute inset-0 z-[3] flex"
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                transition={{ duration: 0.16, ease: "easeOut" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <HoldToConfirmButton
+                  className={cn(
+                    "h-full w-full gap-2.5 border-0 font-semibold text-destructive",
+                    "bg-background/70 backdrop-blur-md",
+                    isCard || active ? "rounded-lg" : "rounded-none"
+                  )}
+                  radius={isCard || active ? 8 : 0}
+                  ariaLabel={confirmingAction.ariaLabel ?? confirmingAction.label ?? "Hold to confirm"}
+                  icon={confirmingAction.icon}
+                  label="Hold to confirm"
+                  duration={confirmingAction.holdDuration}
+                  onConfirm={() => {
+                    const a = confirmingAction
+                    setConfirmingAction(null)
+                    a.onClick()
+                  }}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </motion.div>
     </div>

@@ -8,10 +8,10 @@ import { useHoldToConfirm } from "@/hooks/use-hold-to-confirm"
 
 /**
  * Press-and-hold-to-confirm button. While held, an SVG border draws *around* the
- * button (radial progress) and thickens, with a growing glow — the
- * motion.dev "hold to confirm" pattern. The label/icon stay fully visible (no
- * fill overlay). Releasing early cancels (and calls {@link onCancel}, used when
- * the button is a dismissable overlay); a full hold fires {@link onConfirm}.
+ * button over a faint track (radial progress) and thickens, with a growing glow
+ * — the motion.dev "hold to confirm" pattern. The label/icon stay fully visible
+ * (no fill overlay). Releasing early just resets the progress; a full hold fires
+ * {@link onConfirm}. (Whoever renders it decides how it's dismissed.)
  *
  * The border is an SVG `<rect>` whose `pathLength` is normalised to 100, so a
  * `strokeDashoffset` driven by the hold progress reveals the stroke from 0 → the
@@ -21,7 +21,6 @@ import { useHoldToConfirm } from "@/hooks/use-hold-to-confirm"
 export function HoldToConfirmButton({
   label,
   onConfirm,
-  onCancel,
   icon,
   disabled = false,
   duration,
@@ -31,8 +30,6 @@ export function HoldToConfirmButton({
 }: {
   label?: string
   onConfirm: () => void
-  /** Called on release before the hold completes (e.g. dismiss an overlay). */
-  onCancel?: () => void
   icon?: React.ReactNode
   disabled?: boolean
   duration?: number
@@ -41,15 +38,7 @@ export function HoldToConfirmButton({
   /** Corner radius of the animated border (px) — match the surface. */
   radius?: number
 }) {
-  const confirmedRef = useRef(false)
-  const { progress, isCharging, handlers } = useHoldToConfirm({
-    duration,
-    disabled,
-    onConfirm: () => {
-      confirmedRef.current = true
-      onConfirm()
-    },
-  })
+  const { progress, isCharging, handlers } = useHoldToConfirm({ duration, disabled, onConfirm })
 
   const ref = useRef<HTMLButtonElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
@@ -61,21 +50,19 @@ export function HoldToConfirmButton({
     return () => ro.disconnect()
   }, [])
 
-  const inset = 2
+  // Inset enough that the stroke + glow sit inside the surface (parents often
+  // clip with overflow-hidden).
+  const inset = 3.5
   const w = Math.max(0, size.w - inset * 2)
   const h = Math.max(0, size.h - inset * 2)
 
   // pathLength is normalised to 100; offset 100 → 0 reveals the stroke fully.
   const dashOffset = useTransform(progress, [0, 1], [100, 0])
-  const strokeWidth = useTransform(progress, [0, 1], [1.5, 4])
-  const filter = useTransform(progress, (p) => `drop-shadow(0 0 ${5 * p}px var(--destructive))`)
-
-  // On release, run the hook's reset, then dismiss if we didn't confirm.
-  const release = (e: React.PointerEvent, fn: (e: React.PointerEvent) => void) => {
-    fn(e)
-    if (!confirmedRef.current) onCancel?.()
-    confirmedRef.current = false
-  }
+  const strokeWidth = useTransform(progress, [0, 1], [1.5, 3.5])
+  const filter = useTransform(progress, (p) => `drop-shadow(0 0 ${6 * p}px var(--destructive))`)
+  // The faint track only appears once a press begins, so the resting button
+  // stays clean.
+  const trackOpacity = useTransform(progress, [0, 0.001, 1], [0, 0.16, 0.16])
 
   return (
     <motion.button
@@ -83,12 +70,9 @@ export function HoldToConfirmButton({
       type="button"
       disabled={disabled}
       aria-label={ariaLabel ?? label}
-      onPointerDown={handlers.onPointerDown}
-      onPointerUp={(e) => release(e, handlers.onPointerUp)}
-      onPointerLeave={(e) => release(e, handlers.onPointerLeave)}
-      onPointerCancel={(e) => release(e, handlers.onPointerCancel)}
+      {...handlers}
       style={{ touchAction: "none" }}
-      animate={{ scale: isCharging ? 0.98 : 1 }}
+      animate={{ scale: isCharging ? 0.985 : 1 }}
       transition={{ type: "spring", stiffness: 500, damping: 30 }}
       className={cn(
         "relative inline-flex h-11 select-none items-center justify-center gap-2",
@@ -104,6 +88,20 @@ export function HoldToConfirmButton({
           width={size.w}
           height={size.h}
         >
+          {/* Track (appears on press) */}
+          <motion.rect
+            x={inset}
+            y={inset}
+            width={w}
+            height={h}
+            rx={radius}
+            ry={radius}
+            fill="none"
+            stroke="var(--destructive)"
+            strokeWidth={1.5}
+            style={{ opacity: trackOpacity }}
+          />
+          {/* Progress arc */}
           <motion.rect
             x={inset}
             y={inset}
