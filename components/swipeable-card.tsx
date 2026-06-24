@@ -12,7 +12,7 @@ import {
   type PanInfo,
 } from "framer-motion"
 import { cn } from "@/lib/utils"
-import { useHoldToConfirm } from "@/hooks/use-hold-to-confirm"
+import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button"
 
 const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
 
@@ -45,9 +45,11 @@ export interface SwipeAction {
   className?: string
   disabled?: boolean
   /**
-   * When true the action is not fired on a tap — the user must **press and
-   * hold** the button until it charges, which fills the row red. Releasing
-   * early cancels. Used for destructive actions (delete) in place of a dialog.
+   * When true the action is not fired on a tap. Instead, tapping closes the
+   * action panel and raises a translucent confirm button over the row that the
+   * user must **press and hold** (an animated progress border draws around it).
+   * Releasing early dismisses it. Used for destructive actions in place of a
+   * dialog.
    */
   holdToConfirm?: boolean
   /** Hold duration in ms (default 700). */
@@ -89,7 +91,8 @@ function variantClasses(variant?: SwipeAction["variant"]): string {
 /**
  * A single revealed action button that scales/pops in (with spring) as the card
  * is dragged open, staggered by its position. Rests at opacity 0 when closed so
- * nothing peeks at the card's edge.
+ * nothing peeks at the card's edge. A tap fires the action (or, for a
+ * hold-to-confirm action, asks the parent to show the confirm overlay).
  */
 function SwipeActionButton({
   action,
@@ -97,32 +100,19 @@ function SwipeActionButton({
   startX,
   endX,
   onClose,
-  chargeMV,
+  onRequestConfirm,
 }: {
   action: SwipeAction
   x: MotionValue<number>
   startX: number
   endX: number
   onClose: () => void
-  chargeMV: MotionValue<number>
+  onRequestConfirm: (action: SwipeAction) => void
 }) {
   // 0 (hidden) → 1 (fully revealed) across this button's stagger window.
   const reveal = useTransform(x, [endX, startX], [1, 0], { clamp: true })
   const scale = useSpring(useTransform(reveal, [0, 1], [0.4, 1]), POP_SPRING)
   const opacity = useSpring(reveal, POP_SPRING)
-
-  const isHold = !!action.holdToConfirm
-  // The hook is always called (hooks rule); its gesture handlers are only wired
-  // for hold actions. For a hold action it drives the shared row `chargeMV`.
-  const { handlers: holdHandlers } = useHoldToConfirm({
-    duration: action.holdDuration ?? 700,
-    disabled: action.disabled || !isHold,
-    progress: chargeMV,
-    onConfirm: useCallback(() => {
-      action.onClick()
-      onClose()
-    }, [action, onClose]),
-  })
 
   return (
     <motion.button
@@ -130,13 +120,18 @@ function SwipeActionButton({
       aria-label={action.ariaLabel ?? action.label}
       onClick={(e: React.MouseEvent) => {
         e.stopPropagation()
-        if (action.disabled || isHold) return
+        if (action.disabled) return
+        // Hold-to-confirm actions don't fire on tap — they hand off to a
+        // translucent confirm overlay the user must press-and-hold.
+        if (action.holdToConfirm) {
+          onRequestConfirm(action)
+          return
+        }
         action.onClick()
         onClose()
       }}
-      {...(isHold ? holdHandlers : {})}
       disabled={action.disabled}
-      style={{ scale, opacity, width: BUTTON_WIDTH, touchAction: "none" }}
+      style={{ scale, opacity, width: BUTTON_WIDTH, touchAction: "manipulation" }}
       className={cn(
         "shrink-0 self-stretch flex flex-col items-center justify-center gap-0.5",
         "rounded-lg overflow-hidden disabled:opacity-50 select-none",
@@ -192,18 +187,10 @@ export function SwipeableCard({
   // True while the row is swiped open or mid-gesture (drives the card morph).
   const [active, setActive] = useState(false)
 
-  // Shared 0→1 charge for a press-and-hold (destructive) action — drives the
-  // liquid red fill that sweeps across the row as the user holds the button.
-  const charge = useMotionValue(0)
-  // The fill sits ON TOP of the row content (so it shows even when a consumer's
-  // card has an opaque background, e.g. flight/aircraft/crew rows), but its
-  // opacity ramps translucent → near-solid rather than fully opaque, so the row
-  // text stays legible *through* the sweep.
-  const chargeOpacity = useTransform(charge, [0, 0.05, 1], [0, 0.45, 0.82])
-  // Width-based, eased sweep with a rounded leading edge (matches
-  // HoldToConfirmButton) instead of a hard left→right scaleX rectangle.
-  const chargeWidth = useTransform(charge, (v) => `${(1 - Math.pow(1 - v, 3)) * 100}%`)
-  const hasHoldAction = actions.some((a) => a.holdToConfirm && !a.disabled)
+  // When a hold-to-confirm action is tapped, the panel closes and this
+  // translucent confirm button overlays the row; the user must press-and-hold it
+  // (animated progress border) to fire the action. Releasing early dismisses it.
+  const [confirmingAction, setConfirmingAction] = useState<SwipeAction | null>(null)
 
   // Tracks whether the last pointer interaction actually moved (drag vs tap).
   const movedRef = useRef(false)
@@ -228,12 +215,22 @@ export function SwipeableCard({
   useEffect(() => {
     const handler = (e: Event) => {
       if ((e as CustomEvent).detail?.id !== cardId.current) {
+        setConfirmingAction(null)
         animate(x, 0, { ...SPRING, onComplete: () => setActive(false) })
       }
     }
     window.addEventListener(SWIPE_CLOSE_EVENT, handler)
     return () => window.removeEventListener(SWIPE_CLOSE_EVENT, handler)
   }, [x])
+
+  // Tapping a hold-to-confirm action: close the panel and raise the overlay.
+  const requestConfirm = useCallback(
+    (action: SwipeAction) => {
+      setConfirmingAction(action)
+      settle(0)
+    },
+    [settle]
+  )
 
   const closeOthers = useCallback(() => {
     window.dispatchEvent(
@@ -244,6 +241,7 @@ export function SwipeableCard({
   const handleDragStart = useCallback(() => {
     movedRef.current = false
     setActive(true)
+    setConfirmingAction(null)
     // Swiping dismisses any focused field (e.g. a row's inline input).
     if (typeof document !== "undefined") {
       const el = document.activeElement
@@ -331,7 +329,7 @@ export function SwipeableCard({
                 startX={-startReveal}
                 endX={-endReveal}
                 onClose={close}
-                chargeMV={charge}
+                onRequestConfirm={requestConfirm}
               />
             )
           })}
@@ -362,15 +360,29 @@ export function SwipeableCard({
           )}
         >
           {children}
-          {/* Liquid red charge fill that sweeps across as a hold action is held
-              (rounded leading edge, eased, translucent→near-solid). On top of the
-              content but kept translucent so the row text shows through. */}
-          {hasHoldAction && (
-            <motion.div
-              aria-hidden
-              className="pointer-events-none absolute inset-y-0 left-0 z-[2] rounded-r-xl bg-gradient-to-r from-destructive to-[color-mix(in_oklch,var(--destructive)_82%,black)]"
-              style={{ width: chargeWidth, opacity: chargeOpacity }}
-            />
+          {/* Hold-to-confirm overlay: a translucent button covering the row, with
+              an animated progress border. Hold to fire the action, release to
+              dismiss. Sits above the content (and the .row-divider z-2). */}
+          {confirmingAction && (
+            <div className="absolute inset-0 z-[3] flex">
+              <HoldToConfirmButton
+                className={cn(
+                  "h-full w-full border-0 bg-background/55 text-destructive backdrop-blur-[2px]",
+                  isCard ? "rounded-lg" : active ? "rounded-lg" : "rounded-none"
+                )}
+                radius={isCard || active ? 8 : 0}
+                ariaLabel={confirmingAction.ariaLabel ?? confirmingAction.label ?? "Hold to confirm"}
+                icon={confirmingAction.icon}
+                label="Hold to confirm"
+                duration={confirmingAction.holdDuration}
+                onConfirm={() => {
+                  const a = confirmingAction
+                  setConfirmingAction(null)
+                  a.onClick()
+                }}
+                onCancel={() => setConfirmingAction(null)}
+              />
+            </div>
           )}
         </div>
       </motion.div>

@@ -21,7 +21,7 @@ import { useAuth } from "@/components/providers/auth-provider"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
 import { motion, AnimatePresence } from "framer-motion"
 import { GlassContainer } from "@/components/ui/glass-container"
-import { BorderGlow } from "@/components/ui/border-glow"
+import { BorderGlide } from "@/components/ui/border-glide"
 
 type Step =
   | "initial" // Choose login or register
@@ -561,7 +561,7 @@ export default function LoginPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  // TOTP status class for OTP input group (loading is handled by <BorderGlow/>)
+  // TOTP status class for OTP input group (loading is handled by <BorderGlide/>)
   const totpInputClass = totpStatus === "success" ? "totp-success" :
     totpStatus === "error" ? "totp-error" : ""
 
@@ -727,7 +727,7 @@ export default function LoginPage() {
 
                   <div className="flex justify-center">
                     <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
-                      <BorderGlow active={totpStatus === "loading"} radius="0.5rem">
+                      <BorderGlide active={totpStatus === "loading"} radius={8}>
                         <InputOTPGroup className={totpInputClass}>
                           <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                           <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
@@ -736,7 +736,7 @@ export default function LoginPage() {
                           <InputOTPSlot index={4} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                           <InputOTPSlot index={5} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                         </InputOTPGroup>
-                      </BorderGlow>
+                      </BorderGlide>
                     </InputOTP>
                   </div>
                 </div>
@@ -916,7 +916,7 @@ export default function LoginPage() {
 
                   <div className="flex justify-center">
                     <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
-                      <BorderGlow active={totpStatus === "loading"} radius="0.5rem">
+                      <BorderGlide active={totpStatus === "loading"} radius={8}>
                         <InputOTPGroup className={totpInputClass}>
                           <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                           <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
@@ -925,7 +925,7 @@ export default function LoginPage() {
                           <InputOTPSlot index={4} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                           <InputOTPSlot index={5} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                         </InputOTPGroup>
-                      </BorderGlow>
+                      </BorderGlide>
                     </InputOTP>
                   </div>
                 </div>
