@@ -536,7 +536,13 @@ export default function LoginPage() {
       setTimeout(() => router.push("/"), 1500)
     } catch (err) {
       console.error("[v0] Add passkey error:", err)
-      if (err instanceof Error && err.name === "NotAllowedError") {
+      if (err instanceof Error && err.name === "InvalidStateError") {
+        // This device already has a passkey registered for the account, so the
+        // authenticator refuses to create a duplicate. The device is already
+        // secured — treat it as done rather than surfacing a scary error.
+        setStep("success")
+        setTimeout(() => router.push("/"), 1200)
+      } else if (err instanceof Error && err.name === "NotAllowedError") {
         setError("Passkey setup was cancelled. You can try again or skip.")
       } else if (err instanceof Error && err.message === "Cancelled") {
         setError("Passkey setup was cancelled. You can try again or skip.")

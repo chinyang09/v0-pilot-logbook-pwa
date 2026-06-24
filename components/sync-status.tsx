@@ -4,8 +4,10 @@ import { useState, useEffect } from "react"
 import { syncService } from "@/lib/sync"
 import { Cloud, CloudOff, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/components/providers/auth-provider"
 
 export function SyncStatus() {
+  const { ensureValidSession } = useAuth()
   const [status, setStatus] = useState<"online" | "offline" | "syncing">(() => syncService.getStatus())
   const [pendingCount, setPendingCount] = useState(0)
 
@@ -31,6 +33,12 @@ export function SyncStatus() {
   }, [])
 
   const handleSync = async () => {
+    // Intercept a manual resync attempted against a dead session: re-authenticate
+    // via the custom passkey flow first. If that can't recover the session,
+    // ensureValidSession routes to the login flow and we abort the sync.
+    const valid = await ensureValidSession()
+    if (!valid) return
+
     // Use force sync which triggers immediately via trigger manager
     await syncService.forceSyncNow()
     // Refresh pending count after sync

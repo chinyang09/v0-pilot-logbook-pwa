@@ -80,6 +80,7 @@ export async function POST(request: NextRequest) {
       callsign: user.identity.callsign,
       deviceId: deviceId || "unknown_device",
       recoveryLogin: true,
+      userAgent: request.headers.get("user-agent") || undefined,
     });
     await setSessionCookie(sessionId);
 

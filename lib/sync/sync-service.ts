@@ -171,6 +171,17 @@ class SyncService {
     this.reauthHandler = fn
   }
 
+  /**
+   * Notify the rest of the app that a server request was rejected as
+   * unauthorized, so the auth provider's session monitor can re-validate and
+   * flip its reactive `sessionExpired` state without waiting for the next poll.
+   */
+  private signalUnauthorized() {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("auth:unauthorized"))
+    }
+  }
+
   private setStatus(status: SyncStatus) {
     this.status = status
     this.listeners.forEach((listener) => listener(status))
@@ -222,8 +233,24 @@ class SyncService {
 
   private async executeFullSync(): Promise<{ pushed: number; pulled: number; failed: number }> {
     const session = await getUserSession()
-    if (!session || (session.expiresAt && session.expiresAt < Date.now())) {
+    if (!session) {
       return { pushed: 0, pulled: 0, failed: 0 }
+    }
+
+    // If the local session mirror is already past its expiry, the bearer token is
+    // (most likely) dead. Previously this returned a silent no-op, which is the
+    // root cause of "a manual resync never prompts re-auth". Instead, give the
+    // registered reauth handler (the custom passkey flow) a chance to refresh the
+    // session first, and only bail if that fails.
+    if (session.expiresAt && session.expiresAt < Date.now()) {
+      this.signalUnauthorized()
+      if (!this.reauthHandler) {
+        return { pushed: 0, pulled: 0, failed: 0 }
+      }
+      const refreshed = await this.reauthHandler().catch(() => false)
+      if (!refreshed) {
+        return { pushed: 0, pulled: 0, failed: 0 }
+      }
     }
 
     const dbReady = await initializeDB()
@@ -338,6 +365,7 @@ class SyncService {
       // 401 → session expired; never dead-letter, signal for one reauth+retry.
       if (response.status === 401) {
         this.got401 = true
+        this.signalUnauthorized()
         console.warn(`[Sync ${correlationId}] push 401 - will reauth`)
         return { success: 0, failed: compacted.length }
       }
@@ -463,6 +491,7 @@ class SyncService {
           if (response.status === 401) {
             allOk = false
             this.got401 = true
+            this.signalUnauthorized()
             console.error(`[Sync ${correlationId}] unauthorized pulling ${collection}`)
             break
           }

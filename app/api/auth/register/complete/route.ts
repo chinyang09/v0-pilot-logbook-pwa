@@ -101,6 +101,7 @@ export async function POST(request: NextRequest) {
     const { token: sessionId, expiresAt: sessionExpiry } = await issueSession(db, {
       userId,
       callsign: user.identity.callsign,
+      userAgent: request.headers.get("user-agent") || undefined,
     })
     await setSessionCookie(sessionId)
 
