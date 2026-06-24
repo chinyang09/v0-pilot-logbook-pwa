@@ -35,6 +35,7 @@ import { QRCodeSVG } from "qrcode.react"
 import { motion, AnimatePresence } from "framer-motion"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button"
+import { BorderGlow } from "@/components/ui/border-glow"
 import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
 import { parseUserAgent } from "@/lib/utils/user-agent"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
@@ -591,20 +592,23 @@ export default function AccountPage() {
                     </div>
 
                     {/* Primary: authorize with a passkey (works even if the
-                        authenticator was lost). */}
-                    <Button
-                      className="w-full"
-                      size="sm"
-                      onClick={handleChangeCallsignPasskey}
-                      disabled={!newCallsign.trim() || isPasskeyVerifying || isChangingCallsign}
-                    >
-                      {isPasskeyVerifying ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <Fingerprint className="h-4 w-4 mr-2" />
-                      )}
-                      Verify with passkey & save
-                    </Button>
+                        authenticator was lost). Glows while verifying, matching
+                        the TOTP login. */}
+                    <BorderGlow active={isPasskeyVerifying} radius="0.5rem">
+                      <Button
+                        className="w-full"
+                        size="sm"
+                        onClick={handleChangeCallsignPasskey}
+                        disabled={!newCallsign.trim() || isPasskeyVerifying || isChangingCallsign}
+                      >
+                        {isPasskeyVerifying ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Fingerprint className="h-4 w-4 mr-2" />
+                        )}
+                        Verify with passkey & save
+                      </Button>
+                    </BorderGlow>
 
                     <div className="relative">
                       <div className="absolute inset-0 flex items-center">
@@ -663,36 +667,31 @@ export default function AccountPage() {
                 )}
               </button>
             </div>
-            {profile?.createdAt && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Member since</span>
-                <span className="text-sm">{formatDate(profile.createdAt)}</span>
-              </div>
-            )}
+            {/* Always render so the value loading in doesn't shove other rows
+                down (no cascade). */}
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">2FA (TOTP)</span>
-              <div className="flex items-center gap-2">
-                {profile?.totpEnabled && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs text-muted-foreground"
-                    onClick={handleRevealTotp}
-                    disabled={isRevealing}
-                    aria-label="Re-add authenticator"
-                  >
-                    {isRevealing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <QrCode className="h-3.5 w-3.5" />}
-                    <span className="ml-1">Re-add</span>
-                  </Button>
-                )}
-                {isLoading && !profile ? (
-                  <Skeleton className="h-5 w-16 rounded-full" />
-                ) : (
-                  <Badge variant={profile?.totpEnabled ? "default" : "secondary"}>
-                    {profile?.totpEnabled ? "Enabled" : "Disabled"}
-                  </Badge>
-                )}
-              </div>
+              <span className="text-sm text-muted-foreground">Member since</span>
+              {profile?.createdAt ? (
+                <span className="text-sm">{formatDate(profile.createdAt)}</span>
+              ) : (
+                <Skeleton className="h-4 w-24" />
+              )}
+            </div>
+            {/* TOTP is mandatory at sign-up, so an "Enabled" chip is redundant —
+                this row is just the re-add affordance. */}
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Authenticator (2FA)</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-muted-foreground"
+                onClick={handleRevealTotp}
+                disabled={isRevealing}
+                aria-label="Re-add authenticator"
+              >
+                {isRevealing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <QrCode className="h-3.5 w-3.5" />}
+                <span className="ml-1">Re-add</span>
+              </Button>
             </div>
 
             {revealError && <p className="text-sm text-destructive">{revealError}</p>}
@@ -791,7 +790,7 @@ export default function AccountPage() {
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        {pk.deviceType} {pk.backedUp && "· Synced"} · Added {formatDate(pk.createdAt)}
+                        {pk.backedUp ? "Synced · " : ""}Added {formatDate(pk.createdAt)}
                       </p>
                     </div>
                     {removingPasskey === pk.credentialId && (
@@ -891,54 +890,62 @@ export default function AccountPage() {
           </CardContent>
         </Card>
 
-        {/* Install App */}
+        {/* Install App — just a button (no card/header). On iOS it expands the
+            manual "Add to Home Screen" steps; elsewhere it triggers the native
+            install prompt (falling back to steps if the browser offers none). */}
         {!pwaInstalled && (
-          <Card className="py-4 gap-3">
-            <CardHeader className="px-4">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Download className="h-4 w-4" />
-                Install App
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 space-y-3">
-              <Button size="sm" onClick={handlePwaInstall}>
-                <Download className="h-4 w-4 mr-2" />
-                {pwaPlatform === "ios" ? "How to Install" : "Install App"}
-              </Button>
-              {showPwaInstructions && pwaPlatform === "ios" && (
-                <div className="space-y-2.5 text-sm pt-2 border-t border-border">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
-                    <p className="flex items-center gap-1.5">
-                      Tap the <Share className="h-4 w-4 inline text-muted-foreground" /> Share button in Safari
-                    </p>
+          <div className="space-y-3">
+            <Button variant="outline" className="w-full" onClick={handlePwaInstall}>
+              <Download className="h-4 w-4 mr-2" />
+              {pwaPlatform === "ios" ? "How to install app" : "Install app"}
+            </Button>
+            <AnimatePresence initial={false}>
+              {showPwaInstructions && (pwaPlatform === "ios" || pwaPlatform === "android") && (
+                <motion.div
+                  key="pwa-steps"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                  className="overflow-hidden"
+                >
+                  <div className="space-y-2.5 text-sm rounded-xl border bg-card px-4 py-3">
+                    {pwaPlatform === "ios" ? (
+                      <>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
+                          <p className="flex items-center gap-1.5">
+                            Tap the <Share className="h-4 w-4 inline text-muted-foreground" /> Share button in Safari
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
+                          <p>Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong></p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">3</div>
+                          <p>Tap <strong>&quot;Add&quot;</strong> to confirm</p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
+                          <p className="flex items-center gap-1.5">
+                            Tap the <MoreVertical className="h-4 w-4 inline text-muted-foreground" /> menu in your browser
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
+                          <p>Tap <strong>&quot;Install app&quot;</strong> or <strong>&quot;Add to Home Screen&quot;</strong></p>
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
-                    <p>Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong></p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">3</div>
-                    <p>Tap <strong>&quot;Add&quot;</strong> to confirm</p>
-                  </div>
-                </div>
+                </motion.div>
               )}
-              {showPwaInstructions && pwaPlatform === "android" && (
-                <div className="space-y-2.5 text-sm pt-2 border-t border-border">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
-                    <p className="flex items-center gap-1.5">
-                      Tap the <MoreVertical className="h-4 w-4 inline text-muted-foreground" /> menu in your browser
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
-                    <p>Tap <strong>&quot;Install app&quot;</strong> or <strong>&quot;Add to Home Screen&quot;</strong></p>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            </AnimatePresence>
+          </div>
         )}
       </div>
     </PageContainer>

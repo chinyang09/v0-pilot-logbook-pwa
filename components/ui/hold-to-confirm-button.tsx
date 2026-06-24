@@ -32,8 +32,10 @@ export function HoldToConfirmButton({
   const { progress, isCharging, handlers } = useHoldToConfirm({ duration, onConfirm, disabled })
 
   // Width-based fill with a rounded leading edge → a soft liquid sweep instead of
-  // a hard rectangle. Eased so it feels physical.
+  // a hard rectangle. Eased so it feels physical, and translucent → solid so the
+  // label stays readable through it until the very end.
   const fillWidth = useTransform(progress, (v) => `${easeOutCubic(v) * 100}%`)
+  const fillOpacity = useTransform(progress, [0, 1], [0.5, 1])
 
   return (
     <motion.button
@@ -56,7 +58,7 @@ export function HoldToConfirmButton({
       <motion.span
         aria-hidden
         className="pointer-events-none absolute inset-y-0 left-0 rounded-r-xl bg-gradient-to-r from-destructive to-[color-mix(in_oklch,var(--destructive)_82%,black)]"
-        style={{ width: fillWidth }}
+        style={{ width: fillWidth, opacity: fillOpacity }}
       />
       <span className="relative z-[1] inline-flex items-center gap-2">
         {icon}

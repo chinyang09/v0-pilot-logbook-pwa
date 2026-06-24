@@ -195,7 +195,9 @@ export function SwipeableCard({
   // Shared 0→1 charge for a press-and-hold (destructive) action — drives the
   // liquid red fill that sweeps across the row as the user holds the button.
   const charge = useMotionValue(0)
-  const chargeOpacity = useTransform(charge, [0, 0.001, 1], [0, 1, 1])
+  // Ramp from translucent → fully solid as it charges, so the row text stays
+  // legible *through* the fill until the very end (it sits behind the content).
+  const chargeOpacity = useTransform(charge, [0, 0.04, 1], [0, 0.5, 1])
   // Width-based, eased sweep with a rounded leading edge (matches
   // HoldToConfirmButton) instead of a hard left→right scaleX rectangle.
   const chargeWidth = useTransform(charge, (v) => `${(1 - Math.pow(1 - v, 3)) * 100}%`)
@@ -357,16 +359,17 @@ export function SwipeableCard({
             !isCard && active && "rounded-lg bg-secondary"
           )}
         >
-          {children}
-          {/* Liquid red charge fill that sweeps across the row as a hold action
-              is held (rounded leading edge, eased). */}
+          {/* Liquid red charge fill that sweeps across as a hold action is held
+              (rounded leading edge, eased, translucent→solid). Sits BEHIND the
+              content (z-0) so the row text stays visible through it. */}
           {hasHoldAction && (
             <motion.div
               aria-hidden
-              className="pointer-events-none absolute inset-y-0 left-0 z-[2] rounded-r-xl bg-gradient-to-r from-destructive to-[color-mix(in_oklch,var(--destructive)_82%,black)]"
+              className="pointer-events-none absolute inset-y-0 left-0 z-0 rounded-r-xl bg-gradient-to-r from-destructive to-[color-mix(in_oklch,var(--destructive)_82%,black)]"
               style={{ width: chargeWidth, opacity: chargeOpacity }}
             />
           )}
+          <div className="relative z-[1]">{children}</div>
         </div>
       </motion.div>
     </div>
