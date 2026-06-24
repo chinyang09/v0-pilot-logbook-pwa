@@ -30,15 +30,16 @@ import {
   LogOut,
   Fingerprint,
   QrCode,
+  ChevronDown,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import { motion, AnimatePresence } from "framer-motion"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button"
-import { BorderGlow } from "@/components/ui/border-glow"
 import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
 import { parseUserAgent } from "@/lib/utils/user-agent"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
+import { cn } from "@/lib/utils"
 
 interface ProfileData {
   userId: string
@@ -592,23 +593,20 @@ export default function AccountPage() {
                     </div>
 
                     {/* Primary: authorize with a passkey (works even if the
-                        authenticator was lost). Glows while verifying, matching
-                        the TOTP login. */}
-                    <BorderGlow active={isPasskeyVerifying} radius="0.5rem">
-                      <Button
-                        className="w-full"
-                        size="sm"
-                        onClick={handleChangeCallsignPasskey}
-                        disabled={!newCallsign.trim() || isPasskeyVerifying || isChangingCallsign}
-                      >
-                        {isPasskeyVerifying ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Fingerprint className="h-4 w-4 mr-2" />
-                        )}
-                        Verify with passkey & save
-                      </Button>
-                    </BorderGlow>
+                        authenticator was lost). */}
+                    <Button
+                      className="w-full"
+                      size="sm"
+                      onClick={handleChangeCallsignPasskey}
+                      disabled={!newCallsign.trim() || isPasskeyVerifying || isChangingCallsign}
+                    >
+                      {isPasskeyVerifying ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Fingerprint className="h-4 w-4 mr-2" />
+                      )}
+                      Verify with passkey & save
+                    </Button>
 
                     <div className="relative">
                       <div className="absolute inset-0 flex items-center">
@@ -890,63 +888,82 @@ export default function AccountPage() {
           </CardContent>
         </Card>
 
-        {/* Install App — just a button (no card/header). On iOS it expands the
-            manual "Add to Home Screen" steps; elsewhere it triggers the native
-            install prompt (falling back to steps if the browser offers none). */}
-        {!pwaInstalled && (
-          <div className="space-y-3">
-            <Button variant="outline" className="w-full" onClick={handlePwaInstall}>
-              <Download className="h-4 w-4 mr-2" />
-              {pwaPlatform === "ios" ? "How to install app" : "Install app"}
-            </Button>
-            <AnimatePresence initial={false}>
-              {showPwaInstructions && (pwaPlatform === "ios" || pwaPlatform === "android") && (
-                <motion.div
-                  key="pwa-steps"
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2, ease: "easeOut" }}
-                  className="overflow-hidden"
-                >
-                  <div className="space-y-2.5 text-sm rounded-xl border bg-card px-4 py-3">
-                    {pwaPlatform === "ios" ? (
-                      <>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
-                          <p className="flex items-center gap-1.5">
-                            Tap the <Share className="h-4 w-4 inline text-muted-foreground" /> Share button in Safari
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
-                          <p>Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong></p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">3</div>
-                          <p>Tap <strong>&quot;Add&quot;</strong> to confirm</p>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
-                          <p className="flex items-center gap-1.5">
-                            Tap the <MoreVertical className="h-4 w-4 inline text-muted-foreground" /> menu in your browser
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
-                          <p>Tap <strong>&quot;Install app&quot;</strong> or <strong>&quot;Add to Home Screen&quot;</strong></p>
-                        </div>
-                      </>
+        {/* Install App — a single surface: the whole header row is the button,
+            and (when there are manual steps to show) it expands them inside the
+            same card. iOS / browsers without a native prompt expand steps;
+            Android/desktop with a prompt installs directly. */}
+        {!pwaInstalled && (() => {
+          const willExpand = pwaPlatform === "ios" || !deferredInstallPrompt
+          return (
+            <div className="rounded-xl border bg-card overflow-hidden">
+              <button
+                type="button"
+                onClick={handlePwaInstall}
+                aria-expanded={willExpand ? showPwaInstructions : undefined}
+                className="w-full flex items-center justify-between gap-2 px-4 py-3 text-sm font-medium hover:bg-muted/50 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <Download className="h-4 w-4" />
+                  {willExpand ? "How to install app" : "Install app"}
+                </span>
+                {willExpand && (
+                  <ChevronDown
+                    className={cn(
+                      "h-4 w-4 text-muted-foreground transition-transform",
+                      showPwaInstructions && "rotate-180",
                     )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
+                  />
+                )}
+              </button>
+              <AnimatePresence initial={false}>
+                {willExpand && showPwaInstructions && (
+                  <motion.div
+                    key="pwa-steps"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div className="space-y-2.5 text-sm border-t px-4 py-3">
+                      {pwaPlatform === "ios" ? (
+                        <>
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
+                            <p className="flex items-center gap-1.5">
+                              Tap the <Share className="h-4 w-4 inline text-muted-foreground" /> Share button in Safari
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
+                            <p>Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong></p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">3</div>
+                            <p>Tap <strong>&quot;Add&quot;</strong> to confirm</p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">1</div>
+                            <p className="flex items-center gap-1.5">
+                              Tap the <MoreVertical className="h-4 w-4 inline text-muted-foreground" /> menu in your browser
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-bold shrink-0 text-muted-foreground">2</div>
+                            <p>Tap <strong>&quot;Install app&quot;</strong> or <strong>&quot;Add to Home Screen&quot;</strong></p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )
+        })()}
       </div>
     </PageContainer>
   )
