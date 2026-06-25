@@ -5,7 +5,6 @@ import Link from "next/link"
 import { ArrowUpRight, Plane, Sun, Moon } from "lucide-react"
 
 import { useDashboardPeriod } from "@/hooks/use-dashboard-period"
-import { useDeferredAnimation } from "@/hooks/use-deferred-animation"
 import { formatDecimalHours } from "@/lib/utils/dashboard-aggregate"
 import { cn } from "@/lib/utils"
 
@@ -31,8 +30,6 @@ export function HeroTotalsWidget({
   className,
 }: HeroTotalsWidgetProps) {
   const { resolved } = useDashboardPeriod()
-  // Skip the ring's entrance animation on navigation; animate later changes.
-  const animate = useDeferredAnimation()
 
   const max = Math.max(periodTargetMinutes ?? 100 * 60, blockMinutes, 1)
   const ratio = Math.min(1, blockMinutes / max)
@@ -86,10 +83,7 @@ export function HeroTotalsWidget({
               strokeLinecap="round"
               strokeDasharray={c}
               strokeDashoffset={c * (1 - ratio)}
-              className={cn(
-                "stroke-chart-2 motion-reduce:transition-none",
-                animate && "transition-[stroke-dashoffset] duration-500",
-              )}
+              className="stroke-chart-2 transition-[stroke-dashoffset] duration-500 motion-reduce:transition-none"
             />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center">

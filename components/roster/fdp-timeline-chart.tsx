@@ -15,7 +15,6 @@ import {
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
 import { ZoomIn, ZoomOut, RotateCcw, X } from "lucide-react"
-import { useDeferredAnimation } from "@/hooks/use-deferred-animation"
 
 // Custom inline icons for the multi/single toggle — tailored shapes that
 // visually communicate "stacked rolling areas" vs "single rolling area".
@@ -107,10 +106,6 @@ export function FDPTimelineChart({
     scenarioLen: scenarioTimelineData?.length ?? 0,
     limits: limits?.regulationType,
   })
-
-  // Skip the chart's entrance animation on navigation (it competes with the nav
-  // transition and hitches it); animate later in-page filter changes.
-  const animateCharts = useDeferredAnimation()
 
   const [activeViews, setActiveViews] = useState<Set<ChartView>>(new Set(["duty14"]))
 
@@ -1081,7 +1076,6 @@ export function FDPTimelineChart({
                       dot={false}
                       activeDot={{ r: 4, fill: cc.card, stroke: view.color, strokeWidth: 2 }}
                       name={view.rollingLabel}
-                      isAnimationActive={animateCharts}
                     />
                   ))}
 
@@ -1100,7 +1094,6 @@ export function FDPTimelineChart({
                       activeDot={false}
                       connectNulls={false}
                       name="Scenario change"
-                      isAnimationActive={animateCharts}
                     />
                   ))}
 
@@ -1115,7 +1108,6 @@ export function FDPTimelineChart({
                         radius={[2, 2, 0, 0]}
                         maxBarSize={uniqueBarKeys.length > 1 ? 12 : 16}
                         name={barView.barLabel}
-                        isAnimationActive={animateCharts}
                       >
                         {slicedData.map((entry, index) => {
                           const isModified = hasScenario && scenarioModifiedDates?.has(entry.date)

@@ -492,8 +492,15 @@ export function NavPill() {
 
 // ─── Morph phase state machine (shared) ──────────────────────
 
-type MorphPhase = "pill" | "sliding" | "expanding" | "sidebar" | "collapsing" | "returning"
+type MorphPhase = "pill" | "opening" | "sidebar" | "closing"
 
+/**
+ * Morph state machine. Previously the open/close was split into a slide phase
+ * then a separate expand phase, which made the pill visibly pause ("stuck")
+ * between sliding to the corner and growing into the sidebar. Now position,
+ * width AND height all transition together in a single `opening`/`closing`
+ * phase, so the morph is one continuous motion.
+ */
 function useMorphPhase(isOpen: boolean, phaseDuration: number) {
   const [phase, setPhase] = useState<MorphPhase>(isOpen ? "sidebar" : "pill")
   const prevOpenRef = useRef(isOpen)
@@ -502,35 +509,30 @@ function useMorphPhase(isOpen: boolean, phaseDuration: number) {
   useEffect(() => {
     if (prevOpenRef.current === isOpen) return
     prevOpenRef.current = isOpen
-    setPhase(isOpen ? "sliding" : "collapsing")
+    setPhase(isOpen ? "opening" : "closing")
   }, [isOpen])
 
   const advancePhase = useCallback(() => {
     clearTimeout(safetyTimerRef.current)
-    setPhase((current) => {
-      switch (current) {
-        case "sliding": return "expanding"
-        case "expanding": return "sidebar"
-        case "collapsing": return "returning"
-        case "returning": return "pill"
-        default: return current
-      }
-    })
+    setPhase((current) =>
+      current === "opening" ? "sidebar" : current === "closing" ? "pill" : current,
+    )
   }, [])
 
   useEffect(() => {
-    const isTransitioning = phase === "sliding" || phase === "expanding" || phase === "collapsing" || phase === "returning"
-    if (!isTransitioning) return
+    if (phase !== "opening" && phase !== "closing") return
     clearTimeout(safetyTimerRef.current)
-    safetyTimerRef.current = setTimeout(advancePhase, phaseDuration + 50)
+    safetyTimerRef.current = setTimeout(advancePhase, phaseDuration + 80)
     return () => clearTimeout(safetyTimerRef.current)
   }, [phase, phaseDuration, advancePhase])
 
-  const isAtSidebarPosition = phase === "sliding" || phase === "expanding" || phase === "sidebar" || phase === "collapsing"
-  const isAtFullHeight = phase === "expanding" || phase === "sidebar"
-  const isExpanded = phase === "sidebar" || phase === "expanding"
+  // Sidebar geometry (position + width + height) for the whole open span.
+  const isSidebarShape = phase === "opening" || phase === "sidebar"
+  const isTransitioning = phase === "opening" || phase === "closing"
+  // Content shows only once fully settled.
+  const isExpanded = phase === "sidebar"
 
-  return { phase, advancePhase, isAtSidebarPosition, isAtFullHeight, isExpanded }
+  return { phase, advancePhase, isSidebarShape, isTransitioning, isExpanded }
 }
 
 // ─── Desktop: top pill ↔ sidebar ─────────────────────────────
@@ -550,9 +552,9 @@ function DesktopPillMorph({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const { expandedHeight } = useViewportMeasure()
-  const PHASE_DURATION = prefersReducedMotion ? 0 : 150
+  const PHASE_DURATION = prefersReducedMotion ? 0 : 240
 
-  const { phase, advancePhase, isAtSidebarPosition, isAtFullHeight, isExpanded } =
+  const { phase, advancePhase, isSidebarShape, isTransitioning, isExpanded } =
     useMorphPhase(sidebarOpen, PHASE_DURATION)
 
   const handleTransitionEnd = useCallback((e: React.TransitionEvent) => {
@@ -560,27 +562,18 @@ function DesktopPillMorph({
     advancePhase()
   }, [advancePhase])
 
-  const transitionProperty = (() => {
-    switch (phase) {
-      case "sliding": return "top, left, transform, width"
-      case "expanding": return "height"
-      case "collapsing": return "height"
-      case "returning": return "top, left, transform, width"
-      default: return "none"
-    }
-  })()
-
   const style: React.CSSProperties = {
-    top: isAtSidebarPosition
+    top: isSidebarShape
       ? `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`
       : `calc(${PILL_TOP}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
-    left: isAtSidebarPosition ? SIDEBAR_MARGIN : "50%",
-    transform: isAtSidebarPosition ? "translateX(0)" : "translateX(-50%)",
-    width: isAtSidebarPosition ? SIDEBAR_INNER_WIDTH : "auto",
-    height: isAtFullHeight ? expandedHeight : PILL_HEIGHT,
-    transitionProperty,
+    left: isSidebarShape ? SIDEBAR_MARGIN : "50%",
+    transform: isSidebarShape ? "translateX(0)" : "translateX(-50%)",
+    width: isSidebarShape ? SIDEBAR_INNER_WIDTH : "auto",
+    height: isSidebarShape ? expandedHeight : PILL_HEIGHT,
+    // Position, width and height morph together in one continuous motion.
+    transitionProperty: isTransitioning ? "top, left, transform, width, height" : "none",
     transitionDuration: `${PHASE_DURATION}ms`,
-    transitionTimingFunction: "cubic-bezier(0.25, 0.1, 0.25, 1)",
+    transitionTimingFunction: "cubic-bezier(0.32, 0.72, 0, 1)",
   }
 
   return (
@@ -663,9 +656,9 @@ function MobilePillMorph({
   const ref = useRef<HTMLDivElement>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { expandedHeight } = useViewportMeasure()
-  const PHASE_DURATION = prefersReducedMotion ? 0 : 150
+  const PHASE_DURATION = prefersReducedMotion ? 0 : 240
 
-  const { phase, advancePhase, isAtSidebarPosition, isAtFullHeight, isExpanded } =
+  const { phase, advancePhase, isSidebarShape, isTransitioning, isExpanded } =
     useMorphPhase(sidebarOpen, PHASE_DURATION)
 
   // Close sidebar on route change
@@ -678,40 +671,32 @@ function MobilePillMorph({
     advancePhase()
   }, [advancePhase])
 
-  // Mobile morph — always bottom-anchored:
-  // pill: bottom-center, auto width, pill height
-  // sliding: slides to bottom-left, widens to sidebar width (still pill height)
-  // expanding: grows UPWARD (bottom anchored, height increases)
-  // sidebar: full sidebar height, bottom-left
-
-  const transitionProperty = (() => {
-    switch (phase) {
-      case "sliding": return "left, transform, width"
-      case "expanding": return "height"
-      case "collapsing": return "height"
-      case "returning": return "left, transform, width"
-      default: return "none"
-    }
-  })()
+  // Mobile morph — always bottom-anchored. pill: bottom-centre, auto width, pill
+  // height. opening/closing: position, width and height morph together
+  // (bottom-anchored, so it grows upward). sidebar: full height, bottom-left.
 
   const style: React.CSSProperties = {
     position: "fixed" as const,
     bottom: `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-bottom, 0px))`,
-    left: isAtSidebarPosition ? SIDEBAR_MARGIN : "50%",
-    transform: isAtSidebarPosition
+    left: isSidebarShape ? SIDEBAR_MARGIN : "50%",
+    transform: isSidebarShape
       ? "translateX(0)"
       : `translateX(-50%) translateY(${hideNavbar ? "calc(100% + 24px)" : "0%"})`,
-    width: isAtSidebarPosition ? SIDEBAR_INNER_WIDTH : "auto",
-    height: isAtFullHeight ? expandedHeight : PILL_HEIGHT,
+    width: isSidebarShape ? SIDEBAR_INNER_WIDTH : "auto",
+    height: isSidebarShape ? expandedHeight : PILL_HEIGHT,
+    // Pill state: only `transform` animates (scroll hide/show). During the morph
+    // position, width and height move together in one continuous motion.
     transitionProperty: phase === "pill"
       ? "transform"
-      : transitionProperty,
+      : isTransitioning
+        ? "left, transform, width, height"
+        : "none",
     transitionDuration: phase === "pill"
       ? (prefersReducedMotion ? "0ms" : "300ms")
       : `${PHASE_DURATION}ms`,
     transitionTimingFunction: phase === "pill"
       ? "cubic-bezier(0.34, 1.56, 0.64, 1)"
-      : "cubic-bezier(0.25, 0.1, 0.25, 1)",
+      : "cubic-bezier(0.32, 0.72, 0, 1)",
   }
 
   return (

@@ -43,11 +43,14 @@ export function DashboardGrid({ className }: { className?: string }) {
         />
       </div>
 
-      {/* Per-flight breakdown — same height as hero, scrollable list */}
-      <div className="col-span-3 row-span-2">
+      {/* Per-flight breakdown — same height as the hero, scrollable list. The
+          card is taken out of flow (absolute) so its (potentially long) list
+          doesn't stretch the shared grid rows; the hero defines the height and
+          the list scrolls inside. */}
+      <div className="col-span-3 row-span-2 relative">
         <PeriodFlightsCard
           flights={aggregates.periodFlights}
-          className="h-full"
+          className="absolute inset-0"
         />
       </div>
 
