@@ -1,49 +1,23 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useRef, useState } from "react"
 import { motion, useTransform, type MotionValue } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { useHoldToConfirm } from "@/hooks/use-hold-to-confirm"
+import { HoldProgressBorder } from "@/components/ui/hold-progress-border"
 
 const easeOutCubic = (v: number) => 1 - Math.pow(1 - v, 3)
 
 /**
- * Build a rounded-rect outline path that STARTS at the top-centre (12 o'clock),
- * runs clockwise, and returns to the top-centre. Used so the progress stroke
- * grows from 12 o'clock clockwise (a plain `<rect>` would start at a corner).
- * A large `radius` is clamped to `min(w,h)/2`, giving a pill outline.
- */
-function topCenterRoundedRectPath(x: number, y: number, w: number, h: number, radius: number): string {
-  const r = Math.max(0, Math.min(radius, w / 2, h / 2))
-  const right = x + w
-  const bottom = y + h
-  const cx = x + w / 2
-  return [
-    `M ${cx} ${y}`,
-    `L ${right - r} ${y}`,
-    `A ${r} ${r} 0 0 1 ${right} ${y + r}`,
-    `L ${right} ${bottom - r}`,
-    `A ${r} ${r} 0 0 1 ${right - r} ${bottom}`,
-    `L ${x + r} ${bottom}`,
-    `A ${r} ${r} 0 0 1 ${x} ${bottom - r}`,
-    `L ${x} ${y + r}`,
-    `A ${r} ${r} 0 0 1 ${x + r} ${y}`,
-    `L ${cx} ${y}`,
-    "Z",
-  ].join(" ")
-}
-
-/**
- * Press-and-hold-to-confirm button. While held, the button fills gracefully with
- * red while a stroke draws *around* it over a faint track — starting from 12
- * o'clock clockwise, thickening with a growing glow (the motion.dev "hold to
- * confirm" pattern). The label/icon stay on top. The button does NOT
- * depress/scale. Releasing early just resets the progress; a full hold fires
- * {@link onConfirm}.
+ * Press-and-hold-to-confirm button. While held, a soft red gradient sweeps the
+ * fill left→right (intensifying as it nears the end), and — when {@link showBorder}
+ * — a stroke draws around the button from 12 o'clock clockwise (the motion.dev
+ * pattern). The label/icon stay on top. The button does NOT depress/scale.
+ * Releasing early just resets; a full hold fires {@link onConfirm}.
  *
  * Pass an external `progress` MotionValue to mirror the hold elsewhere (e.g. a
- * surrounding overlay tint that fills in lock-step).
+ * card border / overlay tint that advances in lock-step), and `showBorder={false}`
+ * when that surrounding element owns the border instead of the button.
  */
 export function HoldToConfirmButton({
   label,
@@ -55,6 +29,7 @@ export function HoldToConfirmButton({
   ariaLabel,
   radius = 12,
   progress: externalProgress,
+  showBorder = true,
 }: {
   label?: string
   onConfirm: () => void
@@ -66,6 +41,7 @@ export function HoldToConfirmButton({
   /** Corner radius of the animated border (px) — match the surface. Large = pill. */
   radius?: number
   progress?: MotionValue<number>
+  showBorder?: boolean
 }) {
   const { progress, handlers } = useHoldToConfirm({
     duration,
@@ -74,37 +50,19 @@ export function HoldToConfirmButton({
     progress: externalProgress,
   })
 
-  const ref = useRef<HTMLButtonElement>(null)
-  const [size, setSize] = useState({ w: 0, h: 0 })
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }))
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-
-  // Inset enough that the stroke + glow sit inside the surface (parents often
-  // clip with overflow-hidden).
-  const inset = 3.5
-  const w = Math.max(0, size.w - inset * 2)
-  const h = Math.max(0, size.h - inset * 2)
-  const path = w > 0 && h > 0 ? topCenterRoundedRectPath(inset, inset, w, h, radius) : ""
-
-  // Graceful left→right fill that grows with the hold.
-  const fillWidth = useTransform(progress, (p) => `${easeOutCubic(p) * 100}%`)
-  // pathLength is normalised to 100; offset 100 → 0 reveals the stroke fully,
-  // growing forward from the path start (12 o'clock) clockwise.
-  const dashOffset = useTransform(progress, [0, 1], [100, 0])
-  const strokeWidth = useTransform(progress, [0, 1], [1.5, 3.5])
-  const filter = useTransform(progress, (p) => `drop-shadow(0 0 ${6 * p}px var(--destructive))`)
-  // The faint track only appears once a press begins, so the resting button
-  // stays clean.
-  const trackOpacity = useTransform(progress, [0, 0.001, 1], [0, 0.16, 0.16])
+  // Soft left→right gradient sweep: a mask reveals the gradient up to the eased
+  // progress with a feathered leading edge, and the whole fill intensifies as it
+  // nears completion. Reads as the fill "turning red" gradient-style (not a hard
+  // solid edge).
+  const fillMask = useTransform(progress, (p) => {
+    const pct = easeOutCubic(p) * 100
+    const soft = Math.max(0, pct - 22)
+    return `linear-gradient(to right, #000 ${soft}%, transparent ${pct}%)`
+  })
+  const fillOpacity = useTransform(progress, [0, 1], [0.5, 1])
 
   return (
     <button
-      ref={ref}
       type="button"
       disabled={disabled}
       aria-label={ariaLabel ?? label}
@@ -117,33 +75,19 @@ export function HoldToConfirmButton({
         className,
       )}
     >
-      {/* Graceful red fill */}
+      {/* Graceful red gradient fill (left → right, intensifying) */}
       <motion.span
         aria-hidden
-        className="pointer-events-none absolute inset-y-0 left-0 rounded-[inherit] bg-destructive"
-        style={{ width: fillWidth }}
+        className="pointer-events-none absolute inset-0 rounded-[inherit]"
+        style={{
+          background:
+            "linear-gradient(90deg, var(--destructive), color-mix(in oklch, var(--destructive) 45%, transparent))",
+          opacity: fillOpacity,
+          WebkitMaskImage: fillMask,
+          maskImage: fillMask,
+        }}
       />
-      {path && (
-        <svg
-          aria-hidden
-          className="pointer-events-none absolute inset-0 overflow-visible"
-          width={size.w}
-          height={size.h}
-        >
-          {/* Track (appears on press) */}
-          <motion.path d={path} fill="none" stroke="var(--destructive)" strokeWidth={1.5} style={{ opacity: trackOpacity }} />
-          {/* Progress arc — from 12 o'clock, clockwise */}
-          <motion.path
-            d={path}
-            pathLength={100}
-            fill="none"
-            stroke="var(--destructive)"
-            strokeLinecap="round"
-            strokeDasharray="100 100"
-            style={{ strokeDashoffset: dashOffset, strokeWidth, filter }}
-          />
-        </svg>
-      )}
+      {showBorder && <HoldProgressBorder progress={progress} radius={radius} />}
       <span className="relative z-[1] inline-flex items-center gap-2">
         {icon}
         {label}

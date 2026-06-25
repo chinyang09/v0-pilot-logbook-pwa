@@ -14,6 +14,7 @@ import {
 } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button"
+import { HoldProgressBorder } from "@/components/ui/hold-progress-border"
 
 const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
 
@@ -195,7 +196,9 @@ export function SwipeableCard({
   // fills together with it.
   const [confirmingAction, setConfirmingAction] = useState<SwipeAction | null>(null)
   const confirmProgress = useMotionValue(0)
-  const tintOpacity = useTransform(confirmProgress, [0, 1], [0.06, 0.34])
+  // A red wash that intensifies as the hold completes (on top of the constant
+  // black mute), so the whole card "heats up" toward confirmation.
+  const redTintOpacity = useTransform(confirmProgress, [0, 1], [0, 0.22])
 
   // Tracks whether the last pointer interaction actually moved (drag vs tap).
   const movedRef = useRef(false)
@@ -382,13 +385,20 @@ export function SwipeableCard({
             !isCard && active && "rounded-lg bg-secondary"
           )}
         >
-          {/* Content desaturates while confirming — reads as "the past". */}
-          <div className={cn("transition-[filter] duration-300", confirmingAction && "grayscale")}>
+          {/* Content is muted while confirming — desaturated, slightly blurred
+              and darkened — so it clearly reads as "backgrounded" (and is
+              distinguishable from an already-white completed card). */}
+          <div
+            className={cn(
+              "transition-[filter] duration-300",
+              confirmingAction && "grayscale blur-[1.5px]"
+            )}
+          >
             {children}
           </div>
-          {/* Hold-to-confirm overlay: the content behind is greyscaled, a red
-              tint fills in lock-step with the hold (NO blur — the user must still
-              see what they're deleting), and a centred pill is held to confirm.
+          {/* Hold-to-confirm overlay: a black mute + a red wash that intensifies
+              with the hold, the progress border traced around the CARD, and a
+              centred pill (held to confirm) whose fill sweeps red left→right.
               Above the content (and the .row-divider z-2). */}
           <AnimatePresence>
             {confirmingAction && (
@@ -400,15 +410,20 @@ export function SwipeableCard({
                 transition={{ duration: 0.16, ease: "easeOut" }}
                 onClick={(e) => e.stopPropagation()}
               >
-                {/* Red tint that fills together with the hold progress */}
+                {/* Constant black mute */}
+                <div aria-hidden className="pointer-events-none absolute inset-0 bg-black/45" />
+                {/* Red wash that intensifies with the hold */}
                 <motion.div
                   aria-hidden
                   className="pointer-events-none absolute inset-0 bg-destructive"
-                  style={{ opacity: tintOpacity }}
+                  style={{ opacity: redTintOpacity }}
                 />
+                {/* Progress border traced around the card */}
+                <HoldProgressBorder progress={confirmProgress} radius={isCard || active ? 8 : 0} />
                 <HoldToConfirmButton
                   className="h-9 rounded-full px-5 shadow-md"
                   radius={999}
+                  showBorder={false}
                   progress={confirmProgress}
                   ariaLabel={confirmingAction.ariaLabel ?? confirmingAction.label ?? "Hold to confirm"}
                   icon={confirmingAction.icon}
