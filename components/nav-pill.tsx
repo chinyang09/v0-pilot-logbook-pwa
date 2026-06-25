@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { useReducedMotion } from "framer-motion"
+import { motion, useMotionValue, useReducedMotion } from "framer-motion"
 import {
   LayoutDashboard,
   Book,
@@ -147,6 +147,76 @@ function SyncIconButton({ className }: { className?: string }) {
   )
 }
 
+// ─── Gravity active-tab indicator ────────────────────────────
+
+/**
+ * A "gravity" active-tab highlight: a single blob that springs to the active
+ * tab, but with the leading edge snapping (fast spring) and the trailing edge
+ * lagging (slow spring) so it STRETCHES in the direction of travel and settles
+ * with a slight bounce — a liquid feel without an SVG goo filter (which renders
+ * unreliably inside the glass/backdrop pill on iOS). Tab metrics are measured
+ * with a ResizeObserver (setState only in the RO callback).
+ */
+function GravityNavIndicator({
+  containerRef,
+  activeIndex,
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>
+  activeIndex: number
+}) {
+  const reduce = useReducedMotion()
+  const [metrics, setMetrics] = useState<{
+    rects: { left: number; width: number; top: number; height: number }[]
+    cw: number
+  }>({ rects: [], cw: 0 })
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const measure = () => {
+      const base = el.getBoundingClientRect()
+      const items = Array.from(el.querySelectorAll<HTMLElement>("[data-nav-tab]"))
+      setMetrics({
+        cw: base.width,
+        rects: items.map((it) => {
+          const r = it.getBoundingClientRect()
+          return { left: r.left - base.left, width: r.width, top: r.top - base.top, height: r.height }
+        }),
+      })
+    }
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [containerRef])
+
+  // Direction of travel decides which edge leads (fast) vs trails (slow). The
+  // previous index is tracked in a motion value (not a React ref) so reading it
+  // during render is lint-clean; it's committed after each change in an effect.
+  const prevIndex = useMotionValue(activeIndex)
+  const movingRight = activeIndex >= prevIndex.get()
+  useEffect(() => {
+    prevIndex.set(activeIndex)
+  }, [activeIndex, prevIndex])
+
+  const target = metrics.rects[activeIndex]
+  if (!target || activeIndex < 0) return null
+
+  const right = Math.max(0, metrics.cw - (target.left + target.width))
+  const fast = reduce ? { duration: 0 } : { type: "spring" as const, stiffness: 420, damping: 34 }
+  const slow = reduce ? { duration: 0 } : { type: "spring" as const, stiffness: 140, damping: 17 }
+
+  return (
+    <motion.span
+      aria-hidden
+      className="pointer-events-none absolute z-0 rounded-full bg-foreground/10"
+      style={{ top: target.top, height: target.height }}
+      initial={false}
+      animate={{ left: target.left, right }}
+      transition={{ left: movingRight ? slow : fast, right: movingRight ? fast : slow }}
+    />
+  )
+}
+
 // ─── Shared pill bar content ─────────────────────────────────
 
 /**
@@ -168,6 +238,9 @@ function PillBarContent({
   mode: "desktop" | "mobile"
   onToggleSidebar: () => void
 }) {
+  const tabsRef = useRef<HTMLDivElement>(null)
+  const activeIndex = tabs.findIndex((k) => TAB_CONFIG[k]?.isActive(pathname))
+
   return (
     <div className="flex items-center h-14 px-2">
       {/* Sidebar toggle — fixed width bookend */}
@@ -178,8 +251,10 @@ function PillBarContent({
         <PanelLeft className="h-5 w-5" />
       </button>
 
-      {/* Tabs — equally spaced, fill remaining space */}
-      <div className="flex items-center flex-1 min-w-0 justify-evenly">
+      {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
+          behind the labels and stretches between tabs as the route changes. */}
+      <div ref={tabsRef} className="relative flex items-center flex-1 min-w-0 justify-evenly">
+        <GravityNavIndicator containerRef={tabsRef} activeIndex={activeIndex} />
         {tabs.map((tabKey) => {
           const tab = TAB_CONFIG[tabKey]
           if (!tab) return null
@@ -187,25 +262,23 @@ function PillBarContent({
           const Icon = tab.icon
 
           return (
-            <Link key={tabKey} href={tab.href}>
+            <Link key={tabKey} href={tab.href} className="relative z-[1]">
               {mode === "desktop" ? (
                 <span
+                  data-nav-tab
                   className={cn(
                     "inline-flex items-center justify-center h-9 px-4 rounded-full text-sm font-medium transition-colors",
-                    active
-                      ? "bg-foreground/10 text-primary"
-                      : "text-foreground/60 active:text-foreground"
+                    active ? "text-primary" : "text-foreground/60 active:text-foreground"
                   )}
                 >
                   {tab.label}
                 </span>
               ) : (
                 <span
+                  data-nav-tab
                   className={cn(
                     "inline-flex flex-col items-center justify-center gap-0.5 h-11 px-3 rounded-full transition-colors",
-                    active
-                      ? "bg-foreground/10 text-primary"
-                      : "text-foreground/60 active:text-foreground"
+                    active ? "text-primary" : "text-foreground/60 active:text-foreground"
                   )}
                 >
                   <Icon className="h-5 w-5" />
