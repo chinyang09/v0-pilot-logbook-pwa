@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { animate, motion, useMotionValue, useReducedMotion, useTransform, type MotionValue } from "framer-motion"
+import { useReducedMotion } from "framer-motion"
 import {
   LayoutDashboard,
   Book,
@@ -150,30 +150,29 @@ function SyncIconButton({ className }: { className?: string }) {
 // ─── Gravity active-tab indicator ────────────────────────────
 
 /**
- * A "gravity" active-item highlight: a single blob that springs to the active
- * item, but with the LEADING edge snapping (fast spring) and the TRAILING edge
- * lagging (slow spring), so it STRETCHES in the direction of travel and settles
- * with a slight bounce — a liquid feel without an SVG goo filter (which renders
- * unreliably inside the glass/backdrop pill on iOS).
+ * A "gravity" active-item highlight: a single blob that moves to the active item
+ * with a bouncy overshoot, and — because position and size settle at slightly
+ * different rates — stretches a touch in the direction of travel for a liquid
+ * feel.
  *
- * Position is driven by a transform (`x`/`y`) rather than `left`/`top`, so the
- * frequent per-frame movement is compositor-friendly and doesn't thrash layout
- * (this is what was causing frame-skips when navigating into the heavy dashboard).
- * The two edges are animated imperatively on motion values; the size is derived.
- * Works for both the horizontal pill bar (`axis="x"`) and the vertical sidebar
- * (`axis="y"`). Metrics are measured with a ResizeObserver (setState only in the
- * RO callback) in content coordinates so it stays correct inside a scroll area.
+ * Crucially this uses CSS transitions on `transform` (position) rather than a
+ * JS/Framer spring. Framer springs tick per-frame on the MAIN thread, so when a
+ * heavy page (dashboard/FDP) mounts and blocks it, the blob hitches. A CSS
+ * transform transition runs on the compositor and stays smooth regardless.
+ * Works for both the horizontal pill bar and the vertical sidebar (position is
+ * always `translate(left, top)`; the changing axis is just whichever of
+ * width/height varies). Metrics are measured with a ResizeObserver (setState
+ * only in the RO callback) in content coordinates so it's correct inside a
+ * scroll area.
  */
 function GravityIndicator({
   containerRef,
   activeIndex,
-  axis = "x",
   className,
   revision = "",
 }: {
   containerRef: React.RefObject<HTMLElement | null>
   activeIndex: number
-  axis?: "x" | "y"
   className?: string
   /** Change this when the set/order of items changes so metrics re-measure. */
   revision?: string
@@ -207,53 +206,33 @@ function GravityIndicator({
     return () => ro.disconnect()
   }, [containerRef, revision])
 
-  // Edge motion values: a = start edge (x:left / y:top), b = end edge. Size and
-  // transform are derived so only transforms move per frame.
-  const a = useMotionValue(0)
-  const b = useMotionValue(0)
-  const size = useTransform([a, b] as [MotionValue<number>, MotionValue<number>], ([av, bv]: number[]) =>
-    Math.max(0, bv - av),
-  )
-  const prevIndex = useMotionValue(activeIndex)
-  const initRef = useRef(false)
-
-  useEffect(() => {
-    const target = rects[activeIndex]
-    if (!target) return
-    const startEdge = axis === "x" ? target.left : target.top
-    const endEdge = axis === "x" ? target.left + target.width : target.top + target.height
-    const forward = activeIndex >= prevIndex.get()
-    prevIndex.set(activeIndex)
-
-    if (!initRef.current) {
-      initRef.current = true
-      a.set(startEdge)
-      b.set(endEdge)
-      return
-    }
-    const fast = reduce ? { duration: 0 } : { type: "spring" as const, stiffness: 430, damping: 34 }
-    const slow = reduce ? { duration: 0 } : { type: "spring" as const, stiffness: 150, damping: 18 }
-    // Trailing edge lags (slow), leading edge snaps (fast).
-    animate(a, startEdge, forward ? slow : fast)
-    animate(b, endEdge, forward ? fast : slow)
-  }, [activeIndex, rects, axis, reduce, a, b, prevIndex])
-
   const target = rects[activeIndex]
   if (!target || activeIndex < 0) return null
 
-  const style =
-    axis === "x"
-      ? { x: a, width: size, top: target.top, height: target.height }
-      : { y: a, height: size, left: target.left, width: target.width }
+  // Position transitions with a bouncy overshoot (compositor-driven); size
+  // settles a touch faster so the trailing edge lags → a subtle stretch. CSS
+  // transitions don't fire on first paint, so there's no fly-in on mount.
+  const transition = reduce
+    ? "none"
+    : [
+        "transform 0.5s cubic-bezier(0.34, 1.5, 0.64, 1)",
+        "width 0.4s cubic-bezier(0.22, 1, 0.36, 1)",
+        "height 0.4s cubic-bezier(0.22, 1, 0.36, 1)",
+      ].join(", ")
 
   return (
-    <motion.span
+    <div
       aria-hidden
       className={cn(
         "pointer-events-none absolute left-0 top-0 z-0 rounded-full bg-foreground/10 will-change-transform",
         className,
       )}
-      style={style}
+      style={{
+        transform: `translate(${target.left}px, ${target.top}px)`,
+        width: target.width,
+        height: target.height,
+        transition,
+      }}
     />
   )
 }
@@ -295,7 +274,7 @@ function PillBarContent({
       {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
           behind the labels and stretches between tabs as the route changes. */}
       <div ref={tabsRef} className="relative flex items-center flex-1 min-w-0 justify-evenly">
-        <GravityIndicator containerRef={tabsRef} activeIndex={activeIndex} axis="x" revision={tabs.join(",")} />
+        <GravityIndicator containerRef={tabsRef} activeIndex={activeIndex} revision={tabs.join(",")} />
         {tabs.map((tabKey) => {
           const tab = TAB_CONFIG[tabKey]
           if (!tab) return null
@@ -374,7 +353,6 @@ function SidebarNav({
       <GravityIndicator
         containerRef={navRef}
         activeIndex={activeIndex}
-        axis="y"
         className="rounded-full"
         revision={orderedHrefs.join(",")}
       />
@@ -622,11 +600,14 @@ function DesktopPillMorph({
           <div
             className="flex-shrink-0"
             style={{
-              opacity: isExpanded ? 0 : 1,
+              // Only show the pill content once fully settled as a pill — during
+              // the morph the container is mid-shape, so showing the content makes
+              // it look squished. It eases in as it reaches the pill.
+              opacity: phase === "pill" ? 1 : 0,
               visibility: isExpanded ? "hidden" : "visible",
-              pointerEvents: isExpanded ? "none" : "auto",
+              pointerEvents: phase === "pill" ? "auto" : "none",
               height: isExpanded ? 0 : PILL_HEIGHT,
-              transition: "opacity 0.1s",
+              transition: "opacity 0.2s ease",
             }}
           >
             <PillBarContent
@@ -639,11 +620,13 @@ function DesktopPillMorph({
 
           {/* Sidebar header + nav — visible when expanded */}
           <div
-            className="flex flex-col flex-1 min-h-0 transition-opacity duration-150"
+            className="flex flex-col flex-1 min-h-0 transition-opacity duration-200 ease-out"
             style={{
-              opacity: isExpanded ? 1 : 0,
+              // Same as the pill content: only reveal once fully settled as the
+              // sidebar, so the content eases in rather than morphing squished.
+              opacity: phase === "sidebar" ? 1 : 0,
               visibility: isExpanded ? "visible" : "hidden",
-              pointerEvents: isExpanded ? "auto" : "none",
+              pointerEvents: phase === "sidebar" ? "auto" : "none",
             }}
           >
             {/* Sidebar top row — toggle + sync flushed right */}
@@ -770,11 +753,14 @@ function MobilePillMorph({
           <div
             className="flex-shrink-0"
             style={{
-              opacity: isExpanded ? 0 : 1,
+              // Only show the pill content once fully settled as a pill — during
+              // the morph the container is mid-shape, so showing the content makes
+              // it look squished. It eases in as it reaches the pill.
+              opacity: phase === "pill" ? 1 : 0,
               visibility: isExpanded ? "hidden" : "visible",
-              pointerEvents: isExpanded ? "none" : "auto",
+              pointerEvents: phase === "pill" ? "auto" : "none",
               height: isExpanded ? 0 : PILL_HEIGHT,
-              transition: "opacity 0.1s",
+              transition: "opacity 0.2s ease",
             }}
           >
             <PillBarContent
@@ -787,11 +773,13 @@ function MobilePillMorph({
 
           {/* Sidebar header + nav — visible when expanded */}
           <div
-            className="flex flex-col flex-1 min-h-0 transition-opacity duration-150"
+            className="flex flex-col flex-1 min-h-0 transition-opacity duration-200 ease-out"
             style={{
-              opacity: isExpanded ? 1 : 0,
+              // Same as the pill content: only reveal once fully settled as the
+              // sidebar, so the content eases in rather than morphing squished.
+              opacity: phase === "sidebar" ? 1 : 0,
               visibility: isExpanded ? "visible" : "hidden",
-              pointerEvents: isExpanded ? "auto" : "none",
+              pointerEvents: phase === "sidebar" ? "auto" : "none",
             }}
           >
             {/* Sidebar top row — toggle + sync flushed right */}
