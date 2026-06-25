@@ -60,14 +60,16 @@ export function HoldToConfirmButton({
     return `linear-gradient(to right, #000 ${soft}%, transparent ${pct}%)`
   })
   const fillOpacity = useTransform(progress, [0, 1], [0.5, 1])
+  // Gently shrink as the hold progresses (settles back if released).
+  const scale = useTransform(progress, [0, 1], [1, 0.9])
 
   return (
-    <button
+    <motion.button
       type="button"
       disabled={disabled}
       aria-label={ariaLabel ?? label}
       {...handlers}
-      style={{ touchAction: "none", WebkitTapHighlightColor: "transparent" }}
+      style={{ touchAction: "none", WebkitTapHighlightColor: "transparent", scale }}
       className={cn(
         "relative inline-flex h-11 select-none items-center justify-center gap-2 isolate",
         "rounded-xl border border-border bg-secondary px-4 text-sm font-medium text-foreground",
@@ -92,6 +94,6 @@ export function HoldToConfirmButton({
         {icon}
         {label}
       </span>
-    </button>
+    </motion.button>
   )
 }

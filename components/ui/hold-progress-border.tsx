@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { motion, useTransform, type MotionValue } from "framer-motion"
 import { cn } from "@/lib/utils"
 
@@ -48,6 +48,7 @@ export function HoldProgressBorder({
 }) {
   const ref = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
+  const gradId = useId().replace(/[:]/g, "")
 
   useEffect(() => {
     const el = ref.current?.parentElement
@@ -80,14 +81,21 @@ export function HoldProgressBorder({
     >
       {path && (
         <>
+          {/* Soft gradient so the stroke reads gentler than a flat solid red. */}
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--destructive)" stopOpacity="1" />
+              <stop offset="100%" stopColor="var(--destructive)" stopOpacity="0.45" />
+            </linearGradient>
+          </defs>
           {/* Track (appears on press) */}
-          <motion.path d={path} fill="none" stroke="var(--destructive)" strokeWidth={1.5} style={{ opacity: trackOpacity }} />
+          <motion.path d={path} fill="none" stroke={`url(#${gradId})`} strokeWidth={1.5} style={{ opacity: trackOpacity }} />
           {/* Progress arc — from 12 o'clock, clockwise */}
           <motion.path
             d={path}
             pathLength={100}
             fill="none"
-            stroke="var(--destructive)"
+            stroke={`url(#${gradId})`}
             strokeLinecap="round"
             strokeDasharray="100 100"
             style={{ strokeDashoffset: dashOffset, strokeWidth, opacity, filter }}

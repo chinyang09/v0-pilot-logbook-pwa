@@ -196,9 +196,6 @@ export function SwipeableCard({
   // fills together with it.
   const [confirmingAction, setConfirmingAction] = useState<SwipeAction | null>(null)
   const confirmProgress = useMotionValue(0)
-  // A red wash that intensifies as the hold completes (on top of the constant
-  // black mute), so the whole card "heats up" toward confirmation.
-  const redTintOpacity = useTransform(confirmProgress, [0, 1], [0, 0.22])
 
   // Tracks whether the last pointer interaction actually moved (drag vs tap).
   const movedRef = useRef(false)
@@ -410,18 +407,13 @@ export function SwipeableCard({
                 transition={{ duration: 0.16, ease: "easeOut" }}
                 onClick={(e) => e.stopPropagation()}
               >
-                {/* Constant black mute */}
+                {/* Constant black mute (no red wash — the gradient border + the
+                    pill fill carry the destructive cue). */}
                 <div aria-hidden className="pointer-events-none absolute inset-0 bg-black/45" />
-                {/* Red wash that intensifies with the hold */}
-                <motion.div
-                  aria-hidden
-                  className="pointer-events-none absolute inset-0 bg-destructive"
-                  style={{ opacity: redTintOpacity }}
-                />
                 {/* Progress border traced around the card */}
                 <HoldProgressBorder progress={confirmProgress} radius={isCard || active ? 8 : 0} />
                 <HoldToConfirmButton
-                  className="h-9 rounded-full px-5 shadow-md"
+                  className="h-10 rounded-full px-6 text-[15px] shadow-md"
                   radius={999}
                   showBorder={false}
                   progress={confirmProgress}

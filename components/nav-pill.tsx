@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { motion, useMotionValue, useReducedMotion } from "framer-motion"
+import { animate, motion, useMotionValue, useReducedMotion, useTransform, type MotionValue } from "framer-motion"
 import {
   LayoutDashboard,
   Book,
@@ -150,69 +150,110 @@ function SyncIconButton({ className }: { className?: string }) {
 // ─── Gravity active-tab indicator ────────────────────────────
 
 /**
- * A "gravity" active-tab highlight: a single blob that springs to the active
- * tab, but with the leading edge snapping (fast spring) and the trailing edge
- * lagging (slow spring) so it STRETCHES in the direction of travel and settles
+ * A "gravity" active-item highlight: a single blob that springs to the active
+ * item, but with the LEADING edge snapping (fast spring) and the TRAILING edge
+ * lagging (slow spring), so it STRETCHES in the direction of travel and settles
  * with a slight bounce — a liquid feel without an SVG goo filter (which renders
- * unreliably inside the glass/backdrop pill on iOS). Tab metrics are measured
- * with a ResizeObserver (setState only in the RO callback).
+ * unreliably inside the glass/backdrop pill on iOS).
+ *
+ * Position is driven by a transform (`x`/`y`) rather than `left`/`top`, so the
+ * frequent per-frame movement is compositor-friendly and doesn't thrash layout
+ * (this is what was causing frame-skips when navigating into the heavy dashboard).
+ * The two edges are animated imperatively on motion values; the size is derived.
+ * Works for both the horizontal pill bar (`axis="x"`) and the vertical sidebar
+ * (`axis="y"`). Metrics are measured with a ResizeObserver (setState only in the
+ * RO callback) in content coordinates so it stays correct inside a scroll area.
  */
-function GravityNavIndicator({
+function GravityIndicator({
   containerRef,
   activeIndex,
+  axis = "x",
+  className,
+  revision = "",
 }: {
-  containerRef: React.RefObject<HTMLDivElement | null>
+  containerRef: React.RefObject<HTMLElement | null>
   activeIndex: number
+  axis?: "x" | "y"
+  className?: string
+  /** Change this when the set/order of items changes so metrics re-measure. */
+  revision?: string
 }) {
   const reduce = useReducedMotion()
-  const [metrics, setMetrics] = useState<{
-    rects: { left: number; width: number; top: number; height: number }[]
-    cw: number
-  }>({ rects: [], cw: 0 })
+  const [rects, setRects] = useState<{ left: number; top: number; width: number; height: number }[]>([])
 
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     const measure = () => {
       const base = el.getBoundingClientRect()
-      const items = Array.from(el.querySelectorAll<HTMLElement>("[data-nav-tab]"))
-      setMetrics({
-        cw: base.width,
-        rects: items.map((it) => {
+      const items = Array.from(el.querySelectorAll<HTMLElement>("[data-grav-item]"))
+      setRects(
+        items.map((it) => {
           const r = it.getBoundingClientRect()
-          return { left: r.left - base.left, width: r.width, top: r.top - base.top, height: r.height }
+          return {
+            left: r.left - base.left + el.scrollLeft,
+            top: r.top - base.top + el.scrollTop,
+            width: r.width,
+            height: r.height,
+          }
         }),
-      })
+      )
     }
     const ro = new ResizeObserver(measure)
     ro.observe(el)
+    // Items themselves can change size/position (e.g. a collapsing sidebar
+    // section) without the container resizing — observe them too.
+    el.querySelectorAll<HTMLElement>("[data-grav-item]").forEach((it) => ro.observe(it))
     return () => ro.disconnect()
-  }, [containerRef])
+  }, [containerRef, revision])
 
-  // Direction of travel decides which edge leads (fast) vs trails (slow). The
-  // previous index is tracked in a motion value (not a React ref) so reading it
-  // during render is lint-clean; it's committed after each change in an effect.
+  // Edge motion values: a = start edge (x:left / y:top), b = end edge. Size and
+  // transform are derived so only transforms move per frame.
+  const a = useMotionValue(0)
+  const b = useMotionValue(0)
+  const size = useTransform([a, b] as [MotionValue<number>, MotionValue<number>], ([av, bv]: number[]) =>
+    Math.max(0, bv - av),
+  )
   const prevIndex = useMotionValue(activeIndex)
-  const movingRight = activeIndex >= prevIndex.get()
-  useEffect(() => {
-    prevIndex.set(activeIndex)
-  }, [activeIndex, prevIndex])
+  const initRef = useRef(false)
 
-  const target = metrics.rects[activeIndex]
+  useEffect(() => {
+    const target = rects[activeIndex]
+    if (!target) return
+    const startEdge = axis === "x" ? target.left : target.top
+    const endEdge = axis === "x" ? target.left + target.width : target.top + target.height
+    const forward = activeIndex >= prevIndex.get()
+    prevIndex.set(activeIndex)
+
+    if (!initRef.current) {
+      initRef.current = true
+      a.set(startEdge)
+      b.set(endEdge)
+      return
+    }
+    const fast = reduce ? { duration: 0 } : { type: "spring" as const, stiffness: 430, damping: 34 }
+    const slow = reduce ? { duration: 0 } : { type: "spring" as const, stiffness: 150, damping: 18 }
+    // Trailing edge lags (slow), leading edge snaps (fast).
+    animate(a, startEdge, forward ? slow : fast)
+    animate(b, endEdge, forward ? fast : slow)
+  }, [activeIndex, rects, axis, reduce, a, b, prevIndex])
+
+  const target = rects[activeIndex]
   if (!target || activeIndex < 0) return null
 
-  const right = Math.max(0, metrics.cw - (target.left + target.width))
-  const fast = reduce ? { duration: 0 } : { type: "spring" as const, stiffness: 420, damping: 34 }
-  const slow = reduce ? { duration: 0 } : { type: "spring" as const, stiffness: 140, damping: 17 }
+  const style =
+    axis === "x"
+      ? { x: a, width: size, top: target.top, height: target.height }
+      : { y: a, height: size, left: target.left, width: target.width }
 
   return (
     <motion.span
       aria-hidden
-      className="pointer-events-none absolute z-0 rounded-full bg-foreground/10"
-      style={{ top: target.top, height: target.height }}
-      initial={false}
-      animate={{ left: target.left, right }}
-      transition={{ left: movingRight ? slow : fast, right: movingRight ? fast : slow }}
+      className={cn(
+        "pointer-events-none absolute left-0 top-0 z-0 rounded-full bg-foreground/10 will-change-transform",
+        className,
+      )}
+      style={style}
     />
   )
 }
@@ -254,7 +295,7 @@ function PillBarContent({
       {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
           behind the labels and stretches between tabs as the route changes. */}
       <div ref={tabsRef} className="relative flex items-center flex-1 min-w-0 justify-evenly">
-        <GravityNavIndicator containerRef={tabsRef} activeIndex={activeIndex} />
+        <GravityIndicator containerRef={tabsRef} activeIndex={activeIndex} axis="x" revision={tabs.join(",")} />
         {tabs.map((tabKey) => {
           const tab = TAB_CONFIG[tabKey]
           if (!tab) return null
@@ -265,7 +306,7 @@ function PillBarContent({
             <Link key={tabKey} href={tab.href} className="relative z-[1]">
               {mode === "desktop" ? (
                 <span
-                  data-nav-tab
+                  data-grav-item
                   className={cn(
                     "inline-flex items-center justify-center h-9 px-4 rounded-full text-sm font-medium transition-colors",
                     active ? "text-primary" : "text-foreground/60 active:text-foreground"
@@ -275,7 +316,7 @@ function PillBarContent({
                 </span>
               ) : (
                 <span
-                  data-nav-tab
+                  data-grav-item
                   className={cn(
                     "inline-flex flex-col items-center justify-center gap-0.5 h-11 px-3 rounded-full transition-colors",
                     active ? "text-primary" : "text-foreground/60 active:text-foreground"
@@ -305,6 +346,7 @@ function SidebarNav({
   pathname: string
   className?: string
 }) {
+  const navRef = useRef<HTMLElement>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const toggleSection = (label: string) => {
     setCollapsed((prev) => ({ ...prev, [label]: !prev[label] }))
@@ -315,11 +357,27 @@ function SidebarNav({
     return pathname === href || pathname?.startsWith(href + "/")
   }
 
+  // Rendered item order (matches DOM): dashboard, then each expanded section's
+  // items. Drives the vertical gravity blob's target.
+  const orderedHrefs = [
+    dashboardNavItem.href,
+    ...navSections.flatMap((s) => (collapsed[s.label] ? [] : s.items.map((i) => i.href))),
+  ]
+  const activeIndex = orderedHrefs.findIndex((href) => isItemActive(href))
+
   return (
     <nav
-      className={cn("overflow-y-auto overscroll-contain px-3 pb-4", className)}
+      ref={navRef}
+      className={cn("relative overflow-y-auto overscroll-contain px-3 pb-4", className)}
       style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
     >
+      <GravityIndicator
+        containerRef={navRef}
+        activeIndex={activeIndex}
+        axis="y"
+        className="rounded-lg"
+        revision={orderedHrefs.join(",")}
+      />
       <SidebarNavItem
         href={dashboardNavItem.href}
         icon={dashboardNavItem.icon}
@@ -375,11 +433,12 @@ function SidebarNavItem({
   return (
     <Link
       href={href}
+      data-grav-item
       className={cn(
-        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150",
-        "active:scale-[0.98] active:bg-foreground/8",
+        "relative z-[1] flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150",
+        "active:scale-[0.98]",
         isActive
-          ? "bg-foreground/10 text-primary font-medium"
+          ? "text-primary font-medium"
           : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
       )}
     >
