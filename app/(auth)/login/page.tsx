@@ -855,7 +855,7 @@ export default function LoginPage() {
                       <p className="text-xs text-white/50 mb-1">Or enter manually:</p>
                       <code
                         onClick={copyToClipboard}
-                        className="flex justify-center gap-2 max-w-full text-xs bg-white/10 px-3 py-2 rounded-md font-mono break-all text-white/80 hover:bg-white/15 transition-colors cursor-pointer"
+                        className="flex justify-center gap-2 max-w-full text-xs bg-white/10 px-3 py-2 rounded-md break-all text-white/80 hover:bg-white/15 transition-colors cursor-pointer"
                       >
                         {totpSecret}
                         {copied ? (

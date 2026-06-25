@@ -43,7 +43,7 @@ export function PeriodFlightsCard({ flights, className }: PeriodFlightsCardProps
           <Plane className="h-3 w-3" />
           Flights in period
         </p>
-        <span className="font-mono tabular-nums text-[11px] text-foreground/70">
+        <span className=" tabular-nums text-[11px] text-foreground/70">
           {flights.length}
         </span>
       </div>
@@ -53,23 +53,25 @@ export function PeriodFlightsCard({ flights, className }: PeriodFlightsCardProps
           No flights in this period
         </div>
       ) : (
-        <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+        <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto overflow-x-hidden">
           {flights.map((f) => (
             <li key={f.id}>
               <Link
                 href={`/flights/${f.id}`}
-                className="flex items-center gap-2 rounded-lg px-1.5 py-1 text-xs transition-colors hover:bg-accent/40"
+                className="flex items-center gap-1.5 rounded-lg px-1 py-1 text-xs transition-colors hover:bg-accent/40"
               >
-                <span className="w-12 shrink-0 tabular-nums text-muted-foreground">
+                <span className="w-11 shrink-0 tabular-nums text-muted-foreground">
                   {formatDate(f.date)}
                 </span>
-                <span className="w-14 shrink-0 truncate font-medium text-foreground">
+                <span className="w-12 shrink-0 truncate font-medium text-foreground">
                   {f.flightNumber || "—"}
                 </span>
-                <span className="flex-1 truncate font-mono tabular-nums text-foreground/80">
+                {/* min-w-0 lets the route shrink + truncate instead of pushing
+                    the row wider than the card (which caused horizontal scroll). */}
+                <span className="min-w-0 flex-1 truncate tabular-nums text-foreground/80">
                   {formatRoute(f)}
                 </span>
-                <span className="shrink-0 font-mono tabular-nums text-foreground">
+                <span className="shrink-0 tabular-nums text-foreground">
                   {formatDecimalHours(f.blockMinutes)}h
                 </span>
               </Link>

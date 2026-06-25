@@ -84,7 +84,7 @@ export function ProgressRingGrid({
                   trackClassName={tile.tone.track}
                   indicatorClassName={tile.tone.indicator}
                 >
-                  <span className="font-mono tabular-nums text-[10px] font-semibold text-foreground">
+                  <span className=" tabular-nums text-[10px] font-semibold text-foreground">
                     {formatDecimalHours(tile.minutes)}
                   </span>
                   <span className="text-[8px] uppercase tracking-wider text-muted-foreground">

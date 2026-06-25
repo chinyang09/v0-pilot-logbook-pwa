@@ -147,7 +147,7 @@ export default function AirportDetailPage() {
                     <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                       <Globe className="h-3 w-3" /> Coordinates
                     </div>
-                    <div className="text-sm font-mono bg-muted/50 p-1.5 rounded text-center">
+                    <div className="text-sm bg-muted/50 p-1.5 rounded text-center">
                       {airport.latitude.toFixed(4)},{" "}
                       {airport.longitude.toFixed(4)}
                     </div>
@@ -157,7 +157,7 @@ export default function AirportDetailPage() {
                     <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                       <Mountain className="h-3 w-3" /> Elevation
                     </div>
-                    <div className="text-sm font-mono bg-muted/50 p-1.5 rounded text-center">
+                    <div className="text-sm bg-muted/50 p-1.5 rounded text-center">
                       {airport.elevation} FT
                     </div>
                   </div>

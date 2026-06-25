@@ -297,7 +297,7 @@ export default function FDPPage() {
                     </span>
                     <span
                       className={cn(
-                        "text-sm font-mono font-semibold tabular-nums mt-0.5 block leading-none",
+                        "text-sm font-semibold tabular-nums mt-0.5 block leading-none",
                         isRestMet ? "text-green-500" : "text-red-500"
                       )}
                     >
@@ -327,7 +327,7 @@ export default function FDPPage() {
                   <span className="text-[9px] uppercase tracking-wider text-muted-foreground block leading-none">
                     Rest since last duty
                   </span>
-                  <span className="text-sm font-mono font-semibold tabular-nums text-foreground mt-0.5 block leading-none">
+                  <span className="text-sm font-semibold tabular-nums text-foreground mt-0.5 block leading-none">
                     {formatMinutesHM(restHadMinutes)}
                   </span>
                 </div>

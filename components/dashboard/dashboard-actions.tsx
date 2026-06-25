@@ -14,10 +14,13 @@ import {
 import { AlertsDropdown } from "./alerts-dropdown"
 import { cn } from "@/lib/utils"
 
-// Snappy spring with a hint of bounce for the expand/shrink of the period pills
-// + month label. Kept fairly damped so the width:auto collapse settles cleanly
-// (a looser/bouncier spring left a visible "stuck" tail before fully closing).
-const SPRING = { type: "spring" as const, stiffness: 420, damping: 36 }
+// Bouncy spring for the OPEN (expand) of the period pills + month label.
+const SPRING = { type: "spring" as const, stiffness: 340, damping: 24 }
+// The COLLAPSE uses a deterministic tween instead: a spring eases toward its
+// width:auto→0 target and is considered "done" within a rest threshold, so the
+// last ~10% of width vanishes instantly when AnimatePresence unmounts the
+// element (the visible "stuck then snap"). A tween reaches exactly 0 at the end.
+const COLLAPSE = { duration: 0.22, ease: [0.4, 0, 0.2, 1] as const }
 
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -74,7 +77,7 @@ export function DashboardActions() {
                 aria-expanded={monthYearView}
                 initial={{ width: 0, opacity: 0 }}
                 animate={{ width: "auto", opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
+                exit={{ width: 0, opacity: 0, transition: COLLAPSE }}
                 transition={SPRING}
                 className="flex items-center gap-1 overflow-hidden whitespace-nowrap rounded-full px-2 py-1 text-sm font-medium text-foreground/80 transition-colors hover:bg-foreground/5"
               >
@@ -116,7 +119,7 @@ export function DashboardActions() {
                 aria-label="Dashboard period"
                 initial={{ width: 0, opacity: 0 }}
                 animate={{ width: "auto", opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
+                exit={{ width: 0, opacity: 0, transition: COLLAPSE }}
                 transition={SPRING}
                 className="flex items-center gap-0.5 overflow-hidden whitespace-nowrap pr-1"
               >

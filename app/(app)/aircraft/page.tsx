@@ -84,7 +84,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
                 <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">{aircraft.typecode}</span>
               )}
               {aircraft.shortDescription && (
-                <span className="text-xs text-muted-foreground font-mono">{aircraft.shortDescription}</span>
+                <span className="text-xs text-muted-foreground ">{aircraft.shortDescription}</span>
               )}
             </div>
             <div className="text-sm text-muted-foreground truncate mt-0.5">

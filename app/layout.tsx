@@ -51,12 +51,10 @@ export default function RootLayout({
       <head>
         {/* Windows tile color */}
         <meta name="msapplication-TileColor" content="#05080B" />
-        {/* Inter (sans) + Geist Mono (tabular numbers) from Google Fonts. Geist
-            Mono must be loaded or every `font-mono` element falls back to an
-            inconsistent system monospace. */}
+        {/* Inter is the single app typeface (sans + numbers). */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100..900&family=Inter:wght@100..900&display=swap" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet" />
       </head>
       <body className="bg-background font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>

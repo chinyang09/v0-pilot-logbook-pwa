@@ -657,7 +657,7 @@ export default function AccountPage() {
                 className="flex items-center gap-1.5 min-w-0 text-muted-foreground hover:text-foreground transition-colors"
                 aria-label="Copy User ID"
               >
-                <span className="text-sm font-mono truncate">{profile?.userId || user?.userId}</span>
+                <span className="text-sm truncate">{profile?.userId || user?.userId}</span>
                 {copiedKey === "userId" ? (
                   <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
                 ) : (
@@ -725,7 +725,7 @@ export default function AccountPage() {
                     <button
                       type="button"
                       onClick={() => copyToClipboard(totpReveal.secret, "totpSecret")}
-                      className="flex items-center justify-center gap-2 w-full text-xs bg-muted px-3 py-2 rounded-md font-mono break-all text-muted-foreground hover:bg-muted/70 transition-colors"
+                      className="flex items-center justify-center gap-2 w-full text-xs bg-muted px-3 py-2 rounded-md break-all text-muted-foreground hover:bg-muted/70 transition-colors"
                     >
                       {totpReveal.secret}
                       {copiedKey === "totpSecret" ? (

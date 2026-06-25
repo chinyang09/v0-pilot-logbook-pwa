@@ -90,14 +90,14 @@ export function HeroTotalsWidget({
             <p className="text-[10px] font-semibold uppercase tracking-wider text-chart-2">
               Flight
             </p>
-            <p className="font-mono tabular-nums text-3xl font-bold text-foreground leading-none">
+            <p className=" tabular-nums text-3xl font-bold text-foreground leading-none">
               {formatDecimalHours(blockMinutes)}
             </p>
             <div className="my-1 h-px w-10 bg-border/80" />
             <p className="text-[10px] font-semibold uppercase tracking-wider text-chart-4">
               Sim
             </p>
-            <p className="font-mono tabular-nums text-base font-semibold text-foreground/90 leading-none">
+            <p className=" tabular-nums text-base font-semibold text-foreground/90 leading-none">
               {formatDecimalHours(simMinutes)}
             </p>
           </div>
@@ -136,7 +136,7 @@ function StatTile({
         {icon}
         {label}
       </p>
-      <p className="font-mono tabular-nums text-sm font-semibold text-foreground">
+      <p className=" tabular-nums text-sm font-semibold text-foreground">
         {value}
       </p>
     </div>

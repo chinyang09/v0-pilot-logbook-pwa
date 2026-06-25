@@ -344,12 +344,16 @@ re-renders).
   touch faster for a subtle stretch. Tab metrics are measured with a
   ResizeObserver in **content coordinates** (so it's correct inside the scrollable
   sidebar). Do **not** revert this to a Framer `animate()`/motion-value spring.
-- **Nav morph** (`useMorphPhase` + `DesktopPillMorph`/`MobilePillMorph`) — the
-  pill ↔ sidebar morph is a single continuous `opening`/`closing` transition
-  (position + width + height move **together**), not the old slide-then-expand
-  two-step (which felt "stuck"). The pill/sidebar **content** is hidden during
-  the morph and only **eases in** once fully settled (`phase === "pill"` /
-  `"sidebar"`), so you never see squished content mid-morph.
+- **Nav morph** (`useMorphPhase` + `DesktopPillMorph`/`MobilePillMorph` +
+  `morphTransition`) — the pill ↔ sidebar morph is a single `opening`/`closing`
+  transition whose two property groups **overlap** via per-property CSS
+  `transition-delay` (no phase stall, no "stuck"). Order is deliberate: **opening**
+  (pill→sidebar) moves position+width first then grows height; **closing**
+  (sidebar→pill) shrinks height first then moves position+width. `useMorphPhase`
+  advances on a timer sized to the full overlap (`DUR + LEAD`), **not** on
+  `transitionEnd` (which would fire on the first/undelayed property and cut the
+  delayed one). The pill/sidebar **content** is hidden during the morph and only
+  **eases in** once fully settled (`phase === "pill"` / `"sidebar"`).
 
 ### Unified Settings/Form Layout
 
@@ -504,12 +508,12 @@ Debug logs use prefixed format: `[v0]`, `[Auth]`, `[SW]`, `[UserDB]`, `[Sync]`, 
 - **shadcn/ui** uses the New York style with CSS variables and RSC support
 - **Tailwind CSS v4** via `@tailwindcss/postcss` PostCSS plugin
 - **Dark mode** is class-based via `next-themes`
-- **Fonts**: **Inter** (`--font-sans`) and **Geist Mono** (`--font-mono`, for
-  `tabular-nums` numbers) are both loaded via a single Google Fonts `<link>` in
-  `app/layout.tsx`. Geist Mono **must stay loaded** — `--font-mono` references it,
-  so dropping the link makes every `font-mono` element fall back to an
-  inconsistent system monospace. Keep app text on Inter/Geist Mono; the only
-  deliberate exception is the FDP "next reporting time" (`font-serif italic`).
+- **Fonts**: **Inter is the single app typeface** (sans + numbers), loaded via a
+  Google Fonts `<link>` in `app/layout.tsx`; `--font-sans` and `--font-mono` both
+  point to Inter. There is intentionally **no `font-mono`** in the app — use
+  `tabular-nums` (Inter has tabular figures) for aligned numbers, not a monospace
+  class. The only deliberate non-Inter text is the FDP "next reporting time"
+  (`font-serif italic`).
 
 ## Linting
 
@@ -749,7 +753,7 @@ When making changes, be aware of these high-impact files:
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
 - Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
 - Do not make a `holdToConfirm` action fire on tap, dismiss the confirm overlay on release, or bring back the red full-row fill — the overlay is dismissed only by an outside tap/swipe, release just resets, and the destructive cue is the card progress border + the pill's gradient fill
-- Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. Likewise don't restore the slide-then-expand two-step morph or show the pill/sidebar content mid-morph (it must ease in only when settled)
+- Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) and the **timer-based** phase advance — advancing on `transitionEnd` cuts the delayed property; and never show the pill/sidebar content mid-morph (it eases in only when settled)
 - Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely
 - Do not drop the Geist Mono Google-Fonts `<link>` — `--font-mono` depends on it; without it `font-mono` falls back to an inconsistent system monospace
 - Do not give `register/complete`, `add-passkey`, the callsign change, or the TOTP-reveal routes a path that skips `verifyAuthenticationResponse`/`verifyStepUpAssertion` — the TOTP seed must never be revealed without a fresh passkey step-up

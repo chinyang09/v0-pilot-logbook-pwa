@@ -148,7 +148,7 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDel
               </Badge>
             </div>
             {currency.code !== "CUSTOM" && (
-              <p className="text-xs text-muted-foreground font-mono">{currency.code}</p>
+              <p className="text-xs text-muted-foreground ">{currency.code}</p>
             )}
           </div>
         </div>

@@ -32,7 +32,7 @@ export function EngineClassCard({ byEngine, topTypes, className }: EngineClassCa
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             SE
           </p>
-          <p className="font-mono tabular-nums text-lg font-bold text-foreground">
+          <p className=" tabular-nums text-lg font-bold text-foreground">
             {formatDecimalHours(byEngine.se)}
           </p>
         </div>
@@ -40,7 +40,7 @@ export function EngineClassCard({ byEngine, topTypes, className }: EngineClassCa
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             ME
           </p>
-          <p className="font-mono tabular-nums text-lg font-bold text-foreground">
+          <p className=" tabular-nums text-lg font-bold text-foreground">
             {formatDecimalHours(byEngine.me)}
           </p>
         </div>
@@ -48,7 +48,7 @@ export function EngineClassCard({ byEngine, topTypes, className }: EngineClassCa
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Jet
           </p>
-          <p className="font-mono tabular-nums text-lg font-bold text-foreground">
+          <p className=" tabular-nums text-lg font-bold text-foreground">
             {formatDecimalHours(byEngine.jet)}
           </p>
         </div>
@@ -87,7 +87,7 @@ export function EngineClassCard({ byEngine, topTypes, className }: EngineClassCa
                 className="flex-1"
                 height={4}
               />
-              <span className="w-10 text-right font-mono tabular-nums text-[11px] text-foreground/80">
+              <span className="w-10 text-right tabular-nums text-[11px] text-foreground/80">
                 {formatDecimalHours(t.minutes)}
               </span>
             </div>
