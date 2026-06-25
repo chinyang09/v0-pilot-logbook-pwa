@@ -188,10 +188,14 @@ export function SwipeableCard({
   // True while the row is swiped open or mid-gesture (drives the card morph).
   const [active, setActive] = useState(false)
 
-  // When a hold-to-confirm action is tapped, the panel closes and this
-  // translucent confirm button overlays the row; the user must press-and-hold it
-  // (animated progress border) to fire the action. Releasing early dismisses it.
+  // When a hold-to-confirm action is tapped, the panel closes and this confirm
+  // overlay covers the row: the content behind desaturates ("the past"), a red
+  // tint fills in lock-step with the hold, and a centred pill must be held to
+  // fire the action. `confirmProgress` mirrors the button's hold 0→1 so the tint
+  // fills together with it.
   const [confirmingAction, setConfirmingAction] = useState<SwipeAction | null>(null)
+  const confirmProgress = useMotionValue(0)
+  const tintOpacity = useTransform(confirmProgress, [0, 1], [0.06, 0.34])
 
   // Tracks whether the last pointer interaction actually moved (drag vs tap).
   const movedRef = useRef(false)
@@ -227,10 +231,11 @@ export function SwipeableCard({
   // Tapping a hold-to-confirm action: close the panel and raise the overlay.
   const requestConfirm = useCallback(
     (action: SwipeAction) => {
+      confirmProgress.set(0)
       setConfirmingAction(action)
       settle(0)
     },
-    [settle]
+    [settle, confirmProgress]
   )
 
   // The confirm overlay is dismissed only by interacting *outside* this card
@@ -241,12 +246,13 @@ export function SwipeableCard({
     if (!confirmingAction) return
     const onPointerDown = (e: PointerEvent) => {
       if (!containerRef.current?.contains(e.target as Node)) {
+        confirmProgress.set(0)
         setConfirmingAction(null)
       }
     }
     document.addEventListener("pointerdown", onPointerDown, true)
     return () => document.removeEventListener("pointerdown", onPointerDown, true)
-  }, [confirmingAction])
+  }, [confirmingAction, confirmProgress])
 
   const closeOthers = useCallback(() => {
     window.dispatchEvent(
@@ -351,10 +357,12 @@ export function SwipeableCard({
         </motion.div>
       )}
 
-      {/* Swipeable content — morphs into a lifted card on swipe (row variant) */}
+      {/* Swipeable content — morphs into a lifted card on swipe (row variant).
+          Dragging is disabled while a confirm overlay is up so the row can't be
+          inadvertently swiped while holding. */}
       <motion.div
         ref={contentRef}
-        drag={hasActions ? "x" : false}
+        drag={hasActions && !confirmingAction ? "x" : false}
         dragDirectionLock
         dragConstraints={{ left: -openWidth, right: 0 }}
         dragElastic={DRAG_ELASTIC}
@@ -374,35 +382,41 @@ export function SwipeableCard({
             !isCard && active && "rounded-lg bg-secondary"
           )}
         >
-          {children}
-          {/* Hold-to-confirm overlay: a slight red tint over the row (NO blur —
-              the user must still see exactly what they're about to delete), with
-              an animated progress border. Hold to fire; release just resets — it
-              is dismissed by tapping outside (handled above). Above the content
-              (and the .row-divider z-2). */}
+          {/* Content desaturates while confirming — reads as "the past". */}
+          <div className={cn("transition-[filter] duration-300", confirmingAction && "grayscale")}>
+            {children}
+          </div>
+          {/* Hold-to-confirm overlay: the content behind is greyscaled, a red
+              tint fills in lock-step with the hold (NO blur — the user must still
+              see what they're deleting), and a centred pill is held to confirm.
+              Above the content (and the .row-divider z-2). */}
           <AnimatePresence>
             {confirmingAction && (
               <motion.div
-                className="absolute inset-0 z-[3] flex"
+                className="absolute inset-0 z-[3] flex items-center justify-center"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.16, ease: "easeOut" }}
                 onClick={(e) => e.stopPropagation()}
               >
+                {/* Red tint that fills together with the hold progress */}
+                <motion.div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 bg-destructive"
+                  style={{ opacity: tintOpacity }}
+                />
                 <HoldToConfirmButton
-                  className={cn(
-                    "h-full w-full gap-2.5 border-0 font-semibold text-destructive",
-                    "bg-destructive/15",
-                    isCard || active ? "rounded-lg" : "rounded-none"
-                  )}
-                  radius={isCard || active ? 8 : 0}
+                  className="h-9 rounded-full px-5 shadow-md"
+                  radius={999}
+                  progress={confirmProgress}
                   ariaLabel={confirmingAction.ariaLabel ?? confirmingAction.label ?? "Hold to confirm"}
                   icon={confirmingAction.icon}
                   label="Hold to confirm"
-                  duration={confirmingAction.holdDuration}
+                  duration={confirmingAction.holdDuration ?? 3000}
                   onConfirm={() => {
                     const a = confirmingAction
+                    confirmProgress.set(0)
                     setConfirmingAction(null)
                     a.onClick()
                   }}
