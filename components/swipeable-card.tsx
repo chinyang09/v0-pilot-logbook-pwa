@@ -420,7 +420,7 @@ export function SwipeableCard({
                   ariaLabel={confirmingAction.ariaLabel ?? confirmingAction.label ?? "Hold to confirm"}
                   icon={confirmingAction.icon}
                   label="Hold to confirm"
-                  duration={confirmingAction.holdDuration ?? 3000}
+                  duration={confirmingAction.holdDuration ?? 2500}
                   onConfirm={() => {
                     const a = confirmingAction
                     confirmProgress.set(0)

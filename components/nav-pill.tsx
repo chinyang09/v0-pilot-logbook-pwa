@@ -375,7 +375,7 @@ function SidebarNav({
         containerRef={navRef}
         activeIndex={activeIndex}
         axis="y"
-        className="rounded-lg"
+        className="rounded-full"
         revision={orderedHrefs.join(",")}
       />
       <SidebarNavItem
@@ -435,7 +435,7 @@ function SidebarNavItem({
       href={href}
       data-grav-item
       className={cn(
-        "relative z-[1] flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150",
+        "relative z-[1] flex items-center gap-3 px-3.5 py-2.5 rounded-full text-sm transition-all duration-150",
         "active:scale-[0.98]",
         isActive
           ? "text-primary font-medium"

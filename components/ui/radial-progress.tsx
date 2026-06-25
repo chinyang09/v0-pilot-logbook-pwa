@@ -3,6 +3,7 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { useDeferredAnimation } from "@/hooks/use-deferred-animation"
 
 interface RadialProgressProps extends React.HTMLAttributes<HTMLDivElement> {
   value: number
@@ -29,6 +30,8 @@ export function RadialProgress({
   style,
   ...props
 }: RadialProgressProps) {
+  // Skip the entrance animation on navigation; animate later value changes.
+  const animate = useDeferredAnimation()
   const safeMax = max > 0 ? max : 1
   const ratio = Math.max(0, Math.min(1, value / safeMax))
   const radius = (size - strokeWidth) / 2
@@ -71,7 +74,8 @@ export function RadialProgress({
           strokeDashoffset={dashOffset}
           strokeLinecap={rounded ? "round" : "butt"}
           className={cn(
-            "stroke-primary transition-[stroke-dashoffset] duration-500 ease-out motion-reduce:transition-none",
+            "stroke-primary motion-reduce:transition-none",
+            animate && "transition-[stroke-dashoffset] duration-500 ease-out",
             indicatorClassName,
           )}
         />
