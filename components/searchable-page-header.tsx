@@ -98,10 +98,12 @@ export function SearchablePageHeader({
           </div>
         )}
 
-        {/* Search bar — expands from w-8 icon to full flex-1 */}
+        {/* Search bar — expands from w-8 icon to full flex-1, with a bouncy
+            (overshoot) easing for a springy, liquid feel. */}
         <div
+          style={{ transitionTimingFunction: "cubic-bezier(0.34, 1.45, 0.64, 1)" }}
           className={cn(
-            "flex items-center gap-2 rounded-lg border overflow-hidden transition-all duration-300 ease-out cursor-pointer",
+            "flex items-center gap-2 rounded-lg border overflow-hidden transition-all duration-300 cursor-pointer",
             isSearchActive
               ? "flex-1 border-border/50 bg-background/50 px-2 h-8 cursor-default"
               : "w-8 h-8 border-transparent justify-center flex-shrink-0"

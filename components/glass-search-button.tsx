@@ -70,7 +70,10 @@ export function GlassSearchButton({
       className="overflow-hidden"
       style={{
         maxWidth: isOpen ? (isDesktop ? 240 : "100vw") : 56,
-        transition: "max-width 0.28s cubic-bezier(0.25, 1, 0.5, 1)",
+        // Liquid/bounce: an overshoot easing makes the bar spring open/closed.
+        // Kept as a CSS max-width transition (GPU-friendly) to avoid the iOS
+        // reflow jank that a JS width spring causes.
+        transition: "max-width 0.4s cubic-bezier(0.34, 1.3, 0.64, 1)",
         flex: !isDesktop && isOpen ? 1 : undefined,
         minWidth: !isDesktop && isOpen ? 0 : 56,
         willChange: isOpen ? "max-width" : undefined,

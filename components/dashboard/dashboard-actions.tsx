@@ -14,7 +14,8 @@ import {
 import { AlertsDropdown } from "./alerts-dropdown"
 import { cn } from "@/lib/utils"
 
-const SPRING = { type: "spring" as const, stiffness: 360, damping: 32 }
+// Liquid/bounce spring for the expand/shrink of the period pills + month label.
+const SPRING = { type: "spring" as const, stiffness: 340, damping: 22 }
 
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
