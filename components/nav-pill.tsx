@@ -224,10 +224,16 @@ function GravityIndicator({
     <div
       aria-hidden
       className={cn(
-        "pointer-events-none absolute left-0 top-0 z-0 rounded-full bg-foreground/10 will-change-transform",
+        "absolute left-0 top-0 z-0 rounded-full bg-foreground/10",
         className,
       )}
+      // `pointer-events:none` inline (belt-and-suspenders) — the blob sits over
+      // the active item, and on iOS a *composited* layer (it transforms) can
+      // occasionally swallow a touch despite the class. No `will-change` so the
+      // layer isn't promoted persistently (the transform transition still
+      // composites while animating, so nav stays smooth).
       style={{
+        pointerEvents: "none",
         transform: `translate(${target.left}px, ${target.top}px)`,
         width: target.width,
         height: target.height,
