@@ -350,10 +350,14 @@ re-renders).
   `transition-delay` (no phase stall, no "stuck"). Order is deliberate: **opening**
   (pill→sidebar) moves position+width first then grows height; **closing**
   (sidebar→pill) shrinks height first then moves position+width. `useMorphPhase`
-  advances on a timer sized to the full overlap (`DUR + LEAD`), **not** on
-  `transitionEnd` (which would fire on the first/undelayed property and cut the
-  delayed one). The pill/sidebar **content** is hidden during the morph and only
-  **eases in** once fully settled (`phase === "pill"` / `"sidebar"`).
+  advances on a timer (`DUR + LEAD` fallback) **and** on the *delayed* property's
+  `transitionEnd` (keyed to `propertyName` so the delayed group isn't cut) — the
+  latter settles the phase the instant the morph finishes so the nav is
+  interactive immediately. The **pill** content (horizontal tabs) is hidden until
+  fully settled (it squishes mid-morph); the **sidebar** content (vertical list)
+  rides `isSidebarShape` and stays **visible + interactive for the whole open
+  span** (it merely clips like a drawer, so there's no dead window that drops
+  sidebar taps).
 
 ### Unified Settings/Form Layout
 

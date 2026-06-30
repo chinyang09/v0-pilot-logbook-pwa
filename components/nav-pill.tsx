@@ -526,13 +526,11 @@ function useMorphPhase(isOpen: boolean, phaseDuration: number) {
     return () => clearTimeout(safetyTimerRef.current)
   }, [phase, phaseDuration, advancePhase])
 
-  // Sidebar geometry (position + width + height) for the whole open span.
+  // Sidebar geometry (position + width + height) for the whole open span. The
+  // sidebar content rides this too, so it's interactive throughout the open.
   const isSidebarShape = phase === "opening" || phase === "sidebar"
-  const isTransitioning = phase === "opening" || phase === "closing"
-  // Content shows only once fully settled.
-  const isExpanded = phase === "sidebar"
 
-  return { phase, advancePhase, isSidebarShape, isTransitioning, isExpanded }
+  return { phase, advancePhase, isSidebarShape }
 }
 
 const MORPH_EASE = "cubic-bezier(0.4, 0, 0.2, 1)"
@@ -583,7 +581,21 @@ function DesktopPillMorph({
   const LEAD = prefersReducedMotion ? 0 : 160
   const TOTAL = DUR + LEAD
 
-  const { phase, isSidebarShape, isExpanded } = useMorphPhase(sidebarOpen, TOTAL)
+  const { phase, advancePhase, isSidebarShape } = useMorphPhase(sidebarOpen, TOTAL)
+
+  // Settle the phase the instant the morph visually finishes — i.e. when the
+  // LAST (delayed) property's transition ends — so the content becomes
+  // interactive immediately rather than ~80ms later via the fallback timer
+  // (that gap dropped sidebar taps). Keyed to the delayed property so the
+  // delayed group is never cut short.
+  const handleTransitionEnd = useCallback(
+    (e: React.TransitionEvent) => {
+      if (e.target !== ref.current) return
+      const last = phase === "opening" ? "height" : phase === "closing" ? "transform" : null
+      if (last && e.propertyName === last) advancePhase()
+    },
+    [phase, advancePhase],
+  )
 
   const transition = morphTransition(phase, DUR, LEAD, "top, left, transform, width")
 
@@ -603,9 +615,10 @@ function DesktopPillMorph({
       ref={ref}
       className="fixed z-[100]"
       style={style}
+      onTransitionEnd={handleTransitionEnd}
     >
         <GlassContainer
-          cornerRadius={isExpanded ? 20 : 28}
+          cornerRadius={isSidebarShape ? 20 : 28}
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           disableTapFeedback
@@ -614,13 +627,13 @@ function DesktopPillMorph({
           <div
             className="flex-shrink-0"
             style={{
-              // Only show the pill content once fully settled as a pill — during
-              // the morph the container is mid-shape, so showing the content makes
-              // it look squished. It eases in as it reaches the pill.
+              // Only show the (horizontal) pill content once fully settled as a
+              // pill — mid-morph the container is the wrong shape so the tabs look
+              // squished. Collapsed to 0 height + non-interactive otherwise.
               opacity: phase === "pill" ? 1 : 0,
-              visibility: isExpanded ? "hidden" : "visible",
+              visibility: phase === "pill" ? "visible" : "hidden",
               pointerEvents: phase === "pill" ? "auto" : "none",
-              height: isExpanded ? 0 : PILL_HEIGHT,
+              height: phase === "pill" ? PILL_HEIGHT : 0,
               transition: "opacity 0.2s ease",
             }}
           >
@@ -636,11 +649,13 @@ function DesktopPillMorph({
           <div
             className="flex flex-col flex-1 min-h-0 transition-opacity duration-200 ease-out"
             style={{
-              // Same as the pill content: only reveal once fully settled as the
-              // sidebar, so the content eases in rather than morphing squished.
-              opacity: phase === "sidebar" ? 1 : 0,
-              visibility: isExpanded ? "visible" : "hidden",
-              pointerEvents: phase === "sidebar" ? "auto" : "none",
+              // The vertical sidebar list isn't "squished" mid-morph (it's just
+              // clipped by the growing height, like a drawer), so keep it visible
+              // AND interactive for the whole open span. Gating it on the settled
+              // phase left a brief dead window that dropped sidebar taps.
+              opacity: isSidebarShape ? 1 : 0,
+              visibility: isSidebarShape ? "visible" : "hidden",
+              pointerEvents: isSidebarShape ? "auto" : "none",
             }}
           >
             {/* Sidebar top row — toggle + sync flushed right */}
@@ -681,12 +696,23 @@ function MobilePillMorph({
   const LEAD = prefersReducedMotion ? 0 : 160
   const TOTAL = DUR + LEAD
 
-  const { phase, isSidebarShape, isExpanded } = useMorphPhase(sidebarOpen, TOTAL)
+  const { phase, advancePhase, isSidebarShape } = useMorphPhase(sidebarOpen, TOTAL)
 
   // Close sidebar on route change
   useEffect(() => {
     setSidebarOpen(false)
   }, [pathname])
+
+  // Settle the phase the instant the morph visually finishes (see desktop), so
+  // the sidebar content becomes interactive immediately instead of ~80ms later.
+  const handleTransitionEnd = useCallback(
+    (e: React.TransitionEvent) => {
+      if (e.target !== ref.current) return
+      const last = phase === "opening" ? "height" : phase === "closing" ? "transform" : null
+      if (last && e.propertyName === last) advancePhase()
+    },
+    [phase, advancePhase],
+  )
 
   // Mobile morph — always bottom-anchored. pill: bottom-centre, auto width, pill
   // height. opening/closing: height and position+width morph in a sequenced
@@ -736,9 +762,10 @@ function MobilePillMorph({
         ref={ref}
         className="z-[100]"
         style={style}
+        onTransitionEnd={handleTransitionEnd}
       >
         <GlassContainer
-          cornerRadius={isExpanded ? 20 : 28}
+          cornerRadius={isSidebarShape ? 20 : 28}
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           disableTapFeedback
@@ -747,13 +774,13 @@ function MobilePillMorph({
           <div
             className="flex-shrink-0"
             style={{
-              // Only show the pill content once fully settled as a pill — during
-              // the morph the container is mid-shape, so showing the content makes
-              // it look squished. It eases in as it reaches the pill.
+              // Only show the (horizontal) pill content once fully settled as a
+              // pill — mid-morph the container is the wrong shape so the tabs look
+              // squished. Collapsed to 0 height + non-interactive otherwise.
               opacity: phase === "pill" ? 1 : 0,
-              visibility: isExpanded ? "hidden" : "visible",
+              visibility: phase === "pill" ? "visible" : "hidden",
               pointerEvents: phase === "pill" ? "auto" : "none",
-              height: isExpanded ? 0 : PILL_HEIGHT,
+              height: phase === "pill" ? PILL_HEIGHT : 0,
               transition: "opacity 0.2s ease",
             }}
           >
@@ -769,11 +796,13 @@ function MobilePillMorph({
           <div
             className="flex flex-col flex-1 min-h-0 transition-opacity duration-200 ease-out"
             style={{
-              // Same as the pill content: only reveal once fully settled as the
-              // sidebar, so the content eases in rather than morphing squished.
-              opacity: phase === "sidebar" ? 1 : 0,
-              visibility: isExpanded ? "visible" : "hidden",
-              pointerEvents: phase === "sidebar" ? "auto" : "none",
+              // The vertical sidebar list isn't "squished" mid-morph (it's just
+              // clipped by the growing height, like a drawer), so keep it visible
+              // AND interactive for the whole open span. Gating it on the settled
+              // phase left a brief dead window that dropped sidebar taps.
+              opacity: isSidebarShape ? 1 : 0,
+              visibility: isSidebarShape ? "visible" : "hidden",
+              pointerEvents: isSidebarShape ? "auto" : "none",
             }}
           >
             {/* Sidebar top row — toggle + sync flushed right */}
