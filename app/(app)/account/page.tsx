@@ -32,8 +32,15 @@ import {
   QrCode,
   ChevronDown,
 } from "lucide-react"
-import { QRCodeSVG } from "qrcode.react"
+import dynamic from "next/dynamic"
 import { motion, AnimatePresence } from "framer-motion"
+
+// The QR code renders only after a passkey step-up reveal — load it on demand
+// instead of shipping qrcode.react with the page bundle.
+const QRCodeSVG = dynamic(() => import("qrcode.react").then((m) => m.QRCodeSVG), {
+  ssr: false,
+  loading: () => <Skeleton className="h-[150px] w-[150px] rounded" />,
+})
 import { SwipeableCard } from "@/components/swipeable-card"
 import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button"
 import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
@@ -206,13 +213,18 @@ export default function AccountPage() {
   }, [fetchProfile, fetchSessions])
 
   // Keep profile + sessions fresh when returning to the tab, so a session
-  // revoked elsewhere is reflected without a manual browser refresh.
+  // revoked elsewhere is reflected without a manual browser refresh. Returning
+  // fires BOTH `focus` and `visibilitychange`, so a 1s guard stops each wake
+  // from double-fetching.
   useEffect(() => {
+    let lastRefresh = 0
     const refresh = () => {
-      if (document.visibilityState === "visible") {
-        fetchProfile()
-        fetchSessions()
-      }
+      if (document.visibilityState !== "visible") return
+      const now = Date.now()
+      if (now - lastRefresh < 1000) return
+      lastRefresh = now
+      fetchProfile()
+      fetchSessions()
     }
     window.addEventListener("focus", refresh)
     document.addEventListener("visibilitychange", refresh)

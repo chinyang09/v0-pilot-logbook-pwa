@@ -223,10 +223,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!user) return
 
     let cancelled = false
+    // Returning to the tab fires BOTH `focus` and `visibilitychange`; without a
+    // guard every wake did two identical fetches. Skip re-checks within 1s.
+    let lastCheck = 0
 
     const checkSession = async () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return
       if (typeof navigator !== "undefined" && !navigator.onLine) return
+      const now = Date.now()
+      if (now - lastCheck < 1000) return
+      lastCheck = now
       try {
         const res = await fetch("/api/auth/session", { cache: "no-store" })
         const data = await res.json().catch(() => ({ authenticated: false }))
@@ -247,15 +253,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const onVisible = () => {
       if (document.visibilityState === "visible") checkSession()
     }
-    const onUnauthorized = () => checkSession()
+    // A 401 signal must never be de-duped away — reset the guard first.
+    const onUnauthorized = () => {
+      lastCheck = 0
+      checkSession()
+    }
 
     // Re-validate on focus/visibility/network-online, on an explicit
     // unauthorized signal, and on a slow background interval as a backstop.
+    // The interval is deliberately long (4 min) — the event triggers cover
+    // every responsive case, so the timer only exists for a session revoked
+    // while the tab sits open and untouched.
     window.addEventListener("focus", checkSession)
     window.addEventListener("online", checkSession)
     window.addEventListener("auth:unauthorized", onUnauthorized)
     document.addEventListener("visibilitychange", onVisible)
-    const interval = window.setInterval(checkSession, 60_000)
+    const interval = window.setInterval(checkSession, 240_000)
 
     // Initial check shortly after mount/login.
     checkSession()

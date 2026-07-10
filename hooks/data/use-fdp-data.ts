@@ -51,6 +51,105 @@ const EMPTY_RESULT = {
   restUntilLegal: null as RestUntilLegalResult | null,
 }
 
+type FDPResult = typeof EMPTY_RESULT
+
+/**
+ * Module-level cache of the last computed FDP result. The full pipeline (duty
+ * periods → rest → forecast → timeline) is expensive, and the dashboard is NOT
+ * a keep-alive page — its useMemo dies on every navigation, so without this the
+ * whole pipeline re-ran on every dashboard visit (the residual mount hitch).
+ * The key is content-derived (counts + max updatedAt + tz map) plus a 5-minute
+ * time bucket, because the results are relative to "now" (rolling windows) and
+ * must not stay frozen across a long-lived session.
+ *
+ * The cache lives in this plain module function (not in the hook) so the render
+ * path stays pure per the React Compiler rules — the hook's useMemo simply
+ * calls a memoized function.
+ */
+let fdpCache: { key: string; value: FDPResult } | null = null
+
+function computeFDPResult(
+  flights: Parameters<typeof createDutyPeriodsFromFlights>[0],
+  scheduleEntries: Parameters<typeof getDutyPeriodsFromSchedule>[0],
+  airportTimezones: Map<string, number>,
+): FDPResult {
+  // Cheap content key: any add/edit/delete changes a count or max updatedAt
+  // (CRUD helpers always bump updatedAt); the tz entries cover late-resolving
+  // airport offsets; the 5-min bucket bounds staleness of the "as of now"
+  // rolling-window math. An O(n) scan of in-memory arrays is ~free next to
+  // the pipeline itself.
+  let maxFlightUpdated = 0
+  for (const f of flights) if (f.updatedAt && f.updatedAt > maxFlightUpdated) maxFlightUpdated = f.updatedAt
+  let maxScheduleUpdated = 0
+  for (const s of scheduleEntries) if (s.updatedAt && s.updatedAt > maxScheduleUpdated) maxScheduleUpdated = s.updatedAt
+  const tzKey = [...airportTimezones.entries()].map(([k, v]) => `${k}:${v}`).sort().join(",")
+  const cacheKey = [
+    flights.length, maxFlightUpdated,
+    scheduleEntries.length, maxScheduleUpdated,
+    tzKey,
+    Math.floor(Date.now() / 300_000),
+  ].join("|")
+
+  if (fdpCache?.key === cacheKey) return fdpCache.value
+
+  try {
+    // Only flown logbook entries count toward duty periods. Placeholder /
+    // scheduled flights without OOOI times would otherwise create spurious
+    // duty periods and inflate cumulative limits.
+    const flownFlights = flights.filter(isFlownFlight)
+    const logbookDPs = mergeAdjacentDutyPeriods(createDutyPeriodsFromFlights(flownFlights))
+    const scheduleDPs = mergeAdjacentDutyPeriods(
+      getDutyPeriodsFromSchedule(scheduleEntries, airportTimezones)
+    )
+
+    const merged = mergeDutyPeriods(logbookDPs, scheduleDPs)
+    const withRest = calculateAllRestPeriods(merged)
+
+    const today = new Date()
+    const limits = DEFAULT_FTL_LIMITS
+
+    // Use only non-future DPs for current cumulative/capacity calculations
+    const currentDPs = withRest.filter((dp) => !dp.isFuture)
+    const cumulativeLimits = calculateCumulativeLimits(currentDPs, today, limits)
+    const capacity = calculateCapacity(currentDPs, today, limits)
+
+    // Forecast uses all DPs (past + future) to project exceedances
+    const forecast = forecastExceedances(withRest, limits)
+
+    // Split for display
+    const pastDuties = withRest.filter((dp) => !dp.isFuture)
+    const futureDuties = withRest.filter((dp) => dp.isFuture)
+
+    // Rest violations
+    const restViolations = withRest.filter(
+      (dp) => dp.restBefore && !dp.restBefore.compliant
+    )
+
+    // Timeline chart data
+    const timelineData = generateTimelineData(withRest, limits)
+
+    // Rest until legal for next duty
+    const restUntilLegal = calculateRestUntilLegal(currentDPs)
+
+    const value: FDPResult = {
+      allDutyPeriods: withRest,
+      pastDuties,
+      futureDuties,
+      cumulativeLimits,
+      capacity,
+      forecast,
+      restViolations,
+      timelineData,
+      restUntilLegal,
+    }
+    fdpCache = { key: cacheKey, value }
+    return value
+  } catch (err) {
+    console.error("[FDP] Error computing duty data:", err)
+    return EMPTY_RESULT
+  }
+}
+
 /**
  * Combined FDP data hook.
  * Merges actual flights (logbook) with scheduled flights for a unified
@@ -136,61 +235,7 @@ export function useFDPData() {
 
   const result = useMemo(() => {
     if (!dbReady) return EMPTY_RESULT
-
-    try {
-      // Only flown logbook entries count toward duty periods. Placeholder /
-      // scheduled flights without OOOI times would otherwise create spurious
-      // duty periods and inflate cumulative limits.
-      const flownFlights = flights.filter(isFlownFlight)
-      const logbookDPs = mergeAdjacentDutyPeriods(createDutyPeriodsFromFlights(flownFlights))
-      const scheduleDPs = mergeAdjacentDutyPeriods(
-        getDutyPeriodsFromSchedule(scheduleEntries, airportTimezones)
-      )
-
-      const merged = mergeDutyPeriods(logbookDPs, scheduleDPs)
-      const withRest = calculateAllRestPeriods(merged)
-
-      const today = new Date()
-      const limits = DEFAULT_FTL_LIMITS
-
-      // Use only non-future DPs for current cumulative/capacity calculations
-      const currentDPs = withRest.filter((dp) => !dp.isFuture)
-      const cumulativeLimits = calculateCumulativeLimits(currentDPs, today, limits)
-      const capacity = calculateCapacity(currentDPs, today, limits)
-
-      // Forecast uses all DPs (past + future) to project exceedances
-      const forecast = forecastExceedances(withRest, limits)
-
-      // Split for display
-      const pastDuties = withRest.filter((dp) => !dp.isFuture)
-      const futureDuties = withRest.filter((dp) => dp.isFuture)
-
-      // Rest violations
-      const restViolations = withRest.filter(
-        (dp) => dp.restBefore && !dp.restBefore.compliant
-      )
-
-      // Timeline chart data
-      const timelineData = generateTimelineData(withRest, limits)
-
-      // Rest until legal for next duty
-      const restUntilLegal = calculateRestUntilLegal(currentDPs)
-
-      return {
-        allDutyPeriods: withRest,
-        pastDuties,
-        futureDuties,
-        cumulativeLimits,
-        capacity,
-        forecast,
-        restViolations,
-        timelineData,
-        restUntilLegal,
-      }
-    } catch (err) {
-      console.error("[FDP] Error computing duty data:", err)
-      return EMPTY_RESULT
-    }
+    return computeFDPResult(flights, scheduleEntries, airportTimezones)
   }, [dbReady, flights, scheduleEntries, airportTimezones])
 
   // NOTE: we deliberately do NOT keep a separate `liveRestUntilLegal` state

@@ -30,6 +30,13 @@ function formatRoute(f: PeriodFlight): string {
   return `${dep}-${arr}`
 }
 
+/**
+ * Cap on rendered rows. Long periods ("1y"/"All") can hold hundreds of flights;
+ * mounting them all costs real time on every dashboard visit for rows nobody
+ * scrolls through here — the logbook is the place for the full list.
+ */
+const MAX_ROWS = 50
+
 export function PeriodFlightsCard({ flights, className }: PeriodFlightsCardProps) {
   return (
     <div
@@ -54,7 +61,7 @@ export function PeriodFlightsCard({ flights, className }: PeriodFlightsCardProps
         </div>
       ) : (
         <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto overflow-x-hidden">
-          {flights.map((f) => (
+          {flights.slice(0, MAX_ROWS).map((f) => (
             <li key={f.id}>
               <Link
                 href={`/flights/${f.id}`}
@@ -77,6 +84,16 @@ export function PeriodFlightsCard({ flights, className }: PeriodFlightsCardProps
               </Link>
             </li>
           ))}
+          {flights.length > MAX_ROWS && (
+            <li>
+              <Link
+                href="/logbook"
+                className="flex items-center justify-center rounded-lg px-1.5 py-1.5 text-xs text-primary transition-colors hover:bg-accent/40"
+              >
+                View all {flights.length} flights in logbook
+              </Link>
+            </li>
+          )}
         </ul>
       )}
     </div>

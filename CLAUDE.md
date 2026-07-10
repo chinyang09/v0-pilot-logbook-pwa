@@ -512,6 +512,15 @@ Debug logs use prefixed format: `[v0]`, `[Auth]`, `[SW]`, `[UserDB]`, `[Sync]`, 
 - **shadcn/ui** uses the New York style with CSS variables and RSC support
 - **Tailwind CSS v4** via `@tailwindcss/postcss` PostCSS plugin
 - **Dark mode** is class-based via `next-themes`
+- **`console.log`/`console.debug` are stripped from production bundles**
+  (`compiler.removeConsole`, keeping `error`/`warn`) — don't rely on `console.log`
+  side effects, and use `console.error`/`console.warn` for anything that must
+  surface in production
+- **FDP pipeline results are memoized at module level** (`hooks/data/use-fdp-data.ts`
+  → `computeFDPResult`): the dashboard isn't keep-alive, so its `useMemo` dies on
+  every navigation — the module cache (content key + 5-min time bucket) makes
+  re-mounts a cache hit. Keep heavy computation + the cache write in that plain
+  module function, not in the hook (render purity)
 - **Fonts**: **Inter is the single app typeface** (sans + numbers), loaded via a
   Google Fonts `<link>` in `app/layout.tsx`; `--font-sans` and `--font-mono` both
   point to Inter. There is intentionally **no `font-mono`** in the app — use
@@ -632,15 +641,16 @@ worse than the current behavior. Do **not** change these casually.
   explicit time-frame header and is normalized via `time-reference-normalizer`.
   (An earlier audit guessed these were local station times; that was a false
   positive.)
-- **Service worker** (`public/sw.js`) — three items needing offline testing
+- **Service worker** (`public/sw.js`) — two items needing offline testing
   before any change (a bad SW is hard to roll back): (1) `install` calls
   `self.skipWaiting()` unconditionally while the registration
   (`hooks/use-service-worker.ts`) is built around an update-*prompt* flow, so
   the prompt is effectively dead and a background update can auto-reload the page
-  mid-edit (auto-save mitigates data loss); (2) `DYNAMIC_CACHE` has no cap —
-  per-flight `/flights/<id>` shells accumulate unbounded until a `CACHE_VERSION`
-  bump; (3) the Strategy-6 catch-all caches any cross-origin `ok` GET (no
-  same-origin guard). All are latent/hardening, not active data bugs.
+  mid-edit (auto-save mitigates data loss); (2) the Strategy-6 catch-all caches
+  any cross-origin `ok` GET (no same-origin guard). Both are latent/hardening,
+  not active data bugs. (`DYNAMIC_CACHE` is now FIFO-capped at 150 entries via
+  `trimDynamicCache()` after each put — everything in it is re-fetchable, so an
+  eviction just falls through to network/shell fallbacks.)
 
 ## PWA Details
 
