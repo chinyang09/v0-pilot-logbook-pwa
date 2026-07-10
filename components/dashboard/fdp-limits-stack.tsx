@@ -119,7 +119,7 @@ export function FDPLimitsStack({ className }: { className?: string }) {
               <li key={row.label}>
                 <div className="flex items-baseline justify-between gap-2 text-xs">
                   <span className="font-medium text-foreground">{row.label}</span>
-                  <span className="font-mono tabular-nums text-muted-foreground">
+                  <span className=" tabular-nums text-muted-foreground">
                     <span className="text-foreground">{formatHours(row.used)}</span>
                     {" / "}
                     {formatHours(row.max)}h
@@ -155,7 +155,7 @@ export function FDPLimitsStack({ className }: { className?: string }) {
             </p>
             <p
               className={cn(
-                "font-mono tabular-nums text-sm font-bold",
+                " tabular-nums text-sm font-bold",
                 isLegalNow ? "text-chart-2" : "text-foreground",
               )}
             >

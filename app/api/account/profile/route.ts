@@ -28,6 +28,9 @@ export async function GET() {
     deviceType: pk.deviceType || "unknown",
     backedUp: pk.backedUp || false,
     createdAt: pk.createdAt,
+    // Opaque id of the browser that registered this passkey, so the client can
+    // tell whether the *current* device already has one.
+    deviceId: pk.deviceId ?? null,
   }))
 
   return NextResponse.json({

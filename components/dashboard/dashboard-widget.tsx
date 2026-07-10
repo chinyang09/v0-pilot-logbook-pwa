@@ -66,7 +66,7 @@ export function WidgetValue({
   return (
     <p
       className={cn(
-        "font-mono tabular-nums text-foreground leading-tight",
+        " tabular-nums text-foreground leading-tight",
         className,
       )}
       {...props}

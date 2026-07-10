@@ -114,7 +114,7 @@ export function StatsDashboard({ stats }: StatsDashboardProps) {
                 <stat.icon className="h-4 w-4" />
               </div>
               <div>
-                <p className="text-xl font-bold text-foreground font-mono">
+                <p className="text-xl font-bold text-foreground ">
                   {stat.value}
                   {stat.subValue && (
                     <span className="text-xs font-normal text-muted-foreground ml-1 font-sans">

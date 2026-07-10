@@ -757,10 +757,10 @@ function ChangeList({
           className="text-xs text-muted-foreground"
         >
           <div className="flex items-center gap-1">
-            <span className="font-mono">{change.field}:</span>
-            <span className="font-mono">{change.from || "—"}</span>
+            <span className=" ">{change.field}:</span>
+            <span className=" ">{change.from || "—"}</span>
             <ArrowRight className="h-3 w-3" />
-            <span className="font-mono text-foreground">{change.to}</span>
+            <span className=" text-foreground">{change.to}</span>
           </div>
           {change.note && (
             <div className="pl-3 text-[11px] italic text-amber-700 dark:text-amber-400">

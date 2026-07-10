@@ -110,11 +110,13 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDel
     )
   }
 
+  // Icon-only swipe actions, consistent with the rest of the app (flight/aircraft
+  // lists). aria-label keeps them accessible without visible text.
   const actions: SwipeAction[] = []
   if (onEdit) {
     actions.push({
       icon: <Edit className="h-5 w-5" />,
-      label: "Edit",
+      ariaLabel: "Edit",
       variant: "secondary",
       onClick: () => onEdit(currency),
     })
@@ -122,7 +124,7 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDel
   if (onDelete) {
     actions.push({
       icon: <Trash2 className="h-5 w-5" />,
-      label: "Delete",
+      ariaLabel: "Delete",
       variant: "destructive",
       holdToConfirm: true,
       onClick: () => onDelete(currency),
@@ -146,7 +148,7 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDel
               </Badge>
             </div>
             {currency.code !== "CUSTOM" && (
-              <p className="text-xs text-muted-foreground font-mono">{currency.code}</p>
+              <p className="text-xs text-muted-foreground ">{currency.code}</p>
             )}
           </div>
         </div>

@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from "@/components/ui/button"
 import { Fingerprint, Loader2, X } from "lucide-react"
 import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
+import { getOrCreateDeviceId } from "@/lib/utils/device"
 
 export function AddPasskeyPrompt() {
   const searchParams = useSearchParams()
@@ -62,6 +63,7 @@ export function AddPasskeyPrompt() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          deviceId: getOrCreateDeviceId(),
           credential: {
             id: pubKeyCred.id,
             rawId: base64URLEncode(pubKeyCred.rawId),
@@ -82,7 +84,11 @@ export function AddPasskeyPrompt() {
       setOpen(false)
     } catch (err) {
       console.error("Add passkey error:", err)
-      if (err instanceof Error && err.name === "NotAllowedError") {
+      if (err instanceof Error && err.name === "InvalidStateError") {
+        // A passkey for this device already exists — the authenticator won't
+        // create a duplicate. Nothing to do; close the prompt cleanly.
+        setOpen(false)
+      } else if (err instanceof Error && err.name === "NotAllowedError") {
         setError("Passkey registration was cancelled")
       } else {
         setError(err instanceof Error ? err.message : "Failed to add passkey")

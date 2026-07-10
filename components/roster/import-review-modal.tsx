@@ -353,10 +353,10 @@ function ConflictRow({
               key={change.field}
               className="text-xs text-muted-foreground flex items-center gap-1"
             >
-              <span className="font-mono">{change.field}:</span>
-              <span className="font-mono">{change.from || "—"}</span>
+              <span className=" ">{change.field}:</span>
+              <span className=" ">{change.from || "—"}</span>
               <ArrowRight className="h-3 w-3" />
-              <span className="font-mono text-foreground">{change.to}</span>
+              <span className=" text-foreground">{change.to}</span>
             </div>
           ))}
         </div>
@@ -414,10 +414,10 @@ function EditedConflictRow({
               key={change.field}
               className="text-xs text-muted-foreground flex items-center gap-1"
             >
-              <span className="font-mono">{change.field}:</span>
-              <span className="font-mono">{change.from || "—"}</span>
+              <span className=" ">{change.field}:</span>
+              <span className=" ">{change.from || "—"}</span>
               <ArrowRight className="h-3 w-3" />
-              <span className="font-mono text-foreground">{change.to}</span>
+              <span className=" text-foreground">{change.to}</span>
             </div>
           ))}
         </div>

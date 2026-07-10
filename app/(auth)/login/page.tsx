@@ -21,7 +21,7 @@ import { useAuth } from "@/components/providers/auth-provider"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
 import { motion, AnimatePresence } from "framer-motion"
 import { GlassContainer } from "@/components/ui/glass-container"
-import { BorderGlow } from "@/components/ui/border-glow"
+import { BorderGlide } from "@/components/ui/border-glide"
 
 type Step =
   | "initial" // Choose login or register
@@ -514,6 +514,7 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           challenge: options.challenge,
+          deviceId: getOrCreateDeviceId(),
           credential: {
             id: pubKeyCred.id,
             response: {
@@ -536,7 +537,13 @@ export default function LoginPage() {
       setTimeout(() => router.push("/"), 1500)
     } catch (err) {
       console.error("[v0] Add passkey error:", err)
-      if (err instanceof Error && err.name === "NotAllowedError") {
+      if (err instanceof Error && err.name === "InvalidStateError") {
+        // This device already has a passkey registered for the account, so the
+        // authenticator refuses to create a duplicate. The device is already
+        // secured — treat it as done rather than surfacing a scary error.
+        setStep("success")
+        setTimeout(() => router.push("/"), 1200)
+      } else if (err instanceof Error && err.name === "NotAllowedError") {
         setError("Passkey setup was cancelled. You can try again or skip.")
       } else if (err instanceof Error && err.message === "Cancelled") {
         setError("Passkey setup was cancelled. You can try again or skip.")
@@ -554,7 +561,7 @@ export default function LoginPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  // TOTP status class for OTP input group (loading is handled by <BorderGlow/>)
+  // TOTP status class for OTP input group (loading is handled by <BorderGlide/>)
   const totpInputClass = totpStatus === "success" ? "totp-success" :
     totpStatus === "error" ? "totp-error" : ""
 
@@ -720,7 +727,7 @@ export default function LoginPage() {
 
                   <div className="flex justify-center">
                     <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
-                      <BorderGlow active={totpStatus === "loading"} radius="0.5rem">
+                      <BorderGlide active={totpStatus === "loading"} radius={8}>
                         <InputOTPGroup className={totpInputClass}>
                           <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                           <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
@@ -729,7 +736,7 @@ export default function LoginPage() {
                           <InputOTPSlot index={4} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                           <InputOTPSlot index={5} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                         </InputOTPGroup>
-                      </BorderGlow>
+                      </BorderGlide>
                     </InputOTP>
                   </div>
                 </div>
@@ -848,7 +855,7 @@ export default function LoginPage() {
                       <p className="text-xs text-white/50 mb-1">Or enter manually:</p>
                       <code
                         onClick={copyToClipboard}
-                        className="flex justify-center gap-2 max-w-full text-xs bg-white/10 px-3 py-2 rounded-md font-mono break-all text-white/80 hover:bg-white/15 transition-colors cursor-pointer"
+                        className="flex justify-center gap-2 max-w-full text-xs bg-white/10 px-3 py-2 rounded-md break-all text-white/80 hover:bg-white/15 transition-colors cursor-pointer"
                       >
                         {totpSecret}
                         {copied ? (
@@ -909,7 +916,7 @@ export default function LoginPage() {
 
                   <div className="flex justify-center">
                     <InputOTP maxLength={6} value={totpCode} onChange={setTotpCode} className="justify-center" disabled={isLoading}>
-                      <BorderGlow active={totpStatus === "loading"} radius="0.5rem">
+                      <BorderGlide active={totpStatus === "loading"} radius={8}>
                         <InputOTPGroup className={totpInputClass}>
                           <InputOTPSlot index={0} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                           <InputOTPSlot index={1} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
@@ -918,7 +925,7 @@ export default function LoginPage() {
                           <InputOTPSlot index={4} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                           <InputOTPSlot index={5} className="h-12 w-10 text-lg bg-white/10 border-white/20 text-white" />
                         </InputOTPGroup>
-                      </BorderGlow>
+                      </BorderGlide>
                     </InputOTP>
                   </div>
                 </div>

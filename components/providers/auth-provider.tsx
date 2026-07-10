@@ -12,9 +12,21 @@ interface AuthContextType {
   user: UserSession | null
   isLoading: boolean
   isAuthenticated: boolean
+  /**
+   * True when a logged-in user's server session is no longer valid (expired or
+   * revoked from another device) but the local mirror still exists. UI can react
+   * to this to surface a "re-authenticate" state instead of showing stale data.
+   */
+  sessionExpired: boolean
   login: (session: Omit<UserSession, "id" | "createdAt">) => Promise<void>
   logout: () => Promise<void>
   silentReauth: () => Promise<boolean>
+  /**
+   * Ensure the server session is valid before a privileged action (e.g. a manual
+   * resync). Returns true if already valid or successfully re-authenticated via
+   * the custom passkey flow; otherwise routes to the login flow and returns false.
+   */
+  ensureValidSession: () => Promise<boolean>
   updateCallsign: (newCallsign: string) => Promise<void>
 }
 
@@ -24,6 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserSession | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [sessionExpired, setSessionExpired] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
   const authCheckDone = useRef(false)
@@ -32,6 +45,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await saveUserSession(session)
     const savedSession = await getUserSession()
     setUser(savedSession || null)
+    // A fresh login always clears any stale "expired" state.
+    setSessionExpired(false)
 
     // After successful login, trigger proactive caching of app pages
     if (savedSession && "serviceWorker" in navigator) {
@@ -162,6 +177,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const savedSession = await getUserSession()
       setUser(savedSession || null)
+      setSessionExpired(false)
 
       console.log("[v0] Silent re-auth successful for:", userData.callsign)
       return true
@@ -172,17 +188,123 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  // Register silent reauth with the sync engine so a 401 mid-sync refreshes the
-  // session once and retries, instead of failing the sync.
+  // The reauth handler the sync engine calls on a 401 (background DB access or a
+  // manual resync). It runs the custom passkey flow; if that can't recover the
+  // session, it flips the reactive `sessionExpired` flag so the UI updates and
+  // the route guard sends the user through the custom login flow.
+  const handleSyncReauth = useCallback(async (): Promise<boolean> => {
+    const ok = await silentReauth()
+    if (!ok) {
+      console.warn("[Auth] reauth failed during sync - marking session expired")
+      setSessionExpired(true)
+    }
+    return ok
+  }, [silentReauth])
+
+  // Register reauth with the sync engine so a 401 mid-sync refreshes the session
+  // once and retries, instead of silently failing the sync.
   useEffect(() => {
     let active = true
     import("@/lib/sync").then(({ syncService }) => {
-      if (active) syncService.setReauthHandler(silentReauth)
+      if (active) syncService.setReauthHandler(handleSyncReauth)
     })
     return () => {
       active = false
       import("@/lib/sync").then(({ syncService }) => syncService.setReauthHandler(null))
     }
+  }, [handleSyncReauth])
+
+  // Global session monitor: keep React auth state in sync with the *actual*
+  // server session so a session expired/revoked elsewhere is reflected without a
+  // manual browser refresh. Validation never triggers WebAuthn on its own
+  // (browsers block un-gestured ceremonies); it only flips `sessionExpired`, and
+  // the route guard below routes to the custom login flow for a user gesture.
+  useEffect(() => {
+    if (!user) return
+
+    let cancelled = false
+    // Returning to the tab fires BOTH `focus` and `visibilitychange`; without a
+    // guard every wake did two identical fetches. Skip re-checks within 1s.
+    let lastCheck = 0
+
+    const checkSession = async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
+      if (typeof navigator !== "undefined" && !navigator.onLine) return
+      const now = Date.now()
+      if (now - lastCheck < 1000) return
+      lastCheck = now
+      try {
+        const res = await fetch("/api/auth/session", { cache: "no-store" })
+        const data = await res.json().catch(() => ({ authenticated: false }))
+        if (cancelled) return
+        // Use a functional update so we don't need `sessionExpired` as a dep.
+        setSessionExpired((prev) => {
+          const expired = !data.authenticated
+          if (expired !== prev) {
+            console.log(`[Auth] session monitor: ${expired ? "expired" : "active"}`)
+          }
+          return expired
+        })
+      } catch {
+        // Network error — treat as inconclusive (offline-first), don't flip state.
+      }
+    }
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") checkSession()
+    }
+    // A 401 signal must never be de-duped away — reset the guard first.
+    const onUnauthorized = () => {
+      lastCheck = 0
+      checkSession()
+    }
+
+    // Re-validate on focus/visibility/network-online, on an explicit
+    // unauthorized signal, and on a slow background interval as a backstop.
+    // The interval is deliberately long (4 min) — the event triggers cover
+    // every responsive case, so the timer only exists for a session revoked
+    // while the tab sits open and untouched.
+    window.addEventListener("focus", checkSession)
+    window.addEventListener("online", checkSession)
+    window.addEventListener("auth:unauthorized", onUnauthorized)
+    document.addEventListener("visibilitychange", onVisible)
+    const interval = window.setInterval(checkSession, 240_000)
+
+    // Initial check shortly after mount/login.
+    checkSession()
+
+    return () => {
+      cancelled = true
+      window.removeEventListener("focus", checkSession)
+      window.removeEventListener("online", checkSession)
+      window.removeEventListener("auth:unauthorized", onUnauthorized)
+      document.removeEventListener("visibilitychange", onVisible)
+      window.clearInterval(interval)
+    }
+  }, [user])
+
+  // Ensure a valid server session before a privileged, user-gestured action such
+  // as a manual resync. Because this runs inside a user gesture, WebAuthn is
+  // allowed, so we can attempt the custom silent-reauth flow inline; if it fails
+  // we mark the session expired (the route guard then opens the login flow).
+  const ensureValidSession = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/auth/session", { cache: "no-store" })
+      const data = await res.json().catch(() => ({ authenticated: false }))
+      if (data.authenticated) {
+        setSessionExpired(false)
+        return true
+      }
+    } catch {
+      // Inconclusive (likely offline) — let the caller proceed; the sync engine's
+      // own 401 handling will catch a genuinely dead session.
+      return true
+    }
+
+    // Session is dead — run the custom passkey reauth flow (user-gestured here).
+    const ok = await silentReauth()
+    if (!ok) setSessionExpired(true)
+    return ok
   }, [silentReauth])
 
   // Check authentication on mount
@@ -226,24 +348,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth()
   }, []) // intentional: run once on mount; authCheckDone.current guards against double execution
 
-  // Protect routes
+  // Protect routes. A logged-out user OR a logged-in user whose server session
+  // died (and couldn't be silently recovered) is routed to the custom login
+  // flow. We keep local data intact — re-authenticating restores access and the
+  // sync engine continues from where it left off.
   useEffect(() => {
-    if (!isLoading && !user && pathname !== "/login") {
+    if (isLoading) return
+    if ((!user || sessionExpired) && pathname !== "/login") {
       router.push("/login")
     }
-  }, [user, isLoading, pathname, router])
+  }, [user, sessionExpired, isLoading, pathname, router])
 
   const value = useMemo(
     () => ({
       user,
       isLoading,
-      isAuthenticated: !!user,
+      isAuthenticated: !!user && !sessionExpired,
+      sessionExpired,
       login,
       logout,
       silentReauth,
+      ensureValidSession,
       updateCallsign,
     }),
-    [user, isLoading, login, logout, silentReauth, updateCallsign]
+    [user, isLoading, sessionExpired, login, logout, silentReauth, ensureValidSession, updateCallsign]
   )
 
   return (

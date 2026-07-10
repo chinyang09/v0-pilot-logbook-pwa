@@ -25,6 +25,8 @@ export async function GET() {
 
   // Never expose the session token (the bearer secret) to client JS — hand out
   // the opaque session id for revocation and compute "current" server-side.
+  // The raw User-Agent is the user's own and is parsed into a device label
+  // client-side for the "Active Sessions" list.
   const sanitized = sessions.map((s) => ({
     id: s._id.toString(),
     isCurrent: s.token === currentToken,
@@ -32,6 +34,7 @@ export async function GET() {
     lastAccessedAt: s.lastAccessedAt || s.createdAt,
     expiresAt: s.expiresAt,
     recoveryLogin: s.recoveryLogin || false,
+    userAgent: typeof s.userAgent === "string" ? s.userAgent : null,
   }))
 
   return NextResponse.json({ sessions: sanitized })
@@ -43,8 +46,19 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const body = await request.json()
-  const { sessionId } = body as { sessionId?: string }
+  const body = await request.json().catch(() => ({}))
+  const { sessionId, all } = body as { sessionId?: string; all?: boolean }
+
+  const db = await getDB()
+  const cookieStore = await cookies()
+  const currentToken = cookieStore.get("session")?.value
+
+  // "Logout of all devices": drop every session row for this user (including the
+  // current one). The client clears its local cookie/data via the logout flow.
+  if (all === true) {
+    await db.collection("sessions").deleteMany({ userId: session.userId })
+    return NextResponse.json({ success: true, loggedOutCurrent: true })
+  }
 
   if (!sessionId) {
     return NextResponse.json({ error: "Session id is required" }, { status: 400 })
@@ -57,22 +71,16 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Invalid session id" }, { status: 400 })
   }
 
-  const db = await getDB()
-
-  // Look up the target session scoped to this user, then refuse to revoke the
-  // one backing the current request.
+  // Look up the target session scoped to this user. Logout management now lives
+  // entirely in the sessions list, so revoking the *current* device's session is
+  // allowed and signals the client to run its local logout/cleanup.
   const target = await db.collection("sessions").findOne({ _id: objectId, userId: session.userId })
   if (!target) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 })
   }
 
-  const cookieStore = await cookies()
-  const currentToken = cookieStore.get("session")?.value
-  if (target.token === currentToken) {
-    return NextResponse.json({ error: "Cannot revoke current session" }, { status: 400 })
-  }
-
   await db.collection("sessions").deleteOne({ _id: objectId, userId: session.userId })
 
-  return NextResponse.json({ success: true })
+  const loggedOutCurrent = !!currentToken && target.token === currentToken
+  return NextResponse.json({ success: true, loggedOutCurrent })
 }

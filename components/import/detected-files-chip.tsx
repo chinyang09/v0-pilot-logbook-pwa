@@ -31,7 +31,7 @@ export function DetectedFilesChip({ files }: DetectedFilesChipProps) {
             ) : (
               <FileText className="h-3 w-3" />
             )}
-            <span className="font-mono text-[11px]">{f.fileName}</span>
+            <span className=" text-[11px]">{f.fileName}</span>
             <span className="text-[10px] uppercase opacity-70">
               {f.format}
             </span>

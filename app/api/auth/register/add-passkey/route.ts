@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
 // POST: Verify and PUSH the new passkey to the user array
 export async function POST(request: NextRequest) {
   try {
-    const { credential, challenge, name } = await request.json()
+    const { credential, challenge, name, deviceId } = await request.json()
     const db = await getDB()
 
     // Single-use challenge: consume it atomically and confirm it was issued for
@@ -145,6 +145,7 @@ export async function POST(request: NextRequest) {
       transports: attestation.transports,
       createdAt: Date.now(),
       name: name || getDeviceNameFromUA(userAgent),
+      ...(typeof deviceId === "string" && deviceId ? { deviceId } : {}),
     }
 
     // Idempotent add: never push a duplicate credential id (e.g. user re-runs the

@@ -42,6 +42,8 @@ export interface IssueSessionInput {
   deviceId?: string;
   /** Mark this as a TOTP-recovery login (drives the "add a passkey" nudge). */
   recoveryLogin?: boolean;
+  /** Raw request User-Agent, stored so the account page can label sessions by device. */
+  userAgent?: string;
 }
 
 /**
@@ -51,12 +53,20 @@ export interface IssueSessionInput {
  */
 export async function issueSession(
   db: Db,
-  { userId, callsign, deviceId, recoveryLogin = false }: IssueSessionInput,
+  { userId, callsign, deviceId, recoveryLogin = false, userAgent }: IssueSessionInput,
 ): Promise<{ token: string; expiresAt: Date }> {
   const token = createId();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
-  const base = { token, userId, callsign, expiresAt, lastAccessedAt: now, updatedAt: now };
+  const base = {
+    token,
+    userId,
+    callsign,
+    expiresAt,
+    lastAccessedAt: now,
+    updatedAt: now,
+    ...(userAgent ? { userAgent } : {}),
+  };
 
   if (deviceId) {
     await db.collection("sessions").updateOne(

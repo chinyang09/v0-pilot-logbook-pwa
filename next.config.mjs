@@ -12,6 +12,13 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  compiler: {
+    // Strip console.* from production client bundles (SWC transform — applies
+    // even with the webpack bundler). The app logs verbosely ([Sync], [Auth],
+    // [FDP-chart] per-render diagnostics…), which costs real time on iOS.
+    // error/warn are kept so production issues still surface.
+    removeConsole: { exclude: ["error", "warn"] },
+  },
   // Empty turbopack config to allow webpack config for builds
   turbopack: {},
   webpack: (config, { isServer }) => {

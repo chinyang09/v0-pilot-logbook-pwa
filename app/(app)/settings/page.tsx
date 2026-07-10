@@ -144,7 +144,7 @@ function NavigationSection({ preferences, updateNavigation }: {
     <div className="p-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Navigation</h2>
-        <p className="text-sm text-muted-foreground">Choose up to 4 tabs to show on your navigation bar.</p>
+        <p className="text-sm text-muted-foreground">Choose up to 4 tabs for the bottom tab bar (mobile) and the navigation pill (desktop).</p>
       </div>
       <SortableNavList
         tabs={ALL_NAV_TABS}

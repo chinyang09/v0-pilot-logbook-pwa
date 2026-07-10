@@ -7,7 +7,7 @@ import { issueSession, setSessionCookie } from "@/lib/auth/server/session"
 // POST /api/auth/register/complete - Complete passkey registration
 export async function POST(request: NextRequest) {
   try {
-    const { credential, challenge } = await request.json()
+    const { credential, challenge, deviceId } = await request.json()
 
     if (!credential || !challenge) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
@@ -68,6 +68,7 @@ export async function POST(request: NextRequest) {
       transports: attestation.transports,
       createdAt: Date.now(),
       name: getDeviceNameFromUA(userAgent),
+      ...(typeof deviceId === "string" && deviceId ? { deviceId } : {}),
     }
 
     const nowTimestamp = Date.now()
@@ -101,6 +102,7 @@ export async function POST(request: NextRequest) {
     const { token: sessionId, expiresAt: sessionExpiry } = await issueSession(db, {
       userId,
       callsign: user.identity.callsign,
+      userAgent: request.headers.get("user-agent") || undefined,
     })
     await setSessionCookie(sessionId)
 

@@ -201,7 +201,15 @@ parallel switch/if-else chains.
 - The WebAuthn signature counter is enforced as strictly-increasing **only when a counter is in use** (either side non-zero) — synced/platform passkeys report `signCount 0` permanently and must not be locked out on their second use.
 - TOTP is **single-use**: verify with `verifyTOTPWithCounter` and reject any code whose time-step `counter <= auth.lastTotpCounter` (shared across the TOTP login and callsign-change endpoints). Compare codes in constant time.
 
-Sessions are stored in MongoDB (with TTL) and mirrored to IndexedDB. Cookies are HttpOnly + Secure + SameSite=Lax.
+Sessions are stored in MongoDB (with TTL) and mirrored to IndexedDB. Cookies are HttpOnly + Secure + SameSite=Lax. Each session row also stores the request **`userAgent`** (set in `issueSession`) so the account page can label active sessions by device.
+
+**Session reactivity & resync interception** (`auth-provider.tsx`):
+- A global **session monitor** revalidates `/api/auth/session` on focus, visibility, network-online, an `auth:unauthorized` event, and a slow interval, flipping a reactive **`sessionExpired`** flag so a session revoked elsewhere is reflected without a manual refresh. The route guard sends a logged-in-but-expired user through the custom login flow (keeping local data).
+- The sync engine emits `auth:unauthorized` on any 401, and a **locally-expired** session attempts reauth (custom passkey flow) instead of a silent no-op — this is why a manual resync against a dead session now actually prompts re-auth. `ensureValidSession()` gates the manual sync button: it revalidates, runs passkey reauth if needed, and only then syncs. Do **not** restore the silent early-return on expiry.
+
+**Step-up auth** (`lib/auth/server/step-up.ts`): sensitive account actions are gated behind a fresh passkey assertion. `GET /api/account/step-up` issues a user-bound single-use challenge; `verifyStepUpAssertion` verifies it with the same `verifyAuthenticationResponse` path (and advances the counter). Used to **reveal the TOTP seed/QR** (`/api/account/totp/reveal` — never served without it) so a user who lost their authenticator can re-add it, and as an **alternative to TOTP** for changing the callsign.
+
+**Per-device passkeys:** each passkey stores the registering browser's opaque `deviceId` (`getOrCreateDeviceId`, sent on register/add-passkey). The account page uses it to show "Add passkey for this device" vs "This device already has a passkey" (instead of letting `navigator.credentials.create` throw `InvalidStateError` on a duplicate — which is also caught gracefully everywhere as a no-op).
 
 ### Shared Reference Data System
 
@@ -276,7 +284,19 @@ re-renders).
   trailing button sits **flush** with the card's right edge; the left gap comes
   from `openWidth` via `justify-end` (the panel has no padding, so it collapses
   to true 0 width when closed). `icon` is optional (label-only actions like
-  "Clear" are allowed).
+  "Clear" are allowed). Destructive **delete/logout** actions are **icon-only**
+  app-wide — omit `label` and set `ariaLabel` for accessibility (don't reintroduce
+  visible "Delete"/"Revoke" text).
+- **Hold-to-confirm** (`holdToConfirm`): a tap does **not** fire the action.
+  Instead the panel closes and a **confirm overlay** covers the row — the content
+  behind is greyscaled + slightly blurred + black-tinted ("the past"), a
+  translucent pill ("Hold to confirm") sits centred, and a progress border
+  (`HoldProgressBorder`) traces the **card** from 12 o'clock clockwise as you
+  press-and-hold (2.5s default). The pill fills with a soft red left→right
+  gradient and shrinks slightly. Releasing early just **resets**; it's dismissed
+  only by tapping **outside** the card (a capture-phase `pointerdown`) or
+  swiping. Dragging is disabled while the overlay is up. There is **no** red
+  full-row fill anymore.
 - **Variants:** `variant="card"` (default — standalone rounded card) and
   `variant="row"` (inline divider row inside a grouped `FormSection`). A
   swiped `row` **morphs** into a rounded, lifted card (`bg-secondary`).
@@ -295,6 +315,49 @@ re-renders).
   `swipe-card-close-others` window event.
 - **No full-swipe:** there is intentionally **no** "swipe past N% to auto-trigger
   the primary action" behaviour — it was removed. Actions fire only on button tap.
+
+### Motion Primitives & Navigation Animation
+
+- **`components/ui/hold-to-confirm-button.tsx`** (`HoldToConfirmButton`) — the
+  shared press-and-hold confirm control (used by the swipe confirm overlay and
+  the account "Log out of all devices" button). Built on
+  `hooks/use-hold-to-confirm.ts` (a `MotionValue` progress 0→1 via rAF). The fill
+  is a soft red left→right gradient revealed by a CSS mask; an optional
+  `HoldProgressBorder` draws the perimeter. Accepts an external `progress`
+  MotionValue so a surrounding surface can advance in lock-step. `showBorder={false}`
+  when the surrounding element owns the border (the swipe overlay puts the border
+  on the card, not the pill).
+- **`components/ui/hold-progress-border.tsx`** (`HoldProgressBorder` +
+  `topCenterRoundedRectPath`) — an SVG rounded-rect stroke that draws from **12
+  o'clock clockwise** (custom path; a `<rect>` starts at a corner), thickening,
+  glowing and intensifying with `progress`. Uses a per-instance (`useId`)
+  gradient stroke. Sized to its positioned parent via a ResizeObserver.
+- **`components/ui/border-glide.tsx`** (`BorderGlide`) — a glowing segment that
+  **glides around** the rounded border (a "border beam"), used on the TOTP login
+  OTP group while verifying. The full-border "confirmed" glow stays via the
+  `.totp-success` box-shadow.
+- **Gravity nav indicator** (`GravityIndicator` in `components/nav-pill.tsx`) —
+  the active-tab/​item highlight blob (pill bar + bottom nav + sidebar). It moves
+  via a **CSS `transform` transition** (compositor-driven), NOT a Framer/JS spring
+  — Framer springs tick on the main thread and **hitch** when a heavy page
+  (dashboard/FDP) mounts. Position uses a bouncy overshoot bezier; size settles a
+  touch faster for a subtle stretch. Tab metrics are measured with a
+  ResizeObserver in **content coordinates** (so it's correct inside the scrollable
+  sidebar). Do **not** revert this to a Framer `animate()`/motion-value spring.
+- **Nav morph** (`useMorphPhase` + `DesktopPillMorph`/`MobilePillMorph` +
+  `morphTransition`) — the pill ↔ sidebar morph is a single `opening`/`closing`
+  transition whose two property groups **overlap** via per-property CSS
+  `transition-delay` (no phase stall, no "stuck"). Order is deliberate: **opening**
+  (pill→sidebar) moves position+width first then grows height; **closing**
+  (sidebar→pill) shrinks height first then moves position+width. `useMorphPhase`
+  advances on a timer (`DUR + LEAD` fallback) **and** on the *delayed* property's
+  `transitionEnd` (keyed to `propertyName` so the delayed group isn't cut) — the
+  latter settles the phase the instant the morph finishes so the nav is
+  interactive immediately. The **pill** content (horizontal tabs) is hidden until
+  fully settled (it squishes mid-morph); the **sidebar** content (vertical list)
+  rides `isSidebarShape` and stays **visible + interactive for the whole open
+  span** (it merely clips like a drawer, so there's no dead window that drops
+  sidebar taps).
 
 ### Unified Settings/Form Layout
 
@@ -431,6 +494,10 @@ Notable route groups:
 | `/api/submissions/airport` | POST | Yes | Submit custom airport for enrichment |
 | `/api/enrichment/batch` | POST | CRON_SECRET (required) | Background enrichment of pending submissions; fails closed if `CRON_SECRET` is unset |
 | `/api/timezone?lat=&lng=` | GET | No | Coordinate → IANA timezone via geo-tz |
+| `/api/account/step-up` | GET | Yes | Issue a user-bound single-use WebAuthn challenge for step-up |
+| `/api/account/totp/reveal` | POST | Yes (passkey step-up) | Reveal the TOTP seed + otpauth URI to re-add an authenticator |
+| `/api/account/callsign` | PUT | Yes (passkey step-up **or** TOTP) | Change callsign |
+| `/api/account/sessions` | GET/DELETE | Yes | List sessions (with device `userAgent`); revoke one (incl. current) or all |
 
 ### Console Logging
 
@@ -445,6 +512,21 @@ Debug logs use prefixed format: `[v0]`, `[Auth]`, `[SW]`, `[UserDB]`, `[Sync]`, 
 - **shadcn/ui** uses the New York style with CSS variables and RSC support
 - **Tailwind CSS v4** via `@tailwindcss/postcss` PostCSS plugin
 - **Dark mode** is class-based via `next-themes`
+- **`console.log`/`console.debug` are stripped from production bundles**
+  (`compiler.removeConsole`, keeping `error`/`warn`) — don't rely on `console.log`
+  side effects, and use `console.error`/`console.warn` for anything that must
+  surface in production
+- **FDP pipeline results are memoized at module level** (`hooks/data/use-fdp-data.ts`
+  → `computeFDPResult`): the dashboard isn't keep-alive, so its `useMemo` dies on
+  every navigation — the module cache (content key + 5-min time bucket) makes
+  re-mounts a cache hit. Keep heavy computation + the cache write in that plain
+  module function, not in the hook (render purity)
+- **Fonts**: **Inter is the single app typeface** (sans + numbers), loaded via a
+  Google Fonts `<link>` in `app/layout.tsx`; `--font-sans` and `--font-mono` both
+  point to Inter. There is intentionally **no `font-mono`** in the app — use
+  `tabular-nums` (Inter has tabular figures) for aligned numbers, not a monospace
+  class. The only deliberate non-Inter text is the FDP "next reporting time"
+  (`font-serif italic`).
 
 ## Linting
 
@@ -559,15 +641,16 @@ worse than the current behavior. Do **not** change these casually.
   explicit time-frame header and is normalized via `time-reference-normalizer`.
   (An earlier audit guessed these were local station times; that was a false
   positive.)
-- **Service worker** (`public/sw.js`) — three items needing offline testing
+- **Service worker** (`public/sw.js`) — two items needing offline testing
   before any change (a bad SW is hard to roll back): (1) `install` calls
   `self.skipWaiting()` unconditionally while the registration
   (`hooks/use-service-worker.ts`) is built around an update-*prompt* flow, so
   the prompt is effectively dead and a background update can auto-reload the page
-  mid-edit (auto-save mitigates data loss); (2) `DYNAMIC_CACHE` has no cap —
-  per-flight `/flights/<id>` shells accumulate unbounded until a `CACHE_VERSION`
-  bump; (3) the Strategy-6 catch-all caches any cross-origin `ok` GET (no
-  same-origin guard). All are latent/hardening, not active data bugs.
+  mid-edit (auto-save mitigates data loss); (2) the Strategy-6 catch-all caches
+  any cross-origin `ok` GET (no same-origin guard). Both are latent/hardening,
+  not active data bugs. (`DYNAMIC_CACHE` is now FIFO-capped at 150 entries via
+  `trimDynamicCache()` after each put — everything in it is re-fetchable, so an
+  eviction just falls through to network/shell fallbacks.)
 
 ## PWA Details
 
@@ -683,6 +766,11 @@ When making changes, be aware of these high-impact files:
 - Do not add pages to `PERSISTENT_PAGES` in `keep-alive-pages.tsx` without considering memory impact — only heavy virtualized pages should be persistent
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
 - Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
+- Do not make a `holdToConfirm` action fire on tap, dismiss the confirm overlay on release, or bring back the red full-row fill — the overlay is dismissed only by an outside tap/swipe, release just resets, and the destructive cue is the card progress border + the pill's gradient fill
+- Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) and the **timer-based** phase advance — advancing on `transitionEnd` cuts the delayed property; and never show the pill/sidebar content mid-morph (it eases in only when settled)
+- Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely
+- Do not drop the Geist Mono Google-Fonts `<link>` — `--font-mono` depends on it; without it `font-mono` falls back to an inconsistent system monospace
+- Do not give `register/complete`, `add-passkey`, the callsign change, or the TOTP-reveal routes a path that skips `verifyAuthenticationResponse`/`verifyStepUpAssertion` — the TOTP seed must never be revealed without a fresh passkey step-up
 - Do not give `SwipeableCard` action panels horizontal padding — the panel must collapse to 0 width when closed (the left gap comes from `openWidth`/`justify-end`), otherwise a sliver of the action button peeks at the card edge
 - Do not put row dividers as a full-width `border-b` — use the inset `.row-divider` class so the line aligns with the `px-4` text
 - Do not give inline form inputs a visible box — keep `border-0 bg-transparent dark:bg-transparent shadow-none rounded-none` so they blend with the row (and `md:text-base` so the font doesn't shrink in edit mode)

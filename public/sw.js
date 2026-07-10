@@ -27,6 +27,28 @@ const CDN_PATTERNS = ["cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic
 // Routes that should be cached when visited (runtime caching)
 const CACHEABLE_ROUTES = ["/", "/logbook", "/aircraft", "/airports", "/crew", "/data", "/roster", "/fdp", "/currencies", "/discrepancies"]
 
+// Cap on DYNAMIC_CACHE entries. Per-flight shells, hashed /_next/static chunks
+// from old deploys, and catch-all responses otherwise accumulate unbounded
+// until a CACHE_VERSION bump — degrading cache lookups and eating the storage
+// quota over months. Everything in this cache is re-fetchable, so evicting the
+// oldest entries (Cache API keys() preserve insertion order) is safe: a miss
+// just falls through to the network (or the shell/offline fallbacks).
+const DYNAMIC_CACHE_MAX_ENTRIES = 150
+
+// Fire-and-forget FIFO trim, called after DYNAMIC_CACHE writes. Never blocks
+// or fails a response.
+async function trimDynamicCache() {
+  try {
+    const cache = await caches.open(DYNAMIC_CACHE)
+    const keys = await cache.keys()
+    if (keys.length <= DYNAMIC_CACHE_MAX_ENTRIES) return
+    const excess = keys.slice(0, keys.length - DYNAMIC_CACHE_MAX_ENTRIES)
+    await Promise.all(excess.map((key) => cache.delete(key)))
+  } catch (e) {
+    // Trimming is best-effort — never let it surface.
+  }
+}
+
 // Dynamic routes whose page shell is identical for all IDs (client-rendered).
 // We cache one shell instance and serve it for any matching request.
 const DYNAMIC_SHELL_ROUTES = [
@@ -201,8 +223,11 @@ async function handleDynamicShellRequest(request, shellRoute) {
   if (exactMatch) {
     // Stale-while-revalidate: return cached, update in background
     fetch(request)
-      .then((r) => {
-        if (r.ok) dynamicCache.put(request, r)
+      .then(async (r) => {
+        if (r.ok) {
+          await dynamicCache.put(request, r)
+          trimDynamicCache()
+        }
       })
       .catch(() => {})
     return exactMatch
@@ -213,7 +238,7 @@ async function handleDynamicShellRequest(request, shellRoute) {
     const networkResponse = await fetch(request)
     if (networkResponse.ok) {
       // Cache exact URL for future revisits
-      dynamicCache.put(request, networkResponse.clone())
+      dynamicCache.put(request, networkResponse.clone()).then(() => trimDynamicCache())
       // Also update the generic shell cache (strip Vary for universal matching)
       cloneWithoutVary(networkResponse.clone()).then((clean) => {
         staticCache.put(shellKey, clean)
@@ -386,7 +411,7 @@ self.addEventListener("fetch", (event) => {
         try {
           const response = await fetch(request)
           if (response.ok) {
-            cache.put(request, response.clone())
+            cache.put(request, response.clone()).then(() => trimDynamicCache())
           }
           return response
         } catch (e) {
@@ -520,7 +545,7 @@ self.addEventListener("fetch", (event) => {
       const fetchPromise = fetch(request)
         .then((response) => {
           if (response.ok) {
-            cache.put(request, response.clone())
+            cache.put(request, response.clone()).then(() => trimDynamicCache())
           }
           return response
         })

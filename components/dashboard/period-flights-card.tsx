@@ -30,6 +30,13 @@ function formatRoute(f: PeriodFlight): string {
   return `${dep}-${arr}`
 }
 
+/**
+ * Cap on rendered rows. Long periods ("1y"/"All") can hold hundreds of flights;
+ * mounting them all costs real time on every dashboard visit for rows nobody
+ * scrolls through here — the logbook is the place for the full list.
+ */
+const MAX_ROWS = 50
+
 export function PeriodFlightsCard({ flights, className }: PeriodFlightsCardProps) {
   return (
     <div
@@ -43,7 +50,7 @@ export function PeriodFlightsCard({ flights, className }: PeriodFlightsCardProps
           <Plane className="h-3 w-3" />
           Flights in period
         </p>
-        <span className="font-mono tabular-nums text-[11px] text-foreground/70">
+        <span className=" tabular-nums text-[11px] text-foreground/70">
           {flights.length}
         </span>
       </div>
@@ -53,28 +60,40 @@ export function PeriodFlightsCard({ flights, className }: PeriodFlightsCardProps
           No flights in this period
         </div>
       ) : (
-        <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
-          {flights.map((f) => (
+        <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto overflow-x-hidden">
+          {flights.slice(0, MAX_ROWS).map((f) => (
             <li key={f.id}>
               <Link
                 href={`/flights/${f.id}`}
-                className="flex items-center gap-2 rounded-lg px-1.5 py-1 text-xs transition-colors hover:bg-accent/40"
+                className="flex items-center gap-1.5 rounded-lg px-1 py-1 text-xs transition-colors hover:bg-accent/40"
               >
-                <span className="w-12 shrink-0 tabular-nums text-muted-foreground">
+                <span className="w-11 shrink-0 tabular-nums text-muted-foreground">
                   {formatDate(f.date)}
                 </span>
-                <span className="w-14 shrink-0 truncate font-medium text-foreground">
+                <span className="w-12 shrink-0 truncate font-medium text-foreground">
                   {f.flightNumber || "—"}
                 </span>
-                <span className="flex-1 truncate font-mono tabular-nums text-foreground/80">
+                {/* min-w-0 lets the route shrink + truncate instead of pushing
+                    the row wider than the card (which caused horizontal scroll). */}
+                <span className="min-w-0 flex-1 truncate tabular-nums text-foreground/80">
                   {formatRoute(f)}
                 </span>
-                <span className="shrink-0 font-mono tabular-nums text-foreground">
+                <span className="shrink-0 tabular-nums text-foreground">
                   {formatDecimalHours(f.blockMinutes)}h
                 </span>
               </Link>
             </li>
           ))}
+          {flights.length > MAX_ROWS && (
+            <li>
+              <Link
+                href="/logbook"
+                className="flex items-center justify-center rounded-lg px-1.5 py-1.5 text-xs text-primary transition-colors hover:bg-accent/40"
+              >
+                View all {flights.length} flights in logbook
+              </Link>
+            </li>
+          )}
         </ul>
       )}
     </div>

@@ -147,6 +147,102 @@ function SyncIconButton({ className }: { className?: string }) {
   )
 }
 
+// ─── Gravity active-tab indicator ────────────────────────────
+
+/**
+ * A "gravity" active-item highlight: a single blob that moves to the active item
+ * with a bouncy overshoot, and — because position and size settle at slightly
+ * different rates — stretches a touch in the direction of travel for a liquid
+ * feel.
+ *
+ * Crucially this uses CSS transitions on `transform` (position) rather than a
+ * JS/Framer spring. Framer springs tick per-frame on the MAIN thread, so when a
+ * heavy page (dashboard/FDP) mounts and blocks it, the blob hitches. A CSS
+ * transform transition runs on the compositor and stays smooth regardless.
+ * Works for both the horizontal pill bar and the vertical sidebar (position is
+ * always `translate(left, top)`; the changing axis is just whichever of
+ * width/height varies). Metrics are measured with a ResizeObserver (setState
+ * only in the RO callback) in content coordinates so it's correct inside a
+ * scroll area.
+ */
+function GravityIndicator({
+  containerRef,
+  activeIndex,
+  className,
+  revision = "",
+}: {
+  containerRef: React.RefObject<HTMLElement | null>
+  activeIndex: number
+  className?: string
+  /** Change this when the set/order of items changes so metrics re-measure. */
+  revision?: string
+}) {
+  const reduce = useReducedMotion()
+  const [rects, setRects] = useState<{ left: number; top: number; width: number; height: number }[]>([])
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const measure = () => {
+      const base = el.getBoundingClientRect()
+      const items = Array.from(el.querySelectorAll<HTMLElement>("[data-grav-item]"))
+      setRects(
+        items.map((it) => {
+          const r = it.getBoundingClientRect()
+          return {
+            left: r.left - base.left + el.scrollLeft,
+            top: r.top - base.top + el.scrollTop,
+            width: r.width,
+            height: r.height,
+          }
+        }),
+      )
+    }
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    // Items themselves can change size/position (e.g. a collapsing sidebar
+    // section) without the container resizing — observe them too.
+    el.querySelectorAll<HTMLElement>("[data-grav-item]").forEach((it) => ro.observe(it))
+    return () => ro.disconnect()
+  }, [containerRef, revision])
+
+  const target = rects[activeIndex]
+  if (!target || activeIndex < 0) return null
+
+  // Position transitions with a bouncy overshoot (compositor-driven); size
+  // settles a touch faster so the trailing edge lags → a subtle stretch. CSS
+  // transitions don't fire on first paint, so there's no fly-in on mount.
+  const transition = reduce
+    ? "none"
+    : [
+        "transform 0.5s cubic-bezier(0.34, 1.5, 0.64, 1)",
+        "width 0.4s cubic-bezier(0.22, 1, 0.36, 1)",
+        "height 0.4s cubic-bezier(0.22, 1, 0.36, 1)",
+      ].join(", ")
+
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        "absolute left-0 top-0 z-0 rounded-full bg-foreground/10",
+        className,
+      )}
+      // `pointer-events:none` inline (belt-and-suspenders) — the blob sits over
+      // the active item, and on iOS a *composited* layer (it transforms) can
+      // occasionally swallow a touch despite the class. No `will-change` so the
+      // layer isn't promoted persistently (the transform transition still
+      // composites while animating, so nav stays smooth).
+      style={{
+        pointerEvents: "none",
+        transform: `translate(${target.left}px, ${target.top}px)`,
+        width: target.width,
+        height: target.height,
+        transition,
+      }}
+    />
+  )
+}
+
 // ─── Shared pill bar content ─────────────────────────────────
 
 /**
@@ -168,6 +264,9 @@ function PillBarContent({
   mode: "desktop" | "mobile"
   onToggleSidebar: () => void
 }) {
+  const tabsRef = useRef<HTMLDivElement>(null)
+  const activeIndex = tabs.findIndex((k) => TAB_CONFIG[k]?.isActive(pathname))
+
   return (
     <div className="flex items-center h-14 px-2">
       {/* Sidebar toggle — fixed width bookend */}
@@ -178,8 +277,10 @@ function PillBarContent({
         <PanelLeft className="h-5 w-5" />
       </button>
 
-      {/* Tabs — equally spaced, fill remaining space */}
-      <div className="flex items-center flex-1 min-w-0 justify-evenly">
+      {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
+          behind the labels and stretches between tabs as the route changes. */}
+      <div ref={tabsRef} className="relative flex items-center flex-1 min-w-0 justify-evenly">
+        <GravityIndicator containerRef={tabsRef} activeIndex={activeIndex} revision={tabs.join(",")} />
         {tabs.map((tabKey) => {
           const tab = TAB_CONFIG[tabKey]
           if (!tab) return null
@@ -187,25 +288,23 @@ function PillBarContent({
           const Icon = tab.icon
 
           return (
-            <Link key={tabKey} href={tab.href}>
+            <Link key={tabKey} href={tab.href} className="relative z-[1]">
               {mode === "desktop" ? (
                 <span
+                  data-grav-item
                   className={cn(
                     "inline-flex items-center justify-center h-9 px-4 rounded-full text-sm font-medium transition-colors",
-                    active
-                      ? "bg-foreground/10 text-primary"
-                      : "text-foreground/60 active:text-foreground"
+                    active ? "text-primary" : "text-foreground/60 active:text-foreground"
                   )}
                 >
                   {tab.label}
                 </span>
               ) : (
                 <span
+                  data-grav-item
                   className={cn(
                     "inline-flex flex-col items-center justify-center gap-0.5 h-11 px-3 rounded-full transition-colors",
-                    active
-                      ? "bg-foreground/10 text-primary"
-                      : "text-foreground/60 active:text-foreground"
+                    active ? "text-primary" : "text-foreground/60 active:text-foreground"
                   )}
                 >
                   <Icon className="h-5 w-5" />
@@ -232,6 +331,7 @@ function SidebarNav({
   pathname: string
   className?: string
 }) {
+  const navRef = useRef<HTMLElement>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const toggleSection = (label: string) => {
     setCollapsed((prev) => ({ ...prev, [label]: !prev[label] }))
@@ -242,11 +342,26 @@ function SidebarNav({
     return pathname === href || pathname?.startsWith(href + "/")
   }
 
+  // Rendered item order (matches DOM): dashboard, then each expanded section's
+  // items. Drives the vertical gravity blob's target.
+  const orderedHrefs = [
+    dashboardNavItem.href,
+    ...navSections.flatMap((s) => (collapsed[s.label] ? [] : s.items.map((i) => i.href))),
+  ]
+  const activeIndex = orderedHrefs.findIndex((href) => isItemActive(href))
+
   return (
     <nav
-      className={cn("overflow-y-auto overscroll-contain px-3 pb-4", className)}
+      ref={navRef}
+      className={cn("relative overflow-y-auto overscroll-contain px-3 pb-4", className)}
       style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
     >
+      <GravityIndicator
+        containerRef={navRef}
+        activeIndex={activeIndex}
+        className="rounded-full"
+        revision={orderedHrefs.join(",")}
+      />
       <SidebarNavItem
         href={dashboardNavItem.href}
         icon={dashboardNavItem.icon}
@@ -302,11 +417,12 @@ function SidebarNavItem({
   return (
     <Link
       href={href}
+      data-grav-item
       className={cn(
-        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150",
-        "active:scale-[0.98] active:bg-foreground/8",
+        "relative z-[1] flex items-center gap-3 px-3.5 py-2.5 rounded-full text-sm transition-all duration-150",
+        "active:scale-[0.98]",
         isActive
-          ? "bg-foreground/10 text-primary font-medium"
+          ? "text-primary font-medium"
           : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
       )}
     >
@@ -382,8 +498,15 @@ export function NavPill() {
 
 // ─── Morph phase state machine (shared) ──────────────────────
 
-type MorphPhase = "pill" | "sliding" | "expanding" | "sidebar" | "collapsing" | "returning"
+type MorphPhase = "pill" | "opening" | "sidebar" | "closing"
 
+/**
+ * Morph state machine. Previously the open/close was split into a slide phase
+ * then a separate expand phase, which made the pill visibly pause ("stuck")
+ * between sliding to the corner and growing into the sidebar. Now position,
+ * width AND height all transition together in a single `opening`/`closing`
+ * phase, so the morph is one continuous motion.
+ */
 function useMorphPhase(isOpen: boolean, phaseDuration: number) {
   const [phase, setPhase] = useState<MorphPhase>(isOpen ? "sidebar" : "pill")
   const prevOpenRef = useRef(isOpen)
@@ -392,35 +515,51 @@ function useMorphPhase(isOpen: boolean, phaseDuration: number) {
   useEffect(() => {
     if (prevOpenRef.current === isOpen) return
     prevOpenRef.current = isOpen
-    setPhase(isOpen ? "sliding" : "collapsing")
+    setPhase(isOpen ? "opening" : "closing")
   }, [isOpen])
 
   const advancePhase = useCallback(() => {
     clearTimeout(safetyTimerRef.current)
-    setPhase((current) => {
-      switch (current) {
-        case "sliding": return "expanding"
-        case "expanding": return "sidebar"
-        case "collapsing": return "returning"
-        case "returning": return "pill"
-        default: return current
-      }
-    })
+    setPhase((current) =>
+      current === "opening" ? "sidebar" : current === "closing" ? "pill" : current,
+    )
   }, [])
 
   useEffect(() => {
-    const isTransitioning = phase === "sliding" || phase === "expanding" || phase === "collapsing" || phase === "returning"
-    if (!isTransitioning) return
+    if (phase !== "opening" && phase !== "closing") return
     clearTimeout(safetyTimerRef.current)
-    safetyTimerRef.current = setTimeout(advancePhase, phaseDuration + 50)
+    safetyTimerRef.current = setTimeout(advancePhase, phaseDuration + 80)
     return () => clearTimeout(safetyTimerRef.current)
   }, [phase, phaseDuration, advancePhase])
 
-  const isAtSidebarPosition = phase === "sliding" || phase === "expanding" || phase === "sidebar" || phase === "collapsing"
-  const isAtFullHeight = phase === "expanding" || phase === "sidebar"
-  const isExpanded = phase === "sidebar" || phase === "expanding"
+  // Sidebar geometry (position + width + height) for the whole open span. The
+  // sidebar content rides this too, so it's interactive throughout the open.
+  const isSidebarShape = phase === "opening" || phase === "sidebar"
 
-  return { phase, advancePhase, isAtSidebarPosition, isAtFullHeight, isExpanded }
+  return { phase, advancePhase, isSidebarShape }
+}
+
+const MORPH_EASE = "cubic-bezier(0.4, 0, 0.2, 1)"
+
+/**
+ * Build the per-property CSS `transition` for the morph so the two property
+ * groups OVERLAP rather than running as a stalled two-step:
+ * - opening (pill→sidebar): position+width lead (delay 0), height follows (delay
+ *   `lead`, i.e. starts ~85% through the position move).
+ * - closing (sidebar→pill): height leads (delay 0), position+width follow.
+ * Settled phases get `"none"`. `positionProps` is the comma-separated geometry
+ * (desktop includes `top`; mobile is bottom-anchored so it doesn't).
+ */
+function morphTransition(phase: MorphPhase, dur: number, lead: number, positionProps: string): string {
+  if (phase !== "opening" && phase !== "closing") return "none"
+  const group = (props: string, delay: number) =>
+    props
+      .split(",")
+      .map((p) => `${p.trim()} ${dur}ms ${MORPH_EASE} ${delay}ms`)
+      .join(", ")
+  return phase === "opening"
+    ? `${group(positionProps, 0)}, ${group("height", lead)}`
+    : `${group("height", 0)}, ${group(positionProps, lead)}`
 }
 
 // ─── Desktop: top pill ↔ sidebar ─────────────────────────────
@@ -440,37 +579,41 @@ function DesktopPillMorph({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const { expandedHeight } = useViewportMeasure()
-  const PHASE_DURATION = prefersReducedMotion ? 0 : 150
+  // Each property animates over DUR; the second group starts LEAD ms in (~85% of
+  // the way through the first) so the two overlap rather than stalling. Order:
+  // opening (pill→sidebar) moves position+width first, then grows height;
+  // closing (sidebar→pill) shrinks height first, then moves position+width.
+  const DUR = prefersReducedMotion ? 0 : 190
+  const LEAD = prefersReducedMotion ? 0 : 160
+  const TOTAL = DUR + LEAD
 
-  const { phase, advancePhase, isAtSidebarPosition, isAtFullHeight, isExpanded } =
-    useMorphPhase(sidebarOpen, PHASE_DURATION)
+  const { phase, advancePhase, isSidebarShape } = useMorphPhase(sidebarOpen, TOTAL)
 
-  const handleTransitionEnd = useCallback((e: React.TransitionEvent) => {
-    if (e.target !== ref.current) return
-    advancePhase()
-  }, [advancePhase])
+  // Settle the phase the instant the morph visually finishes — i.e. when the
+  // LAST (delayed) property's transition ends — so the content becomes
+  // interactive immediately rather than ~80ms later via the fallback timer
+  // (that gap dropped sidebar taps). Keyed to the delayed property so the
+  // delayed group is never cut short.
+  const handleTransitionEnd = useCallback(
+    (e: React.TransitionEvent) => {
+      if (e.target !== ref.current) return
+      const last = phase === "opening" ? "height" : phase === "closing" ? "transform" : null
+      if (last && e.propertyName === last) advancePhase()
+    },
+    [phase, advancePhase],
+  )
 
-  const transitionProperty = (() => {
-    switch (phase) {
-      case "sliding": return "top, left, transform, width"
-      case "expanding": return "height"
-      case "collapsing": return "height"
-      case "returning": return "top, left, transform, width"
-      default: return "none"
-    }
-  })()
+  const transition = morphTransition(phase, DUR, LEAD, "top, left, transform, width")
 
   const style: React.CSSProperties = {
-    top: isAtSidebarPosition
+    top: isSidebarShape
       ? `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`
       : `calc(${PILL_TOP}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
-    left: isAtSidebarPosition ? SIDEBAR_MARGIN : "50%",
-    transform: isAtSidebarPosition ? "translateX(0)" : "translateX(-50%)",
-    width: isAtSidebarPosition ? SIDEBAR_INNER_WIDTH : "auto",
-    height: isAtFullHeight ? expandedHeight : PILL_HEIGHT,
-    transitionProperty,
-    transitionDuration: `${PHASE_DURATION}ms`,
-    transitionTimingFunction: "cubic-bezier(0.25, 0.1, 0.25, 1)",
+    left: isSidebarShape ? SIDEBAR_MARGIN : "50%",
+    transform: isSidebarShape ? "translateX(0)" : "translateX(-50%)",
+    width: isSidebarShape ? SIDEBAR_INNER_WIDTH : "auto",
+    height: isSidebarShape ? expandedHeight : PILL_HEIGHT,
+    transition,
   }
 
   return (
@@ -481,7 +624,7 @@ function DesktopPillMorph({
       onTransitionEnd={handleTransitionEnd}
     >
         <GlassContainer
-          cornerRadius={isExpanded ? 20 : 28}
+          cornerRadius={isSidebarShape ? 20 : 28}
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           disableTapFeedback
@@ -490,11 +633,14 @@ function DesktopPillMorph({
           <div
             className="flex-shrink-0"
             style={{
-              opacity: isExpanded ? 0 : 1,
-              visibility: isExpanded ? "hidden" : "visible",
-              pointerEvents: isExpanded ? "none" : "auto",
-              height: isExpanded ? 0 : PILL_HEIGHT,
-              transition: "opacity 0.1s",
+              // Only show the (horizontal) pill content once fully settled as a
+              // pill — mid-morph the container is the wrong shape so the tabs look
+              // squished. Collapsed to 0 height + non-interactive otherwise.
+              opacity: phase === "pill" ? 1 : 0,
+              visibility: phase === "pill" ? "visible" : "hidden",
+              pointerEvents: phase === "pill" ? "auto" : "none",
+              height: phase === "pill" ? PILL_HEIGHT : 0,
+              transition: "opacity 0.2s ease",
             }}
           >
             <PillBarContent
@@ -507,11 +653,15 @@ function DesktopPillMorph({
 
           {/* Sidebar header + nav — visible when expanded */}
           <div
-            className="flex flex-col flex-1 min-h-0 transition-opacity duration-150"
+            className="flex flex-col flex-1 min-h-0 transition-opacity duration-200 ease-out"
             style={{
-              opacity: isExpanded ? 1 : 0,
-              visibility: isExpanded ? "visible" : "hidden",
-              pointerEvents: isExpanded ? "auto" : "none",
+              // The vertical sidebar list isn't "squished" mid-morph (it's just
+              // clipped by the growing height, like a drawer), so keep it visible
+              // AND interactive for the whole open span. Gating it on the settled
+              // phase left a brief dead window that dropped sidebar taps.
+              opacity: isSidebarShape ? 1 : 0,
+              visibility: isSidebarShape ? "visible" : "hidden",
+              pointerEvents: isSidebarShape ? "auto" : "none",
             }}
           >
             {/* Sidebar top row — toggle + sync flushed right */}
@@ -548,55 +698,47 @@ function MobilePillMorph({
   const ref = useRef<HTMLDivElement>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { expandedHeight } = useViewportMeasure()
-  const PHASE_DURATION = prefersReducedMotion ? 0 : 150
+  const DUR = prefersReducedMotion ? 0 : 190
+  const LEAD = prefersReducedMotion ? 0 : 160
+  const TOTAL = DUR + LEAD
 
-  const { phase, advancePhase, isAtSidebarPosition, isAtFullHeight, isExpanded } =
-    useMorphPhase(sidebarOpen, PHASE_DURATION)
+  const { phase, advancePhase, isSidebarShape } = useMorphPhase(sidebarOpen, TOTAL)
 
   // Close sidebar on route change
   useEffect(() => {
     setSidebarOpen(false)
   }, [pathname])
 
-  const handleTransitionEnd = useCallback((e: React.TransitionEvent) => {
-    if (e.target !== ref.current) return
-    advancePhase()
-  }, [advancePhase])
+  // Settle the phase the instant the morph visually finishes (see desktop), so
+  // the sidebar content becomes interactive immediately instead of ~80ms later.
+  const handleTransitionEnd = useCallback(
+    (e: React.TransitionEvent) => {
+      if (e.target !== ref.current) return
+      const last = phase === "opening" ? "height" : phase === "closing" ? "transform" : null
+      if (last && e.propertyName === last) advancePhase()
+    },
+    [phase, advancePhase],
+  )
 
-  // Mobile morph — always bottom-anchored:
-  // pill: bottom-center, auto width, pill height
-  // sliding: slides to bottom-left, widens to sidebar width (still pill height)
-  // expanding: grows UPWARD (bottom anchored, height increases)
-  // sidebar: full sidebar height, bottom-left
-
-  const transitionProperty = (() => {
-    switch (phase) {
-      case "sliding": return "left, transform, width"
-      case "expanding": return "height"
-      case "collapsing": return "height"
-      case "returning": return "left, transform, width"
-      default: return "none"
-    }
-  })()
+  // Mobile morph — always bottom-anchored. pill: bottom-centre, auto width, pill
+  // height. opening/closing: height and position+width morph in a sequenced
+  // overlap (bottom-anchored, so it grows upward). sidebar: full height,
+  // bottom-left. In the pill state only `transform` animates (scroll hide/show).
+  const transition =
+    phase === "pill"
+      ? `transform ${prefersReducedMotion ? 0 : 300}ms cubic-bezier(0.34, 1.56, 0.64, 1)`
+      : morphTransition(phase, DUR, LEAD, "left, transform, width")
 
   const style: React.CSSProperties = {
     position: "fixed" as const,
     bottom: `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-bottom, 0px))`,
-    left: isAtSidebarPosition ? SIDEBAR_MARGIN : "50%",
-    transform: isAtSidebarPosition
+    left: isSidebarShape ? SIDEBAR_MARGIN : "50%",
+    transform: isSidebarShape
       ? "translateX(0)"
       : `translateX(-50%) translateY(${hideNavbar ? "calc(100% + 24px)" : "0%"})`,
-    width: isAtSidebarPosition ? SIDEBAR_INNER_WIDTH : "auto",
-    height: isAtFullHeight ? expandedHeight : PILL_HEIGHT,
-    transitionProperty: phase === "pill"
-      ? "transform"
-      : transitionProperty,
-    transitionDuration: phase === "pill"
-      ? (prefersReducedMotion ? "0ms" : "300ms")
-      : `${PHASE_DURATION}ms`,
-    transitionTimingFunction: phase === "pill"
-      ? "cubic-bezier(0.34, 1.56, 0.64, 1)"
-      : "cubic-bezier(0.25, 0.1, 0.25, 1)",
+    width: isSidebarShape ? SIDEBAR_INNER_WIDTH : "auto",
+    height: isSidebarShape ? expandedHeight : PILL_HEIGHT,
+    transition,
   }
 
   return (
@@ -629,7 +771,7 @@ function MobilePillMorph({
         onTransitionEnd={handleTransitionEnd}
       >
         <GlassContainer
-          cornerRadius={isExpanded ? 20 : 28}
+          cornerRadius={isSidebarShape ? 20 : 28}
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           disableTapFeedback
@@ -638,11 +780,14 @@ function MobilePillMorph({
           <div
             className="flex-shrink-0"
             style={{
-              opacity: isExpanded ? 0 : 1,
-              visibility: isExpanded ? "hidden" : "visible",
-              pointerEvents: isExpanded ? "none" : "auto",
-              height: isExpanded ? 0 : PILL_HEIGHT,
-              transition: "opacity 0.1s",
+              // Only show the (horizontal) pill content once fully settled as a
+              // pill — mid-morph the container is the wrong shape so the tabs look
+              // squished. Collapsed to 0 height + non-interactive otherwise.
+              opacity: phase === "pill" ? 1 : 0,
+              visibility: phase === "pill" ? "visible" : "hidden",
+              pointerEvents: phase === "pill" ? "auto" : "none",
+              height: phase === "pill" ? PILL_HEIGHT : 0,
+              transition: "opacity 0.2s ease",
             }}
           >
             <PillBarContent
@@ -655,11 +800,15 @@ function MobilePillMorph({
 
           {/* Sidebar header + nav — visible when expanded */}
           <div
-            className="flex flex-col flex-1 min-h-0 transition-opacity duration-150"
+            className="flex flex-col flex-1 min-h-0 transition-opacity duration-200 ease-out"
             style={{
-              opacity: isExpanded ? 1 : 0,
-              visibility: isExpanded ? "visible" : "hidden",
-              pointerEvents: isExpanded ? "auto" : "none",
+              // The vertical sidebar list isn't "squished" mid-morph (it's just
+              // clipped by the growing height, like a drawer), so keep it visible
+              // AND interactive for the whole open span. Gating it on the settled
+              // phase left a brief dead window that dropped sidebar taps.
+              opacity: isSidebarShape ? 1 : 0,
+              visibility: isSidebarShape ? "visible" : "hidden",
+              pointerEvents: isSidebarShape ? "auto" : "none",
             }}
           >
             {/* Sidebar top row — toggle + sync flushed right */}

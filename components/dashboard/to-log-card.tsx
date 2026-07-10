@@ -51,7 +51,7 @@ export function ToLogCard({
             trackClassName="stroke-chart-2/15"
             indicatorClassName="stroke-chart-2"
           >
-            <span className="font-mono tabular-nums text-sm font-bold text-foreground">
+            <span className=" tabular-nums text-sm font-bold text-foreground">
               {takeoffs}
             </span>
           </RadialProgress>
@@ -69,7 +69,7 @@ export function ToLogCard({
             trackClassName="stroke-chart-3/15"
             indicatorClassName="stroke-chart-3"
           >
-            <span className="font-mono tabular-nums text-sm font-bold text-foreground">
+            <span className=" tabular-nums text-sm font-bold text-foreground">
               {landings}
             </span>
           </RadialProgress>
@@ -96,7 +96,7 @@ export function ToLogCard({
           )}
           {isCurrent ? "Current" : "Not current"}
         </span>
-        <span className="font-mono tabular-nums text-foreground/80">
+        <span className=" tabular-nums text-foreground/80">
           {currency.takeoffs}/{currency.landings} · 90d
         </span>
       </div>
@@ -115,7 +115,7 @@ export function ToLogCard({
                   {ev.flightNumber || ev.aircraftReg || "—"}
                 </span>
               </span>
-              <span className="shrink-0 font-mono tabular-nums text-foreground/80">
+              <span className="shrink-0 tabular-nums text-foreground/80">
                 {ev.takeoffs}/{ev.landings}
               </span>
             </li>

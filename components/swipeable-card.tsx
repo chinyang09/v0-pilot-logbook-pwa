@@ -4,6 +4,7 @@ import type React from "react"
 import { useCallback, useEffect, useId, useRef, useState } from "react"
 import {
   animate,
+  AnimatePresence,
   motion,
   useMotionValue,
   useSpring,
@@ -12,7 +13,8 @@ import {
   type PanInfo,
 } from "framer-motion"
 import { cn } from "@/lib/utils"
-import { useHoldToConfirm } from "@/hooks/use-hold-to-confirm"
+import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button"
+import { HoldProgressBorder } from "@/components/ui/hold-progress-border"
 
 const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
 
@@ -32,6 +34,12 @@ const POP_SPRING = { stiffness: 700, damping: 24, mass: 0.6 }
 
 export interface SwipeAction {
   label?: string
+  /**
+   * Accessible name for an icon-only action (no visible text). Delete/logout and
+   * similar destructive actions are icon-only app-wide; this keeps them labelled
+   * for screen readers.
+   */
+  ariaLabel?: string
   /** Optional — actions may be label-only (e.g. "Clear") */
   icon?: React.ReactNode
   onClick: () => void
@@ -39,9 +47,11 @@ export interface SwipeAction {
   className?: string
   disabled?: boolean
   /**
-   * When true the action is not fired on a tap — the user must **press and
-   * hold** the button until it charges, which fills the row red. Releasing
-   * early cancels. Used for destructive actions (delete) in place of a dialog.
+   * When true the action is not fired on a tap. Instead, tapping closes the
+   * action panel and raises a translucent confirm button over the row that the
+   * user must **press and hold** (an animated progress border draws around it).
+   * Releasing early dismisses it. Used for destructive actions in place of a
+   * dialog.
    */
   holdToConfirm?: boolean
   /** Hold duration in ms (default 700). */
@@ -83,7 +93,8 @@ function variantClasses(variant?: SwipeAction["variant"]): string {
 /**
  * A single revealed action button that scales/pops in (with spring) as the card
  * is dragged open, staggered by its position. Rests at opacity 0 when closed so
- * nothing peeks at the card's edge.
+ * nothing peeks at the card's edge. A tap fires the action (or, for a
+ * hold-to-confirm action, asks the parent to show the confirm overlay).
  */
 function SwipeActionButton({
   action,
@@ -91,45 +102,38 @@ function SwipeActionButton({
   startX,
   endX,
   onClose,
-  chargeMV,
+  onRequestConfirm,
 }: {
   action: SwipeAction
   x: MotionValue<number>
   startX: number
   endX: number
   onClose: () => void
-  chargeMV: MotionValue<number>
+  onRequestConfirm: (action: SwipeAction) => void
 }) {
   // 0 (hidden) → 1 (fully revealed) across this button's stagger window.
   const reveal = useTransform(x, [endX, startX], [1, 0], { clamp: true })
   const scale = useSpring(useTransform(reveal, [0, 1], [0.4, 1]), POP_SPRING)
   const opacity = useSpring(reveal, POP_SPRING)
 
-  const isHold = !!action.holdToConfirm
-  // The hook is always called (hooks rule); its gesture handlers are only wired
-  // for hold actions. For a hold action it drives the shared row `chargeMV`.
-  const { handlers: holdHandlers } = useHoldToConfirm({
-    duration: action.holdDuration ?? 700,
-    disabled: action.disabled || !isHold,
-    progress: chargeMV,
-    onConfirm: useCallback(() => {
-      action.onClick()
-      onClose()
-    }, [action, onClose]),
-  })
-
   return (
     <motion.button
       type="button"
+      aria-label={action.ariaLabel ?? action.label}
       onClick={(e: React.MouseEvent) => {
         e.stopPropagation()
-        if (action.disabled || isHold) return
+        if (action.disabled) return
+        // Hold-to-confirm actions don't fire on tap — they hand off to a
+        // translucent confirm overlay the user must press-and-hold.
+        if (action.holdToConfirm) {
+          onRequestConfirm(action)
+          return
+        }
         action.onClick()
         onClose()
       }}
-      {...(isHold ? holdHandlers : {})}
       disabled={action.disabled}
-      style={{ scale, opacity, width: BUTTON_WIDTH, touchAction: "none" }}
+      style={{ scale, opacity, width: BUTTON_WIDTH, touchAction: "manipulation" }}
       className={cn(
         "shrink-0 self-stretch flex flex-col items-center justify-center gap-0.5",
         "rounded-lg overflow-hidden disabled:opacity-50 select-none",
@@ -185,11 +189,13 @@ export function SwipeableCard({
   // True while the row is swiped open or mid-gesture (drives the card morph).
   const [active, setActive] = useState(false)
 
-  // Shared 0→1 charge for a press-and-hold (destructive) action — drives the
-  // red fill that sweeps across the row as the user holds the delete button.
-  const charge = useMotionValue(0)
-  const chargeOpacity = useTransform(charge, [0, 0.001, 1], [0, 1, 1])
-  const hasHoldAction = actions.some((a) => a.holdToConfirm && !a.disabled)
+  // When a hold-to-confirm action is tapped, the panel closes and this confirm
+  // overlay covers the row: the content behind desaturates ("the past"), a red
+  // tint fills in lock-step with the hold, and a centred pill must be held to
+  // fire the action. `confirmProgress` mirrors the button's hold 0→1 so the tint
+  // fills together with it.
+  const [confirmingAction, setConfirmingAction] = useState<SwipeAction | null>(null)
+  const confirmProgress = useMotionValue(0)
 
   // Tracks whether the last pointer interaction actually moved (drag vs tap).
   const movedRef = useRef(false)
@@ -214,12 +220,39 @@ export function SwipeableCard({
   useEffect(() => {
     const handler = (e: Event) => {
       if ((e as CustomEvent).detail?.id !== cardId.current) {
+        setConfirmingAction(null)
         animate(x, 0, { ...SPRING, onComplete: () => setActive(false) })
       }
     }
     window.addEventListener(SWIPE_CLOSE_EVENT, handler)
     return () => window.removeEventListener(SWIPE_CLOSE_EVENT, handler)
   }, [x])
+
+  // Tapping a hold-to-confirm action: close the panel and raise the overlay.
+  const requestConfirm = useCallback(
+    (action: SwipeAction) => {
+      confirmProgress.set(0)
+      setConfirmingAction(action)
+      settle(0)
+    },
+    [settle, confirmProgress]
+  )
+
+  // The confirm overlay is dismissed only by interacting *outside* this card
+  // (release just resets the hold). A capture-phase pointerdown anywhere outside
+  // the container clears it. The listener is added after the overlay mounts, so
+  // the tap that opened it never self-dismisses.
+  useEffect(() => {
+    if (!confirmingAction) return
+    const onPointerDown = (e: PointerEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) {
+        confirmProgress.set(0)
+        setConfirmingAction(null)
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown, true)
+    return () => document.removeEventListener("pointerdown", onPointerDown, true)
+  }, [confirmingAction, confirmProgress])
 
   const closeOthers = useCallback(() => {
     window.dispatchEvent(
@@ -311,23 +344,25 @@ export function SwipeableCard({
             const endReveal = startReveal + unit
             return (
               <SwipeActionButton
-                key={action.label ?? index}
+                key={action.label ?? action.ariaLabel ?? index}
                 action={action}
                 x={x}
                 startX={-startReveal}
                 endX={-endReveal}
                 onClose={close}
-                chargeMV={charge}
+                onRequestConfirm={requestConfirm}
               />
             )
           })}
         </motion.div>
       )}
 
-      {/* Swipeable content — morphs into a lifted card on swipe (row variant) */}
+      {/* Swipeable content — morphs into a lifted card on swipe (row variant).
+          Dragging is disabled while a confirm overlay is up so the row can't be
+          inadvertently swiped while holding. */}
       <motion.div
         ref={contentRef}
-        drag={hasActions ? "x" : false}
+        drag={hasActions && !confirmingAction ? "x" : false}
         dragDirectionLock
         dragConstraints={{ left: -openWidth, right: 0 }}
         dragElastic={DRAG_ELASTIC}
@@ -347,15 +382,55 @@ export function SwipeableCard({
             !isCard && active && "rounded-lg bg-secondary"
           )}
         >
-          {children}
-          {/* Red charge fill that sweeps across the row as a hold action is held. */}
-          {hasHoldAction && (
-            <motion.div
-              aria-hidden
-              className="pointer-events-none absolute inset-0 z-[2] origin-left bg-destructive"
-              style={{ scaleX: charge, opacity: chargeOpacity }}
-            />
-          )}
+          {/* Content is muted while confirming — desaturated, slightly blurred
+              and darkened — so it clearly reads as "backgrounded" (and is
+              distinguishable from an already-white completed card). */}
+          <div
+            className={cn(
+              "transition-[filter] duration-300",
+              confirmingAction && "grayscale blur-[1.5px]"
+            )}
+          >
+            {children}
+          </div>
+          {/* Hold-to-confirm overlay: a black mute + a red wash that intensifies
+              with the hold, the progress border traced around the CARD, and a
+              centred pill (held to confirm) whose fill sweeps red left→right.
+              Above the content (and the .row-divider z-2). */}
+          <AnimatePresence>
+            {confirmingAction && (
+              <motion.div
+                className="absolute inset-0 z-[3] flex items-center justify-center"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.16, ease: "easeOut" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Constant black mute (no red wash — the gradient border + the
+                    pill fill carry the destructive cue). */}
+                <div aria-hidden className="pointer-events-none absolute inset-0 bg-black/45" />
+                {/* Progress border traced around the card */}
+                <HoldProgressBorder progress={confirmProgress} radius={isCard || active ? 8 : 0} />
+                <HoldToConfirmButton
+                  className="h-10 rounded-full px-6 text-[15px] shadow-md"
+                  radius={999}
+                  showBorder={false}
+                  progress={confirmProgress}
+                  ariaLabel={confirmingAction.ariaLabel ?? confirmingAction.label ?? "Hold to confirm"}
+                  icon={confirmingAction.icon}
+                  label="Hold to confirm"
+                  duration={confirmingAction.holdDuration ?? 2500}
+                  onConfirm={() => {
+                    const a = confirmingAction
+                    confirmProgress.set(0)
+                    setConfirmingAction(null)
+                    a.onClick()
+                  }}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </motion.div>
     </div>

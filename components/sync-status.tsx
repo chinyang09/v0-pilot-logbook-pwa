@@ -4,33 +4,49 @@ import { useState, useEffect } from "react"
 import { syncService } from "@/lib/sync"
 import { Cloud, CloudOff, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/components/providers/auth-provider"
 
 export function SyncStatus() {
+  const { ensureValidSession } = useAuth()
   const [status, setStatus] = useState<"online" | "offline" | "syncing">(() => syncService.getStatus())
   const [pendingCount, setPendingCount] = useState(0)
 
   useEffect(() => {
     setStatus(syncService.getStatus())
 
-    const unsubscribe = syncService.subscribe(setStatus)
-
-    // Check pending count periodically
     const checkPending = async () => {
       const { getSyncQueue } = await import("@/lib/db")
       const queue = await getSyncQueue()
       setPendingCount(queue.length)
     }
 
+    // Event-driven instead of a 5s poll (which ran forever in every open tab):
+    // status flips on sync start/end (covers the pending count draining) and
+    // onDataChanged fires after every completed cycle. A local write is picked
+    // up when its debounced sync starts moments later.
+    const unsubscribeStatus = syncService.subscribe((s) => {
+      setStatus(s)
+      void checkPending()
+    })
+    const unsubscribeData = syncService.onDataChanged(() => {
+      void checkPending()
+    })
+
     checkPending()
-    const interval = setInterval(checkPending, 5000)
 
     return () => {
-      unsubscribe()
-      clearInterval(interval)
+      unsubscribeStatus()
+      unsubscribeData()
     }
   }, [])
 
   const handleSync = async () => {
+    // Intercept a manual resync attempted against a dead session: re-authenticate
+    // via the custom passkey flow first. If that can't recover the session,
+    // ensureValidSession routes to the login flow and we abort the sync.
+    const valid = await ensureValidSession()
+    if (!valid) return
+
     // Use force sync which triggers immediately via trigger manager
     await syncService.forceSyncNow()
     // Refresh pending count after sync
