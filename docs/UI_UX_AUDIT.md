@@ -2,7 +2,33 @@
 
 Audit date: 2026-07-11 · Baseline: `main` @ `f9ce4a5` · `pnpm lint`: **0 errors, 54 warnings** (matches the documented advisory-warning cap)
 
-Scope: UI bugs and errors, dead/duplicated code, performance, motion fluidity, and visual consistency ("whole and as one"). Findings are ranked by impact within each section. Nothing in this report has been changed in code — it is a flag list for review.
+Scope: UI bugs and errors, dead/duplicated code, performance, motion fluidity, and visual consistency ("whole and as one"). Findings are ranked by impact within each section.
+
+## Implementation status (2026-07-11, same branch)
+
+**Fixed** — lint after fixes: 0 errors, 52 warnings (baseline was 54; no new warnings):
+
+- ✅ §3.1 Dead code deleted (10 files incl. `DutyPeriodCard`, which the audit missed; `ocr-models-preloader` turned out to be **used** in `app/layout.tsx` and was kept) + stale `globals.css` BorderGlow comment.
+- ✅ §2.1 Roster page: grouping/sorting memoized, selected-day entries derived (stale/empty restored-day bug gone), `DutyEntryCard` memoized, `ChevronLeft` back button.
+- ✅ §1.3/§2.2 One sync button: nav pill now renders the shared `SyncStatus` (theme tokens, pending badge, `ensureValidSession` re-auth path); the hardcoded-color `SyncIconButton` body is gone.
+- ✅ §2.4/§4.3 Flight-list: dead props removed; card callbacks made stable (`useCallback` + flight-passing handlers) so the `memo` actually holds.
+- ✅ §1.5 Overlay ladder: alert-dialog raised to `z-[80]` (above dialogs/pickers), picker scrims unified to `bg-black/50`; `button.tsx` destructive uses `text-destructive-foreground`; `holdDuration` doc comment corrected; CLAUDE.md Geist-Mono bullet replaced with Inter-only guidance.
+- ✅ §1.5 One `PageLoading` for all four `loading.tsx` + the keep-alive Suspense fallback; one `EmptyState` adopted on currencies/discrepancies/roster/FDP/flight-list.
+- ✅ §1.4 Semantic status tokens (`--status-valid/-warning/-critical/-error/-info`, light+dark) added and swept through the roster-family pages, `currency-card`, `discrepancy-card`, `quick-check-panel`, account success text, new-form hints. Favorite-star gold and duty-type categorical colors intentionally kept.
+- ✅ §3.2 `GlassIconButton`/`GlassButtonGroup`/`GlassGroupButton` extracted and adopted on all 8 pages (geometry now pinned: 56px singles, 48px group buttons, one active style).
+- ✅ §3.3 `lib/utils/date.ts` (`parseYMDLocal`, `formatYMD*`, `formatMinutesHM`) replacing the flight-list/logbook/FDP/dashboard/currency-card duplicates (quick-check's "16 Apr" day-first format deliberately kept).
+- ✅ §1.1 (partial) + §5.3 `FilterChips` segmented control replaces the "Filter:" dropdowns on currencies/discrepancies; discrepancies KPI axes fixed (Errors/Warnings/Info/Resolved now sum to total); roster quick-access cards got `active:` press feedback.
+- ✅ §5.1 (partial) The two overshoot beziers unified into one `OVERSHOOT_BEZIER` constant.
+
+**Remaining (not yet done):**
+
+- §1.1/§1.2 Full restyle of roster/currencies/discrepancies onto `FormSection` groups, and settings/account onto `SettingsRow`/`ToggleRow` (needs design review — big visual change).
+- §4.1 Roster list virtualization (memoization fixed; virtualization still pending).
+- §4.2 Glass `lite` variant + device profiling.
+- §1.4 Raw palette colors inside `fdp-timeline-chart.tsx` and `import-review-modal-v2.tsx` (chart-internal; riskier sweep).
+- §5.1/§5.2 Shared motion-constants module and list enter/exit transitions on roster-family cards.
+
+---
 
 ---
 

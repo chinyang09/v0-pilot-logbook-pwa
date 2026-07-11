@@ -1,5 +1,6 @@
 "use client"
 
+import { formatYMDShort as formatDate } from "@/lib/utils/date"
 import * as React from "react"
 import Link from "next/link"
 import { Plane } from "lucide-react"
@@ -13,15 +14,6 @@ import { cn } from "@/lib/utils"
 interface PeriodFlightsCardProps {
   flights: PeriodFlight[]
   className?: string
-}
-
-function formatDate(iso: string): string {
-  if (!iso) return ""
-  const d = new Date(`${iso}T00:00:00`)
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    month: "short",
-  }).format(d)
 }
 
 function formatRoute(f: PeriodFlight): string {

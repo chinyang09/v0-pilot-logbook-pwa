@@ -33,7 +33,7 @@ import { SwipeableCard } from "@/components/swipeable-card"
 import { usePageActive } from "@/hooks/use-page-active"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassSearchButton } from "@/components/glass-search-button"
-import { GlassContainer } from "@/components/ui/glass-container"
+import { GlassIconButton } from "@/components/ui/glass-icon-button"
 
 // Memoized swipeable aircraft card (matches crew card pattern)
 interface AircraftCardProps {
@@ -610,11 +610,9 @@ export default function AircraftPage() {
         onChange={setSearchQuery}
         placeholder="Search aircraft..."
       />
-      <GlassContainer cornerRadius={28}>
-        <Button variant="ghost" size="icon" onClick={handleAddClick} className="h-14 w-14">
-          <Plus className="h-5 w-5" />
-        </Button>
-      </GlassContainer>
+      <GlassIconButton ariaLabel="Add aircraft" onClick={handleAddClick}>
+        <Plus className="h-5 w-5" />
+      </GlassIconButton>
     </>
   ), [handleAddClick, searchQuery, desktopSearchOpen])
 

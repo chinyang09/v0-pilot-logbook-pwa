@@ -54,7 +54,7 @@ export interface SwipeAction {
    * dialog.
    */
   holdToConfirm?: boolean
-  /** Hold duration in ms (default 700). */
+  /** Hold duration in ms (default 2500). */
   holdDuration?: number
 }
 

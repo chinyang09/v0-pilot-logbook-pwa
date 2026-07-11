@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, Suspense, lazy, Component, type ReactNode, type ErrorInfo } from "react"
 import { usePathname } from "next/navigation"
 import { ActiveRouteProvider } from "@/hooks/use-page-active"
+import { PageLoading } from "@/components/ui/page-loading"
 
 /**
  * Error boundary for lazy-loaded persistent pages.
@@ -136,7 +137,9 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
               }}
             >
               <PageErrorBoundary>
-                <Suspense fallback={null}>
+                {/* Shared spinner instead of a blank pane while the lazy chunk
+                    loads on the first visit to this tab. */}
+                <Suspense fallback={<PageLoading />}>
                   <PageComponent />
                 </Suspense>
               </PageErrorBoundary>

@@ -308,7 +308,7 @@ export function AircraftNewForm({
             <div className="px-4 py-2.5 row-divider">
               <div className="flex items-center justify-between">
                 <div className="text-xs">
-                  <span className="text-amber-500 font-medium flex items-center gap-1">
+                  <span className="text-status-warning font-medium flex items-center gap-1">
                     <AlertCircle className="h-3 w-3" />
                     Already exists:
                   </span>

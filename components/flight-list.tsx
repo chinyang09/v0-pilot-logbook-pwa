@@ -13,9 +13,10 @@ import {
   memo,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { FlightLog, Aircraft, Airport, Personnel } from "@/lib/db";
+import type { FlightLog } from "@/lib/db";
 import { deleteFlight } from "@/lib/db";
 import { formatHHMMDisplay } from "@/lib/utils/time";
+import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date";
 import { getDepartureDisplay, getArrivalDisplay } from "@/lib/utils/airport-display";
 import { usePreferences } from "@/components/providers/preferences-provider";
 import type { DisplayPreferences } from "@/types/db/stores.types";
@@ -23,7 +24,7 @@ import { syncService } from "@/lib/sync";
 import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Plane,
@@ -47,14 +48,9 @@ interface FlightListProps {
   isLoading?: boolean;
   onEdit?: (flight: FlightLog) => void;
   onDeleted?: () => void;
-  aircraft?: Aircraft[];
-  airports?: Airport[];
-  personnel?: Personnel[];
   onTopFlightChange?: (flight: FlightLog | null) => void;
   onScrollStart?: () => void;
   onScroll?: (e: React.UIEvent<HTMLElement>) => void;
-  showMonthHeaders?: boolean;
-  hideFilters?: boolean;
   topSpacerHeight?: number; // Height of the calendar
   headerContent?: React.ReactNode; // Height of the top bar (48px)
   selectedFlightId?: string | null; // Currently selected flight for visual highlighting
@@ -76,33 +72,6 @@ const MONTHS = [
   "DEC",
 ];
 
-function parseDateLocal(dateStr: string): Date {
-  if (!dateStr || typeof dateStr !== "string") {
-    return new Date(); // Return current date as fallback
-  }
-
-  const parts = dateStr.split("-");
-  if (parts.length !== 3) {
-    return new Date();
-  }
-
-  let year = Number(parts[0]);
-  const month = Number(parts[1]);
-  const day = Number(parts[2]);
-
-  // Handle 2-digit year (YY format) - assume 2000s
-  if (year < 100) {
-    year = 2000 + year;
-  }
-
-  // Validate parsed values
-  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) {
-    return new Date();
-  }
-
-  return new Date(year, month - 1, day);
-}
-
 function timeToMinutes(hhmm: string): number {
   const parts = hhmm.split(":").map(Number);
   return (parts[0] || 0) * 60 + (parts[1] || 0);
@@ -116,12 +85,14 @@ function formatScheduledDuration(scheduledOut: string, scheduledIn: string): str
   return `${h}:${m.toString().padStart(2, "0")}`;
 }
 
+// Callbacks receive the flight so the parent can pass stable (useCallback)
+// handlers — inline `() => …` closures would give every card new props each
+// render and defeat the memo below.
 interface SwipeableFlightCardProps {
   flight: FlightLog;
-  onEdit: () => void;
-  onDelete: () => void;
-  onToggleLock: () => void;
-  personnel?: Personnel[];
+  onEdit: (flight: FlightLog) => void;
+  onDelete: (flight: FlightLog) => void;
+  onToggleLock: (flight: FlightLog) => void;
   isSelected?: boolean;
   displayPrefs?: DisplayPreferences;
 }
@@ -131,7 +102,6 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   onEdit,
   onDelete,
   onToggleLock,
-  personnel = [],
   isSelected = false,
   displayPrefs,
 }: SwipeableFlightCardProps) {
@@ -192,16 +162,16 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
 
   return (
     <SwipeableCard
-      onClick={() => !isLocked && onEdit()}
+      onClick={() => !isLocked && onEdit(flight)}
       actions={[
         {
           icon: isLocked ? <Unlock className="h-5 w-5" /> : <Lock className="h-5 w-5" />,
-          onClick: onToggleLock,
+          onClick: () => onToggleLock(flight),
           variant: "secondary",
         },
         {
           icon: <Trash2 className="h-5 w-5" />,
-          onClick: onDelete,
+          onClick: () => onDelete(flight),
           variant: "destructive",
           holdToConfirm: true,
           disabled: isLocked,
@@ -353,14 +323,9 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       isLoading,
       onEdit,
       onDeleted,
-      aircraft = [],
-      airports = [],
-      personnel = [],
       onTopFlightChange,
       onScrollStart,
       onScroll,
-      showMonthHeaders = false,
-      hideFilters = false,
       topSpacerHeight = 0,
       headerContent,
       selectedFlightId,
@@ -534,7 +499,12 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       };
     }, [handleScroll, onScroll]);
 
-    const performDelete = async (flight: FlightLog) => {
+    const handleEdit = useCallback(
+      (flight: FlightLog) => onEdit?.(flight),
+      [onEdit]
+    );
+
+    const performDelete = useCallback(async (flight: FlightLog) => {
       // Measure the card's current rendered height from the outer wrapper div.
       // This height is used to shift cards below upward by the exact right amount.
       const outerEl = document.getElementById(`flight-${flight.id}`);
@@ -565,9 +535,9 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       await deleteFlight(flight.id);
       if (navigator.onLine) syncService.fullSync();
       onDeleted?.();
-    };
+    }, [onDeleted]);
 
-    const handleToggleLock = async (flight: FlightLog) => {
+    const handleToggleLock = useCallback(async (flight: FlightLog) => {
       const { updateFlight } = await import("@/lib/db");
       // Optimistic: flip lock state in SWR cache immediately.
       mutate(
@@ -578,7 +548,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       );
       await updateFlight(flight.id, { isLocked: !flight.isLocked });
       onDeleted?.();
-    };
+    }, [onDeleted]);
 
     // FastScroll selection handler (year-based) with instant scrolling
     const handleFastScrollSelect = useCallback(
@@ -659,14 +629,12 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
               className="transition-[height] duration-300 ease-in-out"
             />
             {headerContent}
-            <div className="text-center py-12">
-              <Plane className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-              <h3 className="text-lg font-medium text-foreground">
-                No flights logged
-              </h3>
-              <p className="text-muted-foreground mt-1">
-                Add your first flight to get started
-              </p>
+            <div className="px-2 pt-2">
+              <EmptyState
+                icon={Plane}
+                title="No flights logged"
+                description="Add your first flight to get started"
+              />
             </div>
           </div>
         </>
@@ -751,10 +719,9 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                         >
                           <SwipeableFlightCard
                             flight={flight}
-                            onEdit={() => onEdit?.(flight)}
-                            onDelete={() => performDelete(flight)}
-                            onToggleLock={() => handleToggleLock(flight)}
-                            personnel={personnel}
+                            onEdit={handleEdit}
+                            onDelete={performDelete}
+                            onToggleLock={handleToggleLock}
                             isSelected={selectedFlightId === flight.id}
                             displayPrefs={preferences.display}
                           />

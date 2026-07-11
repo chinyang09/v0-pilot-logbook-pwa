@@ -28,7 +28,7 @@ import { CrewDetailPanel } from "@/components/crew-detail-panel";
 import { usePageActive } from "@/hooks/use-page-active";
 import { useRegisterMainActions } from "@/hooks/use-page-actions";
 import { GlassSearchButton } from "@/components/glass-search-button";
-import { GlassContainer } from "@/components/ui/glass-container";
+import { GlassIconButton } from "@/components/ui/glass-icon-button";
 
 // Memoized crew card to prevent unnecessary re-renders during virtualization
 const SwipeableCrewCard = memo(function SwipeableCrewCard({
@@ -459,11 +459,9 @@ export default function CrewPage() {
         onChange={setSearchQuery}
         placeholder="Search crew..."
       />
-      <GlassContainer cornerRadius={28}>
-        <Button variant="ghost" size="icon" onClick={handleAddCrew} className="h-14 w-14">
-          <Plus className="h-5 w-5" />
-        </Button>
-      </GlassContainer>
+      <GlassIconButton ariaLabel="Add crew member" onClick={handleAddCrew}>
+        <Plus className="h-5 w-5" />
+      </GlassIconButton>
     </>
   ), [handleAddCrew, searchQuery, desktopSearchOpen]);
 

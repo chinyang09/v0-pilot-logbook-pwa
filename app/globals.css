@@ -47,6 +47,14 @@
   --status-synced: oklch(0.50 0.18 145);
   --status-pending: oklch(0.55 0.15 85);
   --status-offline: oklch(0.45 0.15 25);
+
+  /* Semantic status palette — use these (never raw green-500/yellow-500/red-500,
+     which aren't contrast-tuned for the light theme) */
+  --status-valid: oklch(0.50 0.18 145);
+  --status-warning: oklch(0.55 0.15 85);
+  --status-critical: oklch(0.58 0.16 60);
+  --status-error: oklch(0.55 0.2 25);
+  --status-info: oklch(0.50 0.12 250);
 }
 
 /* Dark theme — warm Claude-inspired palette */
@@ -86,6 +94,13 @@
   --status-synced: oklch(0.65 0.18 145);
   --status-pending: oklch(0.70 0.15 85);
   --status-offline: oklch(0.60 0.15 25);
+
+  /* Semantic status palette (dark-tuned counterparts) */
+  --status-valid: oklch(0.65 0.18 145);
+  --status-warning: oklch(0.70 0.15 85);
+  --status-critical: oklch(0.70 0.15 60);
+  --status-error: oklch(0.62 0.19 25);
+  --status-info: oklch(0.65 0.12 250);
 }
 
 @theme inline {
@@ -130,6 +145,13 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  /* Semantic status colors as Tailwind utilities: text-status-valid,
+     bg-status-error/10, border-status-warning/20, … */
+  --color-status-valid: var(--status-valid);
+  --color-status-warning: var(--status-warning);
+  --color-status-critical: var(--status-critical);
+  --color-status-error: var(--status-error);
+  --color-status-info: var(--status-info);
 }
 
 @layer base {
@@ -317,7 +339,7 @@ textarea:focus-within {
 }
 
 /* Login TOTP border feedback animations.
-   Loading uses the framer-motion <BorderGlow/> component, not CSS. */
+   Loading uses the framer-motion <BorderGlide/> component, not CSS. */
 @keyframes totp-border-shake {
   0%, 100% { transform: translateX(0); }
   20%, 60% { transform: translateX(-4px); }

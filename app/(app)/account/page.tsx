@@ -654,7 +654,7 @@ export default function AccountPage() {
 
                     {callsignError && <p className="text-sm text-destructive">{callsignError}</p>}
                     {callsignSuccess && (
-                      <p className="text-sm text-green-600 dark:text-green-400">{callsignSuccess}</p>
+                      <p className="text-sm text-status-valid">{callsignSuccess}</p>
                     )}
                   </div>
                 </motion.div>
@@ -671,7 +671,7 @@ export default function AccountPage() {
               >
                 <span className="text-sm truncate">{profile?.userId || user?.userId}</span>
                 {copiedKey === "userId" ? (
-                  <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
+                  <Check className="h-3.5 w-3.5 shrink-0 text-status-valid" />
                 ) : (
                   <Copy className="h-3.5 w-3.5 shrink-0" />
                 )}
@@ -741,7 +741,7 @@ export default function AccountPage() {
                     >
                       {totpReveal.secret}
                       {copiedKey === "totpSecret" ? (
-                        <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
+                        <Check className="h-3.5 w-3.5 shrink-0 text-status-valid" />
                       ) : (
                         <Copy className="h-3.5 w-3.5 shrink-0" />
                       )}
@@ -818,7 +818,7 @@ export default function AccountPage() {
                   one. Otherwise confirm the device is already secured. */}
               {thisDeviceHasPasskey ? (
                 <p className="text-sm text-muted-foreground flex items-center gap-1.5">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-status-valid" />
                   This device already has a passkey.
                 </p>
               ) : (

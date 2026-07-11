@@ -3,6 +3,7 @@
  * Displays detailed information for a schedule entry
  */
 
+import { memo } from "react"
 import type { ScheduleEntry, DutyType } from "@/types/entities/roster.types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -47,7 +48,10 @@ interface DutyEntryCardProps {
   compact?: boolean
 }
 
-export function DutyEntryCard({ entry, onClick, compact = false }: DutyEntryCardProps) {
+// Memoized — the roster list renders one of these per duty entry for the whole
+// imported history, so a stable card avoids re-rendering hundreds of rows on
+// every sync-driven data refresh.
+export const DutyEntryCard = memo(function DutyEntryCard({ entry, onClick, compact = false }: DutyEntryCardProps) {
   const Icon = DUTY_TYPE_ICONS[entry.dutyType] || FileText
   const colors = DUTY_TYPE_COLORS[entry.dutyType] || DUTY_TYPE_COLORS.other
 
@@ -238,4 +242,4 @@ export function DutyEntryCard({ entry, onClick, compact = false }: DutyEntryCard
       </CardContent>
     </Card>
   )
-}
+})
