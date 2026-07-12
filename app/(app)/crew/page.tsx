@@ -24,6 +24,7 @@ import { CACHE_KEYS } from "@/hooks/data";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
+import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { CrewDetailPanel } from "@/components/crew-detail-panel";
 import { usePageActive } from "@/hooks/use-page-active";
 import { useRegisterMainActions } from "@/hooks/use-page-actions";
@@ -157,6 +158,7 @@ export default function CrewPage() {
     setSelectedId: setSelectedCrewId,
     setDetailContent,
   } = useDetailPanel();
+  const isDesktop = useIsDesktop();
 
   // FastScroll state
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
@@ -415,6 +417,35 @@ export default function CrewPage() {
   }, [fieldType, flightId, router, setSelectedCrewId]);
 
   const handleAddCrew = useCallback(() => {
+    // Desktop (non-picker): open the create form in the detail panel, matching
+    // the aircraft/airports [+] behavior — not as a main-panel page.
+    if (isDesktop && !fieldType) {
+      setDetailContent(
+        <CrewDetailPanel
+          crewId="new"
+          isNew
+          onUpdated={async (saved) => {
+            await mutate(CACHE_KEYS.personnel);
+            if (saved) setSelectedCrewId(saved.id);
+          }}
+          onCancelNew={() => {
+            if (selectedCrew) {
+              setDetailContent(
+                <CrewDetailPanel
+                  crewId={selectedCrew.id}
+                  onUpdated={() => mutate(CACHE_KEYS.personnel)}
+                  onBack={() => setSelectedCrewId(null)}
+                />
+              );
+            } else {
+              setDetailContent(null);
+            }
+          }}
+        />
+      );
+      return;
+    }
+
     const params = new URLSearchParams();
     if (fieldType) {
       params.set("field", fieldType);
@@ -423,7 +454,7 @@ export default function CrewPage() {
     }
     const query = params.toString();
     router.push(query ? `/crew/new?${query}` : "/crew/new");
-  }, [fieldType, returnUrl, flightId, router]);
+  }, [isDesktop, fieldType, returnUrl, flightId, router, setDetailContent, setSelectedCrewId, selectedCrew]);
 
   const handleToggleFavorite = useCallback(async (crewId: string) => {
     const crew = personnel.find((p) => p.id === crewId);
