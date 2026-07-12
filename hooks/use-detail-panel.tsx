@@ -13,6 +13,15 @@ interface DetailPanelContextType {
   selectedId: string | null
   // Set the selected item (updates URL)
   setSelectedId: (id: string | null) => void
+  /**
+   * True when the current route's selection was set explicitly this session
+   * (user tapped an item / created one) rather than restored from
+   * sessionStorage. The mobile overlay opens for explicit selections
+   * immediately from state — it must NOT wait for the router.replace URL
+   * round-trip, which can be slow or dropped on a phone (offline PWA, service
+   * worker, backgrounding) while desktop renders straight from state.
+   */
+  selectionExplicit: boolean
   // Whether this is a page that supports detail panel
   hasDetailSupport: boolean
   // Register that current page supports detail panel
@@ -94,6 +103,11 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
   // Effective selectedId: derived during render from the current route's slot.
   const selectedId = selections[currentBase] ?? null
 
+  // Which base routes had a selection set explicitly (via setSelectedId) this
+  // session — memory-only, so restored selections never count as explicit.
+  const [explicitBases, setExplicitBases] = useState<Record<string, boolean>>({})
+  const selectionExplicit = !!explicitBases[currentBase] && selectedId !== null
+
   // Sync the current route's selection with external URL changes (back/forward,
   // deep links). Only acts when ?selected= is present — when it's absent we must
   // NOT clobber a sessionStorage-restored selection to null, otherwise the mobile
@@ -110,6 +124,9 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
 
   const setSelectedId = useCallback((id: string | null) => {
     setSelections(prev => ({ ...prev, [currentBase]: id }))
+    setExplicitBases(prev =>
+      prev[currentBase] === !!id ? prev : { ...prev, [currentBase]: !!id }
+    )
 
     // Update URL
     const params = new URLSearchParams(searchParams.toString())
@@ -159,6 +176,7 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
         setDetailContent,
         selectedId,
         setSelectedId,
+        selectionExplicit,
         hasDetailSupport,
         setHasDetailSupport,
         pinDetailContent,
@@ -175,6 +193,7 @@ const defaultValue: DetailPanelContextType = {
   setDetailContent: () => {},
   selectedId: null,
   setSelectedId: () => {},
+  selectionExplicit: false,
   hasDetailSupport: false,
   setHasDetailSupport: () => {},
   pinDetailContent: () => {},

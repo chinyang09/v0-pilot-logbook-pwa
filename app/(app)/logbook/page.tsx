@@ -362,6 +362,9 @@ export default function LogbookPage() {
   // changes only re-render the text node — the glass DOM stays untouched.
   const selectedDateRef = useRef(selectedDate)
   selectedDateRef.current = selectedDate
+  // Re-entrancy guard: a second tap on [+] before the first create finishes
+  // must not create a second blank flight.
+  const creatingFlightRef = useRef(false)
   const logbookActions = useMemo(() => (
     <>
       <GlassButtonGroup>
@@ -401,13 +404,19 @@ export default function LogbookPage() {
       <GlassIconButton
         ariaLabel="Add flight"
         onClick={async () => {
-          const newFlight = await createFlight(selectedDateRef.current || undefined)
-          mutate(
-            CACHE_KEYS.flights,
-            (prev: FlightLog[] | undefined) => [newFlight, ...(prev ?? [])],
-            { revalidate: false }
-          )
-          setSelectedFlightId(newFlight.id)
+          if (creatingFlightRef.current) return
+          creatingFlightRef.current = true
+          try {
+            const newFlight = await createFlight(selectedDateRef.current || undefined)
+            mutate(
+              CACHE_KEYS.flights,
+              (prev: FlightLog[] | undefined) => [newFlight, ...(prev ?? [])],
+              { revalidate: false }
+            )
+            setSelectedFlightId(newFlight.id)
+          } finally {
+            creatingFlightRef.current = false
+          }
         }}
       >
         <Plus className="h-5 w-5" />

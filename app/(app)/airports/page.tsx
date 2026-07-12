@@ -28,7 +28,7 @@ import { AirportNewForm } from "@/components/airport-new-form";
 import { useDebounce } from "@/hooks/use-debounce";
 import { usePageActive } from "@/hooks/use-page-active";
 import { useRegisterMainActions } from "@/hooks/use-page-actions";
-import { GlassSearchButton } from "@/components/glass-search-button";
+import { GlassSearchButton } from "@/components/ui/glass-search-button";
 import { GlassIconButton } from "@/components/ui/glass-icon-button";
 
 // Memoized airport card to prevent unnecessary re-renders during virtualization

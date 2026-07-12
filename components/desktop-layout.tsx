@@ -15,8 +15,7 @@ import {
 import { FlightForm } from "@/components/flight-form"
 import { useRef, useCallback, useEffect, useState } from "react"
 import { ChevronLeft } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { GlassContainer } from "@/components/ui/glass-container"
+import { GlassIconButton } from "@/components/ui/glass-icon-button"
 import { cn } from "@/lib/utils"
 import { NavPill } from "@/components/nav-pill"
 import { PushSidebar } from "@/components/push-sidebar"
@@ -111,7 +110,7 @@ function DetailPanelContent() {
  */
 function AppShellContent({ children }: AppShellProps) {
   const { handleScroll } = useScrollNavbarContext()
-  const { selectedId, setSelectedId } = useDetailPanel()
+  const { selectedId, setSelectedId, selectionExplicit } = useDetailPanel()
   const isDesktop = useIsDesktop()
   const canPushSidebar = useCanPushSidebar()
   const { isOpen: sidebarOpen } = useSidebar()
@@ -239,10 +238,16 @@ function AppShellContent({ children }: AppShellProps) {
   const scrollDetailToTop = useCallback(() => smoothScrollToTop(detailPanelRef), [smoothScrollToTop])
   const scrollMobileDetailToTop = useCallback(() => smoothScrollToTop(overlayPanelRef), [smoothScrollToTop])
 
-  // Only show mobile overlay when the selection is explicit (in URL via ?selected=).
-  // SessionStorage-restored selections set state but don't update the URL,
-  // so this prevents the overlay from auto-showing on page navigation.
-  const showMobileOverlay = !isDesktop && !!selectedId && searchParams.has("selected")
+  // Show the mobile overlay when the selection is explicit. Two signals:
+  // - `selectionExplicit` (state): the user tapped/created something THIS
+  //   session — open immediately, without waiting for the router.replace URL
+  //   round-trip (which can be slow/dropped on a phone while desktop renders
+  //   from state — that asymmetry made the logbook [+] look dead on mobile).
+  // - `?selected=` in the URL: deep links / reloads.
+  // SessionStorage-restored selections set neither, so navigating back to a
+  // page still doesn't auto-open the overlay.
+  const showMobileOverlay =
+    !isDesktop && !!selectedId && (selectionExplicit || searchParams.has("selected"))
 
   return (
     <div className="relative h-[100dvh] w-full flex flex-col bg-background overflow-hidden">
@@ -352,23 +357,18 @@ function AppShellContent({ children }: AppShellProps) {
           >
             <div className="flex items-center justify-between px-4 w-full pointer-events-auto h-16">
               {/* Back button — flush left */}
-              <GlassContainer cornerRadius={28}>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Back"
-                  className="h-14 w-14"
-                  onClick={() => {
+              <GlassIconButton
+                ariaLabel="Back"
+                onClick={() => {
                     // Remove ?selected= from URL to dismiss overlay
                     const url = new URL(window.location.href)
                     url.searchParams.delete("selected")
                     window.history.replaceState({}, "", url.toString())
                     setSelectedId(null)
-                  }}
-                >
+                }}
+              >
                   <ChevronLeft className="h-5 w-5" />
-                </Button>
-              </GlassContainer>
+              </GlassIconButton>
               {/* Fall-through zone — tapping its bare area scrolls the detail overlay to top */}
               <div
                 className="flex-1 h-full cursor-pointer"

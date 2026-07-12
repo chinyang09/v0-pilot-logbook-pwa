@@ -560,15 +560,6 @@ textarea:focus-within {
   margin: calc(var(--emboss-width) + var(--refraction-width));
 }
 
-/* Lite glass — a single full-coverage blur layer for small controls (header
-   buttons) where the 9-layer material isn't perceptible but its GPU cost is.
-   Rendered instead of the layer stack when <GlassContainer lite/>. The
-   gradient edge ring (.GlassMaterial::before) and .Highlight still apply. */
-.GlassMaterial .GlassBlurLite {
-  backdrop-filter: blur(var(--total-strength)) brightness(1.15) saturate(1.15);
-  border-radius: var(--corner-radius);
-}
-
 .GlassMaterial .BlendLayers {
   z-index: 3;
   backdrop-filter: blur(calc((var(--softness) * 0.2) + (var(--extra-blur) * 0.2)));

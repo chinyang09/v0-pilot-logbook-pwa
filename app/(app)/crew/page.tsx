@@ -27,7 +27,7 @@ import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { CrewDetailPanel } from "@/components/crew-detail-panel";
 import { usePageActive } from "@/hooks/use-page-active";
 import { useRegisterMainActions } from "@/hooks/use-page-actions";
-import { GlassSearchButton } from "@/components/glass-search-button";
+import { GlassSearchButton } from "@/components/ui/glass-search-button";
 import { GlassIconButton } from "@/components/ui/glass-icon-button";
 
 // Memoized crew card to prevent unnecessary re-renders during virtualization

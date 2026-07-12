@@ -32,7 +32,7 @@ import { submitAircraftToServer } from "@/lib/submissions/submit"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { usePageActive } from "@/hooks/use-page-active"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
-import { GlassSearchButton } from "@/components/glass-search-button"
+import { GlassSearchButton } from "@/components/ui/glass-search-button"
 import { GlassIconButton } from "@/components/ui/glass-icon-button"
 
 // Memoized swipeable aircraft card (matches crew card pattern)

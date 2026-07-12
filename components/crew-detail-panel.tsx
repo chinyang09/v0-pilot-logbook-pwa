@@ -2,7 +2,7 @@
 
 import { useMemo, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { GlassContainer } from "@/components/ui/glass-container"
+import { GlassTextButton } from "@/components/ui/glass-icon-button"
 import { useRegisterDetailActions } from "@/hooks/use-page-actions"
 import { useCrewForm } from "@/hooks/use-crew-form"
 import { CrewFormBody } from "@/components/crew-form-body"
@@ -32,32 +32,21 @@ export function CrewDetailPanel({ crewId, onUpdated }: CrewDetailPanelProps) {
   const detailActions = useMemo(() => {
     return isEditing ? (
       <>
-        <GlassContainer cornerRadius={28}>
-          <Button variant="ghost" className="h-14 px-4" onClick={() => cancelRef.current()}>
-            Cancel
-          </Button>
-        </GlassContainer>
-        <GlassContainer cornerRadius={28}>
-          <Button
-            variant="ghost"
-            className="h-14 px-4 text-primary font-semibold"
-            disabled={!formData.name.trim() || isSaving}
-            onClick={() => saveRef.current()}
-          >
-            {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Save"}
-          </Button>
-        </GlassContainer>
+        <GlassTextButton onClick={() => cancelRef.current()}>
+          Cancel
+        </GlassTextButton>
+        <GlassTextButton
+          primary
+          disabled={!formData.name.trim() || isSaving}
+          onClick={() => saveRef.current()}
+        >
+          {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Save"}
+        </GlassTextButton>
       </>
     ) : (
-      <GlassContainer cornerRadius={28}>
-        <Button
-          variant="ghost"
-          className="h-14 px-4 text-primary font-semibold"
-          onClick={() => setIsEditing(true)}
-        >
-          Edit
-        </Button>
-      </GlassContainer>
+      <GlassTextButton primary onClick={() => setIsEditing(true)}>
+        Edit
+      </GlassTextButton>
     )
   }, [isEditing, isSaving, formData.name, setIsEditing])
 

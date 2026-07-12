@@ -457,8 +457,10 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
 
       <Button
         variant="ghost"
-        size="icon-sm"
+        size="icon"
         disabled={busy}
+        aria-label="Import files"
+        className="h-12 w-12 rounded-full"
         onClick={() => fileInputRef.current?.click()}
       >
         {busy ? (
