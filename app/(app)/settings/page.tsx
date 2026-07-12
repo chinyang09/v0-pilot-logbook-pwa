@@ -5,20 +5,18 @@ import { useCallback, useEffect, useMemo } from "react"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
+import { FormSection } from "@/components/ui/form-section"
+import { SettingsRow, ToggleRow, SelectRow } from "@/components/ui/settings-row"
+import { PageLoading } from "@/components/ui/page-loading"
 import { SortableNavList } from "@/components/sortable-nav-list"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import {
-  Monitor, Clock, Plane, Loader2, Sun, Moon, Laptop,
+  Monitor, Clock, Plane, Sun, Moon, Laptop,
   LayoutDashboard, Book, Calendar, Users, MapPin, Award,
-  Settings, UserCircle, Navigation, ChevronRight, ChevronLeft,
+  Settings, UserCircle, Navigation, ChevronRight,
   Upload,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 import type { DisplayPreferences, AutoFillPreferences, ThemePreference, BottomNavTab } from "@/types/db/stores.types"
@@ -107,7 +105,8 @@ function AppearanceSection({ preferences, updateDisplay }: {
         <h2 className="text-lg font-semibold">Appearance</h2>
         <p className="text-sm text-muted-foreground">Choose your preferred theme.</p>
       </div>
-      <div className="grid grid-cols-3 gap-2">
+      <FormSection>
+        <div className="grid grid-cols-3 gap-2 p-3">
         {([
           { value: "light" as ThemePreference, label: "Light", icon: Sun },
           { value: "dark" as ThemePreference, label: "Dark", icon: Moon },
@@ -131,7 +130,8 @@ function AppearanceSection({ preferences, updateDisplay }: {
             <span className="text-sm font-medium">{label}</span>
           </button>
         ))}
-      </div>
+        </div>
+      </FormSection>
     </div>
   )
 }
@@ -146,11 +146,15 @@ function NavigationSection({ preferences, updateNavigation }: {
         <h2 className="text-lg font-semibold">Navigation</h2>
         <p className="text-sm text-muted-foreground">Choose up to 4 tabs for the bottom tab bar (mobile) and the navigation pill (desktop).</p>
       </div>
-      <SortableNavList
-        tabs={ALL_NAV_TABS}
-        selectedTabs={preferences.navigation.bottomNavTabs}
-        onUpdate={updateNavigation}
-      />
+      <FormSection>
+        <div className="p-3">
+          <SortableNavList
+            tabs={ALL_NAV_TABS}
+            selectedTabs={preferences.navigation.bottomNavTabs}
+            onUpdate={updateNavigation}
+          />
+        </div>
+      </FormSection>
     </div>
   )
 }
@@ -160,81 +164,52 @@ function DisplaySection({ preferences, updateDisplay }: {
   updateDisplay: ReturnType<typeof usePreferences>["updateDisplay"]
 }) {
   return (
-    <div className="p-4 space-y-5">
+    <div className="p-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Display Options</h2>
         <p className="text-sm text-muted-foreground">Configure how times, airports, and coordinates are displayed.</p>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <Label>Time Format</Label>
-          <p className="text-xs text-muted-foreground">How duration and block times are shown</p>
-        </div>
-        <Select
+      <FormSection>
+        <SelectRow<DisplayPreferences["timeFormat"]>
+          label="Time Format"
+          description="How duration and block times are shown"
           value={preferences.display.timeFormat}
-          onValueChange={(value: DisplayPreferences["timeFormat"]) => updateDisplay({ timeFormat: value })}
-        >
-          <SelectTrigger className="w-[160px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="24h">24h (2:30)</SelectItem>
-            <SelectItem value="24h-padded">24h (02:30)</SelectItem>
-            <SelectItem value="12h">12h (2:30 PM)</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <Label>Use Zulu Time (UTC)</Label>
-          <p className="text-xs text-muted-foreground">Display all times in UTC</p>
-        </div>
-        <Switch
+          onValueChange={(value) => updateDisplay({ timeFormat: value })}
+          options={[
+            { value: "24h", label: "24h (2:30)" },
+            { value: "24h-padded", label: "24h (02:30)" },
+            { value: "12h", label: "12h (2:30 PM)" },
+          ]}
+        />
+        <ToggleRow
+          label="Use Zulu Time (UTC)"
+          description="Display all times in UTC"
           checked={preferences.display.useZuluTime}
           onCheckedChange={(checked) => updateDisplay({ useZuluTime: checked })}
         />
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <Label>Airport Identifier</Label>
-          <p className="text-xs text-muted-foreground">Preferred airport code display</p>
-        </div>
-        <Select
+        <SelectRow<DisplayPreferences["airportIdentifier"]>
+          label="Airport Identifier"
+          description="Preferred airport code display"
           value={preferences.display.airportIdentifier}
-          onValueChange={(value: DisplayPreferences["airportIdentifier"]) => updateDisplay({ airportIdentifier: value })}
-        >
-          <SelectTrigger className="w-[160px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="icao">ICAO (WSSS)</SelectItem>
-            <SelectItem value="iata">IATA (SIN)</SelectItem>
-            <SelectItem value="both">Both (WSSS/SIN)</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <Label>Coordinate Format</Label>
-          <p className="text-xs text-muted-foreground">How lat/lon coordinates are displayed</p>
-        </div>
-        <Select
+          onValueChange={(value) => updateDisplay({ airportIdentifier: value })}
+          options={[
+            { value: "icao", label: "ICAO (WSSS)" },
+            { value: "iata", label: "IATA (SIN)" },
+            { value: "both", label: "Both (WSSS/SIN)" },
+          ]}
+        />
+        <SelectRow<DisplayPreferences["coordinateFormat"]>
+          label="Coordinate Format"
+          description="How lat/lon coordinates are displayed"
           value={preferences.display.coordinateFormat}
-          onValueChange={(value: DisplayPreferences["coordinateFormat"]) => updateDisplay({ coordinateFormat: value })}
-        >
-          <SelectTrigger className="w-[160px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="decimal">Decimal (1.3521)</SelectItem>
-            <SelectItem value="dms">DMS (1°21&apos;8&quot;N)</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+          onValueChange={(value) => updateDisplay({ coordinateFormat: value })}
+          options={[
+            { value: "decimal", label: "Decimal (1.3521)" },
+            { value: "dms", label: "DMS (1°21'8\"N)" },
+          ]}
+        />
+      </FormSection>
     </div>
   )
 }
@@ -252,20 +227,17 @@ function AutoFillSection({ preferences, updateAutoFill }: {
           Manually entered values are never overwritten.
         </p>
       </div>
-      <div className="space-y-4">
+      <FormSection>
         {AUTO_FILL_FIELDS.map((field) => (
-          <div key={field.key} className="flex items-center justify-between">
-            <div className="space-y-0.5 flex-1 mr-4">
-              <Label className="text-sm">{field.label}</Label>
-              <p className="text-xs text-muted-foreground">{field.description}</p>
-            </div>
-            <Switch
-              checked={preferences.autoFill[field.key]}
-              onCheckedChange={(checked) => updateAutoFill({ [field.key]: checked })}
-            />
-          </div>
+          <ToggleRow
+            key={field.key}
+            label={field.label}
+            description={field.description}
+            checked={preferences.autoFill[field.key]}
+            onCheckedChange={(checked) => updateAutoFill({ [field.key]: checked })}
+          />
         ))}
-      </div>
+      </FormSection>
     </div>
   )
 }
@@ -276,71 +248,53 @@ function DutyTimeSection({ preferences, updateDutyTimeDefaults }: {
 }) {
   const regulation = preferences.dutyTimeDefaults.regulationType ?? "CAAS"
   return (
-    <div className="p-4 space-y-5">
+    <div className="p-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Duty Time Defaults</h2>
         <p className="text-sm text-muted-foreground">Default report and debrief times used for duty period calculations.</p>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <Label>Regulation</Label>
-          <p className="text-xs text-muted-foreground">FTL ruleset used for FDP limits &amp; rest</p>
-        </div>
-        <Select
+      <FormSection>
+        <SelectRow<"CAAS" | "FAA" | "EASA">
+          label="Regulation"
+          description="FTL ruleset used for FDP limits & rest"
           value={regulation}
-          onValueChange={(v) => updateDutyTimeDefaults({ regulationType: v as "CAAS" | "FAA" | "EASA" })}
-        >
-          <SelectTrigger className="w-[120px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="CAAS">CAAS</SelectItem>
-            <SelectItem value="FAA">FAA</SelectItem>
-            <SelectItem value="EASA">EASA</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <Label>Minutes Before Scheduled OUT</Label>
-          <p className="text-xs text-muted-foreground">Report time before departure</p>
-        </div>
-        <Input
+          onValueChange={(v) => updateDutyTimeDefaults({ regulationType: v })}
+          options={[
+            { value: "CAAS", label: "CAAS" },
+            { value: "FAA", label: "FAA" },
+            { value: "EASA", label: "EASA" },
+          ]}
+        />
+        <SettingsRow
+          label="Minutes Before Scheduled OUT"
+          description="Report time before departure"
           type="number"
-          min={0}
-          max={240}
-          className="w-[100px]"
-          value={preferences.dutyTimeDefaults.minutesBeforeOut}
-          onChange={(e) => {
-            const val = Number.parseInt(e.target.value, 10)
+          inputMode="numeric"
+          swipeToClear={false}
+          value={String(preferences.dutyTimeDefaults.minutesBeforeOut)}
+          onChange={(v) => {
+            const val = Number.parseInt(v, 10)
             if (!Number.isNaN(val) && val >= 0 && val <= 240) {
               updateDutyTimeDefaults({ minutesBeforeOut: val })
             }
           }}
         />
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <Label>Minutes After IN</Label>
-          <p className="text-xs text-muted-foreground">Debrief time after arrival</p>
-        </div>
-        <Input
+        <SettingsRow
+          label="Minutes After IN"
+          description="Debrief time after arrival"
           type="number"
-          min={0}
-          max={240}
-          className="w-[100px]"
-          value={preferences.dutyTimeDefaults.minutesAfterIn}
-          onChange={(e) => {
-            const val = Number.parseInt(e.target.value, 10)
+          inputMode="numeric"
+          swipeToClear={false}
+          value={String(preferences.dutyTimeDefaults.minutesAfterIn)}
+          onChange={(v) => {
+            const val = Number.parseInt(v, 10)
             if (!Number.isNaN(val) && val >= 0 && val <= 240) {
               updateDutyTimeDefaults({ minutesAfterIn: val })
             }
           }}
         />
-      </div>
+      </FormSection>
     </div>
   )
 }
@@ -351,7 +305,7 @@ function ImportDefaultsSection({ preferences, updateImportDefaults }: {
 }) {
   const role = preferences.importDefaults.nonPicPfRole
   return (
-    <div className="p-4 space-y-5">
+    <div className="p-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Import Defaults</h2>
         <p className="text-sm text-muted-foreground">
@@ -360,30 +314,18 @@ function ImportDefaultsSection({ preferences, updateImportDefaults }: {
         </p>
       </div>
 
-      <div className="flex items-center justify-between gap-4">
-        <div className="space-y-0.5 flex-1">
-          <Label>Role when Pilot Flying but not PIC</Label>
-          <p className="text-xs text-muted-foreground">
-            For imported flights where you logged a takeoff/landing but
-            another pilot was PIC, log your role as PICUS (Pilot In Command
-            Under Supervision) or SIC.
-          </p>
-        </div>
-        <Select
+      <FormSection>
+        <SelectRow<"PICUS" | "SIC">
+          label="Role when Pilot Flying but not PIC"
+          description="For imported flights where you logged a takeoff/landing but another pilot was PIC, log your role as PICUS (Pilot In Command Under Supervision) or SIC."
           value={role}
-          onValueChange={(v) =>
-            updateImportDefaults({ nonPicPfRole: v as "PICUS" | "SIC" })
-          }
-        >
-          <SelectTrigger className="w-[120px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="SIC">SIC</SelectItem>
-            <SelectItem value="PICUS">PICUS</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+          onValueChange={(v) => updateImportDefaults({ nonPicPfRole: v })}
+          options={[
+            { value: "SIC", label: "SIC" },
+            { value: "PICUS", label: "PICUS" },
+          ]}
+        />
+      </FormSection>
     </div>
   )
 }
@@ -454,40 +396,40 @@ export default function SettingsPage() {
   if (isLoading) {
     return (
       <PageContainer>
-        <div className="flex items-center justify-center min-h-[50vh]">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
+        <PageLoading />
       </PageContainer>
     )
   }
 
   return (
     <PageContainer>
-      <div className="pt-1">
-        {SECTIONS.map((section) => {
-          const Icon = section.icon
-          const isActive = selectedId === section.key
-          return (
-            <button
-              key={section.key}
-              type="button"
-              className={cn(
-                "flex items-center w-full px-4 py-3.5 text-left transition-colors border-b border-border/50",
-                isActive
-                  ? "bg-primary/10 text-primary"
-                  : "hover:bg-secondary/50"
-              )}
-              onClick={() => setSelectedId(section.key)}
-            >
-              <Icon className={cn("h-4 w-4 mr-3 flex-shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium">{section.label}</div>
-                <div className="text-xs text-muted-foreground truncate">{section.description}</div>
-              </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0 ml-2" />
-            </button>
-          )
-        })}
+      <div className="px-4 pt-4">
+        <FormSection>
+          {SECTIONS.map((section) => {
+            const Icon = section.icon
+            const isActive = selectedId === section.key
+            return (
+              <button
+                key={section.key}
+                type="button"
+                className={cn(
+                  "flex items-center w-full px-4 py-3.5 text-left transition-colors row-divider",
+                  isActive
+                    ? "bg-primary/10 text-primary"
+                    : "hover:bg-secondary/50 active:bg-secondary/50"
+                )}
+                onClick={() => setSelectedId(section.key)}
+              >
+                <Icon className={cn("h-4 w-4 mr-3 flex-shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium">{section.label}</div>
+                  <div className="text-xs text-muted-foreground truncate">{section.description}</div>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0 ml-2" />
+              </button>
+            )
+          })}
+        </FormSection>
       </div>
     </PageContainer>
   )

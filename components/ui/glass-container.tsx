@@ -3,6 +3,7 @@
 import type React from "react"
 import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
+import { TAP_SPRING } from "@/lib/motion"
 
 interface GlassContainerProps {
   children: React.ReactNode
@@ -16,9 +17,14 @@ interface GlassContainerProps {
   style?: React.CSSProperties
   /** Disable the whileTap scale feedback */
   disableTapFeedback?: boolean
+  /**
+   * Lite material: a single blur layer + edge ring instead of the full 9-layer
+   * stack. Use for small controls (56px header buttons) where the emboss/
+   * refraction layers aren't perceptible but their backdrop-filter GPU cost is.
+   */
+  lite?: boolean
 }
 
-const tapTransition = { type: "spring" as const, stiffness: 400, damping: 25, duration: 0.15 }
 
 export function GlassContainer({
   children,
@@ -29,6 +35,7 @@ export function GlassContainer({
   tintOpacity = 0.3,
   style,
   disableTapFeedback,
+  lite = false,
 }: GlassContainerProps) {
   return (
     <motion.div
@@ -38,7 +45,7 @@ export function GlassContainer({
         ...style,
       } as React.CSSProperties}
       whileTap={disableTapFeedback ? undefined : { scale: 1.015 }}
-      transition={tapTransition}
+      transition={TAP_SPRING}
     >
       <div className={cn("GlassContent", contentClassName)}>
         {tintColor && (
@@ -54,15 +61,24 @@ export function GlassContainer({
         {children}
       </div>
       <div className="GlassMaterial">
-        <div className="GlassEdgeReflection" />
-        <div className="GlassEmbossReflection" />
-        <div className="GlassRefraction" />
-        <div className="GlassBlur" />
-        <div className="BlendLayers" />
-        <div className="BlendEdge" />
-        <div className="Highlight" />
-        <div className="Contrast" />
-        <div className="Brightness" />
+        {lite ? (
+          <>
+            <div className="GlassBlurLite" />
+            <div className="Highlight" />
+          </>
+        ) : (
+          <>
+            <div className="GlassEdgeReflection" />
+            <div className="GlassEmbossReflection" />
+            <div className="GlassRefraction" />
+            <div className="GlassBlur" />
+            <div className="BlendLayers" />
+            <div className="BlendEdge" />
+            <div className="Highlight" />
+            <div className="Contrast" />
+            <div className="Brightness" />
+          </>
+        )}
       </div>
     </motion.div>
   )

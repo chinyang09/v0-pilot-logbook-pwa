@@ -10,6 +10,8 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FilterChips } from "@/components/ui/filter-chips"
 import { RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react"
+import { AnimatePresence, motion } from "framer-motion"
+import { LIST_ITEM_TRANSITION } from "@/lib/motion"
 import { useDiscrepancies } from "@/hooks/data"
 import { DiscrepancyCard, DiscrepancyResolutionDialog } from "@/components/roster"
 import type { Discrepancy, DiscrepancyType } from "@/types/entities/roster.types"
@@ -125,22 +127,33 @@ export default function DiscrepanciesPage() {
           />
         )}
 
-        {/* Discrepancy List */}
+        {/* Discrepancy List — items fade/slide on filter changes and
+            resolve/reopen so the list moves like the logbook. */}
         {sortedDiscrepancies.length > 0 && (
           <div className="space-y-3">
-            {sortedDiscrepancies.map((discrepancy) => (
-              <DiscrepancyCard
-                key={discrepancy.id}
-                discrepancy={discrepancy}
-                onResolve={(d) => setDiscrepancyToResolve(d)}
-                onReopen={async (d) => {
-                  // Import the unresolve function
-                  const { unresolveDiscrepancy } = await import("@/lib/db")
-                  await unresolveDiscrepancy(d.id)
-                  await refresh()
-                }}
-              />
-            ))}
+            <AnimatePresence initial={false} mode="popLayout">
+              {sortedDiscrepancies.map((discrepancy) => (
+                <motion.div
+                  key={discrepancy.id}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  transition={LIST_ITEM_TRANSITION}
+                >
+                  <DiscrepancyCard
+                    discrepancy={discrepancy}
+                    onResolve={(d) => setDiscrepancyToResolve(d)}
+                    onReopen={async (d) => {
+                      // Import the unresolve function
+                      const { unresolveDiscrepancy } = await import("@/lib/db")
+                      await unresolveDiscrepancy(d.id)
+                      await refresh()
+                    }}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         )}
 

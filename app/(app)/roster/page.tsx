@@ -1,13 +1,15 @@
 "use client"
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useLayoutEffect, useRef } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { useSessionState } from "@/hooks/use-session-state"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassButtonGroup, GlassGroupButton } from "@/components/ui/glass-icon-button"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty-state"
+import { FormSection } from "@/components/ui/form-section"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Calendar as CalendarIcon,
@@ -70,22 +72,44 @@ export default function RosterPage() {
 
   const [activeMonthKey, setActiveMonthKey] = useState<string | undefined>(undefined);
 
+  // ─── Virtualized date list ───────────────────────────────────
+  // One virtual row per date group, scrolling inside PageContainer's <main>.
+  // A year of airline roster is 300+ date cards / 600+ duty entries — rendering
+  // them all made Roster the only unvirtualized long list in the app.
+  const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null)
+  const mainRef = useCallback((node: HTMLElement | null) => setScrollEl(node), [])
+
+  const listRef = useRef<HTMLDivElement>(null)
+  const listOffsetRef = useRef(0)
+  // Measured every render (KPI cards above the list change height as data
+  // loads); ref write only, no render loop.
+  useLayoutEffect(() => {
+    listOffsetRef.current = listRef.current?.offsetTop ?? 0
+  })
+
+  const dateVirtualizer = useVirtualizer({
+    count: sortedDates.length,
+    getScrollElement: () => scrollEl,
+    // Rough guess: section header + ~64px per compact entry; measureElement corrects.
+    estimateSize: (i) => 48 + (entriesByDate[sortedDates[i]]?.length ?? 1) * 64,
+    overscan: 4,
+    scrollMargin: listOffsetRef.current,
+    getItemKey: (i) => sortedDates[i],
+  })
+
   const handleFastScrollSelect = useCallback((monthYear: string) => {
     setActiveMonthKey(monthYear);
 
     const [targetYear, targetMonth] = monthYear.split("-");
-    const targetDate = sortedDates.find((date) => {
+    const index = sortedDates.findIndex((date) => {
       const [year, month] = date.split("-");
       return year === targetYear && month === targetMonth;
     });
 
-    if (targetDate) {
-      const element = document.getElementById(`roster-date-${targetDate}`);
-      if (element) {
-        element.scrollIntoView({ behavior: "instant", block: "start" });
-      }
+    if (index !== -1) {
+      dateVirtualizer.scrollToIndex(index, { align: "start", behavior: "auto" });
     }
-  }, [sortedDates]);
+  }, [sortedDates, dateVirtualizer]);
 
   const handleDateClick = (date: string) => {
     setSelectedDate(date)
@@ -140,7 +164,7 @@ export default function RosterPage() {
 
   return (
     <>
-      <PageContainer>
+      <PageContainer mainRef={mainRef}>
         <div className="px-4 pt-4 pb-safe space-y-4">
 
         {/* Stats Cards */}
@@ -261,28 +285,43 @@ export default function RosterPage() {
                 ))}
               </>
             ) : (
-              <>
-                {/* All Dates List — render every date so the FastScroll rail can
-                    reach any month (a 30-item cap left older months as dead taps). */}
-                {sortedDates.map((date) => (
-                  <Card key={date} id={`roster-date-${date}`}>
-                    <CardHeader className="pb-2 pt-3 px-3">
-                      <CardTitle className="text-sm font-medium">
-                        {formatYMD(date, {
+              /* All Dates List — virtualized (one row per date group) so the
+                 whole history stays scrollable without rendering hundreds of
+                 cards. Grouped-section style matches the rest of the app. */
+              <div
+                ref={listRef}
+                className="relative"
+                style={{ height: `${dateVirtualizer.getTotalSize()}px` }}
+              >
+                {dateVirtualizer.getVirtualItems().map((vRow) => {
+                  const date = sortedDates[vRow.index]
+                  return (
+                    <div
+                      key={vRow.key}
+                      data-index={vRow.index}
+                      ref={dateVirtualizer.measureElement}
+                      className="absolute top-0 left-0 w-full pb-3"
+                      style={{
+                        transform: `translateY(${vRow.start - dateVirtualizer.options.scrollMargin}px)`,
+                      }}
+                    >
+                      <FormSection
+                        title={formatYMD(date, {
                           weekday: "short",
                           month: "short",
                           day: "numeric",
                         }, "en-US")}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-3 pb-3 space-y-2">
-                      {entriesByDate[date].map((entry) => (
-                        <DutyEntryCard key={entry.id} entry={entry} compact />
-                      ))}
-                    </CardContent>
-                  </Card>
-                ))}
-              </>
+                      >
+                        <div className="p-3 space-y-2">
+                          {entriesByDate[date].map((entry) => (
+                            <DutyEntryCard key={entry.id} entry={entry} compact />
+                          ))}
+                        </div>
+                      </FormSection>
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </div>
         )}

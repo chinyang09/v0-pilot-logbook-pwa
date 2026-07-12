@@ -19,6 +19,7 @@ import {
   ChevronDown,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { OVERSHOOT_BEZIER, SETTLE_BEZIER, MORPH_EASE } from "@/lib/motion"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { useDesktopPill } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
@@ -107,12 +108,6 @@ const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_MARGIN * 2 // 191
 const PILL_HEIGHT = 56 // h-14
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
-/** The app's single bouncy-overshoot bezier (gravity blob position, pill
- *  scroll re-show) — keep every overshoot on this one curve so all nav motion
- *  shares the same physics. */
-const OVERSHOOT_BEZIER = "cubic-bezier(0.34, 1.5, 0.64, 1)"
-/** Ease-out used where size settles slightly faster than position (stretch). */
-const SETTLE_BEZIER = "cubic-bezier(0.22, 1, 0.36, 1)"
 
 // ─── Sync status icon ────────────────────────────────────────
 
@@ -518,7 +513,6 @@ function useMorphPhase(isOpen: boolean, phaseDuration: number) {
   return { phase, advancePhase, isSidebarShape }
 }
 
-const MORPH_EASE = "cubic-bezier(0.4, 0, 0.2, 1)"
 
 /**
  * Build the per-property CSS `transition` for the morph so the two property

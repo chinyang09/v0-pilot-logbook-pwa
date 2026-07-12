@@ -506,7 +506,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             )}
             {summary && !errorMsg && !progress && (
               <div className="flex items-start gap-2 text-sm">
-                <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0 text-green-500" />
+                <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0 text-status-valid" />
                 <span>{summary}</span>
               </div>
             )}

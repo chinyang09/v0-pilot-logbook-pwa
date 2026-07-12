@@ -29,7 +29,7 @@ export function GlassIconButton({
   children: React.ReactNode
 }) {
   return (
-    <GlassContainer cornerRadius={28}>
+    <GlassContainer cornerRadius={28} lite>
       <Button
         variant="ghost"
         size="icon"
@@ -46,7 +46,7 @@ export function GlassIconButton({
 
 export function GlassButtonGroup({ children }: { children: React.ReactNode }) {
   return (
-    <GlassContainer cornerRadius={28}>
+    <GlassContainer cornerRadius={28} lite>
       <div className="flex items-center gap-1 px-1 h-14">{children}</div>
     </GlassContainer>
   )

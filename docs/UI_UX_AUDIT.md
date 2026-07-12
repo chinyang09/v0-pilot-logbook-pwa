@@ -20,13 +20,16 @@ Scope: UI bugs and errors, dead/duplicated code, performance, motion fluidity, a
 - ✅ §1.1 (partial) + §5.3 `FilterChips` segmented control replaces the "Filter:" dropdowns on currencies/discrepancies; discrepancies KPI axes fixed (Errors/Warnings/Info/Resolved now sum to total); roster quick-access cards got `active:` press feedback.
 - ✅ §5.1 (partial) The two overshoot beziers unified into one `OVERSHOOT_BEZIER` constant.
 
-**Remaining (not yet done):**
+**Round 2 (same branch)** — the previously deferred items, all done. Lint: 0 errors, 53 warnings (still under the original 54 baseline; the +1 is the unavoidable `react-hooks/incompatible-library` on the new roster `useVirtualizer`, same as every other virtualized page):
 
-- §1.1/§1.2 Full restyle of roster/currencies/discrepancies onto `FormSection` groups, and settings/account onto `SettingsRow`/`ToggleRow` (needs design review — big visual change).
-- §4.1 Roster list virtualization (memoization fixed; virtualization still pending).
-- §4.2 Glass `lite` variant + device profiling.
-- §1.4 Raw palette colors inside `fdp-timeline-chart.tsx` and `import-review-modal-v2.tsx` (chart-internal; riskier sweep).
-- §5.1/§5.2 Shared motion-constants module and list enter/exit transitions on roster-family cards.
+- ✅ §1.2 Settings page fully on the shared system: `settings-row.tsx` gained `description` support and a blended-trigger `SelectRow`; every section (display, auto-fill, duty defaults, import defaults, appearance, navigation) now renders `FormSection` groups with `SettingsRow`/`ToggleRow`/`SelectRow`; the section list itself is a grouped card with inset `.row-divider`s; loading uses `PageLoading`.
+- ✅ §1.2 Account page section chrome converted from `Card`+`CardHeader` to `FormSection` (Profile / Passkeys / Active Sessions) — inner flows untouched.
+- ✅ §1.1 Roster date groups render as `FormSection` cards (uppercase date header) instead of `CardHeader`/`CardTitle` chrome.
+- ✅ §4.1 Roster date list virtualized with `@tanstack/react-virtual` (one row per date group, scrolling in `PageContainer`'s main via `scrollMargin`; FastScroll drives `scrollToIndex`).
+- ✅ §4.2 `GlassContainer lite` — 2 backdrop-filter layers instead of 9 (`GlassBlurLite` + `Highlight` + the cheap gradient ring); used by all `GlassIconButton`/`GlassButtonGroup` header controls. Device profiling still worth doing before considering `lite` elsewhere.
+- ✅ §1.4 `fdp-timeline-chart.tsx` status classes (red/orange/yellow/green-500 thresholds) and `import-review-modal-v2.tsx` badges/hints swept to `--status-*` tokens (the light-only `bg-blue-100 text-blue-900` badge is now theme-safe `status-info`). Chart *categorical* hex palette (series colors) intentionally kept.
+- ✅ §5.1 `lib/motion.ts` — SPRING / POP_SPRING / TAP_SPRING / OVERSHOOT_BEZIER / SETTLE_BEZIER / MORPH_EASE / LIST_ITEM_TRANSITION; adopted by `swipeable-card`, `nav-pill`, `glass-container`.
+- ✅ §5.2 Currency and discrepancy lists animate enter/exit/reorder (`AnimatePresence` popLayout + layout) on filter changes and resolve/delete.
 
 ---
 

@@ -16,6 +16,8 @@ import {
   Plus,
   ShieldCheck,
 } from "lucide-react"
+import { AnimatePresence, motion } from "framer-motion"
+import { LIST_ITEM_TRANSITION } from "@/lib/motion"
 import { useCurrencies } from "@/hooks/data"
 import { CurrencyCard, CurrencyFormDialog } from "@/components/roster"
 import type { CurrencyWithStatus, CurrencyStatus } from "@/types/entities/roster.types"
@@ -142,17 +144,28 @@ export default function CurrenciesPage() {
           />
         )}
 
-        {/* Currency List */}
+        {/* Currency List — items fade/slide on filter changes and deletes so
+            the list moves like the logbook instead of hard-cutting. */}
         {sortedCurrencies.length > 0 && (
           <div className="space-y-3">
-            {sortedCurrencies.map((currency) => (
-              <CurrencyCard
-                key={currency.id}
-                currency={currency}
-                onEdit={(c) => setCurrencyToEdit(c)}
-                onDelete={(c) => handleDelete(c)}
-              />
-            ))}
+            <AnimatePresence initial={false} mode="popLayout">
+              {sortedCurrencies.map((currency) => (
+                <motion.div
+                  key={currency.id}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  transition={LIST_ITEM_TRANSITION}
+                >
+                  <CurrencyCard
+                    currency={currency}
+                    onEdit={(c) => setCurrencyToEdit(c)}
+                    onDelete={(c) => handleDelete(c)}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         )}
 
