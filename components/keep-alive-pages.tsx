@@ -66,12 +66,22 @@ const PERSISTENT_PAGES: Record<string, React.LazyExoticComponent<React.Component
 
 /**
  * Normalise pathname → route key.
- * Only exact top-level matches are persistent.
+ *
+ * Only EXACT top-level matches map to a persistent page. Sub-routes
+ * (/aircraft/new, /crew/[id], /airports/[icao], …) must keep their own key —
+ * collapsing them to the first segment made `isPersistent` true, so
+ * KeepAlivePages rendered the kept-alive LIST page and never rendered
+ * `children`: the URL changed but the screen didn't. That silently swallowed
+ * every mobile [+] navigation (router.push("/aircraft/new") etc.) and all
+ * entity-detail deep links.
  */
 function routeKeyFromPathname(pathname: string | null): string {
   if (!pathname) return "/"
-  const segments = pathname.split("?")[0].split("/").filter(Boolean)
-  return segments.length > 0 ? `/${segments[0]}` : "/"
+  const path = pathname.split("?")[0]
+  const segments = path.split("/").filter(Boolean)
+  if (segments.length === 0) return "/"
+  if (segments.length === 1) return `/${segments[0]}`
+  return path
 }
 
 /**
