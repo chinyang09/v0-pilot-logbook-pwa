@@ -23,6 +23,7 @@ import {
   ArrowRight,
 } from "lucide-react"
 import { useScheduleEntries, useCurrencies, useDiscrepancyCounts, refreshAllData } from "@/hooks/data"
+import { usePageActive } from "@/hooks/use-page-active"
 import { cn } from "@/lib/utils"
 import { formatYMD } from "@/lib/utils/date"
 import Link from "next/link"
@@ -160,7 +161,11 @@ export default function RosterPage() {
     </>
   ), [refreshEntries, entriesLoading, viewMode, setViewMode])
 
-  useRegisterMainActions(rosterActions, true)
+  // Keep-alive: only the active tab owns the header actions; re-activation
+  // refreshes the schedule so the retained page stays accurate.
+  const isActive = usePageActive("/roster", refreshEntries)
+
+  useRegisterMainActions(rosterActions, isActive)
 
   return (
     <>

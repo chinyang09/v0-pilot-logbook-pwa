@@ -139,8 +139,12 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname
     router.replace(newUrl || "/", { scroll: false })
 
-    // Persist to sessionStorage (keyed by base route, matching the map)
-    saveSelection(currentBase, id)
+    // Persist to sessionStorage (keyed by base route, matching the map).
+    // Transient sentinel selections ("__new__" — the mobile create overlay)
+    // are session-only UI state and must not be restored on reload.
+    if (!id?.startsWith("__")) {
+      saveSelection(currentBase, id)
+    }
   }, [currentBase, pathname, router, searchParams])
 
   // Reset state when pathname changes (different page)

@@ -135,6 +135,9 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
 });
 
 // --- Main CrewPage Component ---
+/** Transient selection id for the mobile create overlay (never persisted). */
+const NEW_SENTINEL = "__new__";
+
 export default function CrewPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -293,14 +296,19 @@ export default function CrewPage() {
   const virtualItems = rowVirtualizer.getVirtualItems();
 
   // Sync detail panel content — re-runs whenever selection, data, or active state changes
-  // While the create form is open in the detail panel, data-driven re-syncs
-  // must not clobber the user's in-progress entry.
-  const creatingRef = useRef(false);
+  // While the create form is open (detail panel on desktop, ?selected overlay
+  // on mobile), data-driven re-syncs must not clobber the in-progress entry —
+  // but a user changing the selection ends create mode (see aircraft page).
+  const creatingRef = useRef<false | { sel: string | null }>(false);
 
   const syncDetailPanel = useCallback(() => {
     if (!isActive) return;
     if (fieldType) return;
-    if (creatingRef.current) return;
+    if (creatingRef.current) {
+      const sel = selectedCrewId ?? null;
+      if (sel === NEW_SENTINEL || sel === creatingRef.current.sel) return;
+      creatingRef.current = false;
+    }
 
     if (isLoading) {
       setDetailContent(
@@ -331,7 +339,7 @@ export default function CrewPage() {
     } else {
       setDetailContent(null);
     }
-  }, [isActive, fieldType, selectedCrew, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
+  }, [isActive, fieldType, selectedCrewId, selectedCrew, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
 
   // Update detail content when selection, data, or active state changes
   useEffect(() => {
@@ -422,7 +430,7 @@ export default function CrewPage() {
   }, [fieldType, flightId, router, setSelectedCrewId]);
 
   const openCreatePanel = useCallback(() => {
-    creatingRef.current = true;
+    creatingRef.current = { sel: selectedCrewId ?? null };
     setDetailContent(
       <CrewDetailPanel
         crewId="new"
@@ -443,30 +451,30 @@ export default function CrewPage() {
               />
             );
           } else {
+            setSelectedCrewId(null);
             setDetailContent(null);
           }
         }}
       />
     );
-  }, [selectedCrew, setDetailContent, setSelectedCrewId]);
+  }, [selectedCrewId, selectedCrew, setDetailContent, setSelectedCrewId]);
 
   const handleAddCrew = useCallback(() => {
-    // Desktop (non-picker): open the create form in the detail panel, matching
-    // the aircraft/airports [+] behavior — not as a main-panel page.
-    if (isDesktop && !fieldType) {
-      openCreatePanel();
-      return;
-    }
-
-    const params = new URLSearchParams();
     if (fieldType) {
+      // Picker flow (choosing crew for a flight) keeps the full-page route.
+      const params = new URLSearchParams();
       params.set("field", fieldType);
       params.set("return", returnUrl);
       if (flightId) params.set("flightId", flightId);
+      router.push(`/crew/new?${params.toString()}`);
+      return;
     }
-    const query = params.toString();
-    router.push(query ? `/crew/new?${query}` : "/crew/new");
-  }, [isDesktop, fieldType, returnUrl, flightId, router, openCreatePanel]);
+    // Create from state on both viewports — instant, no route mount. Desktop
+    // renders into the detail panel; mobile selects the sentinel so the
+    // ?selected overlay opens with the same form.
+    openCreatePanel();
+    if (!isDesktop) setSelectedCrewId(NEW_SENTINEL);
+  }, [isDesktop, fieldType, returnUrl, flightId, router, openCreatePanel, setSelectedCrewId]);
 
   // Prefetch the standalone create route so the mobile [+] navigation is as
   // snappy as opening a card (no RSC fetch on tap).

@@ -128,6 +128,9 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
   )
 })
 
+/** Transient selection id for the mobile create overlay (never persisted). */
+const NEW_SENTINEL = "__new__"
+
 export default function AircraftPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -368,15 +371,23 @@ export default function AircraftPage() {
   // overwriting the active page's detail content when shared selectedId changes.
   const isActive = usePageActive("/aircraft")
 
-  // While the create form is open in the detail panel, data-driven re-syncs
-  // must not clobber the user's in-progress entry.
-  const creatingRef = useRef(false)
+  // While the create form is open (detail panel on desktop, ?selected overlay
+  // on mobile), data-driven re-syncs must not clobber the in-progress entry —
+  // but a user changing the selection (tapping a card, dismissing the mobile
+  // overlay then picking something) ends create mode. We remember the
+  // selection the create started under: same selection (or the sentinel) →
+  // keep the form; anything else → resume normal syncing.
+  const creatingRef = useRef<false | { sel: string | null }>(false)
 
   // Sync detail panel content — extracted so usePageActive can re-trigger it
   const syncDetailPanel = useCallback(() => {
     if (!isActive) return
     if (selectMode) return
-    if (creatingRef.current) return
+    if (creatingRef.current) {
+      const sel = selectedAircraftReg ?? null
+      if (sel === NEW_SENTINEL || sel === creatingRef.current.sel) return
+      creatingRef.current = false
+    }
 
     if (isLoading) {
       setDetailContent(
@@ -408,7 +419,7 @@ export default function AircraftPage() {
     } else {
       setDetailContent(null)
     }
-  }, [isActive, selectMode, selectedAircraft, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg, refreshAircraft])
+  }, [isActive, selectMode, selectedAircraftReg, selectedAircraft, allSortedAircraft, isLoading, setDetailContent, setSelectedAircraftReg, refreshAircraft])
 
   // Update detail content when selection, data, or active state changes
   useEffect(() => {
@@ -572,7 +583,7 @@ export default function AircraftPage() {
     : `/aircraft/new${searchQuery ? `?reg=${encodeURIComponent(searchQuery)}` : ""}`
 
   const openCreatePanel = useCallback(() => {
-    creatingRef.current = true
+    creatingRef.current = { sel: selectedAircraftReg ?? null }
     setDetailContent(
       <AircraftNewForm
         prefilledReg={searchQuery}
@@ -590,6 +601,7 @@ export default function AircraftPage() {
               <AircraftDetailPanel aircraft={selectedAircraft} onUpdated={refreshAircraft} onBack={() => setSelectedAircraftReg(null)} />
             )
           } else {
+            setSelectedAircraftReg(null)
             setDetailContent(null)
           }
         }}
@@ -599,15 +611,20 @@ export default function AircraftPage() {
         }}
       />
     )
-  }, [searchQuery, selectedAircraft, setDetailContent, setSelectedAircraftReg, refreshAircraft])
+  }, [searchQuery, selectedAircraftReg, selectedAircraft, setDetailContent, setSelectedAircraftReg, refreshAircraft])
 
   const handleAddClick = useCallback(() => {
-    if (isDesktop && !selectMode) {
-      openCreatePanel()
-    } else {
+    if (selectMode) {
+      // Picker flow (choosing for a flight) keeps the full-page route.
       router.push(addAircraftUrl)
+      return
     }
-  }, [isDesktop, selectMode, router, addAircraftUrl, openCreatePanel])
+    // Both viewports create from state — instant, no route mount. Desktop
+    // renders into the detail panel; mobile additionally selects the sentinel
+    // so the ?selected overlay opens with the same form.
+    openCreatePanel()
+    if (!isDesktop) setSelectedAircraftReg(NEW_SENTINEL)
+  }, [isDesktop, selectMode, router, addAircraftUrl, openCreatePanel, setSelectedAircraftReg])
 
   // Prefetch the standalone create route so the mobile [+] navigation is as
   // snappy as opening a card (no RSC fetch on tap).

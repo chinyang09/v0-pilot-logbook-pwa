@@ -58,10 +58,16 @@ class PageErrorBoundary extends Component<
  * on navigation even if we cached the `children` prop.
  */
 const PERSISTENT_PAGES: Record<string, React.LazyExoticComponent<React.ComponentType>> = {
+  "/": lazy(() => import("@/app/(app)/page")),
   "/logbook": lazy(() => import("@/app/(app)/logbook/page")),
   "/aircraft": lazy(() => import("@/app/(app)/aircraft/page")),
   "/airports": lazy(() => import("@/app/(app)/airports/page")),
   "/crew": lazy(() => import("@/app/(app)/crew/page")),
+  // Dashboard and roster joined the keep-alive set so every primary tab
+  // switches instantly: the dashboard is the most-visited page (Recharts
+  // remount was the dominant cost; its FDP data was already module-cached)
+  // and the roster list is virtualized, so the retained DOM is bounded.
+  "/roster": lazy(() => import("@/app/(app)/roster/page")),
 }
 
 /**

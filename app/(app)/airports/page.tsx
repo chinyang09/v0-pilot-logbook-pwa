@@ -99,6 +99,9 @@ const AirportCard = memo(function AirportCard({
   );
 });
 
+/** Transient selection id for the mobile create overlay (never persisted). */
+const NEW_SENTINEL = "__new__";
+
 export default function AirportsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -300,14 +303,19 @@ export default function AirportsPage() {
   const virtualItems = rowVirtualizer.getVirtualItems();
 
   // Sync detail panel content — re-runs whenever selection, data, or active state changes
-  // While the create form is open in the detail panel, data-driven re-syncs
-  // must not clobber the user's in-progress entry.
-  const creatingRef = useRef(false);
+  // While the create form is open (detail panel on desktop, ?selected overlay
+  // on mobile), data-driven re-syncs must not clobber the in-progress entry —
+  // but a user changing the selection ends create mode (see aircraft page).
+  const creatingRef = useRef<false | { sel: string | null }>(false);
 
   const syncDetailPanel = useCallback(() => {
     if (!isActive) return;
     if (fieldType) return;
-    if (creatingRef.current) return;
+    if (creatingRef.current) {
+      const sel = selectedAirportIcao ?? null;
+      if (sel === NEW_SENTINEL || sel === creatingRef.current.sel) return;
+      creatingRef.current = false;
+    }
 
     if (isLoading) {
       setDetailContent(
@@ -342,7 +350,7 @@ export default function AirportsPage() {
     } else {
       setDetailContent(null);
     }
-  }, [isActive, fieldType, selectedAirport, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao, mutateAirports]);
+  }, [isActive, fieldType, selectedAirportIcao, selectedAirport, allSortedAirports, isLoading, setDetailContent, setSelectedAirportIcao, mutateAirports]);
 
   // Update detail content when selection, data, or active state changes
   useEffect(() => {
@@ -509,7 +517,7 @@ export default function AirportsPage() {
     : `/airports/new${searchQuery ? `?code=${encodeURIComponent(searchQuery)}` : ""}`;
 
   const openCreatePanel = useCallback(() => {
-    creatingRef.current = true;
+    creatingRef.current = { sel: selectedAirportIcao ?? null };
     setDetailContent(
       <AirportNewForm
         prefilledCode={searchQuery}
@@ -537,6 +545,7 @@ export default function AirportsPage() {
               />
             );
           } else {
+            setSelectedAirportIcao(null);
             setDetailContent(null);
           }
         }}
@@ -549,12 +558,15 @@ export default function AirportsPage() {
   }, [searchQuery, selectedAirportIcao, mutateAirports, setDetailContent, setSelectedAirportIcao]);
 
   const handleAddClick = useCallback(() => {
-    if (isDesktop && !fieldType) {
-      openCreatePanel();
-    } else {
+    if (fieldType) {
+      // Picker flow (choosing for a flight) keeps the full-page route.
       router.push(addAirportUrl);
+      return;
     }
-  }, [isDesktop, fieldType, router, addAirportUrl, openCreatePanel]);
+    // Create from state on both viewports — instant, no route mount.
+    openCreatePanel();
+    if (!isDesktop) setSelectedAirportIcao(NEW_SENTINEL);
+  }, [isDesktop, fieldType, router, addAirportUrl, openCreatePanel, setSelectedAirportIcao]);
 
   // Prefetch the standalone create route so the mobile [+] navigation is as
   // snappy as opening a card (no RSC fetch on tap).
