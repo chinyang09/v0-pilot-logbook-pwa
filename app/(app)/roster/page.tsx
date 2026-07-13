@@ -169,7 +169,19 @@ export default function RosterPage() {
 
   return (
     <>
-      <PageContainer mainRef={mainRef}>
+      <PageContainer
+        mainRef={mainRef}
+        rightContent={
+          viewMode === "list" && !selectedDate && fastScrollItems.length > 1 ? (
+            <FastScroll
+              items={fastScrollItems}
+              activeKey={activeMonthKey}
+              onSelect={handleFastScrollSelect}
+              indicatorPosition="left"
+            />
+          ) : null
+        }
+      >
         <div className="px-4 pt-4 pb-safe space-y-4">
 
         {/* Stats Cards */}
@@ -331,17 +343,6 @@ export default function RosterPage() {
           </div>
         )}
 
-        {/* FastScroll rail - fixed position */}
-        {viewMode === "list" && !selectedDate && fastScrollItems.length > 1 && (
-          <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
-            <FastScroll
-              items={fastScrollItems}
-              activeKey={activeMonthKey}
-              onSelect={handleFastScrollSelect}
-              indicatorPosition="left"
-            />
-          </div>
-        )}
       </div>
       </PageContainer>
     </>

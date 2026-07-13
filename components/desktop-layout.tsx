@@ -4,7 +4,7 @@ import type React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
-import { useIsDesktop, useCanPushSidebar } from "@/hooks/use-is-desktop"
+import { useIsDesktop, useDesktopPill } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import {
@@ -102,17 +102,17 @@ function DetailPanelContent() {
  * Unified responsive shell.
  *
  * Breakpoints (all min-widths):
- *   ≥1180px: Push sidebar (199) + dual-month main (≥620) + detail (≥360) + handle (1)
- *   ≥1120px: Desktop pill morph (top center / sidebar)
- *   ≥ 920px: Push sidebar (199) + main (≥360) + detail (≥360) + handle (1)
- *   ≥ 720px: Split panels + bottom pill + overlay sidebar
+ *   ≥1120px: Desktop pill morph (top center / sidebar) + push spacer when open
+ *   ≥ 720px: Split panels (main + detail); bottom pill + overlay sidebar until 1120
  *   < 720px: Mobile — single panel + bottom pill + overlay sidebar
  */
 function AppShellContent({ children }: AppShellProps) {
   const { handleScroll } = useScrollNavbarContext()
   const { selectedId, setSelectedId, selectionExplicit } = useDetailPanel()
   const isDesktop = useIsDesktop()
-  const canPushSidebar = useCanPushSidebar()
+  // Sidebar UI (pill↔sidebar morph) exists only at the desktop-pill tier —
+  // the push spacer and the width-lock must gate on the same breakpoint.
+  const canPushSidebar = useDesktopPill()
   const { isOpen: sidebarOpen } = useSidebar()
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
