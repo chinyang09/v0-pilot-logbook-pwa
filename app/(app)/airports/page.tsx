@@ -300,9 +300,14 @@ export default function AirportsPage() {
   const virtualItems = rowVirtualizer.getVirtualItems();
 
   // Sync detail panel content — re-runs whenever selection, data, or active state changes
+  // While the create form is open in the detail panel, data-driven re-syncs
+  // must not clobber the user's in-progress entry.
+  const creatingRef = useRef(false);
+
   const syncDetailPanel = useCallback(() => {
     if (!isActive) return;
     if (fieldType) return;
+    if (creatingRef.current) return;
 
     if (isLoading) {
       setDetailContent(
@@ -503,45 +508,68 @@ export default function AirportsPage() {
     ? `/airports/new?field=${fieldType}&flightId=${flightId}${searchQuery ? `&code=${encodeURIComponent(searchQuery)}` : ""}`
     : `/airports/new${searchQuery ? `?code=${encodeURIComponent(searchQuery)}` : ""}`;
 
+  const openCreatePanel = useCallback(() => {
+    creatingRef.current = true;
+    setDetailContent(
+      <AirportNewForm
+        prefilledCode={searchQuery}
+        isDetailPanel
+        onSave={async (icao) => {
+          creatingRef.current = false;
+          const airport = await getAirportByIcao(icao);
+          if (airport) {
+            mutateAirports((prev) => [...prev, airport]);
+          }
+          setSelectedAirportIcao(icao);
+        }}
+        onCancel={() => {
+          creatingRef.current = false;
+          if (selectedAirportIcao) {
+            setDetailContent(
+              <AirportDetailPanel
+                icao={selectedAirportIcao}
+                onBack={() => setSelectedAirportIcao(null)}
+                onToggleFavorite={(ic) =>
+                  mutateAirports((prev) =>
+                    prev.map((a) => (a.icao === ic ? { ...a, isFavorite: !a.isFavorite } : a))
+                  )
+                }
+              />
+            );
+          } else {
+            setDetailContent(null);
+          }
+        }}
+        onViewExisting={(icao) => {
+          creatingRef.current = false;
+          setSelectedAirportIcao(icao);
+        }}
+      />
+    );
+  }, [searchQuery, selectedAirportIcao, mutateAirports, setDetailContent, setSelectedAirportIcao]);
+
   const handleAddClick = useCallback(() => {
     if (isDesktop && !fieldType) {
-      setDetailContent(
-        <AirportNewForm
-          prefilledCode={searchQuery}
-          isDetailPanel
-          onSave={async (icao) => {
-            const airport = await getAirportByIcao(icao);
-            if (airport) {
-              mutateAirports((prev) => [...prev, airport]);
-            }
-            setSelectedAirportIcao(icao);
-          }}
-          onCancel={() => {
-            if (selectedAirportIcao) {
-              setDetailContent(
-                <AirportDetailPanel
-                  icao={selectedAirportIcao}
-                  onBack={() => setSelectedAirportIcao(null)}
-                  onToggleFavorite={(ic) =>
-                    mutateAirports((prev) =>
-                      prev.map((a) => (a.icao === ic ? { ...a, isFavorite: !a.isFavorite } : a))
-                    )
-                  }
-                />
-              );
-            } else {
-              setDetailContent(null);
-            }
-          }}
-          onViewExisting={(icao) => {
-            setSelectedAirportIcao(icao);
-          }}
-        />
-      );
+      openCreatePanel();
     } else {
       router.push(addAirportUrl);
     }
-  }, [isDesktop, fieldType, searchQuery, router, addAirportUrl, selectedAirportIcao, mutateAirports, setDetailContent, setSelectedAirportIcao]);
+  }, [isDesktop, fieldType, router, addAirportUrl, openCreatePanel]);
+
+  // Prefetch the standalone create route so the mobile [+] navigation is as
+  // snappy as opening a card (no RSC fetch on tap).
+  useEffect(() => {
+    router.prefetch(addAirportUrl);
+  }, [router, addAirportUrl]);
+
+  // ?new=1 — set when the standalone /airports/new route detects a desktop
+  // viewport and redirects here so the create form lives in the detail panel.
+  const wantsNew = searchParams.get("new") === "1";
+  useEffect(() => {
+    if (!wantsNew) return;
+    router.replace("/airports", { scroll: false });
+    if (isDesktop) openCreatePanel();
+  }, [wantsNew, isDesktop, router, openCreatePanel]);
 
   const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim();
 

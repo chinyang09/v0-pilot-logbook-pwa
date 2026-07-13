@@ -21,13 +21,18 @@ export default function CrewDetailPage() {
   const router = useRouter();
   const isDesktop = useIsDesktop();
 
-  // When switching to desktop view, redirect to crew page with selection.
-  // Skip for "new" crew creation which stays as a full page.
+  // When switching to desktop view, redirect to the crew page: an existing
+  // crew becomes a selection; a non-picker "new" becomes the detail-panel
+  // create flow (?new=1). Covers deep links and a window resized from mobile
+  // to desktop mid-create (which otherwise showed the form in both panels).
   useEffect(() => {
-    if (isDesktop && !isNew && id) {
+    if (!isDesktop || !id) return;
+    if (isNew) {
+      if (!fieldType) router.replace("/crew?new=1");
+    } else {
       router.replace(`/crew?selected=${encodeURIComponent(id)}`);
     }
-  }, [isDesktop, isNew, id, router]);
+  }, [isDesktop, isNew, fieldType, id, router]);
 
   const form = useCrewForm({
     id,

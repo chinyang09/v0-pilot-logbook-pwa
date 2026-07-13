@@ -293,9 +293,14 @@ export default function CrewPage() {
   const virtualItems = rowVirtualizer.getVirtualItems();
 
   // Sync detail panel content — re-runs whenever selection, data, or active state changes
+  // While the create form is open in the detail panel, data-driven re-syncs
+  // must not clobber the user's in-progress entry.
+  const creatingRef = useRef(false);
+
   const syncDetailPanel = useCallback(() => {
     if (!isActive) return;
     if (fieldType) return;
+    if (creatingRef.current) return;
 
     if (isLoading) {
       setDetailContent(
@@ -416,33 +421,40 @@ export default function CrewPage() {
     }
   }, [fieldType, flightId, router, setSelectedCrewId]);
 
+  const openCreatePanel = useCallback(() => {
+    creatingRef.current = true;
+    setDetailContent(
+      <CrewDetailPanel
+        crewId="new"
+        isNew
+        onUpdated={async (saved) => {
+          creatingRef.current = false;
+          await mutate(CACHE_KEYS.personnel);
+          if (saved) setSelectedCrewId(saved.id);
+        }}
+        onCancelNew={() => {
+          creatingRef.current = false;
+          if (selectedCrew) {
+            setDetailContent(
+              <CrewDetailPanel
+                crewId={selectedCrew.id}
+                onUpdated={() => mutate(CACHE_KEYS.personnel)}
+                onBack={() => setSelectedCrewId(null)}
+              />
+            );
+          } else {
+            setDetailContent(null);
+          }
+        }}
+      />
+    );
+  }, [selectedCrew, setDetailContent, setSelectedCrewId]);
+
   const handleAddCrew = useCallback(() => {
     // Desktop (non-picker): open the create form in the detail panel, matching
     // the aircraft/airports [+] behavior — not as a main-panel page.
     if (isDesktop && !fieldType) {
-      setDetailContent(
-        <CrewDetailPanel
-          crewId="new"
-          isNew
-          onUpdated={async (saved) => {
-            await mutate(CACHE_KEYS.personnel);
-            if (saved) setSelectedCrewId(saved.id);
-          }}
-          onCancelNew={() => {
-            if (selectedCrew) {
-              setDetailContent(
-                <CrewDetailPanel
-                  crewId={selectedCrew.id}
-                  onUpdated={() => mutate(CACHE_KEYS.personnel)}
-                  onBack={() => setSelectedCrewId(null)}
-                />
-              );
-            } else {
-              setDetailContent(null);
-            }
-          }}
-        />
-      );
+      openCreatePanel();
       return;
     }
 
@@ -454,7 +466,23 @@ export default function CrewPage() {
     }
     const query = params.toString();
     router.push(query ? `/crew/new?${query}` : "/crew/new");
-  }, [isDesktop, fieldType, returnUrl, flightId, router, setDetailContent, setSelectedCrewId, selectedCrew]);
+  }, [isDesktop, fieldType, returnUrl, flightId, router, openCreatePanel]);
+
+  // Prefetch the standalone create route so the mobile [+] navigation is as
+  // snappy as opening a card (no RSC fetch on tap).
+  useEffect(() => {
+    router.prefetch("/crew/new");
+  }, [router]);
+
+  // ?new=1 — set when /crew/new detects a desktop viewport (deep link, or a
+  // window resized mid-create) and redirects here so the create form lives in
+  // the detail panel instead of the main panel.
+  const wantsNew = searchParams.get("new") === "1";
+  useEffect(() => {
+    if (!wantsNew) return;
+    router.replace("/crew", { scroll: false });
+    if (isDesktop) openCreatePanel();
+  }, [wantsNew, isDesktop, router, openCreatePanel]);
 
   const handleToggleFavorite = useCallback(async (crewId: string) => {
     const crew = personnel.find((p) => p.id === crewId);

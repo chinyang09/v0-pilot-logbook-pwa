@@ -368,10 +368,15 @@ export default function AircraftPage() {
   // overwriting the active page's detail content when shared selectedId changes.
   const isActive = usePageActive("/aircraft")
 
+  // While the create form is open in the detail panel, data-driven re-syncs
+  // must not clobber the user's in-progress entry.
+  const creatingRef = useRef(false)
+
   // Sync detail panel content — extracted so usePageActive can re-trigger it
   const syncDetailPanel = useCallback(() => {
     if (!isActive) return
     if (selectMode) return
+    if (creatingRef.current) return
 
     if (isLoading) {
       setDetailContent(
@@ -566,35 +571,59 @@ export default function AircraftPage() {
     ? `/aircraft/new?select=true${flightId ? `&flightId=${flightId}` : ""}${searchQuery ? `&reg=${encodeURIComponent(searchQuery)}` : ""}`
     : `/aircraft/new${searchQuery ? `?reg=${encodeURIComponent(searchQuery)}` : ""}`
 
+  const openCreatePanel = useCallback(() => {
+    creatingRef.current = true
+    setDetailContent(
+      <AircraftNewForm
+        prefilledReg={searchQuery}
+        isDetailPanel
+        onSave={async (registration) => {
+          creatingRef.current = false
+          // Refresh SWR cache so the new aircraft appears in the list
+          await refreshAircraft()
+          setSelectedAircraftReg(registration)
+        }}
+        onCancel={() => {
+          creatingRef.current = false
+          if (selectedAircraft) {
+            setDetailContent(
+              <AircraftDetailPanel aircraft={selectedAircraft} onUpdated={refreshAircraft} onBack={() => setSelectedAircraftReg(null)} />
+            )
+          } else {
+            setDetailContent(null)
+          }
+        }}
+        onViewExisting={(registration) => {
+          creatingRef.current = false
+          setSelectedAircraftReg(registration)
+        }}
+      />
+    )
+  }, [searchQuery, selectedAircraft, setDetailContent, setSelectedAircraftReg, refreshAircraft])
+
   const handleAddClick = useCallback(() => {
     if (isDesktop && !selectMode) {
-      setDetailContent(
-        <AircraftNewForm
-          prefilledReg={searchQuery}
-          isDetailPanel
-          onSave={async (registration) => {
-            // Refresh SWR cache so the new aircraft appears in the list
-            await refreshAircraft()
-            setSelectedAircraftReg(registration)
-          }}
-          onCancel={() => {
-            if (selectedAircraft) {
-              setDetailContent(
-                <AircraftDetailPanel aircraft={selectedAircraft} onUpdated={refreshAircraft} onBack={() => setSelectedAircraftReg(null)} />
-              )
-            } else {
-              setDetailContent(null)
-            }
-          }}
-          onViewExisting={(registration) => {
-            setSelectedAircraftReg(registration)
-          }}
-        />
-      )
+      openCreatePanel()
     } else {
       router.push(addAircraftUrl)
     }
-  }, [isDesktop, selectMode, searchQuery, router, addAircraftUrl, selectedAircraft, setDetailContent, setSelectedAircraftReg, refreshAircraft])
+  }, [isDesktop, selectMode, router, addAircraftUrl, openCreatePanel])
+
+  // Prefetch the standalone create route so the mobile [+] navigation is as
+  // snappy as opening a card (no RSC fetch on tap).
+  useEffect(() => {
+    router.prefetch(addAircraftUrl)
+  }, [router, addAircraftUrl])
+
+  // ?new=1 — set when the standalone /aircraft/new route detects a desktop
+  // viewport (deep link, or a window resized mid-create) and redirects here so
+  // the create form lives in the detail panel instead of the main panel.
+  const wantsNew = searchParams.get("new") === "1"
+  useEffect(() => {
+    if (!wantsNew) return
+    router.replace("/aircraft", { scroll: false })
+    if (isDesktop) openCreatePanel()
+  }, [wantsNew, isDesktop, router, openCreatePanel])
 
   const showFavorites = !debouncedSearchQuery && favoriteAircraft.length > 0
   const showRecentlyUsed = !debouncedSearchQuery && recentNonFavorites.length > 0
