@@ -174,20 +174,27 @@ export function RosterCalendar({ entries, onDateClick }: RosterCalendarProps) {
                 onClick={() => hasEntries && onDateClick?.(day.dateString, day.entries)}
                 className={cn(
                   "aspect-square flex flex-col items-center justify-center rounded-lg text-sm transition-all relative",
-                  // `today` is an exclusive branch so its text colour isn't
-                  // fighting the `text-foreground/*` utility (Tailwind can't
-                  // order two same-category classes by attribute order).
-                  day.isToday
-                    ? "bg-primary/15 text-primary font-bold ring-2 ring-inset ring-primary/70"
+                  day.isToday && day.isCurrentMonth
+                    ? "text-foreground"
                     : day.isCurrentMonth
                       ? "text-foreground/90"
                       : "text-foreground/15",
-                  hasEntries && day.isCurrentMonth && !day.isToday && "font-semibold cursor-pointer",
-                  hasEntries && day.isToday && "cursor-pointer",
+                  hasEntries && day.isCurrentMonth && "font-semibold cursor-pointer",
                   !hasEntries && "cursor-default"
                 )}
               >
-                <span className="text-xs">{day.date.getDate()}</span>
+                {/* Today: the number sits in a solid accent disc so it's
+                    unmistakable (amber in the night theme), while the duty dots
+                    below stay readable on the cell's normal background. */}
+                <span
+                  className={cn(
+                    "text-xs",
+                    day.isToday && day.isCurrentMonth &&
+                      "flex h-6 w-6 items-center justify-center rounded-full bg-primary font-bold text-primary-foreground shadow-sm"
+                  )}
+                >
+                  {day.date.getDate()}
+                </span>
 
                 {/* Duty indicators */}
                 {hasEntries && day.isCurrentMonth && (

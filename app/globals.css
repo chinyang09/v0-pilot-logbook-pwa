@@ -1,7 +1,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *));
+/* `night` is a dark-family theme: it rides the `dark:` variant so every
+   dark-mode utility applies, then overrides the palette tokens below. */
+@custom-variant dark (&:is(.dark *, .night *));
 
 /* Shared values */
 :root {
@@ -101,6 +103,62 @@
   --status-critical: oklch(0.70 0.15 60);
   --status-error: oklch(0.62 0.19 25);
   --status-info: oklch(0.65 0.12 250);
+}
+
+/* Night (cockpit) theme — a deep, low-glare instrument palette for flying at
+   night: a near-black warm ground, dimmed warm-white text (less glare in a
+   dark cockpit), and an amber "instrument glow" accent that keeps blue light
+   down (easier on night-adapted eyes). It rides the `dark` variant above, so
+   every `dark:` utility still applies; these tokens override the dark palette.
+   `--primary`/`--ring` live in the shared `:root` block, so night must set them
+   here to swap the terracotta accent for amber. */
+.night {
+  color-scheme: dark;
+  --primary: oklch(0.74 0.15 66);
+  --ring: oklch(0.74 0.15 66);
+
+  --background: oklch(0.13 0.012 45);
+  --foreground: oklch(0.85 0.012 70);
+  --card: oklch(0.17 0.013 45);
+  --card-foreground: oklch(0.85 0.012 70);
+  --popover: oklch(0.17 0.013 45);
+  --popover-foreground: oklch(0.85 0.012 70);
+  --primary-foreground: oklch(0.14 0.012 60);
+  --secondary: oklch(0.21 0.013 45);
+  --secondary-foreground: oklch(0.80 0.012 70);
+  --muted: oklch(0.21 0.013 45);
+  --muted-foreground: oklch(0.63 0.012 65);
+  --accent: oklch(0.60 0.13 64);
+  --accent-foreground: oklch(0.13 0.012 45);
+  --destructive: oklch(0.58 0.20 26);
+  --destructive-foreground: oklch(0.90 0.012 70);
+  --border: oklch(0.26 0.013 45);
+  --input: oklch(0.21 0.013 45);
+  --chart-1: oklch(0.74 0.15 66);
+  --chart-2: oklch(0.68 0.13 150);
+  --chart-3: oklch(0.66 0.09 235);
+  --chart-4: oklch(0.76 0.13 88);
+  --chart-5: oklch(0.63 0.16 32);
+  --sidebar: oklch(0.15 0.012 45);
+  --sidebar-foreground: oklch(0.85 0.012 70);
+  --sidebar-primary: oklch(0.74 0.15 66);
+  --sidebar-primary-foreground: oklch(0.14 0.012 60);
+  --sidebar-accent: oklch(0.21 0.013 45);
+  --sidebar-accent-foreground: oklch(0.85 0.012 70);
+  --sidebar-border: oklch(0.26 0.013 45);
+  --sidebar-ring: oklch(0.74 0.15 66);
+
+  /* Sync status — instrument tones */
+  --status-synced: oklch(0.70 0.15 150);
+  --status-pending: oklch(0.76 0.14 82);
+  --status-offline: oklch(0.64 0.16 30);
+
+  /* Semantic status — kept low-blue so night vision holds */
+  --status-valid: oklch(0.70 0.15 150);
+  --status-warning: oklch(0.76 0.14 82);
+  --status-critical: oklch(0.73 0.15 58);
+  --status-error: oklch(0.63 0.20 28);
+  --status-info: oklch(0.68 0.09 220);
 }
 
 @theme inline {

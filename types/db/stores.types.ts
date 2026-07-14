@@ -13,7 +13,7 @@ export interface FieldOrder {
   notes: string[]
 }
 
-export type ThemePreference = "light" | "dark" | "system"
+export type ThemePreference = "light" | "dark" | "night" | "system"
 
 export interface DisplayPreferences {
   timeFormat: "24h" | "24h-padded" | "12h"

@@ -81,7 +81,7 @@ export const DutyEntryCard = memo(function DutyEntryCard({ entry, onClick, compa
             <div className="text-xs text-muted-foreground truncate">{entry.dutyDescription}</div>
           )}
           {hasSectors && (
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-muted-foreground truncate">
               {entry.sectors.map((s) => `${s.departureIata}-${s.arrivalIata}`).join(", ")}
             </div>
           )}
@@ -193,9 +193,9 @@ export const DutyEntryCard = memo(function DutyEntryCard({ entry, onClick, compa
 
         {/* Crew */}
         {hasCrew && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Users className="h-3.5 w-3.5" />
-            <span>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+            <Users className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="truncate">
               {entry.crew
                 .map((c) => `${c.role === "CPT" || c.role === "PIC" ? "CPT" : "FO"} ${c.name}`)
                 .join(", ")}
