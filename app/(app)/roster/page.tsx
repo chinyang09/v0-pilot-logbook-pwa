@@ -207,9 +207,13 @@ export default function RosterPage() {
         {/* Quick Access Navigation — active: press feedback so the cards feel
             tappable on touch, matching the sidebar items / glass buttons. */}
         {scheduleEntries.length > 0 && (
+          // block h-full on the Link + h-full on the Card: the grid stretches
+          // the Links to one row height, but without h-full the Cards stayed
+          // content-sized — when "FDP Dashboard" wrapped at narrow widths its
+          // card was visibly taller than its siblings.
           <div className="grid grid-cols-3 gap-2">
-            <Link href="/currencies">
-              <Card className="hover:bg-secondary/50 active:bg-secondary/50 active:scale-[0.98] transition-[background-color,transform] cursor-pointer">
+            <Link href="/currencies" className="block h-full">
+              <Card className="h-full hover:bg-secondary/50 active:bg-secondary/50 active:scale-[0.98] transition-[background-color,transform] cursor-pointer">
                 <CardContent className="pt-4 pb-3 px-3">
                   <div className="flex items-center justify-between mb-1">
                     <Shield className="h-5 w-5 text-status-valid" />
@@ -219,8 +223,8 @@ export default function RosterPage() {
                 </CardContent>
               </Card>
             </Link>
-            <Link href="/discrepancies">
-              <Card className="hover:bg-secondary/50 active:bg-secondary/50 active:scale-[0.98] transition-[background-color,transform] cursor-pointer">
+            <Link href="/discrepancies" className="block h-full">
+              <Card className="h-full hover:bg-secondary/50 active:bg-secondary/50 active:scale-[0.98] transition-[background-color,transform] cursor-pointer">
                 <CardContent className="pt-4 pb-3 px-3">
                   <div className="flex items-center justify-between mb-1">
                     <AlertCircle className="h-5 w-5 text-status-warning" />
@@ -230,8 +234,8 @@ export default function RosterPage() {
                 </CardContent>
               </Card>
             </Link>
-            <Link href="/fdp">
-              <Card className="hover:bg-secondary/50 active:bg-secondary/50 active:scale-[0.98] transition-[background-color,transform] cursor-pointer">
+            <Link href="/fdp" className="block h-full">
+              <Card className="h-full hover:bg-secondary/50 active:bg-secondary/50 active:scale-[0.98] transition-[background-color,transform] cursor-pointer">
                 <CardContent className="pt-4 pb-3 px-3">
                   <div className="flex items-center justify-between mb-1">
                     <TrendingUp className="h-5 w-5 text-status-info" />
