@@ -35,6 +35,21 @@ export function parseYMDLocal(dateStr: string): Date {
   return new Date(year, month - 1, day)
 }
 
+/**
+ * Format a Date as a "YYYY-MM-DD" key using its LOCAL calendar fields.
+ *
+ * Never use `date.toISOString().split("T")[0]` for this — that converts to UTC
+ * and rolls the date back a day for any positive-offset timezone (e.g. a locally
+ * constructed midnight in SGT/UTC+8 becomes the previous day), which silently
+ * files calendar entries under the wrong cell.
+ */
+export function formatLocalYMD(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
 /** Format "YYYY-MM-DD" with arbitrary Intl options (local, no TZ shift). */
 export function formatYMD(
   ymd: string,

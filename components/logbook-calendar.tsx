@@ -451,7 +451,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                         ? "font-semibold text-primary/70 ring-1 ring-inset ring-primary/50"
                         : "font-semibold text-primary bg-primary/20"
                     ),
-                    isCurrentMonth && isToday && !isRangeStart && !isRangeEnd && "ring-1.5 ring-primary/60",
+                    isCurrentMonth && isToday && !isSelected && !isRangeStart && !isRangeEnd && "ring-2 ring-inset ring-primary/70 font-semibold",
                     isSelected && "bg-primary text-primary-foreground shadow-md z-10",
                     (isRangeStart || isRangeEnd) && "bg-primary text-primary-foreground shadow-md z-10",
                   )}

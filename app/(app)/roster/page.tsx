@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils"
 import { formatYMD } from "@/lib/utils/date"
 import Link from "next/link"
 import { DutyEntryCard, RosterCalendar } from "@/components/roster"
-import { FastScroll, generateDateItems } from "@/components/ui/fast-scroll"
+import { FastScroll, generateYearItems } from "@/components/ui/fast-scroll"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
 
 type ViewMode = "list" | "calendar"
@@ -66,12 +66,13 @@ export default function RosterPage() {
   // day view when selectedDate was restored from sessionStorage).
   const selectedEntries = selectedDate ? (entriesByDate[selectedDate] ?? []) : []
 
-  // Generate FastScroll items from dates
+  // Generate FastScroll items from dates — year buckets with 2-digit labels
+  // (like the logbook rail) so they fit the narrow rail and never overflow.
   const fastScrollItems = useMemo(() => {
-    return generateDateItems(sortedDates);
+    return generateYearItems(sortedDates);
   }, [sortedDates]);
 
-  const [activeMonthKey, setActiveMonthKey] = useState<string | undefined>(undefined);
+  const [activeYearKey, setActiveYearKey] = useState<string | undefined>(undefined);
 
   // ─── Virtualized date list ───────────────────────────────────
   // One virtual row per date group, scrolling inside PageContainer's <main>.
@@ -98,14 +99,11 @@ export default function RosterPage() {
     getItemKey: (i) => sortedDates[i],
   })
 
-  const handleFastScrollSelect = useCallback((monthYear: string) => {
-    setActiveMonthKey(monthYear);
+  const handleFastScrollSelect = useCallback((year: string) => {
+    setActiveYearKey(year);
 
-    const [targetYear, targetMonth] = monthYear.split("-");
-    const index = sortedDates.findIndex((date) => {
-      const [year, month] = date.split("-");
-      return year === targetYear && month === targetMonth;
-    });
+    // sortedDates is newest-first, so the first match is that year's latest date.
+    const index = sortedDates.findIndex((date) => date.split("-")[0] === year);
 
     if (index !== -1) {
       dateVirtualizer.scrollToIndex(index, { align: "start", behavior: "auto" });
@@ -175,7 +173,7 @@ export default function RosterPage() {
           viewMode === "list" && !selectedDate && fastScrollItems.length > 1 ? (
             <FastScroll
               items={fastScrollItems}
-              activeKey={activeMonthKey}
+              activeKey={activeYearKey}
               onSelect={handleFastScrollSelect}
               indicatorPosition="left"
             />

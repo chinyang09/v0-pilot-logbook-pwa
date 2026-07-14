@@ -306,10 +306,29 @@ function SidebarNav({
   className?: string
 }) {
   const navRef = useRef<HTMLElement>(null)
+  const blobLayerRef = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const toggleSection = (label: string) => {
     setCollapsed((prev) => ({ ...prev, [label]: !prev[label] }))
   }
+
+  // Keep the (un-clipped) gravity-blob overlay in lock-step with the nav's
+  // scroll. The blob is measured in the scroller's CONTENT coordinates; the
+  // overlay isn't a scroll container, so translating it by -scrollTop projects
+  // the blob into the right viewport position WITHOUT the overflow clipping that
+  // used to slice the overshoot spring off above the top item. Imperative DOM
+  // write on a passive scroll listener — no re-render, stays on the compositor.
+  useEffect(() => {
+    const sc = navRef.current
+    const layer = blobLayerRef.current
+    if (!sc || !layer) return
+    const sync = () => {
+      layer.style.transform = `translateY(${-sc.scrollTop}px)`
+    }
+    sync()
+    sc.addEventListener("scroll", sync, { passive: true })
+    return () => sc.removeEventListener("scroll", sync)
+  }, [])
 
   const isItemActive = (href: string) => {
     if (href === "/") return pathname === "/"
@@ -325,17 +344,24 @@ function SidebarNav({
   const activeIndex = orderedHrefs.findIndex((href) => isItemActive(href))
 
   return (
-    <nav
-      ref={navRef}
-      className={cn("relative overflow-y-auto overscroll-contain px-3 pb-4", className)}
-      style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
-    >
-      <GravityIndicator
-        containerRef={navRef}
-        activeIndex={activeIndex}
-        className="rounded-full"
-        revision={orderedHrefs.join(",")}
-      />
+    <div className={cn("relative min-h-0", className)}>
+      {/* Gravity blob lives in a NON-scrolling overlay so the overshoot spring
+          can travel above the first item without being clipped by the nav's
+          overflow. `blobLayerRef` is translated by -scrollTop (above) to stay
+          pinned to the scrolling content. Sits behind the nav items (z-0). */}
+      <div ref={blobLayerRef} aria-hidden className="pointer-events-none absolute inset-0 z-0">
+        <GravityIndicator
+          containerRef={navRef}
+          activeIndex={activeIndex}
+          className="rounded-full"
+          revision={orderedHrefs.join(",")}
+        />
+      </div>
+      <nav
+        ref={navRef}
+        className="relative z-[1] h-full overflow-y-auto overscroll-contain px-3 pb-4"
+        style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+      >
       <SidebarNavItem
         href={dashboardNavItem.href}
         icon={dashboardNavItem.icon}
@@ -373,7 +399,8 @@ function SidebarNav({
           </div>
         )
       })}
-    </nav>
+      </nav>
+    </div>
   )
 }
 
