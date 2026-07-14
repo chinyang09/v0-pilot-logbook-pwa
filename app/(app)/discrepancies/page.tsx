@@ -4,18 +4,14 @@ import { useState, useMemo } from "react"
 import { useSessionState } from "@/hooks/use-session-state"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
-import { GlassContainer } from "@/components/ui/glass-container"
-import { Button } from "@/components/ui/button"
+import { GlassIconButton } from "@/components/ui/glass-icon-button"
 import { Card, CardContent } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { FilterChips } from "@/components/ui/filter-chips"
 import { RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react"
+import { AnimatePresence, motion } from "framer-motion"
+import { LIST_ITEM_TRANSITION } from "@/lib/motion"
 import { useDiscrepancies } from "@/hooks/data"
 import { DiscrepancyCard, DiscrepancyResolutionDialog } from "@/components/roster"
 import type { Discrepancy, DiscrepancyType } from "@/types/entities/roster.types"
@@ -53,11 +49,9 @@ export default function DiscrepanciesPage() {
 
   // Glass action buttons for the floating header bar
   const discrepancyActions = useMemo(() => (
-    <GlassContainer cornerRadius={28}>
-      <Button variant="ghost" size="icon" className="h-14 w-14" onClick={() => refresh()} disabled={isLoading}>
-        <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
-      </Button>
-    </GlassContainer>
+    <GlassIconButton ariaLabel="Refresh discrepancies" onClick={() => refresh()} disabled={isLoading}>
+      <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
+    </GlassIconButton>
   ), [refresh, isLoading])
 
   useRegisterMainActions(discrepancyActions, true)
@@ -66,55 +60,53 @@ export default function DiscrepanciesPage() {
     <PageContainer
     >
       <div className="px-4 pt-4 pb-safe space-y-4">
-        {/* Status Cards */}
+        {/* Status Cards — first three are unresolved by severity, last is
+            resolved, so the four numbers always sum to the total (the old
+            Total/Errors/Warnings/Resolved mix left `info` uncounted). */}
         <div className="grid grid-cols-4 gap-2">
           <Card>
             <CardContent className="pt-4 pb-3 px-3">
-              <div className="text-2xl font-bold">{discrepancies.length}</div>
-              <div className="text-xs text-muted-foreground">Total</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-3 px-3">
-              <div className="text-2xl font-bold text-red-500">{errorCount}</div>
+              <div className="text-2xl font-bold text-status-error">{errorCount}</div>
               <div className="text-xs text-muted-foreground">Errors</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4 pb-3 px-3">
-              <div className="text-2xl font-bold text-yellow-500">{warningCount}</div>
+              <div className="text-2xl font-bold text-status-warning">{warningCount}</div>
               <div className="text-xs text-muted-foreground">Warnings</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4 pb-3 px-3">
-              <div className="text-2xl font-bold text-green-500">{resolvedCount}</div>
+              <div className="text-2xl font-bold text-status-info">{infoCount}</div>
+              <div className="text-xs text-muted-foreground">Info</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3 px-3">
+              <div className="text-2xl font-bold text-status-valid">{resolvedCount}</div>
               <div className="text-xs text-muted-foreground">Resolved</div>
             </CardContent>
           </Card>
         </div>
 
         {/* Filter */}
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Filter:</span>
-          <Select value={filterType} onValueChange={(value) => setFilterType(value as FilterType)}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All ({discrepancies.length})</SelectItem>
-              <SelectItem value="unresolved">Unresolved ({unresolvedCount})</SelectItem>
-              <SelectItem value="resolved">Resolved ({resolvedCount})</SelectItem>
-              <SelectItem value="duplicate">Duplicate</SelectItem>
-              <SelectItem value="time_mismatch">Time Mismatch</SelectItem>
-              <SelectItem value="crew_mismatch">Crew Mismatch</SelectItem>
-              <SelectItem value="route_mismatch">Route Mismatch</SelectItem>
-              <SelectItem value="missing_in_logbook">Missing in Logbook</SelectItem>
-              <SelectItem value="missing_in_schedule">Missing in Schedule</SelectItem>
-              <SelectItem value="stale_report">Stale Report</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <FilterChips<FilterType>
+          value={filterType}
+          onChange={setFilterType}
+          options={[
+            { value: "unresolved", label: "Unresolved", count: unresolvedCount },
+            { value: "resolved", label: "Resolved", count: resolvedCount },
+            { value: "all", label: "All", count: discrepancies.length },
+            { value: "duplicate", label: "Duplicate" },
+            { value: "time_mismatch", label: "Time" },
+            { value: "crew_mismatch", label: "Crew" },
+            { value: "route_mismatch", label: "Route" },
+            { value: "missing_in_logbook", label: "Missing in Logbook" },
+            { value: "missing_in_schedule", label: "Missing in Schedule" },
+            { value: "stale_report", label: "Stale Report" },
+          ]}
+        />
 
         {/* First-load skeleton */}
         {isLoading && discrepancies.length === 0 && (
@@ -127,46 +119,51 @@ export default function DiscrepanciesPage() {
 
         {/* Empty State */}
         {discrepancies.length === 0 && !isLoading && (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <CheckCircle2 className="h-10 w-10 mx-auto text-green-500/60 mb-3" />
-              <p className="text-sm font-medium text-foreground mb-1">No Discrepancies</p>
-              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto">
-                Your schedule and logbook are in sync. Discrepancies will appear here when
-                detected during schedule imports.
-              </p>
-            </CardContent>
-          </Card>
+          <EmptyState
+            icon={CheckCircle2}
+            iconClassName="text-status-valid/60"
+            title="No Discrepancies"
+            description="Your schedule and logbook are in sync. Discrepancies will appear here when detected during schedule imports."
+          />
         )}
 
-        {/* Discrepancy List */}
+        {/* Discrepancy List — items fade/slide on filter changes and
+            resolve/reopen so the list moves like the logbook. */}
         {sortedDiscrepancies.length > 0 && (
           <div className="space-y-3">
-            {sortedDiscrepancies.map((discrepancy) => (
-              <DiscrepancyCard
-                key={discrepancy.id}
-                discrepancy={discrepancy}
-                onResolve={(d) => setDiscrepancyToResolve(d)}
-                onReopen={async (d) => {
-                  // Import the unresolve function
-                  const { unresolveDiscrepancy } = await import("@/lib/db")
-                  await unresolveDiscrepancy(d.id)
-                  await refresh()
-                }}
-              />
-            ))}
+            <AnimatePresence initial={false} mode="popLayout">
+              {sortedDiscrepancies.map((discrepancy) => (
+                <motion.div
+                  key={discrepancy.id}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  transition={LIST_ITEM_TRANSITION}
+                >
+                  <DiscrepancyCard
+                    discrepancy={discrepancy}
+                    onResolve={(d) => setDiscrepancyToResolve(d)}
+                    onReopen={async (d) => {
+                      // Import the unresolve function
+                      const { unresolveDiscrepancy } = await import("@/lib/db")
+                      await unresolveDiscrepancy(d.id)
+                      await refresh()
+                    }}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         )}
 
         {/* No Results */}
         {discrepancies.length > 0 && sortedDiscrepancies.length === 0 && (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <AlertCircle className="h-10 w-10 mx-auto text-muted-foreground/40 mb-3" />
-              <p className="text-sm font-medium text-foreground mb-1">No {filterType.replace(/_/g, " ")} discrepancies</p>
-              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto">Try changing the filter to see more discrepancies.</p>
-            </CardContent>
-          </Card>
+          <EmptyState
+            icon={AlertCircle}
+            title={`No ${filterType.replace(/_/g, " ")} discrepancies`}
+            description="Try changing the filter to see more discrepancies."
+          />
         )}
       </div>
 

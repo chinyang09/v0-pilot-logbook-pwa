@@ -6,7 +6,7 @@ import { Cloud, CloudOff, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/components/providers/auth-provider"
 
-export function SyncStatus() {
+export function SyncStatus({ className }: { className?: string }) {
   const { ensureValidSession } = useAuth()
   const [status, setStatus] = useState<"online" | "offline" | "syncing">(() => syncService.getStatus())
   const [pendingCount, setPendingCount] = useState(0)
@@ -72,10 +72,11 @@ export function SyncStatus() {
       }
       title={status === "offline" ? "Offline" : status === "syncing" ? "Syncing…" : "Tap to sync"}
       className={cn(
-        "relative p-1.5 rounded-full transition-colors",
+        "relative flex items-center justify-center p-1.5 rounded-full transition-colors",
         status === "online" && "text-[var(--status-synced)]",
         status === "offline" && "text-[var(--status-offline)] cursor-not-allowed",
         status === "syncing" && "text-[var(--status-pending)] cursor-wait",
+        className,
       )}
     >
       {status === "online" && <Cloud className="h-4 w-4" />}

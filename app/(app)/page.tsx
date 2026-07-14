@@ -9,6 +9,7 @@ import { syncService } from "@/lib/sync"
 import { useAuth } from "@/components/providers/auth-provider"
 import { refreshAllData } from "@/hooks/data"
 
+import { usePageActive } from "@/hooks/use-page-active"
 import { DashboardActions } from "@/components/dashboard/dashboard-actions"
 import { DashboardCalendarPanel } from "@/components/dashboard/dashboard-calendar-panel"
 import { DashboardGrid } from "@/components/dashboard/dashboard-grid"
@@ -23,8 +24,12 @@ export default function Dashboard() {
     return unsubscribe
   }, [])
 
+  // Keep-alive: only the active tab owns the header actions, and re-activation
+  // refreshes data so the retained page never shows stale numbers.
+  const isActive = usePageActive("/", refreshAllData)
+
   const dashboardActions = useMemo(() => <DashboardActions />, [])
-  useRegisterMainActions(dashboardActions, true)
+  useRegisterMainActions(dashboardActions, isActive)
 
   if (authLoading) {
     return (

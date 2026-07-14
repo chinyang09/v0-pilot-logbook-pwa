@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react"
 import { useAuth } from "@/components/providers/auth-provider"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { FormSection } from "@/components/ui/form-section"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -557,11 +557,8 @@ export default function AccountPage() {
         />
 
         {/* Profile */}
-        <Card className="py-4 gap-3">
-          <CardHeader className="px-4">
-            <CardTitle className="text-base">Profile</CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 space-y-3">
+        <FormSection title="Profile">
+          <div className="px-4 py-3 space-y-3">
             {/* Callsign row with inline edit */}
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm text-muted-foreground">Callsign</span>
@@ -654,7 +651,7 @@ export default function AccountPage() {
 
                     {callsignError && <p className="text-sm text-destructive">{callsignError}</p>}
                     {callsignSuccess && (
-                      <p className="text-sm text-green-600 dark:text-green-400">{callsignSuccess}</p>
+                      <p className="text-sm text-status-valid">{callsignSuccess}</p>
                     )}
                   </div>
                 </motion.div>
@@ -671,7 +668,7 @@ export default function AccountPage() {
               >
                 <span className="text-sm truncate">{profile?.userId || user?.userId}</span>
                 {copiedKey === "userId" ? (
-                  <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
+                  <Check className="h-3.5 w-3.5 shrink-0 text-status-valid" />
                 ) : (
                   <Copy className="h-3.5 w-3.5 shrink-0" />
                 )}
@@ -741,7 +738,7 @@ export default function AccountPage() {
                     >
                       {totpReveal.secret}
                       {copiedKey === "totpSecret" ? (
-                        <Check className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
+                        <Check className="h-3.5 w-3.5 shrink-0 text-status-valid" />
                       ) : (
                         <Copy className="h-3.5 w-3.5 shrink-0" />
                       )}
@@ -750,18 +747,12 @@ export default function AccountPage() {
                 </motion.div>
               )}
             </AnimatePresence>
-          </CardContent>
-        </Card>
+          </div>
+        </FormSection>
 
         {/* Passkeys */}
-        <Card className="py-4 gap-3">
-          <CardHeader className="px-4">
-            <CardTitle className="text-base flex items-center gap-2">
-              <KeyRound className="h-4 w-4" />
-              Passkeys
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-0">
+        <FormSection title="Passkeys">
+          <div className="py-1">
             {isLoading && !profile && (
               <div className="flex items-center gap-3 py-2 px-4">
                 <Skeleton className="h-4 w-4 rounded-full" />
@@ -818,7 +809,7 @@ export default function AccountPage() {
                   one. Otherwise confirm the device is already secured. */}
               {thisDeviceHasPasskey ? (
                 <p className="text-sm text-muted-foreground flex items-center gap-1.5">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-status-valid" />
                   This device already has a passkey.
                 </p>
               ) : (
@@ -832,18 +823,12 @@ export default function AccountPage() {
                 </Button>
               )}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </FormSection>
 
         {/* Active Sessions */}
-        <Card className="py-4 gap-3">
-          <CardHeader className="px-4">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Monitor className="h-4 w-4" />
-              Active Sessions
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-0">
+        <FormSection title="Active Sessions">
+          <div className="py-1">
             {isLoading && sessions.length === 0 && (
               <div className="flex items-center gap-3 py-2 px-4">
                 <Skeleton className="h-4 w-4 rounded" />
@@ -897,8 +882,8 @@ export default function AccountPage() {
             <p className="text-xs text-muted-foreground px-4 pt-3">
               Swipe a session to sign that device out.
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </FormSection>
 
         {/* Install App — a single surface: the whole header row is the button,
             and (when there are manual steps to show) it expands them inside the

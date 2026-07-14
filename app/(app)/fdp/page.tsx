@@ -3,9 +3,9 @@
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type ErrorInfo } from "react"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
-import { GlassContainer } from "@/components/ui/glass-container"
-import { Button } from "@/components/ui/button"
+import { GlassIconButton } from "@/components/ui/glass-icon-button"
 import { Card, CardContent } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/empty-state"
 import {
   RefreshCw,
   TrendingUp,
@@ -24,6 +24,7 @@ import { QuickCheckPanel } from "@/components/roster/quick-check-panel"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import type { ScenarioResult } from "@/lib/utils/roster/fdp-calculator"
 import { cn } from "@/lib/utils"
+import { formatMinutesHM, formatYMDShort as formatShortDate } from "@/lib/utils/date"
 
 /** Error boundary around the chart — prevents Recharts crashes from taking down the page */
 class ChartErrorBoundary extends Component<
@@ -70,29 +71,12 @@ class ChartErrorBoundary extends Component<
   }
 }
 
-/** Format minutes as "Xh Ym" */
-function formatMinutesHM(minutes: number): string {
-  const h = Math.floor(minutes / 60)
-  const m = minutes % 60
-  if (h === 0) return `${m}m`
-  if (m === 0) return `${h}h`
-  return `${h}h ${m}m`
-}
-
 /** Extract outbound destination from a route string like "WSSS-VVNB/VVNB-WSSS". */
 function extractDestination(route?: string): string {
   if (!route) return ""
   const firstSector = route.split("/")[0] ?? ""
   const parts = firstSector.split("-")
   return parts[1]?.trim() ?? ""
-}
-
-/** Format a YYYY-MM-DD date as e.g. "Apr 16" */
-function formatShortDate(ymd: string): string {
-  const [y, m, d] = ymd.split("-").map(Number)
-  if (!y || !m || !d) return ymd
-  const dt = new Date(Date.UTC(y, m - 1, d))
-  return dt.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })
 }
 
 export default function FDPPage() {
@@ -226,27 +210,19 @@ export default function FDPPage() {
   const fdpActions = useMemo(
     () => (
       <div className="flex gap-2">
-        <GlassContainer cornerRadius={28}>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-14 w-14"
-            onClick={() => setQuickCheckOpen((prev) => !prev)}
-          >
-            <Calculator className={cn("h-5 w-5", quickCheckOpen && "text-primary")} />
-          </Button>
-        </GlassContainer>
-        <GlassContainer cornerRadius={28}>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-14 w-14"
-            onClick={() => refresh()}
-            disabled={isLoading}
-          >
-            <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
-          </Button>
-        </GlassContainer>
+        <GlassIconButton
+          ariaLabel="Legality quick check"
+          onClick={() => setQuickCheckOpen((prev) => !prev)}
+        >
+          <Calculator className={cn("h-5 w-5", quickCheckOpen && "text-primary")} />
+        </GlassIconButton>
+        <GlassIconButton
+          ariaLabel="Refresh FDP data"
+          onClick={() => refresh()}
+          disabled={isLoading}
+        >
+          <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
+        </GlassIconButton>
       </div>
     ),
     [refresh, isLoading, quickCheckOpen]
@@ -265,8 +241,8 @@ export default function FDPPage() {
             className={cn(
               "border py-0 gap-0",
               isRestMet
-                ? "border-green-500/20 bg-green-500/5"
-                : "border-red-500/20 bg-red-500/5"
+                ? "border-status-valid/20 bg-status-valid/5"
+                : "border-status-error/20 bg-status-error/5"
             )}
           >
             <CardContent className="py-1.5 px-2.5">
@@ -298,7 +274,7 @@ export default function FDPPage() {
                     <span
                       className={cn(
                         "text-sm font-semibold tabular-nums mt-0.5 block leading-none",
-                        isRestMet ? "text-green-500" : "text-red-500"
+                        isRestMet ? "text-status-valid" : "text-status-error"
                       )}
                     >
                       {formatMinutesHM(restHadMinutes)}
@@ -341,8 +317,8 @@ export default function FDPPage() {
         {forecast.hasExceedance && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1">
             <div className="flex items-center gap-1">
-              <AlertTriangle className="h-3 w-3 text-orange-500" />
-              <span className="text-[10px] text-orange-500">Breach forecast</span>
+              <AlertTriangle className="h-3 w-3 text-status-critical" />
+              <span className="text-[10px] text-status-critical">Breach forecast</span>
             </div>
           </div>
         )}
@@ -363,15 +339,11 @@ export default function FDPPage() {
             />
           </ChartErrorBoundary>
         ) : !isLoading ? (
-          <Card>
-            <CardContent className="py-6 text-center">
-              <TrendingUp className="h-8 w-8 text-muted-foreground/40 mb-2 mx-auto" />
-              <p className="text-xs font-medium text-foreground mb-0.5">No Duty Periods</p>
-              <p className="text-[10px] text-muted-foreground max-w-[200px] mx-auto">
-                Import schedule or log flights to see FDP compliance.
-              </p>
-            </CardContent>
-          </Card>
+          <EmptyState
+            icon={TrendingUp}
+            title="No Duty Periods"
+            description="Import schedule or log flights to see FDP compliance."
+          />
         ) : null}
       </div>
     </PageContainer>

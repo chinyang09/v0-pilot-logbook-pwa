@@ -3,6 +3,7 @@
 import type React from "react"
 import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
+import { TAP_SPRING } from "@/lib/motion"
 
 interface GlassContainerProps {
   children: React.ReactNode
@@ -18,7 +19,6 @@ interface GlassContainerProps {
   disableTapFeedback?: boolean
 }
 
-const tapTransition = { type: "spring" as const, stiffness: 400, damping: 25, duration: 0.15 }
 
 export function GlassContainer({
   children,
@@ -38,7 +38,7 @@ export function GlassContainer({
         ...style,
       } as React.CSSProperties}
       whileTap={disableTapFeedback ? undefined : { scale: 1.015 }}
-      transition={tapTransition}
+      transition={TAP_SPRING}
     >
       <div className={cn("GlassContent", contentClassName)}>
         {tintColor && (

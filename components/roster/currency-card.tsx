@@ -20,6 +20,7 @@ import {
   FileText,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { formatYMDMedium as formatDate } from "@/lib/utils/date"
 
 const STATUS_CONFIG: Record<
   CurrencyStatus,
@@ -33,30 +34,30 @@ const STATUS_CONFIG: Record<
 > = {
   valid: {
     icon: ShieldCheck,
-    bg: "bg-green-500/10",
-    text: "text-green-500",
-    border: "border-green-500/20",
+    bg: "bg-status-valid/10",
+    text: "text-status-valid",
+    border: "border-status-valid/20",
     label: "Valid",
   },
   warning: {
     icon: ShieldAlert,
-    bg: "bg-yellow-500/10",
-    text: "text-yellow-500",
-    border: "border-yellow-500/20",
+    bg: "bg-status-warning/10",
+    text: "text-status-warning",
+    border: "border-status-warning/20",
     label: "Expiring Soon",
   },
   critical: {
     icon: ShieldAlert,
-    bg: "bg-orange-500/10",
-    text: "text-orange-500",
-    border: "border-orange-500/20",
+    bg: "bg-status-critical/10",
+    text: "text-status-critical",
+    border: "border-status-critical/20",
     label: "Critical",
   },
   expired: {
     icon: ShieldX,
-    bg: "bg-red-500/10",
-    text: "text-red-500",
-    border: "border-red-500/20",
+    bg: "bg-status-error/10",
+    text: "text-status-error",
+    border: "border-status-error/20",
     label: "Expired",
   },
 }
@@ -71,15 +72,6 @@ interface CurrencyCardProps {
 export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDelete, compact = false }: CurrencyCardProps) {
   const config = STATUS_CONFIG[currency.status]
   const Icon = config.icon
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString + "T00:00:00")
-    return date.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    })
-  }
 
   const getDaysText = (days: number) => {
     if (days < 0) return `Expired ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} ago`

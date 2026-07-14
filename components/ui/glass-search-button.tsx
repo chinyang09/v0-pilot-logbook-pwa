@@ -14,8 +14,10 @@ interface GlassSearchButtonProps {
 }
 
 /**
- * Expandable glass search button — compact search icon that CSS-transitions
- * into a full search bar.
+ * Expandable liquid-glass search button — part of the glass header-control
+ * system (see glass-icon-button.tsx). Collapsed it matches GlassIconButton
+ * (56px pill, full glass material); tapping CSS-transitions it into a full
+ * search bar.
  *
  * Uses CSS max-width transition instead of JS-driven spring animation to avoid
  * iOS layout reflow jank. The max-width change is GPU-friendly and doesn't
@@ -88,7 +90,7 @@ export function GlassSearchButton({
             className="absolute left-0 top-0 h-14 w-14 flex items-center justify-center flex-shrink-0"
             style={{ pointerEvents: isOpen ? "none" : "auto" }}
           >
-            <Search className="h-5 w-5 text-foreground/60" />
+            <Search className="h-5 w-5" />
           </button>
 
           {/* Expanded content — always rendered, fades in/out */}

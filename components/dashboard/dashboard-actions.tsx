@@ -4,8 +4,7 @@ import * as React from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Calendar, ChevronDown, SlidersHorizontal } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
-import { GlassContainer } from "@/components/ui/glass-container"
+import { GlassButtonGroup, GlassGroupButton } from "@/components/ui/glass-icon-button"
 import {
   PERIOD_PRESETS,
   useDashboardPeriod,
@@ -49,23 +48,16 @@ export function DashboardActions() {
 
   return (
     <>
-      <GlassContainer cornerRadius={28}>
-        {/* Calendar first, then period filter — matches the logbook header order. */}
-        <div className="flex items-center gap-1 px-1 h-14">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Date range"
-            aria-expanded={showCalendar}
-            className={cn(
-              "h-12 w-12 rounded-full",
-              (showCalendar || period.kind === "custom") &&
-                "text-primary bg-primary/15",
-            )}
+      {/* Calendar first, then period filter — matches the logbook header order. */}
+      <GlassButtonGroup>
+          <GlassGroupButton
+            ariaLabel="Date range"
+            ariaPressed={showCalendar}
+            active={showCalendar || period.kind === "custom"}
             onClick={() => setShowCalendar(!showCalendar)}
           >
             <Calendar className="h-5 w-5" />
-          </Button>
+          </GlassGroupButton>
 
           <AnimatePresence initial={false}>
             {showCalendar && (
@@ -147,14 +139,11 @@ export function DashboardActions() {
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
-      </GlassContainer>
+      </GlassButtonGroup>
 
-      <GlassContainer cornerRadius={28}>
-        <div className="flex items-center px-1 h-14">
-          <AlertsDropdown />
-        </div>
-      </GlassContainer>
+      <GlassButtonGroup>
+        <AlertsDropdown />
+      </GlassButtonGroup>
     </>
   )
 }

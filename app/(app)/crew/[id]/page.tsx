@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
-import { Button } from "@/components/ui/button";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { PageContainer } from "@/components/page-container";
+import { PageLoading } from "@/components/ui/page-loading";
+import { GlassIconButton, GlassTextButton } from "@/components/ui/glass-icon-button";
+import { useRegisterMainActions } from "@/hooks/use-page-actions";
 import { useCrewForm } from "@/hooks/use-crew-form";
 import { CrewFormBody } from "@/components/crew-form-body";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ChevronLeft, Loader2 } from "lucide-react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 
@@ -19,13 +21,18 @@ export default function CrewDetailPage() {
   const router = useRouter();
   const isDesktop = useIsDesktop();
 
-  // When switching to desktop view, redirect to crew page with selection.
-  // Skip for "new" crew creation which stays as a full page.
+  // When switching to desktop view, redirect to the crew page: an existing
+  // crew becomes a selection; a non-picker "new" becomes the detail-panel
+  // create flow (?new=1). Covers deep links and a window resized from mobile
+  // to desktop mid-create (which otherwise showed the form in both panels).
   useEffect(() => {
-    if (isDesktop && !isNew && id) {
+    if (!isDesktop || !id) return;
+    if (isNew) {
+      if (!fieldType) router.replace("/crew?new=1");
+    } else {
       router.replace(`/crew?selected=${encodeURIComponent(id)}`);
     }
-  }, [isDesktop, isNew, id, router]);
+  }, [isDesktop, isNew, fieldType, id, router]);
 
   const form = useCrewForm({
     id,
@@ -44,72 +51,79 @@ export default function CrewDetailPage() {
   });
   const { crew, isLoading, isEditing, isSaving, setIsEditing, formData } = form;
 
-  const handleCancel = () => {
-    if (isNew) {
+  // Latest handlers/state behind a ref (synced in an effect, read only inside
+  // event handlers) so the memoised glass actions stay stable across keystrokes.
+  const latestRef = useRef({
+    save: form.handleSave,
+    reset: form.resetForm,
+    isNew,
+    isEditing,
+    hasCrew: !!crew,
+  });
+  useEffect(() => {
+    latestRef.current = {
+      save: form.handleSave,
+      reset: form.resetForm,
+      isNew,
+      isEditing,
+      hasCrew: !!crew,
+    };
+  });
+
+  const handleCancel = useCallback(() => {
+    const l = latestRef.current;
+    if (l.isNew) {
       router.back();
-    } else if (isEditing && crew) {
-      form.resetForm();
+    } else if (l.isEditing && l.hasCrew) {
+      l.reset();
     } else {
       router.back();
     }
-  };
+  }, [router]);
+
+  // Floating glass header actions — same system as every other page (no
+  // embedded page header). Editing/new: Cancel + Save; viewing: Back + Edit.
+  const actions = useMemo(() => {
+    if (isEditing) {
+      return (
+        <>
+          <GlassTextButton onClick={handleCancel}>
+            Cancel
+          </GlassTextButton>
+          <GlassTextButton
+            primary
+            disabled={!formData.name.trim() || isSaving}
+            onClick={() => latestRef.current.save()}
+          >
+            {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Save"}
+          </GlassTextButton>
+        </>
+      );
+    }
+    return (
+      <>
+        <GlassIconButton ariaLabel="Back" onClick={handleCancel}>
+          <ChevronLeft className="h-5 w-5" />
+        </GlassIconButton>
+        <GlassTextButton primary onClick={() => setIsEditing(true)}>
+          Edit
+        </GlassTextButton>
+      </>
+    );
+  }, [isEditing, isSaving, formData.name, setIsEditing, handleCancel]);
+
+  useRegisterMainActions(actions, true);
 
   if (isLoading) {
     return (
-      <div className="h-[100dvh] flex items-center justify-center bg-background">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
+      <PageContainer>
+        <PageLoading />
+      </PageContainer>
     );
   }
 
   return (
-    <PageContainer
-      header={
-        <header className="bg-background/30 backdrop-blur-xl border-b border-border/50 z-50">
-          <div className="container mx-auto px-3">
-            <div className="flex items-center justify-between h-12">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleCancel}
-                className="text-primary h-8 px-2"
-              >
-                {isEditing ? "Cancel" : <ArrowLeft className="h-4 w-4" />}
-              </Button>
-              <h1 className="text-lg font-semibold truncate px-2">
-                {!crew && !isNew
-                  ? "Crew Not Found"
-                  : isNew
-                  ? "New Crew"
-                  : formData.isMe
-                  ? "Self"
-                  : formData.name || "Crew Info"}
-              </h1>
-              {isEditing ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => form.handleSave()}
-                  disabled={!formData.name.trim() || isSaving}
-                  className="text-primary h-8 px-2 font-semibold"
-                >
-                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
-                </Button>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsEditing(true)}
-                  className="text-primary h-8 px-2 font-semibold"
-                >
-                  Edit
-                </Button>
-              )}
-            </div>
-          </div>
-        </header>
-      }
-    >
+    <PageContainer>
       <div className="container mx-auto px-2 pt-4 pb-safe">
         {!isNew && !crew ? (
           <p className="text-center text-muted-foreground py-12">

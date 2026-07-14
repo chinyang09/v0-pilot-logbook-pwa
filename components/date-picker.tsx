@@ -120,7 +120,7 @@ export function DatePicker({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60"
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50"
       style={{ paddingBottom: "calc(4rem + env(safe-area-inset-bottom))" }}
       onClick={onClose}
     >

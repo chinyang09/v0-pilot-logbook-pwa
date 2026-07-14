@@ -24,11 +24,12 @@ import { CACHE_KEYS } from "@/hooks/data";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
+import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { CrewDetailPanel } from "@/components/crew-detail-panel";
 import { usePageActive } from "@/hooks/use-page-active";
 import { useRegisterMainActions } from "@/hooks/use-page-actions";
-import { GlassSearchButton } from "@/components/glass-search-button";
-import { GlassContainer } from "@/components/ui/glass-container";
+import { GlassSearchButton } from "@/components/ui/glass-search-button";
+import { GlassIconButton } from "@/components/ui/glass-icon-button";
 
 // Memoized crew card to prevent unnecessary re-renders during virtualization
 const SwipeableCrewCard = memo(function SwipeableCrewCard({
@@ -134,6 +135,9 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
 });
 
 // --- Main CrewPage Component ---
+/** Transient selection id for the mobile create overlay (never persisted). */
+const NEW_SENTINEL = "__new__";
+
 export default function CrewPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -157,6 +161,7 @@ export default function CrewPage() {
     setSelectedId: setSelectedCrewId,
     setDetailContent,
   } = useDetailPanel();
+  const isDesktop = useIsDesktop();
 
   // FastScroll state
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
@@ -291,9 +296,19 @@ export default function CrewPage() {
   const virtualItems = rowVirtualizer.getVirtualItems();
 
   // Sync detail panel content — re-runs whenever selection, data, or active state changes
+  // While the create form is open (detail panel on desktop, ?selected overlay
+  // on mobile), data-driven re-syncs must not clobber the in-progress entry —
+  // but a user changing the selection ends create mode (see aircraft page).
+  const creatingRef = useRef<false | { sel: string | null }>(false);
+
   const syncDetailPanel = useCallback(() => {
     if (!isActive) return;
     if (fieldType) return;
+    if (creatingRef.current) {
+      const sel = selectedCrewId ?? null;
+      if (sel === NEW_SENTINEL || sel === creatingRef.current.sel) return;
+      creatingRef.current = false;
+    }
 
     if (isLoading) {
       setDetailContent(
@@ -324,7 +339,7 @@ export default function CrewPage() {
     } else {
       setDetailContent(null);
     }
-  }, [isActive, fieldType, selectedCrew, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
+  }, [isActive, fieldType, selectedCrewId, selectedCrew, sortedPersonnel, isLoading, setDetailContent, setSelectedCrewId]);
 
   // Update detail content when selection, data, or active state changes
   useEffect(() => {
@@ -414,16 +429,68 @@ export default function CrewPage() {
     }
   }, [fieldType, flightId, router, setSelectedCrewId]);
 
+  const openCreatePanel = useCallback(() => {
+    creatingRef.current = { sel: selectedCrewId ?? null };
+    setDetailContent(
+      <CrewDetailPanel
+        crewId="new"
+        isNew
+        onUpdated={async (saved) => {
+          creatingRef.current = false;
+          await mutate(CACHE_KEYS.personnel);
+          if (saved) setSelectedCrewId(saved.id);
+        }}
+        onCancelNew={() => {
+          creatingRef.current = false;
+          if (selectedCrew) {
+            setDetailContent(
+              <CrewDetailPanel
+                crewId={selectedCrew.id}
+                onUpdated={() => mutate(CACHE_KEYS.personnel)}
+                onBack={() => setSelectedCrewId(null)}
+              />
+            );
+          } else {
+            setSelectedCrewId(null);
+            setDetailContent(null);
+          }
+        }}
+      />
+    );
+  }, [selectedCrewId, selectedCrew, setDetailContent, setSelectedCrewId]);
+
   const handleAddCrew = useCallback(() => {
-    const params = new URLSearchParams();
     if (fieldType) {
+      // Picker flow (choosing crew for a flight) keeps the full-page route.
+      const params = new URLSearchParams();
       params.set("field", fieldType);
       params.set("return", returnUrl);
       if (flightId) params.set("flightId", flightId);
+      router.push(`/crew/new?${params.toString()}`);
+      return;
     }
-    const query = params.toString();
-    router.push(query ? `/crew/new?${query}` : "/crew/new");
-  }, [fieldType, returnUrl, flightId, router]);
+    // Create from state on both viewports — instant, no route mount. Desktop
+    // renders into the detail panel; mobile selects the sentinel so the
+    // ?selected overlay opens with the same form.
+    openCreatePanel();
+    if (!isDesktop) setSelectedCrewId(NEW_SENTINEL);
+  }, [isDesktop, fieldType, returnUrl, flightId, router, openCreatePanel, setSelectedCrewId]);
+
+  // Prefetch the standalone create route so the mobile [+] navigation is as
+  // snappy as opening a card (no RSC fetch on tap).
+  useEffect(() => {
+    router.prefetch("/crew/new");
+  }, [router]);
+
+  // ?new=1 — set when /crew/new detects a desktop viewport (deep link, or a
+  // window resized mid-create) and redirects here so the create form lives in
+  // the detail panel instead of the main panel.
+  const wantsNew = searchParams.get("new") === "1";
+  useEffect(() => {
+    if (!wantsNew) return;
+    router.replace("/crew", { scroll: false });
+    if (isDesktop) openCreatePanel();
+  }, [wantsNew, isDesktop, router, openCreatePanel]);
 
   const handleToggleFavorite = useCallback(async (crewId: string) => {
     const crew = personnel.find((p) => p.id === crewId);
@@ -459,11 +526,9 @@ export default function CrewPage() {
         onChange={setSearchQuery}
         placeholder="Search crew..."
       />
-      <GlassContainer cornerRadius={28}>
-        <Button variant="ghost" size="icon" onClick={handleAddCrew} className="h-14 w-14">
-          <Plus className="h-5 w-5" />
-        </Button>
-      </GlassContainer>
+      <GlassIconButton ariaLabel="Add crew member" onClick={handleAddCrew}>
+        <Plus className="h-5 w-5" />
+      </GlassIconButton>
     </>
   ), [handleAddCrew, searchQuery, desktopSearchOpen]);
 

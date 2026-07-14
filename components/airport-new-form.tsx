@@ -4,14 +4,14 @@ import { useState, useEffect, useMemo, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PageContainer } from "@/components/page-container"
-import { GlassContainer } from "@/components/ui/glass-container"
+import { GlassTextButton } from "@/components/ui/glass-icon-button"
 import { SettingsRow, ReadOnlyRow } from "@/components/ui/settings-row"
 import { Loader2, AlertCircle } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { addCustomAirport, getAirportByIcao, updateFlight } from "@/lib/db"
 import { syncService } from "@/lib/sync"
 import { submitAirportToServer } from "@/lib/submissions/submit"
-import { useRegisterDetailActions } from "@/hooks/use-page-actions"
+import { useRegisterDetailActions, useRegisterMainActions } from "@/hooks/use-page-actions"
 
 export interface AirportNewFormProps {
   prefilledCode?: string
@@ -291,39 +291,24 @@ export function AirportNewForm({
   const cancelRef = useRef(handleCancel)
   cancelRef.current = handleCancel
 
-  // Floating right-side action pills for the desktop detail panel
-  const detailActions = useMemo(() => {
+  // Floating glass Cancel/Save — right-side detail bar on desktop, main header
+  // bar on the standalone (mobile) route. Same buttons either way, so the page
+  // matches the app-wide glass header system instead of an embedded header.
+  const actions = useMemo(() => {
     return (
       <>
-        <GlassContainer cornerRadius={28}>
-          <Button
-            variant="ghost"
-            className="h-14 px-4"
-            onClick={() => cancelRef.current()}
-          >
-            Cancel
-          </Button>
-        </GlassContainer>
-        <GlassContainer cornerRadius={28}>
-          <Button
-            variant="ghost"
-            className="h-14 px-4 text-primary font-semibold"
-            disabled={!canSave}
-            onClick={() => saveRef.current()}
-          >
-            {isSaving ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              "Save"
-            )}
-          </Button>
-        </GlassContainer>
+        <GlassTextButton onClick={() => cancelRef.current()}>
+          Cancel
+        </GlassTextButton>
+        <GlassTextButton primary disabled={!canSave} onClick={() => saveRef.current()}>
+          {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Save"}
+        </GlassTextButton>
       </>
     )
   }, [canSave, isSaving])
 
-  // Only register actions in detail-panel mode; standalone route uses its own header
-  useRegisterDetailActions(detailActions, isDetailPanel)
+  useRegisterDetailActions(actions, isDetailPanel)
+  useRegisterMainActions(actions, !isDetailPanel)
 
   const formContent = (
     <div className="container mx-auto px-3 pt-4 pb-safe">
@@ -350,7 +335,7 @@ export function AirportNewForm({
             <div className="px-4 py-2.5 row-divider">
               <div className="flex items-center justify-between">
                 <div className="text-xs">
-                  <span className="text-amber-500 font-medium flex items-center gap-1">
+                  <span className="text-status-warning font-medium flex items-center gap-1">
                     <AlertCircle className="h-3 w-3" />
                     Already exists:
                   </span>
@@ -512,39 +497,6 @@ export function AirportNewForm({
     </div>
   )
 
-  const headerContent = (
-    <header className="bg-background/30 backdrop-blur-xl border-b border-border/50 z-50">
-      <div className="container mx-auto px-3">
-        <div className="flex items-center justify-between h-12">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleCancel}
-            className="text-primary h-8 px-2"
-          >
-            Cancel
-          </Button>
-          <h1 className="text-lg font-semibold truncate px-2">
-            New Airport
-          </h1>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleSave}
-            disabled={!canSave}
-            className="text-primary h-8 px-2 font-semibold"
-          >
-            {isSaving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              "Save"
-            )}
-          </Button>
-        </div>
-      </div>
-    </header>
-  )
-
   if (isDetailPanel) {
     // Detail panel mode: actions live in the floating right-side glass bar,
     // registered above via useRegisterDetailActions. Content scrolls behind
@@ -559,7 +511,7 @@ export function AirportNewForm({
   }
 
   return (
-    <PageContainer header={headerContent}>
+    <PageContainer>
       {formContent}
     </PageContainer>
   )

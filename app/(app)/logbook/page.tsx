@@ -24,39 +24,15 @@ import { Calendar, Plus, Search, X, ChevronDown } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
+import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useSearchParams } from "next/navigation"
 import { usePageActive } from "@/hooks/use-page-active"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
-import { GlassContainer } from "@/components/ui/glass-container"
+import { GlassButtonGroup, GlassGroupButton, GlassIconButton } from "@/components/ui/glass-icon-button"
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-function parseDateLocal(dateStr: string): Date {
-  if (!dateStr || typeof dateStr !== "string") {
-    return new Date()
-  }
-
-  const parts = dateStr.split("-")
-  if (parts.length !== 3) {
-    return new Date()
-  }
-
-  let year = Number(parts[0])
-  const month = Number(parts[1])
-  const day = Number(parts[2])
-
-  if (year < 100) {
-    year = 2000 + year
-  }
-
-  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) {
-    return new Date()
-  }
-
-  return new Date(year, month - 1, day)
-}
 
 export default function LogbookPage() {
   const router = useRouter()
@@ -382,57 +358,55 @@ export default function LogbookPage() {
 
   // Action buttons for the desktop floating glass bar — each in its own glass container.
   // Height h-14 matches the nav pill.
-  // Month/year text is inside the first GlassContainer (not a separate one) so month
-  // changes only re-render the text node — the GlassContainer DOM stays untouched.
+  // Month/year text is inside the first glass group (not a separate one) so month
+  // changes only re-render the text node — the glass DOM stays untouched.
   const selectedDateRef = useRef(selectedDate)
   selectedDateRef.current = selectedDate
+  // Re-entrancy guard: a second tap on [+] before the first create finishes
+  // must not create a second blank flight.
+  const creatingFlightRef = useRef(false)
   const logbookActions = useMemo(() => (
     <>
-      <GlassContainer cornerRadius={28}>
-        <div className="flex items-center gap-1 px-1 h-14">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Toggle calendar"
-            aria-pressed={showCalendar}
-            className={cn("h-12 w-12 rounded-full", showCalendar && "text-primary bg-primary/15")}
-            onClick={() => {
-              toggleCalendar(!showCalendar)
-              setSelectedDate(null)
-              setSearchFocused(false)
-              if (showCalendar) setShowMonthPicker(false)
-            }}
+      <GlassButtonGroup>
+        <GlassGroupButton
+          ariaLabel="Toggle calendar"
+          ariaPressed={showCalendar}
+          active={showCalendar}
+          onClick={() => {
+            toggleCalendar(!showCalendar)
+            setSelectedDate(null)
+            setSearchFocused(false)
+            if (showCalendar) setShowMonthPicker(false)
+          }}
+        >
+          <Calendar className="h-5 w-5" />
+        </GlassGroupButton>
+
+        {showCalendar && (
+          <button
+            onClick={() => setShowMonthPicker(prev => !prev)}
+            aria-label="Select month"
+            className="flex items-center gap-1 px-2 py-1 rounded-full text-sm font-medium text-foreground/80 hover:bg-foreground/5 transition-colors min-w-[5.5rem] justify-center"
           >
-            <Calendar className="h-5 w-5" />
-          </Button>
+            {MONTHS[selectedMonth.month]} {selectedMonth.year}
+            <ChevronDown className={cn("h-3 w-3 opacity-50 transition-transform", showMonthPicker && "rotate-180")} />
+          </button>
+        )}
 
-          {showCalendar && (
-            <button
-              onClick={() => setShowMonthPicker(prev => !prev)}
-              aria-label="Select month"
-              className="flex items-center gap-1 px-2 py-1 rounded-full text-sm font-medium text-foreground/80 hover:bg-foreground/5 transition-colors min-w-[5.5rem] justify-center"
-            >
-              {MONTHS[selectedMonth.month]} {selectedMonth.year}
-              <ChevronDown className={cn("h-3 w-3 opacity-50 transition-transform", showMonthPicker && "rotate-180")} />
-            </button>
-          )}
+        <UnifiedImportButton
+          context="logbook"
+          onComplete={() => {
+            refreshAllData()
+          }}
+        />
+      </GlassButtonGroup>
 
-          <UnifiedImportButton
-            context="logbook"
-            onComplete={() => {
-              refreshAllData()
-            }}
-          />
-        </div>
-      </GlassContainer>
-
-      <GlassContainer cornerRadius={28}>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Add flight"
-          className="h-14 w-14 rounded-full"
-          onClick={async () => {
+      <GlassIconButton
+        ariaLabel="Add flight"
+        onClick={async () => {
+          if (creatingFlightRef.current) return
+          creatingFlightRef.current = true
+          try {
             const newFlight = await createFlight(selectedDateRef.current || undefined)
             mutate(
               CACHE_KEYS.flights,
@@ -440,11 +414,13 @@ export default function LogbookPage() {
               { revalidate: false }
             )
             setSelectedFlightId(newFlight.id)
-          }}
-        >
-          <Plus className="h-5 w-5" />
-        </Button>
-      </GlassContainer>
+          } finally {
+            creatingFlightRef.current = false
+          }
+        }}
+      >
+        <Plus className="h-5 w-5" />
+      </GlassIconButton>
     </>
   ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId, selectedMonth, showMonthPicker])
 

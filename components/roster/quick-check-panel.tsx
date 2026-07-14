@@ -222,7 +222,7 @@ export function QuickCheckPanel({
                       onClick={() => toggleRemoveDuty(dp.id, dp.date)}
                       className={cn(
                         "flex-1 flex items-center justify-between px-2 py-1.5 rounded text-[11px] transition-colors",
-                        isRemoved ? "bg-red-500/10 text-red-500 line-through" : "bg-secondary/50 text-foreground hover:bg-secondary"
+                        isRemoved ? "bg-status-error/10 text-status-error line-through" : "bg-secondary/50 text-foreground hover:bg-secondary"
                       )}
                     >
                       <span className="font-medium tabular-nums">{formatDateShort(dp.date)}</span>
@@ -259,7 +259,7 @@ export function QuickCheckPanel({
                 {addEntries.length > 1 && (
                   <button
                     onClick={() => removeChange(entry.id)}
-                    className="absolute top-1.5 right-1.5 p-0.5 rounded text-muted-foreground hover:text-red-500 transition-colors"
+                    className="absolute top-1.5 right-1.5 p-0.5 rounded text-muted-foreground hover:text-status-error transition-colors"
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
@@ -340,8 +340,8 @@ export function QuickCheckPanel({
             <div className={cn(
               "rounded-md py-2 text-center font-semibold text-xs",
               result.overallLegal
-                ? "bg-green-500/10 text-green-600 dark:text-green-400"
-                : "bg-red-500/10 text-red-600 dark:text-red-400"
+                ? "bg-status-valid/10 text-status-valid"
+                : "bg-status-error/10 text-status-error"
             )}>
               {result.overallLegal ? "ALL CHANGES LEGAL" : "VIOLATIONS DETECTED"}
             </div>
@@ -350,13 +350,13 @@ export function QuickCheckPanel({
             {result.violations.length > 0 && (
               <div className="space-y-1">
                 {result.violations.map((v, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded bg-red-500/10">
+                  <div key={idx} className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded bg-status-error/10">
                     <div className="flex items-center gap-1.5">
-                      <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
-                      <span className="text-red-500 font-medium">{formatDateShort(v.date)}</span>
-                      <span className="text-red-400">{VIOLATION_TYPE_LABELS[v.type] ?? v.type}</span>
+                      <AlertTriangle className="h-3 w-3 text-status-error shrink-0" />
+                      <span className="text-status-error font-medium">{formatDateShort(v.date)}</span>
+                      <span className="text-status-error/80">{VIOLATION_TYPE_LABELS[v.type] ?? v.type}</span>
                     </div>
-                    <span className="text-red-500 tabular-nums font-medium">
+                    <span className="text-status-error tabular-nums font-medium">
                       {v.projected.toFixed(1)}h / {v.limit.toFixed(0)}h
                     </span>
                   </div>

@@ -2,7 +2,7 @@
 
 import { useReducedMotion } from "framer-motion"
 import { useSidebar } from "@/hooks/use-sidebar-context"
-import { useCanPushSidebar } from "@/hooks/use-is-desktop"
+import { useDesktopPill } from "@/hooks/use-is-desktop"
 
 const SIDEBAR_WIDTH = 199
 
@@ -10,13 +10,15 @@ const SIDEBAR_WIDTH = 199
  * Push sidebar spacer — invisible flex child that animates width
  * to push content when the sidebar is open.
  *
- * Only pushes content when viewport is wide enough (>= 920px) to fit
- * sidebar + main panel + detail panel. On narrower desktops (720-919px),
- * the sidebar overlays content instead.
+ * Gated on the DESKTOP-PILL breakpoint (>= 1120px), because that's the only
+ * tier where the sidebar UI (the pill↔sidebar morph) exists. Gating on the
+ * narrower >=920 tier reserved a 199px phantom column on iPad-sized windows:
+ * the persisted sidebar-open state pushed content right while the nav was the
+ * bottom mobile pill and nothing rendered in the gap.
  */
 export function PushSidebar() {
   const { isOpen } = useSidebar()
-  const canPush = useCanPushSidebar()
+  const canPush = useDesktopPill()
   const prefersReducedMotion = useReducedMotion()
 
   return (

@@ -350,9 +350,9 @@ export function FDPTimelineChart({
         ? Math.round(((data[headerView.rollingKey] as number) / headerView.limitValue) * 100)
         : null
       const headerPctColor = headerPct == null ? "text-muted-foreground"
-        : headerPct >= 100 ? "text-red-500"
-          : headerPct >= 90 ? "text-orange-500"
-            : headerPct >= 75 ? "text-yellow-500" : "text-green-500"
+        : headerPct >= 100 ? "text-status-error"
+          : headerPct >= 90 ? "text-status-critical"
+            : headerPct >= 75 ? "text-status-warning" : "text-status-valid"
 
       return (
         <div className="backdrop-blur-xl bg-popover/40 border border-border/40 rounded-lg p-2.5 shadow-lg text-xs max-w-[240px]">
@@ -385,7 +385,7 @@ export function FDPTimelineChart({
               {data.dutyHours > 0 && (
                 <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Duty</span>
-                  <span className={cn("font-medium tabular-nums", data.maxFdpHours && data.dutyHours > data.maxFdpHours && "text-red-500")}>
+                  <span className={cn("font-medium tabular-nums", data.maxFdpHours && data.dutyHours > data.maxFdpHours && "text-status-error")}>
                     {formatHoursHM(data.dutyHours)}{data.maxFdpHours ? `/${formatHoursHM(data.maxFdpHours)}` : ""}
                   </span>
                 </div>
@@ -813,14 +813,14 @@ export function FDPTimelineChart({
               const pct = cap.limit > 0 ? (cap.used / cap.limit) * 100 : 0
               const isActive = activeViews.has(view.key)
 
-              const remainingColor = pct >= 100 ? "text-red-500"
-                : pct >= 90 ? "text-orange-500"
-                  : pct >= 75 ? "text-yellow-500"
-                    : "text-green-500"
-              const barColor = pct >= 100 ? "bg-red-500"
-                : pct >= 90 ? "bg-orange-500"
-                  : pct >= 75 ? "bg-yellow-500"
-                    : "bg-green-500"
+              const remainingColor = pct >= 100 ? "text-status-error"
+                : pct >= 90 ? "text-status-critical"
+                  : pct >= 75 ? "text-status-warning"
+                    : "text-status-valid"
+              const barColor = pct >= 100 ? "bg-status-error"
+                : pct >= 90 ? "bg-status-critical"
+                  : pct >= 75 ? "bg-status-warning"
+                    : "bg-status-valid"
 
               return (
                 <button
@@ -1216,12 +1216,12 @@ export function FDPTimelineChart({
                 .map((exc, idx) => (
                   <div
                     key={idx}
-                    className="flex items-center justify-between text-[10px] px-2 py-1 rounded bg-red-500/10"
+                    className="flex items-center justify-between text-[10px] px-2 py-1 rounded bg-status-error/10"
                   >
-                    <span className="text-red-500 font-medium">
+                    <span className="text-status-error font-medium">
                       {(() => { const d = new Date(exc.date + "T00:00:00Z"); return `${d.getUTCDate().toString().padStart(2, "0")} ${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}`; })()}
                     </span>
-                    <span className="text-red-500">
+                    <span className="text-status-error">
                       {exc.projected.toFixed(1)}h / {exc.limit}h
                     </span>
                   </div>

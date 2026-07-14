@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, Suspense, lazy, Component, type ReactNode, type ErrorInfo } from "react"
 import { usePathname } from "next/navigation"
 import { ActiveRouteProvider } from "@/hooks/use-page-active"
+import { PageLoading } from "@/components/ui/page-loading"
 
 /**
  * Error boundary for lazy-loaded persistent pages.
@@ -57,20 +58,36 @@ class PageErrorBoundary extends Component<
  * on navigation even if we cached the `children` prop.
  */
 const PERSISTENT_PAGES: Record<string, React.LazyExoticComponent<React.ComponentType>> = {
+  "/": lazy(() => import("@/app/(app)/page")),
   "/logbook": lazy(() => import("@/app/(app)/logbook/page")),
   "/aircraft": lazy(() => import("@/app/(app)/aircraft/page")),
   "/airports": lazy(() => import("@/app/(app)/airports/page")),
   "/crew": lazy(() => import("@/app/(app)/crew/page")),
+  // Dashboard and roster joined the keep-alive set so every primary tab
+  // switches instantly: the dashboard is the most-visited page (Recharts
+  // remount was the dominant cost; its FDP data was already module-cached)
+  // and the roster list is virtualized, so the retained DOM is bounded.
+  "/roster": lazy(() => import("@/app/(app)/roster/page")),
 }
 
 /**
  * Normalise pathname → route key.
- * Only exact top-level matches are persistent.
+ *
+ * Only EXACT top-level matches map to a persistent page. Sub-routes
+ * (/aircraft/new, /crew/[id], /airports/[icao], …) must keep their own key —
+ * collapsing them to the first segment made `isPersistent` true, so
+ * KeepAlivePages rendered the kept-alive LIST page and never rendered
+ * `children`: the URL changed but the screen didn't. That silently swallowed
+ * every mobile [+] navigation (router.push("/aircraft/new") etc.) and all
+ * entity-detail deep links.
  */
 function routeKeyFromPathname(pathname: string | null): string {
   if (!pathname) return "/"
-  const segments = pathname.split("?")[0].split("/").filter(Boolean)
-  return segments.length > 0 ? `/${segments[0]}` : "/"
+  const path = pathname.split("?")[0]
+  const segments = path.split("/").filter(Boolean)
+  if (segments.length === 0) return "/"
+  if (segments.length === 1) return `/${segments[0]}`
+  return path
 }
 
 /**
@@ -136,7 +153,9 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
               }}
             >
               <PageErrorBoundary>
-                <Suspense fallback={null}>
+                {/* Shared spinner instead of a blank pane while the lazy chunk
+                    loads on the first visit to this tab. */}
+                <Suspense fallback={<PageLoading />}>
                   <PageComponent />
                 </Suspense>
               </PageErrorBoundary>

@@ -1,12 +1,15 @@
 "use client"
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useLayoutEffect, useRef } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { useSessionState } from "@/hooks/use-session-state"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
-import { GlassContainer } from "@/components/ui/glass-container"
+import { GlassButtonGroup, GlassGroupButton } from "@/components/ui/glass-icon-button"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/empty-state"
+import { FormSection } from "@/components/ui/form-section"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Calendar as CalendarIcon,
@@ -14,13 +17,15 @@ import {
   RefreshCw,
   List,
   CalendarDays,
+  ChevronLeft,
   Shield,
   TrendingUp,
   ArrowRight,
 } from "lucide-react"
 import { useScheduleEntries, useCurrencies, useDiscrepancyCounts, refreshAllData } from "@/hooks/data"
-import type { ScheduleEntry } from "@/types"
+import { usePageActive } from "@/hooks/use-page-active"
 import { cn } from "@/lib/utils"
+import { formatYMD } from "@/lib/utils/date"
 import Link from "next/link"
 import { DutyEntryCard, RosterCalendar } from "@/components/roster"
 import { FastScroll, generateDateItems } from "@/components/ui/fast-scroll"
@@ -31,25 +36,35 @@ type ViewMode = "list" | "calendar"
 export default function RosterPage() {
   const [viewMode, setViewMode] = useSessionState<ViewMode>("roster:viewMode", "list")
   const [selectedDate, setSelectedDate] = useSessionState<string | null>("roster:selectedDate", null)
-  const [selectedEntries, setSelectedEntries] = useState<ScheduleEntry[]>([])
 
   const { scheduleEntries, isLoading: entriesLoading, refresh: refreshEntries } = useScheduleEntries()
   const { currencies } = useCurrencies()
   const { counts: discrepancyCounts } = useDiscrepancyCounts()
 
-  // Group schedule entries by date
-  const entriesByDate = scheduleEntries.reduce(
-    (acc, entry) => {
-      if (!acc[entry.date]) {
-        acc[entry.date] = []
-      }
-      acc[entry.date].push(entry)
-      return acc
-    },
-    {} as Record<string, typeof scheduleEntries>
-  )
+  // Group schedule entries by date. Memoized on the data itself — without this,
+  // sortedDates gets a new identity every render and every downstream
+  // useMemo/useCallback keyed on it recomputes for nothing.
+  const { entriesByDate, sortedDates } = useMemo(() => {
+    const byDate = scheduleEntries.reduce(
+      (acc, entry) => {
+        if (!acc[entry.date]) {
+          acc[entry.date] = []
+        }
+        acc[entry.date].push(entry)
+        return acc
+      },
+      {} as Record<string, typeof scheduleEntries>
+    )
+    return {
+      entriesByDate: byDate,
+      sortedDates: Object.keys(byDate).sort((a, b) => b.localeCompare(a)),
+    }
+  }, [scheduleEntries])
 
-  const sortedDates = Object.keys(entriesByDate).sort((a, b) => b.localeCompare(a))
+  // Derived, never stored: entries for the selected day always reflect the
+  // latest data (a stored copy went stale after sync and rendered an empty
+  // day view when selectedDate was restored from sessionStorage).
+  const selectedEntries = selectedDate ? (entriesByDate[selectedDate] ?? []) : []
 
   // Generate FastScroll items from dates
   const fastScrollItems = useMemo(() => {
@@ -58,83 +73,115 @@ export default function RosterPage() {
 
   const [activeMonthKey, setActiveMonthKey] = useState<string | undefined>(undefined);
 
+  // ─── Virtualized date list ───────────────────────────────────
+  // One virtual row per date group, scrolling inside PageContainer's <main>.
+  // A year of airline roster is 300+ date cards / 600+ duty entries — rendering
+  // them all made Roster the only unvirtualized long list in the app.
+  const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null)
+  const mainRef = useCallback((node: HTMLElement | null) => setScrollEl(node), [])
+
+  const listRef = useRef<HTMLDivElement>(null)
+  const listOffsetRef = useRef(0)
+  // Measured every render (KPI cards above the list change height as data
+  // loads); ref write only, no render loop.
+  useLayoutEffect(() => {
+    listOffsetRef.current = listRef.current?.offsetTop ?? 0
+  })
+
+  const dateVirtualizer = useVirtualizer({
+    count: sortedDates.length,
+    getScrollElement: () => scrollEl,
+    // Rough guess: section header + ~64px per compact entry; measureElement corrects.
+    estimateSize: (i) => 48 + (entriesByDate[sortedDates[i]]?.length ?? 1) * 64,
+    overscan: 4,
+    scrollMargin: listOffsetRef.current,
+    getItemKey: (i) => sortedDates[i],
+  })
+
   const handleFastScrollSelect = useCallback((monthYear: string) => {
     setActiveMonthKey(monthYear);
 
     const [targetYear, targetMonth] = monthYear.split("-");
-    const targetDate = sortedDates.find((date) => {
+    const index = sortedDates.findIndex((date) => {
       const [year, month] = date.split("-");
       return year === targetYear && month === targetMonth;
     });
 
-    if (targetDate) {
-      const element = document.getElementById(`roster-date-${targetDate}`);
-      if (element) {
-        element.scrollIntoView({ behavior: "instant", block: "start" });
-      }
+    if (index !== -1) {
+      dateVirtualizer.scrollToIndex(index, { align: "start", behavior: "auto" });
     }
-  }, [sortedDates]);
+  }, [sortedDates, dateVirtualizer]);
 
-  const handleDateClick = (date: string, entries: ScheduleEntry[]) => {
+  const handleDateClick = (date: string) => {
     setSelectedDate(date)
-    setSelectedEntries(entries)
     setViewMode("list")
   }
 
   const handleBackToCalendar = () => {
     setSelectedDate(null)
-    setSelectedEntries([])
   }
 
   // Glass action buttons for the floating header bar
   const rosterActions = useMemo(() => (
     <>
-      <GlassContainer cornerRadius={28}>
-        <div className="flex items-center gap-0.5 px-1 h-14">
-          <Button variant="ghost" size="icon" aria-label="Refresh roster" className="h-12 w-12" onClick={() => refreshEntries()} disabled={entriesLoading}>
-            <RefreshCw className={cn("h-5 w-5", entriesLoading && "animate-spin")} />
-          </Button>
-          <Button
-            variant={viewMode === "list" ? "secondary" : "ghost"}
-            size="icon"
-            aria-label="List view"
-            aria-pressed={viewMode === "list"}
-            className="h-12 w-12"
-            onClick={() => setViewMode("list")}
-          >
-            <List className="h-5 w-5" />
-          </Button>
-          <Button
-            variant={viewMode === "calendar" ? "secondary" : "ghost"}
-            size="icon"
-            aria-label="Calendar view"
-            aria-pressed={viewMode === "calendar"}
-            className="h-12 w-12"
-            onClick={() => setViewMode("calendar")}
-          >
-            <CalendarDays className="h-5 w-5" />
-          </Button>
-        </div>
-      </GlassContainer>
-      <GlassContainer cornerRadius={28}>
-        <div className="flex items-center gap-0.5 px-1 h-14">
-          <UnifiedImportButton
-            context="roster"
-            onComplete={() => {
-              refreshEntries()
-              refreshAllData()
-            }}
-          />
-        </div>
-      </GlassContainer>
+      <GlassButtonGroup>
+        <GlassGroupButton
+          ariaLabel="Refresh roster"
+          onClick={() => refreshEntries()}
+          disabled={entriesLoading}
+        >
+          <RefreshCw className={cn("h-5 w-5", entriesLoading && "animate-spin")} />
+        </GlassGroupButton>
+        <GlassGroupButton
+          ariaLabel="List view"
+          ariaPressed={viewMode === "list"}
+          active={viewMode === "list"}
+          onClick={() => setViewMode("list")}
+        >
+          <List className="h-5 w-5" />
+        </GlassGroupButton>
+        <GlassGroupButton
+          ariaLabel="Calendar view"
+          ariaPressed={viewMode === "calendar"}
+          active={viewMode === "calendar"}
+          onClick={() => setViewMode("calendar")}
+        >
+          <CalendarDays className="h-5 w-5" />
+        </GlassGroupButton>
+      </GlassButtonGroup>
+      <GlassButtonGroup>
+        <UnifiedImportButton
+          context="roster"
+          onComplete={() => {
+            refreshEntries()
+            refreshAllData()
+          }}
+        />
+      </GlassButtonGroup>
     </>
   ), [refreshEntries, entriesLoading, viewMode, setViewMode])
 
-  useRegisterMainActions(rosterActions, true)
+  // Keep-alive: only the active tab owns the header actions; re-activation
+  // refreshes the schedule so the retained page stays accurate.
+  const isActive = usePageActive("/roster", refreshEntries)
+
+  useRegisterMainActions(rosterActions, isActive)
 
   return (
     <>
-      <PageContainer>
+      <PageContainer
+        mainRef={mainRef}
+        rightContent={
+          viewMode === "list" && !selectedDate && fastScrollItems.length > 1 ? (
+            <FastScroll
+              items={fastScrollItems}
+              activeKey={activeMonthKey}
+              onSelect={handleFastScrollSelect}
+              indicatorPosition="left"
+            />
+          ) : null
+        }
+      >
         <div className="px-4 pt-4 pb-safe space-y-4">
 
         {/* Stats Cards */}
@@ -153,20 +200,21 @@ export default function RosterPage() {
           </Card>
           <Card>
             <CardContent className="pt-4 pb-3 px-3">
-              <div className="text-2xl font-bold text-yellow-500">{discrepancyCounts.unresolved}</div>
+              <div className="text-2xl font-bold text-status-warning">{discrepancyCounts.unresolved}</div>
               <div className="text-xs text-muted-foreground">Discrepancies</div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Quick Access Navigation */}
+        {/* Quick Access Navigation — active: press feedback so the cards feel
+            tappable on touch, matching the sidebar items / glass buttons. */}
         {scheduleEntries.length > 0 && (
           <div className="grid grid-cols-3 gap-2">
             <Link href="/currencies">
-              <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
+              <Card className="hover:bg-secondary/50 active:bg-secondary/50 active:scale-[0.98] transition-[background-color,transform] cursor-pointer">
                 <CardContent className="pt-4 pb-3 px-3">
                   <div className="flex items-center justify-between mb-1">
-                    <Shield className="h-5 w-5 text-green-500" />
+                    <Shield className="h-5 w-5 text-status-valid" />
                     <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
                   </div>
                   <div className="text-xs font-medium">Currencies</div>
@@ -174,10 +222,10 @@ export default function RosterPage() {
               </Card>
             </Link>
             <Link href="/discrepancies">
-              <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
+              <Card className="hover:bg-secondary/50 active:bg-secondary/50 active:scale-[0.98] transition-[background-color,transform] cursor-pointer">
                 <CardContent className="pt-4 pb-3 px-3">
                   <div className="flex items-center justify-between mb-1">
-                    <AlertCircle className="h-5 w-5 text-yellow-500" />
+                    <AlertCircle className="h-5 w-5 text-status-warning" />
                     <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
                   </div>
                   <div className="text-xs font-medium">Discrepancies</div>
@@ -185,10 +233,10 @@ export default function RosterPage() {
               </Card>
             </Link>
             <Link href="/fdp">
-              <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
+              <Card className="hover:bg-secondary/50 active:bg-secondary/50 active:scale-[0.98] transition-[background-color,transform] cursor-pointer">
                 <CardContent className="pt-4 pb-3 px-3">
                   <div className="flex items-center justify-between mb-1">
-                    <TrendingUp className="h-5 w-5 text-blue-500" />
+                    <TrendingUp className="h-5 w-5 text-status-info" />
                     <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
                   </div>
                   <div className="text-xs font-medium">FDP Dashboard</div>
@@ -217,15 +265,11 @@ export default function RosterPage() {
 
         {/* Empty State */}
         {scheduleEntries.length === 0 && !entriesLoading && (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <CalendarIcon className="h-10 w-10 mx-auto text-muted-foreground/40 mb-3" />
-              <p className="text-sm font-medium text-foreground mb-1">No Schedule Data</p>
-              <p className="text-xs text-muted-foreground max-w-[240px] mx-auto mb-4">
-                Use the upload button above to import your Crew Logbook or Schedule report (CSV/PDF).
-              </p>
-            </CardContent>
-          </Card>
+          <EmptyState
+            icon={CalendarIcon}
+            title="No Schedule Data"
+            description="Use the upload button above to import your Crew Logbook or Schedule report (CSV/PDF)."
+          />
         )}
 
         {/* Calendar View */}
@@ -241,15 +285,16 @@ export default function RosterPage() {
                 {/* Selected Date Details */}
                 <div className="flex items-center gap-2 mb-4">
                   <Button variant="ghost" size="sm" onClick={handleBackToCalendar}>
-                    ← Back to Calendar
+                    <ChevronLeft className="h-4 w-4" />
+                    Back to Calendar
                   </Button>
                   <h2 className="text-lg font-semibold">
-                    {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
+                    {formatYMD(selectedDate, {
                       weekday: "long",
                       month: "long",
                       day: "numeric",
                       year: "numeric",
-                    })}
+                    }, "en-US")}
                   </h2>
                 </div>
                 {selectedEntries.map((entry) => (
@@ -257,43 +302,47 @@ export default function RosterPage() {
                 ))}
               </>
             ) : (
-              <>
-                {/* All Dates List — render every date so the FastScroll rail can
-                    reach any month (a 30-item cap left older months as dead taps). */}
-                {sortedDates.map((date) => (
-                  <Card key={date} id={`roster-date-${date}`}>
-                    <CardHeader className="pb-2 pt-3 px-3">
-                      <CardTitle className="text-sm font-medium">
-                        {new Date(date + "T00:00:00").toLocaleDateString("en-US", {
+              /* All Dates List — virtualized (one row per date group) so the
+                 whole history stays scrollable without rendering hundreds of
+                 cards. Grouped-section style matches the rest of the app. */
+              <div
+                ref={listRef}
+                className="relative"
+                style={{ height: `${dateVirtualizer.getTotalSize()}px` }}
+              >
+                {dateVirtualizer.getVirtualItems().map((vRow) => {
+                  const date = sortedDates[vRow.index]
+                  return (
+                    <div
+                      key={vRow.key}
+                      data-index={vRow.index}
+                      ref={dateVirtualizer.measureElement}
+                      className="absolute top-0 left-0 w-full pb-3"
+                      style={{
+                        transform: `translateY(${vRow.start - dateVirtualizer.options.scrollMargin}px)`,
+                      }}
+                    >
+                      <FormSection
+                        title={formatYMD(date, {
                           weekday: "short",
                           month: "short",
                           day: "numeric",
-                        })}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-3 pb-3 space-y-2">
-                      {entriesByDate[date].map((entry) => (
-                        <DutyEntryCard key={entry.id} entry={entry} compact />
-                      ))}
-                    </CardContent>
-                  </Card>
-                ))}
-              </>
+                        }, "en-US")}
+                      >
+                        <div className="p-3 space-y-2">
+                          {entriesByDate[date].map((entry) => (
+                            <DutyEntryCard key={entry.id} entry={entry} compact />
+                          ))}
+                        </div>
+                      </FormSection>
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </div>
         )}
 
-        {/* FastScroll rail - fixed position */}
-        {viewMode === "list" && !selectedDate && fastScrollItems.length > 1 && (
-          <div className="fixed right-1 top-1/2 -translate-y-1/2 z-40">
-            <FastScroll
-              items={fastScrollItems}
-              activeKey={activeMonthKey}
-              onSelect={handleFastScrollSelect}
-              indicatorPosition="left"
-            />
-          </div>
-        )}
       </div>
       </PageContainer>
     </>

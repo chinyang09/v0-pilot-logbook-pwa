@@ -70,23 +70,23 @@ const DISCREPANCY_TYPE_CONFIG: Record<
 const SEVERITY_CONFIG = {
   info: {
     icon: Info,
-    bg: "bg-blue-500/10",
-    text: "text-blue-500",
-    border: "border-blue-500/20",
+    bg: "bg-status-info/10",
+    text: "text-status-info",
+    border: "border-status-info/20",
     label: "Info",
   },
   warning: {
     icon: AlertTriangle,
-    bg: "bg-yellow-500/10",
-    text: "text-yellow-500",
-    border: "border-yellow-500/20",
+    bg: "bg-status-warning/10",
+    text: "text-status-warning",
+    border: "border-status-warning/20",
     label: "Warning",
   },
   error: {
     icon: AlertCircle,
-    bg: "bg-red-500/10",
-    text: "text-red-500",
-    border: "border-red-500/20",
+    bg: "bg-status-error/10",
+    text: "text-status-error",
+    border: "border-status-error/20",
     label: "Error",
   },
 }
@@ -134,7 +134,7 @@ export const DiscrepancyCard = memo(function DiscrepancyCard({
           </div>
         </div>
         {discrepancy.resolved ? (
-          <CheckCircle2 className="h-4 w-4 text-green-500" />
+          <CheckCircle2 className="h-4 w-4 text-status-valid" />
         ) : (
           <span
             className={cn(
@@ -208,9 +208,9 @@ export const DiscrepancyCard = memo(function DiscrepancyCard({
 
         {/* Resolution Info */}
         {discrepancy.resolved && (
-          <div className="mb-3 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+          <div className="mb-3 p-3 rounded-lg bg-status-valid/10 border border-status-valid/20">
             <div className="flex items-center gap-2 text-sm mb-1">
-              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              <CheckCircle2 className="h-4 w-4 text-status-valid" />
               <span className="font-medium">
                 {discrepancy.resolvedBy
                   ? RESOLUTION_LABELS[discrepancy.resolvedBy]

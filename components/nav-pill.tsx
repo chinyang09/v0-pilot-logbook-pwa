@@ -16,19 +16,17 @@ import {
   Settings,
   UserCircle,
   PanelLeft,
-  Cloud,
-  CloudOff,
-  Loader2,
   ChevronDown,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { OVERSHOOT_BEZIER, SETTLE_BEZIER, MORPH_EASE } from "@/lib/motion"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { useDesktopPill } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { navSections, dashboardNavItem } from "@/components/nav-sections"
-import { useSyncStatus, useSyncTrigger } from "@/hooks/sync/use-sync-status"
+import { SyncStatus } from "@/components/sync-status"
 import type { BottomNavTab } from "@/types/db/stores.types"
 
 // ─── Tab config ──────────────────────────────────────────────
@@ -110,41 +108,17 @@ const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_MARGIN * 2 // 191
 const PILL_HEIGHT = 56 // h-14
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
+
 // ─── Sync status icon ────────────────────────────────────────
 
+/**
+ * The nav's sync affordance is the shared <SyncStatus/> — it uses the theme's
+ * `--status-*` colors, shows the pending-count badge, and (critically) routes a
+ * manual sync through `ensureValidSession()` so a dead session prompts passkey
+ * re-auth instead of silently 401ing. Do not reintroduce a bespoke button here.
+ */
 function SyncIconButton({ className }: { className?: string }) {
-  const { status, isSyncing: statusSyncing } = useSyncStatus()
-  const { triggerSync, isSyncing: triggerSyncing } = useSyncTrigger()
-  const syncing = statusSyncing || triggerSyncing
-
-  const handleSync = () => {
-    if (!syncing && status !== "offline") triggerSync()
-  }
-
-  return (
-    <button
-      onClick={handleSync}
-      disabled={syncing || status === "offline"}
-      className={cn(
-        "flex items-center justify-center h-8 w-8 rounded-full flex-shrink-0 transition-colors",
-        status === "offline"
-          ? "text-red-400/70 cursor-not-allowed"
-          : syncing
-            ? "text-orange-400 cursor-wait"
-            : "text-emerald-400 hover:text-emerald-300 cursor-pointer",
-        className
-      )}
-      title={syncing ? "Syncing..." : status === "offline" ? "Offline" : "Tap to sync"}
-    >
-      {syncing ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : status === "offline" ? (
-        <CloudOff className="h-4 w-4" />
-      ) : (
-        <Cloud className="h-4 w-4" />
-      )}
-    </button>
-  )
+  return <SyncStatus className={cn("h-8 w-8 flex-shrink-0", className)} />
 }
 
 // ─── Gravity active-tab indicator ────────────────────────────
@@ -215,9 +189,9 @@ function GravityIndicator({
   const transition = reduce
     ? "none"
     : [
-        "transform 0.5s cubic-bezier(0.34, 1.5, 0.64, 1)",
-        "width 0.4s cubic-bezier(0.22, 1, 0.36, 1)",
-        "height 0.4s cubic-bezier(0.22, 1, 0.36, 1)",
+        `transform 0.5s ${OVERSHOOT_BEZIER}`,
+        `width 0.4s ${SETTLE_BEZIER}`,
+        `height 0.4s ${SETTLE_BEZIER}`,
       ].join(", ")
 
   return (
@@ -539,7 +513,6 @@ function useMorphPhase(isOpen: boolean, phaseDuration: number) {
   return { phase, advancePhase, isSidebarShape }
 }
 
-const MORPH_EASE = "cubic-bezier(0.4, 0, 0.2, 1)"
 
 /**
  * Build the per-property CSS `transition` for the morph so the two property
@@ -726,7 +699,7 @@ function MobilePillMorph({
   // bottom-left. In the pill state only `transform` animates (scroll hide/show).
   const transition =
     phase === "pill"
-      ? `transform ${prefersReducedMotion ? 0 : 300}ms cubic-bezier(0.34, 1.56, 0.64, 1)`
+      ? `transform ${prefersReducedMotion ? 0 : 300}ms ${OVERSHOOT_BEZIER}`
       : morphTransition(phase, DUR, LEAD, "left, transform, width")
 
   const style: React.CSSProperties = {

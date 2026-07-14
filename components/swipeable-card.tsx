@@ -13,6 +13,7 @@ import {
   type PanInfo,
 } from "framer-motion"
 import { cn } from "@/lib/utils"
+import { SPRING, POP_SPRING } from "@/lib/motion"
 import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button"
 import { HoldProgressBorder } from "@/components/ui/hold-progress-border"
 
@@ -27,10 +28,6 @@ const GAP = 8
 const PANEL_PAD = 8
 /** Elastic resistance once dragged past the natural open position */
 const DRAG_ELASTIC = 0.14
-/** Spring used for every snap/settle animation of the card */
-const SPRING = { type: "spring" as const, stiffness: 520, damping: 42, mass: 0.9 }
-/** Spring used for the per-button scale/pop-in */
-const POP_SPRING = { stiffness: 700, damping: 24, mass: 0.6 }
 
 export interface SwipeAction {
   label?: string
@@ -54,7 +51,7 @@ export interface SwipeAction {
    * dialog.
    */
   holdToConfirm?: boolean
-  /** Hold duration in ms (default 700). */
+  /** Hold duration in ms (default 2500). */
   holdDuration?: number
 }
 

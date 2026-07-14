@@ -1,5 +1,6 @@
 "use client"
 
+import { formatYMDShort as formatShortDate } from "@/lib/utils/date"
 import * as React from "react"
 import Link from "next/link"
 import { PlaneTakeoff, PlaneLanding, ShieldCheck, ShieldAlert } from "lucide-react"
@@ -14,12 +15,6 @@ interface ToLogCardProps {
   recentEvents: TLEvent[]
   currency: NinetyDayCurrency
   className?: string
-}
-
-function formatShortDate(iso: string): string {
-  if (!iso) return ""
-  const d = new Date(`${iso}T00:00:00`)
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(d)
 }
 
 export function ToLogCard({

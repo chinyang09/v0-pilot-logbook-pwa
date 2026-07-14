@@ -227,7 +227,7 @@ export function ImportReviewModalV2({
           {partitioned.safe.length > 0 && (
             <Section
               title={`Auto-applied safe updates (${partitioned.safe.length})`}
-              icon={<CheckCircle2 className="h-4 w-4 text-green-600" />}
+              icon={<CheckCircle2 className="h-4 w-4 text-status-valid" />}
             >
               <p className="text-xs text-muted-foreground mb-3">
                 Future flights and existing flights with only crew/route metadata
@@ -281,7 +281,7 @@ export function ImportReviewModalV2({
           {partitioned.edited.length > 0 && (
             <Section
               title={`Edited flights (${partitioned.edited.length})`}
-              icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
+              icon={<AlertTriangle className="h-4 w-4 text-status-warning" />}
             >
               <p className="text-xs text-muted-foreground mb-3">
                 These flights have your edits (signatures, remarks, manual
@@ -439,12 +439,12 @@ function SummaryBar(props: {
   return (
     <div className="flex flex-wrap gap-2 text-xs">
       {props.creates > 0 && (
-        <Badge variant="default" className="bg-green-600">
+        <Badge variant="default" className="bg-status-valid text-primary-foreground">
           {props.creates} new
         </Badge>
       )}
       {props.safe > 0 && (
-        <Badge variant="secondary" className="bg-blue-100 text-blue-900">
+        <Badge variant="secondary" className="bg-status-info/15 text-status-info">
           {props.safe} safe updates
         </Badge>
       )}
@@ -452,12 +452,12 @@ function SummaryBar(props: {
         <Badge variant="outline">{props.consult} need consent</Badge>
       )}
       {props.edited > 0 && (
-        <Badge variant="outline" className="border-amber-500 text-amber-700">
+        <Badge variant="outline" className="border-status-warning text-status-warning">
           {props.edited} edited
         </Badge>
       )}
       {props.deletions > 0 && (
-        <Badge variant="outline" className="border-red-500 text-red-700">
+        <Badge variant="outline" className="border-status-error text-status-error">
           {props.deletions} orphan
         </Badge>
       )}
@@ -503,7 +503,7 @@ function DiffRow({
   airportPref: AirportPref;
 }) {
   return (
-    <div className="pl-6 border-l-2 border-blue-200 py-1">
+    <div className="pl-6 border-l-2 border-status-info/30 py-1">
       <div className="text-sm font-medium">
         {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
         {depDisplay(op.flight, airportPref)}→{arrDisplay(op.flight, airportPref)}
@@ -582,7 +582,7 @@ function EditedRow({
     }
   };
   return (
-    <label className="flex items-start gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer border-l-2 border-amber-500">
+    <label className="flex items-start gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer border-l-2 border-status-warning">
       <Checkbox
         checked={checked}
         onCheckedChange={(v) => onCheckedChange(Boolean(v))}
@@ -601,7 +601,7 @@ function EditedRow({
               <Badge
                 key={r}
                 variant="outline"
-                className="text-[10px] border-amber-500 text-amber-700"
+                className="text-[10px] border-status-warning text-status-warning"
               >
                 {reasonLabel(r)}
               </Badge>
@@ -718,7 +718,7 @@ function SunCheck({
           className={
             ctx.depSunStatus === "night"
               ? "text-indigo-500 dark:text-indigo-300 font-medium"
-              : "text-amber-600 dark:text-amber-400 font-medium"
+              : "text-status-warning font-medium"
           }
         >
           {ctx.depSunStatus ?? "?"}
@@ -733,7 +733,7 @@ function SunCheck({
           className={
             ctx.arrSunStatus === "night"
               ? "text-indigo-500 dark:text-indigo-300 font-medium"
-              : "text-amber-600 dark:text-amber-400 font-medium"
+              : "text-status-warning font-medium"
           }
         >
           {ctx.arrSunStatus ?? "?"}
@@ -763,7 +763,7 @@ function ChangeList({
             <span className=" text-foreground">{change.to}</span>
           </div>
           {change.note && (
-            <div className="pl-3 text-[11px] italic text-amber-700 dark:text-amber-400">
+            <div className="pl-3 text-[11px] italic text-status-warning">
               {change.note}
             </div>
           )}

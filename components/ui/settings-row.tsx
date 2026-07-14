@@ -1,10 +1,43 @@
 "use client"
 
+import type React from "react"
 import { useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { cn } from "@/lib/utils"
+
+/** Shared label block: main label + optional small muted description. */
+function RowLabel({
+  label,
+  description,
+  required,
+  disabled,
+}: {
+  label: string
+  description?: string
+  required?: boolean
+  disabled?: boolean
+}) {
+  return (
+    <div className="min-w-0 flex-1 mr-4">
+      <span className={disabled ? "text-muted-foreground" : "text-foreground"}>
+        {label}
+        {required && <span className="text-destructive ml-0.5">*</span>}
+      </span>
+      {description && (
+        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+      )}
+    </div>
+  )
+}
 
 /**
  * A row displaying a label and value, optionally editable via an inline input.
@@ -15,6 +48,7 @@ import { cn } from "@/lib/utils"
  */
 export function SettingsRow({
   label,
+  description,
   value,
   onChange,
   placeholder,
@@ -26,6 +60,8 @@ export function SettingsRow({
   swipeToClear = true,
 }: {
   label: string
+  /** Optional small muted line under the label. */
+  description?: string
   value: string
   onChange?: (value: string) => void
   placeholder?: string
@@ -47,10 +83,7 @@ export function SettingsRow({
         !wrapped && "row-divider"
       )}
     >
-      <span className="text-foreground">
-        {label}
-        {required && <span className="text-destructive ml-0.5">*</span>}
-      </span>
+      <RowLabel label={label} description={description} required={required} />
       {readOnly ? (
         <span className="text-muted-foreground">{value || "-"}</span>
       ) : (
@@ -93,12 +126,15 @@ export function SettingsRow({
  */
 export function ToggleRow({
   label,
+  description,
   checked,
   onCheckedChange,
   readOnly = false,
   disabled = false,
 }: {
   label: string
+  /** Optional small muted line under the label. */
+  description?: string
   checked: boolean
   onCheckedChange?: (checked: boolean) => void
   readOnly?: boolean
@@ -106,14 +142,59 @@ export function ToggleRow({
 }) {
   return (
     <div className="flex items-center justify-between px-4 py-3.5 row-divider">
-      <span className={disabled ? "text-muted-foreground" : "text-foreground"}>
-        {label}
-      </span>
+      <RowLabel label={label} description={description} disabled={disabled} />
       <Switch
         checked={checked}
         onCheckedChange={readOnly ? undefined : onCheckedChange}
         disabled={readOnly || disabled}
       />
+    </div>
+  )
+}
+
+/**
+ * A row displaying a label and an inline select. The trigger is blended into
+ * the row (no box) like the other inline inputs; the popover is a standard
+ * Select menu.
+ */
+export function SelectRow<T extends string>({
+  label,
+  description,
+  value,
+  onValueChange,
+  options,
+  disabled = false,
+}: {
+  label: string
+  /** Optional small muted line under the label. */
+  description?: string
+  value: T
+  onValueChange: (value: T) => void
+  options: Array<{ value: T; label: React.ReactNode }>
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex items-center justify-between px-4 py-3.5 row-divider">
+      <RowLabel label={label} description={description} disabled={disabled} />
+      <Select value={value} onValueChange={(v) => onValueChange(v as T)} disabled={disabled}>
+        <SelectTrigger
+          className={cn(
+            // Blend into the row like the inline text inputs — no box, right
+            // aligned, same type size as the read-only value.
+            "border-0 bg-transparent dark:bg-transparent shadow-none rounded-none h-auto p-0 w-auto",
+            "justify-end gap-1 text-muted-foreground md:text-base focus-visible:ring-0"
+          )}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent align="end">
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   )
 }
