@@ -95,7 +95,7 @@ export default function FDPPage() {
   const { preferences } = usePreferences()
   const activeRule: RegulationType = preferences.dutyTimeDefaults?.regulationType ?? "CAAS"
 
-  const { selectedId, setDetailContent, setHasDetailSupport, setSelectedId } = useDetailPanel()
+  const { selectedId, setDetailContent, setSelectedId } = useDetailPanel()
   const [scenarioResult, setScenarioResult] = useState<ScenarioResult | null>(null)
   const [quickCheckOpen, setQuickCheckOpen] = useState(false)
 
@@ -107,16 +107,8 @@ export default function FDPPage() {
   // setSelectedId new ref → effect reruns.
   const setDetailContentRef = useRef(setDetailContent)
   const setSelectedIdRef = useRef(setSelectedId)
-  const setHasDetailSupportRef = useRef(setHasDetailSupport)
   useEffect(() => { setDetailContentRef.current = setDetailContent })
   useEffect(() => { setSelectedIdRef.current = setSelectedId })
-  useEffect(() => { setHasDetailSupportRef.current = setHasDetailSupport })
-
-  // Register detail panel support
-  useEffect(() => {
-    setHasDetailSupportRef.current(true)
-    return () => setHasDetailSupportRef.current(false)
-  }, [])
 
   const activeLimits = useMemo(
     () => FTL_PRESETS[activeRule] ?? FTL_PRESETS.CAAS,

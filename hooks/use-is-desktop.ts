@@ -84,3 +84,18 @@ export function useIsDesktop() {
 export function useDesktopPill() {
   return useSyncExternalStore(desktopPillStore.subscribe, desktopPillStore.getSnapshot, getServerSnapshot)
 }
+
+const emptySubscribe = () => () => {}
+
+/**
+ * False during SSR and the hydration render, true from the first client-owned
+ * render — the same pass in which the breakpoint stores above deliver their
+ * real values. Use it to CSS-gate layout variants pre-hydration: the JS
+ * breakpoint hooks must report `false` while hydrating (server snapshot), so
+ * anything JS-gated on them renders the mobile tier first and visibly jumps
+ * at desktop widths. Rendering both variants behind viewport classes until
+ * hydration, then letting JS pick one, removes that flash.
+ */
+export function useHydrated() {
+  return useSyncExternalStore(emptySubscribe, () => true, () => false)
+}

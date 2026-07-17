@@ -21,7 +21,7 @@ import {
 import { cn } from "@/lib/utils"
 import { OVERSHOOT_BEZIER, SETTLE_BEZIER, MORPH_EASE } from "@/lib/motion"
 import { GlassContainer } from "@/components/ui/glass-container"
-import { useDesktopPill } from "@/hooks/use-is-desktop"
+import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { usePreferences } from "@/components/providers/preferences-provider"
@@ -471,6 +471,7 @@ function useViewportMeasure() {
 
 export function NavPill() {
   const canPush = useDesktopPill()
+  const hydrated = useHydrated()
   const { isOpen: sidebarOpen, toggle: toggleSidebar } = useSidebar()
   const { hideNavbar } = useScrollNavbarContext()
   const pathname = usePathname()
@@ -479,7 +480,7 @@ export function NavPill() {
 
   const tabs = preferences.navigation.bottomNavTabs
 
-  return canPush ? (
+  const desktopPill = (
     <DesktopPillMorph
       tabs={tabs}
       pathname={pathname}
@@ -487,7 +488,8 @@ export function NavPill() {
       onToggleSidebar={toggleSidebar}
       prefersReducedMotion={!!prefersReducedMotion}
     />
-  ) : (
+  )
+  const mobilePill = (
     <MobilePillMorph
       tabs={tabs}
       pathname={pathname}
@@ -495,6 +497,22 @@ export function NavPill() {
       prefersReducedMotion={!!prefersReducedMotion}
     />
   )
+
+  // Pre-hydration (SSR HTML + the hydration render), useDesktopPill() must
+  // report false — JS-picking a variant painted the BOTTOM pill at desktop
+  // widths until hydration finished, then jumped to the top pill. Render both
+  // variants gated by the same 1120px breakpoint in CSS so the correct one
+  // paints immediately; once hydrated, JS picks one and the other unmounts.
+  if (!hydrated) {
+    return (
+      <>
+        <div className="hidden min-[1120px]:block">{desktopPill}</div>
+        <div className="min-[1120px]:hidden">{mobilePill}</div>
+      </>
+    )
+  }
+
+  return canPush ? desktopPill : mobilePill
 }
 
 // ─── Morph phase state machine (shared) ──────────────────────

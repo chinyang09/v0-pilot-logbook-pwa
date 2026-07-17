@@ -2,41 +2,46 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { useIsDesktop } from "@/hooks/use-is-desktop"
+import { KEEPALIVE_DETAIL_ROUTES } from "@/components/keep-alive-routes"
+
+interface SetSelectedIdOptions {
+  /**
+   * Pass `false` for PROGRAMMATIC selections (e.g. "auto-select the first
+   * section so the desktop panel isn't empty"). A non-explicit selection is
+   * stored in state + sessionStorage only — it does NOT mark the route as
+   * explicitly selected and does NOT write `?selected=` to the URL. Both of
+   * those signals open the full-screen mobile detail overlay when the
+   * viewport crosses below the split breakpoint (iPad Split View, window
+   * resize), which must only ever happen for selections the user actually
+   * made. Defaults to true (user taps).
+   */
+  explicit?: boolean
+}
 
 interface DetailPanelContextType {
   // The currently rendered detail content
   detailContent: ReactNode | null
   // Set the detail content to render
   setDetailContent: (content: ReactNode | null) => void
-  // The selected item ID (stored in URL as ?selected=...)
+  // The selected item ID (stored in URL as ?selected=... for explicit selections)
   selectedId: string | null
-  // Set the selected item (updates URL)
-  setSelectedId: (id: string | null) => void
+  // Set the selected item (updates URL unless opts.explicit === false)
+  setSelectedId: (id: string | null, opts?: SetSelectedIdOptions) => void
   /**
    * True when the current route's selection was set explicitly this session
    * (user tapped an item / created one) rather than restored from
-   * sessionStorage. The mobile overlay opens for explicit selections
-   * immediately from state — it must NOT wait for the router.replace URL
-   * round-trip, which can be slow or dropped on a phone (offline PWA, service
-   * worker, backgrounding) while desktop renders straight from state.
+   * sessionStorage or auto-selected. The mobile overlay opens for explicit
+   * selections immediately from state — it must NOT wait for the
+   * router.replace URL round-trip, which can be slow or dropped on a phone
+   * (offline PWA, service worker, backgrounding) while desktop renders
+   * straight from state.
    */
   selectionExplicit: boolean
-  // Whether this is a page that supports detail panel
-  hasDetailSupport: boolean
-  // Register that current page supports detail panel
-  setHasDetailSupport: (value: boolean) => void
-  // Pin detail content so it survives one pathname change (for picker navigation)
-  pinDetailContent: () => void
 }
 
 const DetailPanelContext = createContext<DetailPanelContextType | null>(null)
 
 const SELECTION_STORAGE_KEY = "detail-panel-selections"
-
-// Routes that use KeepAlivePages — their detail content survives navigation
-// because the page stays mounted and will re-sync via the usePageActive callback.
-const KEEPALIVE_ROUTES = ["/logbook", "/aircraft", "/airports", "/crew"]
 
 // Get stored selections from sessionStorage
 function getStoredSelections(): Record<string, string> {
@@ -75,13 +80,6 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
   const searchParams = useSearchParams()
 
   const [detailContent, setDetailContent] = useState<ReactNode | null>(null)
-  const [hasDetailSupport, setHasDetailSupport] = useState(false)
-
-  // One-shot pin: when true, the next pathname change won't clear detailContent
-  const pinnedRef = useRef(false)
-  const pinDetailContent = useCallback(() => {
-    pinnedRef.current = true
-  }, [])
 
   // Derive current base route (e.g. "/aircraft", "/airports") from pathname
   const currentBase = useMemo(
@@ -122,22 +120,28 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     )
   }, [searchParams, currentBase])
 
-  const setSelectedId = useCallback((id: string | null) => {
+  const setSelectedId = useCallback((id: string | null, opts?: SetSelectedIdOptions) => {
+    const explicit = opts?.explicit !== false
+
     setSelections(prev => ({ ...prev, [currentBase]: id }))
+    const nextExplicit = explicit && !!id
     setExplicitBases(prev =>
-      prev[currentBase] === !!id ? prev : { ...prev, [currentBase]: !!id }
+      prev[currentBase] === nextExplicit ? prev : { ...prev, [currentBase]: nextExplicit }
     )
 
-    // Update URL
-    const params = new URLSearchParams(searchParams.toString())
-    if (id) {
-      params.set("selected", id)
-    } else {
-      params.delete("selected")
-    }
+    // Update URL — explicit selections only. A programmatic default writing
+    // ?selected= would re-open the mobile overlay on a desktop→mobile resize.
+    if (explicit) {
+      const params = new URLSearchParams(searchParams.toString())
+      if (id) {
+        params.set("selected", id)
+      } else {
+        params.delete("selected")
+      }
 
-    const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname
-    router.replace(newUrl || "/", { scroll: false })
+      const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname
+      router.replace(newUrl || "/", { scroll: false })
+    }
 
     // Persist to sessionStorage (keyed by base route, matching the map).
     // Transient sentinel selections ("__new__" — the mobile create overlay)
@@ -147,30 +151,38 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     }
   }, [currentBase, pathname, router, searchParams])
 
-  // Reset state when pathname changes (different page)
-  // If pinned, skip one reset so detail content survives picker navigation.
-  // If navigating BETWEEN keep-alive routes, don't clear — the activated page
-  // will re-set its detail content via its own usePageActive callback.
+  // Re-sync ?selected= into the URL when returning to a keep-alive tab whose
+  // EXPLICIT selection survived in state (tab navigation links carry no query,
+  // so a copied URL used to lose the selection). Explicit-only on the exact
+  // base pathname: restored/auto selections must stay out of the URL (see
+  // SetSelectedIdOptions), and sub-routes (/aircraft/new) keep their own URL.
+  useEffect(() => {
+    if (pathname !== currentBase) return
+    if (!KEEPALIVE_DETAIL_ROUTES.includes(currentBase)) return
+    if (searchParams.has("selected")) return
+    const sel = selections[currentBase]
+    if (!sel || sel.startsWith("__") || !explicitBases[currentBase]) return
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("selected", sel)
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+  }, [pathname, currentBase, searchParams, selections, explicitBases, router])
+
+  // Reset detail content when the base route changes — EXCEPT between two
+  // keep-alive routes that own detail content (the activated page re-sets its
+  // own panel via its usePageActive callback; clearing would flash). Routes
+  // derive from the shared registry in keep-alive-routes.ts, so pages added
+  // to the keep-alive set can't silently miss this list again.
   const prevPathnameRef = useRef(pathname)
   useEffect(() => {
-    if (pinnedRef.current) {
-      pinnedRef.current = false
-      prevPathnameRef.current = pathname
-      return
-    }
-
     const prevBase = "/" + (prevPathnameRef.current?.split("/").filter(Boolean)[0] || "")
     const currBase = "/" + (pathname?.split("/").filter(Boolean)[0] || "")
     prevPathnameRef.current = pathname
 
-    // If navigating between two keep-alive routes, let the activated page
-    // re-sync detail content — don't clear it (prevents flash).
-    if (KEEPALIVE_ROUTES.includes(prevBase) && KEEPALIVE_ROUTES.includes(currBase)) {
+    if (KEEPALIVE_DETAIL_ROUTES.includes(prevBase) && KEEPALIVE_DETAIL_ROUTES.includes(currBase)) {
       return
     }
 
     setDetailContent(null)
-    setHasDetailSupport(false)
   }, [pathname])
 
   return (
@@ -181,9 +193,6 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
         selectedId,
         setSelectedId,
         selectionExplicit,
-        hasDetailSupport,
-        setHasDetailSupport,
-        pinDetailContent,
       }}
     >
       {children}
@@ -198,75 +207,10 @@ const defaultValue: DetailPanelContextType = {
   selectedId: null,
   setSelectedId: () => {},
   selectionExplicit: false,
-  hasDetailSupport: false,
-  setHasDetailSupport: () => {},
-  pinDetailContent: () => {},
 }
 
 export function useDetailPanel() {
   const context = useContext(DetailPanelContext)
   // Return default value when used outside provider (e.g., SSR or mobile layout)
   return context ?? defaultValue
-}
-
-// Hook for pages to register their detail support and auto-select first item
-export function useDetailPanelPage<T extends { id: string }>(options: {
-  items: T[]
-  isLoading: boolean
-  renderDetail: (item: T) => ReactNode
-  emptyMessage?: string
-}) {
-  const { items, isLoading, renderDetail, emptyMessage = "No entries" } = options
-  const { selectedId, setSelectedId, setDetailContent, setHasDetailSupport } = useDetailPanel()
-  const isDesktop = useIsDesktop()
-
-  // Register that this page supports detail panel
-  useEffect(() => {
-    setHasDetailSupport(true)
-    return () => setHasDetailSupport(false)
-  }, [setHasDetailSupport])
-
-  // Auto-select first item if nothing selected and items loaded
-  // Desktop only — on mobile, auto-select would trigger the detail overlay
-  useEffect(() => {
-    if (!isDesktop) return
-    if (!isLoading && items.length > 0 && !selectedId) {
-      setSelectedId(items[0].id)
-    }
-  }, [isDesktop, isLoading, items, selectedId, setSelectedId])
-
-  // Update detail content when selection changes
-  useEffect(() => {
-    if (isLoading) {
-      setDetailContent(
-        <div className="flex items-center justify-center h-full">
-          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
-        </div>
-      )
-      return
-    }
-
-    if (items.length === 0) {
-      setDetailContent(
-        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <p>{emptyMessage}</p>
-        </div>
-      )
-      return
-    }
-
-    const selectedItem = items.find(item => item.id === selectedId)
-    if (selectedItem) {
-      setDetailContent(renderDetail(selectedItem))
-    } else if (isDesktop && items.length > 0) {
-      // Selection not found, select first item (desktop only)
-      setSelectedId(items[0].id)
-    }
-  }, [isDesktop, selectedId, items, isLoading, renderDetail, setDetailContent, setSelectedId, emptyMessage])
-
-  return {
-    selectedId,
-    setSelectedId,
-    selectedItem: items.find(item => item.id === selectedId) || null,
-  }
 }

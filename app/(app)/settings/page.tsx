@@ -78,11 +78,7 @@ const SECTIONS: SectionDef[] = [
 
 // ─── Detail panel wrapper with frosted header ───────────────
 
-function SettingsDetailPanel({ title, onBack, children }: {
-  title: string
-  onBack: () => void
-  children: React.ReactNode
-}) {
+function SettingsDetailPanel({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-full relative">
       <div className="h-full overflow-auto pt-16">
@@ -336,26 +332,18 @@ function ImportDefaultsSection({ preferences, updateImportDefaults }: {
 export default function SettingsPage() {
   const prefs = usePreferences()
   const { preferences, isLoading } = prefs
-  const { selectedId, setSelectedId, setDetailContent, setHasDetailSupport } = useDetailPanel()
+  const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
   const isDesktop = useIsDesktop()
 
   // Clear stale keep-alive page actions
   useRegisterMainActions(null, true)
-
-  // Register detail support
-  useEffect(() => {
-    setHasDetailSupport(true)
-    return () => setHasDetailSupport(false)
-  }, [setHasDetailSupport])
-
-  const handleBack = useCallback(() => setSelectedId(null), [setSelectedId])
 
   // Build detail content for a given section
   const renderSection = useCallback((key: SectionKey) => {
     const section = SECTIONS.find((s) => s.key === key)
     if (!section) return null
     const wrap = (content: React.ReactNode) => (
-      <SettingsDetailPanel title={section.label} onBack={handleBack}>
+      <SettingsDetailPanel>
         {content}
       </SettingsDetailPanel>
     )
@@ -375,7 +363,7 @@ export default function SettingsPage() {
       default:
         return null
     }
-  }, [preferences, prefs, handleBack])
+  }, [preferences, prefs])
 
   // Sync detail panel when selection or preferences change
   useEffect(() => {
@@ -383,8 +371,12 @@ export default function SettingsPage() {
     if (sectionKey && SECTIONS.find((s) => s.key === sectionKey)) {
       setDetailContent(renderSection(sectionKey))
     } else if (!sectionKey && isDesktop) {
-      // Auto-select first section on desktop
-      setSelectedId("appearance")
+      // Auto-select first section on desktop so the panel isn't empty.
+      // explicit:false — this is a programmatic default, so it must not write
+      // ?selected= or mark the route explicitly selected; either would pop the
+      // full-screen mobile overlay when the viewport shrinks below the split
+      // breakpoint (iPad Split View / window resize).
+      setSelectedId("appearance", { explicit: false })
     } else if (!sectionKey) {
       setDetailContent(
         <div className="flex items-center justify-center h-full text-muted-foreground">

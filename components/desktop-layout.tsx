@@ -4,7 +4,7 @@ import type React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
-import { useIsDesktop, useDesktopPill } from "@/hooks/use-is-desktop"
+import { useIsDesktop, useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import {
@@ -110,6 +110,7 @@ function AppShellContent({ children }: AppShellProps) {
   const { handleScroll } = useScrollNavbarContext()
   const { selectedId, setSelectedId, selectionExplicit } = useDetailPanel()
   const isDesktop = useIsDesktop()
+  const hydrated = useHydrated()
   // Sidebar UI (pill↔sidebar morph) exists only at the desktop-pill tier —
   // the push spacer and the width-lock must gate on the same breakpoint.
   const canPushSidebar = useDesktopPill()
@@ -325,10 +326,20 @@ function AppShellContent({ children }: AppShellProps) {
             {/* Resize handle — desktop only, snaps to mobile-width multiples */}
             <ResizableHandle withHandle className="hidden md:flex" onDragging={setIsDragging} />
 
-            {/* Detail panel — desktop only */}
+            {/* Detail panel — desktop only. Pre-hydration, `isDesktop` is
+                forced false (server snapshot) while the CSS `md:` panel is
+                already visible — without the placeholder the panel painted as
+                a bare void until hydration. The placeholder is display:none'd
+                by the same md: rule on phones, so it costs nothing there. */}
             <ResizablePanel defaultSize={65} minSize={20} className="hidden md:block md:min-w-[360px]">
               <div ref={detailPanelRef} className="h-full">
-                {isDesktop && <DetailPanelContent />}
+                {isDesktop ? (
+                  <DetailPanelContent />
+                ) : !hydrated ? (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-background">
+                    <p>Select an item to view details</p>
+                  </div>
+                ) : null}
               </div>
             </ResizablePanel>
           </ResizablePanelGroup>
