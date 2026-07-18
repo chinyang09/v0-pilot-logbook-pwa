@@ -672,6 +672,29 @@ textarea:focus-within {
   backdrop-filter: blur(calc(var(--extra-blur) + 6px)) brightness(1.4) saturate(1.7);
 }
 
+/* ─── Lens mode (Chromium progressive enhancement) ───
+   A real Snell's-law displacement map applied via backdrop-filter: url(#…)
+   replaces the whole ring stack with ONE backdrop-filter surface (see
+   components/ui/glass-container.tsx + lib/glass/displacement.ts). The filter
+   itself carries blur, refraction, vibrancy, and the screen-blended rim
+   specular. Safari/Firefox never enter this mode. */
+.GlassLens {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: var(--corner-radius);
+  overflow: hidden;
+  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1), backdrop-filter 240ms ease;
+}
+.GlassFilterSvg {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .GlassMaterial .BlendLayers {
   z-index: 3;
   backdrop-filter: blur(calc((var(--softness) * 0.2) + (var(--extra-blur) * 0.2)));
@@ -695,16 +718,23 @@ textarea:focus-within {
   border-radius: var(--corner-radius);
   padding: 1px;
   border: 0 solid transparent;
-  /* Top-lit rim: bright specular at 12 o'clock, falling to a dark seat at the
-     sides/lower third, with a faint counter-highlight at the bottom edge where
-     glass catches bounce light. (Replaces the old uniform 155° ring, which
-     read as a flat outline rather than a lit edge.) */
-  background: linear-gradient(
-    177deg,
-    rgba(255, 255, 255, 0.38) 0%,
-    rgba(255, 255, 255, 0.10) 22%,
-    rgba(0, 0, 0, 0.18) 58%,
-    rgba(255, 255, 255, 0.14) 100%
+  /* Angular specular rim — a CSS approximation of the physically computed
+     specular map (liquid-web/kube: rim brightness ∝ |edge normal · light|²,
+     light at ~60°). The |cos| term produces symmetric DOUBLE lobes — glints
+     at the upper-right and lower-left shoulders fading through dim flanks —
+     which is how real liquid glass edges read, not a lit top / dark bottom.
+     Additive white only: no dark seat. */
+  background: conic-gradient(
+    from 30deg,
+    rgba(255, 255, 255, 0.40) 0deg,
+    rgba(255, 255, 255, 0.16) 38deg,
+    rgba(255, 255, 255, 0.05) 90deg,
+    rgba(255, 255, 255, 0.16) 142deg,
+    rgba(255, 255, 255, 0.40) 180deg,
+    rgba(255, 255, 255, 0.16) 218deg,
+    rgba(255, 255, 255, 0.05) 270deg,
+    rgba(255, 255, 255, 0.16) 322deg,
+    rgba(255, 255, 255, 0.40) 360deg
   );
   transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
   /* backdrop-filter removed — invert(0.15) on pseudo-element border ring
@@ -744,14 +774,16 @@ textarea:focus-within {
   .GlassMaterial,
   .GlassMaterial > div,
   .GlassMaterial::before,
-  .GlassMaterial::after {
+  .GlassMaterial::after,
+  .GlassLens {
     backdrop-filter: none !important;
   }
   .GlassContainer,
   .GlassContent,
   .GlassMaterial > div,
   .GlassMaterial::before,
-  .GlassMaterial::after {
+  .GlassMaterial::after,
+  .GlassLens {
     transition: none !important;
   }
 }

@@ -746,6 +746,18 @@ When making changes, be aware of these high-impact files:
 - `hooks/use-detail-panel.tsx` — Detail panel provider (keep-alive route awareness)
 - `components/desktop-layout.tsx` — Responsive app shell (sidebar + detail panel)
 
+**Glass system:**
+- `components/ui/glass-container.tsx` + `lib/glass/displacement.ts` — the glass
+  surface has TWO rendering paths: **lens** (Chromium only — a per-element
+  Snell's-law displacement map + computed rim specular applied via
+  `backdrop-filter: url(#filter)`, adapted from winaviation/liquid-web, MIT)
+  and **rings** (Safari/Firefox — the layered backdrop-filter stack in
+  `globals.css`, with the specular approximated by a conic-gradient rim).
+  Safari is the primary iPad PWA target and does NOT support SVG filters in
+  backdrop-filter — never remove the ring fallback, and never gate the ring
+  path behind the lens detection being merely "not yet ready" (lens maps
+  generate async client-side; rings render first).
+
 **Swipe & Forms:**
 - `components/swipeable-card.tsx` — The single swipe-to-reveal primitive (framer-motion). Used by all lists, the flight form rows, and the crew/aircraft detail rows.
 - `components/ui/form-section.tsx` — Shared grouped section card + header.
