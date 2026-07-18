@@ -547,6 +547,45 @@ textarea:focus-within {
   /* Invert effect moved here from GlassContainer::before pseudo-element
      to eliminate white flash during visibility transitions */
   backdrop-filter: invert(var(--invert, 0));
+  /* Liquid glass float: tight contact shadow + wide soft ambient, plus a
+     hairline inner lip (top catches light, bottom seats into shadow) so the
+     slab reads as having thickness. Radius transitions so the pill↔sidebar
+     corner change (28↔20) flows instead of snapping. */
+  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.10),
+    0 2px 6px rgba(0, 0, 0, 0.10),
+    0 14px 36px -14px rgba(0, 0, 0, 0.28);
+}
+
+/* Convex sheen — light falls from above: a soft vertical gradient plus a wide
+   specular bloom centred just off the top edge. Sits UNDER the content
+   (children are position:relative and stack above). */
+.GlassContent::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02) 38%, transparent 62%),
+    radial-gradient(130% 70% at 50% -12%, rgba(255, 255, 255, 0.10), transparent 58%);
+}
+
+/* Press bloom — the material lightens under the finger while the container
+   compresses (GlassContainer animates --glass-press 0→1 via whileTap). Paints
+   over the content on purpose: Apple's press lightens the label too. */
+.GlassContent::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: inherit;
+  background: radial-gradient(85% 85% at 50% 45%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.15) 72%);
+  opacity: calc(var(--glass-press, 0) * 0.16);
 }
 
 .GlassMaterial {
@@ -568,6 +607,7 @@ textarea:focus-within {
   overflow: hidden;
   border-radius: var(--corner-radius);
   background-color: rgba(255, 255, 255, 0);
+  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .GlassMaterial > div {
@@ -577,6 +617,8 @@ textarea:focus-within {
   border-radius: var(--corner-radius);
   z-index: 2;
   overflow: hidden;
+  /* Corners morph in step with .GlassContent (pill 28 ↔ sidebar 20). */
+  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .GlassMaterial .GlassEdgeReflection {
@@ -613,9 +655,21 @@ textarea:focus-within {
 }
 
 .GlassMaterial .GlassBlur {
-  backdrop-filter: blur(var(--extra-blur)) brightness(1.25);
+  /* saturate(1.5): the vibrancy term — real glass intensifies the colour of
+     what's behind it; without it the material reads as frosted film. The
+     backdrop-filter transitions so the morph surge below swells and settles
+     smoothly (backdrop-filter is animatable in Safari/Chromium). */
+  backdrop-filter: blur(var(--extra-blur)) brightness(1.25) saturate(1.5);
   border-radius: calc(var(--corner-radius) - (var(--emboss-width) + var(--refraction-width)));
   margin: calc(var(--emboss-width) + var(--refraction-width));
+  transition: backdrop-filter 240ms ease;
+}
+
+/* Morph surge — while the pill↔sidebar morph is in flight the material swells
+   like a merging droplet (more blur, brighter, more vibrant), then settles as
+   it lands. Driven by data-morphing on the GlassContainer. */
+.GlassContainer[data-morphing="true"] .GlassBlur {
+  backdrop-filter: blur(calc(var(--extra-blur) + 6px)) brightness(1.4) saturate(1.7);
 }
 
 .GlassMaterial .BlendLayers {
@@ -641,7 +695,18 @@ textarea:focus-within {
   border-radius: var(--corner-radius);
   padding: 1px;
   border: 0 solid transparent;
-  background: linear-gradient(155deg, hsla(0, 0%, 100%, 0.15) 0%, hsla(0, 0%, 0%, 0.2) 50%, hsla(0, 0%, 100%, 0.15) 100%);
+  /* Top-lit rim: bright specular at 12 o'clock, falling to a dark seat at the
+     sides/lower third, with a faint counter-highlight at the bottom edge where
+     glass catches bounce light. (Replaces the old uniform 155° ring, which
+     read as a flat outline rather than a lit edge.) */
+  background: linear-gradient(
+    177deg,
+    rgba(255, 255, 255, 0.38) 0%,
+    rgba(255, 255, 255, 0.10) 22%,
+    rgba(0, 0, 0, 0.18) 58%,
+    rgba(255, 255, 255, 0.14) 100%
+  );
+  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
   /* backdrop-filter removed — invert(0.15) on pseudo-element border ring
      caused white flash during visibility/opacity transitions */
   mask:
@@ -682,7 +747,11 @@ textarea:focus-within {
   .GlassMaterial::after {
     backdrop-filter: none !important;
   }
-  .GlassContainer {
+  .GlassContainer,
+  .GlassContent,
+  .GlassMaterial > div,
+  .GlassMaterial::before,
+  .GlassMaterial::after {
     transition: none !important;
   }
 }

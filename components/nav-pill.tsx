@@ -646,6 +646,7 @@ function DesktopPillMorph({
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           disableTapFeedback
+          morphing={phase === "opening" || phase === "closing"}
         >
           {/* Pill bar — always visible */}
           <div
@@ -793,6 +794,7 @@ function MobilePillMorph({
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           disableTapFeedback
+          morphing={phase === "opening" || phase === "closing"}
         >
           {/* Pill bar — visible when collapsed */}
           <div

@@ -17,6 +17,13 @@ interface GlassContainerProps {
   style?: React.CSSProperties
   /** Disable the whileTap scale feedback */
   disableTapFeedback?: boolean
+  /**
+   * True while this glass surface is mid-morph (pill ↔ sidebar). The material
+   * surges — extra blur/brightness/vibrancy, like a droplet swelling — then
+   * settles when the morph lands (see the [data-morphing] rules in
+   * globals.css).
+   */
+  morphing?: boolean
 }
 
 
@@ -29,15 +36,25 @@ export function GlassContainer({
   tintOpacity = 0.3,
   style,
   disableTapFeedback,
+  morphing,
 }: GlassContainerProps) {
   return (
     <motion.div
       className={cn("GlassContainer", className)}
+      data-morphing={morphing ? "true" : undefined}
       style={{
         "--corner-radius": `${cornerRadius}px`,
+        "--glass-press": 0,
         ...style,
       } as React.CSSProperties}
-      whileTap={disableTapFeedback ? undefined : { scale: 1.015 }}
+      // Apple-style press: the glass COMPRESSES under the finger (not grows)
+      // while the material blooms brighter (--glass-press drives the
+      // .GlassContent::after overlay), then springs back on release.
+      whileTap={
+        disableTapFeedback
+          ? undefined
+          : ({ scale: 0.965, "--glass-press": 1 } as Record<string, number | string>)
+      }
       transition={TAP_SPRING}
     >
       <div className={cn("GlassContent", contentClassName)}>

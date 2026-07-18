@@ -23,8 +23,13 @@ export const OVERSHOOT_BEZIER = "cubic-bezier(0.34, 1.5, 0.64, 1)"
 /** Ease-out that settles slightly faster than the overshoot (size trailing position → stretch). */
 export const SETTLE_BEZIER = "cubic-bezier(0.22, 1, 0.36, 1)"
 
-/** Standard ease for non-bouncy morphs (nav pill ↔ sidebar). */
-export const MORPH_EASE = "cubic-bezier(0.4, 0, 0.2, 1)"
+/**
+ * Ease for the nav pill ↔ sidebar morph geometry. Fast launch with a ~2%
+ * overshoot before settling — liquid, not mechanical: the glass slightly
+ * over-extends past its target and relaxes back, like surface tension. Kept
+ * small so the height overshoot never visibly pokes past the viewport edge.
+ */
+export const MORPH_EASE = "cubic-bezier(0.3, 0.9, 0.35, 1.02)"
 
 /** Enter/exit transition for list items (filter changes, add/remove). */
 export const LIST_ITEM_TRANSITION = { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const }
