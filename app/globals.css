@@ -526,19 +526,21 @@ textarea:focus-within {
 :root {
   --glass-blur-brightness: 1.12;
   /* Soft white lobes over a warm dark hairline — the hairline is what makes
-     the slab edge visible on cream. */
+     the slab edge visible on cream. Specular axis is VERTICAL (Apple
+     convention: a wide bright arc across the top edge, a fainter counter-arc
+     at the bottom), asymmetric top-heavy. */
   --glass-rim:
     conic-gradient(
-      from 30deg,
-      rgba(255, 255, 255, 0.55) 0deg,
-      rgba(255, 255, 255, 0.18) 38deg,
-      rgba(255, 255, 255, 0) 90deg,
-      rgba(255, 255, 255, 0.18) 142deg,
-      rgba(255, 255, 255, 0.55) 180deg,
-      rgba(255, 255, 255, 0.18) 218deg,
-      rgba(255, 255, 255, 0) 270deg,
-      rgba(255, 255, 255, 0.18) 322deg,
-      rgba(255, 255, 255, 0.55) 360deg
+      from 0deg,
+      rgba(255, 255, 255, 0.60) 0deg,
+      rgba(255, 255, 255, 0.20) 55deg,
+      rgba(255, 255, 255, 0.02) 100deg,
+      rgba(255, 255, 255, 0.12) 150deg,
+      rgba(255, 255, 255, 0.30) 180deg,
+      rgba(255, 255, 255, 0.12) 210deg,
+      rgba(255, 255, 255, 0.02) 260deg,
+      rgba(255, 255, 255, 0.20) 305deg,
+      rgba(255, 255, 255, 0.60) 360deg
     ),
     linear-gradient(rgba(62, 50, 38, 0.22), rgba(62, 50, 38, 0.22));
   --glass-veil: rgba(64, 52, 40, 0.05);
@@ -551,17 +553,18 @@ textarea:focus-within {
 .dark,
 .night {
   --glass-blur-brightness: 1.25;
+  /* Vertical specular axis, top-heavy (see :root note). */
   --glass-rim: conic-gradient(
-    from 30deg,
-    rgba(255, 255, 255, 0.40) 0deg,
-    rgba(255, 255, 255, 0.16) 38deg,
-    rgba(255, 255, 255, 0.05) 90deg,
-    rgba(255, 255, 255, 0.16) 142deg,
-    rgba(255, 255, 255, 0.40) 180deg,
-    rgba(255, 255, 255, 0.16) 218deg,
-    rgba(255, 255, 255, 0.05) 270deg,
-    rgba(255, 255, 255, 0.16) 322deg,
-    rgba(255, 255, 255, 0.40) 360deg
+    from 0deg,
+    rgba(255, 255, 255, 0.48) 0deg,
+    rgba(255, 255, 255, 0.15) 55deg,
+    rgba(255, 255, 255, 0.03) 100deg,
+    rgba(255, 255, 255, 0.09) 150deg,
+    rgba(255, 255, 255, 0.24) 180deg,
+    rgba(255, 255, 255, 0.09) 210deg,
+    rgba(255, 255, 255, 0.03) 260deg,
+    rgba(255, 255, 255, 0.15) 305deg,
+    rgba(255, 255, 255, 0.48) 360deg
   );
   --glass-veil: transparent;
   --glass-shadow:
@@ -610,9 +613,11 @@ textarea:focus-within {
   box-shadow: var(--glass-shadow);
 }
 
-/* Press bloom — the material lightens under the finger while the container
-   compresses (GlassContainer animates --glass-press 0→1 via whileTap). Paints
-   over the content on purpose: Apple's press lightens the label too. */
+/* Touch spotlight — a soft glow anchored to the FINGER (GlassContainer sets
+   --press-x/--press-y imperatively on pointer down/move, and animates
+   --glass-press 0→1 via whileTap), so the light tracks a hold-and-drag
+   across the surface like Apple's controls. Paints over the content on
+   purpose: the press lightens the label too. */
 .GlassContent::after {
   content: "";
   position: absolute;
@@ -620,8 +625,13 @@ textarea:focus-within {
   z-index: 1;
   pointer-events: none;
   border-radius: inherit;
-  background: radial-gradient(85% 85% at 50% 45%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.15) 72%);
-  opacity: calc(var(--glass-press, 0) * 0.16);
+  background: radial-gradient(
+    130px circle at var(--press-x, 50%) var(--press-y, 45%),
+    rgba(255, 255, 255, 0.60),
+    rgba(255, 255, 255, 0.14) 55%,
+    transparent 78%
+  );
+  opacity: calc(var(--glass-press, 0) * 0.22);
 }
 
 .GlassMaterial {
@@ -780,9 +790,12 @@ textarea:focus-within {
   z-index: 12;
   display: block;
   border-radius: var(--corner-radius);
-  padding: 1px;
+  /* 2px band with a slight blur: the rim visibly BENDS the backdrop under
+     the specular glint (Apple's edge is refracted light, not a painted
+     line). The angular white conic (--glass-rim) sits above this. */
+  padding: 2px;
   border: 0 solid transparent;
-  backdrop-filter: brightness(1.2) contrast(1.6) saturate(1.2) opacity(1);
+  backdrop-filter: blur(1px) brightness(1.25) contrast(1.5) saturate(1.35);
   mask:
     linear-gradient(white 0 0) padding-box,
     linear-gradient(white 0 0) content-box;

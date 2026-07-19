@@ -2,9 +2,8 @@
 
 import type React from "react"
 import { useEffect, useId, useRef, useState } from "react"
-import { motion } from "framer-motion"
+import { motion, useMotionValue, useReducedMotion, useSpring } from "framer-motion"
 import { cn } from "@/lib/utils"
-import { TAP_SPRING } from "@/lib/motion"
 import {
   generateGlassMaps,
   supportsSvgBackdropFilter,
@@ -31,21 +30,31 @@ interface GlassContainerProps {
   morphing?: boolean
 }
 
+/** Spring for press bloom / drag-follow — snappy with a soft settle. */
+const PRESS_SPRING = { stiffness: 420, damping: 26, mass: 0.6 }
+/** Bloom scale while pressed (Apple controls grow, they don't compress). */
+const BLOOM = 1.045
+/** How much of the finger's offset from centre the glass follows. */
+const PULL = 0.12
+const PULL_MAX = 8
+
 /**
  * Liquid glass surface.
  *
  * Two rendering paths (adapted from winaviation/liquid-web, MIT — itself from
  * kube's Liquid Glass article):
  *
- * - **Lens** (Chromium): a real Snell's-law displacement map + rim specular is
- *   generated per element size and applied through
- *   `backdrop-filter: url(#filter)` — genuine edge refraction with a clean
- *   centre, and FEWER layers than the fallback (one backdrop-filter surface
- *   instead of nine).
+ * - **Lens** (Chromium): a real Snell's-law displacement map + rim specular
+ *   applied through `backdrop-filter: url(#filter)` — genuine edge refraction
+ *   with a clean centre, fewer layers than the fallback.
  * - **Rings** (Safari/Firefox — the primary iPad PWA target): WebKit doesn't
  *   support SVG filters in backdrop-filter, so the layered ring material
- *   stays, with the specular approximated by a conic gradient on the rim
- *   (see globals.css `.GlassMaterial::before`).
+ *   stays, with the specular approximated by a conic gradient on the rim.
+ *
+ * Interaction (unless disableTapFeedback): press BLOOMS the glass (~1.045)
+ * with a spotlight glow anchored to the finger; holding and moving drags the
+ * spotlight across the surface while the whole slab spring-follows the pull
+ * and stretches slightly — release springs everything home.
  */
 export function GlassContainer({
   children,
@@ -61,6 +70,60 @@ export function GlassContainer({
   const rootRef = useRef<HTMLDivElement>(null)
   const filterId = useId().replace(/[^a-zA-Z0-9_-]/g, "") + "-lens"
   const [maps, setMaps] = useState<GlassMaps | null>(null)
+  const reduceMotion = useReducedMotion()
+  const interactive = !disableTapFeedback && !reduceMotion
+
+  // Press-follow springs: translate toward the held finger + bloom/stretch.
+  const tx = useMotionValue(0)
+  const ty = useMotionValue(0)
+  const sx = useMotionValue(1)
+  const sy = useMotionValue(1)
+  const txS = useSpring(tx, PRESS_SPRING)
+  const tyS = useSpring(ty, PRESS_SPRING)
+  const sxS = useSpring(sx, PRESS_SPRING)
+  const syS = useSpring(sy, PRESS_SPRING)
+  const pressedRef = useRef(false)
+
+  const setSpotlight = (e: React.PointerEvent) => {
+    const el = rootRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    el.style.setProperty("--press-x", `${e.clientX - rect.left}px`)
+    el.style.setProperty("--press-y", `${e.clientY - rect.top}px`)
+  }
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (!interactive) return
+    pressedRef.current = true
+    setSpotlight(e)
+    sx.set(BLOOM)
+    sy.set(BLOOM)
+  }
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!interactive || !pressedRef.current) return
+    setSpotlight(e)
+    const el = rootRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const dx = e.clientX - (rect.left + rect.width / 2)
+    const dy = e.clientY - (rect.top + rect.height / 2)
+    const clamp = (v: number) => Math.max(-PULL_MAX, Math.min(PULL_MAX, v))
+    tx.set(clamp(dx * PULL))
+    ty.set(clamp(dy * PULL))
+    // Stretch slightly along the pull axis — the glass "gives" toward the drag.
+    sx.set(BLOOM + Math.min(Math.abs(dx) * 0.0006, 0.025))
+    sy.set(BLOOM + Math.min(Math.abs(dy) * 0.0006, 0.025))
+  }
+
+  const endPress = () => {
+    if (!pressedRef.current) return
+    pressedRef.current = false
+    tx.set(0)
+    ty.set(0)
+    sx.set(1)
+    sy.set(1)
+  }
 
   // Chromium only: (re)generate the refraction maps for the current size.
   // Debounced so morphs/resizes regenerate once at settle — mid-flight the
@@ -99,17 +162,23 @@ export function GlassContainer({
       style={{
         "--corner-radius": `${cornerRadius}px`,
         "--glass-press": 0,
+        ...(interactive
+          ? { x: txS, y: tyS, scaleX: sxS, scaleY: syS }
+          : null),
         ...style,
       } as React.CSSProperties}
-      // Apple-style press: the glass COMPRESSES under the finger (not grows)
-      // while the material blooms brighter (--glass-press drives the
-      // .GlassContent::after overlay), then springs back on release.
+      // The spotlight overlay fades in via --glass-press (custom properties
+      // animate through framer); position is set imperatively above.
       whileTap={
-        disableTapFeedback
-          ? undefined
-          : ({ scale: 0.965, "--glass-press": 1 } as Record<string, number | string>)
+        interactive
+          ? ({ "--glass-press": 1 } as Record<string, number | string>)
+          : undefined
       }
-      transition={TAP_SPRING}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endPress}
+      onPointerLeave={endPress}
+      onPointerCancel={endPress}
     >
       <div className={cn("GlassContent", contentClassName)}>
         {tintColor && (
