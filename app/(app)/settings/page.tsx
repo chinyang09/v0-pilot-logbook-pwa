@@ -12,7 +12,7 @@ import { SortableNavList } from "@/components/sortable-nav-list"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import {
-  Monitor, Clock, Plane, Sun, Moon, MoonStar, Laptop,
+  Monitor, Clock, Plane, Sun, Moon, Laptop,
   LayoutDashboard, Book, Calendar, Users, MapPin, Award,
   Settings, UserCircle, Navigation, ChevronRight,
   Upload,
@@ -99,14 +99,13 @@ function AppearanceSection({ preferences, updateDisplay }: {
     <div className="p-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Appearance</h2>
-        <p className="text-sm text-muted-foreground">Choose your preferred theme. Night dims the UI to a low-glare, amber, low-blue instrument palette for flying after dark.</p>
+        <p className="text-sm text-muted-foreground">Choose your preferred theme.</p>
       </div>
       <FormSection>
-        <div className="grid grid-cols-2 gap-2 p-3">
+        <div className="grid grid-cols-3 gap-2 p-3">
         {([
           { value: "light" as ThemePreference, label: "Light", icon: Sun },
           { value: "dark" as ThemePreference, label: "Dark", icon: Moon },
-          { value: "night" as ThemePreference, label: "Night", icon: MoonStar },
           { value: "system" as ThemePreference, label: "System", icon: Laptop },
         ]).map(({ value, label, icon: Icon }) => (
           <button

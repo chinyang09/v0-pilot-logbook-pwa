@@ -1,9 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* `night` is a dark-family theme: it rides the `dark:` variant so every
-   dark-mode utility applies, then overrides the palette tokens below. */
-@custom-variant dark (&:is(.dark *, .night *));
+@custom-variant dark (&:is(.dark *));
 
 /* Shared values */
 :root {
@@ -103,62 +101,6 @@
   --status-critical: oklch(0.70 0.15 60);
   --status-error: oklch(0.62 0.19 25);
   --status-info: oklch(0.65 0.12 250);
-}
-
-/* Night (cockpit) theme — a deep, low-glare instrument palette for flying at
-   night: a near-black warm ground, dimmed warm-white text (less glare in a
-   dark cockpit), and an amber "instrument glow" accent that keeps blue light
-   down (easier on night-adapted eyes). It rides the `dark` variant above, so
-   every `dark:` utility still applies; these tokens override the dark palette.
-   `--primary`/`--ring` live in the shared `:root` block, so night must set them
-   here to swap the terracotta accent for amber. */
-.night {
-  color-scheme: dark;
-  --primary: oklch(0.74 0.15 66);
-  --ring: oklch(0.74 0.15 66);
-
-  --background: oklch(0.13 0.012 45);
-  --foreground: oklch(0.85 0.012 70);
-  --card: oklch(0.17 0.013 45);
-  --card-foreground: oklch(0.85 0.012 70);
-  --popover: oklch(0.17 0.013 45);
-  --popover-foreground: oklch(0.85 0.012 70);
-  --primary-foreground: oklch(0.14 0.012 60);
-  --secondary: oklch(0.21 0.013 45);
-  --secondary-foreground: oklch(0.80 0.012 70);
-  --muted: oklch(0.21 0.013 45);
-  --muted-foreground: oklch(0.63 0.012 65);
-  --accent: oklch(0.60 0.13 64);
-  --accent-foreground: oklch(0.13 0.012 45);
-  --destructive: oklch(0.58 0.20 26);
-  --destructive-foreground: oklch(0.90 0.012 70);
-  --border: oklch(0.26 0.013 45);
-  --input: oklch(0.21 0.013 45);
-  --chart-1: oklch(0.74 0.15 66);
-  --chart-2: oklch(0.68 0.13 150);
-  --chart-3: oklch(0.66 0.09 235);
-  --chart-4: oklch(0.76 0.13 88);
-  --chart-5: oklch(0.63 0.16 32);
-  --sidebar: oklch(0.15 0.012 45);
-  --sidebar-foreground: oklch(0.85 0.012 70);
-  --sidebar-primary: oklch(0.74 0.15 66);
-  --sidebar-primary-foreground: oklch(0.14 0.012 60);
-  --sidebar-accent: oklch(0.21 0.013 45);
-  --sidebar-accent-foreground: oklch(0.85 0.012 70);
-  --sidebar-border: oklch(0.26 0.013 45);
-  --sidebar-ring: oklch(0.74 0.15 66);
-
-  /* Sync status — instrument tones */
-  --status-synced: oklch(0.70 0.15 150);
-  --status-pending: oklch(0.76 0.14 82);
-  --status-offline: oklch(0.64 0.16 30);
-
-  /* Semantic status — kept low-blue so night vision holds */
-  --status-valid: oklch(0.70 0.15 150);
-  --status-warning: oklch(0.76 0.14 82);
-  --status-critical: oklch(0.73 0.15 58);
-  --status-error: oklch(0.63 0.20 28);
-  --status-info: oklch(0.68 0.09 220);
 }
 
 @theme inline {
@@ -518,6 +460,21 @@ textarea:focus-within {
 
 /* ─── Liquid Glass UI ─── */
 
+/* The specular angle is a registered custom property so it can ANIMATE:
+   Apple's Liquid Glass highlights are alive (they shift with device motion);
+   the web approximation is a slow ambient drift around the top-left anchor.
+   inherits: true so the rim pseudo-elements see the animated value. */
+@property --glass-specular-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 315deg;
+}
+
+@keyframes glass-specular-drift {
+  from { --glass-specular-angle: 297deg; }
+  to   { --glass-specular-angle: 333deg; }
+}
+
 /* Glass theme tokens. Glass legibility flips with the theme: on the DARK
    themes the material shows itself through brightness + white edge specular;
    on the LIGHT (cream) theme white-on-cream vanishes, so the glass reads
@@ -531,7 +488,7 @@ textarea:focus-within {
   --glass-blur-brightness: 1.03;
   --glass-rim:
     conic-gradient(
-      from 315deg,
+      from var(--glass-specular-angle, 315deg),
       rgba(255, 255, 255, 0.85) 0deg,
       rgba(255, 255, 255, 0.25) 55deg,
       rgba(255, 255, 255, 0) 100deg,
@@ -549,21 +506,20 @@ textarea:focus-within {
     0 8px 28px rgba(45, 38, 30, 0.10);
   --glass-edge-filter: blur(var(--total-strength)) brightness(1.03) saturate(1.05);
 }
-.dark,
-.night {
+.dark {
   --glass-blur-brightness: 1.25;
   /* Top-left / bottom-right specular lobes (see :root note). */
   --glass-rim: conic-gradient(
-    from 315deg,
-    rgba(255, 255, 255, 0.48) 0deg,
-    rgba(255, 255, 255, 0.15) 55deg,
-    rgba(255, 255, 255, 0.03) 100deg,
-    rgba(255, 255, 255, 0.09) 150deg,
-    rgba(255, 255, 255, 0.24) 180deg,
-    rgba(255, 255, 255, 0.09) 210deg,
-    rgba(255, 255, 255, 0.03) 260deg,
-    rgba(255, 255, 255, 0.15) 305deg,
-    rgba(255, 255, 255, 0.48) 360deg
+    from var(--glass-specular-angle, 315deg),
+    rgba(255, 255, 255, 0.65) 0deg,
+    rgba(255, 255, 255, 0.22) 60deg,
+    rgba(255, 255, 255, 0.04) 105deg,
+    rgba(255, 255, 255, 0.12) 150deg,
+    rgba(255, 255, 255, 0.34) 180deg,
+    rgba(255, 255, 255, 0.12) 210deg,
+    rgba(255, 255, 255, 0.04) 255deg,
+    rgba(255, 255, 255, 0.22) 300deg,
+    rgba(255, 255, 255, 0.65) 360deg
   );
   --glass-veil: transparent;
   --glass-shadow:
@@ -574,6 +530,8 @@ textarea:focus-within {
 }
 
 .GlassContainer {
+  /* Ambient specular drift — see @property above. Long period, alternate. */
+  animation: glass-specular-drift 60s ease-in-out infinite alternate;
   --corner-radius: 24px;
   --base-strength: 24px;
   --extra-blur: 2px;
@@ -832,6 +790,9 @@ textarea:focus-within {
   .GlassLens {
     transition: none !important;
   }
+  .GlassContainer {
+    animation: none !important;
+  }
 }
 
 /* Inset row divider — a 1px line aligned with the row's px-4 content (iOS
@@ -870,4 +831,41 @@ textarea:focus-within {
 [data-swipe-row] input,
 [data-swipe-row] textarea {
   pointer-events: none;
+}
+
+/* ─── Nav pill drag lens ───
+   The iPadOS tab-bar "hold and slide" bubble: a glass lens that appears over
+   the hovered tab and follows the finger (see PillBarContent). Sits ABOVE the
+   labels — the bright rim + slight blur reads as a magnifying droplet. The
+   short transform transition makes the follow lag liquidly behind the finger. */
+.PillDragLens {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: 999px;
+  backdrop-filter: blur(1.5px) saturate(1.6) brightness(1.15);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.30),
+    inset 0 10px 14px -10px rgba(255, 255, 255, 0.50),
+    inset 0 -10px 14px -10px rgba(255, 255, 255, 0.28),
+    0 4px 14px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  scale: 0.6;
+  transition:
+    opacity 0.16s ease,
+    scale 0.28s cubic-bezier(0.34, 1.5, 0.64, 1),
+    transform 0.12s cubic-bezier(0.2, 0.8, 0.3, 1),
+    width 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.PillDragLens--on {
+  opacity: 1;
+  scale: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .PillDragLens {
+    display: none;
+  }
 }

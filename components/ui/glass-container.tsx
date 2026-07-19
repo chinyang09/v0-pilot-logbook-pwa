@@ -248,7 +248,7 @@ export function GlassContainer({
                   result="spec"
                 />
                 <feComponentTransfer in="spec" result="specFaded">
-                  <feFuncA type="linear" slope={0.5} />
+                  <feFuncA type="linear" slope={0.65} />
                 </feComponentTransfer>
                 <feBlend in="specFaded" in2="sat" mode="screen" />
               </filter>

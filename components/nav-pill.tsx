@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
 import { useReducedMotion } from "framer-motion"
 import {
@@ -240,6 +240,97 @@ function PillBarContent({
 }) {
   const tabsRef = useRef<HTMLDivElement>(null)
   const activeIndex = tabs.findIndex((k) => TAB_CONFIG[k]?.isActive(pathname))
+  const router = useRouter()
+  const reduce = useReducedMotion()
+
+  // ── Drag lens (iPadOS tab-bar style): hold and slide along the pill and a
+  // glass bubble appears over the nearest tab, following the finger with a
+  // magnetic pull toward tab centres; release navigates to that tab. A plain
+  // tap never activates it (10px slop), so normal Link taps work unchanged.
+  const lensRef = useRef<HTMLDivElement>(null)
+  const [lensVisible, setLensVisible] = useState(false)
+  const suppressClickRef = useRef(false)
+  const dragRef = useRef<{
+    startX: number
+    active: boolean
+    nearest: number
+    rects: { left: number; width: number; height: number }[]
+  } | null>(null)
+
+  const positionLens = useCallback((clientX: number) => {
+    const el = tabsRef.current
+    const lens = lensRef.current
+    const drag = dragRef.current
+    if (!el || !lens || !drag || drag.rects.length === 0) return
+    const base = el.getBoundingClientRect()
+    const x = clientX - base.left
+    let nearest = 0
+    let best = Infinity
+    drag.rects.forEach((r, i) => {
+      const d = Math.abs(x - (r.left + r.width / 2))
+      if (d < best) {
+        best = d
+        nearest = i
+      }
+    })
+    drag.nearest = nearest
+    const r = drag.rects[nearest]
+    // Magnetic follow: mostly snapped to the nearest tab centre, part finger.
+    const cx = (r.left + r.width / 2) * 0.65 + x * 0.35
+    const w = r.width + 10
+    lens.style.width = `${w}px`
+    lens.style.height = `${r.height + 6}px`
+    lens.style.transform = `translate(${cx - w / 2}px, -50%)`
+  }, [])
+
+  const handleLensDown = useCallback((e: React.PointerEvent) => {
+    if (reduce) return
+    const el = tabsRef.current
+    if (!el) return
+    const base = el.getBoundingClientRect()
+    dragRef.current = {
+      startX: e.clientX,
+      active: false,
+      nearest: -1,
+      rects: Array.from(el.querySelectorAll<HTMLElement>("[data-grav-item]")).map((it) => {
+        const r = it.getBoundingClientRect()
+        return { left: r.left - base.left, width: r.width, height: r.height }
+      }),
+    }
+  }, [reduce])
+
+  const handleLensMove = useCallback((e: React.PointerEvent) => {
+    const drag = dragRef.current
+    if (!drag) return
+    if (!drag.active) {
+      if (Math.abs(e.clientX - drag.startX) < 10) return
+      drag.active = true
+      setLensVisible(true)
+      try {
+        tabsRef.current?.setPointerCapture(e.pointerId)
+      } catch {
+        // capture can fail if the pointer is already gone — lens still tracks
+      }
+    }
+    positionLens(e.clientX)
+  }, [positionLens])
+
+  const handleLensEnd = useCallback((e: React.PointerEvent) => {
+    const drag = dragRef.current
+    dragRef.current = null
+    if (!drag?.active) return
+    setLensVisible(false)
+    // Swallow the click synthesised at the end of the drag; the timeout clears
+    // the flag if pointer capture already ate the click (so the NEXT tap works).
+    suppressClickRef.current = true
+    setTimeout(() => {
+      suppressClickRef.current = false
+    }, 150)
+    if (e.type !== "pointercancel" && drag.nearest >= 0) {
+      const tab = TAB_CONFIG[tabs[drag.nearest]]
+      if (tab) router.push(tab.href)
+    }
+  }, [tabs, router])
 
   return (
     <div className="flex items-center h-14 px-2">
@@ -252,9 +343,31 @@ function PillBarContent({
       </button>
 
       {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
-          behind the labels and stretches between tabs as the route changes. */}
-      <div ref={tabsRef} className="relative flex items-center flex-1 min-w-0 justify-evenly">
+          behind the labels and stretches between tabs as the route changes.
+          touch-action:none so hold-and-slide streams pointermoves on iOS. */}
+      <div
+        ref={tabsRef}
+        className="relative flex items-center flex-1 min-w-0 justify-evenly touch-none"
+        onPointerDown={handleLensDown}
+        onPointerMove={handleLensMove}
+        onPointerUp={handleLensEnd}
+        onPointerCancel={handleLensEnd}
+        onClickCapture={(e) => {
+          if (suppressClickRef.current) {
+            suppressClickRef.current = false
+            e.preventDefault()
+            e.stopPropagation()
+          }
+        }}
+      >
         <GravityIndicator containerRef={tabsRef} activeIndex={activeIndex} revision={tabs.join(",")} />
+        {/* Drag lens — a glass bubble ABOVE the labels (it magnifies/refracts
+            visually via blur+rim; labels stay legible through the centre). */}
+        <div
+          ref={lensRef}
+          aria-hidden
+          className={cn("PillDragLens", lensVisible && "PillDragLens--on")}
+        />
         {tabs.map((tabKey) => {
           const tab = TAB_CONFIG[tabKey]
           if (!tab) return null
