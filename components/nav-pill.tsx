@@ -252,11 +252,16 @@ function PillBarContent({
   // ── Drag lens (iPadOS tab-bar style): hold and slide along the pill and a
   // clear glass bubble — TALLER than the pill, so it rides over its edges —
   // follows the finger 1:1 (no snapping mid-drag). The nearest tab's label
-  // pre-highlights as the lens passes over it and the grey blob hides; on
-  // release the lens SPRINGS to that tab and morphs into the grey highlight,
-  // then hands off to the real blob. A plain tap never activates it (10px
-  // slop), so normal Link taps work unchanged. Rendered through a portal —
-  // the pill's GlassContent clips overflow, and the lens must overhang it.
+  // pre-highlights as the lens passes over it and the grey blob hides. On
+  // release the lens simply FADES OUT where it is while the grey blob fades
+  // back in mid-spring toward the chosen tab (navigation is pushed at
+  // release). A plain tap never activates it (10px slop), so normal Link taps
+  // work unchanged. Rendered through a portal — the pill's GlassContent clips
+  // overflow, and the lens must overhang it. NOTE: the lens's animation
+  // classes (--on / --fade) are managed IMPERATIVELY and its React className
+  // stays constant — React re-renders during the drag (lensIndex updates)
+  // must not strip them (stripping --on was the cause of a shrink-flicker on
+  // release in the previous morphing design).
   const lensRef = useRef<HTMLDivElement | null>(null)
   const [lensPhase, setLensPhase] = useState<"idle" | "drag" | "settle">("idle")
   const [lensIndex, setLensIndex] = useState(-1)
@@ -365,28 +370,18 @@ function PillBarContent({
       return
     }
 
-    // Settle: the lens itself springs to the chosen tab and morphs into the
-    // grey highlight (the --settle class swaps easing to the overshoot spring
-    // and crossfades the material); navigation happens now so the hidden blob
-    // arrives underneath, and the handoff swap is invisible.
+    // Release: the lens fades out in place while the grey blob fades back in
+    // MID-SPRING toward the chosen tab (navigation pushed now; the settle
+    // phase unhides the blob so its opacity and transform animate together).
+    lensRef.current?.classList.add("PillDragLens--fade")
     setLensPhase("settle")
-    const idx = drag.nearest
-    const r = drag.rects[idx]
-    const lens = lensRef.current
-    if (lens) {
-      requestAnimationFrame(() => {
-        lens.style.width = `${r.width}px`
-        lens.style.height = `${r.height}px`
-        lens.style.transform = `translate(${r.left}px, -50%)`
-      })
-    }
-    const tab = TAB_CONFIG[tabs[idx]]
+    const tab = TAB_CONFIG[tabs[drag.nearest]]
     if (tab) router.push(tab.href)
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
     settleTimerRef.current = setTimeout(() => {
       setLensPhase("idle")
       setLensIndex(-1)
-    }, 480)
+    }, 220)
   }, [tabs, router])
 
   useEffect(() => () => {
@@ -427,7 +422,7 @@ function PillBarContent({
           containerRef={tabsRef}
           activeIndex={activeIndex}
           revision={tabs.join(",")}
-          hidden={lensActive}
+          hidden={lensPhase === "drag"}
         />
         {tabs.map((tabKey, i) => {
           const tab = TAB_CONFIG[tabKey]
@@ -472,11 +467,7 @@ function PillBarContent({
       {lensActive &&
         typeof document !== "undefined" &&
         createPortal(
-          <div
-            ref={lensMountRef}
-            aria-hidden
-            className={cn("PillDragLens", lensPhase === "settle" && "PillDragLens--settle")}
-          />,
+          <div ref={lensMountRef} aria-hidden className="PillDragLens" />,
           document.body
         )}
 
