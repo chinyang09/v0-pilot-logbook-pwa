@@ -23,6 +23,14 @@ interface GlassContainerProps {
   /** Disable the whileTap scale feedback */
   disableTapFeedback?: boolean
   /**
+   * Enable the finger-tracking spotlight WITHOUT the bloom/stretch transforms.
+   * Defaults to following !disableTapFeedback. Nav surfaces (pill, sidebar,
+   * bottom pill) set this true while keeping tap feedback disabled — the glow
+   * follows the finger but the container never scales (its tabs/items carry
+   * their own affordances).
+   */
+  spotlight?: boolean
+  /**
    * True while this glass surface is mid-morph (pill ↔ sidebar). The material
    * surges — extra blur/brightness/vibrancy, like a droplet swelling — then
    * settles when the morph lands.
@@ -67,6 +75,7 @@ export function GlassContainer({
   tintOpacity = 0.3,
   style,
   disableTapFeedback,
+  spotlight,
   morphing,
 }: GlassContainerProps) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -74,6 +83,7 @@ export function GlassContainer({
   const [maps, setMaps] = useState<GlassMaps | null>(null)
   const reduceMotion = useReducedMotion()
   const interactive = !disableTapFeedback && !reduceMotion
+  const spotlightOn = (spotlight ?? !disableTapFeedback) && !reduceMotion
 
   // Press-follow springs: translate toward the held finger + bloom/stretch.
   const tx = useMotionValue(0)
@@ -95,16 +105,19 @@ export function GlassContainer({
   }
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (!interactive) return
+    if (!spotlightOn) return
     pressedRef.current = true
     setSpotlight(e)
-    sx.set(BLOOM)
-    sy.set(BLOOM)
+    if (interactive) {
+      sx.set(BLOOM)
+      sy.set(BLOOM)
+    }
   }
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!interactive || !pressedRef.current) return
+    if (!spotlightOn || !pressedRef.current) return
     setSpotlight(e)
+    if (!interactive) return
     const el = rootRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
@@ -173,7 +186,7 @@ export function GlassContainer({
       // The spotlight overlay fades in via --glass-press (custom properties
       // animate through framer); position is set imperatively above.
       whileTap={
-        interactive
+        spotlightOn
           ? ({ "--glass-press": 1 } as Record<string, number | string>)
           : undefined
       }

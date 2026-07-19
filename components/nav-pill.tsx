@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
+import { createPortal } from "react-dom"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
 import { useReducedMotion } from "framer-motion"
@@ -144,12 +145,15 @@ function GravityIndicator({
   activeIndex,
   className,
   revision = "",
+  hidden = false,
 }: {
   containerRef: React.RefObject<HTMLElement | null>
   activeIndex: number
   className?: string
   /** Change this when the set/order of items changes so metrics re-measure. */
   revision?: string
+  /** Fade the blob out (drag-lens active) while its transform keeps tracking. */
+  hidden?: boolean
 }) {
   const reduce = useReducedMotion()
   const [rects, setRects] = useState<{ left: number; top: number; width: number; height: number }[]>([])
@@ -192,6 +196,7 @@ function GravityIndicator({
         `transform 0.5s ${OVERSHOOT_BEZIER}`,
         `width 0.4s ${SETTLE_BEZIER}`,
         `height 0.4s ${SETTLE_BEZIER}`,
+        "opacity 0.15s ease",
       ].join(", ")
 
   return (
@@ -208,6 +213,7 @@ function GravityIndicator({
       // composites while animating, so nav stays smooth).
       style={{
         pointerEvents: "none",
+        opacity: hidden ? 0 : 1,
         transform: `translate(${target.left}px, ${target.top}px)`,
         width: target.width,
         height: target.height,
@@ -244,26 +250,36 @@ function PillBarContent({
   const reduce = useReducedMotion()
 
   // ── Drag lens (iPadOS tab-bar style): hold and slide along the pill and a
-  // glass bubble appears over the nearest tab, following the finger with a
-  // magnetic pull toward tab centres; release navigates to that tab. A plain
-  // tap never activates it (10px slop), so normal Link taps work unchanged.
-  const lensRef = useRef<HTMLDivElement>(null)
-  const [lensVisible, setLensVisible] = useState(false)
+  // clear glass bubble — TALLER than the pill, so it rides over its edges —
+  // follows the finger 1:1 (no snapping mid-drag). The nearest tab's label
+  // pre-highlights as the lens passes over it and the grey blob hides; on
+  // release the lens SPRINGS to that tab and morphs into the grey highlight,
+  // then hands off to the real blob. A plain tap never activates it (10px
+  // slop), so normal Link taps work unchanged. Rendered through a portal —
+  // the pill's GlassContent clips overflow, and the lens must overhang it.
+  const lensRef = useRef<HTMLDivElement | null>(null)
+  const [lensPhase, setLensPhase] = useState<"idle" | "drag" | "settle">("idle")
+  const [lensIndex, setLensIndex] = useState(-1)
   const suppressClickRef = useRef(false)
+  const lastXRef = useRef(0)
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dragRef = useRef<{
     startX: number
     active: boolean
     nearest: number
+    base: { left: number; top: number; width: number; height: number }
     rects: { left: number; width: number; height: number }[]
   } | null>(null)
 
+  /** Extra height beyond the pill — the lens overhangs top and bottom. */
+  const LENS_OVERHANG = 16
+
   const positionLens = useCallback((clientX: number) => {
-    const el = tabsRef.current
     const lens = lensRef.current
     const drag = dragRef.current
-    if (!el || !lens || !drag || drag.rects.length === 0) return
-    const base = el.getBoundingClientRect()
-    const x = clientX - base.left
+    if (!lens || !drag || drag.rects.length === 0) return
+    lastXRef.current = clientX
+    const x = Math.max(0, Math.min(drag.base.width, clientX - drag.base.left))
     let nearest = 0
     let best = Infinity
     drag.rects.forEach((r, i) => {
@@ -273,31 +289,48 @@ function PillBarContent({
         nearest = i
       }
     })
-    drag.nearest = nearest
+    if (nearest !== drag.nearest) {
+      drag.nearest = nearest
+      setLensIndex(nearest)
+    }
     const r = drag.rects[nearest]
-    // Magnetic follow: mostly snapped to the nearest tab centre, part finger.
-    const cx = (r.left + r.width / 2) * 0.65 + x * 0.35
-    const w = r.width + 10
+    const w = r.width + 12
+    // Pure finger follow — the smoothing comes from the short CSS transform
+    // transition, not from snapping. Release does the spring-to-tab.
     lens.style.width = `${w}px`
-    lens.style.height = `${r.height + 6}px`
-    lens.style.transform = `translate(${cx - w / 2}px, -50%)`
+    lens.style.height = `${drag.base.height + LENS_OVERHANG}px`
+    lens.style.transform = `translate(${x - w / 2}px, -50%)`
   }, [])
 
+  // Portal mount: position immediately from the live drag state, then reveal
+  // on the next frame so the pop-in transitions from the base styles.
+  const lensMountRef = useCallback((node: HTMLDivElement | null) => {
+    lensRef.current = node
+    const drag = dragRef.current
+    if (!node || !drag) return
+    node.style.left = `${drag.base.left}px`
+    node.style.top = `${drag.base.top + drag.base.height / 2}px`
+    positionLens(lastXRef.current)
+    requestAnimationFrame(() => node.classList.add("PillDragLens--on"))
+  }, [positionLens])
+
   const handleLensDown = useCallback((e: React.PointerEvent) => {
-    if (reduce) return
+    if (reduce || lensPhase === "settle") return
     const el = tabsRef.current
     if (!el) return
     const base = el.getBoundingClientRect()
+    lastXRef.current = e.clientX
     dragRef.current = {
       startX: e.clientX,
       active: false,
       nearest: -1,
+      base: { left: base.left, top: base.top, width: base.width, height: base.height },
       rects: Array.from(el.querySelectorAll<HTMLElement>("[data-grav-item]")).map((it) => {
         const r = it.getBoundingClientRect()
         return { left: r.left - base.left, width: r.width, height: r.height }
       }),
     }
-  }, [reduce])
+  }, [reduce, lensPhase])
 
   const handleLensMove = useCallback((e: React.PointerEvent) => {
     const drag = dragRef.current
@@ -305,7 +338,7 @@ function PillBarContent({
     if (!drag.active) {
       if (Math.abs(e.clientX - drag.startX) < 10) return
       drag.active = true
-      setLensVisible(true)
+      setLensPhase("drag")
       try {
         tabsRef.current?.setPointerCapture(e.pointerId)
       } catch {
@@ -319,18 +352,48 @@ function PillBarContent({
     const drag = dragRef.current
     dragRef.current = null
     if (!drag?.active) return
-    setLensVisible(false)
     // Swallow the click synthesised at the end of the drag; the timeout clears
     // the flag if pointer capture already ate the click (so the NEXT tap works).
     suppressClickRef.current = true
     setTimeout(() => {
       suppressClickRef.current = false
     }, 150)
-    if (e.type !== "pointercancel" && drag.nearest >= 0) {
-      const tab = TAB_CONFIG[tabs[drag.nearest]]
-      if (tab) router.push(tab.href)
+
+    if (e.type === "pointercancel" || drag.nearest < 0) {
+      setLensPhase("idle")
+      setLensIndex(-1)
+      return
     }
+
+    // Settle: the lens itself springs to the chosen tab and morphs into the
+    // grey highlight (the --settle class swaps easing to the overshoot spring
+    // and crossfades the material); navigation happens now so the hidden blob
+    // arrives underneath, and the handoff swap is invisible.
+    setLensPhase("settle")
+    const idx = drag.nearest
+    const r = drag.rects[idx]
+    const lens = lensRef.current
+    if (lens) {
+      requestAnimationFrame(() => {
+        lens.style.width = `${r.width}px`
+        lens.style.height = `${r.height}px`
+        lens.style.transform = `translate(${r.left}px, -50%)`
+      })
+    }
+    const tab = TAB_CONFIG[tabs[idx]]
+    if (tab) router.push(tab.href)
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+    settleTimerRef.current = setTimeout(() => {
+      setLensPhase("idle")
+      setLensIndex(-1)
+    }, 480)
   }, [tabs, router])
+
+  useEffect(() => () => {
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+  }, [])
+
+  const lensActive = lensPhase !== "idle"
 
   return (
     <div className="flex items-center h-14 px-2">
@@ -339,7 +402,7 @@ function PillBarContent({
         onClick={onToggleSidebar}
         className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
       >
-        <PanelLeft className="h-5 w-5" />
+        <PanelLeft className="h-6 w-6" />
       </button>
 
       {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
@@ -360,18 +423,19 @@ function PillBarContent({
           }
         }}
       >
-        <GravityIndicator containerRef={tabsRef} activeIndex={activeIndex} revision={tabs.join(",")} />
-        {/* Drag lens — a glass bubble ABOVE the labels (it magnifies/refracts
-            visually via blur+rim; labels stay legible through the centre). */}
-        <div
-          ref={lensRef}
-          aria-hidden
-          className={cn("PillDragLens", lensVisible && "PillDragLens--on")}
+        <GravityIndicator
+          containerRef={tabsRef}
+          activeIndex={activeIndex}
+          revision={tabs.join(",")}
+          hidden={lensActive}
         />
-        {tabs.map((tabKey) => {
+        {tabs.map((tabKey, i) => {
           const tab = TAB_CONFIG[tabKey]
           if (!tab) return null
           const active = tab.isActive(pathname)
+          // While the lens is up, ONLY the tab under it reads as selected —
+          // its label pre-highlights and the previously active tab dims.
+          const highlighted = lensActive ? lensIndex === i : active
           const Icon = tab.icon
 
           return (
@@ -381,7 +445,7 @@ function PillBarContent({
                   data-grav-item
                   className={cn(
                     "inline-flex items-center justify-center h-9 px-4 rounded-full text-sm font-medium transition-colors",
-                    active ? "text-primary" : "text-foreground/60 active:text-foreground"
+                    highlighted ? "text-primary" : "text-foreground/60 active:text-foreground"
                   )}
                 >
                   {tab.label}
@@ -391,10 +455,10 @@ function PillBarContent({
                   data-grav-item
                   className={cn(
                     "inline-flex flex-col items-center justify-center gap-0.5 h-11 px-3 rounded-full transition-colors",
-                    active ? "text-primary" : "text-foreground/60 active:text-foreground"
+                    highlighted ? "text-primary" : "text-foreground/60 active:text-foreground"
                   )}
                 >
-                  <Icon className="h-5 w-5" />
+                  <Icon className="h-6 w-6" />
                   <span className="text-[9px] leading-none">{tab.label}</span>
                 </span>
               )}
@@ -402,6 +466,19 @@ function PillBarContent({
           )
         })}
       </div>
+
+      {/* Drag lens portal — fixed-positioned so it can overhang the pill
+          (GlassContent clips its own overflow). */}
+      {lensActive &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={lensMountRef}
+            aria-hidden
+            className={cn("PillDragLens", lensPhase === "settle" && "PillDragLens--settle")}
+          />,
+          document.body
+        )}
 
       {/* Sync status — fixed width bookend */}
       <SyncIconButton />
@@ -540,7 +617,7 @@ function SidebarNavItem({
           : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
       )}
     >
-      <span className={cn("flex-shrink-0", isActive ? "text-primary" : "text-foreground/50")}>
+      <span className={cn("flex-shrink-0 [&_svg]:!size-6", isActive ? "text-primary" : "text-foreground/50")}>
         {icon}
       </span>
       {label}
@@ -759,6 +836,7 @@ function DesktopPillMorph({
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           disableTapFeedback
+          spotlight
           morphing={phase === "opening" || phase === "closing"}
         >
           {/* Pill bar — always visible */}
@@ -907,6 +985,7 @@ function MobilePillMorph({
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           disableTapFeedback
+          spotlight
           morphing={phase === "opening" || phase === "closing"}
         >
           {/* Pill bar — visible when collapsed */}

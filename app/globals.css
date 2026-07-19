@@ -834,35 +834,55 @@ textarea:focus-within {
 }
 
 /* ─── Nav pill drag lens ───
-   The iPadOS tab-bar "hold and slide" bubble: a glass lens that appears over
-   the hovered tab and follows the finger (see PillBarContent). Sits ABOVE the
-   labels — the bright rim + slight blur reads as a magnifying droplet. The
-   short transform transition makes the follow lag liquidly behind the finger. */
+   The iPadOS tab-bar "hold and slide" bubble: a CLEAR glass lens (no blur —
+   the label under it stays crisp) that overhangs the pill's edges and follows
+   the finger 1:1; the short transform transition adds a liquid lag. On
+   release, --settle swaps the easing to the overshoot spring and crossfades
+   the material into the grey highlight the gravity blob uses, so the lens
+   visibly BECOMES the selection before handing off. Fixed-positioned via a
+   portal (the pill clips its own overflow). */
 .PillDragLens {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  z-index: 2;
+  position: fixed;
+  z-index: 110;
   pointer-events: none;
   border-radius: 999px;
-  backdrop-filter: blur(1.5px) saturate(1.6) brightness(1.15);
+  backdrop-filter: saturate(1.6) brightness(1.14);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.30),
-    inset 0 10px 14px -10px rgba(255, 255, 255, 0.50),
-    inset 0 -10px 14px -10px rgba(255, 255, 255, 0.28),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.32),
+    inset 0 12px 16px -12px rgba(255, 255, 255, 0.50),
+    inset 0 -12px 16px -12px rgba(255, 255, 255, 0.28),
     0 4px 14px rgba(0, 0, 0, 0.18);
   opacity: 0;
   scale: 0.6;
   transition:
     opacity 0.16s ease,
     scale 0.28s cubic-bezier(0.34, 1.5, 0.64, 1),
-    transform 0.12s cubic-bezier(0.2, 0.8, 0.3, 1),
-    width 0.2s cubic-bezier(0.22, 1, 0.36, 1),
-    height 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+    transform 0.11s cubic-bezier(0.2, 0.8, 0.3, 1),
+    width 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.18s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .PillDragLens--on {
   opacity: 1;
   scale: 1;
+}
+.PillDragLens--settle {
+  /* Morph into the gravity blob's grey highlight while springing to the tab. */
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+  backdrop-filter: saturate(1) brightness(1);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0),
+    inset 0 12px 16px -12px rgba(255, 255, 255, 0),
+    inset 0 -12px 16px -12px rgba(255, 255, 255, 0),
+    0 4px 14px rgba(0, 0, 0, 0);
+  transition:
+    opacity 0.12s ease 0.36s,
+    transform 0.42s cubic-bezier(0.34, 1.5, 0.64, 1),
+    width 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    background 0.3s ease,
+    backdrop-filter 0.3s ease,
+    box-shadow 0.3s ease;
+  opacity: 0;
 }
 @media (prefers-reduced-motion: reduce) {
   .PillDragLens {
