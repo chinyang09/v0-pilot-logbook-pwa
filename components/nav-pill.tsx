@@ -2,7 +2,8 @@
 
 import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
-import { usePathname } from "next/navigation"
+import { createPortal } from "react-dom"
+import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
 import { useReducedMotion } from "framer-motion"
 import {
@@ -21,7 +22,7 @@ import {
 import { cn } from "@/lib/utils"
 import { OVERSHOOT_BEZIER, SETTLE_BEZIER, MORPH_EASE } from "@/lib/motion"
 import { GlassContainer } from "@/components/ui/glass-container"
-import { useDesktopPill } from "@/hooks/use-is-desktop"
+import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { usePreferences } from "@/components/providers/preferences-provider"
@@ -144,12 +145,15 @@ function GravityIndicator({
   activeIndex,
   className,
   revision = "",
+  hidden = false,
 }: {
   containerRef: React.RefObject<HTMLElement | null>
   activeIndex: number
   className?: string
   /** Change this when the set/order of items changes so metrics re-measure. */
   revision?: string
+  /** Fade the blob out (drag-lens active) while its transform keeps tracking. */
+  hidden?: boolean
 }) {
   const reduce = useReducedMotion()
   const [rects, setRects] = useState<{ left: number; top: number; width: number; height: number }[]>([])
@@ -192,6 +196,7 @@ function GravityIndicator({
         `transform 0.5s ${OVERSHOOT_BEZIER}`,
         `width 0.4s ${SETTLE_BEZIER}`,
         `height 0.4s ${SETTLE_BEZIER}`,
+        "opacity 0.15s ease",
       ].join(", ")
 
   return (
@@ -208,6 +213,7 @@ function GravityIndicator({
       // composites while animating, so nav stays smooth).
       style={{
         pointerEvents: "none",
+        opacity: hidden ? 0 : 1,
         transform: `translate(${target.left}px, ${target.top}px)`,
         width: target.width,
         height: target.height,
@@ -240,6 +246,154 @@ function PillBarContent({
 }) {
   const tabsRef = useRef<HTMLDivElement>(null)
   const activeIndex = tabs.findIndex((k) => TAB_CONFIG[k]?.isActive(pathname))
+  const router = useRouter()
+  const reduce = useReducedMotion()
+
+  // ── Drag lens (iPadOS tab-bar style): hold and slide along the pill and a
+  // clear glass bubble — TALLER than the pill, so it rides over its edges —
+  // follows the finger 1:1 (no snapping mid-drag). The nearest tab's label
+  // pre-highlights as the lens passes over it and the grey blob hides; on
+  // release the lens SPRINGS to that tab and morphs into the grey highlight,
+  // then hands off to the real blob. A plain tap never activates it (10px
+  // slop), so normal Link taps work unchanged. Rendered through a portal —
+  // the pill's GlassContent clips overflow, and the lens must overhang it.
+  const lensRef = useRef<HTMLDivElement | null>(null)
+  const [lensPhase, setLensPhase] = useState<"idle" | "drag" | "settle">("idle")
+  const [lensIndex, setLensIndex] = useState(-1)
+  const suppressClickRef = useRef(false)
+  const lastXRef = useRef(0)
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dragRef = useRef<{
+    startX: number
+    active: boolean
+    nearest: number
+    base: { left: number; top: number; width: number; height: number }
+    rects: { left: number; width: number; height: number }[]
+  } | null>(null)
+
+  /** Extra height beyond the pill — the lens overhangs top and bottom. */
+  const LENS_OVERHANG = 16
+
+  const positionLens = useCallback((clientX: number) => {
+    const lens = lensRef.current
+    const drag = dragRef.current
+    if (!lens || !drag || drag.rects.length === 0) return
+    lastXRef.current = clientX
+    const x = Math.max(0, Math.min(drag.base.width, clientX - drag.base.left))
+    let nearest = 0
+    let best = Infinity
+    drag.rects.forEach((r, i) => {
+      const d = Math.abs(x - (r.left + r.width / 2))
+      if (d < best) {
+        best = d
+        nearest = i
+      }
+    })
+    if (nearest !== drag.nearest) {
+      drag.nearest = nearest
+      setLensIndex(nearest)
+    }
+    const r = drag.rects[nearest]
+    const w = r.width + 12
+    // Pure finger follow — the smoothing comes from the short CSS transform
+    // transition, not from snapping. Release does the spring-to-tab.
+    lens.style.width = `${w}px`
+    lens.style.height = `${drag.base.height + LENS_OVERHANG}px`
+    lens.style.transform = `translate(${x - w / 2}px, -50%)`
+  }, [])
+
+  // Portal mount: position immediately from the live drag state, then reveal
+  // on the next frame so the pop-in transitions from the base styles.
+  const lensMountRef = useCallback((node: HTMLDivElement | null) => {
+    lensRef.current = node
+    const drag = dragRef.current
+    if (!node || !drag) return
+    node.style.left = `${drag.base.left}px`
+    node.style.top = `${drag.base.top + drag.base.height / 2}px`
+    positionLens(lastXRef.current)
+    requestAnimationFrame(() => node.classList.add("PillDragLens--on"))
+  }, [positionLens])
+
+  const handleLensDown = useCallback((e: React.PointerEvent) => {
+    if (reduce || lensPhase === "settle") return
+    const el = tabsRef.current
+    if (!el) return
+    const base = el.getBoundingClientRect()
+    lastXRef.current = e.clientX
+    dragRef.current = {
+      startX: e.clientX,
+      active: false,
+      nearest: -1,
+      base: { left: base.left, top: base.top, width: base.width, height: base.height },
+      rects: Array.from(el.querySelectorAll<HTMLElement>("[data-grav-item]")).map((it) => {
+        const r = it.getBoundingClientRect()
+        return { left: r.left - base.left, width: r.width, height: r.height }
+      }),
+    }
+  }, [reduce, lensPhase])
+
+  const handleLensMove = useCallback((e: React.PointerEvent) => {
+    const drag = dragRef.current
+    if (!drag) return
+    if (!drag.active) {
+      if (Math.abs(e.clientX - drag.startX) < 10) return
+      drag.active = true
+      setLensPhase("drag")
+      try {
+        tabsRef.current?.setPointerCapture(e.pointerId)
+      } catch {
+        // capture can fail if the pointer is already gone — lens still tracks
+      }
+    }
+    positionLens(e.clientX)
+  }, [positionLens])
+
+  const handleLensEnd = useCallback((e: React.PointerEvent) => {
+    const drag = dragRef.current
+    dragRef.current = null
+    if (!drag?.active) return
+    // Swallow the click synthesised at the end of the drag; the timeout clears
+    // the flag if pointer capture already ate the click (so the NEXT tap works).
+    suppressClickRef.current = true
+    setTimeout(() => {
+      suppressClickRef.current = false
+    }, 150)
+
+    if (e.type === "pointercancel" || drag.nearest < 0) {
+      setLensPhase("idle")
+      setLensIndex(-1)
+      return
+    }
+
+    // Settle: the lens itself springs to the chosen tab and morphs into the
+    // grey highlight (the --settle class swaps easing to the overshoot spring
+    // and crossfades the material); navigation happens now so the hidden blob
+    // arrives underneath, and the handoff swap is invisible.
+    setLensPhase("settle")
+    const idx = drag.nearest
+    const r = drag.rects[idx]
+    const lens = lensRef.current
+    if (lens) {
+      requestAnimationFrame(() => {
+        lens.style.width = `${r.width}px`
+        lens.style.height = `${r.height}px`
+        lens.style.transform = `translate(${r.left}px, -50%)`
+      })
+    }
+    const tab = TAB_CONFIG[tabs[idx]]
+    if (tab) router.push(tab.href)
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+    settleTimerRef.current = setTimeout(() => {
+      setLensPhase("idle")
+      setLensIndex(-1)
+    }, 480)
+  }, [tabs, router])
+
+  useEffect(() => () => {
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+  }, [])
+
+  const lensActive = lensPhase !== "idle"
 
   return (
     <div className="flex items-center h-14 px-2">
@@ -248,17 +402,40 @@ function PillBarContent({
         onClick={onToggleSidebar}
         className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
       >
-        <PanelLeft className="h-5 w-5" />
+        <PanelLeft className="h-6 w-6" />
       </button>
 
       {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
-          behind the labels and stretches between tabs as the route changes. */}
-      <div ref={tabsRef} className="relative flex items-center flex-1 min-w-0 justify-evenly">
-        <GravityIndicator containerRef={tabsRef} activeIndex={activeIndex} revision={tabs.join(",")} />
-        {tabs.map((tabKey) => {
+          behind the labels and stretches between tabs as the route changes.
+          touch-action:none so hold-and-slide streams pointermoves on iOS. */}
+      <div
+        ref={tabsRef}
+        className="relative flex items-center flex-1 min-w-0 justify-evenly touch-none"
+        onPointerDown={handleLensDown}
+        onPointerMove={handleLensMove}
+        onPointerUp={handleLensEnd}
+        onPointerCancel={handleLensEnd}
+        onClickCapture={(e) => {
+          if (suppressClickRef.current) {
+            suppressClickRef.current = false
+            e.preventDefault()
+            e.stopPropagation()
+          }
+        }}
+      >
+        <GravityIndicator
+          containerRef={tabsRef}
+          activeIndex={activeIndex}
+          revision={tabs.join(",")}
+          hidden={lensActive}
+        />
+        {tabs.map((tabKey, i) => {
           const tab = TAB_CONFIG[tabKey]
           if (!tab) return null
           const active = tab.isActive(pathname)
+          // While the lens is up, ONLY the tab under it reads as selected —
+          // its label pre-highlights and the previously active tab dims.
+          const highlighted = lensActive ? lensIndex === i : active
           const Icon = tab.icon
 
           return (
@@ -268,7 +445,7 @@ function PillBarContent({
                   data-grav-item
                   className={cn(
                     "inline-flex items-center justify-center h-9 px-4 rounded-full text-sm font-medium transition-colors",
-                    active ? "text-primary" : "text-foreground/60 active:text-foreground"
+                    highlighted ? "text-primary" : "text-foreground/60 active:text-foreground"
                   )}
                 >
                   {tab.label}
@@ -278,10 +455,10 @@ function PillBarContent({
                   data-grav-item
                   className={cn(
                     "inline-flex flex-col items-center justify-center gap-0.5 h-11 px-3 rounded-full transition-colors",
-                    active ? "text-primary" : "text-foreground/60 active:text-foreground"
+                    highlighted ? "text-primary" : "text-foreground/60 active:text-foreground"
                   )}
                 >
-                  <Icon className="h-5 w-5" />
+                  <Icon className="h-6 w-6" />
                   <span className="text-[9px] leading-none">{tab.label}</span>
                 </span>
               )}
@@ -289,6 +466,19 @@ function PillBarContent({
           )
         })}
       </div>
+
+      {/* Drag lens portal — fixed-positioned so it can overhang the pill
+          (GlassContent clips its own overflow). */}
+      {lensActive &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={lensMountRef}
+            aria-hidden
+            className={cn("PillDragLens", lensPhase === "settle" && "PillDragLens--settle")}
+          />,
+          document.body
+        )}
 
       {/* Sync status — fixed width bookend */}
       <SyncIconButton />
@@ -306,10 +496,29 @@ function SidebarNav({
   className?: string
 }) {
   const navRef = useRef<HTMLElement>(null)
+  const blobLayerRef = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const toggleSection = (label: string) => {
     setCollapsed((prev) => ({ ...prev, [label]: !prev[label] }))
   }
+
+  // Keep the (un-clipped) gravity-blob overlay in lock-step with the nav's
+  // scroll. The blob is measured in the scroller's CONTENT coordinates; the
+  // overlay isn't a scroll container, so translating it by -scrollTop projects
+  // the blob into the right viewport position WITHOUT the overflow clipping that
+  // used to slice the overshoot spring off above the top item. Imperative DOM
+  // write on a passive scroll listener — no re-render, stays on the compositor.
+  useEffect(() => {
+    const sc = navRef.current
+    const layer = blobLayerRef.current
+    if (!sc || !layer) return
+    const sync = () => {
+      layer.style.transform = `translateY(${-sc.scrollTop}px)`
+    }
+    sync()
+    sc.addEventListener("scroll", sync, { passive: true })
+    return () => sc.removeEventListener("scroll", sync)
+  }, [])
 
   const isItemActive = (href: string) => {
     if (href === "/") return pathname === "/"
@@ -325,17 +534,24 @@ function SidebarNav({
   const activeIndex = orderedHrefs.findIndex((href) => isItemActive(href))
 
   return (
-    <nav
-      ref={navRef}
-      className={cn("relative overflow-y-auto overscroll-contain px-3 pb-4", className)}
-      style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
-    >
-      <GravityIndicator
-        containerRef={navRef}
-        activeIndex={activeIndex}
-        className="rounded-full"
-        revision={orderedHrefs.join(",")}
-      />
+    <div className={cn("relative min-h-0", className)}>
+      {/* Gravity blob lives in a NON-scrolling overlay so the overshoot spring
+          can travel above the first item without being clipped by the nav's
+          overflow. `blobLayerRef` is translated by -scrollTop (above) to stay
+          pinned to the scrolling content. Sits behind the nav items (z-0). */}
+      <div ref={blobLayerRef} aria-hidden className="pointer-events-none absolute inset-0 z-0">
+        <GravityIndicator
+          containerRef={navRef}
+          activeIndex={activeIndex}
+          className="rounded-full"
+          revision={orderedHrefs.join(",")}
+        />
+      </div>
+      <nav
+        ref={navRef}
+        className="relative z-[1] h-full overflow-y-auto overscroll-contain px-3 pb-4"
+        style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+      >
       <SidebarNavItem
         href={dashboardNavItem.href}
         icon={dashboardNavItem.icon}
@@ -373,7 +589,8 @@ function SidebarNav({
           </div>
         )
       })}
-    </nav>
+      </nav>
+    </div>
   )
 }
 
@@ -400,7 +617,7 @@ function SidebarNavItem({
           : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
       )}
     >
-      <span className={cn("flex-shrink-0", isActive ? "text-primary" : "text-foreground/50")}>
+      <span className={cn("flex-shrink-0 [&_svg]:!size-6", isActive ? "text-primary" : "text-foreground/50")}>
         {icon}
       </span>
       {label}
@@ -444,6 +661,7 @@ function useViewportMeasure() {
 
 export function NavPill() {
   const canPush = useDesktopPill()
+  const hydrated = useHydrated()
   const { isOpen: sidebarOpen, toggle: toggleSidebar } = useSidebar()
   const { hideNavbar } = useScrollNavbarContext()
   const pathname = usePathname()
@@ -452,7 +670,7 @@ export function NavPill() {
 
   const tabs = preferences.navigation.bottomNavTabs
 
-  return canPush ? (
+  const desktopPill = (
     <DesktopPillMorph
       tabs={tabs}
       pathname={pathname}
@@ -460,7 +678,8 @@ export function NavPill() {
       onToggleSidebar={toggleSidebar}
       prefersReducedMotion={!!prefersReducedMotion}
     />
-  ) : (
+  )
+  const mobilePill = (
     <MobilePillMorph
       tabs={tabs}
       pathname={pathname}
@@ -468,6 +687,22 @@ export function NavPill() {
       prefersReducedMotion={!!prefersReducedMotion}
     />
   )
+
+  // Pre-hydration (SSR HTML + the hydration render), useDesktopPill() must
+  // report false — JS-picking a variant painted the BOTTOM pill at desktop
+  // widths until hydration finished, then jumped to the top pill. Render both
+  // variants gated by the same 1120px breakpoint in CSS so the correct one
+  // paints immediately; once hydrated, JS picks one and the other unmounts.
+  if (!hydrated) {
+    return (
+      <>
+        <div className="hidden min-[1120px]:block">{desktopPill}</div>
+        <div className="min-[1120px]:hidden">{mobilePill}</div>
+      </>
+    )
+  }
+
+  return canPush ? desktopPill : mobilePill
 }
 
 // ─── Morph phase state machine (shared) ──────────────────────
@@ -601,6 +836,8 @@ function DesktopPillMorph({
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           disableTapFeedback
+          spotlight
+          morphing={phase === "opening" || phase === "closing"}
         >
           {/* Pill bar — always visible */}
           <div
@@ -748,6 +985,8 @@ function MobilePillMorph({
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           disableTapFeedback
+          spotlight
+          morphing={phase === "opening" || phase === "closing"}
         >
           {/* Pill bar — visible when collapsed */}
           <div

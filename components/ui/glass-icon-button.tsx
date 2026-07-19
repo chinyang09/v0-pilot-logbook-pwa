@@ -41,7 +41,7 @@ export function GlassIconButton({
         aria-label={ariaLabel}
         onClick={onClick}
         disabled={disabled}
-        className={cn("h-14 w-14 rounded-full", className)}
+        className={cn("h-14 w-14 rounded-full [&_svg]:!size-6", className)}
       >
         {children}
       </Button>
@@ -111,7 +111,7 @@ export function GlassGroupButton({
       aria-pressed={ariaPressed}
       onClick={onClick}
       disabled={disabled}
-      className={cn("h-12 w-12 rounded-full", active && "text-primary bg-primary/15", className)}
+      className={cn("h-12 w-12 rounded-full [&_svg]:!size-[22px]", active && "text-primary bg-primary/15", className)}
     >
       {children}
     </Button>

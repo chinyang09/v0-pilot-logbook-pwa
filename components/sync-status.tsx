@@ -79,9 +79,9 @@ export function SyncStatus({ className }: { className?: string }) {
         className,
       )}
     >
-      {status === "online" && <Cloud className="h-4 w-4" />}
-      {status === "offline" && <CloudOff className="h-4 w-4" />}
-      {status === "syncing" && <RefreshCw className="h-4 w-4 animate-spin" />}
+      {status === "online" && <Cloud className="h-5 w-5" />}
+      {status === "offline" && <CloudOff className="h-5 w-5" />}
+      {status === "syncing" && <RefreshCw className="h-5 w-5 animate-spin" />}
       {pendingCount > 0 && (
         <span className="absolute -top-1 -right-1 bg-[var(--status-pending)] text-background text-[10px] leading-none min-w-[16px] h-[16px] flex items-center justify-center px-1 rounded-full font-medium">{pendingCount}</span>
       )}

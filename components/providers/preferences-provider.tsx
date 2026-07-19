@@ -56,6 +56,11 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     getUserPreferences().then((prefs) => {
       if (prefs) {
+        // The short-lived "night" theme was removed — map any stored value to
+        // dark so next-themes never receives an unknown theme name.
+        if (prefs.display && (prefs.display.theme as string) === "night") {
+          prefs.display = { ...prefs.display, theme: "dark" }
+        }
         const resolved = {
           display: { ...DEFAULT_DISPLAY_PREFERENCES, ...prefs.display },
           autoFill: { ...DEFAULT_AUTO_FILL_PREFERENCES, ...prefs.autoFill },

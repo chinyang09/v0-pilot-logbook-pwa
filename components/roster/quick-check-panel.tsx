@@ -213,7 +213,9 @@ export function QuickCheckPanel({
         {mode === "swap" && futureDPs.length > 0 && (
           <div className="space-y-1">
             <p className="text-[10px] text-muted-foreground">Tap scheduled duties to remove/swap:</p>
-            <div className="max-h-[160px] overflow-y-auto space-y-0.5">
+            {/* pr-1: lane for the overlay scrollbar so it doesn't draw over the
+                right-aligned duty times (same fix as the dashboard flight list). */}
+            <div className="max-h-[160px] overflow-y-auto space-y-0.5 pr-1">
               {futureDPs.map((dp) => {
                 const isRemoved = removedDutyIds.has(dp.id)
                 return (

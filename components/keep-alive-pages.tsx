@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, Suspense, lazy, Component, type ReactNode,
 import { usePathname } from "next/navigation"
 import { ActiveRouteProvider } from "@/hooks/use-page-active"
 import { PageLoading } from "@/components/ui/page-loading"
+import { type KeepAliveRouteKey } from "@/components/keep-alive-routes"
 
 /**
  * Error boundary for lazy-loaded persistent pages.
@@ -56,17 +57,21 @@ class PageErrorBoundary extends Component<
  * Lazy-imported page components — we manage their lifecycle directly,
  * bypassing Next.js's internal LayoutRouter which would unmount them
  * on navigation even if we cached the `children` prop.
+ *
+ * Keyed by the shared registry in `keep-alive-routes.ts` — the
+ * `Record<KeepAliveRouteKey, …>` type makes adding/removing a route in one
+ * file without the other a compile error (the two lists had drifted before).
+ * Dashboard and roster are in the keep-alive set so every primary tab
+ * switches instantly: the dashboard is the most-visited page (Recharts
+ * remount was the dominant cost; its FDP data was already module-cached)
+ * and the roster list is virtualized, so the retained DOM is bounded.
  */
-const PERSISTENT_PAGES: Record<string, React.LazyExoticComponent<React.ComponentType>> = {
+const PERSISTENT_PAGES: Record<KeepAliveRouteKey, React.LazyExoticComponent<React.ComponentType>> = {
   "/": lazy(() => import("@/app/(app)/page")),
   "/logbook": lazy(() => import("@/app/(app)/logbook/page")),
   "/aircraft": lazy(() => import("@/app/(app)/aircraft/page")),
   "/airports": lazy(() => import("@/app/(app)/airports/page")),
   "/crew": lazy(() => import("@/app/(app)/crew/page")),
-  // Dashboard and roster joined the keep-alive set so every primary tab
-  // switches instantly: the dashboard is the most-visited page (Recharts
-  // remount was the dominant cost; its FDP data was already module-cached)
-  // and the roster list is virtualized, so the retained DOM is bounded.
   "/roster": lazy(() => import("@/app/(app)/roster/page")),
 }
 
@@ -120,6 +125,43 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
     }
   }, [routeKey, visited])
 
+  // Render list derived per-render: the first commit of a first visit already
+  // includes the new route. Waiting for the `visited` effect produced one
+  // commit where the route was persistent but not yet visited — neither the
+  // page nor `children` rendered, flashing a blank frame on every first visit
+  // to a tab.
+  const renderKeys =
+    isPersistent && !visited.has(routeKey) ? [...visited, routeKey] : [...visited]
+
+  // Freeze hidden pages' box to the size they had when deactivated. Hidden
+  // pages keep layout on purpose (visibility:hidden preserves scroll +
+  // virtualizer measurements) — but with `inset-0` they also TRACKED the
+  // container, so every split-panel drag frame fired ResizeObservers and
+  // re-rendered up to six retained pages (drag jank). Pinning width/height
+  // while hidden keeps their dimensions constant (no observer work); on
+  // activation the box is released back to inset-0 and the page re-measures
+  // once through its normal resize path.
+  const stackRef = useRef<HTMLDivElement>(null)
+  const pageElsRef = useRef(new Map<string, HTMLDivElement>())
+  useEffect(() => {
+    const stack = stackRef.current
+    if (!stack) return
+    const { width, height } = stack.getBoundingClientRect()
+    pageElsRef.current.forEach((el, key) => {
+      if (key === routeKey) {
+        el.style.width = ""
+        el.style.height = ""
+        el.style.right = "0"
+        el.style.bottom = "0"
+      } else {
+        el.style.right = "auto"
+        el.style.bottom = "auto"
+        el.style.width = `${width}px`
+        el.style.height = `${height}px`
+      }
+    })
+  }, [routeKey])
+
   // Focus management: blur elements inside hidden pages on route change
   const prevRouteRef = useRef(routeKey)
   useEffect(() => {
@@ -136,14 +178,18 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
   return (
     <ActiveRouteProvider activeRoute={routeKey}>
       {/* Stacking container — persistent pages are absolutely positioned inside */}
-      <div className="flex-1 relative overflow-hidden">
+      <div ref={stackRef} className="flex-1 relative overflow-hidden">
         {/* Persistent pages: lazy-mounted on first visit, never unmounted */}
-        {Array.from(visited).map(key => {
-          const PageComponent = PERSISTENT_PAGES[key]
+        {renderKeys.map(key => {
+          const PageComponent = PERSISTENT_PAGES[key as KeepAliveRouteKey]
           const isActive = key === routeKey
           return (
             <div
               key={key}
+              ref={(el) => {
+                if (el) pageElsRef.current.set(key, el)
+                else pageElsRef.current.delete(key)
+              }}
               data-keepalive-hidden={!isActive ? "true" : undefined}
               className="absolute inset-0 flex flex-col bg-background"
               style={{

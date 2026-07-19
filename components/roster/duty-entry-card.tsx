@@ -31,15 +31,19 @@ const DUTY_TYPE_ICONS: Record<DutyType, typeof Plane> = {
   other: FileText,
 }
 
+// Categorical duty-type colours. The icon text uses a darker `-600` shade in the
+// light theme and a lighter `-400` in dark so the low-lightness hues (standby
+// yellow→amber, off/other grey) stay legible on the cream card instead of
+// washing out. Backgrounds/borders stay at the subtle `-500/10`–`/20` tints.
 const DUTY_TYPE_COLORS: Record<DutyType, { bg: string; text: string; border: string }> = {
-  flight: { bg: "bg-blue-500/10", text: "text-blue-500", border: "border-blue-500/20" },
-  standby: { bg: "bg-yellow-500/10", text: "text-yellow-500", border: "border-yellow-500/20" },
-  training: { bg: "bg-purple-500/10", text: "text-purple-500", border: "border-purple-500/20" },
-  leave: { bg: "bg-green-500/10", text: "text-green-500", border: "border-green-500/20" },
-  off: { bg: "bg-gray-500/10", text: "text-gray-500", border: "border-gray-500/20" },
-  ground: { bg: "bg-orange-500/10", text: "text-orange-500", border: "border-orange-500/20" },
-  positioning: { bg: "bg-cyan-500/10", text: "text-cyan-500", border: "border-cyan-500/20" },
-  other: { bg: "bg-gray-500/10", text: "text-gray-500", border: "border-gray-500/20" },
+  flight: { bg: "bg-blue-500/10", text: "text-blue-600 dark:text-blue-400", border: "border-blue-500/20" },
+  standby: { bg: "bg-amber-500/10", text: "text-amber-600 dark:text-amber-400", border: "border-amber-500/20" },
+  training: { bg: "bg-purple-500/10", text: "text-purple-600 dark:text-purple-400", border: "border-purple-500/20" },
+  leave: { bg: "bg-green-500/10", text: "text-green-600 dark:text-green-400", border: "border-green-500/20" },
+  off: { bg: "bg-gray-500/10", text: "text-gray-600 dark:text-gray-400", border: "border-gray-500/20" },
+  ground: { bg: "bg-orange-500/10", text: "text-orange-600 dark:text-orange-400", border: "border-orange-500/20" },
+  positioning: { bg: "bg-cyan-500/10", text: "text-cyan-600 dark:text-cyan-400", border: "border-cyan-500/20" },
+  other: { bg: "bg-gray-500/10", text: "text-gray-600 dark:text-gray-400", border: "border-gray-500/20" },
 }
 
 interface DutyEntryCardProps {
@@ -77,7 +81,7 @@ export const DutyEntryCard = memo(function DutyEntryCard({ entry, onClick, compa
             <div className="text-xs text-muted-foreground truncate">{entry.dutyDescription}</div>
           )}
           {hasSectors && (
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-muted-foreground truncate">
               {entry.sectors.map((s) => `${s.departureIata}-${s.arrivalIata}`).join(", ")}
             </div>
           )}
@@ -189,9 +193,9 @@ export const DutyEntryCard = memo(function DutyEntryCard({ entry, onClick, compa
 
         {/* Crew */}
         {hasCrew && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Users className="h-3.5 w-3.5" />
-            <span>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+            <Users className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="truncate">
               {entry.crew
                 .map((c) => `${c.role === "CPT" || c.role === "PIC" ? "CPT" : "FO"} ${c.name}`)
                 .join(", ")}

@@ -459,7 +459,79 @@ textarea:focus-within {
 .squircle-xl { --squircle-radius: 34%; }
 
 /* ─── Liquid Glass UI ─── */
+
+/* The specular angle is a registered custom property so it can ANIMATE:
+   Apple's Liquid Glass highlights are alive (they shift with device motion);
+   the web approximation is a slow ambient drift around the top-left anchor.
+   inherits: true so the rim pseudo-elements see the animated value. */
+@property --glass-specular-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 315deg;
+}
+
+@keyframes glass-specular-drift {
+  from { --glass-specular-angle: 297deg; }
+  to   { --glass-specular-angle: 333deg; }
+}
+
+/* Glass theme tokens. Glass legibility flips with the theme: on the DARK
+   themes the material shows itself through brightness + white edge specular;
+   on the LIGHT (cream) theme white-on-cream vanishes, so the glass reads
+   through a hairline dark rim, a faint warm veil, a stronger float shadow,
+   and less brightness push. */
+:root {
+  /* LIGHT theme — modelled on Apple's light materials (e.g. the iOS GitHub
+     app): a near-solid soft-white surface, the merest hairline, and a WIDE
+     gentle shadow. No brightness push (it whited the glass out on cream) and
+     no bright edge halo. */
+  --glass-blur-brightness: 1.03;
+  --glass-rim:
+    conic-gradient(
+      from var(--glass-specular-angle, 315deg),
+      rgba(255, 255, 255, 0.85) 0deg,
+      rgba(255, 255, 255, 0.25) 55deg,
+      rgba(255, 255, 255, 0) 100deg,
+      rgba(255, 255, 255, 0.10) 150deg,
+      rgba(255, 255, 255, 0.40) 180deg,
+      rgba(255, 255, 255, 0.10) 210deg,
+      rgba(255, 255, 255, 0) 260deg,
+      rgba(255, 255, 255, 0.25) 305deg,
+      rgba(255, 255, 255, 0.85) 360deg
+    ),
+    linear-gradient(rgba(60, 50, 40, 0.07), rgba(60, 50, 40, 0.07));
+  --glass-veil: rgba(255, 255, 255, 0.62);
+  --glass-shadow:
+    0 1px 2px rgba(45, 38, 30, 0.05),
+    0 8px 28px rgba(45, 38, 30, 0.10);
+  --glass-edge-filter: blur(var(--total-strength)) brightness(1.03) saturate(1.05);
+}
+.dark {
+  --glass-blur-brightness: 1.25;
+  /* Top-left / bottom-right specular lobes (see :root note). */
+  --glass-rim: conic-gradient(
+    from var(--glass-specular-angle, 315deg),
+    rgba(255, 255, 255, 0.65) 0deg,
+    rgba(255, 255, 255, 0.22) 60deg,
+    rgba(255, 255, 255, 0.04) 105deg,
+    rgba(255, 255, 255, 0.12) 150deg,
+    rgba(255, 255, 255, 0.34) 180deg,
+    rgba(255, 255, 255, 0.12) 210deg,
+    rgba(255, 255, 255, 0.04) 255deg,
+    rgba(255, 255, 255, 0.22) 300deg,
+    rgba(255, 255, 255, 0.65) 360deg
+  );
+  --glass-veil: transparent;
+  --glass-shadow:
+    inset 0 -1px 1px rgba(0, 0, 0, 0.10),
+    0 2px 6px rgba(0, 0, 0, 0.10),
+    0 14px 36px -14px rgba(0, 0, 0, 0.28);
+  --glass-edge-filter: blur(var(--total-strength)) brightness(1.2) saturate(1.2);
+}
+
 .GlassContainer {
+  /* Ambient specular drift — see @property above. Long period, alternate. */
+  animation: glass-specular-drift 60s ease-in-out infinite alternate;
   --corner-radius: 24px;
   --base-strength: 24px;
   --extra-blur: 2px;
@@ -489,6 +561,35 @@ textarea:focus-within {
   /* Invert effect moved here from GlassContainer::before pseudo-element
      to eliminate white flash during visibility transitions */
   backdrop-filter: invert(var(--invert, 0));
+  /* Liquid glass float: themed shadow set (see the glass theme tokens below —
+     light mode needs a stronger shadow to read on cream; dark modes keep it
+     soft). Radius transitions so the pill↔sidebar corner change (28↔20)
+     flows instead of snapping. NOTE: no surface sheen — a white wash over the
+     glass face reads as haze on the near-black themes (owner feedback); the
+     only white light on the glass is the edge specular. */
+  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: var(--glass-shadow);
+}
+
+/* Touch spotlight — a soft glow anchored to the FINGER (GlassContainer sets
+   --press-x/--press-y imperatively on pointer down/move, and animates
+   --glass-press 0→1 via whileTap), so the light tracks a hold-and-drag
+   across the surface like Apple's controls. Paints over the content on
+   purpose: the press lightens the label too. */
+.GlassContent::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: inherit;
+  background: radial-gradient(
+    130px circle at var(--press-x, 50%) var(--press-y, 45%),
+    rgba(255, 255, 255, 0.60),
+    rgba(255, 255, 255, 0.14) 55%,
+    transparent 78%
+  );
+  opacity: calc(var(--glass-press, 0) * 0.22);
 }
 
 .GlassMaterial {
@@ -509,7 +610,10 @@ textarea:focus-within {
   z-index: 3;
   overflow: hidden;
   border-radius: var(--corner-radius);
-  background-color: rgba(255, 255, 255, 0);
+  /* Light theme: a faint warm veil that separates the slab from the cream
+     background (dark themes keep it transparent). */
+  background-color: var(--glass-veil, transparent);
+  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .GlassMaterial > div {
@@ -519,13 +623,17 @@ textarea:focus-within {
   border-radius: var(--corner-radius);
   z-index: 2;
   overflow: hidden;
+  /* Corners morph in step with .GlassContent (pill 28 ↔ sidebar 20). */
+  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .GlassMaterial .GlassEdgeReflection {
   z-index: 4;
   margin: calc(var(--total-strength) * -1);
   border-radius: calc(var(--corner-radius) + var(--total-strength));
-  backdrop-filter: blur(var(--total-strength)) brightness(1.2) saturate(1.2);
+  /* Themed: the light theme mutes this ring's brightness — at 1.2 it painted
+     a pale halo box around circular buttons on cream. */
+  backdrop-filter: var(--glass-edge-filter, blur(var(--total-strength)) brightness(1.2) saturate(1.2));
   padding: var(--edge-width);
   border: var(--total-strength) solid transparent;
   mask:
@@ -555,9 +663,46 @@ textarea:focus-within {
 }
 
 .GlassMaterial .GlassBlur {
-  backdrop-filter: blur(var(--extra-blur)) brightness(1.25);
+  /* saturate(1.5): the vibrancy term — real glass intensifies the colour of
+     what's behind it; without it the material reads as frosted film.
+     Brightness is themed: the dark themes push 1.25 so the surface lifts off
+     near-black; the light theme stays near 1.12 (a strong push on cream
+     whites the glass out entirely). The backdrop-filter transitions so the
+     morph surge below swells and settles smoothly. */
+  backdrop-filter: blur(var(--extra-blur)) brightness(var(--glass-blur-brightness, 1.25)) saturate(1.5);
   border-radius: calc(var(--corner-radius) - (var(--emboss-width) + var(--refraction-width)));
   margin: calc(var(--emboss-width) + var(--refraction-width));
+  transition: backdrop-filter 240ms ease;
+}
+
+/* Morph surge — while the pill↔sidebar morph is in flight the material swells
+   like a merging droplet (more blur, brighter, more vibrant), then settles as
+   it lands. Driven by data-morphing on the GlassContainer. */
+.GlassContainer[data-morphing="true"] .GlassBlur {
+  backdrop-filter: blur(calc(var(--extra-blur) + 6px)) brightness(1.4) saturate(1.7);
+}
+
+/* ─── Lens mode (Chromium progressive enhancement) ───
+   A real Snell's-law displacement map applied via backdrop-filter: url(#…)
+   replaces the whole ring stack with ONE backdrop-filter surface (see
+   components/ui/glass-container.tsx + lib/glass/displacement.ts). The filter
+   itself carries blur, refraction, vibrancy, and the screen-blended rim
+   specular. Safari/Firefox never enter this mode. */
+.GlassLens {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: var(--corner-radius);
+  overflow: hidden;
+  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1), backdrop-filter 240ms ease;
+}
+.GlassFilterSvg {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .GlassMaterial .BlendLayers {
@@ -583,7 +728,16 @@ textarea:focus-within {
   border-radius: var(--corner-radius);
   padding: 1px;
   border: 0 solid transparent;
-  background: linear-gradient(155deg, hsla(0, 0%, 100%, 0.15) 0%, hsla(0, 0%, 0%, 0.2) 50%, hsla(0, 0%, 100%, 0.15) 100%);
+  /* Angular specular rim — a CSS approximation of the physically computed
+     specular map (liquid-web/kube: rim brightness ∝ |edge normal · light|²,
+     light at ~60°). The |cos| term produces symmetric DOUBLE lobes — glints
+     at the upper-right and lower-left shoulders fading through dim flanks —
+     which is how real liquid glass edges read, not a lit top / dark bottom.
+     Themed: the light theme underlays a warm hairline so the edge is visible
+     on cream (white-only vanishes there); dark themes are additive white
+     only. See the glass theme tokens above. */
+  background: var(--glass-rim);
+  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
   /* backdrop-filter removed — invert(0.15) on pseudo-element border ring
      caused white flash during visibility/opacity transitions */
   mask:
@@ -596,9 +750,12 @@ textarea:focus-within {
   z-index: 12;
   display: block;
   border-radius: var(--corner-radius);
-  padding: 1px;
+  /* 2px band with a slight blur: the rim visibly BENDS the backdrop under
+     the specular glint (Apple's edge is refracted light, not a painted
+     line). The angular white conic (--glass-rim) sits above this. */
+  padding: 2px;
   border: 0 solid transparent;
-  backdrop-filter: brightness(1.2) contrast(1.6) saturate(1.2) opacity(1);
+  backdrop-filter: blur(1px) brightness(1.25) contrast(1.5) saturate(1.35);
   mask:
     linear-gradient(white 0 0) padding-box,
     linear-gradient(white 0 0) content-box;
@@ -621,11 +778,20 @@ textarea:focus-within {
   .GlassMaterial,
   .GlassMaterial > div,
   .GlassMaterial::before,
-  .GlassMaterial::after {
+  .GlassMaterial::after,
+  .GlassLens {
     backdrop-filter: none !important;
   }
-  .GlassContainer {
+  .GlassContainer,
+  .GlassContent,
+  .GlassMaterial > div,
+  .GlassMaterial::before,
+  .GlassMaterial::after,
+  .GlassLens {
     transition: none !important;
+  }
+  .GlassContainer {
+    animation: none !important;
   }
 }
 
@@ -665,4 +831,61 @@ textarea:focus-within {
 [data-swipe-row] input,
 [data-swipe-row] textarea {
   pointer-events: none;
+}
+
+/* ─── Nav pill drag lens ───
+   The iPadOS tab-bar "hold and slide" bubble: a CLEAR glass lens (no blur —
+   the label under it stays crisp) that overhangs the pill's edges and follows
+   the finger 1:1; the short transform transition adds a liquid lag. On
+   release, --settle swaps the easing to the overshoot spring and crossfades
+   the material into the grey highlight the gravity blob uses, so the lens
+   visibly BECOMES the selection before handing off. Fixed-positioned via a
+   portal (the pill clips its own overflow). */
+.PillDragLens {
+  position: fixed;
+  z-index: 110;
+  pointer-events: none;
+  border-radius: 999px;
+  backdrop-filter: saturate(1.6) brightness(1.14);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.32),
+    inset 0 12px 16px -12px rgba(255, 255, 255, 0.50),
+    inset 0 -12px 16px -12px rgba(255, 255, 255, 0.28),
+    0 4px 14px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  scale: 0.6;
+  transition:
+    opacity 0.16s ease,
+    scale 0.28s cubic-bezier(0.34, 1.5, 0.64, 1),
+    transform 0.11s cubic-bezier(0.2, 0.8, 0.3, 1),
+    width 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.PillDragLens--on {
+  opacity: 1;
+  scale: 1;
+}
+.PillDragLens--settle {
+  /* Morph into the gravity blob's grey highlight while springing to the tab. */
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+  backdrop-filter: saturate(1) brightness(1);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0),
+    inset 0 12px 16px -12px rgba(255, 255, 255, 0),
+    inset 0 -12px 16px -12px rgba(255, 255, 255, 0),
+    0 4px 14px rgba(0, 0, 0, 0);
+  transition:
+    opacity 0.12s ease 0.36s,
+    transform 0.42s cubic-bezier(0.34, 1.5, 0.64, 1),
+    width 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    background 0.3s ease,
+    backdrop-filter 0.3s ease,
+    box-shadow 0.3s ease;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .PillDragLens {
+    display: none;
+  }
 }

@@ -33,7 +33,9 @@ export function PeriodFlightsCard({ flights, className }: PeriodFlightsCardProps
   return (
     <div
       className={cn(
-        "flex h-full w-full flex-col rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm backdrop-blur-sm",
+        // @container: row columns adapt to the CARD's width (it lives in a
+        // resizable split panel, so viewport breakpoints are meaningless here).
+        "@container flex h-full w-full flex-col rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm backdrop-blur-sm",
         className,
       )}
     >
@@ -52,25 +54,30 @@ export function PeriodFlightsCard({ flights, className }: PeriodFlightsCardProps
           No flights in this period
         </div>
       ) : (
-        <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto overflow-x-hidden">
+        // pr-1.5: a lane for the overlay scrollbar (iPadOS draws it ON TOP of
+        // content, which visually chopped the trailing duration digits).
+        <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto overflow-x-hidden pr-1.5">
           {flights.slice(0, MAX_ROWS).map((f) => (
             <li key={f.id}>
               <Link
                 href={`/flights/${f.id}`}
                 className="flex items-center gap-1.5 rounded-lg px-1 py-1 text-xs transition-colors hover:bg-accent/40"
               >
-                <span className="w-11 shrink-0 tabular-nums text-muted-foreground">
+                <span className="w-10 shrink-0 tabular-nums text-muted-foreground">
                   {formatDate(f.date)}
                 </span>
                 <span className="w-12 shrink-0 truncate font-medium text-foreground">
                   {f.flightNumber || "—"}
                 </span>
-                {/* min-w-0 lets the route shrink + truncate instead of pushing
-                    the row wider than the card (which caused horizontal scroll). */}
-                <span className="min-w-0 flex-1 truncate tabular-nums text-foreground/80">
+                {/* Route is the first column to go: hidden below 15rem card
+                    width, where it could only render as an empty truncation
+                    while its fixed siblings overflowed the card (clipped
+                    durations at the 360px panel snap). min-w-0 lets it shrink
+                    + truncate when shown. */}
+                <span className="hidden min-w-0 flex-1 truncate tabular-nums text-foreground/80 @[15rem]:block">
                   {formatRoute(f)}
                 </span>
-                <span className="shrink-0 tabular-nums text-foreground">
+                <span className="ml-auto shrink-0 tabular-nums text-foreground">
                   {formatDecimalHours(f.blockMinutes)}h
                 </span>
               </Link>

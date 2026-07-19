@@ -413,9 +413,22 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
 - Used to re-sync detail panel content when returning to a page
 
 **Detail panel integration** (`hooks/use-detail-panel.tsx`):
-- `DetailPanelProvider` tracks `KEEPALIVE_ROUTES` — does NOT clear `detailContent` when navigating between two keep-alive routes
+- The keep-alive route set lives in ONE registry — `components/keep-alive-routes.ts`
+  (`KEEPALIVE_ROUTES`, with a `hasDetailPanel` flag per route). `keep-alive-pages.tsx`
+  types its `PERSISTENT_PAGES` map against it (compile-checked) and
+  `use-detail-panel.tsx` derives `KEEPALIVE_DETAIL_ROUTES` from it — do not
+  reintroduce parallel hand-maintained route lists (they drifted once already)
+- `DetailPanelProvider` does NOT clear `detailContent` when navigating between two
+  keep-alive routes that own detail content; routes without a detail panel
+  (dashboard, roster) always clear it
 - Each persistent page re-syncs its detail panel via its `usePageActive` callback (`syncDetailPanel`)
 - Selections stored in `sessionStorage` for restoration across full page reloads
+- `setSelectedId(id, { explicit: false })` is for **programmatic** selections
+  (e.g. settings auto-selecting a section to fill the desktop panel): it skips
+  the `?selected=` URL write and the explicit-selection flag, both of which
+  would auto-open the full-screen mobile overlay when the viewport crosses
+  below 720px (iPad Split View / resize). Only real user taps use the default
+  explicit path
 
 **Provider hierarchy:**
 ```
@@ -618,6 +631,16 @@ worse than the current behavior. Do **not** change these casually.
    never runs on a merged overnight duty — an over-long merged duty can read as
    compliant.
 
+### Deferred design work (owner-approved to-do)
+
+- **Populate the split-view detail panel on non-detail routes** (layout audit
+  L·8): dashboard, roster, FDP, currencies, discrepancies, and account leave
+  the ≥720px right panel on a permanent "Select an item to view details"
+  placeholder. Highest-value first step: roster's selected-day view should
+  render into the detail panel (today it replaces the main list). To be
+  designed together with the owner in a future session — do not implement
+  piecemeal.
+
 ### Lower-priority items (not yet actioned)
 
 - **`discrepancies.resolved` boolean secondary index** (`lib/db/user-db.ts`) —
@@ -722,6 +745,18 @@ When making changes, be aware of these high-impact files:
 - `hooks/use-page-active.tsx` — Active route context and `usePageActive` hook
 - `hooks/use-detail-panel.tsx` — Detail panel provider (keep-alive route awareness)
 - `components/desktop-layout.tsx` — Responsive app shell (sidebar + detail panel)
+
+**Glass system:**
+- `components/ui/glass-container.tsx` + `lib/glass/displacement.ts` — the glass
+  surface has TWO rendering paths: **lens** (Chromium only — a per-element
+  Snell's-law displacement map + computed rim specular applied via
+  `backdrop-filter: url(#filter)`, adapted from winaviation/liquid-web, MIT)
+  and **rings** (Safari/Firefox — the layered backdrop-filter stack in
+  `globals.css`, with the specular approximated by a conic-gradient rim).
+  Safari is the primary iPad PWA target and does NOT support SVG filters in
+  backdrop-filter — never remove the ring fallback, and never gate the ring
+  path behind the lens detection being merely "not yet ready" (lens maps
+  generate async client-side; rings render first).
 
 **Swipe & Forms:**
 - `components/swipeable-card.tsx` — The single swipe-to-reveal primitive (framer-motion). Used by all lists, the flight form rows, and the crew/aircraft detail rows.

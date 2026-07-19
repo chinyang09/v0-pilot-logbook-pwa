@@ -189,18 +189,22 @@ export function FastScroll({
     }
   }, [isDragging, handleEnd, handleInteraction])
 
-  // Calculate indicator position
+  // Calculate indicator position.
+  // Anchor the bubble to the CENTRE of the item's hit-test bucket — `getItemFromPosition`
+  // slices the rail into `items.length` equal bands, so `(index + 0.5) / length`
+  // puts the bubble where the finger actually is (the old `index / (length - 1)`
+  // fence-post drifted from the touch point near the ends). The 56px bubble is
+  // then clamped inside the rail so it can't spill off the top/bottom edge.
   const indicatorStyle = React.useMemo(() => {
     if (!currentKey || items.length === 0) return {}
 
     const index = items.findIndex((i) => i.key === currentKey)
     if (index === -1) return {}
 
-    // Handle edge case when there's only one item
-    const percentage = items.length === 1 ? 0.5 : index / (items.length - 1)
+    const percentage = (index + 0.5) / items.length
 
     return {
-      top: `calc(${percentage * 100}% - 28px)`,
+      top: `clamp(0px, calc(${percentage * 100}% - 28px), calc(100% - 56px))`,
     }
   }, [currentKey, items])
 
@@ -336,33 +340,29 @@ export const yearItems = (startYear: number, endYear: number): FastScrollItem[] 
   }))
 
 /**
- * Generate items from a list of dates (grouped by month/year)
- * Useful for logbook/roster navigation
+ * Generate year buckets from a list of YYYY-MM-DD dates (newest first).
+ *
+ * Labels are 2-digit years ("25") so they fit the narrow index rail — the same
+ * convention as the logbook year rail. A month+year label ("May '26") is far too
+ * wide for the 20px rail cell: it wraps and collides with its neighbours, and a
+ * multi-year roster produces enough month rows to overflow the viewport. Year
+ * granularity keeps the rail readable and bounded.
  */
-export function generateDateItems(dates: string[]): FastScrollItem[] {
+export function generateYearItems(dates: string[]): FastScrollItem[] {
   if (dates.length === 0) return []
 
-  const monthYears = new Set<string>()
-
+  const years = new Set<string>()
   dates.forEach((date) => {
-    const [year, month] = date.split("-")
-    if (year && month) {
-      monthYears.add(`${year}-${month}`)
-    }
+    const year = date.split("-")[0]
+    if (year) years.add(year)
   })
 
-  const sorted = Array.from(monthYears).sort((a, b) => b.localeCompare(a))
+  const sorted = Array.from(years).sort((a, b) => b.localeCompare(a))
 
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-  return sorted.map((monthYear) => {
-    const [year, month] = monthYear.split("-")
-    const monthIndex = parseInt(month, 10) - 1
-    return {
-      key: monthYear,
-      label: `${monthNames[monthIndex]} '${year.slice(-2)}`,
-    }
-  })
+  return sorted.map((year) => ({
+    key: year,
+    label: year.slice(-2),
+  }))
 }
 
 /**

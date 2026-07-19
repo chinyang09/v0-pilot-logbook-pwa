@@ -83,20 +83,10 @@ export default function LogbookPage() {
   const {
     selectedId: selectedFlightId,
     setSelectedId: setSelectedFlightId,
-    setHasDetailSupport,
   } = useDetailPanel()
 
-  // Register detail panel support
-  useEffect(() => {
-    setHasDetailSupport(true)
-    return () => setHasDetailSupport(false)
-  }, [setHasDetailSupport])
-
-  // Re-assert detail panel ownership and refresh flight data when this keep-alive page becomes active again
-  const isActive = usePageActive("/logbook", useCallback(() => {
-    setHasDetailSupport(true)
-    refreshFlights()
-  }, [setHasDetailSupport, refreshFlights]))
+  // Refresh flight data when this keep-alive page becomes active again
+  const isActive = usePageActive("/logbook", refreshFlights)
 
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)

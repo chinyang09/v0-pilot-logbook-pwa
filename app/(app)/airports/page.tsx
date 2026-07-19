@@ -59,11 +59,14 @@ const AirportCard = memo(function AirportCard({
         }
       }}
       className={cn(
-        "w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer",
-        isRecent
-          ? "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20"
-          : "bg-card border border-border hover:bg-accent",
-        isSelected && "bg-primary/20 border-primary"
+        // Additive like the aircraft/crew cards: the recent gradient paints
+        // OVER bg-card. The old ternary dropped bg-card for recent rows, so
+        // the gradient sat on the darker page background and recent airports
+        // rendered a different shade from recent aircraft/crew.
+        "w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer bg-card border border-border hover:bg-accent",
+        isRecent &&
+          "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20 hover:bg-transparent",
+        isSelected && "bg-primary/20 border-primary hover:bg-primary/20"
       )}
     >
       <div className="flex items-center justify-between gap-2">

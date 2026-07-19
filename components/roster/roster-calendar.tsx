@@ -11,16 +11,19 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { formatLocalYMD } from "@/lib/utils/date"
 
+// Categorical duty-type colours, tuned per theme so the low-lightness hues
+// (standby yellow, off/other grey) don't wash out on the light cream card.
 const DUTY_TYPE_DOTS: Record<DutyType, string> = {
-  flight: "bg-blue-500",
-  standby: "bg-yellow-500",
-  training: "bg-purple-500",
-  leave: "bg-green-500",
-  off: "bg-gray-400",
-  ground: "bg-orange-500",
-  positioning: "bg-cyan-500",
-  other: "bg-gray-400",
+  flight: "bg-blue-600 dark:bg-blue-400",
+  standby: "bg-amber-500 dark:bg-amber-400",
+  training: "bg-purple-600 dark:bg-purple-400",
+  leave: "bg-green-600 dark:bg-green-400",
+  off: "bg-gray-500 dark:bg-gray-400",
+  ground: "bg-orange-600 dark:bg-orange-400",
+  positioning: "bg-cyan-600 dark:bg-cyan-400",
+  other: "bg-gray-500 dark:bg-gray-400",
 }
 
 const DAYS = ["S", "M", "T", "W", "T", "F", "S"]
@@ -71,7 +74,7 @@ export function RosterCalendar({ entries, onDateClick }: RosterCalendarProps) {
     const prevMonthLastDay = new Date(year, month, 0)
     for (let i = startingDayOfWeek - 1; i >= 0; i--) {
       const date = new Date(year, month - 1, prevMonthLastDay.getDate() - i)
-      const dateString = date.toISOString().split("T")[0]
+      const dateString = formatLocalYMD(date)
       days.push({
         date,
         dateString,
@@ -87,7 +90,7 @@ export function RosterCalendar({ entries, onDateClick }: RosterCalendarProps) {
 
     for (let day = 1; day <= lastDay.getDate(); day++) {
       const date = new Date(year, month, day)
-      const dateString = date.toISOString().split("T")[0]
+      const dateString = formatLocalYMD(date)
       days.push({
         date,
         dateString,
@@ -101,7 +104,7 @@ export function RosterCalendar({ entries, onDateClick }: RosterCalendarProps) {
     const remainingDays = 42 - days.length
     for (let day = 1; day <= remainingDays; day++) {
       const date = new Date(year, month + 1, day)
-      const dateString = date.toISOString().split("T")[0]
+      const dateString = formatLocalYMD(date)
       days.push({
         date,
         dateString,
@@ -171,13 +174,27 @@ export function RosterCalendar({ entries, onDateClick }: RosterCalendarProps) {
                 onClick={() => hasEntries && onDateClick?.(day.dateString, day.entries)}
                 className={cn(
                   "aspect-square flex flex-col items-center justify-center rounded-lg text-sm transition-all relative",
-                  day.isCurrentMonth ? "text-foreground/90" : "text-foreground/15",
-                  day.isToday && "ring-1.5 ring-primary/60",
+                  day.isToday && day.isCurrentMonth
+                    ? "text-foreground"
+                    : day.isCurrentMonth
+                      ? "text-foreground/90"
+                      : "text-foreground/15",
                   hasEntries && day.isCurrentMonth && "font-semibold cursor-pointer",
                   !hasEntries && "cursor-default"
                 )}
               >
-                <span className="text-xs">{day.date.getDate()}</span>
+                {/* Today: the number sits in a solid accent disc so it's
+                    unmistakable (amber in the night theme), while the duty dots
+                    below stay readable on the cell's normal background. */}
+                <span
+                  className={cn(
+                    "text-xs",
+                    day.isToday && day.isCurrentMonth &&
+                      "flex h-6 w-6 items-center justify-center rounded-full bg-primary font-bold text-primary-foreground shadow-sm"
+                  )}
+                >
+                  {day.date.getDate()}
+                </span>
 
                 {/* Duty indicators */}
                 {hasEntries && day.isCurrentMonth && (
