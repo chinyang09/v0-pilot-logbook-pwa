@@ -517,6 +517,59 @@ textarea:focus-within {
 .squircle-xl { --squircle-radius: 34%; }
 
 /* ─── Liquid Glass UI ─── */
+
+/* Glass theme tokens. Glass legibility flips with the theme: on the DARK
+   themes the material shows itself through brightness + white edge specular;
+   on the LIGHT (cream) theme white-on-cream vanishes, so the glass reads
+   through a hairline dark rim, a faint warm veil, a stronger float shadow,
+   and less brightness push. */
+:root {
+  --glass-blur-brightness: 1.12;
+  /* Soft white lobes over a warm dark hairline — the hairline is what makes
+     the slab edge visible on cream. */
+  --glass-rim:
+    conic-gradient(
+      from 30deg,
+      rgba(255, 255, 255, 0.55) 0deg,
+      rgba(255, 255, 255, 0.18) 38deg,
+      rgba(255, 255, 255, 0) 90deg,
+      rgba(255, 255, 255, 0.18) 142deg,
+      rgba(255, 255, 255, 0.55) 180deg,
+      rgba(255, 255, 255, 0.18) 218deg,
+      rgba(255, 255, 255, 0) 270deg,
+      rgba(255, 255, 255, 0.18) 322deg,
+      rgba(255, 255, 255, 0.55) 360deg
+    ),
+    linear-gradient(rgba(62, 50, 38, 0.22), rgba(62, 50, 38, 0.22));
+  --glass-veil: rgba(64, 52, 40, 0.05);
+  --glass-shadow:
+    inset 0 -1px 1px rgba(62, 50, 38, 0.08),
+    0 1px 2px rgba(50, 40, 30, 0.10),
+    0 4px 10px rgba(50, 40, 30, 0.10),
+    0 18px 40px -16px rgba(50, 40, 30, 0.35);
+}
+.dark,
+.night {
+  --glass-blur-brightness: 1.25;
+  --glass-rim: conic-gradient(
+    from 30deg,
+    rgba(255, 255, 255, 0.40) 0deg,
+    rgba(255, 255, 255, 0.16) 38deg,
+    rgba(255, 255, 255, 0.05) 90deg,
+    rgba(255, 255, 255, 0.16) 142deg,
+    rgba(255, 255, 255, 0.40) 180deg,
+    rgba(255, 255, 255, 0.16) 218deg,
+    rgba(255, 255, 255, 0.05) 270deg,
+    rgba(255, 255, 255, 0.16) 322deg,
+    rgba(255, 255, 255, 0.40) 360deg
+  );
+  --glass-veil: transparent;
+  --glass-shadow:
+    inset 0 -1px 1px rgba(0, 0, 0, 0.10),
+    0 2px 6px rgba(0, 0, 0, 0.10),
+    0 14px 36px -14px rgba(0, 0, 0, 0.28);
+}
+
 .GlassContainer {
   --corner-radius: 24px;
   --base-strength: 24px;
@@ -547,31 +600,14 @@ textarea:focus-within {
   /* Invert effect moved here from GlassContainer::before pseudo-element
      to eliminate white flash during visibility transitions */
   backdrop-filter: invert(var(--invert, 0));
-  /* Liquid glass float: tight contact shadow + wide soft ambient, plus a
-     hairline inner lip (top catches light, bottom seats into shadow) so the
-     slab reads as having thickness. Radius transitions so the pill↔sidebar
-     corner change (28↔20) flows instead of snapping. */
+  /* Liquid glass float: themed shadow set (see the glass theme tokens below —
+     light mode needs a stronger shadow to read on cream; dark modes keep it
+     soft). Radius transitions so the pill↔sidebar corner change (28↔20)
+     flows instead of snapping. NOTE: no surface sheen — a white wash over the
+     glass face reads as haze on the near-black themes (owner feedback); the
+     only white light on the glass is the edge specular. */
   transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    inset 0 -1px 1px rgba(0, 0, 0, 0.10),
-    0 2px 6px rgba(0, 0, 0, 0.10),
-    0 14px 36px -14px rgba(0, 0, 0, 0.28);
-}
-
-/* Convex sheen — light falls from above: a soft vertical gradient plus a wide
-   specular bloom centred just off the top edge. Sits UNDER the content
-   (children are position:relative and stack above). */
-.GlassContent::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02) 38%, transparent 62%),
-    radial-gradient(130% 70% at 50% -12%, rgba(255, 255, 255, 0.10), transparent 58%);
+  box-shadow: var(--glass-shadow);
 }
 
 /* Press bloom — the material lightens under the finger while the container
@@ -606,7 +642,9 @@ textarea:focus-within {
   z-index: 3;
   overflow: hidden;
   border-radius: var(--corner-radius);
-  background-color: rgba(255, 255, 255, 0);
+  /* Light theme: a faint warm veil that separates the slab from the cream
+     background (dark themes keep it transparent). */
+  background-color: var(--glass-veil, transparent);
   transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -656,10 +694,12 @@ textarea:focus-within {
 
 .GlassMaterial .GlassBlur {
   /* saturate(1.5): the vibrancy term — real glass intensifies the colour of
-     what's behind it; without it the material reads as frosted film. The
-     backdrop-filter transitions so the morph surge below swells and settles
-     smoothly (backdrop-filter is animatable in Safari/Chromium). */
-  backdrop-filter: blur(var(--extra-blur)) brightness(1.25) saturate(1.5);
+     what's behind it; without it the material reads as frosted film.
+     Brightness is themed: the dark themes push 1.25 so the surface lifts off
+     near-black; the light theme stays near 1.12 (a strong push on cream
+     whites the glass out entirely). The backdrop-filter transitions so the
+     morph surge below swells and settles smoothly. */
+  backdrop-filter: blur(var(--extra-blur)) brightness(var(--glass-blur-brightness, 1.25)) saturate(1.5);
   border-radius: calc(var(--corner-radius) - (var(--emboss-width) + var(--refraction-width)));
   margin: calc(var(--emboss-width) + var(--refraction-width));
   transition: backdrop-filter 240ms ease;
@@ -723,19 +763,10 @@ textarea:focus-within {
      light at ~60°). The |cos| term produces symmetric DOUBLE lobes — glints
      at the upper-right and lower-left shoulders fading through dim flanks —
      which is how real liquid glass edges read, not a lit top / dark bottom.
-     Additive white only: no dark seat. */
-  background: conic-gradient(
-    from 30deg,
-    rgba(255, 255, 255, 0.40) 0deg,
-    rgba(255, 255, 255, 0.16) 38deg,
-    rgba(255, 255, 255, 0.05) 90deg,
-    rgba(255, 255, 255, 0.16) 142deg,
-    rgba(255, 255, 255, 0.40) 180deg,
-    rgba(255, 255, 255, 0.16) 218deg,
-    rgba(255, 255, 255, 0.05) 270deg,
-    rgba(255, 255, 255, 0.16) 322deg,
-    rgba(255, 255, 255, 0.40) 360deg
-  );
+     Themed: the light theme underlays a warm hairline so the edge is visible
+     on cream (white-only vanishes there); dark themes are additive white
+     only. See the glass theme tokens above. */
+  background: var(--glass-rim);
   transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
   /* backdrop-filter removed — invert(0.15) on pseudo-element border ring
      caused white flash during visibility/opacity transitions */
