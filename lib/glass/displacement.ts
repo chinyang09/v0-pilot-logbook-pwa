@@ -73,8 +73,9 @@ export interface GlassMapOptions {
   glassThickness?: number
   /** Refraction intensity multiplier (default 1.2). */
   refractionScale?: number
-  /** Light direction in radians, y-up convention: 0 = +x, CCW (default 90° —
-   *  vertical axis, matching Apple's top/bottom edge arcs). */
+  /** Light direction in radians, y-up convention: 0 = +x, CCW (default 135° —
+   *  upper-left, so the |dot| lobes land top-left/bottom-right like Apple's
+   *  Control Center rims). */
   specularAngle?: number
 }
 
@@ -91,7 +92,7 @@ export function generateGlassMaps(opts: GlassMapOptions): GlassMaps {
     bezelWidth = 12,
     glassThickness = 60,
     refractionScale = 1.2,
-    specularAngle = Math.PI / 2,
+    specularAngle = (3 * Math.PI) / 4,
   } = opts
   const w = Math.max(2, Math.round(width))
   const h = Math.max(2, Math.round(height))

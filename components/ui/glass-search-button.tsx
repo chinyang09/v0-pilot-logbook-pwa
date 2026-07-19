@@ -69,7 +69,10 @@ export function GlassSearchButton({
   return (
     <div
       ref={containerRef}
-      className="overflow-hidden"
+      // NO overflow-hidden here: the glass material's shadow, rim, and the
+      // press bloom/stretch transform must escape this box (clipping them
+      // drew a hard rectangle around the collapsed circle). The inner search
+      // row is clipped by GlassContent's own rounded overflow instead.
       style={{
         maxWidth: isOpen ? (isDesktop ? 240 : "100vw") : 56,
         // Liquid/bounce: an overshoot easing makes the bar spring open/closed.

@@ -34,9 +34,11 @@ interface GlassContainerProps {
 const PRESS_SPRING = { stiffness: 420, damping: 26, mass: 0.6 }
 /** Bloom scale while pressed (Apple controls grow, they don't compress). */
 const BLOOM = 1.045
-/** How much of the finger's offset from centre the glass follows. */
-const PULL = 0.12
-const PULL_MAX = 8
+/** How much of the finger's offset from centre the glass follows — kept LOW:
+ *  the glass should STRETCH toward the drag more than it travels (owner
+ *  feedback: too much movement reads as the button sliding, not gelling). */
+const PULL = 0.05
+const PULL_MAX = 4
 
 /**
  * Liquid glass surface.
@@ -111,9 +113,10 @@ export function GlassContainer({
     const clamp = (v: number) => Math.max(-PULL_MAX, Math.min(PULL_MAX, v))
     tx.set(clamp(dx * PULL))
     ty.set(clamp(dy * PULL))
-    // Stretch slightly along the pull axis — the glass "gives" toward the drag.
-    sx.set(BLOOM + Math.min(Math.abs(dx) * 0.0006, 0.025))
-    sy.set(BLOOM + Math.min(Math.abs(dy) * 0.0006, 0.025))
+    // Stretch along the pull axis — the glass "gives" toward the drag. The
+    // stretch dominates over the translation (see PULL above).
+    sx.set(BLOOM + Math.min(Math.abs(dx) * 0.0012, 0.05))
+    sy.set(BLOOM + Math.min(Math.abs(dy) * 0.0012, 0.05))
   }
 
   const endPress = () => {
