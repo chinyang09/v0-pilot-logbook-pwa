@@ -866,20 +866,60 @@ textarea:focus-within {
   opacity: 1;
   scale: 1;
 }
+.PillDragLens-lens,
 .PillDragLens-glass,
+.PillDragLens-rim,
 .PillDragLens-grey {
   position: absolute;
   inset: 0;
   border-radius: inherit;
 }
-/* Clear glass bubble — no blur so the label under it stays crisp. */
-.PillDragLens-glass {
-  backdrop-filter: saturate(1.6) brightness(1.14);
+/* Chromium path — the backdrop-filter (a real refraction map) is set inline;
+   these shadows are just the convex bulge + drop shadow around it. */
+.PillDragLens-lens {
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.32),
-    inset 0 12px 16px -12px rgba(255, 255, 255, 0.50),
-    inset 0 -12px 16px -12px rgba(255, 255, 255, 0.28),
-    0 4px 14px rgba(0, 0, 0, 0.18);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+    inset 0 14px 18px -14px rgba(255, 255, 255, 0.55),
+    inset 0 -14px 18px -14px rgba(255, 255, 255, 0.30),
+    0 6px 18px rgba(0, 0, 0, 0.20);
+  transition: opacity 0.26s ease;
+}
+/* Safari fallback — no SVG backdrop-filter, so the convex look is faked with
+   layered shadows: bright top+bottom bulges (the glass swell) and an inner
+   thickness vignette that darkens toward the rim, reading as the pill being
+   pinched/minified through the glass. */
+.PillDragLens-glass {
+  backdrop-filter: saturate(1.7) brightness(1.12);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.34),
+    inset 0 14px 18px -14px rgba(255, 255, 255, 0.55),
+    inset 0 -14px 18px -14px rgba(255, 255, 255, 0.30),
+    inset 0 0 22px rgba(0, 0, 0, 0.07),
+    0 6px 18px rgba(0, 0, 0, 0.20);
+  transition: opacity 0.26s ease;
+}
+/* Chromatic dispersion fringe on the rim — the liquid-glass rainbow edge.
+   A conic gradient masked to a 1px border ring, screened over the material. */
+.PillDragLens-rim {
+  padding: 1.25px;
+  background: conic-gradient(
+    from 210deg,
+    rgba(255, 120, 120, 0.55),
+    rgba(120, 165, 255, 0.55),
+    rgba(140, 255, 210, 0.45),
+    rgba(255, 200, 120, 0.5),
+    rgba(255, 120, 120, 0.55)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  mix-blend-mode: screen;
+  opacity: 0.7;
   transition: opacity 0.26s ease;
 }
 /* Matches the gravity blob's bg-foreground/10 so the handoff is invisible. */
@@ -888,7 +928,9 @@ textarea:focus-within {
   opacity: 0;
   transition: opacity 0.26s ease;
 }
-.PillDragLens--settle .PillDragLens-glass {
+.PillDragLens--settle .PillDragLens-lens,
+.PillDragLens--settle .PillDragLens-glass,
+.PillDragLens--settle .PillDragLens-rim {
   opacity: 0;
 }
 .PillDragLens--settle .PillDragLens-grey {
