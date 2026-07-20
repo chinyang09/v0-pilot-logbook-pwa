@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
-import { useReducedMotion } from "framer-motion"
+import { animate, useReducedMotion } from "framer-motion"
 import {
   LayoutDashboard,
   Book,
@@ -196,12 +196,12 @@ function GravityIndicator({
         `transform 0.5s ${OVERSHOOT_BEZIER}`,
         `width 0.4s ${SETTLE_BEZIER}`,
         `height 0.4s ${SETTLE_BEZIER}`,
-        "opacity 0.15s ease",
       ].join(", ")
 
   return (
     <div
       aria-hidden
+      data-grav-blob
       className={cn(
         "absolute left-0 top-0 z-0 rounded-full bg-foreground/10",
         className,
@@ -252,38 +252,49 @@ function PillBarContent({
   // ── Drag lens (iPadOS tab-bar style): hold and slide along the pill and a
   // clear glass bubble — TALLER than the pill, so it rides over its edges —
   // follows the finger 1:1 (no snapping mid-drag). The nearest tab's label
-  // pre-highlights as the lens passes over it and the grey blob hides. On
-  // release the lens simply FADES OUT where it is while the grey blob fades
-  // back in mid-spring toward the chosen tab (navigation is pushed at
-  // release). A plain tap never activates it (10px slop), so normal Link taps
-  // work unchanged. Rendered through a portal — the pill's GlassContent clips
-  // overflow, and the lens must overhang it. NOTE: the lens's animation
-  // classes (--on / --fade) are managed IMPERATIVELY and its React className
-  // stays constant — React re-renders during the drag (lensIndex updates)
-  // must not strip them (stripping --on was the cause of a shrink-flicker on
-  // release in the previous morphing design).
+  // pre-highlights and the grey blob hides. On RELEASE the lens itself
+  // SHRINKS + MORPHS into the grey highlight blob with spring physics
+  // (framer `animate` on the geometry; a CSS crossfade swaps its glass
+  // material for the blob's grey), landing exactly where the real blob sits —
+  // then the real blob is swapped in invisibly. A plain tap never activates
+  // it (10px slop). Rendered through a portal — the pill's GlassContent clips
+  // overflow, and the lens must overhang it. The lens's animation classes
+  // (--on / --settle) are managed IMPERATIVELY and its React className stays
+  // constant, so drag re-renders can't strip them.
   const lensRef = useRef<HTMLDivElement | null>(null)
   const [lensPhase, setLensPhase] = useState<"idle" | "drag" | "settle">("idle")
   const [lensIndex, setLensIndex] = useState(-1)
   const suppressClickRef = useRef(false)
-  const lastXRef = useRef(0)
-  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastPtRef = useRef({ x: 0, y: 0 })
+  const settleAnimRef = useRef<ReturnType<typeof animate> | null>(null)
+  // The pill's GlassContainer — its finger-tracking spotlight is driven
+  // imperatively while the lens has pointer capture (its own move handler
+  // stops firing, so the glow would otherwise freeze).
+  const glassRootRef = useRef<HTMLElement | null>(null)
   const dragRef = useRef<{
     startX: number
     active: boolean
     nearest: number
     base: { left: number; top: number; width: number; height: number }
-    rects: { left: number; width: number; height: number }[]
+    rects: { left: number; top: number; width: number; height: number }[]
   } | null>(null)
 
   /** Extra height beyond the pill — the lens overhangs top and bottom. */
   const LENS_OVERHANG = 16
 
-  const positionLens = useCallback((clientX: number) => {
+  const paintSpotlight = useCallback((clientX: number, clientY: number) => {
+    const gr = glassRootRef.current
+    if (!gr) return
+    const rect = gr.getBoundingClientRect()
+    gr.style.setProperty("--press-x", `${clientX - rect.left}px`)
+    gr.style.setProperty("--press-y", `${clientY - rect.top}px`)
+  }, [])
+
+  const positionLens = useCallback((clientX: number, clientY: number) => {
+    lastPtRef.current = { x: clientX, y: clientY }
     const lens = lensRef.current
     const drag = dragRef.current
     if (!lens || !drag || drag.rects.length === 0) return
-    lastXRef.current = clientX
     const x = Math.max(0, Math.min(drag.base.width, clientX - drag.base.left))
     let nearest = 0
     let best = Infinity
@@ -300,22 +311,23 @@ function PillBarContent({
     }
     const r = drag.rects[nearest]
     const w = r.width + 12
-    // Pure finger follow — the smoothing comes from the short CSS transform
-    // transition, not from snapping. Release does the spring-to-tab.
+    const h = drag.base.height + LENS_OVERHANG
+    // Pure finger follow (1:1) via direct px writes — no CSS transition on
+    // geometry, so it never lags or snaps. The release spring is framer.
     lens.style.width = `${w}px`
-    lens.style.height = `${drag.base.height + LENS_OVERHANG}px`
-    lens.style.transform = `translate(${x - w / 2}px, -50%)`
-  }, [])
+    lens.style.height = `${h}px`
+    lens.style.left = `${clientX - w / 2}px`
+    lens.style.top = `${drag.base.top + drag.base.height / 2 - h / 2}px`
+    paintSpotlight(clientX, clientY)
+  }, [paintSpotlight])
 
   // Portal mount: position immediately from the live drag state, then reveal
-  // on the next frame so the pop-in transitions from the base styles.
+  // on the next frame so the pop-in transition fires from the base styles.
   const lensMountRef = useCallback((node: HTMLDivElement | null) => {
     lensRef.current = node
     const drag = dragRef.current
     if (!node || !drag) return
-    node.style.left = `${drag.base.left}px`
-    node.style.top = `${drag.base.top + drag.base.height / 2}px`
-    positionLens(lastXRef.current)
+    positionLens(lastPtRef.current.x, lastPtRef.current.y)
     requestAnimationFrame(() => node.classList.add("PillDragLens--on"))
   }, [positionLens])
 
@@ -324,7 +336,8 @@ function PillBarContent({
     const el = tabsRef.current
     if (!el) return
     const base = el.getBoundingClientRect()
-    lastXRef.current = e.clientX
+    lastPtRef.current = { x: e.clientX, y: e.clientY }
+    glassRootRef.current = (el.closest(".GlassContainer") as HTMLElement) ?? null
     dragRef.current = {
       startX: e.clientX,
       active: false,
@@ -332,7 +345,7 @@ function PillBarContent({
       base: { left: base.left, top: base.top, width: base.width, height: base.height },
       rects: Array.from(el.querySelectorAll<HTMLElement>("[data-grav-item]")).map((it) => {
         const r = it.getBoundingClientRect()
-        return { left: r.left - base.left, width: r.width, height: r.height }
+        return { left: r.left - base.left, top: r.top - base.top, width: r.width, height: r.height }
       }),
     }
   }, [reduce, lensPhase])
@@ -344,18 +357,22 @@ function PillBarContent({
       if (Math.abs(e.clientX - drag.startX) < 10) return
       drag.active = true
       setLensPhase("drag")
+      // Take over the pill's spotlight — its own move handler is about to stop.
+      glassRootRef.current?.style.setProperty("--glass-press", "1")
       try {
         tabsRef.current?.setPointerCapture(e.pointerId)
       } catch {
         // capture can fail if the pointer is already gone — lens still tracks
       }
     }
-    positionLens(e.clientX)
+    positionLens(e.clientX, e.clientY)
   }, [positionLens])
 
   const handleLensEnd = useCallback((e: React.PointerEvent) => {
     const drag = dragRef.current
     dragRef.current = null
+    // Fade the pill spotlight back out.
+    glassRootRef.current?.style.setProperty("--glass-press", "0")
     if (!drag?.active) return
     // Swallow the click synthesised at the end of the drag; the timeout clears
     // the flag if pointer capture already ate the click (so the NEXT tap works).
@@ -364,28 +381,40 @@ function PillBarContent({
       suppressClickRef.current = false
     }, 150)
 
-    if (e.type === "pointercancel" || drag.nearest < 0) {
+    const lens = lensRef.current
+    if (e.type === "pointercancel" || drag.nearest < 0 || !lens) {
       setLensPhase("idle")
       setLensIndex(-1)
       return
     }
 
-    // Release: the lens fades out in place while the grey blob fades back in
-    // MID-SPRING toward the chosen tab (navigation pushed now; the settle
-    // phase unhides the blob so its opacity and transform animate together).
-    lensRef.current?.classList.add("PillDragLens--fade")
+    // Release: the lens SHRINKS + MORPHS into the grey blob. Geometry springs
+    // (framer) onto the chosen tab's exact rect; the CSS crossfade (--settle)
+    // swaps its glass material for the blob's grey. Navigation is pushed now
+    // so the (hidden) real blob is already at the tab when we hand off.
     setLensPhase("settle")
+    const r = drag.rects[drag.nearest]
+    const targetLeft = drag.base.left + r.left
+    const targetTop = drag.base.top + r.top
+    lens.classList.add("PillDragLens--settle")
+    settleAnimRef.current?.stop()
+    settleAnimRef.current = animate(
+      lens,
+      { left: targetLeft, top: targetTop, width: r.width, height: r.height },
+      { type: "spring", stiffness: 380, damping: 26 },
+    )
     const tab = TAB_CONFIG[tabs[drag.nearest]]
     if (tab) router.push(tab.href)
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
-    settleTimerRef.current = setTimeout(() => {
-      setLensPhase("idle")
-      setLensIndex(-1)
-    }, 220)
+    settleAnimRef.current.finished
+      .then(() => {
+        setLensPhase("idle")
+        setLensIndex(-1)
+      })
+      .catch(() => {})
   }, [tabs, router])
 
   useEffect(() => () => {
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+    settleAnimRef.current?.stop()
   }, [])
 
   const lensActive = lensPhase !== "idle"
@@ -402,7 +431,8 @@ function PillBarContent({
 
       {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
           behind the labels and stretches between tabs as the route changes.
-          touch-action:none so hold-and-slide streams pointermoves on iOS. */}
+          touch-action:none so hold-and-slide streams pointermoves on iOS;
+          [-webkit-touch-callout:none] kills the iOS long-press link popup. */}
       <div
         ref={tabsRef}
         className="relative flex items-center flex-1 min-w-0 justify-evenly touch-none"
@@ -422,7 +452,7 @@ function PillBarContent({
           containerRef={tabsRef}
           activeIndex={activeIndex}
           revision={tabs.join(",")}
-          hidden={lensPhase === "drag"}
+          hidden={lensActive}
         />
         {tabs.map((tabKey, i) => {
           const tab = TAB_CONFIG[tabKey]
@@ -434,7 +464,13 @@ function PillBarContent({
           const Icon = tab.icon
 
           return (
-            <Link key={tabKey} href={tab.href} className="relative z-[1]">
+            <Link
+              key={tabKey}
+              href={tab.href}
+              data-nav-link
+              draggable={false}
+              className="relative z-[1]"
+            >
               {mode === "desktop" ? (
                 <span
                   data-grav-item
@@ -463,11 +499,15 @@ function PillBarContent({
       </div>
 
       {/* Drag lens portal — fixed-positioned so it can overhang the pill
-          (GlassContent clips its own overflow). */}
+          (GlassContent clips its own overflow). The glass child crossfades to
+          the grey child (--settle) as the lens morphs into the blob. */}
       {lensActive &&
         typeof document !== "undefined" &&
         createPortal(
-          <div ref={lensMountRef} aria-hidden className="PillDragLens" />,
+          <div ref={lensMountRef} aria-hidden className="PillDragLens">
+            <div className="PillDragLens-glass" />
+            <div className="PillDragLens-grey" />
+          </div>,
           document.body
         )}
 
@@ -600,6 +640,8 @@ function SidebarNavItem({
     <Link
       href={href}
       data-grav-item
+      data-nav-link
+      draggable={false}
       className={cn(
         "relative z-[1] flex items-center gap-3 px-3.5 py-2.5 rounded-full text-sm transition-all duration-150",
         "active:scale-[0.98]",

@@ -833,45 +833,67 @@ textarea:focus-within {
   pointer-events: none;
 }
 
+/* iOS: a long-press on a nav <a> pops Safari's link preview/callout, which
+   fought the drag-lens hold-and-slide. Suppress it on every nav link. */
+[data-nav-link] {
+  -webkit-touch-callout: none;
+}
+
 /* ─── Nav pill drag lens ───
-   The iPadOS tab-bar "hold and slide" bubble: a CLEAR glass lens (no blur —
-   the label under it stays crisp) that overhangs the pill's edges and follows
-   the finger 1:1; the short transform transition adds a liquid lag. On
-   release it evaporates in place (--fade) while the grey gravity blob fades
-   back in mid-spring toward the chosen tab. Fixed-positioned via a portal
-   (the pill clips its own overflow). */
+   The iPadOS tab-bar "hold and slide" bubble. It overhangs the pill's edges
+   and follows the finger 1:1 (geometry written imperatively, no CSS lag). On
+   release the lens SHRINKS + MORPHS into the grey gravity-blob: framer springs
+   its left/top/width/height onto the chosen tab while --settle crossfades the
+   glass child out and the grey child in — then the real blob is swapped in at
+   the same spot, invisibly. Fixed-positioned via a portal (the pill clips its
+   own overflow). Animation classes (--on / --settle) are set imperatively; the
+   React className stays constant so drag re-renders can't strip them. */
 .PillDragLens {
   position: fixed;
+  left: 0;
+  top: 0;
   z-index: 110;
   pointer-events: none;
   border-radius: 999px;
+  opacity: 0;
+  scale: 0.7;
+  /* Only the pop-in animates via CSS; geometry is imperative / framer. */
+  transition:
+    opacity 0.16s ease,
+    scale 0.28s cubic-bezier(0.34, 1.5, 0.64, 1);
+}
+.PillDragLens--on {
+  opacity: 1;
+  scale: 1;
+}
+.PillDragLens-glass,
+.PillDragLens-grey {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+/* Clear glass bubble — no blur so the label under it stays crisp. */
+.PillDragLens-glass {
   backdrop-filter: saturate(1.6) brightness(1.14);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.32),
     inset 0 12px 16px -12px rgba(255, 255, 255, 0.50),
     inset 0 -12px 16px -12px rgba(255, 255, 255, 0.28),
     0 4px 14px rgba(0, 0, 0, 0.18);
-  opacity: 0;
-  scale: 0.6;
-  transition:
-    opacity 0.16s ease,
-    scale 0.28s cubic-bezier(0.34, 1.5, 0.64, 1),
-    transform 0.11s cubic-bezier(0.2, 0.8, 0.3, 1),
-    width 0.18s cubic-bezier(0.22, 1, 0.36, 1),
-    height 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity 0.26s ease;
 }
-.PillDragLens--on {
+/* Matches the gravity blob's bg-foreground/10 so the handoff is invisible. */
+.PillDragLens-grey {
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+  opacity: 0;
+  transition: opacity 0.26s ease;
+}
+.PillDragLens--settle .PillDragLens-glass {
+  opacity: 0;
+}
+.PillDragLens--settle .PillDragLens-grey {
   opacity: 1;
-  scale: 1;
 }
-.PillDragLens--fade {
-  /* Release: evaporate in place — slight grow + fade. Defined after --on so
-     it wins the cascade at equal specificity. */
-  opacity: 0;
-  scale: 1.05;
-  transition: opacity 0.18s ease, scale 0.18s ease;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .PillDragLens {
     display: none;
