@@ -286,6 +286,7 @@ function PillBarContent({
   const suppressClickRef = useRef(false)
   const lastPtRef = useRef({ x: 0, y: 0 })
   const settleAnimRef = useRef<ReturnType<typeof animate> | null>(null)
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // The pill's GlassContainer — its finger-tracking spotlight is driven
   // imperatively while the lens has pointer capture (its own move handler
   // stops firing, so the glow would otherwise freeze).
@@ -331,9 +332,11 @@ function PillBarContent({
         width: r.width + LENS_PAD_X,
         height: drag.base.height + LENS_OVERHANG,
         radius: (drag.base.height + LENS_OVERHANG) / 2,
-        bezelWidth: 14,
-        glassThickness: 70,
-        refractionScale: 1.6,
+        // Wide bezel + deep glass so the pill visibly MINIFIES through the
+        // lens (the shipped 14/70/1.6 read as flat on-device).
+        bezelWidth: 18,
+        glassThickness: 100,
+        refractionScale: 2.4,
       }),
     )
   }, [lensPhase, lensIndex])
@@ -442,11 +445,10 @@ function PillBarContent({
   const handleLensEnd = useCallback((e: React.PointerEvent) => {
     const drag = dragRef.current
     dragRef.current = null
-    // Fade the pill spotlight back out; let the edge squish bounce home.
+    // Fade the pill spotlight back out. Kill the horizontal strain INSTANTLY
+    // (jump, not set) so releasing never springs the lens left/right.
     glassRootRef.current?.style.setProperty("--glass-press", "0")
-    squishX.set(1)
-    squishY.set(1)
-    nudgeX.set(0)
+    nudgeX.jump(0)
     if (!drag?.active) return
     // Swallow the click synthesised at the end of the drag; the timeout clears
     // the flag if pointer capture already ate the click (so the NEXT tap works).
@@ -457,16 +459,20 @@ function PillBarContent({
 
     const lens = lensRef.current
     if (e.type === "pointercancel" || drag.nearest < 0 || !lens) {
+      squishX.jump(1)
+      squishY.jump(1)
       setLensPhase("idle")
       setLensIndex(-1)
       setLensMaps(null)
       return
     }
 
-    // Release: the lens SHRINKS + MORPHS into the grey blob. Geometry springs
-    // (framer) onto the chosen tab's exact rect; the CSS crossfade (--settle)
-    // swaps its glass material for the blob's grey. Navigation is pushed now
-    // so the (hidden) real blob is already at the tab when we hand off.
+    // Release = a slime drop, seen bird's-eye: the lens descends straight onto
+    // the tab (position eases in with NO overshoot, so it never springs left/
+    // right) and SPLATS on impact — jump to a squashed shape, then let the
+    // underdamped springs rebound to neutral. That vertical squash-and-settle
+    // is the "spring to shape". The --settle crossfade swaps glass → the grey
+    // blob underneath, so the handoff to the real blob is invisible.
     setLensPhase("settle")
     const r = drag.rects[drag.nearest]
     const targetLeft = drag.base.left + r.left
@@ -476,21 +482,26 @@ function PillBarContent({
     settleAnimRef.current = animate(
       lens,
       { left: targetLeft, top: targetTop, width: r.width, height: r.height },
-      { type: "spring", stiffness: 380, damping: 26 },
+      { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
     )
+    squishX.jump(1.14)
+    squishY.jump(0.82)
+    squishX.set(1)
+    squishY.set(1)
     const tab = TAB_CONFIG[tabs[drag.nearest]]
     if (tab) router.push(tab.href)
-    settleAnimRef.current.finished
-      .then(() => {
-        setLensPhase("idle")
-        setLensIndex(-1)
-        setLensMaps(null)
-      })
-      .catch(() => {})
+    // Outlast both the position ease and the squash rebound before handing off.
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+    settleTimerRef.current = setTimeout(() => {
+      setLensPhase("idle")
+      setLensIndex(-1)
+      setLensMaps(null)
+    }, 560)
   }, [tabs, router, squishX, squishY, nudgeX])
 
   useEffect(() => () => {
     settleAnimRef.current?.stop()
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
   }, [])
 
   const lensActive = lensPhase !== "idle"
