@@ -114,6 +114,18 @@ const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_MARGIN * 2 // 191
 const PILL_HEIGHT = 56 // h-14
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
+// ─── Morph timing ────────────────────────────────────────────
+// Each geometry property animates over MORPH_DUR; the second group starts a
+// LEAD ms in so the two overlap. Leads are ASYMMETRIC:
+// - opening (pill→sidebar): position+width lead, height follows (OPEN_LEAD) —
+//   it slides into place then grows, which reads correctly.
+// - closing (sidebar→pill): height leads, position+width follow at CLOSE_LEAD,
+//   which is near-full so the sidebar COLLAPSES almost completely before it
+//   moves into the pill position (owner feedback: they shouldn't move at once).
+const MORPH_DUR = 190
+const MORPH_OPEN_LEAD = 160
+const MORPH_CLOSE_LEAD = 185
+
 
 // ─── Sync status icon ────────────────────────────────────────
 
@@ -230,8 +242,9 @@ function GravityIndicator({
 
 // ─── Shared pill bar content ─────────────────────────────────
 
-/** Underdamped so the drag lens BOUNCES like liquid off the end tabs. */
-const SQUISH_SPRING = { stiffness: 550, damping: 15, mass: 0.8 }
+/** Very underdamped so the drag lens BOUNCES like liquid — off the end tabs and
+ *  on the drop-splat settle (a springier squash-and-stretch rebound). */
+const SQUISH_SPRING = { stiffness: 600, damping: 10, mass: 0.85 }
 
 /** Extra height beyond the pill — the drag lens overhangs top and bottom. */
 const LENS_OVERHANG = 16
@@ -490,13 +503,14 @@ function PillBarContent({
     squishY.set(1)
     const tab = TAB_CONFIG[tabs[drag.nearest]]
     if (tab) router.push(tab.href)
-    // Outlast both the position ease and the squash rebound before handing off.
+    // Outlast both the position ease and the (springier) squash rebound before
+    // handing off to the real blob, or the last wobble gets cut.
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
     settleTimerRef.current = setTimeout(() => {
       setLensPhase("idle")
       setLensIndex(-1)
       setLensMaps(null)
-    }, 560)
+    }, 640)
   }, [tabs, router, squishX, squishY, nudgeX])
 
   useEffect(() => () => {
@@ -640,7 +654,8 @@ function PillBarContent({
                         preserveAspectRatio="none"
                         result="spec"
                       />
-                      <feComponentTransfer in="spec" result="specFaded">
+                      <feGaussianBlur in="spec" stdDeviation={0.5} result="specSoft" />
+                      <feComponentTransfer in="specSoft" result="specFaded">
                         <feFuncA type="linear" slope={0.7} />
                       </feComponentTransfer>
                       <feBlend in="specFaded" in2="displaced" mode="screen" />
@@ -966,13 +981,10 @@ function DesktopPillMorph({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const { expandedHeight } = useViewportMeasure()
-  // Each property animates over DUR; the second group starts LEAD ms in (~85% of
-  // the way through the first) so the two overlap rather than stalling. Order:
-  // opening (pill→sidebar) moves position+width first, then grows height;
-  // closing (sidebar→pill) shrinks height first, then moves position+width.
-  const DUR = prefersReducedMotion ? 0 : 190
-  const LEAD = prefersReducedMotion ? 0 : 160
-  const TOTAL = DUR + LEAD
+  const DUR = prefersReducedMotion ? 0 : MORPH_DUR
+  const OPEN_LEAD = prefersReducedMotion ? 0 : MORPH_OPEN_LEAD
+  const CLOSE_LEAD = prefersReducedMotion ? 0 : MORPH_CLOSE_LEAD
+  const TOTAL = DUR + Math.max(OPEN_LEAD, CLOSE_LEAD)
 
   const { phase, advancePhase, isSidebarShape } = useMorphPhase(sidebarOpen, TOTAL)
 
@@ -990,7 +1002,17 @@ function DesktopPillMorph({
     [phase, advancePhase],
   )
 
-  const transition = morphTransition(phase, DUR, LEAD, "top, left, transform, width")
+  const lead = phase === "closing" ? CLOSE_LEAD : OPEN_LEAD
+  const transition = morphTransition(phase, DUR, lead, "top, left, transform, width")
+  // Reveal the sidebar list in lock-step with the growing/shrinking HEIGHT
+  // (drawer clip), not on its own opacity timeline — otherwise the list fades
+  // while the glass is still resizing and you see two separate motions. Height
+  // is delayed by OPEN_LEAD on open, leads (delay 0) on close.
+  const heightDelay = phase === "opening" ? OPEN_LEAD : 0
+  const contentTransition =
+    phase === "opening" || phase === "closing"
+      ? `opacity ${DUR}ms ease ${heightDelay}ms`
+      : "opacity 200ms ease"
 
   const style: React.CSSProperties = {
     top: isSidebarShape
@@ -1042,15 +1064,17 @@ function DesktopPillMorph({
 
           {/* Sidebar header + nav — visible when expanded */}
           <div
-            className="flex flex-col flex-1 min-h-0 transition-opacity duration-200 ease-out"
+            className="flex flex-col flex-1 min-h-0"
             style={{
               // The vertical sidebar list isn't "squished" mid-morph (it's just
               // clipped by the growing height, like a drawer), so keep it visible
               // AND interactive for the whole open span. Gating it on the settled
-              // phase left a brief dead window that dropped sidebar taps.
+              // phase left a brief dead window that dropped sidebar taps. Its
+              // opacity is timed to the height so reveal + growth are one motion.
               opacity: isSidebarShape ? 1 : 0,
               visibility: isSidebarShape ? "visible" : "hidden",
               pointerEvents: isSidebarShape ? "auto" : "none",
+              transition: contentTransition,
             }}
           >
             {/* Sidebar top row — toggle + sync flushed right */}
@@ -1087,9 +1111,10 @@ function MobilePillMorph({
   const ref = useRef<HTMLDivElement>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { expandedHeight } = useViewportMeasure()
-  const DUR = prefersReducedMotion ? 0 : 190
-  const LEAD = prefersReducedMotion ? 0 : 160
-  const TOTAL = DUR + LEAD
+  const DUR = prefersReducedMotion ? 0 : MORPH_DUR
+  const OPEN_LEAD = prefersReducedMotion ? 0 : MORPH_OPEN_LEAD
+  const CLOSE_LEAD = prefersReducedMotion ? 0 : MORPH_CLOSE_LEAD
+  const TOTAL = DUR + Math.max(OPEN_LEAD, CLOSE_LEAD)
 
   const { phase, advancePhase, isSidebarShape } = useMorphPhase(sidebarOpen, TOTAL)
 
@@ -1111,12 +1136,21 @@ function MobilePillMorph({
 
   // Mobile morph — always bottom-anchored. pill: bottom-centre, auto width, pill
   // height. opening/closing: height and position+width morph in a sequenced
-  // overlap (bottom-anchored, so it grows upward). sidebar: full height,
-  // bottom-left. In the pill state only `transform` animates (scroll hide/show).
+  // overlap (bottom-anchored, so it grows upward). On CLOSE the height collapses
+  // almost fully (CLOSE_LEAD) before position+width move into the pill. sidebar:
+  // full height, bottom-left. In the pill state only `transform` animates.
+  const lead = phase === "closing" ? CLOSE_LEAD : OPEN_LEAD
   const transition =
     phase === "pill"
       ? `transform ${prefersReducedMotion ? 0 : 300}ms ${OVERSHOOT_BEZIER}`
-      : morphTransition(phase, DUR, LEAD, "left, transform, width")
+      : morphTransition(phase, DUR, lead, "left, transform, width")
+  // Sidebar content reveal timed to the height (drawer), so growth + reveal are
+  // one motion instead of the list fading while the glass is still expanding.
+  const heightDelay = phase === "opening" ? OPEN_LEAD : 0
+  const contentTransition =
+    phase === "opening" || phase === "closing"
+      ? `opacity ${DUR}ms ease ${heightDelay}ms`
+      : "opacity 200ms ease"
 
   const style: React.CSSProperties = {
     position: "fixed" as const,
@@ -1191,15 +1225,17 @@ function MobilePillMorph({
 
           {/* Sidebar header + nav — visible when expanded */}
           <div
-            className="flex flex-col flex-1 min-h-0 transition-opacity duration-200 ease-out"
+            className="flex flex-col flex-1 min-h-0"
             style={{
               // The vertical sidebar list isn't "squished" mid-morph (it's just
               // clipped by the growing height, like a drawer), so keep it visible
               // AND interactive for the whole open span. Gating it on the settled
-              // phase left a brief dead window that dropped sidebar taps.
+              // phase left a brief dead window that dropped sidebar taps. Its
+              // opacity is timed to the height so reveal + growth are one motion.
               opacity: isSidebarShape ? 1 : 0,
               visibility: isSidebarShape ? "visible" : "hidden",
               pointerEvents: isSidebarShape ? "auto" : "none",
+              transition: contentTransition,
             }}
           >
             {/* Sidebar top row — toggle + sync flushed right */}

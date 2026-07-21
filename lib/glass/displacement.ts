@@ -115,12 +115,18 @@ export function generateGlassMaps(opts: GlassMapOptions): GlassMaps {
   const dpr =
     pixelRatio ??
     Math.min(3, Math.max(1, Math.round((typeof window !== "undefined" && window.devicePixelRatio) || 1)))
-  const w = Math.max(2, Math.round(cssW * dpr))
-  const h = Math.max(2, Math.round(cssH * dpr))
-  const radius = cssRadius * dpr
-  const bezel = bezelWidth * dpr
-  const feather = dpr // ≈1 CSS px of outer antialias feather
-  const specThickness = 1.5 * dpr
+  // Cap total raster pixels so a large surface (the sidebar) doesn't allocate a
+  // multi-megapixel map or hitch when it regenerates at morph-settle — small
+  // controls (pills, buttons) stay at full DPR for a crisp rim.
+  const BUDGET = 1_200_000
+  const area = cssW * cssH
+  const scale = area * dpr * dpr > BUDGET ? Math.max(1, Math.sqrt(BUDGET / area)) : dpr
+  const w = Math.max(2, Math.round(cssW * scale))
+  const h = Math.max(2, Math.round(cssH * scale))
+  const radius = cssRadius * scale
+  const bezel = bezelWidth * scale
+  const feather = scale // ≈1 CSS px of outer antialias feather
+  const specThickness = 1.5 * scale
 
   const radiusSquared = radius * radius
   const radiusPlusFeatherSquared = (radius + feather) * (radius + feather)

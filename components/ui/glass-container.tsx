@@ -81,9 +81,15 @@ export function GlassContainer({
   const rootRef = useRef<HTMLDivElement>(null)
   const filterId = useId().replace(/[^a-zA-Z0-9_-]/g, "") + "-lens"
   const [maps, setMaps] = useState<GlassMaps | null>(null)
+  // True while the slab is animating its geometry (morph) or scale (press
+  // bloom). An SVG-displacement backdrop-filter re-rasterises every frame that
+  // the element resizes/scales — the jank source — so while animating we drop
+  // it for a cheap plain blur and restore the lens once it settles.
+  const [pressed, setPressed] = useState(false)
   const reduceMotion = useReducedMotion()
   const interactive = !disableTapFeedback && !reduceMotion
   const spotlightOn = (spotlight ?? !disableTapFeedback) && !reduceMotion
+  const cheapMode = !!morphing || (pressed && interactive)
 
   // Press-follow springs: translate toward the held finger + bloom/stretch.
   const tx = useMotionValue(0)
@@ -111,6 +117,7 @@ export function GlassContainer({
     if (interactive) {
       sx.set(BLOOM)
       sy.set(BLOOM)
+      setPressed(true)
     }
   }
 
@@ -139,6 +146,7 @@ export function GlassContainer({
     ty.set(0)
     sx.set(1)
     sy.set(1)
+    setPressed(false)
   }
 
   // Chromium only: (re)generate the refraction maps for the current size.
@@ -212,13 +220,16 @@ export function GlassContainer({
 
       {lensActive ? (
         <>
-          {/* Both filter-function lists have the same shape so the morph surge
-              interpolates instead of stepping. */}
+          {/* While animating (morph or press bloom) the SVG displacement is
+              dropped for a cheap plain blur — the lens would otherwise
+              re-rasterise every frame the element resizes/scales (the jank).
+              The blur radius ≈ the SVG's internal feGaussianBlur so the glass
+              keeps the same weight; the refraction rim returns once settled. */}
           <div
             className="GlassLens"
             style={{
-              backdropFilter: morphing
-                ? `url(#${filterId}) blur(5px) brightness(1.15) saturate(1.15)`
+              backdropFilter: cheapMode
+                ? `blur(6px) saturate(1.5) brightness(1.05)`
                 : `url(#${filterId}) blur(0px) brightness(1) saturate(1)`,
             }}
           />
@@ -260,7 +271,10 @@ export function GlassContainer({
                   preserveAspectRatio="none"
                   result="spec"
                 />
-                <feComponentTransfer in="spec" result="specFaded">
+                {/* Soften the rim ~0.5px so the specular reads as a glow, not a
+                    hard line — smoother highlight on top of the DPR supersample. */}
+                <feGaussianBlur in="spec" stdDeviation={0.5} result="specSoft" />
+                <feComponentTransfer in="specSoft" result="specFaded">
                   <feFuncA type="linear" slope={0.65} />
                 </feComponentTransfer>
                 <feBlend in="specFaded" in2="sat" mode="screen" />
