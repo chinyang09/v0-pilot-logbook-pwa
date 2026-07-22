@@ -346,18 +346,62 @@ re-renders).
   sidebar). Do **not** revert this to a Framer `animate()`/motion-value spring.
 - **Nav morph** (`useMorphPhase` + `DesktopPillMorph`/`MobilePillMorph` +
   `morphTransition`) — the pill ↔ sidebar morph is a single `opening`/`closing`
-  transition whose two property groups **overlap** via per-property CSS
-  `transition-delay` (no phase stall, no "stuck"). Order is deliberate: **opening**
-  (pill→sidebar) moves position+width first then grows height; **closing**
-  (sidebar→pill) shrinks height first then moves position+width. `useMorphPhase`
-  advances on a timer (`DUR + LEAD` fallback) **and** on the *delayed* property's
-  `transitionEnd` (keyed to `propertyName` so the delayed group isn't cut) — the
-  latter settles the phase the instant the morph finishes so the nav is
-  interactive immediately. The **pill** content (horizontal tabs) is hidden until
-  fully settled (it squishes mid-morph); the **sidebar** content (vertical list)
-  rides `isSidebarShape` and stays **visible + interactive for the whole open
-  span** (it merely clips like a drawer, so there's no dead window that drops
-  sidebar taps).
+  transition whose two geometry groups (**position+width** and **height**)
+  **overlap** via per-property CSS `transition-delay` (no phase stall, no
+  "stuck"). Order is deliberate and the leads are **asymmetric** (module consts
+  `MORPH_DUR` / `MORPH_OPEN_LEAD` / `MORPH_CLOSE_LEAD`, picked per phase as
+  `lead`):
+  - **opening** (pill→sidebar) moves position+width first (delay 0), then grows
+    height (delay `OPEN_LEAD`) — it slides into place then expands.
+  - **closing** (sidebar→pill) collapses height first (delay 0), then moves
+    position+width (delay `CLOSE_LEAD`, **near-full** so the sidebar collapses
+    almost completely *before* it slides to the pill — owner feedback: they must
+    not move at once).
+
+  `useMorphPhase` advances on a timer (`DUR + max(lead)` fallback) **and** on the
+  *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed
+  group isn't cut) — the latter settles the phase the instant the morph finishes
+  so the nav is interactive immediately. The **pill** content (horizontal tabs)
+  is hidden until fully settled (it squishes mid-morph); the **sidebar** content
+  (vertical list) rides `isSidebarShape`, stays **visible + interactive for the
+  whole open span** (it merely clips like a drawer — no dead window that drops
+  taps), and its **opacity is timed to the height** (`contentTransition` mirrors
+  the height group's delay/duration) so the reveal and the growth are **one
+  motion** — not the list fading in while the glass is still resizing (which read
+  as two separate motions, "opens up while the glass expands down").
+- **Nav drag lens** (`PillBarContent` in `components/nav-pill.tsx`, `.PillDragLens*`
+  in `globals.css`) — an iPadOS-tab-bar-style **hold-and-slide** over the pill
+  tabs. A plain tap still navigates (10px slop before it activates; a
+  capture-phase guard swallows the drag's synthesised click). Rendered through a
+  **portal** to `document.body` (fixed-position, so it can overhang the pill,
+  which clips its own overflow). While a drag is active the real gravity blob is
+  hidden (`hidden` prop) and only the tab under the lens pre-highlights.
+  - **Shape:** a horizontal **stadium** (`LENS_PAD_X` keeps it wider than tall
+    over narrow tabs) that **overhangs** the pill top/bottom (`LENS_OVERHANG`).
+    **Clamped** to the first/last tab centres so it never leaves the tab strip;
+    finger travel *past* an end tab becomes `overshoot`.
+  - **Refraction:** on Chromium a real Snell's-law displacement map (from
+    `lib/glass/displacement`, wide bezel / deep glass / `refractionScale` ~2.4)
+    so the pill visibly **minifies** through the lens; regenerated per tab so the
+    `feImage` px stays aligned. Safari (no SVG backdrop-filter) uses the
+    `.PillDragLens-glass` convex CSS material (inner thickness vignette fakes the
+    pinch). A chromatic-dispersion `.PillDragLens-rim` adds the liquid fringe on
+    both paths.
+  - **Liquid edge bounce:** `overshoot` past an end tab compresses the lens into
+    the wall (`squishX`↓ `squishY`↑) and strains it toward the finger (`nudgeX`)
+    via **very underdamped** framer `useSpring`s (`SQUISH_SPRING`); leaving the
+    edge / releasing lets them wobble back. The deform is written to the lens
+    `transform` **imperatively** (its React className stays constant so drag
+    re-renders can't strip it); the pop-in uses the separate CSS `scale`
+    property, so the two never fight.
+  - **Drop-splat settle:** on release the lens descends onto the tab with a
+    **no-overshoot ease** on position (never springs left/right) and **splats** —
+    `jump()` to a squashed shape then `set()` to neutral so the underdamped
+    springs rebound (a bird's-eye slime drop that "springs to shape"). A CSS
+    `--settle` crossfade swaps the glass material for the grey blob; a timer
+    (must outlast the springy rebound) hands off to the real blob invisibly.
+    Do **not** put the settle back on a bouncy geometry spring (that was the
+    left/right springing that got removed).
 
 ### Unified Settings/Form Layout
 
@@ -757,6 +801,23 @@ When making changes, be aware of these high-impact files:
   backdrop-filter — never remove the ring fallback, and never gate the ring
   path behind the lens detection being merely "not yet ready" (lens maps
   generate async client-side; rings render first).
+  - **Smooth specular (hi-DPI / Android):** `generateGlassMaps` **supersamples
+    the raster to the device pixel ratio** (capped 3×, and further capped by a
+    ~1.2M-px budget so a large surface like the sidebar doesn't allocate a huge
+    map / hitch on regen). Without it the sub-2px specular rim upscaled ~3× on a
+    phone and read as **jaggies**. A ~0.5px `feGaussianBlur` on the specular
+    (shared filter + the drag lens) softens it into a glow, not a hard line. The
+    displacement magnitude / `displacementScale` stay in **CSS px** (resolution-
+    independent), so supersampling changes only sharpness, not refraction.
+  - **No SVG lens while animating (jank fix):** an SVG-displacement
+    `backdrop-filter` **re-rasterises every frame** the element resizes (morph)
+    or scales (press bloom) — the on-device jank source. `GlassContainer` drops
+    the lens for a **cheap plain `blur()`** whenever `morphing` **or** an
+    interactive `pressed` bloom is active (`cheapMode`), and restores the
+    refraction rim once settled. The `.GlassLens` `backdrop-filter` is **not**
+    CSS-transitioned (blur↔url can't interpolate — a transition only adds a
+    discrete-swap delay). Do **not** keep the SVG `url(#filter)` on a resizing/
+    scaling glass element.
 
 **Swipe & Forms:**
 - `components/swipeable-card.tsx` — The single swipe-to-reveal primitive (framer-motion). Used by all lists, the flight form rows, and the crew/aircraft detail rows.
@@ -802,7 +863,10 @@ When making changes, be aware of these high-impact files:
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
 - Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
 - Do not make a `holdToConfirm` action fire on tap, dismiss the confirm overlay on release, or bring back the red full-row fill — the overlay is dismissed only by an outside tap/swipe, release just resets, and the destructive cue is the card progress border + the pill's gradient fill
-- Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) and the **timer-based** phase advance — advancing on `transitionEnd` cuts the delayed property; and never show the pill/sidebar content mid-morph (it eases in only when settled)
+- Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
+- Do not keep the SVG displacement `backdrop-filter: url(#filter)` on a glass element while it resizes (morph) or scales (press bloom) — it re-rasterises every frame and janks; `GlassContainer` swaps to a cheap `blur()` via `cheapMode` (`morphing || pressed`) and restores the lens when settled. And do not CSS-transition `.GlassLens` `backdrop-filter` (blur↔url can't interpolate — it only adds a discrete-swap delay)
+- Do not rasterise the glass maps at CSS resolution — `generateGlassMaps` **supersamples to the device pixel ratio** (capped 3× and by a ~1.2M-px budget) or the thin specular rim upscales into jaggies on hi-DPI phones; keep the displacement magnitude/`displacementScale` in CSS px (resolution-independent)
+- Do not put the drag-lens (`.PillDragLens`) release settle back on a bouncy geometry spring — position eases in with **no overshoot** (never springs left/right); the "spring to shape" is the underdamped `SQUISH_SPRING` squash-and-stretch (drop-splat). Keep it clamped to the tab strip (edge overshoot → the liquid bounce), keep the transform imperative (constant className so drag re-renders can't strip it), and keep the handoff timer longer than the springy rebound (or the last wobble is cut)
 - Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`
 - Do not give `register/complete`, `add-passkey`, the callsign change, or the TOTP-reveal routes a path that skips `verifyAuthenticationResponse`/`verifyStepUpAssertion` — the TOTP seed must never be revealed without a fresh passkey step-up
