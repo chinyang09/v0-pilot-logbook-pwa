@@ -77,6 +77,11 @@ export interface GlassMapOptions {
    *  upper-left, so the |dot| lobes land top-left/bottom-right like Apple's
    *  Control Center rims). */
   specularAngle?: number
+  /** Supersample factor for the raster — defaults to the device pixel ratio
+   *  (capped at 3). The specular is a sub-2px rim; rendering the map at CSS
+   *  resolution and letting the SVG filter upscale it ~3× on a phone produces
+   *  visible jaggies, so the raster is built at physical resolution instead. */
+  pixelRatio?: number
 }
 
 /**
@@ -93,17 +98,39 @@ export function generateGlassMaps(opts: GlassMapOptions): GlassMaps {
     glassThickness = 60,
     refractionScale = 1.2,
     specularAngle = (3 * Math.PI) / 4,
+    pixelRatio,
   } = opts
-  const w = Math.max(2, Math.round(width))
-  const h = Math.max(2, Math.round(height))
-  const radius = Math.min(rawRadius, w / 2, h / 2)
+  // CSS-px geometry — the refraction magnitude (and displacementScale) are
+  // resolution-independent, so the physics profile stays in CSS units.
+  const cssW = Math.max(2, Math.round(width))
+  const cssH = Math.max(2, Math.round(height))
+  const cssRadius = Math.min(rawRadius, cssW / 2, cssH / 2)
 
   const profile = refractionProfile1D(glassThickness, bezelWidth)
   const maxDisplacement = Math.max(...profile.map(Math.abs), 1)
 
+  // Supersample the raster to the device pixel ratio so the SVG filter samples
+  // a physical-resolution map instead of upscaling a CSS-res one (→ jaggies on
+  // the thin specular rim). The feImage still maps it to the CSS-px element.
+  const dpr =
+    pixelRatio ??
+    Math.min(3, Math.max(1, Math.round((typeof window !== "undefined" && window.devicePixelRatio) || 1)))
+  // Cap total raster pixels so a large surface (the sidebar) doesn't allocate a
+  // multi-megapixel map or hitch when it regenerates at morph-settle — small
+  // controls (pills, buttons) stay at full DPR for a crisp rim.
+  const BUDGET = 1_200_000
+  const area = cssW * cssH
+  const scale = area * dpr * dpr > BUDGET ? Math.max(1, Math.sqrt(BUDGET / area)) : dpr
+  const w = Math.max(2, Math.round(cssW * scale))
+  const h = Math.max(2, Math.round(cssH * scale))
+  const radius = cssRadius * scale
+  const bezel = bezelWidth * scale
+  const feather = scale // ≈1 CSS px of outer antialias feather
+  const specThickness = 1.5 * scale
+
   const radiusSquared = radius * radius
-  const radiusPlusOneSquared = (radius + 1) * (radius + 1)
-  const radiusMinusBezelSquared = Math.max(0, (radius - bezelWidth) * (radius - bezelWidth))
+  const radiusPlusFeatherSquared = (radius + feather) * (radius + feather)
+  const radiusMinusBezelSquared = Math.max(0, (radius - bezel) * (radius - bezel))
   const wBetween = w - radius * 2
   const hBetween = h - radius * 2
 
@@ -119,7 +146,6 @@ export function generateGlassMaps(opts: GlassMapOptions): GlassMaps {
   // Specular map — thin edge band, brightness ∝ |normal · light|².
   const spec = new ImageData(w, h)
   const specVec = [Math.cos(specularAngle), Math.sin(specularAngle)]
-  const specThickness = 1.5
   const radiusMinusSpecSquared = Math.max(0, (radius - specThickness) * (radius - specThickness))
 
   for (let y1 = 0; y1 < h; y1++) {
@@ -133,13 +159,13 @@ export function generateGlassMaps(opts: GlassMapOptions): GlassMaps {
       const edgeFeather =
         d2 < radiusSquared
           ? 1
-          : 1 - (d - radius) / (Math.sqrt(radiusPlusOneSquared) - radius)
+          : 1 - (d - radius) / (Math.sqrt(radiusPlusFeatherSquared) - radius)
 
       // Bezel refraction
-      if (d2 <= radiusPlusOneSquared && d2 >= radiusMinusBezelSquared) {
+      if (d2 <= radiusPlusFeatherSquared && d2 >= radiusMinusBezelSquared) {
         const cos = d > 0 ? x / d : 0
         const sin = d > 0 ? y / d : 0
-        const bezelRatio = Math.max(0, Math.min(1, (radius - d) / bezelWidth))
+        const bezelRatio = Math.max(0, Math.min(1, (radius - d) / bezel))
         const bezelIndex = Math.min(
           Math.max(0, Math.floor(bezelRatio * profile.length)),
           profile.length - 1,
@@ -153,7 +179,7 @@ export function generateGlassMaps(opts: GlassMapOptions): GlassMaps {
       }
 
       // Specular rim
-      if (d2 <= radiusPlusOneSquared && d2 >= radiusMinusSpecSquared) {
+      if (d2 <= radiusPlusFeatherSquared && d2 >= radiusMinusSpecSquared) {
         const cos = d > 0 ? x / d : 0
         const sin = d > 0 ? -y / d : 0
         const dot = Math.abs(cos * specVec[0] + sin * specVec[1])
@@ -173,8 +199,9 @@ export function generateGlassMaps(opts: GlassMapOptions): GlassMaps {
     displacementUrl: imageDataToDataURL(disp),
     specularUrl: imageDataToDataURL(spec),
     displacementScale: maxDisplacement * refractionScale,
-    width: w,
-    height: h,
+    // CSS-px size — the feImage maps the hi-res raster back down to the element.
+    width: cssW,
+    height: cssH,
   }
 }
 

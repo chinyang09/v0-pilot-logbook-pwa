@@ -1,11 +1,16 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useId } from "react"
 import { createPortal } from "react-dom"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
-import { useReducedMotion } from "framer-motion"
+import { animate, useReducedMotion, useSpring } from "framer-motion"
+import {
+  generateGlassMaps,
+  supportsSvgBackdropFilter,
+  type GlassMaps,
+} from "@/lib/glass/displacement"
 import {
   LayoutDashboard,
   Book,
@@ -109,6 +114,18 @@ const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_MARGIN * 2 // 191
 const PILL_HEIGHT = 56 // h-14
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
+// ─── Morph timing ────────────────────────────────────────────
+// Each geometry property animates over MORPH_DUR; the second group starts a
+// LEAD ms in so the two overlap. Leads are ASYMMETRIC:
+// - opening (pill→sidebar): position+width lead, height follows (OPEN_LEAD) —
+//   it slides into place then grows, which reads correctly.
+// - closing (sidebar→pill): height leads, position+width follow at CLOSE_LEAD,
+//   which is near-full so the sidebar COLLAPSES almost completely before it
+//   moves into the pill position (owner feedback: they shouldn't move at once).
+const MORPH_DUR = 190
+const MORPH_OPEN_LEAD = 160
+const MORPH_CLOSE_LEAD = 185
+
 
 // ─── Sync status icon ────────────────────────────────────────
 
@@ -196,12 +213,12 @@ function GravityIndicator({
         `transform 0.5s ${OVERSHOOT_BEZIER}`,
         `width 0.4s ${SETTLE_BEZIER}`,
         `height 0.4s ${SETTLE_BEZIER}`,
-        "opacity 0.15s ease",
       ].join(", ")
 
   return (
     <div
       aria-hidden
+      data-grav-blob
       className={cn(
         "absolute left-0 top-0 z-0 rounded-full bg-foreground/10",
         className,
@@ -224,6 +241,16 @@ function GravityIndicator({
 }
 
 // ─── Shared pill bar content ─────────────────────────────────
+
+/** Very underdamped so the drag lens BOUNCES like liquid — off the end tabs and
+ *  on the drop-splat settle (a springier squash-and-stretch rebound). */
+const SQUISH_SPRING = { stiffness: 600, damping: 10, mass: 0.85 }
+
+/** Extra height beyond the pill — the drag lens overhangs top and bottom. */
+const LENS_OVERHANG = 16
+/** Extra width beyond the tab — keeps the bubble a horizontal stadium, not a
+ *  circle, over narrow tabs (matches Apple's tab-bar lens proportions). */
+const LENS_PAD_X = 26
 
 /**
  * Shared pill bar row — used in both desktop and mobile collapsed states.
@@ -252,38 +279,100 @@ function PillBarContent({
   // ── Drag lens (iPadOS tab-bar style): hold and slide along the pill and a
   // clear glass bubble — TALLER than the pill, so it rides over its edges —
   // follows the finger 1:1 (no snapping mid-drag). The nearest tab's label
-  // pre-highlights as the lens passes over it and the grey blob hides; on
-  // release the lens SPRINGS to that tab and morphs into the grey highlight,
-  // then hands off to the real blob. A plain tap never activates it (10px
-  // slop), so normal Link taps work unchanged. Rendered through a portal —
-  // the pill's GlassContent clips overflow, and the lens must overhang it.
+  // pre-highlights and the grey blob hides. On RELEASE the lens itself
+  // SHRINKS + MORPHS into the grey highlight blob with spring physics
+  // (framer `animate` on the geometry; a CSS crossfade swaps its glass
+  // material for the blob's grey), landing exactly where the real blob sits —
+  // then the real blob is swapped in invisibly. A plain tap never activates
+  // it (10px slop). Rendered through a portal — the pill's GlassContent clips
+  // overflow, and the lens must overhang it. The lens's animation classes
+  // (--on / --settle) are managed IMPERATIVELY and its React className stays
+  // constant, so drag re-renders can't strip them.
   const lensRef = useRef<HTMLDivElement | null>(null)
   const [lensPhase, setLensPhase] = useState<"idle" | "drag" | "settle">("idle")
   const [lensIndex, setLensIndex] = useState(-1)
+  // Chromium-only real refraction map — the backdrop (the pill) genuinely
+  // MINIFIES through the lens's bezel, like Apple's glass. Generated once when
+  // the drag starts (Safari keeps null → the CSS convex material fallback).
+  const [lensMaps, setLensMaps] = useState<GlassMaps | null>(null)
+  const lensFilterId = useId().replace(/[^a-zA-Z0-9_-]/g, "") + "-drag-lens"
   const suppressClickRef = useRef(false)
-  const lastXRef = useRef(0)
+  const lastPtRef = useRef({ x: 0, y: 0 })
+  const settleAnimRef = useRef<ReturnType<typeof animate> | null>(null)
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The pill's GlassContainer — its finger-tracking spotlight is driven
+  // imperatively while the lens has pointer capture (its own move handler
+  // stops firing, so the glow would otherwise freeze).
+  const glassRootRef = useRef<HTMLElement | null>(null)
   const dragRef = useRef<{
     startX: number
     active: boolean
     nearest: number
     base: { left: number; top: number; width: number; height: number }
-    rects: { left: number; width: number; height: number }[]
+    rects: { left: number; top: number; width: number; height: number }[]
   } | null>(null)
 
-  /** Extra height beyond the pill — the lens overhangs top and bottom. */
-  const LENS_OVERHANG = 16
+  // Liquid edge-bounce deformation. Pushing the lens against the first/last tab
+  // COMPRESSES it into the wall (scaleX↓, scaleY↑) and strains it toward the
+  // finger; leaving the edge or releasing lets these underdamped springs
+  // overshoot back to neutral — a water-like wobble. Written to the lens's
+  // `transform` imperatively; the pop-in uses the separate CSS `scale`
+  // property, so the two never fight.
+  const squishX = useSpring(1, SQUISH_SPRING)
+  const squishY = useSpring(1, SQUISH_SPRING)
+  const nudgeX = useSpring(0, SQUISH_SPRING)
+  useEffect(() => {
+    const write = () => {
+      const lens = lensRef.current
+      if (!lens) return
+      lens.style.transform = `translateX(${nudgeX.get()}px) scale(${squishX.get()}, ${squishY.get()})`
+    }
+    const unsub = [squishX.on("change", write), squishY.on("change", write), nudgeX.on("change", write)]
+    return () => unsub.forEach((u) => u())
+  }, [squishX, squishY, nudgeX])
 
-  const positionLens = useCallback((clientX: number) => {
+  // Chromium: (re)build the refraction map to match the lens over the current
+  // tab so the feImage's fixed px size stays aligned with the element. The id
+  // is stable, so a tab change only swaps the map href — no reflow, no remount.
+  useEffect(() => {
+    if (lensPhase !== "drag" || lensIndex < 0) return
+    if (!supportsSvgBackdropFilter()) return
+    const drag = dragRef.current
+    const r = drag?.rects[lensIndex]
+    if (!drag || !r) return
+    setLensMaps(
+      generateGlassMaps({
+        width: r.width + LENS_PAD_X,
+        height: drag.base.height + LENS_OVERHANG,
+        radius: (drag.base.height + LENS_OVERHANG) / 2,
+        // Wide bezel + deep glass so the pill visibly MINIFIES through the
+        // lens (the shipped 14/70/1.6 read as flat on-device).
+        bezelWidth: 18,
+        glassThickness: 100,
+        refractionScale: 2.4,
+      }),
+    )
+  }, [lensPhase, lensIndex])
+
+  const paintSpotlight = useCallback((clientX: number, clientY: number) => {
+    const gr = glassRootRef.current
+    if (!gr) return
+    const rect = gr.getBoundingClientRect()
+    gr.style.setProperty("--press-x", `${clientX - rect.left}px`)
+    gr.style.setProperty("--press-y", `${clientY - rect.top}px`)
+  }, [])
+
+  const positionLens = useCallback((clientX: number, clientY: number) => {
+    lastPtRef.current = { x: clientX, y: clientY }
     const lens = lensRef.current
     const drag = dragRef.current
     if (!lens || !drag || drag.rects.length === 0) return
-    lastXRef.current = clientX
-    const x = Math.max(0, Math.min(drag.base.width, clientX - drag.base.left))
+    const rects = drag.rects
+    const localX = Math.max(0, Math.min(drag.base.width, clientX - drag.base.left))
     let nearest = 0
     let best = Infinity
-    drag.rects.forEach((r, i) => {
-      const d = Math.abs(x - (r.left + r.width / 2))
+    rects.forEach((r, i) => {
+      const d = Math.abs(localX - (r.left + r.width / 2))
       if (d < best) {
         best = d
         nearest = i
@@ -293,24 +382,39 @@ function PillBarContent({
       drag.nearest = nearest
       setLensIndex(nearest)
     }
-    const r = drag.rects[nearest]
-    const w = r.width + 12
-    // Pure finger follow — the smoothing comes from the short CSS transform
-    // transition, not from snapping. Release does the spring-to-tab.
+    const r = rects[nearest]
+    const w = r.width + LENS_PAD_X
+    const h = drag.base.height + LENS_OVERHANG
+    // Clamp the lens CENTRE to the first/last tab centres so the bubble never
+    // leaves the tab strip. The finger's pull PAST an end tab has nowhere to
+    // go — it becomes `overshoot`, which drives the liquid edge bounce.
+    const firstCenter = drag.base.left + rects[0].left + rects[0].width / 2
+    const lastCenter =
+      drag.base.left + rects[rects.length - 1].left + rects[rects.length - 1].width / 2
+    const centerX = Math.max(firstCenter, Math.min(lastCenter, clientX))
+    const overshoot = clientX - centerX // signed; 0 unless past an end tab
+    // Pure finger follow (1:1) via direct px writes — no CSS transition on
+    // geometry, so it never lags or snaps. The release spring is framer.
     lens.style.width = `${w}px`
-    lens.style.height = `${drag.base.height + LENS_OVERHANG}px`
-    lens.style.transform = `translate(${x - w / 2}px, -50%)`
-  }, [])
+    lens.style.height = `${h}px`
+    lens.style.left = `${centerX - w / 2}px`
+    lens.style.top = `${drag.base.top + drag.base.height / 2 - h / 2}px`
+    // Liquid wall: compress into the edge + strain toward the finger. The
+    // underdamped springs make leaving the edge / releasing bounce back.
+    const t = Math.min(Math.abs(overshoot) / 90, 1)
+    squishX.set(1 - t * 0.16)
+    squishY.set(1 + t * 0.12)
+    nudgeX.set(Math.sign(overshoot) * t * 12)
+    paintSpotlight(clientX, clientY)
+  }, [paintSpotlight, squishX, squishY, nudgeX])
 
   // Portal mount: position immediately from the live drag state, then reveal
-  // on the next frame so the pop-in transitions from the base styles.
+  // on the next frame so the pop-in transition fires from the base styles.
   const lensMountRef = useCallback((node: HTMLDivElement | null) => {
     lensRef.current = node
     const drag = dragRef.current
     if (!node || !drag) return
-    node.style.left = `${drag.base.left}px`
-    node.style.top = `${drag.base.top + drag.base.height / 2}px`
-    positionLens(lastXRef.current)
+    positionLens(lastPtRef.current.x, lastPtRef.current.y)
     requestAnimationFrame(() => node.classList.add("PillDragLens--on"))
   }, [positionLens])
 
@@ -319,7 +423,8 @@ function PillBarContent({
     const el = tabsRef.current
     if (!el) return
     const base = el.getBoundingClientRect()
-    lastXRef.current = e.clientX
+    lastPtRef.current = { x: e.clientX, y: e.clientY }
+    glassRootRef.current = (el.closest(".GlassContainer") as HTMLElement) ?? null
     dragRef.current = {
       startX: e.clientX,
       active: false,
@@ -327,7 +432,7 @@ function PillBarContent({
       base: { left: base.left, top: base.top, width: base.width, height: base.height },
       rects: Array.from(el.querySelectorAll<HTMLElement>("[data-grav-item]")).map((it) => {
         const r = it.getBoundingClientRect()
-        return { left: r.left - base.left, width: r.width, height: r.height }
+        return { left: r.left - base.left, top: r.top - base.top, width: r.width, height: r.height }
       }),
     }
   }, [reduce, lensPhase])
@@ -339,18 +444,24 @@ function PillBarContent({
       if (Math.abs(e.clientX - drag.startX) < 10) return
       drag.active = true
       setLensPhase("drag")
+      // Take over the pill's spotlight — its own move handler is about to stop.
+      glassRootRef.current?.style.setProperty("--glass-press", "1")
       try {
         tabsRef.current?.setPointerCapture(e.pointerId)
       } catch {
         // capture can fail if the pointer is already gone — lens still tracks
       }
     }
-    positionLens(e.clientX)
+    positionLens(e.clientX, e.clientY)
   }, [positionLens])
 
   const handleLensEnd = useCallback((e: React.PointerEvent) => {
     const drag = dragRef.current
     dragRef.current = null
+    // Fade the pill spotlight back out. Kill the horizontal strain INSTANTLY
+    // (jump, not set) so releasing never springs the lens left/right.
+    glassRootRef.current?.style.setProperty("--glass-press", "0")
+    nudgeX.jump(0)
     if (!drag?.active) return
     // Swallow the click synthesised at the end of the drag; the timeout clears
     // the flag if pointer capture already ate the click (so the NEXT tap works).
@@ -359,37 +470,51 @@ function PillBarContent({
       suppressClickRef.current = false
     }, 150)
 
-    if (e.type === "pointercancel" || drag.nearest < 0) {
+    const lens = lensRef.current
+    if (e.type === "pointercancel" || drag.nearest < 0 || !lens) {
+      squishX.jump(1)
+      squishY.jump(1)
       setLensPhase("idle")
       setLensIndex(-1)
+      setLensMaps(null)
       return
     }
 
-    // Settle: the lens itself springs to the chosen tab and morphs into the
-    // grey highlight (the --settle class swaps easing to the overshoot spring
-    // and crossfades the material); navigation happens now so the hidden blob
-    // arrives underneath, and the handoff swap is invisible.
+    // Release = a slime drop, seen bird's-eye: the lens descends straight onto
+    // the tab (position eases in with NO overshoot, so it never springs left/
+    // right) and SPLATS on impact — jump to a squashed shape, then let the
+    // underdamped springs rebound to neutral. That vertical squash-and-settle
+    // is the "spring to shape". The --settle crossfade swaps glass → the grey
+    // blob underneath, so the handoff to the real blob is invisible.
     setLensPhase("settle")
-    const idx = drag.nearest
-    const r = drag.rects[idx]
-    const lens = lensRef.current
-    if (lens) {
-      requestAnimationFrame(() => {
-        lens.style.width = `${r.width}px`
-        lens.style.height = `${r.height}px`
-        lens.style.transform = `translate(${r.left}px, -50%)`
-      })
-    }
-    const tab = TAB_CONFIG[tabs[idx]]
+    const r = drag.rects[drag.nearest]
+    const targetLeft = drag.base.left + r.left
+    const targetTop = drag.base.top + r.top
+    lens.classList.add("PillDragLens--settle")
+    settleAnimRef.current?.stop()
+    settleAnimRef.current = animate(
+      lens,
+      { left: targetLeft, top: targetTop, width: r.width, height: r.height },
+      { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
+    )
+    squishX.jump(1.14)
+    squishY.jump(0.82)
+    squishX.set(1)
+    squishY.set(1)
+    const tab = TAB_CONFIG[tabs[drag.nearest]]
     if (tab) router.push(tab.href)
+    // Outlast both the position ease and the (springier) squash rebound before
+    // handing off to the real blob, or the last wobble gets cut.
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
     settleTimerRef.current = setTimeout(() => {
       setLensPhase("idle")
       setLensIndex(-1)
-    }, 480)
-  }, [tabs, router])
+      setLensMaps(null)
+    }, 640)
+  }, [tabs, router, squishX, squishY, nudgeX])
 
   useEffect(() => () => {
+    settleAnimRef.current?.stop()
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
   }, [])
 
@@ -407,7 +532,8 @@ function PillBarContent({
 
       {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
           behind the labels and stretches between tabs as the route changes.
-          touch-action:none so hold-and-slide streams pointermoves on iOS. */}
+          touch-action:none so hold-and-slide streams pointermoves on iOS;
+          [-webkit-touch-callout:none] kills the iOS long-press link popup. */}
       <div
         ref={tabsRef}
         className="relative flex items-center flex-1 min-w-0 justify-evenly touch-none"
@@ -439,7 +565,13 @@ function PillBarContent({
           const Icon = tab.icon
 
           return (
-            <Link key={tabKey} href={tab.href} className="relative z-[1]">
+            <Link
+              key={tabKey}
+              href={tab.href}
+              data-nav-link
+              draggable={false}
+              className="relative z-[1]"
+            >
               {mode === "desktop" ? (
                 <span
                   data-grav-item
@@ -468,15 +600,75 @@ function PillBarContent({
       </div>
 
       {/* Drag lens portal — fixed-positioned so it can overhang the pill
-          (GlassContent clips its own overflow). */}
+          (GlassContent clips its own overflow). On Chromium the -lens layer
+          refracts the pill through a real Snell's-law map (the pill minifies);
+          Safari falls back to the -glass convex material. The chromatic -rim
+          adds the liquid dispersion fringe. All fade to the grey child
+          (--settle) as the lens morphs into the blob. */}
       {lensActive &&
         typeof document !== "undefined" &&
         createPortal(
-          <div
-            ref={lensMountRef}
-            aria-hidden
-            className={cn("PillDragLens", lensPhase === "settle" && "PillDragLens--settle")}
-          />,
+          <div ref={lensMountRef} aria-hidden className="PillDragLens">
+            {lensMaps ? (
+              <>
+                <div
+                  className="PillDragLens-lens"
+                  style={{
+                    backdropFilter: `url(#${lensFilterId}) saturate(1.5) brightness(1.06)`,
+                    WebkitBackdropFilter: `url(#${lensFilterId}) saturate(1.5) brightness(1.06)`,
+                  }}
+                />
+                <svg className="GlassFilterSvg" aria-hidden="true">
+                  <defs>
+                    <filter
+                      id={lensFilterId}
+                      x="-20%"
+                      y="-20%"
+                      width="140%"
+                      height="140%"
+                      colorInterpolationFilters="sRGB"
+                    >
+                      <feImage
+                        href={lensMaps.displacementUrl}
+                        x="0"
+                        y="0"
+                        width={lensMaps.width}
+                        height={lensMaps.height}
+                        preserveAspectRatio="none"
+                        result="dmap"
+                      />
+                      <feDisplacementMap
+                        in="SourceGraphic"
+                        in2="dmap"
+                        scale={lensMaps.displacementScale}
+                        xChannelSelector="R"
+                        yChannelSelector="G"
+                        result="displaced"
+                      />
+                      <feImage
+                        href={lensMaps.specularUrl}
+                        x="0"
+                        y="0"
+                        width={lensMaps.width}
+                        height={lensMaps.height}
+                        preserveAspectRatio="none"
+                        result="spec"
+                      />
+                      <feGaussianBlur in="spec" stdDeviation={0.5} result="specSoft" />
+                      <feComponentTransfer in="specSoft" result="specFaded">
+                        <feFuncA type="linear" slope={0.7} />
+                      </feComponentTransfer>
+                      <feBlend in="specFaded" in2="displaced" mode="screen" />
+                    </filter>
+                  </defs>
+                </svg>
+              </>
+            ) : (
+              <div className="PillDragLens-glass" />
+            )}
+            <div className="PillDragLens-rim" />
+            <div className="PillDragLens-grey" />
+          </div>,
           document.body
         )}
 
@@ -609,6 +801,8 @@ function SidebarNavItem({
     <Link
       href={href}
       data-grav-item
+      data-nav-link
+      draggable={false}
       className={cn(
         "relative z-[1] flex items-center gap-3 px-3.5 py-2.5 rounded-full text-sm transition-all duration-150",
         "active:scale-[0.98]",
@@ -787,13 +981,10 @@ function DesktopPillMorph({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const { expandedHeight } = useViewportMeasure()
-  // Each property animates over DUR; the second group starts LEAD ms in (~85% of
-  // the way through the first) so the two overlap rather than stalling. Order:
-  // opening (pill→sidebar) moves position+width first, then grows height;
-  // closing (sidebar→pill) shrinks height first, then moves position+width.
-  const DUR = prefersReducedMotion ? 0 : 190
-  const LEAD = prefersReducedMotion ? 0 : 160
-  const TOTAL = DUR + LEAD
+  const DUR = prefersReducedMotion ? 0 : MORPH_DUR
+  const OPEN_LEAD = prefersReducedMotion ? 0 : MORPH_OPEN_LEAD
+  const CLOSE_LEAD = prefersReducedMotion ? 0 : MORPH_CLOSE_LEAD
+  const TOTAL = DUR + Math.max(OPEN_LEAD, CLOSE_LEAD)
 
   const { phase, advancePhase, isSidebarShape } = useMorphPhase(sidebarOpen, TOTAL)
 
@@ -811,7 +1002,17 @@ function DesktopPillMorph({
     [phase, advancePhase],
   )
 
-  const transition = morphTransition(phase, DUR, LEAD, "top, left, transform, width")
+  const lead = phase === "closing" ? CLOSE_LEAD : OPEN_LEAD
+  const transition = morphTransition(phase, DUR, lead, "top, left, transform, width")
+  // Reveal the sidebar list in lock-step with the growing/shrinking HEIGHT
+  // (drawer clip), not on its own opacity timeline — otherwise the list fades
+  // while the glass is still resizing and you see two separate motions. Height
+  // is delayed by OPEN_LEAD on open, leads (delay 0) on close.
+  const heightDelay = phase === "opening" ? OPEN_LEAD : 0
+  const contentTransition =
+    phase === "opening" || phase === "closing"
+      ? `opacity ${DUR}ms ease ${heightDelay}ms`
+      : "opacity 200ms ease"
 
   const style: React.CSSProperties = {
     top: isSidebarShape
@@ -863,15 +1064,17 @@ function DesktopPillMorph({
 
           {/* Sidebar header + nav — visible when expanded */}
           <div
-            className="flex flex-col flex-1 min-h-0 transition-opacity duration-200 ease-out"
+            className="flex flex-col flex-1 min-h-0"
             style={{
               // The vertical sidebar list isn't "squished" mid-morph (it's just
               // clipped by the growing height, like a drawer), so keep it visible
               // AND interactive for the whole open span. Gating it on the settled
-              // phase left a brief dead window that dropped sidebar taps.
+              // phase left a brief dead window that dropped sidebar taps. Its
+              // opacity is timed to the height so reveal + growth are one motion.
               opacity: isSidebarShape ? 1 : 0,
               visibility: isSidebarShape ? "visible" : "hidden",
               pointerEvents: isSidebarShape ? "auto" : "none",
+              transition: contentTransition,
             }}
           >
             {/* Sidebar top row — toggle + sync flushed right */}
@@ -908,9 +1111,10 @@ function MobilePillMorph({
   const ref = useRef<HTMLDivElement>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { expandedHeight } = useViewportMeasure()
-  const DUR = prefersReducedMotion ? 0 : 190
-  const LEAD = prefersReducedMotion ? 0 : 160
-  const TOTAL = DUR + LEAD
+  const DUR = prefersReducedMotion ? 0 : MORPH_DUR
+  const OPEN_LEAD = prefersReducedMotion ? 0 : MORPH_OPEN_LEAD
+  const CLOSE_LEAD = prefersReducedMotion ? 0 : MORPH_CLOSE_LEAD
+  const TOTAL = DUR + Math.max(OPEN_LEAD, CLOSE_LEAD)
 
   const { phase, advancePhase, isSidebarShape } = useMorphPhase(sidebarOpen, TOTAL)
 
@@ -932,12 +1136,21 @@ function MobilePillMorph({
 
   // Mobile morph — always bottom-anchored. pill: bottom-centre, auto width, pill
   // height. opening/closing: height and position+width morph in a sequenced
-  // overlap (bottom-anchored, so it grows upward). sidebar: full height,
-  // bottom-left. In the pill state only `transform` animates (scroll hide/show).
+  // overlap (bottom-anchored, so it grows upward). On CLOSE the height collapses
+  // almost fully (CLOSE_LEAD) before position+width move into the pill. sidebar:
+  // full height, bottom-left. In the pill state only `transform` animates.
+  const lead = phase === "closing" ? CLOSE_LEAD : OPEN_LEAD
   const transition =
     phase === "pill"
       ? `transform ${prefersReducedMotion ? 0 : 300}ms ${OVERSHOOT_BEZIER}`
-      : morphTransition(phase, DUR, LEAD, "left, transform, width")
+      : morphTransition(phase, DUR, lead, "left, transform, width")
+  // Sidebar content reveal timed to the height (drawer), so growth + reveal are
+  // one motion instead of the list fading while the glass is still expanding.
+  const heightDelay = phase === "opening" ? OPEN_LEAD : 0
+  const contentTransition =
+    phase === "opening" || phase === "closing"
+      ? `opacity ${DUR}ms ease ${heightDelay}ms`
+      : "opacity 200ms ease"
 
   const style: React.CSSProperties = {
     position: "fixed" as const,
@@ -1012,15 +1225,17 @@ function MobilePillMorph({
 
           {/* Sidebar header + nav — visible when expanded */}
           <div
-            className="flex flex-col flex-1 min-h-0 transition-opacity duration-200 ease-out"
+            className="flex flex-col flex-1 min-h-0"
             style={{
               // The vertical sidebar list isn't "squished" mid-morph (it's just
               // clipped by the growing height, like a drawer), so keep it visible
               // AND interactive for the whole open span. Gating it on the settled
-              // phase left a brief dead window that dropped sidebar taps.
+              // phase left a brief dead window that dropped sidebar taps. Its
+              // opacity is timed to the height so reveal + growth are one motion.
               opacity: isSidebarShape ? 1 : 0,
               visibility: isSidebarShape ? "visible" : "hidden",
               pointerEvents: isSidebarShape ? "auto" : "none",
+              transition: contentTransition,
             }}
           >
             {/* Sidebar top row — toggle + sync flushed right */}

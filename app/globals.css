@@ -695,7 +695,10 @@ textarea:focus-within {
   pointer-events: none;
   border-radius: var(--corner-radius);
   overflow: hidden;
-  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1), backdrop-filter 240ms ease;
+  /* Only the corner radius transitions. The backdrop-filter swaps between the
+     SVG lens and a cheap blur (while animating) — those filter lists can't
+     interpolate, so transitioning it just adds a discrete-swap delay. */
+  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .GlassFilterSvg {
   position: absolute;
@@ -833,56 +836,108 @@ textarea:focus-within {
   pointer-events: none;
 }
 
+/* iOS: a long-press on a nav <a> pops Safari's link preview/callout, which
+   fought the drag-lens hold-and-slide. Suppress it on every nav link. */
+[data-nav-link] {
+  -webkit-touch-callout: none;
+}
+
 /* ─── Nav pill drag lens ───
-   The iPadOS tab-bar "hold and slide" bubble: a CLEAR glass lens (no blur —
-   the label under it stays crisp) that overhangs the pill's edges and follows
-   the finger 1:1; the short transform transition adds a liquid lag. On
-   release, --settle swaps the easing to the overshoot spring and crossfades
-   the material into the grey highlight the gravity blob uses, so the lens
-   visibly BECOMES the selection before handing off. Fixed-positioned via a
-   portal (the pill clips its own overflow). */
+   The iPadOS tab-bar "hold and slide" bubble. It overhangs the pill's edges
+   and follows the finger 1:1 (geometry written imperatively, no CSS lag). On
+   release the lens SHRINKS + MORPHS into the grey gravity-blob: framer springs
+   its left/top/width/height onto the chosen tab while --settle crossfades the
+   glass child out and the grey child in — then the real blob is swapped in at
+   the same spot, invisibly. Fixed-positioned via a portal (the pill clips its
+   own overflow). Animation classes (--on / --settle) are set imperatively; the
+   React className stays constant so drag re-renders can't strip them. */
 .PillDragLens {
   position: fixed;
+  left: 0;
+  top: 0;
   z-index: 110;
   pointer-events: none;
   border-radius: 999px;
-  backdrop-filter: saturate(1.6) brightness(1.14);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.32),
-    inset 0 12px 16px -12px rgba(255, 255, 255, 0.50),
-    inset 0 -12px 16px -12px rgba(255, 255, 255, 0.28),
-    0 4px 14px rgba(0, 0, 0, 0.18);
   opacity: 0;
-  scale: 0.6;
+  scale: 0.7;
+  /* Only the pop-in animates via CSS; geometry is imperative / framer. */
   transition:
     opacity 0.16s ease,
-    scale 0.28s cubic-bezier(0.34, 1.5, 0.64, 1),
-    transform 0.11s cubic-bezier(0.2, 0.8, 0.3, 1),
-    width 0.18s cubic-bezier(0.22, 1, 0.36, 1),
-    height 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+    scale 0.28s cubic-bezier(0.34, 1.5, 0.64, 1);
 }
 .PillDragLens--on {
   opacity: 1;
   scale: 1;
 }
-.PillDragLens--settle {
-  /* Morph into the gravity blob's grey highlight while springing to the tab. */
-  background: color-mix(in oklab, var(--foreground) 10%, transparent);
-  backdrop-filter: saturate(1) brightness(1);
+.PillDragLens-lens,
+.PillDragLens-glass,
+.PillDragLens-rim,
+.PillDragLens-grey {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+/* Chromium path — the backdrop-filter (a real refraction map) is set inline;
+   these shadows are just the convex bulge + drop shadow around it. */
+.PillDragLens-lens {
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0),
-    inset 0 12px 16px -12px rgba(255, 255, 255, 0),
-    inset 0 -12px 16px -12px rgba(255, 255, 255, 0),
-    0 4px 14px rgba(0, 0, 0, 0);
-  transition:
-    opacity 0.12s ease 0.36s,
-    transform 0.42s cubic-bezier(0.34, 1.5, 0.64, 1),
-    width 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-    height 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-    background 0.3s ease,
-    backdrop-filter 0.3s ease,
-    box-shadow 0.3s ease;
+    inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+    inset 0 14px 18px -14px rgba(255, 255, 255, 0.55),
+    inset 0 -14px 18px -14px rgba(255, 255, 255, 0.30),
+    0 6px 18px rgba(0, 0, 0, 0.20);
+  transition: opacity 0.26s ease;
+}
+/* Safari fallback — no SVG backdrop-filter, so the convex look is faked with
+   layered shadows: bright top+bottom bulges (the glass swell) and an inner
+   thickness vignette that darkens toward the rim, reading as the pill being
+   pinched/minified through the glass. */
+.PillDragLens-glass {
+  backdrop-filter: saturate(1.7) brightness(1.12);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.34),
+    inset 0 14px 18px -14px rgba(255, 255, 255, 0.55),
+    inset 0 -14px 18px -14px rgba(255, 255, 255, 0.30),
+    inset 0 0 22px rgba(0, 0, 0, 0.07),
+    0 6px 18px rgba(0, 0, 0, 0.20);
+  transition: opacity 0.26s ease;
+}
+/* Chromatic dispersion fringe on the rim — the liquid-glass rainbow edge.
+   A conic gradient masked to a 1px border ring, screened over the material. */
+.PillDragLens-rim {
+  padding: 1.25px;
+  background: conic-gradient(
+    from 210deg,
+    rgba(255, 120, 120, 0.55),
+    rgba(120, 165, 255, 0.55),
+    rgba(140, 255, 210, 0.45),
+    rgba(255, 200, 120, 0.5),
+    rgba(255, 120, 120, 0.55)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  mix-blend-mode: screen;
+  opacity: 0.7;
+  transition: opacity 0.26s ease;
+}
+/* Matches the gravity blob's bg-foreground/10 so the handoff is invisible. */
+.PillDragLens-grey {
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
   opacity: 0;
+  transition: opacity 0.26s ease;
+}
+.PillDragLens--settle .PillDragLens-lens,
+.PillDragLens--settle .PillDragLens-glass,
+.PillDragLens--settle .PillDragLens-rim {
+  opacity: 0;
+}
+.PillDragLens--settle .PillDragLens-grey {
+  opacity: 1;
 }
 @media (prefers-reduced-motion: reduce) {
   .PillDragLens {
