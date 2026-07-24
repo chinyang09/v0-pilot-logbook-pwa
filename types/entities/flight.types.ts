@@ -173,6 +173,12 @@ export interface FlightLog {
   // Import provenance — used to gate older reports from regressing newer data
   reportGeneratedAt?: number
   importSource?: "logbook" | "schedule" | "cross_hydrated" | "manual"
+  // Simulator sessions are logged as flight entries (no aircraftReg / airports)
+  // so they count toward dashboard simulator-instrument totals. These optional
+  // fields are non-indexed, so they need no Dexie migration.
+  isSimulator?: boolean
+  /** Stable per-date key for deduping sim sessions on re-import (e.g. "EBT1"). */
+  simSessionCode?: string
 }
 
 export type FlightLogCreate = Omit<FlightLog, "id" | "createdAt" | "updatedAt" | "syncStatus">

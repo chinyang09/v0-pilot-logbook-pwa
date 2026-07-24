@@ -458,6 +458,140 @@ describe("reconcileRoster — picName truncation handshake", () => {
 });
 
 // ============================================================
+// Full-crew reconciliation on updates (schedule carries CPT + FO)
+// ============================================================
+
+describe("reconcileRoster — crew update from schedule", () => {
+  const currentUser = { id: "me", crewId: "9766" };
+
+  it("adds the SIC (FO) to an existing flight that had no SIC", () => {
+    const flight = makeFlight({
+      picName: "Self",
+      picId: "me",
+      sicName: "",
+      sicId: "",
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          crew: [
+            { role: "CPT", crewId: "2841", name: "Tham Meiting, Joann", personnelId: "p-cpt" },
+            // User (crewId 9766) is the FO on this sector → SIC = Self.
+            { role: "FO", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+          ],
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+      currentUser,
+    });
+    if (
+      ops[0].kind !== "update_conflict" &&
+      ops[0].kind !== "update_safe" &&
+      ops[0].kind !== "update_consult"
+    ) {
+      throw new Error(`expected an update op, got ${ops[0].kind}`);
+    }
+    const fields = ops[0].changes.map((c) => c.field);
+    expect(fields).toContain("picName");
+    expect(fields).toContain("sicName");
+    const sicName = ops[0].changes.find((c) => c.field === "sicName");
+    expect(sicName?.to).toBe("Self");
+    const picName = ops[0].changes.find((c) => c.field === "picName");
+    expect(picName?.to).toBe("Tham Meiting, Joann");
+  });
+
+  it("upgrades a truncated PIC name to the schedule's full form", () => {
+    const flight = makeFlight({
+      picName: "Siah Yang Tek, Timot",
+      picId: "p-old",
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          crew: [
+            {
+              role: "CPT",
+              crewId: "6409",
+              name: "Siah Yang Tek, Timothy",
+              personnelId: "p-new",
+            },
+            { role: "FO", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+          ],
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+      currentUser,
+    });
+    if (
+      ops[0].kind !== "update_conflict" &&
+      ops[0].kind !== "update_safe" &&
+      ops[0].kind !== "update_consult"
+    ) {
+      throw new Error(`expected an update op, got ${ops[0].kind}`);
+    }
+    const picName = ops[0].changes.find((c) => c.field === "picName");
+    expect(picName?.to).toBe("Siah Yang Tek, Timothy");
+    // id follows the name upgrade
+    const picId = ops[0].changes.find((c) => c.field === "picId");
+    expect(picId?.to).toBe("p-new");
+  });
+
+  it("does NOT downgrade a full PIC name to a truncated re-import", () => {
+    const flight = makeFlight({
+      picName: "Siah Yang Tek, Timothy",
+      picId: "p-full",
+      sicName: "Self",
+      sicId: "me",
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          crew: [
+            { role: "CPT", crewId: "6409", name: "Siah Yang Tek, Timot", personnelId: "p-trunc" },
+            { role: "FO", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+          ],
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+      currentUser,
+    });
+    // Same person (truncated), SIC already Self → nothing to change.
+    expect(ops[0].kind).toBe("skip_identical");
+  });
+
+  it("marks the user as PIC (Self) when they are the captain", () => {
+    const flight = makeFlight({ picName: "", picId: "", sicName: "", sicId: "" });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          crew: [
+            { role: "CPT", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+            { role: "FO", crewId: "3000", name: "Other Pilot", personnelId: "p-fo" },
+          ],
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+      currentUser,
+    });
+    if (
+      ops[0].kind !== "update_conflict" &&
+      ops[0].kind !== "update_safe" &&
+      ops[0].kind !== "update_consult"
+    ) {
+      throw new Error(`expected an update op, got ${ops[0].kind}`);
+    }
+    const picName = ops[0].changes.find((c) => c.field === "picName");
+    expect(picName?.to).toBe("Self");
+    const sicName = ops[0].changes.find((c) => c.field === "sicName");
+    expect(sicName?.to).toBe("Other Pilot");
+  });
+});
+
+// ============================================================
 // Sun-position day/night context on TO/LDG diffs
 // ============================================================
 

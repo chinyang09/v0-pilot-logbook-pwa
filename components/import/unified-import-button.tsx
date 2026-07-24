@@ -36,7 +36,7 @@ import {
   executeRosterImport,
   type ExecutionResult,
 } from "@/lib/utils/roster/executor";
-import { userDb } from "@/lib/db";
+import { userDb, getCurrentUserPersonnel } from "@/lib/db";
 import type { FlightLog } from "@/types/entities/flight.types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
 import { DetectedFilesChip } from "./detected-files-chip";
@@ -93,6 +93,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         if (result.deleted) parts.push(`${result.deleted} deleted`);
         if (result.simSessionsCreated)
           parts.push(`${result.simSessionsCreated} sim sessions`);
+        if (result.aircraftCreated)
+          parts.push(`${result.aircraftCreated} aircraft`);
         if (result.staleSkipped)
           parts.push(`${result.staleSkipped} skipped (older report)`);
         if (result.identical) parts.push(`${result.identical} unchanged`);
@@ -123,6 +125,15 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
 
       try {
         const docs = await extractDocuments(files);
+
+        // Needed so the reconciler can resolve "Self" crew seats and diff the
+        // full PIC + SIC crew (not just the logbook-derived PIC) on updates.
+        const currentUserForRecon = await getCurrentUserPersonnel().catch(
+          () => null
+        );
+        const reconCurrentUser = currentUserForRecon
+          ? { id: currentUserForRecon.id, crewId: currentUserForRecon.crewId }
+          : undefined;
 
         const logbooks = docs.filter((d) => d.reportType === "logbook");
         const schedules = docs.filter((d) => d.reportType === "schedule");
@@ -188,6 +199,19 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           });
           const merged = crossHydrate(logbookPlan, schedulePlan);
 
+          // Simulator sessions: prefer the schedule's richer EBT/Training
+          // Details entries; add any logbook-only sim dates the schedule
+          // didn't carry. Deduped by date so one sim isn't logged twice.
+          const schedSimDates = new Set(
+            schedulePlan.simSessions.map((s) => s.date)
+          );
+          simSessions = [
+            ...schedulePlan.simSessions,
+            ...logbookPlan.simSessions.filter(
+              (s) => !schedSimDates.has(s.date)
+            ),
+          ];
+
           // Re-reconcile against full DB using merged sectors and the report
           // generation timestamp from whichever side has it (prefer logbook
           // since it's the authoritative actuals).
@@ -218,6 +242,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             csvDateRange: dateRange,
             reportGeneratedAt,
             useLegacyUpdateConflict: false,
+            currentUser: reconCurrentUser,
           });
 
           plan = {
@@ -329,6 +354,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             csvDateRange: logbookPlan.dateRange,
             reportGeneratedAt: logbookPlan.generatedAt,
             useLegacyUpdateConflict: false,
+            currentUser: reconCurrentUser,
           });
 
           plan = {
@@ -346,6 +372,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
                 op.kind === "skip_stale_report" ||
                 op.kind === "update_safe",
             })),
+            simSessions: [],
             currencies: [],
             personnelToCreate: logbookPlan.personnelToCreate,
             personnelToUpdate: [],
@@ -393,6 +420,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           plan = await parseScheduleCSV(schedules[0], {
             onProgress: onParseProgress,
           });
+          simSessions = plan.simSessions;
         }
 
         if (!plan.success && plan.errors.length > 0) {

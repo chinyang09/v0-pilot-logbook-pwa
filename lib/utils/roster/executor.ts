@@ -20,10 +20,10 @@ import type {
 import type { ParsedSimSession } from "@/lib/utils/parsers/logbook-parser-v2";
 import type { FlightLog, FlightLogCreate } from "@/types/entities/flight.types";
 import type { Personnel } from "@/types/entities/crew.types";
+import type { Aircraft } from "@/types/entities/aircraft.types";
 import type {
   Currency,
   Discrepancy,
-  ScheduleEntryCreate,
 } from "@/types/entities/roster.types";
 import {
   addFlight,
@@ -33,14 +33,24 @@ import {
   getAirportTimeInfo,
   getCurrentUserPersonnel,
   getUserPreferences,
+  getAllAircraft,
+  addAircraft,
+  updateAircraft,
+  getAircraftType,
   userDb,
   DEFAULT_IMPORT_DEFAULTS,
 } from "@/lib/db";
+import {
+  toEngineType,
+  toDashboardCategory,
+} from "@/lib/utils/parsers/shared/aircraft-classify";
 import type { ImportDefaults } from "@/types/db/stores.types";
-import { addScheduleEntry } from "@/lib/db/stores/user/schedule.store";
 import { recalculateFlightFields } from "@/lib/utils/flight-calculations";
+import { normalizeAircraftType } from "@/lib/utils/parsers/shared/aircraft-type-map";
+import { hhmmToMinutes } from "@/lib/utils/time";
 import {
   TOLDG_DECISION_MARKER,
+  deriveSectorCrew,
   type ParsedSector,
 } from "@/lib/utils/roster/reconciler";
 
@@ -73,6 +83,8 @@ export interface ExecutionResult {
   simSessionsCreated: number;
   personnelCreated: number;
   personnelUpdated: number;
+  aircraftCreated: number;
+  aircraftUpdated: number;
   currenciesSaved: number;
   discrepancies: Discrepancy[];
   errors: Array<{ operation: string; message: string }>;
@@ -105,35 +117,13 @@ async function hydrateFlightFromSector(
   const arrOffset = arrAirport ? getAirportTimeInfo(arrAirport.tz).offset : 0;
 
   // Crew: schedule provides full crew with crewIds; logbook-only path uses
-  // the resolved truncation.
-  const captain = sector.crew?.find((c) => c.role === "CPT" || c.role === "PIC");
-  const fo = sector.crew?.find((c) => c.role === "FO");
-  const isSelfCPT =
-    captain && currentUser.crewId && captain.crewId === currentUser.crewId;
-  const isSelfFO = fo && currentUser.crewId && fo.crewId === currentUser.crewId;
-
-  let picId = captain?.personnelId || sector.picPersonnelId || "";
-  let picName = captain?.name || sector.picResolvedName || "";
-  let sicId = fo?.personnelId || "";
-  let sicName = fo?.name || "";
+  // the resolved truncation. `deriveSectorCrew` is the shared resolver the
+  // reconciler's update-diff also uses, so create and re-import agree.
+  const { picId, picName, sicId, sicName, isSelfCPT } = deriveSectorCrew(
+    sector,
+    currentUser
+  );
   const isUserPic = isSelfCPT || sector.isUserPic === true;
-
-  if (isSelfCPT) {
-    picId = currentUser.id;
-    picName = "Self";
-  } else if (sector.isUserPic && !captain) {
-    // Logbook-only sector where we know the user is PIC.
-    picId = currentUser.id;
-    picName = "Self";
-  }
-  if (isSelfFO) {
-    sicId = currentUser.id;
-    sicName = "Self";
-  } else if (sector.isUserPic === false && !fo) {
-    // Logbook says someone else was PIC — current user is SIC.
-    sicId = currentUser.id;
-    sicName = "Self";
-  }
 
   // PF inference: prefer the explicit logbook signal (TO/LDG-derived);
   // schedule-only imports default to true (no actuals to infer from).
@@ -271,6 +261,176 @@ async function postWriteRecalculate(
   }
 }
 
+/**
+ * Ensure a user `Aircraft` record exists for every registration flown in
+ * this import, deriving engine group + category from the ICAO type so the
+ * dashboard's by-engine / by-category rings populate. New records are
+ * created; existing records are only BACKFILLED where a field is blank —
+ * user-entered values are never clobbered.
+ */
+async function ensureAircraftForFlights(
+  pairs: Array<{ reg: string; type: string }>,
+  result: ExecutionResult
+): Promise<void> {
+  const wanted = new Map<string, string>(); // REG → type designator
+  for (const { reg, type } of pairs) {
+    const R = (reg || "").toUpperCase().trim();
+    if (!R) continue;
+    if (!wanted.has(R) || (!wanted.get(R) && type)) wanted.set(R, type || "");
+  }
+  if (wanted.size === 0) return;
+
+  let existing: Aircraft[] = [];
+  try {
+    existing = await getAllAircraft();
+  } catch {
+    return;
+  }
+  const byReg = new Map(existing.map((a) => [a.registration.toUpperCase(), a]));
+
+  for (const [reg, type] of wanted) {
+    try {
+      const doc = type ? await getAircraftType(type).catch(() => null) : null;
+      const engineType = doc
+        ? toEngineType(doc.engineType, doc.engineCount)
+        : undefined;
+      const category = doc ? toDashboardCategory(doc.category) : undefined;
+      const model = doc ? `${doc.manufacturer} ${doc.designator}`.trim() : "";
+
+      const ex = byReg.get(reg);
+      if (!ex) {
+        await addAircraft({
+          registration: reg,
+          type: type || "",
+          typeDesignator: type || "",
+          model,
+          // Airline schedule imports are jets by domain; DOC 8643 lookup
+          // refines this when the designator resolves.
+          category: category || "Airplane",
+          engineType: engineType || "JET",
+          isComplex: false,
+          isHighPerformance: false,
+        });
+        result.aircraftCreated++;
+      } else {
+        const patch: Partial<Aircraft> = {};
+        if (!ex.typeDesignator && type) patch.typeDesignator = type;
+        if (!ex.type && type) patch.type = type;
+        if (!ex.category && category) patch.category = category;
+        if (!ex.model && model) patch.model = model;
+        if (Object.keys(patch).length > 0) {
+          await updateAircraft(ex.id, patch);
+          result.aircraftUpdated++;
+        }
+      }
+    } catch (error) {
+      result.errors.push({
+        operation: `ensure aircraft ${reg}`,
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+}
+
+/**
+ * Build a FlightLog for a simulator session. Sims are logged as flight
+ * entries (no aircraftReg / airports) so they surface in the logbook and
+ * count toward the dashboard's simulator-instrument totals. The session time
+ * populates simulatedInstrumentTime; block/flight time stay zero so a sim
+ * never inflates flight-hour totals.
+ */
+function buildSimFlight(
+  sim: ParsedSimSession,
+  currentUser: Personnel,
+  reportGeneratedAt: number | null | undefined,
+  importSource: FlightLog["importSource"]
+): FlightLogCreate {
+  const duration =
+    sim.duration && sim.duration !== "00:00"
+      ? sim.duration
+      : sim.outUtc && sim.inUtc
+        ? (() => {
+            let d = hhmmToMinutes(sim.inUtc) - hhmmToMinutes(sim.outUtc);
+            if (d < 0) d += 1440;
+            return `${String(Math.floor(d / 60)).padStart(2, "0")}:${String(
+              d % 60
+            ).padStart(2, "0")}`;
+          })()
+        : "00:00";
+
+  const deviceType = normalizeAircraftType(sim.deviceType || "SIM");
+  const sessionCode = sim.sessionCode || sim.component || "SIM";
+
+  const remarkParts: string[] = [];
+  remarkParts.push(`Simulator: ${sim.sessionCode || sim.component || "session"}`);
+  if (sim.courseName) remarkParts.push(sim.courseName);
+  if (sim.component && sim.component !== sim.sessionCode)
+    remarkParts.push(sim.component);
+  if (sim.facility) remarkParts.push(`@ ${sim.facility}`);
+  if (sim.instructorName) remarkParts.push(`Instructor: ${sim.instructorName}`);
+  if (sim.remarks && sim.remarks !== sim.sessionCode)
+    remarkParts.push(sim.remarks);
+  const remarks = remarkParts.filter(Boolean).join(" — ");
+
+  return {
+    date: sim.date,
+    flightNumber: "",
+    aircraftReg: "",
+    aircraftType: deviceType,
+    departureIcao: "",
+    departureIata: "",
+    arrivalIcao: "",
+    arrivalIata: "",
+    departureTimezone: 0,
+    arrivalTimezone: 0,
+    scheduledOut: "",
+    scheduledIn: "",
+    outTime: sim.outUtc || "",
+    offTime: "",
+    onTime: "",
+    inTime: sim.inUtc || "",
+    blockTime: "00:00",
+    flightTime: "00:00",
+    nightTime: "00:00",
+    dayTime: "00:00",
+    picId: "",
+    picName: sim.instructorName || "",
+    sicId: currentUser.id,
+    sicName: "Self",
+    additionalCrew: [],
+    pilotFlying: false,
+    pilotRole: "Dual",
+    picTime: "00:00",
+    sicTime: "00:00",
+    picusTime: "00:00",
+    dualTime: "00:00",
+    instructorTime: "00:00",
+    dayTakeoffs: 0,
+    dayLandings: 0,
+    nightTakeoffs: 0,
+    nightLandings: 0,
+    autolands: 0,
+    remarks,
+    endorsements: "",
+    // Protect the sim-specific fields from recalculation (empty airports).
+    manualOverrides: {
+      simulatedInstrumentTime: true,
+      nightTime: true,
+    },
+    ifrTime: "00:00",
+    actualInstrumentTime: "00:00",
+    simulatedInstrumentTime: duration,
+    crossCountryTime: "00:00",
+    approaches: [],
+    holds: 0,
+    ipcIcc: false,
+    reportGeneratedAt: reportGeneratedAt ?? undefined,
+    importSource,
+    isSimulator: true,
+    simSessionCode: sessionCode,
+  };
+}
+
 // ============================================================
 // Main executor
 // ============================================================
@@ -289,6 +449,8 @@ export async function executeRosterImport(
     simSessionsCreated: 0,
     personnelCreated: 0,
     personnelUpdated: 0,
+    aircraftCreated: 0,
+    aircraftUpdated: 0,
     currenciesSaved: 0,
     discrepancies: [],
     errors: [],
@@ -493,27 +655,43 @@ export async function executeRosterImport(
     }
   }
 
-  // ----- 3. Sim sessions (logbook only) -----
-  for (const sim of options.simSessions ?? []) {
+  // ----- 3. Sim sessions → logbook flight entries (deduped on re-import) ----
+  const simSessions = options.simSessions ?? [];
+  if (simSessions.length > 0) {
+    // Existing sim flights keyed by date + session code so a re-import of the
+    // same report doesn't create duplicate sim entries.
+    let existingSimKeys = new Set<string>();
     try {
-      const entry: ScheduleEntryCreate = {
-        date: sim.date,
-        timeReference: "UTC",
-        dutyType: "training",
-        dutyCode: sim.sessionCode || `SIM-${sim.deviceType}`,
-        dutyDescription: `Simulator session (${sim.deviceType})`,
-        sectors: [],
-        crew: [],
-        importedAt: Date.now(),
-        sourceFile: "logbook",
-      };
-      await addScheduleEntry(entry);
-      result.simSessionsCreated++;
-    } catch (error) {
-      result.errors.push({
-        operation: `sim session ${sim.date}`,
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
+      const allFlights = await userDb.flights.toArray();
+      existingSimKeys = new Set(
+        allFlights
+          .filter((f) => f.isSimulator)
+          .map((f) => `${f.date}|${(f.simSessionCode || "").toUpperCase()}`)
+      );
+    } catch {
+      // If we can't read existing flights, fall through and create (rare).
+    }
+
+    for (const sim of simSessions) {
+      try {
+        const sessionCode = (sim.sessionCode || sim.component || "SIM").toUpperCase();
+        const key = `${sim.date}|${sessionCode}`;
+        if (existingSimKeys.has(key)) continue; // already logged
+        const payload = buildSimFlight(
+          sim,
+          currentUser,
+          reportGeneratedAt,
+          importSource
+        );
+        await addFlight(payload);
+        existingSimKeys.add(key);
+        result.simSessionsCreated++;
+      } catch (error) {
+        result.errors.push({
+          operation: `sim session ${sim.date}`,
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
     }
   }
 
@@ -558,13 +736,31 @@ export async function executeRosterImport(
     }
   }
 
-  // ----- 6. Recompute derived fields on every touched flight -----
+  // ----- 6. Recompute derived fields on every touched flight, and gather
+  //          (reg, type) pairs so we can populate the user Aircraft store. --
+  const aircraftPairs: Array<{ reg: string; type: string }> = [];
   for (const id of touchedFlightIds) {
     try {
+      const flight = await userDb.flights.get(id);
+      if (flight?.isSimulator) continue; // sim fields are set explicitly
+      if (flight?.aircraftReg) {
+        aircraftPairs.push({
+          reg: flight.aircraftReg,
+          type: flight.aircraftType || "",
+        });
+      }
       await postWriteRecalculate(id);
     } catch {
       // Recompute failures aren't fatal — leave the flight as-is.
     }
+  }
+
+  // ----- 7. Correlate flights with aircraft records (engine/category) so
+  //          the dashboard reflects 2-engine / jet totals correctly. --------
+  try {
+    await ensureAircraftForFlights(aircraftPairs, result);
+  } catch {
+    // Non-fatal — flights are already written.
   }
 
   return result;

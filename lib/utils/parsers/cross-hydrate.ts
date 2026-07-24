@@ -28,6 +28,11 @@ import type {
   ScheduledCrewMember,
 } from "@/types/entities/roster.types";
 
+// Preferred time window for disambiguating MULTIPLE same-route legs on one
+// day. It is a preference, not a hard cutoff: when only one schedule sector
+// shares a logbook sector's full key (date|dep|arr|family) we bind them even
+// if the delay exceeds this, because leaving both unmatched makes the
+// reconciler create TWO flights for one leg (the duplicate-flight bug).
 const MATCH_WINDOW_MIN = 90;
 
 function familyOf(typeCode: string): string {
@@ -63,21 +68,34 @@ function pickScheduleMatch(
 ): ScheduleSectorWithIndex | null {
   if (pool.length === 0) return null;
 
+  // Single same-key candidate → it IS this leg (same date + route + family).
+  // Bind it regardless of any delay so a >90-min delay doesn't spawn a
+  // duplicate flight.
+  if (pool.length === 1) return pool[0];
+
   const logOut = hhmmToMinutes(log.outTime || "00:00");
   let best: ScheduleSectorWithIndex | null = null;
   let bestDelta = Infinity;
+  let bestWithinWindow: ScheduleSectorWithIndex | null = null;
+  let bestWithinWindowDelta = Infinity;
 
   for (const entry of pool) {
     const sched = entry.sector;
     const cmpRaw = sched.actualOut || sched.scheduledOut || "00:00";
     const cmp = hhmmToMinutes(cmpRaw);
     const delta = Math.abs(cmp - logOut);
-    if (delta < bestDelta && delta <= MATCH_WINDOW_MIN) {
+    if (delta < bestDelta) {
       bestDelta = delta;
       best = entry;
     }
+    if (delta <= MATCH_WINDOW_MIN && delta < bestWithinWindowDelta) {
+      bestWithinWindowDelta = delta;
+      bestWithinWindow = entry;
+    }
   }
-  return best;
+  // Prefer the closest within-window candidate when disambiguating multiple
+  // legs; otherwise fall back to the overall closest so the leg still merges.
+  return bestWithinWindow ?? best;
 }
 
 function mergeCrew(
@@ -92,6 +110,24 @@ function mergeCrew(
   return scheduleCrew;
 }
 
+/** The ParsedSector carried by a schedule op, if any (delete/skip_non_airline carry none). */
+function sectorOf(
+  op: PlannedImport["operations"][number]
+): ParsedSector | undefined {
+  switch (op.kind) {
+    case "create":
+    case "skip_identical":
+    case "update_safe":
+    case "update_consult":
+    case "update_conflict":
+    case "edited_conflict":
+    case "skip_stale_report":
+      return op.sector;
+    default:
+      return undefined;
+  }
+}
+
 export function crossHydrate(
   logbook: PlannedLogbookImport,
   schedule: PlannedImport
@@ -100,31 +136,12 @@ export function crossHydrate(
   // so we can disambiguate by time).
   const scheduleIndex = new Map<string, ScheduleSectorWithIndex[]>();
   schedule.operations.forEach((op, i) => {
-    if (op.kind !== "create" && op.kind !== "skip_identical") {
-      // Only sectors backed by ParsedSector data have what we need.
-      // For update_conflict / edited_conflict / update_consult / update_safe,
-      // op.sector is also a ParsedSector — include those too.
-      if (
-        op.kind !== "update_conflict" &&
-        op.kind !== "edited_conflict" &&
-        op.kind !== "skip_non_airline" &&
-        op.kind !== "delete_missing"
-      ) {
-        // unknown — skip
-      }
-    }
-    // Extract sector when present.
-    let sector: ParsedSector | undefined;
-    switch (op.kind) {
-      case "create":
-      case "skip_identical":
-      case "update_conflict":
-      case "edited_conflict":
-        sector = op.sector;
-        break;
-      default:
-        return;
-    }
+    // Every op EXCEPT delete_missing / skip_non_airline carries a ParsedSector
+    // (create, skip_identical, and all four update kinds — update_safe,
+    // update_consult, update_conflict, edited_conflict). Index them all so a
+    // schedule leg that already matched a DB flight still merges with its
+    // logbook counterpart instead of being dropped.
+    const sector = sectorOf(op);
     if (!sector) return;
     const key = keyFor(
       sector.date,
@@ -233,9 +250,10 @@ export function crossHydrate(
   const unmatchedSchedule: ParsedSector[] = [];
   schedule.operations.forEach((op, i) => {
     if (usedScheduleIndices.has(i)) return;
-    if (op.kind === "create" || op.kind === "skip_identical") {
-      unmatchedSchedule.push(op.sector);
-      merged.push(op.sector);
+    const sector = sectorOf(op);
+    if (sector) {
+      unmatchedSchedule.push(sector);
+      merged.push(sector);
     }
   });
 

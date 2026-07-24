@@ -223,12 +223,25 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
                 </div>
 
                 <div className="flex items-center justify-between mt-0">
-                  <span className="text-2xl font-bold leading-tight tracking-tight">
-                    {getDepartureDisplay(flight, displayPrefs?.airportIdentifier)}
-                  </span>
-                  <span className="text-2xl font-bold leading-tight tracking-tight">
-                    {getArrivalDisplay(flight, displayPrefs?.airportIdentifier)}
-                  </span>
+                  {flight.isSimulator ? (
+                    <>
+                      <span className="text-2xl font-bold leading-tight tracking-tight">
+                        SIM
+                      </span>
+                      <span className="text-2xl font-bold leading-tight tracking-tight">
+                        {flight.simSessionCode || ""}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-2xl font-bold leading-tight tracking-tight">
+                        {getDepartureDisplay(flight, displayPrefs?.airportIdentifier)}
+                      </span>
+                      <span className="text-2xl font-bold leading-tight tracking-tight">
+                        {getArrivalDisplay(flight, displayPrefs?.airportIdentifier)}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
 

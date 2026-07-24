@@ -118,6 +118,19 @@ export interface ParsedSimSession {
   sessionCode: string;
   remarks: string;
   sourceLine: number;
+  // ---- Optional enrichment from a schedule report's Training Details ----
+  /** UTC HH:MM session start (normalized from the report's time reference). */
+  outUtc?: string;
+  /** UTC HH:MM session end. */
+  inUtc?: string;
+  /** Course name, e.g. "*A320 EBT Cycle6 (May 14)". */
+  courseName?: string;
+  /** Course component, e.g. "SMCK EBT6 D1". */
+  component?: string;
+  /** Facility name, e.g. "AATC SIM B". */
+  facility?: string;
+  /** Instructor full name when resolvable. */
+  instructorName?: string;
 }
 
 export interface PlannedLogbookImport {

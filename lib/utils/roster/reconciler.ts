@@ -215,6 +215,13 @@ export interface ReconcileInput {
    */
   todayUtc?: string;
   /**
+   * Logged-in user — used to resolve "Self" crew seats and to diff the
+   * FULL crew (PIC + SIC) on updates, not just the logbook-derived PIC.
+   * When omitted, crew diffing falls back to the logbook-resolved PIC only
+   * (the legacy behavior the reconciler unit tests exercise).
+   */
+  currentUser?: CurrentUserCrew;
+  /**
    * Use legacy `update_conflict` op kind instead of the new
    * `update_safe` / `update_consult` split. Defaults to `true` so existing
    * callers (schedule import handler, v1 review modal, existing tests) keep
@@ -230,6 +237,136 @@ export interface ReconcileInput {
 
 const AIRLINE_FLIGHT_NUMBER_RE = /^TR\d+$/i;
 const EDIT_DETECTION_BUFFER_MS = 60_000;
+
+// ============================================================
+// Crew assignment (shared between create-hydration and update-diff)
+// ============================================================
+
+/** Minimal current-user shape needed to resolve "Self" crew seats. */
+export interface CurrentUserCrew {
+  id: string;
+  crewId?: string;
+}
+
+export interface SectorCrewAssignment {
+  picId: string;
+  picName: string;
+  sicId: string;
+  sicName: string;
+  /** True when the logged-in user is the captain on this sector. */
+  isSelfCPT: boolean;
+  /** True when the logged-in user is the first officer on this sector. */
+  isSelfFO: boolean;
+}
+
+/**
+ * Resolve the PIC + SIC seats for a sector against the current user.
+ *
+ * This is the SINGLE source of truth for how a parsed sector's crew maps
+ * onto a FlightLog's picId/picName/sicId/sicName. Both the executor
+ * (create hydration) and the reconciler (update diff) call it so a freshly
+ * created flight and a re-imported update resolve crew identically — that
+ * idempotency is what stops the "crew only sticks if I delete the flight
+ * first" bug (schedule re-imports never diffed SIC / non-PIC crew before).
+ *
+ * Schedule sectors carry `crew` (CPT/FO with full names + crewIds);
+ * logbook-only sectors carry `picResolvedName` / `picPersonnelId` /
+ * `isUserPic`. Either shape resolves here.
+ */
+export function deriveSectorCrew(
+  sector: ParsedSector,
+  currentUser: CurrentUserCrew
+): SectorCrewAssignment {
+  const captain = sector.crew?.find((c) => c.role === "CPT" || c.role === "PIC");
+  const fo = sector.crew?.find((c) => c.role === "FO");
+  const isSelfCPT = Boolean(
+    captain && currentUser.crewId && captain.crewId === currentUser.crewId
+  );
+  const isSelfFO = Boolean(
+    fo && currentUser.crewId && fo.crewId === currentUser.crewId
+  );
+
+  let picId = captain?.personnelId || sector.picPersonnelId || "";
+  let picName = captain?.name || sector.picResolvedName || "";
+  let sicId = fo?.personnelId || "";
+  let sicName = fo?.name || "";
+
+  if (isSelfCPT) {
+    picId = currentUser.id;
+    picName = "Self";
+  } else if (sector.isUserPic && !captain) {
+    // Logbook-only sector where we know the user is PIC.
+    picId = currentUser.id;
+    picName = "Self";
+  }
+  if (isSelfFO) {
+    sicId = currentUser.id;
+    sicName = "Self";
+  } else if (sector.isUserPic === false && !fo) {
+    // Logbook says someone else was PIC — the current user is SIC.
+    sicId = currentUser.id;
+    sicName = "Self";
+  }
+
+  return { picId, picName, sicId, sicName, isSelfCPT, isSelfFO };
+}
+
+/** Alphanumeric-only lowercase form for tolerant crew-name comparison. */
+function normPersonName(s: string): string {
+  return s ? s.toLowerCase().replace(/[^a-z0-9]/g, "") : "";
+}
+
+/**
+ * Two crew names refer to the same person when their normalized forms are
+ * equal OR one is a prefix of the other (the Crew Logbook Report truncates
+ * names to 20 chars; the Schedule Report carries the full form).
+ */
+function isSamePersonName(a: string, b: string): boolean {
+  const na = normPersonName(a);
+  const nb = normPersonName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.length > nb.length && na.startsWith(nb)) return true;
+  if (nb.length > na.length && nb.startsWith(na)) return true;
+  return false;
+}
+
+/**
+ * Diff one crew seat (name + id). Emits an upgrade-only, never-downgrade
+ * change:
+ *   - different person (or existing seat empty) → replace name + id
+ *   - same person, incoming is the fuller (un-truncated) form → upgrade
+ *   - same person, incoming shorter/equal → keep existing (no downgrade)
+ * The id is only rewritten when the name is rewritten, so a truncated
+ * re-import never re-points a flight at a stale/duplicate Personnel row.
+ */
+function diffCrewSeat(
+  nameField: keyof FlightLog,
+  idField: keyof FlightLog,
+  existingName: string,
+  existingId: string,
+  incomingName: string,
+  incomingId: string,
+  changes: FieldDiff[]
+): void {
+  if (!incomingName) return;
+  if (incomingName === existingName) return;
+
+  const same = isSamePersonName(incomingName, existingName);
+  let nameChanged = false;
+
+  if (!same) {
+    changes.push({ field: nameField as string, from: existingName, to: incomingName });
+    nameChanged = true;
+  } else if (incomingName.length > existingName.length) {
+    changes.push({ field: nameField as string, from: existingName, to: incomingName });
+    nameChanged = true;
+  }
+
+  if (nameChanged && incomingId && incomingId !== existingId) {
+    changes.push({ field: idField as string, from: existingId, to: incomingId });
+  }
+}
 
 // ============================================================
 // Matching helpers
@@ -359,7 +496,8 @@ function detectEditReasons(flight: FlightLog): EditReason[] {
 
 function diffSectorVsFlight(
   sector: ParsedSector,
-  flight: FlightLog
+  flight: FlightLog,
+  currentUser?: CurrentUserCrew
 ): FieldDiff[] {
   const changes: FieldDiff[] = [];
 
@@ -561,72 +699,44 @@ function diffSectorVsFlight(
     });
   }
 
-  // PIC name + id treatment for the logbook → schedule handshake.
+  // Crew (PIC + SIC) — the logbook→schedule truncation handshake.
   //
   // The Crew Logbook Report truncates names to 20 chars, while the Schedule
-  // Report has the full form. If a re-import resolves a row's PIC against
-  // an existing-flight value where the existing is the FULLER form
-  // ("Siah Yang Tek, Timothy" vs the logbook's "Siah Yang Tek, Timot"),
-  // treat them as the same person and skip the diff. Otherwise we'd
-  // downgrade the flight's nicely-resolved full name back to the truncated
-  // form on every logbook re-import, and along with it create a duplicate
-  // Personnel row.
-  const incomingPicName = sector.picResolvedName || "";
-  const existingPicName = flight.picName || "";
-  const incomingNorm = incomingPicName
-    ? incomingPicName.toLowerCase().replace(/[^a-z0-9]/g, "")
-    : "";
-  const existingNorm = existingPicName
-    ? existingPicName.toLowerCase().replace(/[^a-z0-9]/g, "")
-    : "";
+  // Report carries the full form. `deriveSectorCrew` resolves both the
+  // captain and first-officer seats identically to the create path, so a
+  // schedule re-import now UPDATES crew on an existing flight (previously
+  // only PIC was ever diffed, so SIC / cabin never stuck unless the user
+  // deleted the flight and let it re-create). `diffCrewSeat` upgrades a
+  // truncated name to the full form but never downgrades, and never
+  // re-points the id unless the name itself changed.
+  const incomingCrew = currentUser
+    ? deriveSectorCrew(sector, currentUser)
+    : {
+        // Legacy path (no current user): logbook-resolved PIC only.
+        picId: sector.picPersonnelId || "",
+        picName: sector.picResolvedName || "",
+        sicId: "",
+        sicName: "",
+      };
 
-  const sameNormalizedPerson =
-    incomingNorm.length > 0 &&
-    existingNorm.length > 0 &&
-    (incomingNorm === existingNorm ||
-      // Existing is a fuller form of incoming (logbook truncation).
-      (existingNorm.length > incomingNorm.length &&
-        existingNorm.startsWith(incomingNorm)) ||
-      // Incoming is a fuller form of existing (legacy truncated row, schedule
-      // came along with the long form).
-      (incomingNorm.length > existingNorm.length &&
-        incomingNorm.startsWith(existingNorm)));
-
-  if (
-    incomingPicName &&
-    incomingPicName !== existingPicName &&
-    !sameNormalizedPerson
-  ) {
-    changes.push({
-      field: "picName",
-      from: existingPicName,
-      to: incomingPicName,
-    });
-  } else if (
-    incomingPicName &&
-    incomingPicName.length > existingPicName.length &&
-    sameNormalizedPerson
-  ) {
-    // Allow upgrade-only (truncated → full), never downgrade.
-    changes.push({
-      field: "picName",
-      from: existingPicName,
-      to: incomingPicName,
-    });
-  }
-
-  if (
-    sector.picPersonnelId &&
-    sector.picPersonnelId !== flight.picId &&
-    sector.picPersonnelId.length > 0 &&
-    !sameNormalizedPerson
-  ) {
-    changes.push({
-      field: "picId",
-      from: flight.picId || "",
-      to: sector.picPersonnelId,
-    });
-  }
+  diffCrewSeat(
+    "picName",
+    "picId",
+    flight.picName || "",
+    flight.picId || "",
+    incomingCrew.picName || "",
+    incomingCrew.picId || "",
+    changes
+  );
+  diffCrewSeat(
+    "sicName",
+    "sicId",
+    flight.sicName || "",
+    flight.sicId || "",
+    incomingCrew.sicName || "",
+    incomingCrew.sicId || "",
+    changes
+  );
 
   return changes;
 }
@@ -655,6 +765,7 @@ export function reconcileRoster(
     csvDateRange,
     reportGeneratedAt,
     useLegacyUpdateConflict = true,
+    currentUser,
   } = input;
   const todayUtc = input.todayUtc || todayUtcDate();
   const operations: ReconcilerOperation[] = [];
@@ -693,7 +804,7 @@ export function reconcileRoster(
       continue;
     }
 
-    const changes = diffSectorVsFlight(sector, match);
+    const changes = diffSectorVsFlight(sector, match, currentUser);
     if (changes.length === 0) {
       operations.push({ kind: "skip_identical", flight: match, sector });
       continue;
