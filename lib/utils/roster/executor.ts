@@ -672,11 +672,23 @@ export async function executeRosterImport(
       // If we can't read existing flights, fall through and create (rare).
     }
 
+    // Tolerate UTC-vs-local date drift: the same EBT can be logged 13 May in
+    // the UTC logbook and scheduled 14 May in the Local Base schedule, so a
+    // sim on date±1 with the same session code is treated as already logged.
+    const shiftIso = (iso: string, days: number): string => {
+      const d = new Date(`${iso}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + days);
+      return d.toISOString().slice(0, 10);
+    };
+    const simAlreadyLogged = (date: string, code: string): boolean =>
+      existingSimKeys.has(`${shiftIso(date, -1)}|${code}`) ||
+      existingSimKeys.has(`${date}|${code}`) ||
+      existingSimKeys.has(`${shiftIso(date, 1)}|${code}`);
+
     for (const sim of simSessions) {
       try {
         const sessionCode = (sim.sessionCode || sim.component || "SIM").toUpperCase();
-        const key = `${sim.date}|${sessionCode}`;
-        if (existingSimKeys.has(key)) continue; // already logged
+        if (simAlreadyLogged(sim.date, sessionCode)) continue; // already logged
         const payload = buildSimFlight(
           sim,
           currentUser,
@@ -684,7 +696,7 @@ export async function executeRosterImport(
           importSource
         );
         await addFlight(payload);
-        existingSimKeys.add(key);
+        existingSimKeys.add(`${sim.date}|${sessionCode}`);
         result.simSessionsCreated++;
       } catch (error) {
         result.errors.push({

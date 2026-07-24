@@ -49,6 +49,10 @@ import { parseDDMMYYYY } from "./shared/csv-split";
 import type { NormalizedDocument, NormalizedRow } from "./types";
 import { normalize } from "./shared/name-normalize";
 import { parseGeneratedAt } from "./shared/generated-at";
+import {
+  applyDefaultAcceptance,
+  summarizeOperations,
+} from "@/lib/utils/roster/plan-summary";
 import { normalizeAircraftType } from "./shared/aircraft-type-map";
 import { enrichAirportBatch } from "./shared/airport-enricher";
 
@@ -959,43 +963,9 @@ export async function parseScheduleCSV(
       useLegacyUpdateConflict: false,
     });
 
-    // Apply default acceptance flags
-    plan.operations = operations.map((op) => ({
-      ...op,
-      accepted:
-        op.kind === "create" ||
-        op.kind === "skip_identical" ||
-        op.kind === "skip_non_airline" ||
-        op.kind === "skip_stale_report" ||
-        op.kind === "update_safe",
-    }));
-
-    // Summary counts
-    for (const op of plan.operations) {
-      switch (op.kind) {
-        case "create":
-          plan.summary.toCreate++;
-          break;
-        case "update_conflict":
-        case "edited_conflict":
-        case "update_safe":
-        case "update_consult":
-          plan.summary.toUpdate++;
-          break;
-        case "delete_missing":
-          plan.summary.toDelete++;
-          break;
-        case "skip_identical":
-          plan.summary.identical++;
-          break;
-        case "skip_non_airline":
-          plan.summary.ignored++;
-          break;
-        case "skip_stale_report":
-          plan.summary.staleSkipped++;
-          break;
-      }
-    }
+    // Apply default acceptance flags + summary counts (shared helpers).
+    plan.operations = applyDefaultAcceptance(operations);
+    plan.summary = summarizeOperations(plan.operations);
 
     // Simulator / training sessions — duty rows enriched from the report's
     // "Training Details" section (times, course, facility, instructor). Times

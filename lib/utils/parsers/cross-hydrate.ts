@@ -110,6 +110,52 @@ function mergeCrew(
   return scheduleCrew;
 }
 
+/**
+ * Promote a parsed logbook sector to the reconciler's `ParsedSector` shape.
+ *
+ * This is the SINGLE mapper shared by the logbook-only import path and both
+ * cross-hydrate branches. It also encodes the flown-vs-planned decision:
+ * a PLANNED sector (dated after the report's generation) carries scheduled
+ * times only — no actual out/in, no block, no pilot-flying — so a future
+ * roster leg is stored as a scheduled placeholder instead of being hydrated
+ * as if it had already been flown.
+ */
+export function logbookSectorToParsedSector(
+  s: ParsedLogbookSector
+): ParsedSector {
+  const planned = s.planned === true;
+  return {
+    date: s.date,
+    flightNumber: s.flightNumber ?? "",
+    aircraftType: s.aircraftType,
+    departureIata: s.departureIata,
+    arrivalIata: s.arrivalIata,
+    scheduledOut: planned ? s.outTime || undefined : undefined,
+    scheduledIn: planned ? s.inTime || undefined : undefined,
+    actualOut: planned ? undefined : s.outTime || undefined,
+    actualIn: planned ? undefined : s.inTime || undefined,
+    sourceLine: s.sourceLine,
+    crew: undefined,
+    aircraftReg: s.aircraftReg,
+    dayTakeoffs: s.dayTakeoffs,
+    nightTakeoffs: s.nightTakeoffs,
+    dayLandings: s.dayLandings,
+    nightLandings: s.nightLandings,
+    blockTime: planned ? "00:00" : s.blockTime,
+    picRawName: s.picRawName,
+    isUserPic: s.isUserPic,
+    picPersonnelId: s.picPersonnelId,
+    picResolvedName: s.picResolvedName,
+    isPilotFlying: planned ? undefined : s.isPilotFlying,
+    suggestedDayTakeoffs: s.suggestedDayTakeoffs,
+    suggestedNightTakeoffs: s.suggestedNightTakeoffs,
+    suggestedDayLandings: s.suggestedDayLandings,
+    suggestedNightLandings: s.suggestedNightLandings,
+    toLdgContext: s.toLdgContext,
+    remarks: s.remarks,
+  };
+}
+
 /** The ParsedSector carried by a schedule op, if any (delete/skip_non_airline carry none). */
 function sectorOf(
   op: PlannedImport["operations"][number]
@@ -167,82 +213,33 @@ export function crossHydrate(
 
     if (!match) {
       unmatchedLogbook.push(log);
-      // Promote the logbook sector to a ParsedSector so the reconciler can
-      // see it. We don't have schedule info, so flightNumber/crew stay empty.
-      const csvFlightNumber = log.flightNumber ?? "";
-      merged.push({
-        date: log.date,
-        flightNumber: csvFlightNumber,
-        aircraftType: log.aircraftType,
-        departureIata: log.departureIata,
-        arrivalIata: log.arrivalIata,
-        scheduledOut: undefined,
-        scheduledIn: undefined,
-        actualOut: log.outTime,
-        actualIn: log.inTime,
-        sourceLine: log.sourceLine,
-        crew: undefined,
-        // Carry logbook-only enrichment.
-        aircraftReg: log.aircraftReg,
-        dayTakeoffs: log.dayTakeoffs,
-        nightTakeoffs: log.nightTakeoffs,
-        dayLandings: log.dayLandings,
-        nightLandings: log.nightLandings,
-        blockTime: log.blockTime,
-        picRawName: log.picRawName,
-        isUserPic: log.isUserPic,
-        picPersonnelId: log.picPersonnelId,
-        picResolvedName: log.picResolvedName,
-        isPilotFlying: log.isPilotFlying,
-        suggestedDayTakeoffs: log.suggestedDayTakeoffs,
-        suggestedNightTakeoffs: log.suggestedNightTakeoffs,
-        suggestedDayLandings: log.suggestedDayLandings,
-        suggestedNightLandings: log.suggestedNightLandings,
-        toLdgContext: log.toLdgContext,
-        remarks: log.remarks,
-      } as ParsedSector & Record<string, unknown>);
+      // Promote the logbook sector (no schedule info; flightNumber/crew empty).
+      merged.push(logbookSectorToParsedSector(log));
       continue;
     }
 
     usedScheduleIndices.add(match.index);
     const sched = match.sector;
 
-    // Prefer schedule's specific aircraft subtype ("32N") over logbook's family ("320").
-    const mergedType =
-      sched.aircraftType && sched.aircraftType.length === 3
-        ? sched.aircraftType
-        : log.aircraftType;
-
+    // Start from the logbook mapping (which already applies flown-vs-planned),
+    // then overlay the schedule's authoritative fields: flight number, full
+    // crew, scheduled times, and the specific aircraft subtype ("32N" vs the
+    // logbook family "320"). Actual times stay whatever the logbook side
+    // resolved (a flown leg keeps its actuals; a planned leg has none).
+    const base = logbookSectorToParsedSector(log);
     merged.push({
-      date: log.date,
-      flightNumber: sched.flightNumber || log.flightNumber || "",
-      aircraftType: mergedType,
-      departureIata: log.departureIata,
-      arrivalIata: log.arrivalIata,
-      scheduledOut: sched.scheduledOut,
-      scheduledIn: sched.scheduledIn,
-      actualOut: log.outTime || sched.actualOut,
-      actualIn: log.inTime || sched.actualIn,
-      sourceLine: log.sourceLine,
+      ...base,
+      flightNumber: sched.flightNumber || base.flightNumber,
+      aircraftType:
+        sched.aircraftType && sched.aircraftType.length === 3
+          ? sched.aircraftType
+          : base.aircraftType,
+      scheduledOut: sched.scheduledOut ?? base.scheduledOut,
+      scheduledIn: sched.scheduledIn ?? base.scheduledIn,
+      actualOut: base.actualOut ?? sched.actualOut,
+      actualIn: base.actualIn ?? sched.actualIn,
       crew: mergeCrew(log, sched.crew ?? []),
-      aircraftReg: log.aircraftReg,
-      dayTakeoffs: log.dayTakeoffs,
-      nightTakeoffs: log.nightTakeoffs,
-      dayLandings: log.dayLandings,
-      nightLandings: log.nightLandings,
-      blockTime: log.blockTime,
-      picRawName: log.picRawName,
-      isUserPic: log.isUserPic,
-      picPersonnelId: log.picPersonnelId,
-      picResolvedName: log.picResolvedName,
-      isPilotFlying: log.isPilotFlying,
-      suggestedDayTakeoffs: log.suggestedDayTakeoffs,
-      suggestedNightTakeoffs: log.suggestedNightTakeoffs,
-      suggestedDayLandings: log.suggestedDayLandings,
-      suggestedNightLandings: log.suggestedNightLandings,
-      toLdgContext: log.toLdgContext,
-      remarks: log.remarks,
-    } as ParsedSector & Record<string, unknown>);
+    });
   }
 
   // Pass through unmatched schedule sectors so the reconciler still creates

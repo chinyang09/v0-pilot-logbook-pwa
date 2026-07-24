@@ -46,7 +46,7 @@ function shiftHHMM(hhmm: string, offsetHours: number): string {
 import { parseDDMMYY } from "./shared/csv-split";
 import type { NormalizedDocument } from "./types";
 import { normalize } from "./shared/name-normalize";
-import { parseGeneratedAt } from "./shared/generated-at";
+import { parseGeneratedAt, isPlannedDate } from "./shared/generated-at";
 import { normalizeAircraftType } from "./shared/aircraft-type-map";
 import {
   enrichAircraftBatch,
@@ -105,6 +105,13 @@ export interface ParsedLogbookSector {
   remarks: string;
   /** Source CSV/PDF line for diagnostics. */
   sourceLine: number;
+  /**
+   * True when the row is dated after the report's generation date — a planned
+   * roster sector, NOT a flown flight. The times are scheduled (not actual),
+   * there are no takeoff/landing counts, and pilot-flying is unknown. The
+   * sector→ParsedSector mapper routes these to scheduledOut/In accordingly.
+   */
+  planned: boolean;
 }
 
 export interface ParsedSimSession {
@@ -401,6 +408,8 @@ export async function parseLogbookV2(
     for (const row of rawRows) {
       try {
         if (isSimRow(row)) {
+          // The logbook is already UTC, so the row's dep/arr times are the
+          // sim session's UTC window.
           plan.simSessions.push({
             date: row.flightDate,
             duration: row.synthTime || row.blockT || "00:00",
@@ -408,6 +417,8 @@ export async function parseLogbookV2(
             sessionCode: row.remarks || row.synthType || "SIM",
             remarks: row.remarks || "",
             sourceLine: row.sourceLine,
+            outUtc: row.outT || undefined,
+            inUtc: row.inT || undefined,
           });
           continue;
         }
@@ -448,11 +459,17 @@ export async function parseLogbookV2(
           newPersonnel,
         });
 
+        // Rows dated after the report's generation are PLANNED roster sectors,
+        // not flown flights. Their times are scheduled — we must not hydrate
+        // them as actual out/in/block/pilot-flying, and the expensive sun /
+        // night computation below is skipped (no actuals to classify).
+        const planned = isPlannedDate(row.flightDate, plan.generatedAt);
+
         // We don't compute night time here — the executor will run
         // recalculateFlightFields() once all derived inputs are known.
         // But we do compute it best-effort so the plan view shows real values.
         const nightTime =
-          depAp && arrAp && row.outT && row.inT
+          !planned && depAp && arrAp && row.outT && row.inT
             ? calculateNightTimeComplete(
                 row.flightDate,
                 row.outT,
@@ -481,7 +498,8 @@ export async function parseLogbookV2(
         // PIC role (the user may be PF as SIC, or PM as PIC).
         const totalUserTO = row.dayTakeoffs + row.nightTakeoffs;
         const totalUserLDG = row.dayLandings + row.nightLandings;
-        const isPilotFlying = totalUserTO + totalUserLDG > 0;
+        // Planned sectors have no actuals, so pilot-flying is unknown.
+        const isPilotFlying = !planned && totalUserTO + totalUserLDG > 0;
 
         // Sun-position sanity check — both CSV and PDF are hand-entered in
         // eCrew, so the day/night column is the most common manual-entry
@@ -495,7 +513,7 @@ export async function parseLogbookV2(
         let suggestedNightLandings: number | undefined;
         let toLdgContext: ParsedSector["toLdgContext"] | undefined;
 
-        if (depAp && arrAp && row.outT && row.inT) {
+        if (!planned && depAp && arrAp && row.outT && row.inT) {
           const depOffset = getAirportTimeInfo(depAp.tz).offset;
           const arrOffset = getAirportTimeInfo(arrAp.tz).offset;
           const takeoffAtNight = isTakeoffAtNight(
@@ -580,6 +598,7 @@ export async function parseLogbookV2(
           suggestedNightLandings,
           toLdgContext,
           isPilotFlying,
+          planned,
           remarks: row.remarks,
           sourceLine: row.sourceLine,
         });

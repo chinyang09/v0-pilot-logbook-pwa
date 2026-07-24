@@ -30,12 +30,19 @@ import {
   type PlannedImport,
 } from "@/lib/utils/parsers/schedule-parser";
 import { parseLogbookV2 } from "@/lib/utils/parsers/logbook-parser-v2";
-import { crossHydrate } from "@/lib/utils/parsers/cross-hydrate";
+import {
+  crossHydrate,
+  logbookSectorToParsedSector,
+} from "@/lib/utils/parsers/cross-hydrate";
 import { reconcileRoster } from "@/lib/utils/roster/reconciler";
 import {
   executeRosterImport,
   type ExecutionResult,
 } from "@/lib/utils/roster/executor";
+import {
+  applyDefaultAcceptance,
+  summarizeOperations,
+} from "@/lib/utils/roster/plan-summary";
 import { userDb, getCurrentUserPersonnel } from "@/lib/db";
 import type { FlightLog } from "@/types/entities/flight.types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
@@ -245,60 +252,20 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             currentUser: reconCurrentUser,
           });
 
+          const acceptedOps = applyDefaultAcceptance(operations);
           plan = {
             ...schedulePlan,
             generatedAt: reportGeneratedAt ?? null,
             dateRange,
-            operations: operations.map((op) => ({
-              ...op,
-              accepted:
-                op.kind === "create" ||
-                op.kind === "skip_identical" ||
-                op.kind === "skip_non_airline" ||
-                op.kind === "skip_stale_report" ||
-                op.kind === "update_safe",
-            })),
+            operations: acceptedOps,
             personnelToCreate: [
               ...schedulePlan.personnelToCreate,
               ...logbookPlan.personnelToCreate,
             ],
             errors: [...schedulePlan.errors, ...logbookPlan.errors],
             warnings: [...schedulePlan.warnings, ...logbookPlan.warnings],
-            summary: {
-              toCreate: 0,
-              toUpdate: 0,
-              toDelete: 0,
-              identical: 0,
-              ignored: 0,
-              staleSkipped: 0,
-            },
+            summary: summarizeOperations(acceptedOps),
           };
-
-          for (const op of plan.operations) {
-            switch (op.kind) {
-              case "create":
-                plan.summary.toCreate++;
-                break;
-              case "update_conflict":
-              case "edited_conflict":
-              case "update_safe":
-              case "update_consult":
-                plan.summary.toUpdate++;
-                break;
-              case "delete_missing":
-                plan.summary.toDelete++;
-                break;
-              case "skip_identical":
-                plan.summary.identical++;
-                break;
-              case "skip_non_airline":
-                plan.summary.ignored++;
-                break;
-              case "skip_stale_report":
-                plan.summary.staleSkipped++;
-                break;
-            }
-          }
         } else if (logbooks.length === 1) {
           importSource = "logbook";
           setProgress({ percent: 15, stage: "Parsing", detail: "Logbook" });
@@ -307,40 +274,9 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           });
           simSessions = logbookPlan.simSessions;
 
-          // Wrap logbook sectors as ParsedSector (they already extend it).
-          const sectors = logbookPlan.sectors.map((s) => ({
-            date: s.date,
-            flightNumber: s.flightNumber ?? "",
-            aircraftType: s.aircraftType,
-            departureIata: s.departureIata,
-            arrivalIata: s.arrivalIata,
-            scheduledOut: undefined,
-            scheduledIn: undefined,
-            actualOut: s.outTime,
-            actualIn: s.inTime,
-            sourceLine: s.sourceLine,
-            crew: undefined,
-            aircraftReg: s.aircraftReg,
-            dayTakeoffs: s.dayTakeoffs,
-            nightTakeoffs: s.nightTakeoffs,
-            dayLandings: s.dayLandings,
-            nightLandings: s.nightLandings,
-            blockTime: s.blockTime,
-            picRawName: s.picRawName,
-            isUserPic: s.isUserPic,
-            picPersonnelId: s.picPersonnelId,
-            picResolvedName: s.picResolvedName,
-            isPilotFlying: s.isPilotFlying,
-            // Sun-position suggestion + day/night cutoff context — must be
-            // carried through so the reconciler can annotate TO/LDG diffs
-            // and the modal can render the day/night check.
-            suggestedDayTakeoffs: s.suggestedDayTakeoffs,
-            suggestedNightTakeoffs: s.suggestedNightTakeoffs,
-            suggestedDayLandings: s.suggestedDayLandings,
-            suggestedNightLandings: s.suggestedNightLandings,
-            toLdgContext: s.toLdgContext,
-            remarks: s.remarks,
-          }));
+          // Promote logbook sectors to ParsedSector via the shared mapper,
+          // which routes planned (future) sectors to scheduled times.
+          const sectors = logbookPlan.sectors.map(logbookSectorToParsedSector);
 
           const allFlights = await userDb.flights.toArray();
           const flightsInRange = allFlights.filter(
@@ -357,62 +293,22 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             currentUser: reconCurrentUser,
           });
 
+          const acceptedOps = applyDefaultAcceptance(operations);
           plan = {
             success: logbookPlan.success,
             timeReference: "UTC",
             dateRange: logbookPlan.dateRange,
             generatedAt: logbookPlan.generatedAt,
             crewMember: { crewId: "", name: "", base: "", role: "", aircraftType: "" },
-            operations: operations.map((op) => ({
-              ...op,
-              accepted:
-                op.kind === "create" ||
-                op.kind === "skip_identical" ||
-                op.kind === "skip_non_airline" ||
-                op.kind === "skip_stale_report" ||
-                op.kind === "update_safe",
-            })),
+            operations: acceptedOps,
             simSessions: [],
             currencies: [],
             personnelToCreate: logbookPlan.personnelToCreate,
             personnelToUpdate: [],
             errors: logbookPlan.errors,
             warnings: logbookPlan.warnings,
-            summary: {
-              toCreate: 0,
-              toUpdate: 0,
-              toDelete: 0,
-              identical: 0,
-              ignored: 0,
-              staleSkipped: 0,
-            },
+            summary: summarizeOperations(acceptedOps),
           };
-
-          for (const op of plan.operations) {
-            switch (op.kind) {
-              case "create":
-                plan.summary.toCreate++;
-                break;
-              case "update_conflict":
-              case "edited_conflict":
-              case "update_safe":
-              case "update_consult":
-                plan.summary.toUpdate++;
-                break;
-              case "delete_missing":
-                plan.summary.toDelete++;
-                break;
-              case "skip_identical":
-                plan.summary.identical++;
-                break;
-              case "skip_non_airline":
-                plan.summary.ignored++;
-                break;
-              case "skip_stale_report":
-                plan.summary.staleSkipped++;
-                break;
-            }
-          }
         } else {
           // Schedule-only path.
           importSource = "schedule";
