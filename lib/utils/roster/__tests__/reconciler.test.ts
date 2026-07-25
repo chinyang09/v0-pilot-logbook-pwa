@@ -379,7 +379,7 @@ describe("reconcileRoster — TO/LDG decision marker", () => {
     }
   });
 
-  it("attaches a sun-position note to TO/LDG diffs when sector carries a suggestion", () => {
+  it("applies OUR calculated day/night value and flags the company's figure", () => {
     const flight = makeFlight({
       dayTakeoffs: 0,
       nightTakeoffs: 0,
@@ -389,6 +389,7 @@ describe("reconcileRoster — TO/LDG decision marker", () => {
     const ops = reconcileRoster({
       sectors: [
         makeSector({
+          // Company recorded a DAY takeoff; our sun calc says NIGHT.
           dayTakeoffs: 1,
           nightTakeoffs: 0,
           dayLandings: 1,
@@ -403,8 +404,39 @@ describe("reconcileRoster — TO/LDG decision marker", () => {
     if (ops[0].kind !== "update_conflict") {
       throw new Error(`expected update_conflict got ${ops[0].kind}`);
     }
-    const dayTo = ops[0].changes.find((c) => c.field === "dayTakeoffs");
-    expect(dayTo?.note).toContain("Sun-position calc suggests 0");
+    // We trust our calculator: the night takeoff is applied...
+    const nightTo = ops[0].changes.find((c) => c.field === "nightTakeoffs");
+    expect(nightTo?.to).toBe("1");
+    // ...and the company's disagreeing figure is surfaced for the UI badge.
+    expect(nightTo?.companyValue).toBe("0");
+
+    // Our calc agrees with the existing 0 day-takeoffs, so nothing to change
+    // there — the company's erroneous "1" is simply not applied.
+    expect(
+      ops[0].changes.find((c) => c.field === "dayTakeoffs")
+    ).toBeUndefined();
+  });
+
+  it("does NOT flag a company value when our calc agrees with it", () => {
+    const flight = makeFlight({ dayLandings: 0, nightLandings: 0 });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          dayLandings: 0,
+          nightLandings: 1,
+          suggestedDayLandings: 0,
+          suggestedNightLandings: 1,
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    if (ops[0].kind !== "update_conflict") {
+      throw new Error(`expected update_conflict got ${ops[0].kind}`);
+    }
+    const nightLdg = ops[0].changes.find((c) => c.field === "nightLandings");
+    expect(nightLdg?.to).toBe("1");
+    expect(nightLdg?.companyValue).toBeUndefined();
   });
 });
 
@@ -636,11 +668,15 @@ describe("reconcileRoster — TO/LDG sun-position note", () => {
     ) {
       throw new Error(`expected an update op, got ${ops[0].kind}`);
     }
+    // The day-landing is cleared and the night-landing applied, per our calc.
     const dayLdg = ops[0].changes.find((c) => c.field === "dayLandings");
-    expect(dayLdg).toBeDefined();
-    expect(dayLdg?.note).toContain("sunset 12:50Z");
-    expect(dayLdg?.note).toContain("night");
-    expect(dayLdg?.note).toContain("CJB");
+    expect(dayLdg?.to).toBe("0");
+    const nightLdg = ops[0].changes.find((c) => c.field === "nightLandings");
+    expect(nightLdg?.to).toBe("1");
+    // The sunrise/sunset evidence rides on the sector for the UI to render —
+    // it is no longer stuffed into a prose note on the diff.
+    expect(ops[0].sector.toLdgContext?.arrSunsetUtc).toBe("12:50");
+    expect(ops[0].sector.toLdgContext?.arrSunStatus).toBe("night");
   });
 });
 

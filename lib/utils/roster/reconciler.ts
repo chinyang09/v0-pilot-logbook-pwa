@@ -122,6 +122,15 @@ export interface FieldDiff {
    * suggestion next to a hand-entered TO/LDG value, etc.
    */
   note?: string;
+  /**
+   * For day/night takeoff + landing fields only: the value the COMPANY
+   * recorded, when it disagrees with our own sun-position calculation.
+   *
+   * We trust our calculator (`to` carries the computed value); this field
+   * exists purely so the review UI can flag "the company logged something
+   * different" without burying the user in prose.
+   */
+  companyValue?: string;
 }
 
 /**
@@ -134,17 +143,6 @@ export const TOLDG_DECISION_MARKER = "[TO/LDG decision recorded]";
 
 function hasToLdgDecisionMarker(flight: FlightLog): boolean {
   return (flight.remarks || "").includes(TOLDG_DECISION_MARKER);
-}
-
-function formatSunBounds(
-  sunriseUtc: string | null | undefined,
-  sunsetUtc: string | null | undefined
-): string {
-  if (!sunriseUtc && !sunsetUtc) return "";
-  const parts: string[] = [];
-  if (sunriseUtc) parts.push(`sunrise ${sunriseUtc}Z`);
-  if (sunsetUtc) parts.push(`sunset ${sunsetUtc}Z`);
-  return `(${parts.join(", ")})`;
 }
 
 export type ReconcilerOperation =
@@ -623,67 +621,36 @@ function diffSectorVsFlight(
     ["nightLandings", "nightLandings", "suggestedNightLandings"],
   ];
   if (!skipToLdg) {
-    const ctx = sector.toLdgContext;
-    const fmtCtx = ctx
-      ? (() => {
-          const dep = ctx.depLocal
-            ? `${ctx.outUtc}Z / ${ctx.depLocal} local (UTC${ctx.depTzOffset! >= 0 ? "+" : ""}${ctx.depTzOffset})`
-            : `${ctx.outUtc}Z`;
-          const arr = ctx.arrLocal
-            ? `${ctx.inUtc}Z / ${ctx.arrLocal} local (UTC${ctx.arrTzOffset! >= 0 ? "+" : ""}${ctx.arrTzOffset})`
-            : `${ctx.inUtc}Z`;
-          const depBounds = formatSunBounds(
-            ctx.depSunriseUtc,
-            ctx.depSunsetUtc
-          );
-          const arrBounds = formatSunBounds(
-            ctx.arrSunriseUtc,
-            ctx.arrSunsetUtc
-          );
-          return {
-            takeoff:
-              `OUT ${dep} → sun says ${ctx.depSunStatus ?? "?"} at ` +
-              `${sector.departureIata}${depBounds ? ` ${depBounds}` : ""}`,
-            landing:
-              `IN  ${arr} → sun says ${ctx.arrSunStatus ?? "?"} at ` +
-              `${sector.arrivalIata}${arrBounds ? ` ${arrBounds}` : ""}`,
-          };
-        })()
-      : null;
-
+    // Day/night classification: OUR sun-position calculator is authoritative.
+    //
+    // The company's day/night columns are hand-filled in eCrew and are the
+    // most common manual-entry error we see, so when our calculator produced
+    // a value we apply THAT (`to`) and record the company's figure in
+    // `companyValue` purely so the review UI can flag the disagreement. The
+    // sunrise/sunset evidence travels separately on `sector.toLdgContext`,
+    // which the UI renders as times rather than prose.
     for (const [flightField, sectorField, suggestedField] of numericPairs) {
-      const incoming = sector[sectorField] as number | undefined;
-      if (incoming === undefined) continue;
+      const reported = sector[sectorField] as number | undefined;
+      if (reported === undefined) continue;
       const existing = (flight[flightField] as number | undefined) ?? 0;
-      if (incoming !== existing) {
-        const suggested =
-          suggestedField !== undefined
-            ? (sector[suggestedField] as number | undefined)
-            : undefined;
-        const change: FieldDiff = {
-          field: flightField as string,
-          from: String(existing),
-          to: String(incoming),
-        };
-        // When the sun-position calc disagrees with the logbook value, tell
-        // the user — the captain hand-fills this column in eCrew and it's
-        // the most common manual-entry mistake we see. We include the
-        // out/in times in both UTC and local form plus the sun status at
-        // dep and arr so the user can verify without leaving the modal.
-        if (fmtCtx) {
-          const isTakeoffField =
-            flightField === "dayTakeoffs" || flightField === "nightTakeoffs";
-          const sideLine = isTakeoffField ? fmtCtx.takeoff : fmtCtx.landing;
-          const suggestion =
-            suggested !== undefined && suggested !== incoming
-              ? `Sun-position calc suggests ${suggested}.`
-              : null;
-          change.note = suggestion ? `${suggestion} ${sideLine}` : sideLine;
-        } else if (suggested !== undefined && suggested !== incoming) {
-          change.note = `Sun-position calc suggests ${suggested} for this field.`;
-        }
-        changes.push(change);
+      const calculated =
+        suggestedField !== undefined
+          ? (sector[suggestedField] as number | undefined)
+          : undefined;
+
+      // Trust our calculator when it ran; otherwise fall back to the report.
+      const applied = calculated ?? reported;
+      if (applied === existing) continue;
+
+      const change: FieldDiff = {
+        field: flightField as string,
+        from: String(existing),
+        to: String(applied),
+      };
+      if (calculated !== undefined && calculated !== reported) {
+        change.companyValue = String(reported);
       }
+      changes.push(change);
     }
   }
 
