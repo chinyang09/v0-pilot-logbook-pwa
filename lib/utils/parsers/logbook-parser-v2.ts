@@ -217,12 +217,39 @@ function findRangeFromHeader(lines: string[]): { start: string; end: string } {
   return { start: "", end: "" };
 }
 
+/**
+ * The Flt-time cell sometimes arrives as "HH:MM <PIC name>".
+ *
+ * The PDF renderer emits the flight-time value and the adjacent Name-PIC value
+ * as a single text run, which the column snapper then assigns wholesale to the
+ * Flt-time column — corrupting the block time (the name showed up in the review
+ * modal's `blockTime → …` diff) and leaving the PIC-name column empty. Split it
+ * back: the leading HH:MM is the block time; any trailing text is the PIC name.
+ */
+export function splitFltTimeCell(cell: string): {
+  blockTime: string;
+  bleedName: string;
+} {
+  const raw = (cell || "").trim();
+  const m = raw.match(/^(\d{1,2}:\d{2})(?:\s+(.+))?$/);
+  if (!m) return { blockTime: raw, bleedName: "" };
+  return {
+    blockTime: m[1].padStart(5, "0"),
+    bleedName: (m[2] || "").trim(),
+  };
+}
+
 function parseRawRow(cols: string[], lineNumber: number): RawRow | null {
   const rawDate = cols[0]?.trim() || "";
   if (!DATE_RE.test(rawDate)) return null;
 
   const flightDate = parseDDMMYY(rawDate);
   if (!flightDate) return null;
+
+  // Recover a PIC name that bled into the Flt-time cell (see splitFltTimeCell).
+  const { blockTime, bleedName } = splitFltTimeCell(cols[7] || "");
+  const picFromColumn = (cols[8] || "").trim();
+  const picRawName = picFromColumn || bleedName;
 
   return {
     cols,
@@ -233,9 +260,9 @@ function parseRawRow(cols: string[], lineNumber: number): RawRow | null {
     rawReg: (cols[6] || "").trim().toUpperCase(),
     outT: (cols[2] || "").trim(),
     inT: (cols[4] || "").trim(),
-    blockT: (cols[7] || "").trim(),
+    blockT: blockTime,
     aircraftType: (cols[5] || "").trim(),
-    picRawName: (cols[8] || "").trim(),
+    picRawName,
     dayTakeoffs: parseInt(cols[9] || "", 10) || 0,
     nightTakeoffs: parseInt(cols[10] || "", 10) || 0,
     dayLandings: parseInt(cols[11] || "", 10) || 0,
