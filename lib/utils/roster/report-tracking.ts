@@ -64,20 +64,36 @@ export async function recordReportImport(
 }
 
 /**
- * The per-flight stamp a given source should be compared against, falling back
- * to the legacy single `reportGeneratedAt` for flights imported before the
- * per-source split existed.
+ * The stamp an incoming report is compared against for staleness.
+ *
+ * Schedule and Crew Logbook reports both come out of the same company system,
+ * so their "Generated on" stamps are directly comparable: whichever is newest
+ * represents the freshest company data this flight has seen, whatever kind of
+ * report it arrived on. We therefore gate on the NEWEST stamp of either type
+ * (falling back to the legacy single watermark for older rows).
+ *
+ * The two stamps are still recorded separately — `logbookReportAt` is what
+ * tells us whether a flight has ever been tallied against the crew logbook.
  */
-export function existingStampFor(
+export function newestStamp(
   flight: Pick<
     FlightLog,
     "scheduleReportAt" | "logbookReportAt" | "reportGeneratedAt"
-  >,
-  source: "schedule" | "logbook"
+  >
 ): number | undefined {
-  const specific =
-    source === "schedule" ? flight.scheduleReportAt : flight.logbookReportAt;
-  return specific ?? flight.reportGeneratedAt;
+  const candidates = [
+    flight.scheduleReportAt,
+    flight.logbookReportAt,
+    flight.reportGeneratedAt,
+  ].filter((v): v is number => typeof v === "number");
+  return candidates.length > 0 ? Math.max(...candidates) : undefined;
+}
+
+/** True when this flight has been tallied against a Crew Logbook report. */
+export function hasBeenTallied(
+  flight: Pick<FlightLog, "logbookReportAt">
+): boolean {
+  return typeof flight.logbookReportAt === "number";
 }
 
 /**

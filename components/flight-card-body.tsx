@@ -80,6 +80,9 @@ function Slot({
 
 const hhmm = (v: string) => (v.length >= 5 ? v.slice(0, 5) : v);
 
+/** Stored pilotFlying is a boolean string; pilots read it as PF / PM. */
+const pfLabel = (v: string) => (v === "true" ? "PF" : "PM");
+
 export interface FlightCardBodyProps {
   flight: FlightLog;
   displayPrefs?: DisplayPreferences;
@@ -96,6 +99,12 @@ export interface FlightCardBodyProps {
   showLandingChips?: boolean;
   /** Signature / lock status icons — logbook only. */
   showStatusIcons?: boolean;
+  /**
+   * Show the pilot-flying role (PF/PM) in the bottom-right slot. The import
+   * review uses this in place of the landing chips so a pilot-flying change —
+   * otherwise invisible — is actually legible on the card.
+   */
+  showPilotRole?: boolean;
 }
 
 export function FlightCardBody({
@@ -104,6 +113,7 @@ export function FlightCardBody({
   diffs,
   showLandingChips = true,
   showStatusIcons = true,
+  showPilotRole = false,
 }: FlightCardBodyProps) {
   const d = (field: string) => diffs?.get(field);
 
@@ -172,6 +182,7 @@ export function FlightCardBody({
   }, [flight.picName, flight.sicName, flight.additionalCrew]);
 
   const blockDiff = d("blockTime");
+  const pfDiff = d("pilotFlying");
 
   // `flight # • reg • type`, skipping any part that is both empty and unchanged.
   const metaParts = (
@@ -336,6 +347,24 @@ export function FlightCardBody({
           </div>
 
           <div className="flex items-center gap-1.5 text-xs font-medium shrink-0 ml-2">
+            {showPilotRole && (
+              <span className="inline-flex items-baseline gap-1">
+                {pfDiff ? (
+                  <>
+                    <span className="text-muted-foreground/50 line-through decoration-muted-foreground/40">
+                      {pfLabel(pfDiff.from)}
+                    </span>
+                    <span className="font-semibold text-primary">
+                      {pfLabel(pfDiff.to)}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">
+                    {pfLabel(String(flight.pilotFlying))}
+                  </span>
+                )}
+              </span>
+            )}
             {showLandingChips && totalDayLandings > 0 && (
               <div className="flex items-center gap-0.5">
                 <Sun className="h-3 w-3" />

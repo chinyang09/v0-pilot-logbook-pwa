@@ -340,9 +340,10 @@ describe("reconcileRoster — per-source stale gate", () => {
     expect(ops[0].kind).toBe("skip_stale_report");
   });
 
-  it("does NOT treat a schedule report as stale because a NEWER logbook exists", () => {
-    // The regression the single watermark caused: a Jul-24 schedule imported
-    // after a Jul-25 logbook must still apply.
+  it("gates on the newest company report of EITHER kind", () => {
+    // Schedule and logbook come out of the same company system, so a Jul-24
+    // file is older company data than an already-applied Jul-25 one whatever
+    // kind each was.
     const flight = makeFlight({ logbookReportAt: JUL25, scheduledOut: "04:00" });
     const ops = reconcileRoster({
       sectors: [makeSector()],
@@ -352,23 +353,19 @@ describe("reconcileRoster — per-source stale gate", () => {
       reportSource: "schedule",
       scheduleGeneratedAt: JUL24,
     });
-    expect(ops[0].kind).toBe("update_conflict");
+    expect(ops[0].kind).toBe("skip_stale_report");
   });
 
-  it("applies a cross-hydrated import when only ONE stream is stale", () => {
-    const flight = makeFlight({
-      scheduleReportAt: JUL25, // schedule side is stale...
-      logbookReportAt: JUL24, // ...but the logbook side is fresh
-      scheduledOut: "04:00",
-    });
+  it("judges a multi-stream import on its NEWEST stamp", () => {
+    const flight = makeFlight({ scheduleReportAt: JUL24, scheduledOut: "04:00" });
     const ops = reconcileRoster({
       sectors: [makeSector()],
       existingFlights: [flight],
       csvDateRange: range,
       reportGeneratedAt: JUL25,
       reportSource: "cross_hydrated",
-      scheduleGeneratedAt: JUL24,
-      logbookGeneratedAt: JUL25,
+      scheduleGeneratedAt: JUL24, // older half...
+      logbookGeneratedAt: JUL25, // ...but the pair is judged on this
     });
     expect(ops[0].kind).toBe("update_conflict");
   });

@@ -18,7 +18,7 @@
 
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Sunrise, Sunset, TriangleAlert } from "lucide-react";
+import { SunTimeline, DayNightChoice } from "./sun-timeline";
 import type { FieldDiff } from "@/lib/utils/roster/reconciler";
 import type { AcceptableOperation } from "@/lib/utils/parsers/schedule-parser";
 import type { FlightLog } from "@/types/entities/flight.types";
@@ -39,6 +39,8 @@ const CHROME_FIELDS = new Set([
   "aircraftType",
   "picName",
   "sicName",
+  // Rendered as PF/PM in the card's bottom-right slot.
+  "pilotFlying",
 ]);
 
 /**
@@ -58,7 +60,6 @@ const HIDDEN_FIELDS = new Set([
   "scheduleReportAt",
   "logbookReportAt",
   "remarks",
-  "pilotFlying",
   "dayTakeoffs",
   "nightTakeoffs",
   "dayLandings",
@@ -188,10 +189,24 @@ function displayFlight(op: AcceptableOperation): FlightLog {
 // Day/night discrepancy flag
 // ============================================================
 
+/** "day"/"night" verdict implied by a set of day/night counts. */
+function verdictFrom(
+  diffs: Map<string, FieldDiff>,
+  side: "Takeoffs" | "Landings",
+  pick: (d: FieldDiff) => string | undefined
+): string {
+  const night = Number(pick(diffs.get(`night${side}`) as FieldDiff) ?? 0);
+  const day = Number(pick(diffs.get(`day${side}`) as FieldDiff) ?? 0);
+  if (night > 0 && day === 0) return "Night";
+  if (day > 0 && night === 0) return "Day";
+  return night > 0 ? "Night" : "Day";
+}
+
 /**
  * Shown ONLY when our sun-position calculation disagrees with the company's
- * day/night split. Our value is what gets applied; this strip explains why and
- * offers the deliberate opt-out.
+ * day/night split. Instead of asserting "differs from company — NIGHT", it
+ * draws the day/night bar with the event marked on it, then offers a
+ * two-option choice defaulting to our calculation.
  */
 function DayNightFlag({
   op,
@@ -211,94 +226,35 @@ function DayNightFlag({
 
   const sector = "sector" in op ? op.sector : undefined;
   const ctx = sector?.toLdgContext;
-  const takeoffSide = disagreements.some((f) => f.endsWith("Takeoffs"));
-  const landingSide = disagreements.some((f) => f.endsWith("Landings"));
-
-  const airport = takeoffSide ? sector?.departureIata : sector?.arrivalIata;
-  const timeUtc = takeoffSide ? ctx?.outUtc : ctx?.inUtc;
-  const sunrise = takeoffSide ? ctx?.depSunriseUtc : ctx?.arrSunriseUtc;
-  const sunset = takeoffSide ? ctx?.depSunsetUtc : ctx?.arrSunsetUtc;
-  const status = takeoffSide ? ctx?.depSunStatus : ctx?.arrSunStatus;
-  const label = takeoffSide && landingSide ? "T/O + LDG" : takeoffSide ? "T/O" : "LDG";
+  const sides: Array<"Takeoffs" | "Landings"> = [];
+  if (disagreements.some((f) => f.endsWith("Takeoffs"))) sides.push("Takeoffs");
+  if (disagreements.some((f) => f.endsWith("Landings"))) sides.push("Landings");
 
   return (
-    <div
-      className={cn(
-        "mt-1.5 rounded-lg border px-2 py-1.5 text-[11px] leading-relaxed",
-        useCompany
-          ? "border-border bg-muted/40"
-          : "border-status-warning/30 bg-status-warning/[0.07]"
-      )}
-    >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="inline-flex items-center gap-1 font-medium text-status-warning">
-          <TriangleAlert className="h-3 w-3" aria-hidden />
-          {label} day/night differs from company
-        </span>
-        {status && (
-          <span
-            className={cn(
-              "rounded px-1 py-px text-[10px] font-semibold uppercase tracking-wide",
-              status === "night"
-                ? "bg-indigo-500/15 text-indigo-500 dark:text-indigo-300"
-                : "bg-status-warning/15 text-status-warning"
-            )}
-          >
-            {status}
-          </span>
-        )}
-      </div>
-
-      {(sunrise || sunset || timeUtc) && (
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums text-muted-foreground">
-          {airport && <span className="font-medium text-foreground/70">{airport}</span>}
-          {timeUtc && <span>{timeUtc}Z</span>}
-          {sunrise && (
-            <span className="inline-flex items-center gap-0.5">
-              <Sunrise className="h-3 w-3" aria-hidden />
-              {sunrise}Z
-            </span>
-          )}
-          {sunset && (
-            <span className="inline-flex items-center gap-0.5">
-              <Sunset className="h-3 w-3" aria-hidden />
-              {sunset}Z
-            </span>
-          )}
-        </div>
-      )}
-
-      {onUseCompanyChange && (
-        <label className="mt-1 flex cursor-pointer items-center gap-1.5 text-muted-foreground">
-          <Checkbox
-            checked={useCompany}
-            onCheckedChange={(v) => onUseCompanyChange(Boolean(v))}
-            className="h-3.5 w-3.5"
-          />
-          <span>
-            Use the company&apos;s figures instead
-            {disagreements.length > 0 && (
-              <span className="ml-1 tabular-nums opacity-70">
-                (
-                {disagreements
-                  .map((f) => `${shortLabel(f)} ${diffs.get(f)?.companyValue}`)
-                  .join(", ")}
-                )
-              </span>
-            )}
-          </span>
-        </label>
-      )}
+    <div className="mt-1.5 rounded-lg border border-border/60 bg-muted/30 px-2 py-2">
+      {sides.map((side) => {
+        const isTakeoff = side === "Takeoffs";
+        return (
+          <div key={side} className={cn(sides.length > 1 && "mb-2 last:mb-0")}>
+            <SunTimeline
+              label={isTakeoff ? "T/O" : "LDG"}
+              airport={isTakeoff ? sector?.departureIata : sector?.arrivalIata}
+              eventUtc={isTakeoff ? ctx?.outUtc : ctx?.inUtc}
+              sunriseUtc={isTakeoff ? ctx?.depSunriseUtc : ctx?.arrSunriseUtc}
+              sunsetUtc={isTakeoff ? ctx?.depSunsetUtc : ctx?.arrSunsetUtc}
+              status={isTakeoff ? ctx?.depSunStatus : ctx?.arrSunStatus}
+            />
+            <DayNightChoice
+              ours={verdictFrom(diffs, side, (d) => d?.to)}
+              company={verdictFrom(diffs, side, (d) => d?.companyValue)}
+              useCompany={useCompany}
+              onChange={onUseCompanyChange}
+            />
+          </div>
+        );
+      })}
     </div>
   );
-}
-
-function shortLabel(field: string): string {
-  return field
-    .replace("day", "day ")
-    .replace("night", "night ")
-    .replace("Takeoffs", "T/O")
-    .replace("Landings", "LDG");
 }
 
 // ============================================================
@@ -344,8 +300,12 @@ export function ImportFlightCard({
         flight={flight}
         displayPrefs={displayPrefs}
         diffs={diffs}
+        // Day/night landing counts are decided by our sun calculator and shown
+        // on the timeline below, so the chip slot carries PF/PM instead — a
+        // pilot-flying change is otherwise invisible on the card.
         showLandingChips={false}
         showStatusIcons={false}
+        showPilotRole
       />
 
       <DayNightFlag

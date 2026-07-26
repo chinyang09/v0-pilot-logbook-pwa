@@ -29,7 +29,7 @@
 import type { FlightLog } from "../../../types/entities/flight.types";
 import type { ScheduledCrewMember } from "@/types/entities/roster.types";
 import { classifyChanges } from "./classification";
-import { existingStampFor, type ReportSource } from "./report-tracking";
+import { newestStamp, type ReportSource } from "./report-tracking";
 
 // ============================================================
 // Public types
@@ -726,46 +726,29 @@ function diffSectorVsFlight(
 // ============================================================
 
 /**
- * Decide whether `flight` already reflects a NEWER report than the one being
- * imported, comparing each contributing stream against its own per-flight
- * stamp. Returns the offending pair for the audit entry, or null to proceed.
+ * Decide whether `flight` already reflects a NEWER company report than the one
+ * being imported. Schedule and Crew Logbook reports come from the same system,
+ * so their stamps are compared together: the newest report a flight has seen —
+ * of either kind — is the bar a new import has to clear.
  *
- * A cross-hydrated import contributes both streams and is stale only when
- * every stream it carries is stale — a fresh logbook paired with an older
- * schedule must still be applied.
+ * An import contributing several streams uses its newest stamp, so pairing a
+ * fresh logbook with an older schedule is judged on the fresh one.
  */
 function staleAgainst(
   flight: FlightLog,
   input: ReconcileInput
 ): { existing: number; incoming: number } | null {
-  const source: ReportSource = input.reportSource ?? "schedule";
-  const primary = input.reportGeneratedAt ?? null;
+  const incoming = Math.max(
+    input.reportGeneratedAt ?? 0,
+    input.scheduleGeneratedAt ?? 0,
+    input.logbookGeneratedAt ?? 0
+  );
+  if (!incoming) return null;
 
-  const pairs: Array<{ existing: number; incoming: number }> = [];
-  const consider = (
-    stream: "schedule" | "logbook",
-    incomingTs: number | null | undefined
-  ) => {
-    const incoming = incomingTs ?? primary;
-    if (!incoming) return;
-    const existing = existingStampFor(flight, stream);
-    if (!existing) return;
-    pairs.push({ existing, incoming });
-  };
+  const existing = newestStamp(flight);
+  if (!existing) return null;
 
-  if (source === "schedule" || source === "cross_hydrated") {
-    consider("schedule", input.scheduleGeneratedAt);
-  }
-  if (source === "logbook" || source === "cross_hydrated") {
-    consider("logbook", input.logbookGeneratedAt);
-  }
-
-  if (pairs.length === 0) return null;
-  const allStale = pairs.every((p) => p.existing > p.incoming);
-  if (!allStale) return null;
-
-  // Report the most-recent offending stamp.
-  return pairs.reduce((a, b) => (b.existing > a.existing ? b : a));
+  return existing > incoming ? { existing, incoming } : null;
 }
 
 // ============================================================

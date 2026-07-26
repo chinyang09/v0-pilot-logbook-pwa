@@ -112,6 +112,12 @@ export function GlassContainer({
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!spotlightOn) return
+    // Ignore presses while this surface sits behind a modal. Radix marks
+    // everything outside an open dialog `aria-hidden`, so a touch that leaks
+    // through (or a scroll that Safari reports as a press) would otherwise
+    // bloom the glass — the "phantom tap" on the calendar/upload buttons while
+    // scrolling the import dialog.
+    if (rootRef.current?.closest('[aria-hidden="true"]')) return
     pressedRef.current = true
     setSpotlight(e)
     if (interactive) {
