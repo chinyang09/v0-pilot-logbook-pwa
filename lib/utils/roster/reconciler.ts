@@ -30,6 +30,8 @@ import type { FlightLog } from "../../../types/entities/flight.types";
 import type { ScheduledCrewMember } from "@/types/entities/roster.types";
 import { classifyChanges } from "./classification";
 import { newestStamp, type ReportSource } from "./report-tracking";
+import { reconcilePilotRole } from "./pilot-role";
+import type { ImportDefaults } from "@/types/db/stores.types";
 
 // ============================================================
 // Public types
@@ -232,6 +234,11 @@ export interface ReconcileInput {
    * (the legacy behavior the reconciler unit tests exercise).
    */
   currentUser?: CurrentUserCrew;
+  /**
+   * The user's convention for a non-PIC leg they flew (PICUS vs SIC), from
+   * import settings. Used to keep `pilotRole` consistent when PF/PM flips.
+   */
+  nonPicPfRole?: ImportDefaults["nonPicPfRole"];
   /**
    * Use legacy `update_conflict` op kind instead of the new
    * `update_safe` / `update_consult` split. Defaults to `true` so existing
@@ -508,7 +515,8 @@ function detectEditReasons(flight: FlightLog): EditReason[] {
 function diffSectorVsFlight(
   sector: ParsedSector,
   flight: FlightLog,
-  currentUser?: CurrentUserCrew
+  currentUser?: CurrentUserCrew,
+  nonPicPfRole?: ImportDefaults["nonPicPfRole"]
 ): FieldDiff[] {
   const changes: FieldDiff[] = [];
 
@@ -615,6 +623,22 @@ function diffSectorVsFlight(
       from: String(flight.pilotFlying ?? true),
       to: String(sector.isPilotFlying),
     });
+
+    // Keep the logged role consistent with who was flying: PICUS can't survive
+    // a switch to Pilot Monitoring, and a plain SIC leg the user actually flew
+    // becomes whatever they log such legs as (`nonPicPfRole`).
+    const nextRole = reconcilePilotRole({
+      currentRole: flight.pilotRole,
+      pilotFlying: sector.isPilotFlying,
+      nonPicPfRole: nonPicPfRole ?? "SIC",
+    });
+    if (nextRole !== flight.pilotRole) {
+      changes.push({
+        field: "pilotRole",
+        from: flight.pilotRole,
+        to: nextRole,
+      });
+    }
   }
 
   // Logbook fields — only flag when sector carries a non-zero value AND the
@@ -813,7 +837,12 @@ export function reconcileRoster(
       continue;
     }
 
-    const changes = diffSectorVsFlight(sector, match, currentUser);
+    const changes = diffSectorVsFlight(
+      sector,
+      match,
+      currentUser,
+      input.nonPicPfRole
+    );
     if (changes.length === 0) {
       operations.push({ kind: "skip_identical", flight: match, sector });
       continue;

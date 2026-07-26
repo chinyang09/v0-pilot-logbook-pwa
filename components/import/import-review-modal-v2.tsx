@@ -31,6 +31,7 @@ import type {
 import { usePreferences } from "@/components/providers/preferences-provider";
 import { ImportFlightCard, type CardTone } from "./import-flight-card";
 import type { FieldDiff } from "@/lib/utils/roster/reconciler";
+import type { PilotRole } from "@/types/entities/flight.types";
 
 interface Props {
   plan: PlannedImport | null;
@@ -124,6 +125,11 @@ export function ImportReviewModalV2({
   // over our sun-position calculation. Empty by default — ours always wins
   // unless the user opts out per flight.
   const [useCompanyToLdg, setUseCompanyToLdg] = useState<Set<number>>(new Set());
+  // Per-op pilot-role overrides. Empty means "use the role derived from the
+  // user's import setting"; an entry means they picked a different one.
+  const [roleOverrides, setRoleOverrides] = useState<Map<number, PilotRole>>(
+    new Map()
+  );
   const [activeTab, setActiveTab] = useState<Bucket | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const { preferences } = usePreferences();
@@ -216,6 +222,14 @@ export function ImportReviewModalV2({
     });
   };
 
+  const setRoleOverride = (index: number, role: PilotRole) => {
+    setRoleOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(index, role);
+      return next;
+    });
+  };
+
   const handleConfirm = () => {
     const updatedOperations = plan.operations.map((op, index) => {
       const accepted = isAutoAccepted(op.kind) ? true : getAccept(index, false);
@@ -223,10 +237,16 @@ export function ImportReviewModalV2({
       // Deliberate opt-out: swap our calculated day/night figures back to the
       // company's for this flight only. Untouched otherwise — our calculator
       // is the default everywhere.
-      if (useCompanyToLdg.has(index) && "changes" in op && op.changes) {
-        const changes = (op.changes as FieldDiff[]).map((c) =>
-          c.companyValue !== undefined ? { ...c, to: c.companyValue } : c
-        );
+      const wantsCompany = useCompanyToLdg.has(index);
+      const role = roleOverrides.get(index);
+      if ((wantsCompany || role) && "changes" in op && op.changes) {
+        const changes = (op.changes as FieldDiff[]).map((c) => {
+          if (wantsCompany && c.companyValue !== undefined) {
+            return { ...c, to: c.companyValue };
+          }
+          if (role && c.field === "pilotRole") return { ...c, to: role };
+          return c;
+        });
         return { ...op, changes, accepted };
       }
       return { ...op, accepted };
@@ -278,10 +298,13 @@ export function ImportReviewModalV2({
         // isn't hidden behind it. Constrain to the visible viewport with
         // safe-area insets top + bottom so it never extends under the nav
         // pill or the mobile bottom nav.
-        className="z-[110] flex max-w-3xl flex-col gap-0 p-0 max-h-[calc(100dvh-7rem)] top-[calc(env(safe-area-inset-top)+4.5rem)] translate-y-0 sm:top-[50%] sm:-translate-y-1/2"
-        overlayClassName="z-[105]"
+        // Reads as an app surface rather than a plain modal: translucent panel
+        // over a blurred backdrop, matching the glass chrome used by the nav
+        // pill and the floating action buttons.
+        className="z-[110] flex max-w-3xl flex-col gap-0 overflow-hidden rounded-3xl border-white/10 bg-card/80 p-0 shadow-2xl backdrop-blur-2xl backdrop-saturate-150 max-h-[calc(100dvh-7rem)] top-[calc(env(safe-area-inset-top)+4.5rem)] translate-y-0 sm:top-[50%] sm:-translate-y-1/2"
+        overlayClassName="z-[105] bg-black/50 backdrop-blur-sm"
       >
-        <DialogHeader className="px-4 pt-4 sm:px-6 sm:pt-6">
+        <DialogHeader className="border-b border-white/10 bg-background/40 px-4 pt-4 backdrop-blur-xl sm:px-6 sm:pt-5">
           <DialogTitle>Review import</DialogTitle>
           <DialogDescription className="tabular-nums">
             {plan.dateRange.start} – {plan.dateRange.end}
@@ -290,7 +313,7 @@ export function ImportReviewModalV2({
         </DialogHeader>
 
         {/* Tab strip */}
-        <div className="border-b px-4 pb-3 pt-3 sm:px-6">
+        <div className="border-b border-white/10 bg-background/40 px-4 pb-3 pt-3 backdrop-blur-xl sm:px-6">
           <FilterChips
             options={tabs}
             value={(current ?? tabs[0]?.value) as Bucket}
@@ -343,6 +366,8 @@ export function ImportReviewModalV2({
                 }
                 useCompany={useCompanyToLdg.has(index)}
                 onUseCompanyChange={(v) => toggleCompanyToLdg(index, v)}
+                roleOverride={roleOverrides.get(index)}
+                onRoleChange={(role) => setRoleOverride(index, role)}
               />
             ))}
 
@@ -368,15 +393,24 @@ export function ImportReviewModalV2({
           </div>
         </div>
 
-        <DialogFooter className="flex-row items-center justify-between gap-3 border-t px-4 py-3 sm:px-6">
+        <DialogFooter className="flex-row items-center justify-between gap-3 border-t border-white/10 bg-background/40 px-4 py-3 backdrop-blur-xl sm:px-6">
           <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
             {breakdown || "No changes selected"}
           </p>
           <div className="flex shrink-0 gap-2">
-            <Button variant="outline" size="sm" onClick={onCancel}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onCancel}
+              className="rounded-full border border-white/10 bg-white/5 px-4 backdrop-blur-md hover:bg-white/10"
+            >
               Cancel
             </Button>
-            <Button size="sm" onClick={handleConfirm}>
+            <Button
+              size="sm"
+              onClick={handleConfirm}
+              className="rounded-full px-5 shadow-lg shadow-primary/20"
+            >
               Apply
               {totalActions > 0 && (
                 <span className="ml-1 tabular-nums">{totalActions}</span>

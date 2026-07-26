@@ -43,7 +43,12 @@ import {
   applyDefaultAcceptance,
   summarizeOperations,
 } from "@/lib/utils/roster/plan-summary";
-import { userDb, getCurrentUserPersonnel } from "@/lib/db";
+import {
+  userDb,
+  getCurrentUserPersonnel,
+  getUserPreferences,
+  DEFAULT_IMPORT_DEFAULTS,
+} from "@/lib/db";
 import type { FlightLog } from "@/types/entities/flight.types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
 import { DetectedFilesChip } from "./detected-files-chip";
@@ -149,6 +154,12 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         const reconCurrentUser = currentUserForRecon
           ? { id: currentUserForRecon.id, crewId: currentUserForRecon.crewId }
           : undefined;
+        // PICUS-vs-SIC convention, so a PF/PM change carries the matching
+        // pilotRole correction.
+        const storedPrefs = await getUserPreferences().catch(() => null);
+        const nonPicPfRole =
+          storedPrefs?.importDefaults?.nonPicPfRole ??
+          DEFAULT_IMPORT_DEFAULTS.nonPicPfRole;
 
         const logbooks = docs.filter((d) => d.reportType === "logbook");
         const schedules = docs.filter((d) => d.reportType === "schedule");
@@ -265,6 +276,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             logbookGeneratedAt,
             useLegacyUpdateConflict: false,
             currentUser: reconCurrentUser,
+            nonPicPfRole,
           });
 
           const acceptedOps = applyDefaultAcceptance(operations);
@@ -309,6 +321,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             logbookGeneratedAt: logbookPlan.generatedAt,
             useLegacyUpdateConflict: false,
             currentUser: reconCurrentUser,
+            nonPicPfRole,
           });
 
           const acceptedOps = applyDefaultAcceptance(operations);

@@ -33,7 +33,10 @@ import {
   getAirportTimeInfo,
   getAllPersonnel,
   getCurrentUserPersonnel,
+  getUserPreferences,
+  DEFAULT_IMPORT_DEFAULTS,
 } from "@/lib/db";
+import type { ImportDefaults } from "@/types/db/stores.types";
 import type { ParsedSimSession } from "./logbook-parser-v2";
 import { parseTrainingDetails } from "./shared/training-details";
 import {
@@ -779,6 +782,13 @@ export async function parseScheduleCSV(
     const rowsForParse = mergePdfTableRows(doc.rows, header);
 
     onProgress?.(10, "Validating", "Checking user profile...");
+    // The user's PICUS-vs-SIC convention, so a PF/PM change can carry the
+    // matching pilotRole correction.
+    const storedPrefs = await getUserPreferences().catch(() => null);
+    const importDefaults: ImportDefaults = {
+      ...DEFAULT_IMPORT_DEFAULTS,
+      ...(storedPrefs?.importDefaults ?? {}),
+    };
     const currentUser = await getCurrentUserPersonnel();
     if (!currentUser) {
       throw new Error(
@@ -959,6 +969,7 @@ export async function parseScheduleCSV(
       reportSource: "schedule",
       scheduleGeneratedAt: plan.generatedAt,
       currentUser: { id: currentUser.id, crewId: currentUser.crewId },
+      nonPicPfRole: importDefaults.nonPicPfRole,
       // Use the v2 safe/consult split so crew-only changes (incl. the
       // truncated→full name upgrade) auto-apply, while time/route changes on
       // already-flown flights still ask for confirmation.

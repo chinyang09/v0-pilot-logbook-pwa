@@ -19,6 +19,8 @@
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SunTimeline, DayNightChoice } from "./sun-timeline";
+import { allowedRolesFor } from "@/lib/utils/roster/pilot-role";
+import type { PilotRole } from "@/types/entities/flight.types";
 import type { FieldDiff } from "@/lib/utils/roster/reconciler";
 import type { AcceptableOperation } from "@/lib/utils/parsers/schedule-parser";
 import type { FlightLog } from "@/types/entities/flight.types";
@@ -41,6 +43,8 @@ const CHROME_FIELDS = new Set([
   "sicName",
   // Rendered as PF/PM in the card's bottom-right slot.
   "pilotFlying",
+  // Rendered by the RoleChoice picker.
+  "pilotRole",
 ]);
 
 /**
@@ -237,12 +241,11 @@ function DayNightFlag({
         return (
           <div key={side} className={cn(sides.length > 1 && "mb-2 last:mb-0")}>
             <SunTimeline
-              label={isTakeoff ? "T/O" : "LDG"}
+              kind={isTakeoff ? "takeoff" : "landing"}
               airport={isTakeoff ? sector?.departureIata : sector?.arrivalIata}
               eventUtc={isTakeoff ? ctx?.outUtc : ctx?.inUtc}
               sunriseUtc={isTakeoff ? ctx?.depSunriseUtc : ctx?.arrSunriseUtc}
               sunsetUtc={isTakeoff ? ctx?.depSunsetUtc : ctx?.arrSunsetUtc}
-              status={isTakeoff ? ctx?.depSunStatus : ctx?.arrSunStatus}
             />
             <DayNightChoice
               ours={verdictFrom(diffs, side, (d) => d?.to)}
@@ -253,6 +256,68 @@ function DayNightFlag({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Role picker, shown when a PF/PM change forces a `pilotRole` correction.
+ * The pre-selected value is the one derived from the user's import setting;
+ * they can still choose any role valid for the new flying state (PICUS is
+ * withheld when the leg becomes Pilot Monitoring, since the two can't coexist).
+ */
+function RoleChoice({
+  diffs,
+  value,
+  onChange,
+}: {
+  diffs: Map<string, FieldDiff>;
+  value?: PilotRole;
+  onChange?: (role: PilotRole) => void;
+}) {
+  const roleDiff = diffs.get("pilotRole");
+  if (!roleDiff) return null;
+
+  const pfDiff = diffs.get("pilotFlying");
+  const nowFlying = pfDiff ? pfDiff.to === "true" : true;
+  const selected = value ?? (roleDiff.to as PilotRole);
+
+  return (
+    <div className="mt-1.5 rounded-lg bg-muted/30 px-2 py-1.5">
+      <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+        Role — {nowFlying ? "now pilot flying" : "now pilot monitoring"}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {allowedRolesFor(nowFlying).map((role) => {
+          const active = role === selected;
+          return (
+            <button
+              key={role}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              disabled={!onChange}
+              onClick={(e) => {
+                // The card is a <label> — don't toggle its checkbox.
+                e.preventDefault();
+                e.stopPropagation();
+                onChange?.(role);
+              }}
+              className={cn(
+                "rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors",
+                active
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-muted/60"
+              )}
+            >
+              {role}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-1 text-[10px] text-muted-foreground/70">
+        was {roleDiff.from}
+      </div>
     </div>
   );
 }
@@ -269,6 +334,8 @@ export function ImportFlightCard({
   onCheckedChange,
   useCompany = false,
   onUseCompanyChange,
+  roleOverride,
+  onRoleChange,
 }: {
   op: AcceptableOperation;
   displayPrefs?: DisplayPreferences;
@@ -279,6 +346,9 @@ export function ImportFlightCard({
   /** Deliberate opt-in to take the company's day/night split for this flight. */
   useCompany?: boolean;
   onUseCompanyChange?: (v: boolean) => void;
+  /** Role the user picked for a PF/PM-driven role change, if they overrode it. */
+  roleOverride?: PilotRole;
+  onRoleChange?: (role: PilotRole) => void;
 }) {
   const changes: FieldDiff[] =
     "changes" in op && Array.isArray(op.changes) ? op.changes : [];
@@ -314,6 +384,8 @@ export function ImportFlightCard({
         useCompany={useCompany}
         onUseCompanyChange={onUseCompanyChange}
       />
+
+      <RoleChoice diffs={diffs} value={roleOverride} onChange={onRoleChange} />
 
       {extraChanges.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
