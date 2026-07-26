@@ -170,9 +170,28 @@ export interface FlightLog {
   serverSeq?: number
   // Sync engine: authoring device id, used as a deterministic LWW tiebreaker
   deviceId?: string
-  // Import provenance — used to gate older reports from regressing newer data
+  // Import provenance — used to gate older reports from regressing newer data.
+  // `reportGeneratedAt` is the legacy single watermark (newest report of ANY
+  // kind); the two per-source stamps below supersede it because a schedule and
+  // a logbook report are independent streams: uploading a Jul-24 schedule after
+  // a Jul-25 logbook must not look "stale", and vice versa.
   reportGeneratedAt?: number
+  /** "Generated on" of the newest SCHEDULE report applied to this flight. */
+  scheduleReportAt?: number
+  /**
+   * "Generated on" of the newest CREW LOGBOOK report applied to this flight —
+   * i.e. when this flight was last tallied against the company's logbook.
+   * Absent means never tallied.
+   */
+  logbookReportAt?: number
   importSource?: "logbook" | "schedule" | "cross_hydrated" | "manual"
+  /**
+   * When the user last made a call on this flight's day/night takeoff+landing
+   * split, so a re-import doesn't keep raising the same question. Previously
+   * recorded as a marker appended to `remarks`, which polluted a user-owned
+   * field; the legacy marker is still honoured when reading.
+   */
+  toLdgDecidedAt?: number
   // Simulator sessions are logged as flight entries (no aircraftReg / airports)
   // so they count toward dashboard simulator-instrument totals. These optional
   // fields are non-indexed, so they need no Dexie migration.

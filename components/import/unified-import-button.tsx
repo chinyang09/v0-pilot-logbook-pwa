@@ -76,6 +76,12 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
     >["simSessions"]
   >([]);
   const importSourceRef = useRef<FlightLog["importSource"]>("schedule");
+  // Per-stream "Generated on" stamps, so the executor can record which report
+  // version each flight reflects (schedule vs logbook are tracked separately).
+  const reportStampsRef = useRef<{
+    scheduleGeneratedAt: number | null;
+    logbookGeneratedAt: number | null;
+  }>({ scheduleGeneratedAt: null, logbookGeneratedAt: null });
 
   const reset = () => {
     setProgress(null);
@@ -93,6 +99,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         const result: ExecutionResult = await executeRosterImport(plan, {
           simSessions: simSessionsRef.current ?? [],
           importSource: importSourceRef.current,
+          scheduleGeneratedAt: reportStampsRef.current.scheduleGeneratedAt,
+          logbookGeneratedAt: reportStampsRef.current.logbookGeneratedAt,
         });
         const parts: string[] = [];
         if (result.created) parts.push(`${result.created} created`);
@@ -178,6 +186,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           Parameters<typeof executeRosterImport>[1]
         >["simSessions"] = [];
         let importSource: FlightLog["importSource"] = "schedule";
+        let scheduleGeneratedAt: number | null = null;
+        let logbookGeneratedAt: number | null = null;
 
         if (logbooks.length === 1 && schedules.length === 1) {
           // Combined flow.
@@ -224,6 +234,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           // since it's the authoritative actuals).
           const reportGeneratedAt =
             logbookPlan.generatedAt ?? schedulePlan.generatedAt;
+          scheduleGeneratedAt = schedulePlan.generatedAt;
+          logbookGeneratedAt = logbookPlan.generatedAt;
 
           const dateRange = {
             start:
@@ -248,6 +260,9 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             existingFlights: flightsInRange,
             csvDateRange: dateRange,
             reportGeneratedAt,
+            reportSource: "cross_hydrated",
+            scheduleGeneratedAt,
+            logbookGeneratedAt,
             useLegacyUpdateConflict: false,
             currentUser: reconCurrentUser,
           });
@@ -284,11 +299,14 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
               f.date >= logbookPlan.dateRange.start &&
               f.date <= logbookPlan.dateRange.end
           );
+          logbookGeneratedAt = logbookPlan.generatedAt;
           const operations = reconcileRoster({
             sectors,
             existingFlights: flightsInRange,
             csvDateRange: logbookPlan.dateRange,
             reportGeneratedAt: logbookPlan.generatedAt,
+            reportSource: "logbook",
+            logbookGeneratedAt: logbookPlan.generatedAt,
             useLegacyUpdateConflict: false,
             currentUser: reconCurrentUser,
           });
@@ -317,6 +335,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             onProgress: onParseProgress,
           });
           simSessions = plan.simSessions;
+          scheduleGeneratedAt = plan.generatedAt;
         }
 
         if (!plan.success && plan.errors.length > 0) {
@@ -325,6 +344,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
 
         simSessionsRef.current = simSessions;
         importSourceRef.current = importSource;
+        reportStampsRef.current = { scheduleGeneratedAt, logbookGeneratedAt };
 
         const needsReview =
           plan.summary.toUpdate > 0 ||

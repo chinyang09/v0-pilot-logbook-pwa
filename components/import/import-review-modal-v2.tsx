@@ -29,11 +29,8 @@ import type {
   PlannedImport,
 } from "@/lib/utils/parsers/schedule-parser";
 import { usePreferences } from "@/components/providers/preferences-provider";
-import {
-  ImportFlightCard,
-  type AirportPref,
-  type CardTone,
-} from "./import-flight-card";
+import { ImportFlightCard, type CardTone } from "./import-flight-card";
+import type { FieldDiff } from "@/lib/utils/roster/reconciler";
 
 interface Props {
   plan: PlannedImport | null;
@@ -123,10 +120,14 @@ export function ImportReviewModalV2({
   onCancel,
 }: Props) {
   const [acceptance, setAcceptance] = useState<Map<number, boolean>>(new Map());
+  // Op indices where the user deliberately chose the company's day/night split
+  // over our sun-position calculation. Empty by default — ours always wins
+  // unless the user opts out per flight.
+  const [useCompanyToLdg, setUseCompanyToLdg] = useState<Set<number>>(new Set());
   const [activeTab, setActiveTab] = useState<Bucket | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const { preferences } = usePreferences();
-  const airportPref = preferences.display.airportIdentifier as AirportPref;
+  const displayPrefs = preferences.display;
 
   const partitioned = useMemo(() => {
     const out: Record<Bucket, Entry[]> = {
@@ -206,12 +207,30 @@ export function ImportReviewModalV2({
     });
   };
 
+  const toggleCompanyToLdg = (index: number, value: boolean) => {
+    setUseCompanyToLdg((prev) => {
+      const next = new Set(prev);
+      if (value) next.add(index);
+      else next.delete(index);
+      return next;
+    });
+  };
+
   const handleConfirm = () => {
-    const updatedOperations = plan.operations.map((op, index) =>
-      isAutoAccepted(op.kind)
-        ? { ...op, accepted: true }
-        : { ...op, accepted: getAccept(index, false) }
-    );
+    const updatedOperations = plan.operations.map((op, index) => {
+      const accepted = isAutoAccepted(op.kind) ? true : getAccept(index, false);
+
+      // Deliberate opt-out: swap our calculated day/night figures back to the
+      // company's for this flight only. Untouched otherwise — our calculator
+      // is the default everywhere.
+      if (useCompanyToLdg.has(index) && "changes" in op && op.changes) {
+        const changes = (op.changes as FieldDiff[]).map((c) =>
+          c.companyValue !== undefined ? { ...c, to: c.companyValue } : c
+        );
+        return { ...op, changes, accepted };
+      }
+      return { ...op, accepted };
+    });
     onConfirm({ ...plan, operations: updatedOperations });
   };
 
@@ -283,8 +302,12 @@ export function ImportReviewModalV2({
           />
         </div>
 
-        {/* Panel */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 sm:px-6">
+        {/* Panel.
+            `overscroll-contain` stops the scroll chaining into the page behind
+            the dialog once this list hits its end — that chaining scrolled the
+            flight list underneath, and the glass action buttons re-sampled
+            their backdrop as it moved, which read as them being tapped. */}
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3 sm:px-6">
           {meta && (
             <div className="mb-3 flex items-start justify-between gap-3">
               <p className="text-xs text-muted-foreground">{meta.hint}</p>
@@ -312,12 +335,14 @@ export function ImportReviewModalV2({
               <ImportFlightCard
                 key={`${index}-${op.kind}`}
                 op={op}
-                airportPref={airportPref}
+                displayPrefs={displayPrefs}
                 tone={meta?.tone ?? "safe"}
                 checked={meta?.selectable ? getAccept(index, false) : undefined}
                 onCheckedChange={
                   meta?.selectable ? (v) => setAccept(index, v) : undefined
                 }
+                useCompany={useCompanyToLdg.has(index)}
+                onUseCompanyChange={(v) => toggleCompanyToLdg(index, v)}
               />
             ))}
 

@@ -956,6 +956,8 @@ export async function parseScheduleCSV(
       existingFlights: flightsInRange,
       csvDateRange: { start: rangeStart, end: rangeEnd },
       reportGeneratedAt: plan.generatedAt,
+      reportSource: "schedule",
+      scheduleGeneratedAt: plan.generatedAt,
       currentUser: { id: currentUser.id, crewId: currentUser.crewId },
       // Use the v2 safe/consult split so crew-only changes (incl. the
       // truncated→full name upgrade) auto-apply, while time/route changes on

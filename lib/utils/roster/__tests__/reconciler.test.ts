@@ -319,6 +319,75 @@ describe("reconcileRoster — delete_missing", () => {
 });
 
 // ============================================================
+// Stale-report gate — evaluated per source
+// ============================================================
+
+describe("reconcileRoster — per-source stale gate", () => {
+  const JUL24 = Date.UTC(2026, 6, 24, 12, 36);
+  const JUL25 = Date.UTC(2026, 6, 25, 2, 10);
+  const range = { start: "2026-04-01", end: "2026-04-30" };
+
+  it("skips a schedule report older than the flight's schedule stamp", () => {
+    const flight = makeFlight({ scheduleReportAt: JUL25, scheduledOut: "04:00" });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [flight],
+      csvDateRange: range,
+      reportGeneratedAt: JUL24,
+      reportSource: "schedule",
+      scheduleGeneratedAt: JUL24,
+    });
+    expect(ops[0].kind).toBe("skip_stale_report");
+  });
+
+  it("does NOT treat a schedule report as stale because a NEWER logbook exists", () => {
+    // The regression the single watermark caused: a Jul-24 schedule imported
+    // after a Jul-25 logbook must still apply.
+    const flight = makeFlight({ logbookReportAt: JUL25, scheduledOut: "04:00" });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [flight],
+      csvDateRange: range,
+      reportGeneratedAt: JUL24,
+      reportSource: "schedule",
+      scheduleGeneratedAt: JUL24,
+    });
+    expect(ops[0].kind).toBe("update_conflict");
+  });
+
+  it("applies a cross-hydrated import when only ONE stream is stale", () => {
+    const flight = makeFlight({
+      scheduleReportAt: JUL25, // schedule side is stale...
+      logbookReportAt: JUL24, // ...but the logbook side is fresh
+      scheduledOut: "04:00",
+    });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [flight],
+      csvDateRange: range,
+      reportGeneratedAt: JUL25,
+      reportSource: "cross_hydrated",
+      scheduleGeneratedAt: JUL24,
+      logbookGeneratedAt: JUL25,
+    });
+    expect(ops[0].kind).toBe("update_conflict");
+  });
+
+  it("still honours the legacy single watermark", () => {
+    const flight = makeFlight({ reportGeneratedAt: JUL25, scheduledOut: "04:00" });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [flight],
+      csvDateRange: range,
+      reportGeneratedAt: JUL24,
+      reportSource: "schedule",
+      scheduleGeneratedAt: JUL24,
+    });
+    expect(ops[0].kind).toBe("skip_stale_report");
+  });
+});
+
+// ============================================================
 // Summary
 // ============================================================
 

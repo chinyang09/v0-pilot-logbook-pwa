@@ -24,6 +24,7 @@ import { syncService } from "@/lib/sync";
 import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
 import { Card, CardContent } from "@/components/ui/card";
+import { FlightCardBody } from "@/components/flight-card-body";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -106,59 +107,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   displayPrefs,
 }: SwipeableFlightCardProps) {
   const isLocked = flight.isLocked || false;
-
-  const hasOut = !!flight.outTime;
-  const hasIn = !!flight.inTime;
-  const isScheduled = !hasOut || !hasIn;
-
-  const displayOut = hasOut
-    ? flight.outTime!.slice(0, 5)
-    : flight.scheduledOut
-      ? flight.scheduledOut.slice(0, 5)
-      : "";
-  const displayIn = hasIn
-    ? flight.inTime!.slice(0, 5)
-    : flight.scheduledIn
-      ? flight.scheduledIn.slice(0, 5)
-      : "";
-
-  const durationInfo = useMemo(() => {
-    if (hasOut && hasIn) {
-      return {
-        text: formatHHMMDisplay(flight.blockTime, displayPrefs?.timeFormat),
-        suffix: "hrs",
-        scheduled: false,
-      };
-    }
-    if (flight.scheduledOut && flight.scheduledIn) {
-      return {
-        text: formatScheduledDuration(flight.scheduledOut, flight.scheduledIn),
-        suffix: "sch",
-        scheduled: true,
-      };
-    }
-    return { text: "", suffix: "hrs", scheduled: false };
-  }, [hasOut, hasIn, flight.blockTime, flight.scheduledOut, flight.scheduledIn, displayPrefs?.timeFormat]);
-
-  const flightDate = parseDateLocal(flight.date);
-  const day = flightDate.getDate().toString().padStart(2, "0");
-  const month = MONTHS[flightDate.getMonth()];
-  const year = flightDate.getFullYear().toString().slice(2);
-
-  const totalDayLandings = flight.dayLandings || 0;
-  const totalNightLandings = flight.nightLandings || 0;
-
-  const crewNames = useMemo(() => {
-    const names: string[] = [];
-    if (flight.picName) names.push(flight.picName);
-    if (flight.sicName) names.push(flight.sicName);
-    if (flight.additionalCrew && Array.isArray(flight.additionalCrew)) {
-      flight.additionalCrew.forEach((crew) => {
-        if (crew.name) names.push(crew.name);
-      });
-    }
-    return names;
-  }, [flight.picName, flight.sicName, flight.additionalCrew]);
+  const isScheduled = !flight.outTime || !flight.inTime;
 
   return (
     <SwipeableCard
@@ -188,103 +137,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
         )}
       >
         <CardContent className="px-3 py-1">
-          <div className={cn("flex items-start gap-2", isScheduled && "text-orange-600 dark:text-orange-400/80")}>
-            <div className="flex flex-col items-center justify-start shrink-0 w-16">
-              <div className="text-6xl font-bold leading-none tracking-tight">
-                {day}
-              </div>
-              <div className={cn("text-base mt-0.5 tracking-wide", isScheduled ? "text-orange-600/70 dark:text-orange-400/60" : "text-muted-foreground")}>
-                {month} {year}
-              </div>
-            </div>
-
-            <div className="flex-1 min-w-0 flex flex-col justify-between">
-              <div className="flex flex-col">
-                <div className="flex items-center justify-between gap-1">
-                  <span className={cn(
-                    "text-base font-semibold leading-tight",
-                    isScheduled && hasOut && "text-foreground"
-                  )}>
-                    {displayOut}
-                  </span>
-                  <div className="flex items-center gap-1 flex-1 justify-center">
-                    <div className={cn("h-px flex-1", durationInfo.scheduled ? "bg-orange-600/40 dark:bg-orange-400/30" : "bg-border")} />
-                    <span className="text-base font-medium whitespace-nowrap px-1">
-                      {durationInfo.text}{durationInfo.text ? ` ${durationInfo.suffix}` : ""}
-                    </span>
-                    <div className={cn("h-px flex-1", durationInfo.scheduled ? "bg-orange-600/40 dark:bg-orange-400/30" : "bg-border")} />
-                  </div>
-                  <span className={cn(
-                    "text-base font-semibold leading-tight",
-                    isScheduled && hasIn && "text-foreground"
-                  )}>
-                    {displayIn}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between mt-0">
-                  {flight.isSimulator ? (
-                    <>
-                      <span className="text-2xl font-bold leading-tight tracking-tight">
-                        SIM
-                      </span>
-                      <span className="text-2xl font-bold leading-tight tracking-tight">
-                        {flight.simSessionCode || ""}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-2xl font-bold leading-tight tracking-tight">
-                        {getDepartureDisplay(flight, displayPrefs?.airportIdentifier)}
-                      </span>
-                      <span className="text-2xl font-bold leading-tight tracking-tight">
-                        {getArrivalDisplay(flight, displayPrefs?.airportIdentifier)}
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div className={cn("flex items-center gap-1.5 text-xs leading-tight mt-0.5", isScheduled ? "text-orange-600/70 dark:text-orange-400/60" : "text-muted-foreground")}>
-                <span>{flight.flightNumber || ""}</span>
-                <span>•</span>
-                <span>{flight.aircraftReg || ""}</span>
-                <span>•</span>
-                <span>{flight.aircraftType || ""}</span>
-              </div>
-
-              <div className="flex items-center justify-between mt-0.5">
-                <div className={cn("flex flex-1 min-w-0 text-xs leading-tight", isScheduled ? "text-orange-600/70 dark:text-orange-400/60" : "text-muted-foreground")}>
-                  {crewNames.map((name, i) => (
-                    <span key={`${name}-${i}`} className="flex-1 min-w-0 truncate">
-                      {i > 0 ? ", " : ""}{name}
-                    </span>
-                  ))}
-                </div>
-
-                <div className="flex items-center gap-1.5 text-xs font-medium shrink-0 ml-2">
-                  {totalDayLandings > 0 && (
-                    <div className="flex items-center gap-0.5">
-                      <Sun className="h-3 w-3" />
-                      <span>{totalDayLandings}D</span>
-                    </div>
-                  )}
-                  {totalNightLandings > 0 && (
-                    <div className="flex items-center gap-0.5">
-                      <Moon className="h-3 w-3" />
-                      <span>{totalNightLandings}N</span>
-                    </div>
-                  )}
-                  {flight.signature && (
-                    <Pen className="h-3 w-3 text-primary" />
-                  )}
-                  {isLocked && (
-                    <Lock className="h-3 w-3 text-muted-foreground" />
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          <FlightCardBody flight={flight} displayPrefs={displayPrefs} />
         </CardContent>
       </Card>
     </SwipeableCard>

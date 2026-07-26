@@ -44,6 +44,11 @@ import {
   toEngineType,
   toDashboardCategory,
 } from "@/lib/utils/parsers/shared/aircraft-classify";
+import {
+  recordReportImport,
+  stampsFor,
+  type ReportSource,
+} from "@/lib/utils/roster/report-tracking";
 import type { ImportDefaults } from "@/types/db/stores.types";
 import { recalculateFlightFields } from "@/lib/utils/flight-calculations";
 import { normalizeAircraftType } from "@/lib/utils/parsers/shared/aircraft-type-map";
@@ -61,13 +66,10 @@ const TOLDG_FIELDS = new Set([
   "nightLandings",
 ]);
 
-function appendToLdgMarker(remarks: string | undefined): string {
-  const base = remarks ?? "";
-  if (base.includes(TOLDG_DECISION_MARKER)) return base;
-  const today = new Date().toISOString().slice(0, 10);
-  const tag = `${TOLDG_DECISION_MARKER} ${today}`;
-  return base ? `${base}\n${tag}` : tag;
-}
+// The TO/LDG decision is now recorded in `FlightLog.toLdgDecidedAt` rather than
+// appended to `remarks` — remarks belong to the user. TOLDG_DECISION_MARKER is
+// still imported so the reconciler can honour it on legacy rows.
+void TOLDG_DECISION_MARKER;
 
 // ============================================================
 // Result type
@@ -95,6 +97,14 @@ export interface ExecuteOptions {
   simSessions?: ParsedSimSession[];
   /** Source of this import — written into every created/updated FlightLog. */
   importSource?: FlightLog["importSource"];
+  /**
+   * Per-stream "Generated on" stamps. Written onto every touched flight as
+   * `scheduleReportAt` / `logbookReportAt` so we can tell which report version
+   * a flight reflects — and, for the logbook stamp, whether it has ever been
+   * tallied against the company logbook at all.
+   */
+  scheduleGeneratedAt?: number | null;
+  logbookGeneratedAt?: number | null;
 }
 
 // ============================================================
@@ -144,11 +154,12 @@ async function hydrateFlightFromSector(
     pilotRole = currentUser.roles?.includes("PIC") ? "PIC" : "SIC";
   }
 
-  const remarks = sector.remarks
-    ? sector.remarks
-    : sector.flightNumber
-      ? `Imported from roster: ${sector.flightNumber}`
-      : "Imported from logbook";
+  // Remarks belong to the user. We only carry through what the source report
+  // actually said (the logbook's remarks column); we no longer synthesise
+  // "Imported from roster: TRxxx", which was redundant with importSource and —
+  // because any non-empty remarks count as a user edit — made every re-import
+  // of a previously-imported flight look like an edited conflict.
+  const remarks = sector.remarks ?? "";
 
   const create: FlightLogCreate = {
     date: sector.date,
@@ -469,6 +480,27 @@ export async function executeRosterImport(
   const importSource: FlightLog["importSource"] =
     options.importSource ?? "schedule";
 
+  // Per-stream stamps written onto every touched flight. Defaulted from the
+  // plan so a schedule-only / logbook-only import stamps the right stream even
+  // when the caller doesn't pass them explicitly.
+  const trackingSource: ReportSource =
+    importSource === "logbook"
+      ? "logbook"
+      : importSource === "cross_hydrated"
+        ? "cross_hydrated"
+        : "schedule";
+  const scheduleGeneratedAt =
+    options.scheduleGeneratedAt ??
+    (trackingSource === "schedule" ? reportGeneratedAt : null);
+  const logbookGeneratedAt =
+    options.logbookGeneratedAt ??
+    (trackingSource === "logbook" ? reportGeneratedAt : null);
+  const reportStamps = stampsFor(
+    trackingSource,
+    scheduleGeneratedAt,
+    logbookGeneratedAt
+  );
+
   // Fetch user import preferences once — reused across every create op.
   const storedPrefs = await getUserPreferences().catch(() => null);
   const importDefaults: ImportDefaults = {
@@ -542,16 +574,14 @@ export async function executeRosterImport(
       }
 
       // Even when rejected, persist the TO/LDG decision so subsequent
-      // imports don't keep raising the same question.
+      // imports don't keep raising the same question. Recorded as a field —
+      // remarks stay the user's.
       if (hasToLdgDiff && "flight" in op) {
         try {
           const fresh = await userDb.flights.get(op.flight.id);
-          if (fresh) {
-            const updatedRemarks = appendToLdgMarker(fresh.remarks);
-            if (updatedRemarks !== fresh.remarks) {
-              await updateFlight(op.flight.id, { remarks: updatedRemarks });
-              touchedFlightIds.push(op.flight.id);
-            }
+          if (fresh && fresh.toLdgDecidedAt === undefined) {
+            await updateFlight(op.flight.id, { toLdgDecidedAt: Date.now() });
+            touchedFlightIds.push(op.flight.id);
           }
         } catch (error) {
           result.errors.push({
@@ -575,7 +605,7 @@ export async function executeRosterImport(
             importSource,
             importDefaults
           );
-          const created = await addFlight(payload);
+          const created = await addFlight({ ...payload, ...reportStamps });
           touchedFlightIds.push(created.id);
           result.created++;
           break;
@@ -587,13 +617,11 @@ export async function executeRosterImport(
           const patch = buildUpdatePatch(op);
           if (reportGeneratedAt) patch.reportGeneratedAt = reportGeneratedAt;
           patch.importSource = importSource;
-          // Persist the user's TO/LDG decision in remarks so subsequent
-          // imports skip the re-flag (see reconciler's
-          // hasToLdgDecisionMarker gate).
-          if (hasToLdgDiff) {
-            const baseRemarks =
-              patch.remarks !== undefined ? patch.remarks : op.flight.remarks;
-            patch.remarks = appendToLdgMarker(baseRemarks);
+          Object.assign(patch, reportStamps);
+          // Record the user's TO/LDG decision so subsequent imports skip the
+          // re-flag (see the reconciler's hasToLdgDecisionMarker gate).
+          if (hasToLdgDiff && op.flight.toLdgDecidedAt === undefined) {
+            patch.toLdgDecidedAt = Date.now();
           }
           const updated = await updateFlight(op.flight.id, patch);
           if (!updated) {
@@ -695,7 +723,7 @@ export async function executeRosterImport(
           reportGeneratedAt,
           importSource
         );
-        await addFlight(payload);
+        await addFlight({ ...payload, ...reportStamps });
         existingSimKeys.add(`${sim.date}|${sessionCode}`);
         result.simSessionsCreated++;
       } catch (error) {
@@ -773,6 +801,18 @@ export async function executeRosterImport(
     await ensureAircraftForFlights(aircraftPairs, result);
   } catch {
     // Non-fatal — flights are already written.
+  }
+
+  // ----- 8. Advance the device-level report watermarks so a later upload of
+  //          an OLDER file can be recognised as such. Never moves backwards. --
+  try {
+    await recordReportImport(trackingSource, reportGeneratedAt);
+    if (trackingSource === "cross_hydrated") {
+      await recordReportImport("schedule", scheduleGeneratedAt);
+      await recordReportImport("logbook", logbookGeneratedAt);
+    }
+  } catch {
+    // Watermarks are advisory — never fail an import over them.
   }
 
   return result;

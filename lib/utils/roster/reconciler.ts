@@ -29,6 +29,7 @@
 import type { FlightLog } from "../../../types/entities/flight.types";
 import type { ScheduledCrewMember } from "@/types/entities/roster.types";
 import { classifyChanges } from "./classification";
+import { existingStampFor, type ReportSource } from "./report-tracking";
 
 // ============================================================
 // Public types
@@ -142,6 +143,9 @@ export interface FieldDiff {
 export const TOLDG_DECISION_MARKER = "[TO/LDG decision recorded]";
 
 function hasToLdgDecisionMarker(flight: FlightLog): boolean {
+  // Structured field first; fall back to the legacy remarks marker so flights
+  // imported before the field existed keep their recorded decision.
+  if (flight.toLdgDecidedAt !== undefined) return true;
   return (flight.remarks || "").includes(TOLDG_DECISION_MARKER);
 }
 
@@ -203,10 +207,19 @@ export interface ReconcileInput {
   csvDateRange: { start: string; end: string };
   /**
    * "Generated on..." footer of the report being imported (epoch ms).
-   * When provided, the reconciler refuses to update flights whose
-   * `reportGeneratedAt` is strictly newer.
+   * When provided, the reconciler refuses to update flights already carrying a
+   * strictly newer report of the SAME source.
    */
   reportGeneratedAt?: number | null;
+  /**
+   * Which stream this import came from. Schedule and logbook reports are
+   * tracked independently, so a Jul-24 schedule is not "stale" merely because
+   * a Jul-25 logbook was imported earlier.
+   */
+  reportSource?: ReportSource;
+  /** Per-stream stamps — set both for a cross-hydrated import. */
+  scheduleGeneratedAt?: number | null;
+  logbookGeneratedAt?: number | null;
   /**
    * Today's UTC date in YYYY-MM-DD. Defaulted from `new Date()`. Exposed
    * for tests so they can pin "today".
@@ -709,6 +722,53 @@ function diffSectorVsFlight(
 }
 
 // ============================================================
+// Stale-report gate (per source)
+// ============================================================
+
+/**
+ * Decide whether `flight` already reflects a NEWER report than the one being
+ * imported, comparing each contributing stream against its own per-flight
+ * stamp. Returns the offending pair for the audit entry, or null to proceed.
+ *
+ * A cross-hydrated import contributes both streams and is stale only when
+ * every stream it carries is stale — a fresh logbook paired with an older
+ * schedule must still be applied.
+ */
+function staleAgainst(
+  flight: FlightLog,
+  input: ReconcileInput
+): { existing: number; incoming: number } | null {
+  const source: ReportSource = input.reportSource ?? "schedule";
+  const primary = input.reportGeneratedAt ?? null;
+
+  const pairs: Array<{ existing: number; incoming: number }> = [];
+  const consider = (
+    stream: "schedule" | "logbook",
+    incomingTs: number | null | undefined
+  ) => {
+    const incoming = incomingTs ?? primary;
+    if (!incoming) return;
+    const existing = existingStampFor(flight, stream);
+    if (!existing) return;
+    pairs.push({ existing, incoming });
+  };
+
+  if (source === "schedule" || source === "cross_hydrated") {
+    consider("schedule", input.scheduleGeneratedAt);
+  }
+  if (source === "logbook" || source === "cross_hydrated") {
+    consider("logbook", input.logbookGeneratedAt);
+  }
+
+  if (pairs.length === 0) return null;
+  const allStale = pairs.every((p) => p.existing > p.incoming);
+  if (!allStale) return null;
+
+  // Report the most-recent offending stamp.
+  return pairs.reduce((a, b) => (b.existing > a.existing ? b : a));
+}
+
+// ============================================================
 // Today helper
 // ============================================================
 
@@ -754,19 +814,18 @@ export function reconcileRoster(
 
     matchedFlightIds.add(match.id);
 
-    // Stale-report gate: if the existing flight came from a NEWER report,
-    // refuse to update it. New flights (no match) always go through.
-    if (
-      reportGeneratedAt &&
-      match.reportGeneratedAt &&
-      match.reportGeneratedAt > reportGeneratedAt
-    ) {
+    // Stale-report gate, evaluated PER SOURCE: refuse to update a flight that
+    // already carries a newer report of the same stream. A cross-hydrated
+    // import contributes two streams and is only skipped when BOTH are stale —
+    // otherwise the fresher half would be thrown away with the older one.
+    const stale = staleAgainst(match, input);
+    if (stale) {
       operations.push({
         kind: "skip_stale_report",
         flight: match,
         sector,
-        existingGeneratedAt: match.reportGeneratedAt,
-        reportGeneratedAt,
+        existingGeneratedAt: stale.existing,
+        reportGeneratedAt: stale.incoming,
       });
       continue;
     }
