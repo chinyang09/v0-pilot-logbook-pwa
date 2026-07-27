@@ -28,12 +28,15 @@ function toMinutes(hhmm: string): number | null {
 
 const DAY_MINUTES = 24 * 60;
 
-// SVG geometry (viewBox units).
+// SVG geometry (viewBox units). Deliberately flat — the arc only has to show
+// which side of the horizon an event fell on, and a tall curve made the flight
+// card unnecessarily deep.
 const W = 300;
-const H = 78;
-const HORIZON_Y = 46;
-const AMPLITUDE_DAY = 32;
-const AMPLITUDE_NIGHT = 22;
+const H = 56;
+const ICON_Y = 9;
+const HORIZON_Y = 36;
+const AMPLITUDE_DAY = 17;
+const AMPLITUDE_NIGHT = 12;
 
 /**
  * Sun elevation as a fraction, using sunrise/sunset as the zero crossings:
@@ -62,44 +65,28 @@ interface AxisMark {
   emphasis?: boolean;
 }
 
-/** Horizontal gap (in % of the axis) below which two labels would collide. */
-const LABEL_MIN_GAP_PCT = 16;
-
 /**
- * Lay labels out under the axis, dropping any that would overlap a
- * previously-placed one onto a second row. A takeoff minutes away from
- * sunrise is the normal case, not an edge case, so they must both stay
- * readable.
+ * A row of labels pinned at their own time positions. Sun crossings and the
+ * flight event live on opposite sides of the curve, so a row never has to
+ * resolve a collision between them.
  */
-function AxisLabels({ marks }: { marks: AxisMark[] }) {
-  const placed = [...marks]
-    .sort((a, b) => a.minute - b.minute)
-    .map((mark) => ({
-      ...mark,
-      leftPct: Math.min(94, Math.max(6, (mark.minute / DAY_MINUTES) * 100)),
-      row: 0,
-    }));
-
-  for (let i = 1; i < placed.length; i++) {
-    for (let j = 0; j < i; j++) {
-      if (
-        placed[j].row === placed[i].row &&
-        Math.abs(placed[j].leftPct - placed[i].leftPct) < LABEL_MIN_GAP_PCT
-      ) {
-        placed[i].row = placed[j].row + 1;
-      }
-    }
-  }
-
-  const rows = Math.max(...placed.map((p) => p.row)) + 1;
-
+function AxisLabels({
+  marks,
+  align,
+}: {
+  marks: AxisMark[];
+  align: "above" | "below";
+}) {
+  if (marks.length === 0) return null;
   return (
-    <div className="relative mt-0.5" style={{ height: `${rows * 1.6 + 0.2}rem` }}>
-      {placed.map((mark) => (
+    <div className={cn("relative h-6", align === "above" ? "mb-0.5" : "mt-0.5")}>
+      {marks.map((mark) => (
         <div
           key={`${mark.caption}-${mark.minute}`}
           className="absolute -translate-x-1/2 text-center leading-tight"
-          style={{ left: `${mark.leftPct}%`, top: `${mark.row * 1.6}rem` }}
+          style={{
+            left: `${Math.min(94, Math.max(6, (mark.minute / DAY_MINUTES) * 100))}%`,
+          }}
         >
           <div className="text-[8px] uppercase tracking-wide text-muted-foreground/70">
             {mark.caption}
@@ -130,6 +117,14 @@ export interface SunTimelineProps {
   /** UTC HH:MM of the sun crossings at that airport, same day. */
   sunriseUtc?: string | null;
   sunsetUtc?: string | null;
+  /**
+   * Show times as Zulu (UTC, "Z"-suffixed) per the user's display preference.
+   * When false, times are shifted into the airport's local time by
+   * `tzOffsetHours` and shown without a suffix.
+   */
+  zulu?: boolean;
+  /** Airport UTC offset in hours; used only when `zulu` is false. */
+  tzOffsetHours?: number;
 }
 
 export function SunTimeline({
@@ -138,6 +133,8 @@ export function SunTimeline({
   eventUtc,
   sunriseUtc,
   sunsetUtc,
+  zulu = true,
+  tzOffsetHours = 0,
 }: SunTimelineProps) {
   const gradId = useId().replace(/:/g, "");
   const rise = sunriseUtc ? toMinutes(sunriseUtc) : null;
@@ -169,6 +166,21 @@ export function SunTimeline({
 
   const Icon = kind === "takeoff" ? PlaneTakeoff : PlaneLanding;
 
+  // Times follow the user's display preference: Zulu with a "Z" suffix, or the
+  // airport's local clock with none. The curve itself is always plotted in UTC
+  // — shifting it would move the sun, not the labels.
+  const fmt = (utc: string): string => {
+    if (zulu) return `${utc}Z`;
+    const mins = toMinutes(utc);
+    if (mins === null) return utc;
+    const shifted =
+      ((mins + Math.round(tzOffsetHours * 60)) % DAY_MINUTES + DAY_MINUTES) %
+      DAY_MINUTES;
+    const h = String(Math.floor(shifted / 60)).padStart(2, "0");
+    const m = String(shifted % 60).padStart(2, "0");
+    return `${h}:${m}`;
+  };
+
   return (
     <div className="w-full">
       <div className="mb-0.5 flex items-baseline gap-1.5 text-[10px]">
@@ -176,8 +188,16 @@ export function SunTimeline({
           {kind === "takeoff" ? "Takeoff" : "Landing"}
         </span>
         {airport && <span className="font-medium">{airport}</span>}
-        <span className="text-muted-foreground/70">all times UTC</span>
       </div>
+
+      {/* Sun crossings sit ABOVE the curve; the flight event sits below. */}
+      <AxisLabels
+        align="above"
+        marks={[
+          { minute: rise, caption: "Sunrise", value: fmt(sunriseUtc!) },
+          { minute: set, caption: "Sunset", value: fmt(sunsetUtc!) },
+        ]}
+      />
 
       <svg
         viewBox={`0 0 ${W} ${H}`}
@@ -185,8 +205,8 @@ export function SunTimeline({
         style={{ height: "auto" }}
         role="img"
         aria-label={
-          `${kind} at ${eventUtc ?? "unknown"}Z, ` +
-          `sunrise ${sunriseUtc}Z, sunset ${sunsetUtc}Z — ` +
+          `${kind} at ${eventUtc ? fmt(eventUtc) : "unknown"}, ` +
+          `sunrise ${fmt(sunriseUtc!)}, sunset ${fmt(sunsetUtc!)} — ` +
           (isNight ? "night" : "day")
         }
       >
@@ -255,32 +275,32 @@ export function SunTimeline({
           </g>
         ))}
 
-        {/* The event, pinned on the curve */}
+        {/* The event: a tick where it meets the curve, with a leader line
+            running UP to the icon so the marker never sits on top of the arc. */}
         {eventX !== null && eventY !== null && (
           <g>
             <line
               x1={eventX}
               y1={eventY}
               x2={eventX}
-              y2={HORIZON_Y}
+              y2={ICON_Y + 6}
               stroke="currentColor"
-              strokeWidth="0.75"
-              className="text-primary/60"
+              strokeWidth="0.85"
+              className="text-primary/70"
             />
             <circle
               cx={eventX}
               cy={eventY}
-              r="9"
-              fill="var(--color-background)"
-              stroke="currentColor"
-              strokeWidth="1.25"
-              className="text-primary"
+              r="2.4"
+              fill="var(--color-primary)"
+              stroke="var(--color-background)"
+              strokeWidth="1"
             />
             <Icon
-              x={eventX - 5.5}
-              y={eventY - 5.5}
-              width={11}
-              height={11}
+              x={eventX - 6}
+              y={ICON_Y - 6}
+              width={12}
+              height={12}
               className="text-primary"
               stroke="currentColor"
             />
@@ -288,22 +308,20 @@ export function SunTimeline({
         )}
       </svg>
 
-      {/* Labels pinned along the axis, stacked when they would collide */}
       <AxisLabels
-        marks={[
-          { minute: rise, caption: "Sunrise", value: `${sunriseUtc}` },
-          { minute: set, caption: "Sunset", value: `${sunsetUtc}` },
-          ...(event !== null && eventUtc
+        align="below"
+        marks={
+          event !== null && eventUtc
             ? [
                 {
                   minute: event,
                   caption: kind === "takeoff" ? "T/O" : "LDG",
-                  value: eventUtc,
+                  value: fmt(eventUtc),
                   emphasis: true,
                 },
               ]
-            : []),
-        ]}
+            : []
+        }
       />
     </div>
   );

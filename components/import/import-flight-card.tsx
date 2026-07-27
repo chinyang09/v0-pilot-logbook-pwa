@@ -217,11 +217,13 @@ function DayNightFlag({
   diffs,
   useCompany,
   onUseCompanyChange,
+  displayPrefs,
 }: {
   op: AcceptableOperation;
   diffs: Map<string, FieldDiff>;
   useCompany: boolean;
   onUseCompanyChange?: (v: boolean) => void;
+  displayPrefs?: DisplayPreferences;
 }) {
   const disagreements = TOLDG_FIELDS.filter(
     (f) => diffs.get(f)?.companyValue !== undefined
@@ -246,6 +248,10 @@ function DayNightFlag({
               eventUtc={isTakeoff ? ctx?.outUtc : ctx?.inUtc}
               sunriseUtc={isTakeoff ? ctx?.depSunriseUtc : ctx?.arrSunriseUtc}
               sunsetUtc={isTakeoff ? ctx?.depSunsetUtc : ctx?.arrSunsetUtc}
+              zulu={displayPrefs?.useZuluTime ?? true}
+              tzOffsetHours={
+                (isTakeoff ? ctx?.depTzOffset : ctx?.arrTzOffset) ?? 0
+              }
             />
             <DayNightChoice
               ours={verdictFrom(diffs, side, (d) => d?.to)}
@@ -383,6 +389,7 @@ export function ImportFlightCard({
         diffs={diffs}
         useCompany={useCompany}
         onUseCompanyChange={onUseCompanyChange}
+        displayPrefs={displayPrefs}
       />
 
       <RoleChoice diffs={diffs} value={roleOverride} onChange={onRoleChange} />

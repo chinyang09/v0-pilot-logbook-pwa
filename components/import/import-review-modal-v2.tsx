@@ -13,7 +13,7 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,6 +24,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { FilterChips } from "@/components/ui/filter-chips";
+import {
+  ProgressiveBlur,
+  RadialBlurBackdrop,
+} from "@/components/ui/progressive-blur";
+import { GlassContainer } from "@/components/ui/glass-container";
 import type {
   AcceptableOperation,
   PlannedImport,
@@ -130,6 +135,24 @@ export function ImportReviewModalV2({
   const [roleOverrides, setRoleOverrides] = useState<Map<number, PilotRole>>(
     new Map()
   );
+  // Header and footer float OVER the scroll area (like the main panel), so the
+  // list dissolves into a progressive blur instead of stopping at a hard edge.
+  // Their heights are measured so the scroll padding always clears them.
+  const [chromeHeights, setChromeHeights] = useState({ top: 96, bottom: 64 });
+  const observeChrome = useCallback(
+    (edge: "top" | "bottom") => (node: HTMLDivElement | null) => {
+      if (!node) return;
+      const ro = new ResizeObserver(() => {
+        const h = node.offsetHeight;
+        setChromeHeights((prev) =>
+          prev[edge] === h ? prev : { ...prev, [edge]: h }
+        );
+      });
+      ro.observe(node);
+    },
+    []
+  );
+  const headerRef = useRef<HTMLDivElement | null>(null);
   const [activeTab, setActiveTab] = useState<Bucket | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const { preferences } = usePreferences();
@@ -301,28 +324,42 @@ export function ImportReviewModalV2({
         // Reads as an app surface rather than a plain modal: translucent panel
         // over a blurred backdrop, matching the glass chrome used by the nav
         // pill and the floating action buttons.
-        className="z-[110] flex max-w-3xl flex-col gap-0 overflow-hidden rounded-3xl border-white/10 bg-card/80 p-0 shadow-2xl backdrop-blur-2xl backdrop-saturate-150 max-h-[calc(100dvh-7rem)] top-[calc(env(safe-area-inset-top)+4.5rem)] translate-y-0 sm:top-[50%] sm:-translate-y-1/2"
-        overlayClassName="z-[105] bg-black/50 backdrop-blur-sm"
+        className="z-[110] block max-w-3xl gap-0 overflow-hidden rounded-3xl border-white/10 bg-card/70 p-0 shadow-2xl backdrop-saturate-150 h-[calc(100dvh-7rem)] max-h-[46rem] top-[calc(env(safe-area-inset-top)+4.5rem)] translate-y-0 sm:top-[50%] sm:-translate-y-1/2"
+        // The backdrop blur is strongest around the dialog and clears toward
+        // the screen edges, so the app stays readable behind it.
+        overlayClassName="z-[105] bg-black/40"
       >
-        <DialogHeader className="border-b border-white/10 bg-background/40 px-4 pt-4 backdrop-blur-xl sm:px-6 sm:pt-5">
-          <DialogTitle>Review import</DialogTitle>
-          <DialogDescription className="tabular-nums">
-            {plan.dateRange.start} – {plan.dateRange.end}
-            {generatedDate ? ` · generated ${generatedDate} UTC` : ""}
-          </DialogDescription>
-        </DialogHeader>
+        <RadialBlurBackdrop className="-z-10" />
 
-        {/* Tab strip */}
-        <div className="border-b border-white/10 bg-background/40 px-4 pb-3 pt-3 backdrop-blur-xl sm:px-6">
-          <FilterChips
-            options={tabs}
-            value={(current ?? tabs[0]?.value) as Bucket}
-            onChange={(v) => {
-              setActiveTab(v as Bucket);
-              setVisibleCount(PAGE_SIZE);
-            }}
-            className="mx-0 px-0"
-          />
+        {/* Floating top chrome: title + tab chips over a progressive blur. */}
+        <div
+          ref={(node) => {
+            headerRef.current = node;
+            observeChrome("top")(node);
+          }}
+          className="absolute inset-x-0 top-0 z-20"
+        >
+          <ProgressiveBlur side="top" className="h-[130%]" />
+          <div className="relative">
+            <DialogHeader className="px-4 pt-4 sm:px-6 sm:pt-5">
+              <DialogTitle>Review import</DialogTitle>
+              <DialogDescription className="tabular-nums">
+                {plan.dateRange.start} – {plan.dateRange.end}
+                {generatedDate ? ` · generated ${generatedDate}` : ""}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="px-4 pb-3 pt-3 sm:px-6">
+              <FilterChips
+                options={tabs}
+                value={(current ?? tabs[0]?.value) as Bucket}
+                onChange={(v) => {
+                  setActiveTab(v as Bucket);
+                  setVisibleCount(PAGE_SIZE);
+                }}
+                className="mx-0 px-0"
+              />
+            </div>
+          </div>
         </div>
 
         {/* Panel.
@@ -330,7 +367,13 @@ export function ImportReviewModalV2({
             the dialog once this list hits its end — that chaining scrolled the
             flight list underneath, and the glass action buttons re-sampled
             their backdrop as it moved, which read as them being tapped. */}
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3 sm:px-6">
+        <div
+          className="h-full overflow-y-auto overscroll-contain px-4 sm:px-6"
+          style={{
+            paddingTop: chromeHeights.top + 8,
+            paddingBottom: chromeHeights.bottom + 8,
+          }}
+        >
           {meta && (
             <div className="mb-3 flex items-start justify-between gap-3">
               <p className="text-xs text-muted-foreground">{meta.hint}</p>
@@ -393,31 +436,41 @@ export function ImportReviewModalV2({
           </div>
         </div>
 
-        <DialogFooter className="flex-row items-center justify-between gap-3 border-t border-white/10 bg-background/40 px-4 py-3 backdrop-blur-xl sm:px-6">
-          <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            {breakdown || "No changes selected"}
-          </p>
-          <div className="flex shrink-0 gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onCancel}
-              className="rounded-full border border-white/10 bg-white/5 px-4 backdrop-blur-md hover:bg-white/10"
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleConfirm}
-              className="rounded-full px-5 shadow-lg shadow-primary/20"
-            >
-              Apply
-              {totalActions > 0 && (
-                <span className="ml-1 tabular-nums">{totalActions}</span>
-              )}
-            </Button>
-          </div>
-        </DialogFooter>
+        {/* Floating bottom chrome: glass actions over a progressive blur. */}
+        <div
+          ref={observeChrome("bottom")}
+          className="absolute inset-x-0 bottom-0 z-20"
+        >
+          <ProgressiveBlur side="bottom" className="h-[150%]" />
+          <DialogFooter className="relative flex-row items-center justify-between gap-3 px-4 py-3 sm:px-6">
+            <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+              {breakdown || "No changes selected"}
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <GlassContainer cornerRadius={20}>
+                <Button
+                  variant="ghost"
+                  onClick={onCancel}
+                  className="h-10 rounded-full px-4"
+                >
+                  Cancel
+                </Button>
+              </GlassContainer>
+              <GlassContainer cornerRadius={20}>
+                <Button
+                  variant="ghost"
+                  onClick={handleConfirm}
+                  className="h-10 rounded-full px-5 font-semibold text-primary"
+                >
+                  Apply
+                  {totalActions > 0 && (
+                    <span className="ml-1 tabular-nums">{totalActions}</span>
+                  )}
+                </Button>
+              </GlassContainer>
+            </div>
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
