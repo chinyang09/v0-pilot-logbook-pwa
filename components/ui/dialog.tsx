@@ -51,15 +51,24 @@ function DialogContent({
   overlayClassName,
   children,
   showCloseButton = true,
+  backdropSlot,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
   /** Extra classes for the backdrop overlay (e.g. a higher z-index). */
   overlayClassName?: string
+  /**
+   * Decorative layer rendered between the overlay and the panel, inside the
+   * same portal. Lets a dialog add its own backdrop treatment (e.g. a radial
+   * progressive blur) without being clipped by the panel's `overflow-hidden`
+   * and transform.
+   */
+  backdropSlot?: React.ReactNode
 }) {
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay className={overlayClassName} />
+      {backdropSlot}
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(

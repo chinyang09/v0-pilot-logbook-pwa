@@ -1,21 +1,20 @@
 /**
  * Sunrise / sunset arc.
  *
- * Draws the sun's path across the horizon for one airport on one day: the
- * curve rises at sunrise, peaks at solar noon and sets at sunset, with daylight
- * filled amber above the horizon line and night filled dark below it. The
- * takeoff or landing is pinned on the curve with a plane icon, so "was this at
- * night?" is answered by looking rather than by reading a verdict.
+ * The sun's path across the horizon for one airport on one day. The flight
+ * event sits ABOVE the arc — icon and time together, on a leader line dropping
+ * to the horizon — while the two sun crossings sit BELOW it, each on its own
+ * leader and marked with an icon rather than a word.
  *
- * Sunrise and sunset are labelled at their own positions along the axis, as is
- * the event itself.
+ * Reading it needs no legend: if the plane's leader meets the horizon on the
+ * dark side of the curve, it was night.
  */
 
 "use client";
 
 import { useId } from "react";
-import { cn } from "@/lib/utils";
-import { PlaneTakeoff, PlaneLanding } from "lucide-react";
+import { PlaneTakeoff, PlaneLanding, Sunrise, Sunset } from "lucide-react";
+import { OptionPair } from "./option-pair";
 
 function toMinutes(hhmm: string): number | null {
   const m = hhmm?.match(/^(\d{1,2}):(\d{2})/);
@@ -28,21 +27,19 @@ function toMinutes(hhmm: string): number | null {
 
 const DAY_MINUTES = 24 * 60;
 
-// SVG geometry (viewBox units). Deliberately flat — the arc only has to show
-// which side of the horizon an event fell on, and a tall curve made the flight
-// card unnecessarily deep.
+// SVG geometry (viewBox units) — deliberately shallow. The arc only has to
+// show which side of the horizon an event fell on, and height here is height
+// added to every card in the list.
 const W = 300;
-const H = 56;
-const ICON_Y = 9;
-const HORIZON_Y = 36;
-const AMPLITUDE_DAY = 17;
-const AMPLITUDE_NIGHT = 12;
+const H = 40;
+const HORIZON_Y = 21;
+const AMPLITUDE_DAY = 13;
+const AMPLITUDE_NIGHT = 9;
 
 /**
  * Sun elevation as a fraction, using sunrise/sunset as the zero crossings:
- * +1 at solar noon, -1 at solar midnight. Not astronomically exact — it is a
- * faithful *shape* whose crossings are the real computed times, which is what
- * makes the picture trustworthy.
+ * +1 at solar noon, -1 at solar midnight. An idealised shape whose crossings
+ * are the real computed times.
  */
 function elevation(minute: number, sunrise: number, dayLength: number): number {
   const phase = ((minute - sunrise) % DAY_MINUTES + DAY_MINUTES) % DAY_MINUTES;
@@ -57,74 +54,23 @@ function elevation(minute: number, sunrise: number, dayLength: number): number {
 const xOf = (minute: number) => (minute / DAY_MINUTES) * W;
 const yOf = (elev: number) =>
   HORIZON_Y - elev * (elev >= 0 ? AMPLITUDE_DAY : AMPLITUDE_NIGHT);
-
-interface AxisMark {
-  minute: number;
-  caption: string;
-  value: string;
-  emphasis?: boolean;
-}
-
-/**
- * A row of labels pinned at their own time positions. Sun crossings and the
- * flight event live on opposite sides of the curve, so a row never has to
- * resolve a collision between them.
- */
-function AxisLabels({
-  marks,
-  align,
-}: {
-  marks: AxisMark[];
-  align: "above" | "below";
-}) {
-  if (marks.length === 0) return null;
-  return (
-    <div className={cn("relative h-6", align === "above" ? "mb-0.5" : "mt-0.5")}>
-      {marks.map((mark) => (
-        <div
-          key={`${mark.caption}-${mark.minute}`}
-          className="absolute -translate-x-1/2 text-center leading-tight"
-          style={{
-            left: `${Math.min(94, Math.max(6, (mark.minute / DAY_MINUTES) * 100))}%`,
-          }}
-        >
-          <div className="text-[8px] uppercase tracking-wide text-muted-foreground/70">
-            {mark.caption}
-          </div>
-          <div
-            className={cn(
-              "text-[10px] tabular-nums",
-              mark.emphasis
-                ? "font-semibold text-foreground"
-                : "text-muted-foreground"
-            )}
-          >
-            {mark.value}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+const pctOf = (minute: number) =>
+  Math.min(92, Math.max(8, (minute / DAY_MINUTES) * 100));
 
 export interface SunTimelineProps {
-  /** What the marker represents. */
   kind: "takeoff" | "landing";
-  /** Airport the sun times belong to. */
+  /** Airport label, already formatted to the user's ICAO/IATA preference. */
   airport?: string;
   /** UTC HH:MM of the event. */
   eventUtc?: string;
   /** UTC HH:MM of the sun crossings at that airport, same day. */
   sunriseUtc?: string | null;
   sunsetUtc?: string | null;
-  /**
-   * Show times as Zulu (UTC, "Z"-suffixed) per the user's display preference.
-   * When false, times are shifted into the airport's local time by
-   * `tzOffsetHours` and shown without a suffix.
-   */
+  /** Zulu display (adds "Z"); otherwise shifted to the airport's local clock. */
   zulu?: boolean;
-  /** Airport UTC offset in hours; used only when `zulu` is false. */
   tzOffsetHours?: number;
+  /** Rendered on the header row, opposite the title. */
+  action?: React.ReactNode;
 }
 
 export function SunTimeline({
@@ -135,40 +81,32 @@ export function SunTimeline({
   sunsetUtc,
   zulu = true,
   tzOffsetHours = 0,
+  action,
 }: SunTimelineProps) {
   const gradId = useId().replace(/:/g, "");
   const rise = sunriseUtc ? toMinutes(sunriseUtc) : null;
   const set = sunsetUtc ? toMinutes(sunsetUtc) : null;
   const event = eventUtc ? toMinutes(eventUtc) : null;
 
-  // Without both crossings there is no arc to draw.
   if (rise === null || set === null) return null;
 
   const dayLength = ((set - rise) % DAY_MINUTES + DAY_MINUTES) % DAY_MINUTES;
 
-  // Sample the curve across the whole 24h window.
-  const step = 8;
   const points: Array<[number, number]> = [];
-  for (let m = 0; m <= DAY_MINUTES; m += step) {
+  for (let m = 0; m <= DAY_MINUTES; m += 8) {
     points.push([xOf(m), yOf(elevation(m, rise, dayLength))]);
   }
   const curve = points.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
+  const fill = `M0,${HORIZON_Y} L${curve} L${W},${HORIZON_Y} Z`;
 
-  // Fills: clip the curve area against the horizon on each side.
-  const dayFill = `M0,${HORIZON_Y} L${curve} L${W},${HORIZON_Y} Z`;
-  const nightFill = dayFill; // same path; split by clip rects below.
-
-  const eventElev =
-    event !== null ? elevation(event, rise, dayLength) : null;
+  const eventElev = event !== null ? elevation(event, rise, dayLength) : null;
   const eventX = event !== null ? xOf(event) : null;
-  const eventY = eventElev !== null ? yOf(eventElev) : null;
   const isNight = eventElev !== null && eventElev < 0;
 
   const Icon = kind === "takeoff" ? PlaneTakeoff : PlaneLanding;
 
-  // Times follow the user's display preference: Zulu with a "Z" suffix, or the
-  // airport's local clock with none. The curve itself is always plotted in UTC
-  // — shifting it would move the sun, not the labels.
+  // Times follow the user's display preference. The curve stays plotted in
+  // UTC — shifting it would move the sun, not the labels.
   const fmt = (utc: string): string => {
     if (zulu) return `${utc}Z`;
     const mins = toMinutes(utc);
@@ -176,37 +114,46 @@ export function SunTimeline({
     const shifted =
       ((mins + Math.round(tzOffsetHours * 60)) % DAY_MINUTES + DAY_MINUTES) %
       DAY_MINUTES;
-    const h = String(Math.floor(shifted / 60)).padStart(2, "0");
-    const m = String(shifted % 60).padStart(2, "0");
-    return `${h}:${m}`;
+    return `${String(Math.floor(shifted / 60)).padStart(2, "0")}:${String(
+      shifted % 60
+    ).padStart(2, "0")}`;
   };
 
   return (
     <div className="w-full">
-      <div className="mb-0.5 flex items-baseline gap-1.5 text-[10px]">
-        <span className="font-semibold uppercase tracking-wider text-muted-foreground">
-          {kind === "takeoff" ? "Takeoff" : "Landing"}
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-baseline gap-1.5 text-[10px]">
+          <span className="font-semibold uppercase tracking-wider text-muted-foreground">
+            {kind === "takeoff" ? "Takeoff" : "Landing"}
+          </span>
+          {airport && <span className="font-medium">{airport}</span>}
         </span>
-        {airport && <span className="font-medium">{airport}</span>}
+        {action}
       </div>
 
-      {/* Sun crossings sit ABOVE the curve; the flight event sits below. */}
-      <AxisLabels
-        align="above"
-        marks={[
-          { minute: rise, caption: "Sunrise", value: fmt(sunriseUtc!) },
-          { minute: set, caption: "Sunset", value: fmt(sunsetUtc!) },
-        ]}
-      />
+      {/* Event: icon + time, above the arc */}
+      <div className="relative h-4">
+        {event !== null && eventUtc && (
+          <div
+            className="absolute flex -translate-x-1/2 items-center gap-1 whitespace-nowrap"
+            style={{ left: `${pctOf(event)}%` }}
+          >
+            <Icon className="h-3 w-3 text-primary" aria-hidden />
+            <span className="text-[10px] font-semibold tabular-nums text-foreground">
+              {fmt(eventUtc)}
+            </span>
+          </div>
+        )}
+      </div>
 
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="w-full"
+        className="block w-full"
         style={{ height: "auto" }}
         role="img"
         aria-label={
-          `${kind} at ${eventUtc ? fmt(eventUtc) : "unknown"}, ` +
-          `sunrise ${fmt(sunriseUtc!)}, sunset ${fmt(sunsetUtc!)} — ` +
+          `${kind} at ${eventUtc ? fmt(eventUtc) : "unknown"}, sunrise ` +
+          `${fmt(sunriseUtc!)}, sunset ${fmt(sunsetUtc!)} — ` +
           (isNight ? "night" : "day")
         }
       >
@@ -227,176 +174,108 @@ export function SunTimeline({
           </clipPath>
         </defs>
 
-        <path d={dayFill} fill={`url(#day-${gradId})`} clipPath={`url(#above-${gradId})`} />
-        <path d={nightFill} fill={`url(#night-${gradId})`} clipPath={`url(#below-${gradId})`} />
+        <path d={fill} fill={`url(#day-${gradId})`} clipPath={`url(#above-${gradId})`} />
+        <path d={fill} fill={`url(#night-${gradId})`} clipPath={`url(#below-${gradId})`} />
 
-        {/* Horizon */}
         <line
           x1="0"
           y1={HORIZON_Y}
           x2={W}
           y2={HORIZON_Y}
           stroke="currentColor"
-          strokeWidth="0.75"
+          strokeWidth="0.6"
           className="text-muted-foreground/40"
         />
-
-        {/* The sun's path */}
         <polyline
           points={curve}
           fill="none"
           stroke="currentColor"
-          strokeWidth="1"
+          strokeWidth="0.9"
           className="text-muted-foreground/50"
         />
 
-        {/* Sunrise / sunset crossings */}
+        {/* Sun crossings: solid leaders dropping to their labels below. */}
         {[rise, set].map((m, i) => (
           <g key={i}>
             <line
               x1={xOf(m)}
-              y1={HORIZON_Y - AMPLITUDE_DAY - 4}
+              y1={HORIZON_Y}
               x2={xOf(m)}
-              y2={HORIZON_Y + AMPLITUDE_NIGHT + 4}
+              y2={H}
               stroke="currentColor"
-              strokeWidth="0.5"
-              strokeDasharray="2 2"
-              className="text-muted-foreground/35"
+              strokeWidth="0.7"
+              className="text-muted-foreground/45"
             />
             <circle
               cx={xOf(m)}
               cy={HORIZON_Y}
-              r="2.5"
+              r="1.8"
               fill="var(--color-background)"
               stroke="currentColor"
-              strokeWidth="1"
+              strokeWidth="0.9"
               className="text-muted-foreground"
             />
           </g>
         ))}
 
-        {/* The event: a tick where it meets the curve, with a leader line
-            running UP to the icon so the marker never sits on top of the arc. */}
-        {eventX !== null && eventY !== null && (
-          <g>
+        {/* The event's leader runs from its icon down to the HORIZON. */}
+        {eventX !== null && (
+          <>
             <line
               x1={eventX}
-              y1={eventY}
+              y1="0"
               x2={eventX}
-              y2={ICON_Y + 6}
+              y2={HORIZON_Y}
               stroke="currentColor"
-              strokeWidth="0.85"
-              className="text-primary/70"
+              strokeWidth="0.9"
+              className="text-primary/80"
             />
-            <circle
-              cx={eventX}
-              cy={eventY}
-              r="2.4"
-              fill="var(--color-primary)"
-              stroke="var(--color-background)"
-              strokeWidth="1"
-            />
-            <Icon
-              x={eventX - 6}
-              y={ICON_Y - 6}
-              width={12}
-              height={12}
-              className="text-primary"
-              stroke="currentColor"
-            />
-          </g>
+            <circle cx={eventX} cy={HORIZON_Y} r="1.9" fill="var(--color-primary)" />
+          </>
         )}
       </svg>
 
-      <AxisLabels
-        align="below"
-        marks={
-          event !== null && eventUtc
-            ? [
-                {
-                  minute: event,
-                  caption: kind === "takeoff" ? "T/O" : "LDG",
-                  value: fmt(eventUtc),
-                  emphasis: true,
-                },
-              ]
-            : []
-        }
-      />
+      {/* Sun crossings: icon + time, below the arc */}
+      <div className="relative h-4">
+        {[
+          { minute: set, utc: sunsetUtc!, Ico: Sunset },
+          { minute: rise, utc: sunriseUtc!, Ico: Sunrise },
+        ].map(({ minute, utc, Ico }) => (
+          <div
+            key={utc}
+            className="absolute flex -translate-x-1/2 items-center gap-1 whitespace-nowrap"
+            style={{ left: `${pctOf(minute)}%` }}
+          >
+            <Ico className="h-3 w-3 text-muted-foreground/80" aria-hidden />
+            <span className="text-[10px] tabular-nums text-muted-foreground">
+              {fmt(utc)}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-function ChoiceOption({
-  active,
-  caption,
-  value,
-  onSelect,
-}: {
-  active: boolean;
-  caption: string;
-  value: string;
-  onSelect?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      disabled={!onSelect}
-      onClick={(e) => {
-        // The card is a <label>; don't let the click toggle its checkbox.
-        e.preventDefault();
-        e.stopPropagation();
-        onSelect?.();
-      }}
-      className={cn(
-        "flex-1 rounded-md px-2 py-1 text-left transition-colors",
-        active
-          ? "bg-primary/15 text-primary"
-          : "text-muted-foreground hover:bg-muted/60"
-      )}
-    >
-      <span className="block text-[9px] uppercase tracking-wide opacity-70">
-        {caption}
-      </span>
-      <span className="block text-[11px] font-semibold">{value}</span>
-    </button>
-  );
-}
-
-/** Two-option segmented control: our calculation (default) vs the company's. */
+/** Day/night choice — our sun calculation (default) vs the company's record. */
 export function DayNightChoice({
   ours,
   company,
   useCompany,
   onChange,
 }: {
-  /** e.g. "Night" */
   ours: string;
-  /** e.g. "Day" */
   company: string;
   useCompany: boolean;
   onChange?: (useCompany: boolean) => void;
 }) {
   return (
-    <div
-      role="radiogroup"
-      aria-label="Day or night classification"
-      className="mt-1.5 flex gap-1 rounded-lg bg-muted/40 p-1"
-    >
-      <ChoiceOption
-        active={!useCompany}
-        caption="Calculated"
-        value={ours}
-        onSelect={onChange ? () => onChange(false) : undefined}
-      />
-      <ChoiceOption
-        active={useCompany}
-        caption="Company"
-        value={company}
-        onSelect={onChange ? () => onChange(true) : undefined}
-      />
-    </div>
+    <OptionPair
+      left={{ caption: "Calculated", value: ours }}
+      right={{ caption: "Company", value: company }}
+      rightActive={useCompany}
+      onChange={onChange}
+      size="sm"
+    />
   );
 }

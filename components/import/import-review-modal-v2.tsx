@@ -23,7 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FilterChips } from "@/components/ui/filter-chips";
+import { SegmentedTabs } from "./segmented-tabs";
 import {
   ProgressiveBlur,
   RadialBlurBackdrop,
@@ -135,6 +135,9 @@ export function ImportReviewModalV2({
   const [roleOverrides, setRoleOverrides] = useState<Map<number, PilotRole>>(
     new Map()
   );
+  // Op indices where the user chose to KEEP the pilot-flying value already in
+  // their logbook rather than take the report's.
+  const [useRecordedPf, setUseRecordedPf] = useState<Set<number>>(new Set());
   // Header and footer float OVER the scroll area (like the main panel), so the
   // list dissolves into a progressive blur instead of stopping at a hard edge.
   // Their heights are measured so the scroll padding always clears them.
@@ -253,6 +256,15 @@ export function ImportReviewModalV2({
     });
   };
 
+  const toggleRecordedPf = (index: number, value: boolean) => {
+    setUseRecordedPf((prev) => {
+      const next = new Set(prev);
+      if (value) next.add(index);
+      else next.delete(index);
+      return next;
+    });
+  };
+
   const handleConfirm = () => {
     const updatedOperations = plan.operations.map((op, index) => {
       const accepted = isAutoAccepted(op.kind) ? true : getAccept(index, false);
@@ -261,15 +273,24 @@ export function ImportReviewModalV2({
       // company's for this flight only. Untouched otherwise — our calculator
       // is the default everywhere.
       const wantsCompany = useCompanyToLdg.has(index);
+      const keepsRecordedPf = useRecordedPf.has(index);
       const role = roleOverrides.get(index);
-      if ((wantsCompany || role) && "changes" in op && op.changes) {
-        const changes = (op.changes as FieldDiff[]).map((c) => {
-          if (wantsCompany && c.companyValue !== undefined) {
-            return { ...c, to: c.companyValue };
-          }
-          if (role && c.field === "pilotRole") return { ...c, to: role };
-          return c;
-        });
+      if ((wantsCompany || role || keepsRecordedPf) && "changes" in op && op.changes) {
+        const changes = (op.changes as FieldDiff[])
+          // Keeping the recorded pilot-flying value drops both halves of that
+          // decision — the flag and the role it would have forced.
+          .filter(
+            (c) =>
+              !keepsRecordedPf ||
+              (c.field !== "pilotFlying" && c.field !== "pilotRole")
+          )
+          .map((c) => {
+            if (wantsCompany && c.companyValue !== undefined) {
+              return { ...c, to: c.companyValue };
+            }
+            if (role && c.field === "pilotRole") return { ...c, to: role };
+            return c;
+          });
         return { ...op, changes, accepted };
       }
       return { ...op, accepted };
@@ -328,9 +349,11 @@ export function ImportReviewModalV2({
         // The backdrop blur is strongest around the dialog and clears toward
         // the screen edges, so the app stays readable behind it.
         overlayClassName="z-[105] bg-black/40"
+        // Rendered inside the dialog's own portal, between the overlay and the
+        // panel — the panel itself is `overflow-hidden` AND transformed, so it
+        // would clip even a fixed-position child.
+        backdropSlot={<RadialBlurBackdrop className="fixed inset-0 z-[106]" />}
       >
-        <RadialBlurBackdrop className="-z-10" />
-
         {/* Floating top chrome: title + tab chips over a progressive blur. */}
         <div
           ref={(node) => {
@@ -349,14 +372,13 @@ export function ImportReviewModalV2({
               </DialogDescription>
             </DialogHeader>
             <div className="px-4 pb-3 pt-3 sm:px-6">
-              <FilterChips
-                options={tabs}
+              <SegmentedTabs
+                tabs={tabs}
                 value={(current ?? tabs[0]?.value) as Bucket}
                 onChange={(v) => {
-                  setActiveTab(v as Bucket);
+                  setActiveTab(v);
                   setVisibleCount(PAGE_SIZE);
                 }}
-                className="mx-0 px-0"
               />
             </div>
           </div>
@@ -411,6 +433,8 @@ export function ImportReviewModalV2({
                 onUseCompanyChange={(v) => toggleCompanyToLdg(index, v)}
                 roleOverride={roleOverrides.get(index)}
                 onRoleChange={(role) => setRoleOverride(index, role)}
+                useRecordedPf={useRecordedPf.has(index)}
+                onUseRecordedPfChange={(v) => toggleRecordedPf(index, v)}
               />
             ))}
 

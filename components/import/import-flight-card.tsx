@@ -26,6 +26,8 @@ import type { AcceptableOperation } from "@/lib/utils/parsers/schedule-parser";
 import type { FlightLog } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import { FlightCardBody } from "@/components/flight-card-body";
+import { OptionPair } from "./option-pair";
+import { getAirportDisplayCode } from "@/lib/utils/airport-display";
 
 /** Field slots the card body already draws. */
 const CHROME_FIELDS = new Set([
@@ -236,15 +238,21 @@ function DayNightFlag({
   if (disagreements.some((f) => f.endsWith("Takeoffs"))) sides.push("Takeoffs");
   if (disagreements.some((f) => f.endsWith("Landings"))) sides.push("Landings");
 
+  const airportPref = displayPrefs?.airportIdentifier ?? "icao";
+
   return (
-    <div className="mt-1.5 rounded-lg border border-border/60 bg-muted/30 px-2 py-2">
+    <div className="mt-1.5 rounded-lg border border-border/60 bg-muted/30 px-2 py-1.5">
       {sides.map((side) => {
         const isTakeoff = side === "Takeoffs";
         return (
-          <div key={side} className={cn(sides.length > 1 && "mb-2 last:mb-0")}>
+          <div key={side} className={cn(sides.length > 1 && "mb-1.5 last:mb-0")}>
             <SunTimeline
               kind={isTakeoff ? "takeoff" : "landing"}
-              airport={isTakeoff ? sector?.departureIata : sector?.arrivalIata}
+              airport={getAirportDisplayCode(
+                isTakeoff ? sector?.departureIcao : sector?.arrivalIcao,
+                isTakeoff ? sector?.departureIata : sector?.arrivalIata,
+                airportPref
+              )}
               eventUtc={isTakeoff ? ctx?.outUtc : ctx?.inUtc}
               sunriseUtc={isTakeoff ? ctx?.depSunriseUtc : ctx?.arrSunriseUtc}
               sunsetUtc={isTakeoff ? ctx?.depSunsetUtc : ctx?.arrSunsetUtc}
@@ -252,12 +260,16 @@ function DayNightFlag({
               tzOffsetHours={
                 (isTakeoff ? ctx?.depTzOffset : ctx?.arrTzOffset) ?? 0
               }
-            />
-            <DayNightChoice
-              ours={verdictFrom(diffs, side, (d) => d?.to)}
-              company={verdictFrom(diffs, side, (d) => d?.companyValue)}
-              useCompany={useCompany}
-              onChange={onUseCompanyChange}
+              // Sits on the header row, so the control is reachable without
+              // scrolling past the graphic on a phone.
+              action={
+                <DayNightChoice
+                  ours={verdictFrom(diffs, side, (d) => d?.to)}
+                  company={verdictFrom(diffs, side, (d) => d?.companyValue)}
+                  useCompany={useCompany}
+                  onChange={onUseCompanyChange}
+                />
+              }
             />
           </div>
         );
@@ -267,65 +279,98 @@ function DayNightFlag({
 }
 
 /**
- * Role picker, shown when a PF/PM change forces a `pilotRole` correction.
- * The pre-selected value is the one derived from the user's import setting;
- * they can still choose any role valid for the new flying state (PICUS is
- * withheld when the leg becomes Pilot Monitoring, since the two can't coexist).
+ * Pilot-flying + role.
+ *
+ * Two decisions, presented as one block: keep the value already in your
+ * logbook, or take the company's. Selecting one dims the other, so which side
+ * wins is visible rather than inferred. The role picker only comes alive when
+ * the company's PF/PM is accepted — keeping your own record means keeping your
+ * own role with it.
  */
-function RoleChoice({
+function PilotFlyingChoice({
   diffs,
-  value,
-  onChange,
+  flight,
+  useRecorded,
+  onUseRecordedChange,
+  roleOverride,
+  onRoleChange,
 }: {
   diffs: Map<string, FieldDiff>;
-  value?: PilotRole;
-  onChange?: (role: PilotRole) => void;
+  flight: FlightLog;
+  useRecorded: boolean;
+  onUseRecordedChange?: (v: boolean) => void;
+  roleOverride?: PilotRole;
+  onRoleChange?: (role: PilotRole) => void;
 }) {
-  const roleDiff = diffs.get("pilotRole");
-  if (!roleDiff) return null;
-
   const pfDiff = diffs.get("pilotFlying");
-  const nowFlying = pfDiff ? pfDiff.to === "true" : true;
-  const selected = value ?? (roleDiff.to as PilotRole);
+  if (!pfDiff) return null;
+
+  const roleDiff = diffs.get("pilotRole");
+  const nowFlying = pfDiff.to === "true";
+  const rolesEnabled = !useRecorded && Boolean(roleDiff);
+  const selectedRole =
+    roleOverride ?? (roleDiff ? (roleDiff.to as PilotRole) : flight.pilotRole);
+  const shownRole = useRecorded ? flight.pilotRole : selectedRole;
 
   return (
-    <div className="mt-1.5 rounded-lg bg-muted/30 px-2 py-1.5">
-      <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-        Role — {nowFlying ? "now pilot flying" : "now pilot monitoring"}
+    <div className="mt-1.5 rounded-lg border border-border/60 bg-muted/30 px-2 py-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Pilot flying
+        </span>
+        <OptionPair
+          left={{ caption: "Recorded", value: pfLabel(pfDiff.from) }}
+          right={{ caption: "Company", value: pfLabel(pfDiff.to) }}
+          rightActive={!useRecorded}
+          onChange={
+            onUseRecordedChange ? (right) => onUseRecordedChange(!right) : undefined
+          }
+          size="sm"
+        />
       </div>
-      <div className="flex flex-wrap gap-1">
-        {allowedRolesFor(nowFlying).map((role) => {
-          const active = role === selected;
-          return (
-            <button
-              key={role}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              disabled={!onChange}
-              onClick={(e) => {
-                // The card is a <label> — don't toggle its checkbox.
-                e.preventDefault();
-                e.stopPropagation();
-                onChange?.(role);
-              }}
-              className={cn(
-                "rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors",
-                active
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:bg-muted/60"
-              )}
-            >
-              {role}
-            </button>
-          );
-        })}
-      </div>
-      <div className="mt-1 text-[10px] text-muted-foreground/70">
-        was {roleDiff.from}
-      </div>
+
+      {roleDiff && (
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          <span className="mr-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+            Role
+          </span>
+          {allowedRolesFor(nowFlying).map((role) => {
+            const active = role === shownRole;
+            return (
+              <button
+                key={role}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                disabled={!rolesEnabled || !onRoleChange}
+                onClick={(e) => {
+                  // The card is a <label>; don't toggle its checkbox.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onRoleChange?.(role);
+                }}
+                className={cn(
+                  "rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+                  active
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground/45",
+                  rolesEnabled && !active && "hover:bg-muted/60 hover:text-muted-foreground",
+                  !rolesEnabled && "cursor-default"
+                )}
+              >
+                {role}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
+}
+
+/** Stored pilotFlying is a boolean string; pilots read it as PF / PM. */
+function pfLabel(v: string): string {
+  return v === "true" ? "PF" : "PM";
 }
 
 // ============================================================
@@ -342,6 +387,8 @@ export function ImportFlightCard({
   onUseCompanyChange,
   roleOverride,
   onRoleChange,
+  useRecordedPf = false,
+  onUseRecordedPfChange,
 }: {
   op: AcceptableOperation;
   displayPrefs?: DisplayPreferences;
@@ -355,6 +402,9 @@ export function ImportFlightCard({
   /** Role the user picked for a PF/PM-driven role change, if they overrode it. */
   roleOverride?: PilotRole;
   onRoleChange?: (role: PilotRole) => void;
+  /** Keep the pilot-flying value already in the logbook instead of the report's. */
+  useRecordedPf?: boolean;
+  onUseRecordedPfChange?: (v: boolean) => void;
 }) {
   const changes: FieldDiff[] =
     "changes" in op && Array.isArray(op.changes) ? op.changes : [];
@@ -376,12 +426,13 @@ export function ImportFlightCard({
         flight={flight}
         displayPrefs={displayPrefs}
         diffs={diffs}
-        // Day/night landing counts are decided by our sun calculator and shown
-        // on the timeline below, so the chip slot carries PF/PM instead — a
-        // pilot-flying change is otherwise invisible on the card.
+        // Day/night landing counts are decided by our sun calculator and are
+        // shown on the timeline below. The corner carries PF/PM only when it
+        // ISN'T changing — a change is owned by the PilotFlyingChoice block,
+        // which states it as a choice rather than a strike-through.
         showLandingChips={false}
         showStatusIcons={false}
-        showPilotRole
+        showPilotRole={!diffs.has("pilotFlying")}
       />
 
       <DayNightFlag
@@ -392,7 +443,14 @@ export function ImportFlightCard({
         displayPrefs={displayPrefs}
       />
 
-      <RoleChoice diffs={diffs} value={roleOverride} onChange={onRoleChange} />
+      <PilotFlyingChoice
+        diffs={diffs}
+        flight={flight}
+        useRecorded={useRecordedPf}
+        onUseRecordedChange={onUseRecordedPfChange}
+        roleOverride={roleOverride}
+        onRoleChange={onRoleChange}
+      />
 
       {extraChanges.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
