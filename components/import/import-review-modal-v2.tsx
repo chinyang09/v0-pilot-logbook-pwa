@@ -51,7 +51,7 @@ type Bucket =
   | "consult"
   | "edited"
   | "deletions"
-  | "skipped";
+  | "protected";
 
 type Entry = { op: AcceptableOperation; index: number };
 
@@ -83,16 +83,16 @@ const BUCKET_META: Record<
     hint: "Crew, route and future-flight details applied automatically.",
   },
   consult: {
-    label: "Review",
+    label: "Changes",
     tone: "consult",
     selectable: true,
-    hint: "Already-flown flights with differing details. Tick the ones to overwrite.",
+    hint: "The report differs from what you have. Tick the ones to take.",
   },
   edited: {
-    label: "Conflicts",
+    label: "Your edits",
     tone: "conflict",
     selectable: true,
-    hint: "These carry your own edits. Ticking one replaces your version.",
+    hint: "You edited these yourself (signature, remarks or manual entries). Ticking one replaces your version with the report's.",
   },
   deletions: {
     label: "Remove",
@@ -100,11 +100,11 @@ const BUCKET_META: Record<
     selectable: true,
     hint: "In your logbook but missing from this report. Tick to delete.",
   },
-  skipped: {
-    label: "Skipped",
+  protected: {
+    label: "Protected",
     tone: "safe",
     selectable: false,
-    hint: "Unchanged, or protected because your data came from a newer report.",
+    hint: "Left alone — your data came from a newer report than this one.",
   },
 };
 
@@ -114,7 +114,7 @@ const BUCKET_ORDER: Bucket[] = [
   "deletions",
   "creates",
   "safe",
-  "skipped",
+  "protected",
 ];
 
 const PAGE_SIZE = 25;
@@ -168,7 +168,7 @@ export function ImportReviewModalV2({
       consult: [],
       edited: [],
       deletions: [],
-      skipped: [],
+      protected: [],
     };
     if (!plan) return out;
 
@@ -192,14 +192,26 @@ export function ImportReviewModalV2({
           out.deletions.push(entry);
           break;
         case "skip_stale_report":
+          out.protected.push(entry);
+          break;
+        // Flights that already match the report need no attention and are
+        // never listed — they are only counted, below.
         case "skip_identical":
         case "skip_non_airline":
-          out.skipped.push(entry);
           break;
       }
     });
     return out;
   }, [plan]);
+
+  // Flights already matching the report: counted for reassurance, never listed.
+  const unchangedCount = useMemo(
+    () =>
+      plan?.operations.filter(
+        (op) => op.kind === "skip_identical" || op.kind === "skip_non_airline"
+      ).length ?? 0,
+    [plan]
+  );
 
   const tabs = useMemo(
     () =>
@@ -276,14 +288,15 @@ export function ImportReviewModalV2({
       const keepsRecordedPf = useRecordedPf.has(index);
       const role = roleOverrides.get(index);
       if ((wantsCompany || role || keepsRecordedPf) && "changes" in op && op.changes) {
-        const changes = (op.changes as FieldDiff[])
-          // Keeping the recorded pilot-flying value drops both halves of that
-          // decision — the flag and the role it would have forced.
-          .filter(
-            (c) =>
-              !keepsRecordedPf ||
-              (c.field !== "pilotFlying" && c.field !== "pilotRole")
-          )
+        const all = op.changes as FieldDiff[];
+        // Keeping the recorded pilot-flying value drops both halves of that
+        // decision — the flag and the role it would have forced. Those dropped
+        // diffs are remembered so the same report doesn't re-ask next time.
+        const isPfPair = (c: FieldDiff) =>
+          c.field === "pilotFlying" || c.field === "pilotRole";
+        const declinedChanges = keepsRecordedPf ? all.filter(isPfPair) : [];
+        const changes = all
+          .filter((c) => !keepsRecordedPf || !isPfPair(c))
           .map((c) => {
             if (wantsCompany && c.companyValue !== undefined) {
               return { ...c, to: c.companyValue };
@@ -291,7 +304,7 @@ export function ImportReviewModalV2({
             if (role && c.field === "pilotRole") return { ...c, to: role };
             return c;
           });
-        return { ...op, changes, accepted };
+        return { ...op, changes, accepted, declinedChanges };
       }
       return { ...op, accepted };
     });
@@ -362,13 +375,16 @@ export function ImportReviewModalV2({
           }}
           className="absolute inset-x-0 top-0 z-20"
         >
-          <ProgressiveBlur side="top" className="h-[130%]" />
+          <ProgressiveBlur side="top" className="h-[185%]" />
           <div className="relative">
             <DialogHeader className="px-4 pt-4 sm:px-6 sm:pt-5">
               <DialogTitle>Review import</DialogTitle>
               <DialogDescription className="tabular-nums">
                 {plan.dateRange.start} – {plan.dateRange.end}
                 {generatedDate ? ` · generated ${generatedDate}` : ""}
+                {unchangedCount > 0
+                  ? ` · ${unchangedCount} already match`
+                  : ""}
               </DialogDescription>
             </DialogHeader>
             <div className="px-4 pb-3 pt-3 sm:px-6">

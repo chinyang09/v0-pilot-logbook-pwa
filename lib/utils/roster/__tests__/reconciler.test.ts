@@ -852,3 +852,55 @@ describe("reconcileRoster — turnaround matching", () => {
     expect(matchOp.changes.map((c) => c.field)).toContain("departureIata");
   });
 });
+
+// ============================================================
+// Declined-decision memory
+// ============================================================
+
+describe("reconcileRoster — declinedImportFields", () => {
+  it("does not re-raise a change the user already turned down", () => {
+    const dbFlight = makeFlight({
+      scheduledOut: "04:00",
+      declinedImportFields: { scheduledOut: "03:50" },
+    });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    // The only diff was the declined one → nothing left to ask about.
+    expect(ops[0].kind).toBe("skip_identical");
+  });
+
+  it("still raises the field when a later report proposes a different value", () => {
+    const dbFlight = makeFlight({
+      scheduledOut: "04:00",
+      declinedImportFields: { scheduledOut: "03:50" },
+    });
+    const ops = reconcileRoster({
+      sectors: [makeSector({ scheduledOut: "03:30" })],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    expect(ops[0].kind).toBe("update_conflict");
+    if (ops[0].kind !== "update_conflict") return;
+    expect(ops[0].changes.map((c) => c.field)).toContain("scheduledOut");
+  });
+
+  it("only mutes the declined field, not the rest of the row", () => {
+    const dbFlight = makeFlight({
+      scheduledOut: "04:00",
+      scheduledIn: "07:00",
+      declinedImportFields: { scheduledOut: "03:50" },
+    });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    if (ops[0].kind !== "update_conflict") throw new Error("expected conflict");
+    const fields = ops[0].changes.map((c) => c.field);
+    expect(fields).toContain("scheduledIn");
+    expect(fields).not.toContain("scheduledOut");
+  });
+});

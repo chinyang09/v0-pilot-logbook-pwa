@@ -192,6 +192,15 @@ export interface FlightLog {
    * field; the legacy marker is still honoured when reading.
    */
   toLdgDecidedAt?: number
+  /**
+   * Field changes the user has already turned down, as `field -> the value
+   * they rejected`. A later report proposing the SAME value for that field is
+   * not raised again; propose something different and it is.
+   *
+   * Without this, declining a change meant being asked about it on every
+   * subsequent import of the same report.
+   */
+  declinedImportFields?: Record<string, string>
   // Simulator sessions are logged as flight entries (no aircraftReg / airports)
   // so they count toward dashboard simulator-instrument totals. These optional
   // fields are non-indexed, so they need no Dexie migration.

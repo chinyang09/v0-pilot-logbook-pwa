@@ -57,6 +57,7 @@ import {
   TOLDG_DECISION_MARKER,
   deriveSectorCrew,
   type ParsedSector,
+  type FieldDiff,
 } from "@/lib/utils/roster/reconciler";
 
 const TOLDG_FIELDS = new Set([
@@ -218,6 +219,30 @@ async function hydrateFlightFromSector(
   };
 
   return create;
+}
+
+/**
+ * Merge turned-down field changes into the flight's `declinedImportFields`
+ * map (`field -> the value that was rejected`).
+ *
+ * The reconciler filters any future diff whose `field`+`to` matches an entry
+ * here, so re-uploading the SAME report stops re-asking a question the user
+ * already answered. A report proposing a DIFFERENT value for that field still
+ * comes through — the memory is per decision, not a permanent mute.
+ */
+function withDeclined(
+  flight: FlightLog,
+  declined: readonly FieldDiff[]
+): Record<string, string> | undefined {
+  if (declined.length === 0) return undefined;
+  const next = { ...(flight.declinedImportFields ?? {}) };
+  let changed = false;
+  for (const d of declined) {
+    if (next[d.field] === d.to) continue;
+    next[d.field] = d.to;
+    changed = true;
+  }
+  return changed ? next : undefined;
 }
 
 function buildUpdatePatch(op: AcceptableOperation): Partial<FlightLog> {
@@ -573,19 +598,28 @@ export async function executeRosterImport(
         });
       }
 
-      // Even when rejected, persist the TO/LDG decision so subsequent
-      // imports don't keep raising the same question. Recorded as a field —
-      // remarks stay the user's.
-      if (hasToLdgDiff && "flight" in op) {
+      // Even when rejected, persist the decision so subsequent imports don't
+      // keep raising the same question: the TO/LDG call as a timestamp, and
+      // every turned-down field as `field -> rejected value`. Both are stored
+      // as fields — remarks stay the user's.
+      if ("flight" in op && (hasToLdgDiff || opChanges.length > 0)) {
         try {
           const fresh = await userDb.flights.get(op.flight.id);
-          if (fresh && fresh.toLdgDecidedAt === undefined) {
-            await updateFlight(op.flight.id, { toLdgDecidedAt: Date.now() });
-            touchedFlightIds.push(op.flight.id);
+          if (fresh) {
+            const patch: Partial<FlightLog> = {};
+            if (hasToLdgDiff && fresh.toLdgDecidedAt === undefined) {
+              patch.toLdgDecidedAt = Date.now();
+            }
+            const declined = withDeclined(fresh, opChanges);
+            if (declined) patch.declinedImportFields = declined;
+            if (Object.keys(patch).length > 0) {
+              await updateFlight(op.flight.id, patch);
+              touchedFlightIds.push(op.flight.id);
+            }
           }
         } catch (error) {
           result.errors.push({
-            operation: `mark TO/LDG decision on ${op.flight.flightNumber}`,
+            operation: `record declined changes on ${op.flight.flightNumber}`,
             message:
               error instanceof Error ? error.message : "Unknown error",
           });
@@ -623,6 +657,10 @@ export async function executeRosterImport(
           if (hasToLdgDiff && op.flight.toLdgDecidedAt === undefined) {
             patch.toLdgDecidedAt = Date.now();
           }
+          // Parts of an otherwise-accepted row the user turned down (e.g.
+          // keeping their recorded PF/PM) are remembered too.
+          const declined = withDeclined(op.flight, op.declinedChanges ?? []);
+          if (declined) patch.declinedImportFields = declined;
           const updated = await updateFlight(op.flight.id, patch);
           if (!updated) {
             // Row vanished between plan build and execute — surface so the

@@ -69,6 +69,13 @@ export interface ParsedLogbookSector {
   aircraftType: string;
   departureIata: string;
   arrivalIata: string;
+  /**
+   * ICAO codes resolved during airport enrichment. Carried so downstream UI
+   * can honour the user's ICAO/IATA display preference — without these a
+   * logbook-sourced sector could only ever render IATA.
+   */
+  departureIcao?: string;
+  arrivalIcao?: string;
   /** UTC HH:MM. */
   outTime: string;
   inTime: string;
@@ -605,6 +612,8 @@ export async function parseLogbookV2(
           aircraftType,
           departureIata: row.depIata,
           arrivalIata: row.arrIata,
+          departureIcao: depAp?.icao,
+          arrivalIcao: arrAp?.icao,
           outTime: row.outT,
           inTime: row.inT,
           blockTime: row.blockT || "00:00",

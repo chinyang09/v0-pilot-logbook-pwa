@@ -130,6 +130,8 @@ export function logbookSectorToParsedSector(
     aircraftType: s.aircraftType,
     departureIata: s.departureIata,
     arrivalIata: s.arrivalIata,
+    departureIcao: s.departureIcao,
+    arrivalIcao: s.arrivalIcao,
     scheduledOut: planned ? s.outTime || undefined : undefined,
     scheduledIn: planned ? s.inTime || undefined : undefined,
     actualOut: planned ? undefined : s.outTime || undefined,

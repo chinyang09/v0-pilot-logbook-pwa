@@ -47,6 +47,7 @@ import {
   reconcileRoster,
   type ParsedSector,
   type ReconcilerOperation,
+  type FieldDiff,
 } from "@/lib/utils/roster/reconciler";
 import { parseDDMMYYYY } from "./shared/csv-split";
 import type { NormalizedDocument, NormalizedRow } from "./types";
@@ -104,8 +105,17 @@ export interface PlannedImport {
   };
 }
 
-/** A reconciler op plus an acceptance flag. Defaults vary by kind. */
-export type AcceptableOperation = ReconcilerOperation & { accepted: boolean };
+/**
+ * A reconciler op plus an acceptance flag. Defaults vary by kind.
+ *
+ * `declinedChanges` carries field changes the user explicitly turned down on
+ * an otherwise-accepted row (e.g. keeping their recorded pilot-flying value),
+ * so the executor can remember the decision and not re-raise it next time.
+ */
+export type AcceptableOperation = ReconcilerOperation & {
+  accepted: boolean;
+  declinedChanges?: FieldDiff[];
+};
 
 export interface ParseOptions {
   onProgress?: (percent: number, stage: string, detail?: string) => void;

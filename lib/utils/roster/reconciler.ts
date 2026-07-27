@@ -742,7 +742,11 @@ function diffSectorVsFlight(
     changes
   );
 
-  return changes;
+  // Anything the user has already turned down — with this exact value — is not
+  // raised again. A different value for the same field still surfaces.
+  const declined = flight.declinedImportFields;
+  if (!declined) return changes;
+  return changes.filter((c) => declined[c.field] !== c.to);
 }
 
 // ============================================================
