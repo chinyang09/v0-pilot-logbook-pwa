@@ -122,22 +122,6 @@ function isUserAuthored(op: AcceptableOperation): boolean {
   return op.kind === "edited_conflict";
 }
 
-/** Human wording for why a row counts as the user's own entry. */
-const EDIT_REASON_LABEL: Record<string, string> = {
-  has_signature: "signed",
-  has_remarks: "your remarks",
-  has_manual_overrides: "manual entry",
-  user_modified_after_sync: "you edited it",
-};
-
-function editReasonText(op: AcceptableOperation): string | undefined {
-  if (op.kind !== "edited_conflict") return undefined;
-  const labels = op.editReasons
-    .map((r) => EDIT_REASON_LABEL[r])
-    .filter(Boolean);
-  return labels.length > 0 ? labels.join(" · ") : "your entry";
-}
-
 const BUCKET_ORDER: Bucket[] = [
   "consult",
   "deletions",
@@ -491,7 +475,6 @@ export function ImportReviewModalV2({
                 tone={
                   isUserAuthored(op) ? "conflict" : meta?.tone ?? "safe"
                 }
-                ownEntryLabel={editReasonText(op)}
                 checked={meta?.selectable ? getAccept(index, false) : undefined}
                 onCheckedChange={
                   meta?.selectable ? (v) => setAccept(index, v) : undefined

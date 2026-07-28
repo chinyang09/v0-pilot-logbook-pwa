@@ -62,6 +62,13 @@ import { ImageImportButton } from "@/components/image-import-button";
 import { GlassContainer } from "@/components/ui/glass-container";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { useRegisterDetailActions } from "@/hooks/use-page-actions";
+import { cn } from "@/lib/utils";
+import {
+  ENTRY_TYPES,
+  entryTypePatch,
+  getEntryType,
+} from "@/lib/utils/entry-type";
+import type { EntryType } from "@/types/entities/flight.types";
 import type { ExtractedFlightData } from "@/lib/ocr";
 
 // Swipeable row — thin wrapper over the shared SwipeableCard primitive so the
@@ -867,6 +874,49 @@ export function FlightForm({
     []
   );
 
+  /**
+   * Switch this record between flight and simulator.
+   *
+   * The two carry their duration in different fields on purpose: a flight's is
+   * `blockTime` (which feeds every flight-hour total), a simulator's is
+   * `simulatedInstrumentTime` (which does not). Switching moves the duration
+   * across rather than leaving it in the field the new type ignores, so a
+   * mis-typed entry stops inflating flight hours the moment it is corrected.
+   */
+  const setEntryType = useCallback((type: EntryType) => {
+    setFormData((prev) => {
+      if (getEntryType(prev) === type) return prev;
+      const patch = entryTypePatch(type);
+      if (type === "simulator") {
+        const duration =
+          prev.simulatedInstrumentTime && prev.simulatedInstrumentTime !== "00:00"
+            ? prev.simulatedInstrumentTime
+            : prev.blockTime || "00:00";
+        return {
+          ...prev,
+          ...patch,
+          simulatedInstrumentTime: duration,
+          blockTime: "00:00",
+          flightTime: "00:00",
+          manualOverrides: {
+            ...(prev.manualOverrides ?? {}),
+            simulatedInstrumentTime: true,
+          },
+        };
+      }
+      const duration =
+        prev.blockTime && prev.blockTime !== "00:00"
+          ? prev.blockTime
+          : prev.simulatedInstrumentTime || "00:00";
+      return {
+        ...prev,
+        ...patch,
+        blockTime: duration,
+        simulatedInstrumentTime: "00:00",
+      };
+    });
+  }, []);
+
   // Clear a field
   const clearField = useCallback(
     (field: keyof FlightLog) => {
@@ -1261,6 +1311,34 @@ export function FlightForm({
               FLIGHT
             </h2>
           </div>
+
+          {/* Entry type — first row, above the date, because it decides what
+              the rest of the form means. A simulator session is logged here
+              like a flight but must never reach flight-hour totals. */}
+          <SettingsRow label="Type">
+            <div className="flex items-center gap-1">
+              {ENTRY_TYPES.map(({ value, label }) => {
+                const active = getEntryType(formData) === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => setEntryType(value)}
+                    className={cn(
+                      "rounded-full px-3 py-1 text-sm font-medium transition-colors",
+                      active
+                        ? "bg-primary/15 text-primary"
+                        : "text-muted-foreground/60 hover:text-muted-foreground"
+                    )}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </SettingsRow>
 
           <SwipeableRow onClear={() => clearField("date")}>
             <SettingsRow

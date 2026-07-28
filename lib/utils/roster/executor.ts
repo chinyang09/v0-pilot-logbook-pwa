@@ -65,6 +65,11 @@ import {
   type ImportDecisions,
 } from "@/lib/utils/roster/import-decisions";
 import { TRACKED_FIELDS } from "@/lib/utils/roster/classification";
+import { entryTypePatch, isSimulatorEntry } from "@/lib/utils/entry-type";
+import {
+  isSameSimSession,
+  looksLikeSimulator,
+} from "@/lib/utils/roster/sim-sessions";
 
 const TOLDG_FIELDS = new Set([
   "dayTakeoffs",
@@ -90,6 +95,8 @@ export interface ExecutionResult {
   ignored: number;
   staleSkipped: number;
   simSessionsCreated: number;
+  /** Duplicate sim rows an earlier build created, cleaned up on this import. */
+  simDuplicatesRemoved: number;
   personnelCreated: number;
   personnelUpdated: number;
   aircraftCreated: number;
@@ -447,6 +454,81 @@ async function ensureAircraftForFlights(
  * populates simulatedInstrumentTime; block/flight time stay zero so a sim
  * never inflates flight-hour totals.
  */
+
+/**
+ * Write the report's simulator sessions, skipping any already logged and
+ * clearing duplicates a previous build left behind.
+ */
+async function applySimSessions(
+  simSessions: ParsedSimSession[],
+  ctx: {
+    currentUser: Personnel;
+    reportGeneratedAt: number | null | undefined;
+    importSource: FlightLog["importSource"];
+    reportStamps: Partial<FlightLog>;
+    result: ExecutionResult;
+  }
+): Promise<void> {
+  const { currentUser, reportGeneratedAt, importSource, reportStamps, result } =
+    ctx;
+
+  let existingSims: FlightLog[] = [];
+  try {
+    const allFlights = await userDb.flights.toArray();
+    existingSims = allFlights.filter(looksLikeSimulator);
+  } catch {
+    // Can't read what's there — fall through and create (rare).
+  }
+
+  for (const sim of simSessions) {
+    try {
+      const code = (sim.sessionCode || sim.component || "SIM").toUpperCase();
+      const incoming = { date: sim.date, code, outUtc: sim.outUtc };
+      const already = existingSims.filter((f) =>
+        isSameSimSession(f, incoming)
+      );
+
+      if (already.length > 0) {
+        // Collapse anything a previous build duplicated: keep the earliest
+        // (the one the user has most likely edited or signed) and drop the
+        // rest, so the list stops growing an entry per upload.
+        const [keep, ...extras] = [...already].sort(
+          (a, b) => a.createdAt - b.createdAt
+        );
+        for (const extra of extras) {
+          await deleteFlight(extra.id);
+          existingSims = existingSims.filter((f) => f.id !== extra.id);
+          result.simDuplicatesRemoved++;
+        }
+        // Backfill the identity fields on the survivor so the next import
+        // recognises it without needing the structural fallback.
+        if (!isSimulatorEntry(keep) || !keep.simSessionCode) {
+          await updateFlight(keep.id, {
+            ...entryTypePatch("simulator"),
+            simSessionCode: keep.simSessionCode || code,
+          });
+        }
+        continue;
+      }
+
+      const payload = buildSimFlight(
+        sim,
+        currentUser,
+        reportGeneratedAt,
+        importSource
+      );
+      const created = await addFlight({ ...payload, ...reportStamps });
+      existingSims.push(created);
+      result.simSessionsCreated++;
+    } catch (error) {
+      result.errors.push({
+        operation: `sim session ${sim.date}`,
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+}
+
 function buildSimFlight(
   sim: ParsedSimSession,
   currentUser: Personnel,
@@ -534,8 +616,8 @@ function buildSimFlight(
     ipcIcc: false,
     reportGeneratedAt: reportGeneratedAt ?? undefined,
     importSource,
-    isSimulator: true,
-    simSessionCode: sessionCode,
+    ...entryTypePatch("simulator"),
+    simSessionCode: sessionCode.toUpperCase(),
   };
 }
 
@@ -555,6 +637,7 @@ export async function executeRosterImport(
     ignored: 0,
     staleSkipped: 0,
     simSessionsCreated: 0,
+    simDuplicatesRemoved: 0,
     personnelCreated: 0,
     personnelUpdated: 0,
     aircraftCreated: 0,
@@ -823,53 +906,13 @@ export async function executeRosterImport(
   // ----- 3. Sim sessions → logbook flight entries (deduped on re-import) ----
   const simSessions = options.simSessions ?? [];
   if (simSessions.length > 0) {
-    // Existing sim flights keyed by date + session code so a re-import of the
-    // same report doesn't create duplicate sim entries.
-    let existingSimKeys = new Set<string>();
-    try {
-      const allFlights = await userDb.flights.toArray();
-      existingSimKeys = new Set(
-        allFlights
-          .filter((f) => f.isSimulator)
-          .map((f) => `${f.date}|${(f.simSessionCode || "").toUpperCase()}`)
-      );
-    } catch {
-      // If we can't read existing flights, fall through and create (rare).
-    }
-
-    // Tolerate UTC-vs-local date drift: the same EBT can be logged 13 May in
-    // the UTC logbook and scheduled 14 May in the Local Base schedule, so a
-    // sim on date±1 with the same session code is treated as already logged.
-    const shiftIso = (iso: string, days: number): string => {
-      const d = new Date(`${iso}T00:00:00Z`);
-      d.setUTCDate(d.getUTCDate() + days);
-      return d.toISOString().slice(0, 10);
-    };
-    const simAlreadyLogged = (date: string, code: string): boolean =>
-      existingSimKeys.has(`${shiftIso(date, -1)}|${code}`) ||
-      existingSimKeys.has(`${date}|${code}`) ||
-      existingSimKeys.has(`${shiftIso(date, 1)}|${code}`);
-
-    for (const sim of simSessions) {
-      try {
-        const sessionCode = (sim.sessionCode || sim.component || "SIM").toUpperCase();
-        if (simAlreadyLogged(sim.date, sessionCode)) continue; // already logged
-        const payload = buildSimFlight(
-          sim,
-          currentUser,
-          reportGeneratedAt,
-          importSource
-        );
-        await addFlight({ ...payload, ...reportStamps });
-        existingSimKeys.add(`${sim.date}|${sessionCode}`);
-        result.simSessionsCreated++;
-      } catch (error) {
-        result.errors.push({
-          operation: `sim session ${sim.date}`,
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
-      }
-    }
+    await applySimSessions(simSessions, {
+      currentUser,
+      reportGeneratedAt,
+      importSource,
+      reportStamps,
+      result,
+    });
   }
 
   // ----- 4. Currencies (always applied) -----

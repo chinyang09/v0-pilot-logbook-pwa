@@ -16,7 +16,7 @@
 
 "use client";
 
-import { PencilLine, Undo2 } from "lucide-react";
+import { Undo2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SunTimeline, DayNightChoice } from "./sun-timeline";
@@ -400,7 +400,6 @@ export function ImportFlightCard({
   onRoleChange,
   useRecordedPf = false,
   onUseRecordedPfChange,
-  ownEntryLabel,
 }: {
   op: AcceptableOperation;
   displayPrefs?: DisplayPreferences;
@@ -417,13 +416,6 @@ export function ImportFlightCard({
   /** Keep the pilot-flying value already in the logbook instead of the report's. */
   useRecordedPf?: boolean;
   onUseRecordedPfChange?: (v: boolean) => void;
-  /**
-   * Set when taking this change would replace something the USER wrote — a
-   * signature, remarks or a manual entry. Carries the short reason, shown as a
-   * marker on the card. Rows without it only overwrite data a previous import
-   * left behind, which costs nothing.
-   */
-  ownEntryLabel?: string;
 }) {
   // A decided row carries no pending `changes` — its reverts ARE the diff to
   // show, so the user can see what ticking it would do.
@@ -460,13 +452,6 @@ export function ImportFlightCard({
         </div>
       )}
 
-      {ownEntryLabel && (
-        <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-status-warning">
-          <PencilLine className="size-3" aria-hidden />
-          <span>Replaces yours · {ownEntryLabel}</span>
-        </div>
-      )}
-
       <FlightCardBody
         flight={flight}
         displayPrefs={displayPrefs}
@@ -476,7 +461,7 @@ export function ImportFlightCard({
         // ISN'T changing — a change is owned by the PilotFlyingChoice block,
         // which states it as a choice rather than a strike-through.
         showLandingChips={false}
-        showStatusIcons={false}
+        showStatusIcons
         showPilotRole={!diffs.has("pilotFlying")}
       />
 

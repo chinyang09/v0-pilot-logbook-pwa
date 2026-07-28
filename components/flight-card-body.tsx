@@ -14,13 +14,14 @@
 
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { Sun, Moon, Pen, Lock } from "lucide-react";
+import { Sun, Moon, Pen, Lock, Plane, MonitorPlay } from "lucide-react";
 import type { FlightLog } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { FieldDiff } from "@/lib/utils/roster/reconciler";
 import { getDepartureDisplay, getArrivalDisplay } from "@/lib/utils/airport-display";
 import { formatHHMMDisplay } from "@/lib/utils/time";
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date";
+import { entryDuration, isSimulatorEntry } from "@/lib/utils/entry-type";
 
 const MONTHS = [
   "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
@@ -137,6 +138,15 @@ export function FlightCardBody({
       : "";
 
   const durationInfo = useMemo(() => {
+    // A simulator session's length is its simulated-instrument time — block
+    // time is deliberately zero on a sim so it never reaches flight totals.
+    if (isSimulatorEntry(flight)) {
+      return {
+        text: formatHHMMDisplay(entryDuration(flight), displayPrefs?.timeFormat),
+        suffix: "hrs",
+        scheduled: false,
+      };
+    }
     if (hasOut && hasIn) {
       return {
         text: formatHHMMDisplay(flight.blockTime, displayPrefs?.timeFormat),
@@ -152,14 +162,7 @@ export function FlightCardBody({
       };
     }
     return { text: "", suffix: "hrs", scheduled: false };
-  }, [
-    hasOut,
-    hasIn,
-    flight.blockTime,
-    flight.scheduledOut,
-    flight.scheduledIn,
-    displayPrefs?.timeFormat,
-  ]);
+  }, [flight, hasOut, hasIn, displayPrefs?.timeFormat]);
 
   const flightDate = parseDateLocal(flight.date);
   const day = flightDate.getDate().toString().padStart(2, "0");
@@ -184,16 +187,24 @@ export function FlightCardBody({
   const blockDiff = d("blockTime");
   const pfDiff = d("pilotFlying");
 
-  // `flight # • reg • type`, skipping any part that is both empty and unchanged.
+  // `reg, type` on the left of the meta row. The flight number used to sit in
+  // this same list; it now has the right-hand side to itself, directly above
+  // the landing chips, so the aircraft and the flight read as two facts rather
+  // than one bulleted string.
   const metaParts = (
     [
-      { key: "flightNumber", current: flight.flightNumber },
       { key: "aircraftReg", current: flight.aircraftReg },
       { key: "aircraftType", current: flight.aircraftType },
     ] as const
   )
     .map((p) => ({ ...p, diff: d(p.key) }))
     .filter((p) => Boolean(p.diff) || Boolean((p.current || "").trim()));
+
+  const flightNumberDiff = d("flightNumber");
+  const hasFlightNumber =
+    Boolean(flightNumberDiff) || Boolean((flight.flightNumber || "").trim());
+  const isSim = isSimulatorEntry(flight);
+  const TypeIcon = isSim ? MonitorPlay : Plane;
 
   return (
     <div
@@ -230,10 +241,10 @@ export function FlightCardBody({
             <div className="flex items-center gap-1 flex-1 justify-center">
               <div
                 className={cn(
-                  "h-px flex-1",
+                  "h-0.5 flex-1 rounded-full",
                   durationInfo.scheduled
-                    ? "bg-orange-600/40 dark:bg-orange-400/30"
-                    : "bg-border"
+                    ? "bg-orange-600/50 dark:bg-orange-400/40"
+                    : "bg-muted-foreground/30"
                 )}
               />
               <span className="text-base font-medium whitespace-nowrap px-1">
@@ -248,10 +259,10 @@ export function FlightCardBody({
               </span>
               <div
                 className={cn(
-                  "h-px flex-1",
+                  "h-0.5 flex-1 rounded-full",
                   durationInfo.scheduled
-                    ? "bg-orange-600/40 dark:bg-orange-400/30"
-                    : "bg-border"
+                    ? "bg-orange-600/50 dark:bg-orange-400/40"
+                    : "bg-muted-foreground/30"
                 )}
               />
             </div>
@@ -266,15 +277,10 @@ export function FlightCardBody({
           </div>
 
           <div className="flex items-center justify-between mt-0">
-            {flight.isSimulator ? (
-              <>
-                <span className="text-2xl font-bold leading-tight tracking-tight">
-                  SIM
-                </span>
-                <span className="text-2xl font-bold leading-tight tracking-tight">
-                  {flight.simSessionCode || ""}
-                </span>
-              </>
+            {isSim ? (
+              <span className="text-2xl font-bold leading-tight tracking-tight">
+                Simulator
+              </span>
             ) : (
               <>
                 <span className="text-2xl font-bold leading-tight tracking-tight">
@@ -308,14 +314,28 @@ export function FlightCardBody({
               : "text-muted-foreground"
           )}
         >
-          {/* Bullets only BETWEEN present values — a sector with no aircraft
-              assigned yet would otherwise render a bare "TR118 • • A21N". */}
-          {metaParts.map((part, i) => (
-            <span key={part.key} className="inline-flex items-baseline gap-1.5">
-              {i > 0 && <span>•</span>}
-              <Slot diff={part.diff} current={part.current} />
+          {metaParts.length > 0 && (
+            <span className="inline-flex min-w-0 items-center gap-1">
+              <TypeIcon className="size-3 shrink-0" aria-hidden />
+              {/* One inline run so the comma sits tight against the value it
+                  follows — a gapped flex row reads "9V-NCE , A21N". Separators
+                  go only BETWEEN present values, so a sector with no aircraft
+                  assigned yet doesn't render a bare ", A21N". */}
+              <span className="min-w-0 truncate">
+                {metaParts.map((part, i) => (
+                  <span key={part.key}>
+                    {i > 0 && ", "}
+                    <Slot diff={part.diff} current={part.current} />
+                  </span>
+                ))}
+              </span>
             </span>
-          ))}
+          )}
+          {hasFlightNumber && (
+            <span className="ml-auto shrink-0 pl-2">
+              Flt <Slot diff={flightNumberDiff} current={flight.flightNumber} />
+            </span>
+          )}
         </div>
 
         <div className="flex items-center justify-between mt-0.5">

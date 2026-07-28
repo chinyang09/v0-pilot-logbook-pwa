@@ -75,6 +75,13 @@ export interface AdditionalCrew {
 
 export type PilotRole = "PIC" | "SIC" | "PICUS" | "Dual" | "Instructor"
 
+/**
+ * What a logbook record is. Only flight and simulator today; the union exists
+ * so ground duties (standby, leave, training) can be added without another
+ * boolean flag per kind.
+ */
+export type EntryType = "flight" | "simulator"
+
 export type SyncStatus = "synced" | "pending" | "error"
 
 export interface ManualOverrides {
@@ -203,6 +210,16 @@ export interface FlightLog {
     string,
     { declined?: string; replaced?: string; at: number }
   >
+  /**
+   * What this record IS. Kept deliberately open-ended — "standby" and other
+   * non-flying duties are the obvious next entries — but only flight and
+   * simulator exist today.
+   *
+   * Absent on every row written before the field existed, so read it through
+   * `getEntryType()` rather than directly: that falls back to the legacy
+   * `isSimulator` flag. Writers must keep the two in sync (`setEntryType`).
+   */
+  entryType?: EntryType
   // Simulator sessions are logged as flight entries (no aircraftReg / airports)
   // so they count toward dashboard simulator-instrument totals. These optional
   // fields are non-indexed, so they need no Dexie migration.

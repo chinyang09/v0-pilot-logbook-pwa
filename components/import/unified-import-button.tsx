@@ -94,6 +94,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         if (result.deleted) parts.push(`${result.deleted} deleted`);
         if (result.simSessionsCreated)
           parts.push(`${result.simSessionsCreated} sim sessions`);
+        if (result.simDuplicatesRemoved)
+          parts.push(`${result.simDuplicatesRemoved} duplicate sims removed`);
         if (result.aircraftCreated)
           parts.push(`${result.aircraftCreated} aircraft`);
         if (result.staleSkipped)
