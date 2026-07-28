@@ -1,9 +1,11 @@
 /**
  * Unified import review modal — v2.
  *
- * Tab-navigated review: operations are bucketed (New / Updates / Review /
- * Conflicts / Remove / Skipped) and each bucket renders as a list of flight
- * cards rather than paragraphs of `field: from → to` text. Changed values show
+ * Tab-navigated review: operations are bucketed (New / Updated / Changes /
+ * Your edits / Removed / Protected) and each bucket renders as a list of
+ * flight cards rather than paragraphs of `field: from → to` text. Rows the
+ * report already agrees with are not listed at all — they are counted in the
+ * header instead. Changed values show
  * the old figure struck through in grey next to the new one in the accent
  * colour, so a card reads as a flight first and a diff second.
  *
@@ -25,10 +27,13 @@ import {
 } from "@/components/ui/dialog";
 import { SegmentedTabs } from "./segmented-tabs";
 import {
+  MODAL_SCRIM,
+  PROGRESSIVE_BLUR_FADE,
   ProgressiveBlur,
   RadialBlurBackdrop,
 } from "@/components/ui/progressive-blur";
 import { GlassContainer } from "@/components/ui/glass-container";
+import { cn } from "@/lib/utils";
 import type {
   AcceptableOperation,
   PlannedImport,
@@ -361,7 +366,7 @@ export function ImportReviewModalV2({
         className="z-[110] block max-w-3xl gap-0 overflow-hidden rounded-3xl border-white/10 bg-card/70 p-0 shadow-2xl backdrop-saturate-150 h-[calc(100dvh-7rem)] max-h-[46rem] top-[calc(env(safe-area-inset-top)+4.5rem)] translate-y-0 sm:top-[50%] sm:-translate-y-1/2"
         // The backdrop blur is strongest around the dialog and clears toward
         // the screen edges, so the app stays readable behind it.
-        overlayClassName="z-[105] bg-black/40"
+        overlayClassName={cn("z-[105]", MODAL_SCRIM)}
         // Rendered inside the dialog's own portal, between the overlay and the
         // panel — the panel itself is `overflow-hidden` AND transformed, so it
         // would clip even a fixed-position child.
@@ -375,7 +380,7 @@ export function ImportReviewModalV2({
           }}
           className="absolute inset-x-0 top-0 z-20"
         >
-          <ProgressiveBlur side="top" className="h-[185%]" />
+          <ProgressiveBlur side="top" />
           <div className="relative">
             <DialogHeader className="px-4 pt-4 sm:px-6 sm:pt-5">
               <DialogTitle>Review import</DialogTitle>
@@ -408,8 +413,10 @@ export function ImportReviewModalV2({
         <div
           className="h-full overflow-y-auto overscroll-contain px-4 sm:px-6"
           style={{
-            paddingTop: chromeHeights.top + 8,
-            paddingBottom: chromeHeights.bottom + 8,
+            // Clear the blur's fade tail as well as the chrome, so the first
+            // row of content isn't sitting inside the gradient at rest.
+            paddingTop: chromeHeights.top + PROGRESSIVE_BLUR_FADE,
+            paddingBottom: chromeHeights.bottom + PROGRESSIVE_BLUR_FADE,
           }}
         >
           {meta && (
@@ -481,7 +488,7 @@ export function ImportReviewModalV2({
           ref={observeChrome("bottom")}
           className="absolute inset-x-0 bottom-0 z-20"
         >
-          <ProgressiveBlur side="bottom" className="h-[150%]" />
+          <ProgressiveBlur side="bottom" />
           <DialogFooter className="relative flex-row items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
               {breakdown || "No changes selected"}

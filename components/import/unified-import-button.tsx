@@ -8,22 +8,8 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import {
-  Upload,
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  AlertTriangle,
-} from "lucide-react";
+import { Upload, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Progress } from "@/components/ui/progress";
 import { extractDocuments } from "@/lib/utils/parsers/extractors";
 import {
   parseScheduleCSV,
@@ -51,6 +37,7 @@ import {
 } from "@/lib/db";
 import type { FlightLog } from "@/types/entities/flight.types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
+import { ImportStatusDialog, type ImportStage } from "./import-status-dialog";
 import { DetectedFilesChip } from "./detected-files-chip";
 
 interface Props {
@@ -60,15 +47,9 @@ interface Props {
   onComplete?: () => void;
 }
 
-interface Stage {
-  percent: number;
-  stage: string;
-  detail?: string;
-}
-
 export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [progress, setProgress] = useState<Stage | null>(null);
+  const [progress, setProgress] = useState<ImportStage | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [pendingPlan, setPendingPlan] = useState<PlannedImport | null>(null);
   const [showReview, setShowReview] = useState(false);
@@ -427,71 +408,19 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         )}
       </Button>
 
-      <Dialog
+      <ImportStatusDialog
         open={isOpen && !showReview}
         onOpenChange={onDialogChange}
-      >
-        <DialogContent className="sm:max-w-md" showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>
-              {progress
-                ? "Importing"
-                : errorMsg
-                  ? "Import Failed"
-                  : summary
-                    ? "Import Complete"
-                    : "Import"}
-            </DialogTitle>
-            <DialogDescription>
-              {progress?.stage || (errorMsg ? "" : summary || "")}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3 py-2">
-            {progress && (
-              <>
-                <Progress value={progress.percent} className="h-2" />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{progress.detail}</span>
-                  <span>{progress.percent}%</span>
-                </div>
-              </>
-            )}
-            {errorMsg && (
-              <div className="flex items-start gap-2 text-sm text-destructive">
-                <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-            {summary && !errorMsg && !progress && (
-              <div className="flex items-start gap-2 text-sm">
-                <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0 text-status-valid" />
-                <span>{summary}</span>
-              </div>
-            )}
-            {context && progress && (
-              <p className="text-[11px] text-muted-foreground">
-                Context: {context}
-              </p>
-            )}
-          </div>
-
-          {(errorMsg || (summary && !progress)) && (
-            <div className="flex justify-end pt-2">
-              <Button
-                size="sm"
-                onClick={() => {
-                  setIsOpen(false);
-                  setSummary(null);
-                  setErrorMsg(null);
-                }}
-              >
-                Close
-              </Button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+        progress={progress}
+        errorMsg={errorMsg}
+        summary={summary}
+        context={context}
+        onDone={() => {
+          setIsOpen(false);
+          setSummary(null);
+          setErrorMsg(null);
+        }}
+      />
 
       <ImportReviewModalV2
         plan={pendingPlan}
