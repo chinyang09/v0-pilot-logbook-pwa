@@ -193,14 +193,16 @@ export interface FlightLog {
    */
   toLdgDecidedAt?: number
   /**
-   * Field changes the user has already turned down, as `field -> the value
-   * they rejected`. A later report proposing the SAME value for that field is
-   * not raised again; propose something different and it is.
-   *
-   * Without this, declining a change meant being asked about it on every
-   * subsequent import of the same report.
+   * What the user already decided about this flight's fields, so a re-uploaded
+   * report doesn't ask the same question twice — and so a decision can still
+   * be reversed on purpose later. Keyed by field name; see
+   * `lib/utils/roster/import-decisions.ts` for the shape, the two directions
+   * (declined / replaced) and the retention window.
    */
-  declinedImportFields?: Record<string, string>
+  importDecisions?: Record<
+    string,
+    { declined?: string; replaced?: string; at: number }
+  >
   // Simulator sessions are logged as flight entries (no aircraftReg / airports)
   // so they count toward dashboard simulator-instrument totals. These optional
   // fields are non-indexed, so they need no Dexie migration.

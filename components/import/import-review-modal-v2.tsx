@@ -28,7 +28,7 @@ import {
 import { SegmentedTabs } from "./segmented-tabs";
 import {
   MODAL_SCRIM,
-  PROGRESSIVE_BLUR_FADE,
+  PROGRESSIVE_BLUR_CLEAR,
   ProgressiveBlur,
   RadialBlurBackdrop,
 } from "@/components/ui/progressive-blur";
@@ -54,8 +54,8 @@ type Bucket =
   | "creates"
   | "safe"
   | "consult"
-  | "edited"
   | "deletions"
+  | "decided"
   | "protected";
 
 type Entry = { op: AcceptableOperation; index: number };
@@ -91,13 +91,13 @@ const BUCKET_META: Record<
     label: "Changes",
     tone: "consult",
     selectable: true,
-    hint: "The report differs from what you have. Tick the ones to take.",
+    hint: "The report differs from what you have. Tick what to take.",
   },
-  edited: {
-    label: "Your edits",
-    tone: "conflict",
+  decided: {
+    label: "Earlier decisions",
+    tone: "consult",
     selectable: true,
-    hint: "You edited these yourself (signature, remarks or manual entries). Ticking one replaces your version with the report's.",
+    hint: "You already answered these, so they were left alone. Tick one only if you want to change your mind.",
   },
   deletions: {
     label: "Remove",
@@ -113,12 +113,38 @@ const BUCKET_META: Record<
   },
 };
 
+/**
+ * True when taking this change would replace something the USER wrote — a
+ * signature, remarks, a manual override, or an edit made after the last sync.
+ * Everything else in the same list only overwrites data a previous import put
+ * there, which costs nothing.
+ */
+function isUserAuthored(op: AcceptableOperation): boolean {
+  return op.kind === "edited_conflict";
+}
+
+/** Human wording for why a row counts as the user's own entry. */
+const EDIT_REASON_LABEL: Record<string, string> = {
+  has_signature: "signed",
+  has_remarks: "your remarks",
+  has_manual_overrides: "manual entry",
+  user_modified_after_sync: "you edited it",
+};
+
+function editReasonText(op: AcceptableOperation): string | undefined {
+  if (op.kind !== "edited_conflict") return undefined;
+  const labels = op.editReasons
+    .map((r) => EDIT_REASON_LABEL[r])
+    .filter(Boolean);
+  return labels.length > 0 ? labels.join(" · ") : "your entry";
+}
+
 const BUCKET_ORDER: Bucket[] = [
   "consult",
-  "edited",
   "deletions",
   "creates",
   "safe",
+  "decided",
   "protected",
 ];
 
@@ -171,8 +197,8 @@ export function ImportReviewModalV2({
       creates: [],
       safe: [],
       consult: [],
-      edited: [],
       deletions: [],
+      decided: [],
       protected: [],
     };
     if (!plan) return out;
@@ -188,13 +214,17 @@ export function ImportReviewModalV2({
           break;
         case "update_consult":
         case "update_conflict":
-          out.consult.push(entry);
-          break;
         case "edited_conflict":
-          out.edited.push(entry);
+          // One list: the action is identical (tick to take the report's
+          // value). The only thing that differs is what it costs you, and
+          // that belongs on the card, not in a separate tab.
+          out.consult.push(entry);
           break;
         case "delete_missing":
           out.deletions.push(entry);
+          break;
+        case "skip_decided":
+          out.decided.push(entry);
           break;
         case "skip_stale_report":
           out.protected.push(entry);
@@ -206,6 +236,12 @@ export function ImportReviewModalV2({
           break;
       }
     });
+    // Rows that would overwrite something the user authored sink to the
+    // bottom, so "Select all" (which skips them) reads as a clean top block
+    // and the ones needing a real decision cluster where they're noticed.
+    out.consult.sort(
+      (a, b) => Number(isUserAuthored(a.op)) - Number(isUserAuthored(b.op))
+    );
     return out;
   }, [plan]);
 
@@ -248,10 +284,18 @@ export function ImportReviewModalV2({
     });
   };
 
+  /**
+   * Bulk toggle. Ticking never touches rows that would overwrite the user's
+   * own entries — those stay a per-row decision, which is the whole reason
+   * they no longer need a separate tab. Clearing applies to everything.
+   */
   const setBucketAccept = (bucket: Bucket, value: boolean) => {
     setAcceptance((prev) => {
       const next = new Map(prev);
-      for (const { index } of partitioned[bucket]) next.set(index, value);
+      for (const { op, index } of partitioned[bucket]) {
+        if (value && isUserAuthored(op)) continue;
+        next.set(index, value);
+      }
       return next;
     });
   };
@@ -320,21 +364,21 @@ export function ImportReviewModalV2({
     partitioned[bucket].filter((e) => getAccept(e.index, false)).length;
 
   const consultAccepted = countAccepted("consult");
-  const editedAccepted = countAccepted("edited");
   const deleteAccepted = countAccepted("deletions");
+  const revertAccepted = countAccepted("decided");
 
   const totalActions =
     partitioned.creates.length +
     partitioned.safe.length +
     consultAccepted +
-    editedAccepted +
+    revertAccepted +
     deleteAccepted;
 
   const breakdown = [
     partitioned.creates.length && `${partitioned.creates.length} new`,
     partitioned.safe.length && `${partitioned.safe.length} updated`,
     consultAccepted && `${consultAccepted} overwritten`,
-    editedAccepted && `${editedAccepted} conflict`,
+    revertAccepted && `${revertAccepted} reversed`,
     deleteAccepted && `${deleteAccepted} deleted`,
   ]
     .filter(Boolean)
@@ -415,8 +459,8 @@ export function ImportReviewModalV2({
           style={{
             // Clear the blur's fade tail as well as the chrome, so the first
             // row of content isn't sitting inside the gradient at rest.
-            paddingTop: chromeHeights.top + PROGRESSIVE_BLUR_FADE,
-            paddingBottom: chromeHeights.bottom + PROGRESSIVE_BLUR_FADE,
+            paddingTop: chromeHeights.top + PROGRESSIVE_BLUR_CLEAR,
+            paddingBottom: chromeHeights.bottom + PROGRESSIVE_BLUR_CLEAR,
           }}
         >
           {meta && (
@@ -425,14 +469,10 @@ export function ImportReviewModalV2({
               {meta.selectable && entries.length > 1 && (
                 <button
                   type="button"
-                  onClick={() =>
-                    setBucketAccept(current!, selectedInTab < entries.length)
-                  }
+                  onClick={() => setBucketAccept(current!, selectedInTab === 0)}
                   className="shrink-0 text-xs font-medium text-primary hover:underline"
                 >
-                  {selectedInTab < entries.length
-                    ? "Select all"
-                    : "Clear all"}
+                  {selectedInTab === 0 ? "Select all" : "Clear all"}
                 </button>
               )}
             </div>
@@ -447,7 +487,10 @@ export function ImportReviewModalV2({
                 key={`${index}-${op.kind}`}
                 op={op}
                 displayPrefs={displayPrefs}
-                tone={meta?.tone ?? "safe"}
+                tone={
+                  isUserAuthored(op) ? "conflict" : meta?.tone ?? "safe"
+                }
+                ownEntryLabel={editReasonText(op)}
                 checked={meta?.selectable ? getAccept(index, false) : undefined}
                 onCheckedChange={
                   meta?.selectable ? (v) => setAccept(index, v) : undefined

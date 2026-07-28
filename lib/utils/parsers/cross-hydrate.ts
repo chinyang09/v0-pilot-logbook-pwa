@@ -165,6 +165,7 @@ function sectorOf(
   switch (op.kind) {
     case "create":
     case "skip_identical":
+    case "skip_decided":
     case "update_safe":
     case "update_consult":
     case "update_conflict":

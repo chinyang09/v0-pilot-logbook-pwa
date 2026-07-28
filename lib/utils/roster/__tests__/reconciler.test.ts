@@ -8,6 +8,7 @@ import {
   type ParsedSector,
 } from "../reconciler";
 import type { FlightLog } from "../../../../types/entities/flight.types";
+import { IMPORT_DECISION_RETENTION_MS } from "../import-decisions";
 
 // ============================================================
 // Fixture helpers
@@ -857,25 +858,71 @@ describe("reconcileRoster — turnaround matching", () => {
 // Declined-decision memory
 // ============================================================
 
-describe("reconcileRoster — declinedImportFields", () => {
+describe("reconcileRoster — import decisions", () => {
+  const declined = (field: string, value: string, at = Date.now()) => ({
+    [field]: { declined: value, at },
+  });
+
   it("does not re-raise a change the user already turned down", () => {
     const dbFlight = makeFlight({
       scheduledOut: "04:00",
-      declinedImportFields: { scheduledOut: "03:50" },
+      importDecisions: declined("scheduledOut", "03:50"),
     });
     const ops = reconcileRoster({
       sectors: [makeSector()],
       existingFlights: [dbFlight],
       csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
     });
-    // The only diff was the declined one → nothing left to ask about.
-    expect(ops[0].kind).toBe("skip_identical");
+    // Nothing left to ask about — but the decision is offered back so it can
+    // be deliberately reversed.
+    expect(ops[0].kind).toBe("skip_decided");
+    if (ops[0].kind !== "skip_decided") return;
+    expect(ops[0].reverts).toHaveLength(1);
+    expect(ops[0].reverts[0].field).toBe("scheduledOut");
+    expect(ops[0].reverts[0].to).toBe("03:50");
+    expect(ops[0].reverts[0].direction).toBe("take_report");
+  });
+
+  it("asks again once the decision has aged past the retention window", () => {
+    const stale = Date.now() - (IMPORT_DECISION_RETENTION_MS + 86_400_000);
+    const dbFlight = makeFlight({
+      scheduledOut: "04:00",
+      importDecisions: declined("scheduledOut", "03:50", stale),
+    });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    expect(ops[0].kind).toBe("update_conflict");
+  });
+
+  it("offers to restore a value an accepted change overwrote", () => {
+    const dbFlight = makeFlight({
+      importDecisions: {
+        remarks: { replaced: "my note", at: Date.now() },
+      },
+      remarks: "company note",
+    });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    expect(ops[0].kind).toBe("skip_decided");
+    if (ops[0].kind !== "skip_decided") return;
+    expect(ops[0].reverts[0]).toMatchObject({
+      field: "remarks",
+      from: "company note",
+      to: "my note",
+      direction: "restore_yours",
+    });
   });
 
   it("still raises the field when a later report proposes a different value", () => {
     const dbFlight = makeFlight({
       scheduledOut: "04:00",
-      declinedImportFields: { scheduledOut: "03:50" },
+      importDecisions: declined("scheduledOut", "03:50"),
     });
     const ops = reconcileRoster({
       sectors: [makeSector({ scheduledOut: "03:30" })],
@@ -891,7 +938,7 @@ describe("reconcileRoster — declinedImportFields", () => {
     const dbFlight = makeFlight({
       scheduledOut: "04:00",
       scheduledIn: "07:00",
-      declinedImportFields: { scheduledOut: "03:50" },
+      importDecisions: declined("scheduledOut", "03:50"),
     });
     const ops = reconcileRoster({
       sectors: [makeSector()],

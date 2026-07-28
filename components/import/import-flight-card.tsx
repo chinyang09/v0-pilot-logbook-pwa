@@ -16,6 +16,7 @@
 
 "use client";
 
+import { PencilLine, Undo2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SunTimeline, DayNightChoice } from "./sun-timeline";
@@ -373,6 +374,16 @@ function pfLabel(v: string): string {
   return v === "true" ? "PF" : "PM";
 }
 
+/** "3 weeks ago" style stamp for an earlier import decision. */
+function decidedAgo(at: number): string {
+  const days = Math.max(0, Math.round((Date.now() - at) / 86_400_000));
+  if (days === 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.round(days / 7)} weeks ago`;
+  return `${Math.round(days / 30)} months ago`;
+}
+
 // ============================================================
 // Card
 // ============================================================
@@ -389,6 +400,7 @@ export function ImportFlightCard({
   onRoleChange,
   useRecordedPf = false,
   onUseRecordedPfChange,
+  ownEntryLabel,
 }: {
   op: AcceptableOperation;
   displayPrefs?: DisplayPreferences;
@@ -405,9 +417,22 @@ export function ImportFlightCard({
   /** Keep the pilot-flying value already in the logbook instead of the report's. */
   useRecordedPf?: boolean;
   onUseRecordedPfChange?: (v: boolean) => void;
+  /**
+   * Set when taking this change would replace something the USER wrote — a
+   * signature, remarks or a manual entry. Carries the short reason, shown as a
+   * marker on the card. Rows without it only overwrite data a previous import
+   * left behind, which costs nothing.
+   */
+  ownEntryLabel?: string;
 }) {
+  // A decided row carries no pending `changes` — its reverts ARE the diff to
+  // show, so the user can see what ticking it would do.
   const changes: FieldDiff[] =
-    "changes" in op && Array.isArray(op.changes) ? op.changes : [];
+    op.kind === "skip_decided"
+      ? op.reverts
+      : "changes" in op && Array.isArray(op.changes)
+        ? op.changes
+        : [];
 
   const diffs = new Map<string, FieldDiff>();
   for (const c of changes) diffs.set(c.field, c);
@@ -422,6 +447,26 @@ export function ImportFlightCard({
 
   const inner = (
     <>
+      {op.kind === "skip_decided" && op.reverts.length > 0 && (
+        <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <Undo2 className="size-3" aria-hidden />
+          <span>
+            {op.reverts[0].direction === "restore_yours"
+              ? "You took the report's value"
+              : "You kept yours"}
+            {" · "}
+            {decidedAgo(op.reverts[0].decidedAt)}
+          </span>
+        </div>
+      )}
+
+      {ownEntryLabel && (
+        <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-status-warning">
+          <PencilLine className="size-3" aria-hidden />
+          <span>Replaces yours · {ownEntryLabel}</span>
+        </div>
+      )}
+
       <FlightCardBody
         flight={flight}
         displayPrefs={displayPrefs}

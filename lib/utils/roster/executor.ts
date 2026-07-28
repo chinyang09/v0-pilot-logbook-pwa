@@ -59,6 +59,11 @@ import {
   type ParsedSector,
   type FieldDiff,
 } from "@/lib/utils/roster/reconciler";
+import {
+  clearDecisions,
+  mergeDecisions,
+  type ImportDecisions,
+} from "@/lib/utils/roster/import-decisions";
 
 const TOLDG_FIELDS = new Set([
   "dayTakeoffs",
@@ -222,27 +227,55 @@ async function hydrateFlightFromSector(
 }
 
 /**
- * Merge turned-down field changes into the flight's `declinedImportFields`
- * map (`field -> the value that was rejected`).
+ * Record what the user decided about a set of field changes.
  *
- * The reconciler filters any future diff whose `field`+`to` matches an entry
- * here, so re-uploading the SAME report stops re-asking a question the user
- * already answered. A report proposing a DIFFERENT value for that field still
- * comes through — the memory is per decision, not a permanent mute.
+ * `declined` are values they turned down — the reconciler withholds a future
+ * diff proposing that same value, so re-uploading the same report stops
+ * re-asking. `applied` are changes they took: the value each one overwrote is
+ * kept so it can be restored later if they change their mind.
+ *
+ * Only changes that overwrite something the user actually had are worth
+ * remembering — filling a blank field leaves nothing to restore.
  */
-function withDeclined(
+function recordDecisions(
   flight: FlightLog,
-  declined: readonly FieldDiff[]
-): Record<string, string> | undefined {
-  if (declined.length === 0) return undefined;
-  const next = { ...(flight.declinedImportFields ?? {}) };
-  let changed = false;
-  for (const d of declined) {
-    if (next[d.field] === d.to) continue;
-    next[d.field] = d.to;
-    changed = true;
-  }
-  return changed ? next : undefined;
+  {
+    declined = [],
+    applied = [],
+  }: { declined?: readonly FieldDiff[]; applied?: readonly FieldDiff[] }
+): ImportDecisions | null {
+  const updates = [
+    ...declined.map((d) => ({ field: d.field, declined: d.to })),
+    ...applied
+      .filter((d) => d.from !== "" && d.from !== d.to)
+      .map((d) => ({ field: d.field, replaced: d.from })),
+  ];
+  if (updates.length === 0) return null;
+  return mergeDecisions(flight, updates);
+}
+
+const NUMERIC_FIELDS = new Set([
+  "dayTakeoffs",
+  "nightTakeoffs",
+  "dayLandings",
+  "nightLandings",
+  "departureTimezone",
+  "arrivalTimezone",
+]);
+
+/**
+ * Write one field onto a patch, coercing back from the string form a
+ * `FieldDiff` carries. Shared by the normal update path and the revert path.
+ */
+function assignFieldValue(
+  patch: Partial<FlightLog>,
+  field: string,
+  value: string
+): void {
+  const target = patch as Record<string, unknown>;
+  if (NUMERIC_FIELDS.has(field)) target[field] = Number(value) || 0;
+  else if (field === "pilotFlying") target[field] = value === "true";
+  else target[field] = value;
 }
 
 function buildUpdatePatch(op: AcceptableOperation): Partial<FlightLog> {
@@ -256,24 +289,7 @@ function buildUpdatePatch(op: AcceptableOperation): Partial<FlightLog> {
   }
   const patch: Partial<FlightLog> = {};
   for (const change of op.changes) {
-    const value: unknown = change.to;
-    // Numeric fields stored as numbers — coerce strings back.
-    if (
-      change.field === "dayTakeoffs" ||
-      change.field === "nightTakeoffs" ||
-      change.field === "dayLandings" ||
-      change.field === "nightLandings" ||
-      change.field === "departureTimezone" ||
-      change.field === "arrivalTimezone"
-    ) {
-      (patch as Record<string, unknown>)[change.field] =
-        Number(value) || 0;
-    } else if (change.field === "pilotFlying") {
-      // FieldDiff carries strings; coerce back to boolean for storage.
-      (patch as Record<string, unknown>)[change.field] = value === "true";
-    } else {
-      (patch as Record<string, unknown>)[change.field] = value;
-    }
+    assignFieldValue(patch, change.field, change.to);
   }
   return patch;
 }
@@ -610,8 +626,8 @@ export async function executeRosterImport(
             if (hasToLdgDiff && fresh.toLdgDecidedAt === undefined) {
               patch.toLdgDecidedAt = Date.now();
             }
-            const declined = withDeclined(fresh, opChanges);
-            if (declined) patch.declinedImportFields = declined;
+            const decisions = recordDecisions(fresh, { declined: opChanges });
+            if (decisions) patch.importDecisions = decisions;
             if (Object.keys(patch).length > 0) {
               await updateFlight(op.flight.id, patch);
               touchedFlightIds.push(op.flight.id);
@@ -657,10 +673,15 @@ export async function executeRosterImport(
           if (hasToLdgDiff && op.flight.toLdgDecidedAt === undefined) {
             patch.toLdgDecidedAt = Date.now();
           }
-          // Parts of an otherwise-accepted row the user turned down (e.g.
-          // keeping their recorded PF/PM) are remembered too.
-          const declined = withDeclined(op.flight, op.declinedChanges ?? []);
-          if (declined) patch.declinedImportFields = declined;
+          // Both halves of the decision are remembered: the parts the user
+          // turned down (e.g. keeping their recorded PF/PM) so they aren't
+          // re-asked, and the values the accepted changes overwrote so they
+          // can be restored later.
+          const decisions = recordDecisions(op.flight, {
+            declined: op.declinedChanges ?? [],
+            applied: op.changes,
+          });
+          if (decisions) patch.importDecisions = decisions;
           const updated = await updateFlight(op.flight.id, patch);
           if (!updated) {
             // Row vanished between plan build and execute — surface so the
@@ -678,6 +699,34 @@ export async function executeRosterImport(
               (k) => k !== "reportGeneratedAt" && k !== "importSource"
             )
           );
+          touchedFlightIds.push(op.flight.id);
+          result.updated++;
+          break;
+        }
+        case "skip_decided": {
+          // The user deliberately reversed an earlier decision. Apply the
+          // reverted values and drop the memory for those fields, so the
+          // flight goes back to being driven by the report (or by their own
+          // restored entry) with a clean slate.
+          const patch: Partial<FlightLog> = {};
+          for (const revert of op.reverts) {
+            assignFieldValue(patch, revert.field, revert.to);
+          }
+          const cleared = clearDecisions(
+            op.flight,
+            op.reverts.map((r) => r.field)
+          );
+          if (cleared) patch.importDecisions = cleared;
+          Object.assign(patch, reportStamps);
+          const reverted = await updateFlight(op.flight.id, patch);
+          if (!reverted) {
+            result.errors.push({
+              operation: `revert ${op.flight.flightNumber || op.flight.id}`,
+              message:
+                "Flight no longer exists in IndexedDB — revert was not applied.",
+            });
+            break;
+          }
           touchedFlightIds.push(op.flight.id);
           result.updated++;
           break;

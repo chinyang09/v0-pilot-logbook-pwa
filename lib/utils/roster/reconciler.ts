@@ -31,6 +31,7 @@ import type { ScheduledCrewMember } from "@/types/entities/roster.types";
 import { classifyChanges } from "./classification";
 import { newestStamp, type ReportSource } from "./report-tracking";
 import { reconcilePilotRole } from "./pilot-role";
+import { liveDecisions } from "./import-decisions";
 import type { ImportDefaults } from "@/types/db/stores.types";
 
 // ============================================================
@@ -137,6 +138,21 @@ export interface FieldDiff {
 }
 
 /**
+ * A field change the user could apply now to reverse a decision they made on
+ * an earlier import.
+ *
+ * - `take_report` — they declined this value before; taking it now follows the
+ *   company after all.
+ * - `restore_yours` — they accepted a change that overwrote their own entry;
+ *   taking this puts their value back.
+ */
+export interface RevertOption extends FieldDiff {
+  direction: "take_report" | "restore_yours";
+  /** When the original decision was made, so the UI can say how long ago. */
+  decidedAt: number;
+}
+
+/**
  * Remarks marker appended by the executor when the user has been asked
  * about (and made a decision on) TO/LDG values for a flight. The
  * reconciler treats this as "user already decided; do not re-flag" so
@@ -189,6 +205,20 @@ export type ReconcilerOperation =
       sector: ParsedSector;
       changes: FieldDiff[];
       editReasons: EditReason[];
+    }
+  /**
+   * Nothing left to ask about — every difference on this flight is one the
+   * user already answered. Carries those answers back as reversible options
+   * so they can deliberately change their mind (the report's value was right
+   * after all, or the value it overwrote should come back).
+   *
+   * Applied only if the user ticks it; ignoring it keeps the earlier decision.
+   */
+  | {
+      kind: "skip_decided";
+      flight: FlightLog;
+      sector: ParsedSector;
+      reverts: RevertOption[];
     }
   | {
       kind: "delete_missing";
@@ -508,16 +538,71 @@ function detectEditReasons(flight: FlightLog): EditReason[] {
   return reasons;
 }
 
+/**
+ * Turn a flight's live decision memory into things the user could undo.
+ *
+ * `suppressed` are diffs this very report raised again and we withheld —
+ * offering them is "actually, follow the company after all". `replaced` values
+ * in the flight's memory are the user's own entries that an accepted change
+ * overwrote — offering them is "put mine back".
+ *
+ * Only reachable when the flight has no other pending change; a flight that
+ * also has live diffs shows those first and its reverts wait for the next
+ * import, which keeps one card to one decision.
+ */
+function buildRevertOptions(
+  flight: FlightLog,
+  suppressed: FieldDiff[]
+): RevertOption[] {
+  const decisions = liveDecisions(flight);
+  if (!decisions) return [];
+
+  const out: RevertOption[] = [];
+  const seen = new Set<string>();
+
+  for (const diff of suppressed) {
+    const decision = decisions[diff.field];
+    if (!decision) continue;
+    out.push({ ...diff, direction: "take_report", decidedAt: decision.at });
+    seen.add(diff.field);
+  }
+
+  for (const [field, decision] of Object.entries(decisions)) {
+    if (seen.has(field) || decision.replaced === undefined) continue;
+    const currentValue = String(
+      (flight as unknown as Record<string, unknown>)[field] ?? ""
+    );
+    // Already back to their value (edited by hand since) — nothing to undo.
+    if (currentValue === decision.replaced) continue;
+    out.push({
+      field,
+      from: currentValue,
+      to: decision.replaced,
+      direction: "restore_yours",
+      decidedAt: decision.at,
+    });
+  }
+
+  return out;
+}
+
 // ============================================================
 // Field comparison
 // ============================================================
+
+interface SectorDiff {
+  /** Changes to raise with the user. */
+  changes: FieldDiff[];
+  /** Changes withheld because the user already turned this exact value down. */
+  suppressed: FieldDiff[];
+}
 
 function diffSectorVsFlight(
   sector: ParsedSector,
   flight: FlightLog,
   currentUser?: CurrentUserCrew,
   nonPicPfRole?: ImportDefaults["nonPicPfRole"]
-): FieldDiff[] {
+): SectorDiff {
   const changes: FieldDiff[] = [];
 
   const csvFullFlightNum =
@@ -742,11 +827,20 @@ function diffSectorVsFlight(
     changes
   );
 
-  // Anything the user has already turned down — with this exact value — is not
-  // raised again. A different value for the same field still surfaces.
-  const declined = flight.declinedImportFields;
-  if (!declined) return changes;
-  return changes.filter((c) => declined[c.field] !== c.to);
+  // Anything the user has already turned down — with this exact value, inside
+  // the retention window — is not raised again. A different value for the same
+  // field still surfaces, and the withheld ones are handed back so the caller
+  // can offer them as a deliberate revert.
+  const decisions = liveDecisions(flight);
+  if (!decisions) return { changes, suppressed: [] };
+
+  const suppressed: FieldDiff[] = [];
+  const visible: FieldDiff[] = [];
+  for (const change of changes) {
+    if (decisions[change.field]?.declined === change.to) suppressed.push(change);
+    else visible.push(change);
+  }
+  return { changes: visible, suppressed };
 }
 
 // ============================================================
@@ -841,14 +935,21 @@ export function reconcileRoster(
       continue;
     }
 
-    const changes = diffSectorVsFlight(
+    const { changes, suppressed } = diffSectorVsFlight(
       sector,
       match,
       currentUser,
       input.nonPicPfRole
     );
     if (changes.length === 0) {
-      operations.push({ kind: "skip_identical", flight: match, sector });
+      // Nothing to ask — but if the silence is because of earlier decisions,
+      // offer them back so the user can deliberately reverse one.
+      const reverts = buildRevertOptions(match, suppressed);
+      if (reverts.length > 0) {
+        operations.push({ kind: "skip_decided", flight: match, sector, reverts });
+      } else {
+        operations.push({ kind: "skip_identical", flight: match, sector });
+      }
       continue;
     }
 

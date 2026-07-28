@@ -65,6 +65,9 @@ export function summarizeOperations(
         summary.toDelete++;
         break;
       case "skip_identical":
+      // A decided row changes nothing unless the user ticks it, so it counts
+      // as unchanged in the pre-review summary.
+      case "skip_decided":
         summary.identical++;
         break;
       case "skip_non_airline":
