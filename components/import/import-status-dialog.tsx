@@ -24,7 +24,7 @@ import { GlassContainer } from "@/components/ui/glass-container";
 import {
   MODAL_SCRIM,
   RadialBlurBackdrop,
-} from "@/components/ui/progressive-blur";
+} from "@/components/ui/chrome-overlays";
 import { cn } from "@/lib/utils";
 
 export interface ImportStage {

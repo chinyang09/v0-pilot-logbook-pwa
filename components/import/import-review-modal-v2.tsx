@@ -28,10 +28,9 @@ import {
 import { SegmentedTabs } from "./segmented-tabs";
 import {
   MODAL_SCRIM,
-  PROGRESSIVE_BLUR_CLEAR,
-  ProgressiveBlur,
+  ChromeFade,
   RadialBlurBackdrop,
-} from "@/components/ui/progressive-blur";
+} from "@/components/ui/chrome-overlays";
 import { GlassContainer } from "@/components/ui/glass-container";
 import { cn } from "@/lib/utils";
 import type {
@@ -424,7 +423,7 @@ export function ImportReviewModalV2({
           }}
           className="absolute inset-x-0 top-0 z-20"
         >
-          <ProgressiveBlur side="top" />
+          <ChromeFade side="top" />
           <div className="relative">
             <DialogHeader className="px-4 pt-4 sm:px-6 sm:pt-5">
               <DialogTitle>Review import</DialogTitle>
@@ -457,10 +456,10 @@ export function ImportReviewModalV2({
         <div
           className="h-full overflow-y-auto overscroll-contain px-4 sm:px-6"
           style={{
-            // Clear the blur's fade tail as well as the chrome, so the first
-            // row of content isn't sitting inside the gradient at rest.
-            paddingTop: chromeHeights.top + PROGRESSIVE_BLUR_CLEAR,
-            paddingBottom: chromeHeights.bottom + PROGRESSIVE_BLUR_CLEAR,
+            // Exactly the chrome height, like the main panel's pt-16 under its
+            // h-16 header: content starts where the gradient has faded out.
+            paddingTop: chromeHeights.top,
+            paddingBottom: chromeHeights.bottom,
           }}
         >
           {meta && (
@@ -531,7 +530,7 @@ export function ImportReviewModalV2({
           ref={observeChrome("bottom")}
           className="absolute inset-x-0 bottom-0 z-20"
         >
-          <ProgressiveBlur side="bottom" />
+          <ChromeFade side="bottom" />
           <DialogFooter className="relative flex-row items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
               {breakdown || "No changes selected"}

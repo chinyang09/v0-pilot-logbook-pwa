@@ -670,40 +670,13 @@ textarea:focus-within {
      whites the glass out entirely). The backdrop-filter transitions so the
      morph surge below swells and settles smoothly. */
   backdrop-filter: blur(var(--extra-blur)) brightness(var(--glass-blur-brightness, 1.25)) saturate(1.5);
-  /* Spans the full face; the feather rule below eases it into the rim stack. */
+  /* Spans the WHOLE face, corner to corner. It used to be inset by the ring
+     widths, which left the perimeter a shade darker than the middle — the
+     material read as a grey slab sitting inside a darker frame instead of one
+     even fill (iOS Control Center controls are uniform edge to edge). */
   border-radius: var(--corner-radius);
   margin: 0;
   transition: backdrop-filter 240ms ease;
-}
-
-/* Face feather — the full-coverage face layers (blur + the contrast/brightness
-   pair that gives the material its milky body) end on a hard rounded rect,
-   which read as a flat grey plateau sitting inside a darker frame rather than
-   as one curved surface. Masking them with four intersecting edge gradients
-   ramps the face out into the rim stack instead, so the tone falls off toward
-   the edge. The rings still blur the perimeter, so nothing is left unfrosted.
-
-   `mask-composite: intersect` takes the minimum of the four, giving a uniform
-   inset feather on all sides regardless of the element's aspect ratio (a
-   radial gradient would over-fade the ends of a wide pill). */
-.GlassMaterial .GlassBlur,
-.GlassMaterial .Contrast,
-.GlassMaterial .Brightness {
-  --face-feather: calc(
-    (var(--emboss-width) + var(--refraction-width)) * 2 + 12px
-  );
-  /* Capped as a share of the axis so the two opposing gradients can't overlap
-     on a short control (a 44px-tall pill would otherwise be feathered edge to
-     edge, dimming the whole face instead of just its perimeter). On a large
-     surface like the sidebar the px value wins and the cap does nothing. */
-  --face-feather-x: min(var(--face-feather), 35%);
-  --face-feather-y: min(var(--face-feather), 35%);
-  mask-image:
-    linear-gradient(to right, transparent 0, black var(--face-feather-x)),
-    linear-gradient(to left, transparent 0, black var(--face-feather-x)),
-    linear-gradient(to bottom, transparent 0, black var(--face-feather-y)),
-    linear-gradient(to top, transparent 0, black var(--face-feather-y));
-  mask-composite: intersect;
 }
 
 /* Morph surge — while the pill↔sidebar morph is in flight the material swells
