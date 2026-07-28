@@ -25,12 +25,20 @@ export function useCountdownConfirm({
   onConfirm,
   autoStart = true,
   progress: externalProgress,
+  deadline,
 }: {
   duration?: number
   onConfirm: () => void
   /** Begin the moment the control mounts (the usual case). */
   autoStart?: boolean
   progress?: MotionValue<number>
+  /**
+   * Epoch ms the action fires at, when something OUTSIDE this component owns
+   * the timer (see `lib/utils/pending-actions`). The hook then only reports
+   * progress — it does not fire `onConfirm`, and it picks up mid-countdown if
+   * the component remounted.
+   */
+  deadline?: number
 }): {
   progress: MotionValue<number>
   /** Whole seconds left, for the label. */
@@ -51,6 +59,7 @@ export function useCountdownConfirm({
   const onConfirmRef = useRef(onConfirm)
   useEffect(() => {
     onConfirmRef.current = onConfirm
+    deadlineRef.current = deadline
   })
 
   const stopRaf = useCallback(() => {
@@ -59,6 +68,12 @@ export function useCountdownConfirm({
       rafRef.current = null
     }
   }, [])
+
+  // With an external deadline the hook is a read-out, not a timer: it must not
+  // fire the action (the owner does) and it starts from wherever the deadline
+  // already is, so a remount resumes rather than restarting.
+  const externallyTimed = deadline !== undefined
+  const deadlineRef = useRef(deadline)
 
   const start = useCallback(() => {
     stopRaf()
@@ -69,21 +84,24 @@ export function useCountdownConfirm({
 
     // Self-referential rAF closure so the loop stays lint-clean.
     const loop = () => {
-      const elapsed = performance.now() - startedAtRef.current
-      const p = Math.min(1, elapsed / duration)
+      const left =
+        deadlineRef.current !== undefined
+          ? deadlineRef.current - Date.now()
+          : duration - (performance.now() - startedAtRef.current)
+      const p = Math.min(1, Math.max(0, (duration - left) / duration))
       progress.set(p)
-      setRemaining(Math.max(0, Math.ceil((duration - elapsed) / 1000)))
-      if (p >= 1) {
+      setRemaining(Math.max(0, Math.ceil(left / 1000)))
+      if (left <= 0) {
         rafRef.current = null
         setRunning(false)
         if (typeof navigator !== "undefined") navigator.vibrate?.(30)
-        onConfirmRef.current()
+        if (!externallyTimed) onConfirmRef.current()
         return
       }
       rafRef.current = requestAnimationFrame(loop)
     }
     rafRef.current = requestAnimationFrame(loop)
-  }, [duration, progress, stopRaf])
+  }, [duration, externallyTimed, progress, stopRaf])
 
   const cancel = useCallback(() => {
     stopRaf()

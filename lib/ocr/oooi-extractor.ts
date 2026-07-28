@@ -377,6 +377,166 @@ function extractFromText(text: string): ExtractedFlightData {
 }
 
 // ============================================
+// EFB "Time Summary" Extraction
+// ============================================
+
+/**
+ * A different shape of source entirely: the EFB flight-record "Time Summary",
+ * which is ROW-oriented — one labelled row per event, with a PLANNED column and
+ * an ACTUAL column — where the MCDU report is a grid of label rows above value
+ * rows. So it gets its own pass rather than more special cases in the other one.
+ *
+ *   TYPE              PLANNED       ACTUAL
+ *   Off Block         01:20 UTC     27 Jul  01:25
+ *   Takeoff           01:30 UTC     27 Jul  01:43
+ *   Landing           04:53 UTC     27 Jul  05:12
+ *   On Block          05:03 UTC     27 Jul  05:15
+ *   Block Time        3h43m         3h50m
+ *
+ * Off Block / Takeoff / Landing / On Block are OUT / OFF / ON / IN. The ACTUAL
+ * cell also carries a date ("27 Jul"), and each value is followed by a yellow
+ * delta ("+00:05") that must never be read as a time — hence the `+` filter.
+ */
+
+/** Times only: a delta ("+00:05") is not one, and neither is a bare year. */
+function timeTokensWithX(row: OcrRow): Array<{ value: string; x: number }> {
+  const out: Array<{ value: string; x: number }> = []
+  for (const item of row.items) {
+    const text = item.text.trim()
+    if (text.startsWith("+") || text.startsWith("-")) continue
+    // A cell may arrive whole ("27 Jul 01:25") or split into its own boxes.
+    for (const match of text.matchAll(/(?<![+\-\d])(\d{1,2}:\d{2})(?!\d)/g)) {
+      out.push({ value: match[1], x: getBoxMidX(item.box) })
+    }
+  }
+  return out.sort((a, b) => a.x - b.x)
+}
+
+/** "3h50m" / "3h 50m" / "50m" → "03:50". The summary states durations this way. */
+function parseHmDuration(text: string): string | undefined {
+  const hm = text.match(/(\d{1,2})\s*h\s*(\d{1,2})\s*m/i)
+  if (hm) {
+    const h = Number(hm[1])
+    const m = Number(hm[2])
+    if (m > 59) return undefined
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
+  }
+  const mOnly = text.match(/^(\d{1,3})\s*m$/i)
+  if (mOnly) {
+    const total = Number(mOnly[1])
+    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(
+      total % 60
+    ).padStart(2, "0")}`
+  }
+  return undefined
+}
+
+/** Row labels → the OOOI field each one carries. */
+const SUMMARY_EVENT_ROWS: Array<{
+  test: RegExp
+  actual: keyof ExtractedFlightData
+  planned?: keyof ExtractedFlightData
+}> = [
+  { test: /OFF\s*BLOCK/, actual: "outTime", planned: "scheduledOut" },
+  { test: /TAKE\s*-?\s*OFF/, actual: "offTime" },
+  { test: /LANDING/, actual: "onTime" },
+  { test: /ON\s*BLOCK/, actual: "inTime", planned: "scheduledIn" },
+]
+
+const SUMMARY_DURATION_ROWS: Array<{
+  test: RegExp
+  actual: keyof ExtractedFlightData
+}> = [
+  { test: /BLOCK\s*TIME/, actual: "blockTime" },
+  { test: /FLIGHT\s*TIME/, actual: "flightTime" },
+]
+
+/** Does this look like a Time Summary rather than an MCDU report? */
+export function looksLikeTimeSummary(rows: OcrRow[]): boolean {
+  const all = rows.map((r) => getRowText(r).toUpperCase()).join(" ")
+  if (/TIME\s*SUMMARY/.test(all)) return true
+  // Two of the four event labels is enough — the header may be cropped out.
+  const hits = SUMMARY_EVENT_ROWS.filter((e) => e.test.test(all)).length
+  return hits >= 2
+}
+
+function extractFromTimeSummary(results: OcrResult[]): ExtractedFlightData {
+  const data: ExtractedFlightData = { confidence: 0 }
+  if (results.length === 0) return data
+
+  const rows = groupIntoRows(results, calculateTolerance(results))
+  data.rawText = rows.map(getRowText).join("\n")
+  if (!looksLikeTimeSummary(rows)) return data
+
+  // Column anchors from the header, when it survived the crop. Without them a
+  // row's rightmost time is taken as the actual, which is the layout's rule
+  // anyway — the anchors just make a single-value row unambiguous.
+  let plannedX: number | undefined
+  let actualX: number | undefined
+  for (const row of rows) {
+    for (const item of row.items) {
+      const t = item.text.trim().toUpperCase()
+      if (plannedX === undefined && /^PLANNED$/.test(t)) plannedX = getBoxMidX(item.box)
+      if (actualX === undefined && /^ACTUAL$/.test(t)) actualX = getBoxMidX(item.box)
+    }
+  }
+
+  const assign = (field: keyof ExtractedFlightData, value: string | undefined) => {
+    if (!value) return
+    const current = data[field]
+    if (typeof current === "string" && current) return
+    ;(data as unknown as Record<string, unknown>)[field] = value
+  }
+
+  for (const row of rows) {
+    const label = getRowText(row).toUpperCase()
+
+    const event = SUMMARY_EVENT_ROWS.find((e) => e.test.test(label))
+    if (event) {
+      const times = timeTokensWithX(row)
+      if (times.length === 0) continue
+
+      let planned: string | undefined
+      let actual: string | undefined
+
+      if (times.length >= 2) {
+        // Leftmost is PLANNED, rightmost is ACTUAL. Anything between is part of
+        // the actual cell (a date), which `timeTokensWithX` already excluded.
+        planned = times[0].value
+        actual = times[times.length - 1].value
+      } else if (plannedX !== undefined && actualX !== undefined) {
+        const only = times[0]
+        const nearPlanned = Math.abs(only.x - plannedX) < Math.abs(only.x - actualX)
+        if (nearPlanned) planned = only.value
+        else actual = only.value
+      } else {
+        // No anchors and one value: the summary always fills ACTUAL, and a row
+        // may legitimately have no plan (e.g. Last Cabin Door Closed).
+        actual = times[0].value
+      }
+
+      assign(event.actual, formatTime(actual))
+      if (event.planned) assign(event.planned, formatTime(planned))
+      continue
+    }
+
+    const duration = SUMMARY_DURATION_ROWS.find((d) => d.test.test(label))
+    if (duration) {
+      // "3h43m  3h50m" — planned then actual; take the last.
+      const parts = row.items
+        .map((i) => i.text.trim())
+        .flatMap((t) => t.split(/\s{2,}/))
+        .map(parseHmDuration)
+        .filter((v): v is string => Boolean(v))
+      if (parts.length > 0) assign(duration.actual, parts[parts.length - 1])
+    }
+  }
+
+  data.confidence = validateTimes(data)
+  return data
+}
+
+// ============================================
 // Public API
 // ============================================
 
@@ -396,20 +556,19 @@ export function extractFlightData(input: OcrResult[] | string): ExtractedFlightD
     return { confidence: 0 }
   }
 
-  // Try layout extraction first
-  const layoutResult = extractFromLayout(input)
+  // Two layouts are understood — the MCDU voyage report and the EFB time
+  // summary — plus a plain-text fallback. Run them and keep the best read
+  // rather than guessing the source up front: a cropped screenshot can look
+  // like either, and `validateTimes` already scores a nonsense parse near zero.
+  const candidates = [
+    extractFromTimeSummary(input),
+    extractFromLayout(input),
+    extractFromText(input.map((r) => r.text).join("\n")),
+  ]
 
-  // If good confidence, return it
-  if (layoutResult.confidence >= 0.5) {
-    return layoutResult
-  }
-
-  // Fallback to text extraction
-  const text = input.map((r) => r.text).join("\n")
-  const textResult = extractFromText(text)
-
-  // Return whichever is better
-  return layoutResult.confidence >= textResult.confidence ? layoutResult : textResult
+  return candidates.reduce((best, current) =>
+    current.confidence > best.confidence ? current : best
+  )
 }
 
 /**

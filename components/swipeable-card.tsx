@@ -15,6 +15,12 @@ import {
 import { cn } from "@/lib/utils"
 import { SPRING, POP_SPRING } from "@/lib/motion"
 import { CountdownConfirmButton } from "@/components/ui/countdown-confirm-button"
+import {
+  armPendingAction,
+  cancelPendingAction,
+  getPendingDeadline,
+  subscribePendingActions,
+} from "@/lib/utils/pending-actions"
 import { HoldProgressBorder } from "@/components/ui/hold-progress-border"
 
 const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
@@ -196,6 +202,9 @@ export function SwipeableCard({
   // fire the action. `confirmProgress` mirrors the button's hold 0→1 so the tint
   // fills together with it.
   const [confirmingAction, setConfirmingAction] = useState<SwipeAction | null>(null)
+  // Epoch ms the armed action fires at. Owned by the pending-actions registry
+  // so it outlives this component.
+  const [pendingDeadline, setPendingDeadline] = useState<number | undefined>(undefined)
   const confirmProgress = useMotionValue(0)
 
   // Tracks whether the last pointer interaction actually moved (drag vs tap).
@@ -229,31 +238,42 @@ export function SwipeableCard({
     return () => window.removeEventListener(SWIPE_CLOSE_EVENT, handler)
   }, [x])
 
-  // Tapping a hold-to-confirm action: close the panel and raise the overlay.
+  // Tapping a confirm action ARMS it: the action is scheduled in the registry
+  // (so it outlives this row), the panel closes and the overlay goes up.
   const requestConfirm = useCallback(
     (action: SwipeAction) => {
       confirmProgress.set(0)
+      armPendingAction(
+        cardId.current,
+        action.holdDuration ?? 10_000,
+        action.onClick
+      )
       setConfirmingAction(action)
       settle(0)
     },
     [settle, confirmProgress]
   )
 
-  // Tapping outside the card also cancels the pending action — the countdown
-  // is running, so anywhere-but-here has to mean "stop", not "let it happen".
-  // Capture-phase so it beats whatever was tapped; added after the overlay
-  // mounts, so the tap that opened it never self-dismisses.
+  // NOTE: tapping outside deliberately does NOT disarm. Once armed the action
+  // is running, and the user is free to carry on with other rows while it does
+  // — only the Cancel button stops it. (An outside-tap dismissal made it
+  // impossible to arm one delete and move on, which is the whole point of a
+  // countdown over a modal.)
+
+  // Follow the armed action so the overlay survives this row unmounting and
+  // remounting (a virtualised list recycles rows as it scrolls).
   useEffect(() => {
-    if (!confirmingAction) return
-    const onPointerDown = (e: PointerEvent) => {
-      if (!containerRef.current?.contains(e.target as Node)) {
+    const sync = () => {
+      const deadline = getPendingDeadline(cardId.current)
+      setPendingDeadline(deadline)
+      if (deadline === undefined) {
+        setConfirmingAction((prev) => (prev ? null : prev))
         confirmProgress.set(0)
-        setConfirmingAction(null)
       }
     }
-    document.addEventListener("pointerdown", onPointerDown, true)
-    return () => document.removeEventListener("pointerdown", onPointerDown, true)
-  }, [confirmingAction, confirmProgress])
+    sync()
+    return subscribePendingActions(sync)
+  }, [confirmProgress])
 
   const closeOthers = useCallback(() => {
     window.dispatchEvent(
@@ -423,15 +443,16 @@ export function SwipeableCard({
                   icon={confirmingAction.icon}
                   label={confirmingAction.cancelLabel ?? "Cancel"}
                   duration={confirmingAction.holdDuration ?? 10_000}
+                  deadline={pendingDeadline}
                   onCancel={() => {
+                    cancelPendingAction(cardId.current)
                     confirmProgress.set(0)
                     setConfirmingAction(null)
                   }}
+                  /* The registry fires the action; this only clears the UI. */
                   onConfirm={() => {
-                    const a = confirmingAction
                     confirmProgress.set(0)
                     setConfirmingAction(null)
-                    a.onClick()
                   }}
                 />
               </motion.div>

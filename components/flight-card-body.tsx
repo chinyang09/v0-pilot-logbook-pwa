@@ -305,7 +305,7 @@ export function FlightCardBody({
 
         <div
           className={cn(
-            "flex items-center gap-1.5 text-xs leading-tight mt-1",
+            "flex items-center gap-1.5 text-[13px] leading-tight mt-0.5",
             isScheduled
               ? "text-orange-600/70 dark:text-orange-400/60"
               : "text-muted-foreground"
@@ -340,7 +340,7 @@ export function FlightCardBody({
         <div className="flex items-center justify-between mt-0.5">
           <div
             className={cn(
-              "flex flex-1 min-w-0 text-xs leading-tight",
+              "flex flex-1 min-w-0 text-[13px] leading-tight",
               isScheduled
                 ? "text-orange-600/70 dark:text-orange-400/60"
                 : "text-muted-foreground"
@@ -365,7 +365,7 @@ export function FlightCardBody({
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs font-medium shrink-0 ml-2">
+          <div className="flex items-center gap-1.5 text-[13px] font-medium shrink-0 ml-2">
             {showPilotRole && (
               <span className="inline-flex items-baseline gap-1">
                 {pfDiff ? (

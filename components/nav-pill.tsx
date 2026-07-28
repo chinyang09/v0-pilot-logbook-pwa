@@ -681,12 +681,18 @@ function PillBarContent({
 
 // ─── Shared sidebar nav content ──────────────────────────────
 
+/** Height of the floating toggle/sync strip the nav scrolls beneath. */
+const SIDEBAR_HEADER_HEIGHT = 56
+
 function SidebarNav({
   pathname,
   className,
+  topInset = 0,
 }: {
   pathname: string
   className?: string
+  /** Space reserved at the top for chrome floating over the list. */
+  topInset?: number
 }) {
   const navRef = useRef<HTMLElement>(null)
   const blobLayerRef = useRef<HTMLDivElement>(null)
@@ -743,7 +749,11 @@ function SidebarNav({
       <nav
         ref={navRef}
         className="relative z-[1] h-full overflow-y-scroll overscroll-contain px-3 pb-4 scrollbar-hide"
-        style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+        style={{
+          WebkitOverflowScrolling: "touch",
+          touchAction: "pan-y",
+          paddingTop: topInset,
+        }}
       >
       {/* One pixel taller than the scroller so the list always has somewhere to
           go: a short nav would otherwise be inert to a drag, which reads as the
@@ -1083,18 +1093,30 @@ function DesktopPillMorph({
               transition: contentTransition,
             }}
           >
-            {/* Sidebar top row — toggle + sync flushed right */}
-            <div className="flex items-center justify-end h-14 px-3 gap-1 flex-shrink-0">
-              <button
-                onClick={onToggleSidebar}
-                className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
+            {/* The nav fills the panel and the header floats over it, so the
+                list scrolls UNDER the toggle and sync icons rather than
+                stopping short of them. The icons stay hit-testable; the strip
+                between them does not swallow scrolls (pointer-events-none on
+                the bar, re-enabled on the controls). */}
+            <div className="relative flex-1 min-h-0">
+              <SidebarNav
+                pathname={pathname}
+                className="h-full"
+                topInset={SIDEBAR_HEADER_HEIGHT}
+              />
+              <div
+                className="pointer-events-none absolute inset-x-0 top-0 z-[2] flex items-center justify-end px-3 gap-1"
+                style={{ height: SIDEBAR_HEADER_HEIGHT }}
               >
-                <PanelLeft className="h-6 w-6" />
-              </button>
-              <SyncIconButton />
+                <button
+                  onClick={onToggleSidebar}
+                  className="pointer-events-auto flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
+                >
+                  <PanelLeft className="h-6 w-6" />
+                </button>
+                <SyncIconButton className="pointer-events-auto" />
+              </div>
             </div>
-
-            <SidebarNav pathname={pathname} className="flex-1 min-h-0" />
           </div>
         </GlassContainer>
     </div>

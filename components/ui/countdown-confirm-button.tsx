@@ -31,6 +31,7 @@ export function CountdownConfirmButton({
   radius = 12,
   progress: externalProgress,
   showBorder = true,
+  deadline,
 }: {
   /** Verb for the cancel action, e.g. "Cancel delete". Seconds are appended. */
   label?: string
@@ -46,11 +47,18 @@ export function CountdownConfirmButton({
   radius?: number
   progress?: MotionValue<number>
   showBorder?: boolean
+  /**
+   * Epoch ms the action fires at, when the timer is owned elsewhere so it can
+   * outlive this component (an armed row delete). Without it the button times
+   * itself.
+   */
+  deadline?: number
 }) {
   const { progress, remaining, cancel } = useCountdownConfirm({
     duration,
     onConfirm,
     progress: externalProgress,
+    deadline,
   })
 
   // The fill tracks the countdown linearly — it is a clock, so a soft eased
