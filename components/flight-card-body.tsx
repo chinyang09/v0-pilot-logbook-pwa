@@ -168,6 +168,12 @@ export function FlightCardBody({
     return { text: "", suffix: "hrs", scheduled: false };
   }, [flight, hasOut, hasIn, displayPrefs?.timeFormat]);
 
+  // With no times at all — a just-created entry — there is nothing for the
+  // connector to join, and two bare rules across an empty row read as damage.
+  const hasTimeStrip = Boolean(
+    displayOut || displayIn || durationInfo.text || outDiff || inDiff || d("blockTime")
+  );
+
   const flightDate = parseDateLocal(flight.date);
   const day = flightDate.getDate().toString().padStart(2, "0");
   const month = MONTHS[flightDate.getMonth()];
@@ -244,7 +250,8 @@ export function FlightCardBody({
             <div className="flex items-center gap-1 flex-1 justify-center">
               <div
                 className={cn(
-                  "h-0.5 flex-1 rounded-full bg-current"
+                  "h-px flex-1 rounded-full bg-current",
+                  !hasTimeStrip && "invisible"
                 )}
               />
               <span className="text-base font-medium whitespace-nowrap px-1">
@@ -259,7 +266,8 @@ export function FlightCardBody({
               </span>
               <div
                 className={cn(
-                  "h-0.5 flex-1 rounded-full bg-current"
+                  "h-px flex-1 rounded-full bg-current",
+                  !hasTimeStrip && "invisible"
                 )}
               />
             </div>

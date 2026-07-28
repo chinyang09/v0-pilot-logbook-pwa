@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SwipeableCard } from "@/components/swipeable-card";
+import { primeFlightCache } from "@/components/flight-form";
 import { FastScroll, type FastScrollItem } from "@/components/ui/fast-scroll";
 
 export interface FlightListRef {
@@ -111,7 +112,15 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
 
   return (
     <SwipeableCard
-      onClick={() => !isLocked && onEdit(flight)}
+      // Stable across the virtualiser recycling this row, so an armed delete
+      // keeps its overlay while the list scrolls.
+      id={`flight-${flight.id}`}
+      onClick={() => {
+        if (isLocked) return;
+        // Hand the panel its data before it mounts — see primeFlightCache.
+        primeFlightCache(flight);
+        onEdit(flight);
+      }}
       actions={[
         {
           icon: isLocked ? <Unlock className="h-5 w-5" /> : <Lock className="h-5 w-5" />,

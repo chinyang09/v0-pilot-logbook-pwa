@@ -590,6 +590,10 @@ textarea:focus-within {
     transparent 78%
   );
   opacity: calc(var(--glass-press, 0) * 0.22);
+  /* --glass-press is set imperatively by GlassContainer (framer's whileTap
+     ended the glow the moment a scroll cancelled the pointer), so the fade
+     lives here instead. */
+  transition: opacity 200ms ease;
 }
 
 .GlassMaterial {

@@ -140,6 +140,20 @@ function SettingsRow({
 // times before snapping to the real values. Cleared when the PWA is closed.
 const flightDataCache = new Map<string, FlightLog>();
 
+/**
+ * Seed the cache before the panel mounts.
+ *
+ * The form holds its first render until `useLiveQuery` resolves, so opening a
+ * flight for the FIRST time showed the empty panel for a beat — the cache was
+ * only ever written from inside the form, which is too late to help the open
+ * that populates it. A list already has the whole flight object in hand, so it
+ * can hand it over on the way in and the panel paints immediately. Re-opening
+ * was always instant; this makes the first time match.
+ */
+export function primeFlightCache(flight: FlightLog): void {
+  flightDataCache.set(flight.id, flight);
+}
+
 // Time row with UTC and Local display
 function TimeRow({
   label,

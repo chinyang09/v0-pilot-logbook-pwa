@@ -176,8 +176,11 @@ export function SwipeableCard({
   variant = "card",
   separated = false,
 }: SwipeableCardProps) {
-  // Stable, SSR-safe identity for the multi-card close-others coordination —
-  // useId avoids calling Math.random() during every render.
+  // Identity for close-others coordination AND for the pending-action registry.
+  //
+  // Pass a `id` derived from the row's data wherever a row can be armed: the
+  // fallback `useId()` changes when a virtualised list recycles the component,
+  // which orphans the registry entry and loses the overlay mid-countdown.
   const autoId = useId()
   const cardId = useRef(id || autoId)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -226,11 +229,15 @@ export function SwipeableCard({
 
   const close = useCallback(() => settle(0), [settle])
 
-  // Close this card when another card opens or is tapped.
+  // Close this card's SWIPE PANEL when another card opens or is tapped.
+  //
+  // It must not touch a pending confirm: this event fires on any interaction
+  // with any other row, so clearing `confirmingAction` here made it impossible
+  // to arm a delete and carry on — the overlay vanished the moment you touched
+  // the next row, leaving a countdown running with no way to cancel it.
   useEffect(() => {
     const handler = (e: Event) => {
       if ((e as CustomEvent).detail?.id !== cardId.current) {
-        setConfirmingAction(null)
         animate(x, 0, { ...SPRING, onComplete: () => setActive(false) })
       }
     }

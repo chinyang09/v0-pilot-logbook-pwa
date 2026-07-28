@@ -125,7 +125,7 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDel
   }
 
   return (
-    <SwipeableCard actions={actions}>
+    <SwipeableCard id={`currency-${currency.id}`} actions={actions}>
       <Card className={cn("overflow-hidden transition-all hover:shadow-md", config.border)}>
       <CardContent className="p-4">
         {/* Header */}

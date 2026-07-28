@@ -753,6 +753,16 @@ function SidebarNav({
           WebkitOverflowScrolling: "touch",
           touchAction: "pan-y",
           paddingTop: topInset,
+          // Content dissolves as it passes under the floating toggle/sync
+          // strip, the same read as the main panel's header fade. A painted
+          // scrim can't be used here — the panel is translucent glass, so the
+          // list is masked out instead of covered up.
+          ...(topInset
+            ? {
+                maskImage: `linear-gradient(to bottom, transparent 0, transparent ${topInset * 0.35}px, black ${topInset}px)`,
+                WebkitMaskImage: `linear-gradient(to bottom, transparent 0, transparent ${topInset * 0.35}px, black ${topInset}px)`,
+              }
+            : {}),
         }}
       >
       {/* One pixel taller than the scroller so the list always has somewhere to
