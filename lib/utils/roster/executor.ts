@@ -64,6 +64,7 @@ import {
   mergeDecisions,
   type ImportDecisions,
 } from "@/lib/utils/roster/import-decisions";
+import { TRACKED_FIELDS } from "@/lib/utils/roster/classification";
 
 const TOLDG_FIELDS = new Set([
   "dayTakeoffs",
@@ -237,6 +238,56 @@ async function hydrateFlightFromSector(
  * Only changes that overwrite something the user actually had are worth
  * remembering — filling a blank field leaves nothing to restore.
  */
+/**
+ * Turn user-vs-company differences on the TRACKED fields into discrepancy
+ * rows for the licence record.
+ *
+ * Unlike the times (which the company simply owns now), PF/PM and the day/
+ * night takeoff-landing split are the pilot's own account of the sector. A
+ * difference there is worth keeping visible whichever way it was decided —
+ * that is what a licence submission gets checked against — so it is written
+ * as a `Discrepancy` rather than resolved and forgotten.
+ *
+ * The id is DETERMINISTIC (`mismatch:<flight>:<field>`) so re-importing the
+ * same report refreshes the row in place instead of stacking duplicates.
+ */
+function trackedMismatches(
+  flight: FlightLog,
+  changes: readonly FieldDiff[],
+  accepted: boolean
+): Discrepancy[] {
+  const now = Date.now();
+  const out: Discrepancy[] = [];
+
+  for (const change of changes) {
+    if (!TRACKED_FIELDS.has(change.field)) continue;
+    // For day/night the applied value is OUR sun calculation; `companyValue`
+    // carries what the company logged. Everywhere else `to` is the company's.
+    const companyValue = change.companyValue ?? change.to;
+    const pilotValue = change.from;
+    if (companyValue === pilotValue) continue;
+
+    const appliedValue = accepted ? change.to : pilotValue;
+    out.push({
+      id: `mismatch:${flight.id}:${change.field}`,
+      type: TOLDG_FIELDS.has(change.field)
+        ? "day_night_mismatch"
+        : "pilot_flying_mismatch",
+      severity: "info",
+      flightLogId: flight.id,
+      field: change.field,
+      scheduleValue: companyValue,
+      logbookValue: pilotValue,
+      holding: appliedValue === companyValue ? "schedule" : "logbook",
+      resolved: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return out;
+}
+
 function recordDecisions(
   flight: FlightLog,
   {
@@ -246,8 +297,13 @@ function recordDecisions(
 ): ImportDecisions | null {
   const updates = [
     ...declined.map((d) => ({ field: d.field, declined: d.to })),
+    // Only the TRACKED fields keep what they overwrote. The company's OOOI
+    // times are the record now, so there is nothing to preserve or restore
+    // there — and filling a blank field leaves nothing to restore either.
     ...applied
-      .filter((d) => d.from !== "" && d.from !== d.to)
+      .filter(
+        (d) => TRACKED_FIELDS.has(d.field) && d.from !== "" && d.from !== d.to
+      )
       .map((d) => ({ field: d.field, replaced: d.from })),
   ];
   if (updates.length === 0) return null;
@@ -593,25 +649,13 @@ export async function executeRosterImport(
     const hasToLdgDiff = opChanges.some((c) => TOLDG_FIELDS.has(c.field));
 
     if (!op.accepted) {
-      // Record discrepancies for declined updates so the audit trail captures
-      // what the user said no to.
-      if (
-        op.kind === "update_conflict" ||
-        op.kind === "edited_conflict" ||
-        op.kind === "update_consult"
-      ) {
-        result.discrepancies.push({
-          id: crypto.randomUUID(),
-          type: "time_mismatch",
-          severity: op.kind === "edited_conflict" ? "warning" : "info",
-          flightLogId: op.flight.id,
-          field: "times",
-          scheduleValue: op.changes.map((c) => `${c.field}=${c.to}`).join(", "),
-          logbookValue: op.changes.map((c) => `${c.field}=${c.from}`).join(", "),
-          message: `User declined roster update for flight ${op.flight.flightNumber}`,
-          resolved: false,
-          createdAt: Date.now(),
-        });
+      // Keep the pilot-vs-company differences on the record. A declined row
+      // keeps the pilot's values, which is exactly the case worth being able
+      // to show later.
+      if ("flight" in op) {
+        result.discrepancies.push(
+          ...trackedMismatches(op.flight, opChanges, false)
+        );
       }
 
       // Even when rejected, persist the decision so subsequent imports don't
@@ -682,6 +726,12 @@ export async function executeRosterImport(
             applied: op.changes,
           });
           if (decisions) patch.importDecisions = decisions;
+          // Same record for an accepted row — the difference happened either
+          // way, and the row notes which side the flight now holds.
+          result.discrepancies.push(
+            ...trackedMismatches(op.flight, op.changes, true),
+            ...trackedMismatches(op.flight, op.declinedChanges ?? [], false)
+          );
           const updated = await updateFlight(op.flight.id, patch);
           if (!updated) {
             // Row vanished between plan build and execute — surface so the

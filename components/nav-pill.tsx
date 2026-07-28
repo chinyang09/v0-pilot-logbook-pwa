@@ -25,6 +25,7 @@ import {
   ChevronDown,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
 import { OVERSHOOT_BEZIER, SETTLE_BEZIER, MORPH_EASE } from "@/lib/motion"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
@@ -1168,7 +1169,10 @@ function MobilePillMorph({
     <>
       {/* Backdrop — dark overlay + progressive blur from sidebar edge */}
       <div
-        className="fixed inset-0 z-[58] bg-black/50 transition-opacity duration-200"
+        className={cn(
+          "fixed inset-0 z-[58] transition-opacity duration-200",
+          MODAL_SCRIM
+        )}
         style={{
           opacity: sidebarOpen ? 1 : 0,
           pointerEvents: sidebarOpen ? "auto" : "none",

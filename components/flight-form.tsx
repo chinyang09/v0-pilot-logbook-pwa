@@ -62,8 +62,6 @@ import { ImageImportButton } from "@/components/image-import-button";
 import { GlassContainer } from "@/components/ui/glass-container";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { useRegisterDetailActions } from "@/hooks/use-page-actions";
-import { ImportDecisionsSection } from "@/components/import/import-decisions-section";
-import { clearDecisions } from "@/lib/utils/roster/import-decisions";
 import type { ExtractedFlightData } from "@/lib/ocr";
 
 // Swipeable row — thin wrapper over the shared SwipeableCard primitive so the
@@ -865,26 +863,6 @@ export function FlightForm({
   const markManualOverride = useCallback(
     (field: keyof FlightLog["manualOverrides"], value: boolean) => {
       setManualOverrides((prev) => ({ ...prev, [field]: value }));
-    },
-    []
-  );
-
-  /**
-   * Undo one import decision: write the remembered value back and drop that
-   * field's memory so it stops being offered. Saves through the form's normal
-   * path, so the change syncs like any other edit.
-   */
-  const revertImportField = useCallback(
-    (field: string, value: string | number | boolean) => {
-      setFormData((prev) => {
-        const cleared = clearDecisions(prev, [field]);
-        return {
-          ...prev,
-          [field]: value,
-          // `clearDecisions` returns null when there was nothing to change.
-          importDecisions: cleared ?? prev.importDecisions,
-        } as FlightLog;
-      });
     },
     []
   );
@@ -1823,10 +1801,6 @@ export function FlightForm({
             />
           </SwipeableRow>
         </div>
-
-        {/* IMPORT DECISIONS Section — only rendered when this flight carries a
-            reversible import decision inside its retention window. */}
-        <ImportDecisionsSection flight={formData} onRevert={revertImportField} />
 
         {/* SIGNATURE Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">

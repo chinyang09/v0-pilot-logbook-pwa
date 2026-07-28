@@ -425,17 +425,19 @@ export function ImportReviewModalV2({
         >
           <ChromeFade side="top" />
           <div className="relative">
-            <DialogHeader className="px-4 pt-4 sm:px-6 sm:pt-5">
-              <DialogTitle>Review import</DialogTitle>
-              <DialogDescription className="tabular-nums">
+            {/* Title and report meta share one row — stacked, the meta wrapped
+                to two lines and pushed the tabs (and the whole list) down. */}
+            <DialogHeader className="flex-row items-baseline gap-x-3 gap-y-0 space-y-0 px-4 pt-4 sm:px-6 sm:pt-5">
+              <DialogTitle className="shrink-0 text-base">
+                Review import
+              </DialogTitle>
+              <DialogDescription className="min-w-0 flex-1 truncate text-right text-xs tabular-nums">
                 {plan.dateRange.start} – {plan.dateRange.end}
-                {generatedDate ? ` · generated ${generatedDate}` : ""}
-                {unchangedCount > 0
-                  ? ` · ${unchangedCount} already match`
-                  : ""}
+                {generatedDate ? ` · ${generatedDate}` : ""}
+                {unchangedCount > 0 ? ` · ${unchangedCount} match` : ""}
               </DialogDescription>
             </DialogHeader>
-            <div className="px-4 pb-3 pt-3 sm:px-6">
+            <div className="px-4 pb-3 pt-2.5 sm:px-6">
               <SegmentedTabs
                 tabs={tabs}
                 value={(current ?? tabs[0]?.value) as Bucket}

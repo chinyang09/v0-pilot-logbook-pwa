@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react"
 import { WheelPicker, WheelPickerWrapper } from "@ncdai/react-wheel-picker"
 import "@ncdai/react-wheel-picker/style.css"
+import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
+import { cn } from "@/lib/utils"
 
 interface TimePickerProps {
   isOpen?: boolean
@@ -86,7 +88,7 @@ export function TimePicker({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50"
+      className={cn("fixed inset-0 z-[60] flex items-end justify-center", MODAL_SCRIM)}
       style={{ paddingBottom: "calc(4rem + env(safe-area-inset-bottom))" }}
       onClick={onClose}
     >

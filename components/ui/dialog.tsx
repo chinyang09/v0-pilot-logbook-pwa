@@ -5,6 +5,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils/index"
+import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
 
 function Dialog({
   ...props
@@ -38,7 +39,10 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-[70] bg-black/50",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-[70]",
+        // Black at 50% is invisible over a dark app and grey mush over a light
+        // one — the veil is much lighter in light mode. See MODAL_SCRIM.
+        MODAL_SCRIM,
         className
       )}
       {...props}

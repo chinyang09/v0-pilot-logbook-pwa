@@ -24,32 +24,55 @@ const SAFE_FIELDS = new Set<keyof FlightLog>([
   "arrivalIcao",
   "departureTimezone",
   "arrivalTimezone",
-]);
-
-const CRITICAL_FIELDS = new Set<keyof FlightLog>([
+  // OOOI + the times derived from them. The company's ACARS-recorded out/off/
+  // on/in IS the record of when the aircraft moved — it is not a matter of
+  // opinion, so a report that disagrees is simply more accurate than what is
+  // stored and applies without asking. (Anything the user typed themselves is
+  // still protected: `detectEditReasons` routes those to `edited_conflict`
+  // before this classification runs.)
   "outTime",
   "inTime",
   "offTime",
   "onTime",
   "scheduledOut",
   "scheduledIn",
+  "blockTime",
+  "flightTime",
+]);
+
+const CRITICAL_FIELDS = new Set<keyof FlightLog>([
   "departureIata",
   "arrivalIata",
   "aircraftReg",
   "aircraftType",
+  // The pilot's own account of the sector. The company's figure is a claim to
+  // compare against, not a correction — every difference on these is recorded
+  // as a discrepancy for the licence record, whichever way the user decides.
   "pilotRole",
   "pilotFlying",
   "dayTakeoffs",
   "nightTakeoffs",
   "dayLandings",
   "nightLandings",
-  "blockTime",
-  "flightTime",
   "nightTime",
   "dayTime",
   "picTime",
   "sicTime",
   "picusTime",
+]);
+
+/**
+ * Fields whose user-vs-company difference is kept on the record permanently
+ * (as a `Discrepancy`) rather than resolved and forgotten — they are what a
+ * licence submission is checked against.
+ */
+export const TRACKED_FIELDS = new Set<string>([
+  "pilotFlying",
+  "pilotRole",
+  "dayTakeoffs",
+  "nightTakeoffs",
+  "dayLandings",
+  "nightLandings",
 ]);
 
 const TODAY_UTC_FN = () => {
