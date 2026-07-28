@@ -8,6 +8,7 @@ import {
   type ParsedSector,
 } from "../reconciler";
 import type { FlightLog } from "../../../../types/entities/flight.types";
+import { IMPORT_DECISION_RETENTION_MS } from "../import-decisions";
 
 // ============================================================
 // Fixture helpers
@@ -319,6 +320,72 @@ describe("reconcileRoster — delete_missing", () => {
 });
 
 // ============================================================
+// Stale-report gate — evaluated per source
+// ============================================================
+
+describe("reconcileRoster — per-source stale gate", () => {
+  const JUL24 = Date.UTC(2026, 6, 24, 12, 36);
+  const JUL25 = Date.UTC(2026, 6, 25, 2, 10);
+  const range = { start: "2026-04-01", end: "2026-04-30" };
+
+  it("skips a schedule report older than the flight's schedule stamp", () => {
+    const flight = makeFlight({ scheduleReportAt: JUL25, scheduledOut: "04:00" });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [flight],
+      csvDateRange: range,
+      reportGeneratedAt: JUL24,
+      reportSource: "schedule",
+      scheduleGeneratedAt: JUL24,
+    });
+    expect(ops[0].kind).toBe("skip_stale_report");
+  });
+
+  it("gates on the newest company report of EITHER kind", () => {
+    // Schedule and logbook come out of the same company system, so a Jul-24
+    // file is older company data than an already-applied Jul-25 one whatever
+    // kind each was.
+    const flight = makeFlight({ logbookReportAt: JUL25, scheduledOut: "04:00" });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [flight],
+      csvDateRange: range,
+      reportGeneratedAt: JUL24,
+      reportSource: "schedule",
+      scheduleGeneratedAt: JUL24,
+    });
+    expect(ops[0].kind).toBe("skip_stale_report");
+  });
+
+  it("judges a multi-stream import on its NEWEST stamp", () => {
+    const flight = makeFlight({ scheduleReportAt: JUL24, scheduledOut: "04:00" });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [flight],
+      csvDateRange: range,
+      reportGeneratedAt: JUL25,
+      reportSource: "cross_hydrated",
+      scheduleGeneratedAt: JUL24, // older half...
+      logbookGeneratedAt: JUL25, // ...but the pair is judged on this
+    });
+    expect(ops[0].kind).toBe("update_conflict");
+  });
+
+  it("still honours the legacy single watermark", () => {
+    const flight = makeFlight({ reportGeneratedAt: JUL25, scheduledOut: "04:00" });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [flight],
+      csvDateRange: range,
+      reportGeneratedAt: JUL24,
+      reportSource: "schedule",
+      scheduleGeneratedAt: JUL24,
+    });
+    expect(ops[0].kind).toBe("skip_stale_report");
+  });
+});
+
+// ============================================================
 // Summary
 // ============================================================
 
@@ -379,7 +446,7 @@ describe("reconcileRoster — TO/LDG decision marker", () => {
     }
   });
 
-  it("attaches a sun-position note to TO/LDG diffs when sector carries a suggestion", () => {
+  it("applies OUR calculated day/night value and flags the company's figure", () => {
     const flight = makeFlight({
       dayTakeoffs: 0,
       nightTakeoffs: 0,
@@ -389,6 +456,7 @@ describe("reconcileRoster — TO/LDG decision marker", () => {
     const ops = reconcileRoster({
       sectors: [
         makeSector({
+          // Company recorded a DAY takeoff; our sun calc says NIGHT.
           dayTakeoffs: 1,
           nightTakeoffs: 0,
           dayLandings: 1,
@@ -403,8 +471,39 @@ describe("reconcileRoster — TO/LDG decision marker", () => {
     if (ops[0].kind !== "update_conflict") {
       throw new Error(`expected update_conflict got ${ops[0].kind}`);
     }
-    const dayTo = ops[0].changes.find((c) => c.field === "dayTakeoffs");
-    expect(dayTo?.note).toContain("Sun-position calc suggests 0");
+    // We trust our calculator: the night takeoff is applied...
+    const nightTo = ops[0].changes.find((c) => c.field === "nightTakeoffs");
+    expect(nightTo?.to).toBe("1");
+    // ...and the company's disagreeing figure is surfaced for the UI badge.
+    expect(nightTo?.companyValue).toBe("0");
+
+    // Our calc agrees with the existing 0 day-takeoffs, so nothing to change
+    // there — the company's erroneous "1" is simply not applied.
+    expect(
+      ops[0].changes.find((c) => c.field === "dayTakeoffs")
+    ).toBeUndefined();
+  });
+
+  it("does NOT flag a company value when our calc agrees with it", () => {
+    const flight = makeFlight({ dayLandings: 0, nightLandings: 0 });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          dayLandings: 0,
+          nightLandings: 1,
+          suggestedDayLandings: 0,
+          suggestedNightLandings: 1,
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    if (ops[0].kind !== "update_conflict") {
+      throw new Error(`expected update_conflict got ${ops[0].kind}`);
+    }
+    const nightLdg = ops[0].changes.find((c) => c.field === "nightLandings");
+    expect(nightLdg?.to).toBe("1");
+    expect(nightLdg?.companyValue).toBeUndefined();
   });
 });
 
@@ -458,6 +557,140 @@ describe("reconcileRoster — picName truncation handshake", () => {
 });
 
 // ============================================================
+// Full-crew reconciliation on updates (schedule carries CPT + FO)
+// ============================================================
+
+describe("reconcileRoster — crew update from schedule", () => {
+  const currentUser = { id: "me", crewId: "9766" };
+
+  it("adds the SIC (FO) to an existing flight that had no SIC", () => {
+    const flight = makeFlight({
+      picName: "Self",
+      picId: "me",
+      sicName: "",
+      sicId: "",
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          crew: [
+            { role: "CPT", crewId: "2841", name: "Tham Meiting, Joann", personnelId: "p-cpt" },
+            // User (crewId 9766) is the FO on this sector → SIC = Self.
+            { role: "FO", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+          ],
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+      currentUser,
+    });
+    if (
+      ops[0].kind !== "update_conflict" &&
+      ops[0].kind !== "update_safe" &&
+      ops[0].kind !== "update_consult"
+    ) {
+      throw new Error(`expected an update op, got ${ops[0].kind}`);
+    }
+    const fields = ops[0].changes.map((c) => c.field);
+    expect(fields).toContain("picName");
+    expect(fields).toContain("sicName");
+    const sicName = ops[0].changes.find((c) => c.field === "sicName");
+    expect(sicName?.to).toBe("Self");
+    const picName = ops[0].changes.find((c) => c.field === "picName");
+    expect(picName?.to).toBe("Tham Meiting, Joann");
+  });
+
+  it("upgrades a truncated PIC name to the schedule's full form", () => {
+    const flight = makeFlight({
+      picName: "Siah Yang Tek, Timot",
+      picId: "p-old",
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          crew: [
+            {
+              role: "CPT",
+              crewId: "6409",
+              name: "Siah Yang Tek, Timothy",
+              personnelId: "p-new",
+            },
+            { role: "FO", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+          ],
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+      currentUser,
+    });
+    if (
+      ops[0].kind !== "update_conflict" &&
+      ops[0].kind !== "update_safe" &&
+      ops[0].kind !== "update_consult"
+    ) {
+      throw new Error(`expected an update op, got ${ops[0].kind}`);
+    }
+    const picName = ops[0].changes.find((c) => c.field === "picName");
+    expect(picName?.to).toBe("Siah Yang Tek, Timothy");
+    // id follows the name upgrade
+    const picId = ops[0].changes.find((c) => c.field === "picId");
+    expect(picId?.to).toBe("p-new");
+  });
+
+  it("does NOT downgrade a full PIC name to a truncated re-import", () => {
+    const flight = makeFlight({
+      picName: "Siah Yang Tek, Timothy",
+      picId: "p-full",
+      sicName: "Self",
+      sicId: "me",
+    });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          crew: [
+            { role: "CPT", crewId: "6409", name: "Siah Yang Tek, Timot", personnelId: "p-trunc" },
+            { role: "FO", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+          ],
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+      currentUser,
+    });
+    // Same person (truncated), SIC already Self → nothing to change.
+    expect(ops[0].kind).toBe("skip_identical");
+  });
+
+  it("marks the user as PIC (Self) when they are the captain", () => {
+    const flight = makeFlight({ picName: "", picId: "", sicName: "", sicId: "" });
+    const ops = reconcileRoster({
+      sectors: [
+        makeSector({
+          crew: [
+            { role: "CPT", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+            { role: "FO", crewId: "3000", name: "Other Pilot", personnelId: "p-fo" },
+          ],
+        } as unknown as Parameters<typeof makeSector>[0]),
+      ],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+      currentUser,
+    });
+    if (
+      ops[0].kind !== "update_conflict" &&
+      ops[0].kind !== "update_safe" &&
+      ops[0].kind !== "update_consult"
+    ) {
+      throw new Error(`expected an update op, got ${ops[0].kind}`);
+    }
+    const picName = ops[0].changes.find((c) => c.field === "picName");
+    expect(picName?.to).toBe("Self");
+    const sicName = ops[0].changes.find((c) => c.field === "sicName");
+    expect(sicName?.to).toBe("Other Pilot");
+  });
+});
+
+// ============================================================
 // Sun-position day/night context on TO/LDG diffs
 // ============================================================
 
@@ -502,11 +735,15 @@ describe("reconcileRoster — TO/LDG sun-position note", () => {
     ) {
       throw new Error(`expected an update op, got ${ops[0].kind}`);
     }
+    // The day-landing is cleared and the night-landing applied, per our calc.
     const dayLdg = ops[0].changes.find((c) => c.field === "dayLandings");
-    expect(dayLdg).toBeDefined();
-    expect(dayLdg?.note).toContain("sunset 12:50Z");
-    expect(dayLdg?.note).toContain("night");
-    expect(dayLdg?.note).toContain("CJB");
+    expect(dayLdg?.to).toBe("0");
+    const nightLdg = ops[0].changes.find((c) => c.field === "nightLandings");
+    expect(nightLdg?.to).toBe("1");
+    // The sunrise/sunset evidence rides on the sector for the UI to render —
+    // it is no longer stuffed into a prose note on the diff.
+    expect(ops[0].sector.toLdgContext?.arrSunsetUtc).toBe("12:50");
+    expect(ops[0].sector.toLdgContext?.arrSunStatus).toBe("night");
   });
 });
 
@@ -614,5 +851,103 @@ describe("reconcileRoster — turnaround matching", () => {
     expect(matchOp.flight.id).toBe("tr560-stale");
     // The diff should include the dep-airport correction.
     expect(matchOp.changes.map((c) => c.field)).toContain("departureIata");
+  });
+});
+
+// ============================================================
+// Declined-decision memory
+// ============================================================
+
+describe("reconcileRoster — import decisions", () => {
+  const declined = (field: string, value: string, at = Date.now()) => ({
+    [field]: { declined: value, at },
+  });
+
+  it("does not re-raise a change the user already turned down", () => {
+    const dbFlight = makeFlight({
+      scheduledOut: "04:00",
+      importDecisions: declined("scheduledOut", "03:50"),
+    });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    // Nothing left to ask about — but the decision is offered back so it can
+    // be deliberately reversed.
+    expect(ops[0].kind).toBe("skip_decided");
+    if (ops[0].kind !== "skip_decided") return;
+    expect(ops[0].reverts).toHaveLength(1);
+    expect(ops[0].reverts[0].field).toBe("scheduledOut");
+    expect(ops[0].reverts[0].to).toBe("03:50");
+    expect(ops[0].reverts[0].direction).toBe("take_report");
+  });
+
+  it("asks again once the decision has aged past the retention window", () => {
+    const stale = Date.now() - (IMPORT_DECISION_RETENTION_MS + 86_400_000);
+    const dbFlight = makeFlight({
+      scheduledOut: "04:00",
+      importDecisions: declined("scheduledOut", "03:50", stale),
+    });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    expect(ops[0].kind).toBe("update_conflict");
+  });
+
+  it("offers to restore a value an accepted change overwrote", () => {
+    const dbFlight = makeFlight({
+      importDecisions: {
+        remarks: { replaced: "my note", at: Date.now() },
+      },
+      remarks: "company note",
+    });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    expect(ops[0].kind).toBe("skip_decided");
+    if (ops[0].kind !== "skip_decided") return;
+    expect(ops[0].reverts[0]).toMatchObject({
+      field: "remarks",
+      from: "company note",
+      to: "my note",
+      direction: "restore_yours",
+    });
+  });
+
+  it("still raises the field when a later report proposes a different value", () => {
+    const dbFlight = makeFlight({
+      scheduledOut: "04:00",
+      importDecisions: declined("scheduledOut", "03:50"),
+    });
+    const ops = reconcileRoster({
+      sectors: [makeSector({ scheduledOut: "03:30" })],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    expect(ops[0].kind).toBe("update_conflict");
+    if (ops[0].kind !== "update_conflict") return;
+    expect(ops[0].changes.map((c) => c.field)).toContain("scheduledOut");
+  });
+
+  it("only mutes the declined field, not the rest of the row", () => {
+    const dbFlight = makeFlight({
+      scheduledOut: "04:00",
+      scheduledIn: "07:00",
+      importDecisions: declined("scheduledOut", "03:50"),
+    });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    if (ops[0].kind !== "update_conflict") throw new Error("expected conflict");
+    const fields = ops[0].changes.map((c) => c.field);
+    expect(fields).toContain("scheduledIn");
+    expect(fields).not.toContain("scheduledOut");
   });
 });

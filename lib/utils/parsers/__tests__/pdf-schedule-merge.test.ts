@@ -50,6 +50,10 @@ vi.mock("@/lib/db", () => {
       createdAt: 0,
       syncStatus: "pending" as const,
     })),
+    // The parser reads the user's PICUS-vs-SIC convention so a PF/PM change
+    // can carry the matching pilotRole correction.
+    getUserPreferences: vi.fn(async () => null),
+    DEFAULT_IMPORT_DEFAULTS: { nonPicPfRole: "SIC" as const },
   };
 });
 

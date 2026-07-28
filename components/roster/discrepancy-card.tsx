@@ -65,6 +65,19 @@ const DISCREPANCY_TYPE_CONFIG: Record<
     label: "Stale Report",
     description: "Older report skipped to protect newer data",
   },
+  // These two normally render as a FlightMismatchCard on the discrepancies
+  // page; the entries exist so a resolved one still has a label in the notes
+  // list.
+  pilot_flying_mismatch: {
+    icon: Users,
+    label: "Pilot Flying",
+    description: "Your PF/PM entry differs from the company report",
+  },
+  day_night_mismatch: {
+    icon: Clock,
+    label: "Day / Night",
+    description: "Your day/night takeoff or landing split differs from the company report",
+  },
 }
 
 const SEVERITY_CONFIG = {

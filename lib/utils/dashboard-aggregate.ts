@@ -266,6 +266,20 @@ export function aggregateDashboard({
 
   for (const flight of flights) {
     if (!flight.date) continue
+
+    // Simulator sessions are logged as flight entries but must NOT count as
+    // flown flights (no flight/block hours, no landings). They contribute
+    // only their simulator-instrument time to the sim totals.
+    if (flight.isSimulator) {
+      if (flight.date >= fromIso && flight.date <= toIso) {
+        const simM = hhmmToMinutes(flight.simulatedInstrumentTime)
+        result.totals.simMinutes += simM
+        result.simIRMinutes += simM
+        result.byAutoFillField.simInst += simM
+      }
+      continue
+    }
+
     // Exclude scheduled / not-yet-flown placeholders.
     if (!isFlownFlight(flight)) continue
 

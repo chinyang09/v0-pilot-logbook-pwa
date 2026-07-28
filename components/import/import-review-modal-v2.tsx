@@ -1,20 +1,22 @@
 /**
  * Unified import review modal — v2.
  *
- * Adds an "Auto-applied safe updates" summary section (read-only) and a
- * "Past flight updates needing your consent" section for `update_consult`.
- * Existing edited-conflicts and missing-from-roster sections are preserved.
+ * Tab-navigated review: operations are bucketed (New / Updated / Changes /
+ * Your edits / Removed / Protected) and each bucket renders as a list of
+ * flight cards rather than paragraphs of `field: from → to` text. Rows the
+ * report already agrees with are not listed at all — they are counted in the
+ * header instead. Changed values show
+ * the old figure struck through in grey next to the new one in the accent
+ * colour, so a card reads as a flight first and a diff second.
  *
- * Stale-report skips appear in a collapsible audit section so the user can
- * see exactly what didn't get overwritten.
+ * Buckets that need the user's consent carry a checkbox per card plus a
+ * select-all toggle; auto-applied buckets are read-only.
  */
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -23,21 +25,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { SegmentedTabs } from "./segmented-tabs";
 import {
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  Edit3,
-  History,
-  Plus,
-  Trash2,
-} from "lucide-react";
+  MODAL_SCRIM,
+  ChromeFade,
+  RadialBlurBackdrop,
+} from "@/components/ui/chrome-overlays";
+import { GlassContainer } from "@/components/ui/glass-container";
+import { cn } from "@/lib/utils";
 import type {
   AcceptableOperation,
   PlannedImport,
 } from "@/lib/utils/parsers/schedule-parser";
 import { usePreferences } from "@/components/providers/preferences-provider";
-import { getAirportDisplayCode } from "@/lib/utils/airport-display";
+import { ImportFlightCard, type CardTone } from "./import-flight-card";
+import type { FieldDiff } from "@/lib/utils/roster/reconciler";
+import type { PilotRole } from "@/types/entities/flight.types";
 
 interface Props {
   plan: PlannedImport | null;
@@ -50,27 +53,85 @@ type Bucket =
   | "creates"
   | "safe"
   | "consult"
-  | "edited"
   | "deletions"
-  | "stale"
-  | "identical";
+  | "decided"
+  | "protected";
 
 type Entry = { op: AcceptableOperation; index: number };
 
-type AirportPref = "icao" | "iata" | "both";
+/** Op kinds applied without asking (mirrors the executor's default set). */
+function isAutoAccepted(kind: AcceptableOperation["kind"]): boolean {
+  return (
+    kind === "create" ||
+    kind === "skip_identical" ||
+    kind === "skip_non_airline" ||
+    kind === "skip_stale_report" ||
+    kind === "update_safe"
+  );
+}
 
-function depDisplay(
-  flight: { departureIcao?: string; departureIata?: string },
-  pref: AirportPref
-): string {
-  return getAirportDisplayCode(flight.departureIcao, flight.departureIata, pref);
+const BUCKET_META: Record<
+  Bucket,
+  { label: string; tone: CardTone; selectable: boolean; hint: string }
+> = {
+  creates: {
+    label: "New",
+    tone: "create",
+    selectable: false,
+    hint: "Added to your logbook automatically.",
+  },
+  safe: {
+    label: "Updates",
+    tone: "safe",
+    selectable: false,
+    hint: "Crew, route and future-flight details applied automatically.",
+  },
+  consult: {
+    label: "Changes",
+    tone: "consult",
+    selectable: true,
+    hint: "The report differs from what you have. Tick what to take.",
+  },
+  decided: {
+    label: "Earlier decisions",
+    tone: "consult",
+    selectable: true,
+    hint: "You already answered these, so they were left alone. Tick one only if you want to change your mind.",
+  },
+  deletions: {
+    label: "Remove",
+    tone: "delete",
+    selectable: true,
+    hint: "In your logbook but missing from this report. Tick to delete.",
+  },
+  protected: {
+    label: "Protected",
+    tone: "safe",
+    selectable: false,
+    hint: "Left alone — your data came from a newer report than this one.",
+  },
+};
+
+/**
+ * True when taking this change would replace something the USER wrote — a
+ * signature, remarks, a manual override, or an edit made after the last sync.
+ * Everything else in the same list only overwrites data a previous import put
+ * there, which costs nothing.
+ */
+function isUserAuthored(op: AcceptableOperation): boolean {
+  return op.kind === "edited_conflict";
 }
-function arrDisplay(
-  flight: { arrivalIcao?: string; arrivalIata?: string },
-  pref: AirportPref
-): string {
-  return getAirportDisplayCode(flight.arrivalIcao, flight.arrivalIata, pref);
-}
+
+const BUCKET_ORDER: Bucket[] = [
+  "consult",
+  "deletions",
+  "creates",
+  "safe",
+  "decided",
+  "protected",
+];
+
+const PAGE_SIZE = 25;
 
 export function ImportReviewModalV2({
   plan,
@@ -79,18 +140,49 @@ export function ImportReviewModalV2({
   onCancel,
 }: Props) {
   const [acceptance, setAcceptance] = useState<Map<number, boolean>>(new Map());
+  // Op indices where the user deliberately chose the company's day/night split
+  // over our sun-position calculation. Empty by default — ours always wins
+  // unless the user opts out per flight.
+  const [useCompanyToLdg, setUseCompanyToLdg] = useState<Set<number>>(new Set());
+  // Per-op pilot-role overrides. Empty means "use the role derived from the
+  // user's import setting"; an entry means they picked a different one.
+  const [roleOverrides, setRoleOverrides] = useState<Map<number, PilotRole>>(
+    new Map()
+  );
+  // Op indices where the user chose to KEEP the pilot-flying value already in
+  // their logbook rather than take the report's.
+  const [useRecordedPf, setUseRecordedPf] = useState<Set<number>>(new Set());
+  // Header and footer float OVER the scroll area (like the main panel), so the
+  // list dissolves into a progressive blur instead of stopping at a hard edge.
+  // Their heights are measured so the scroll padding always clears them.
+  const [chromeHeights, setChromeHeights] = useState({ top: 96, bottom: 64 });
+  const observeChrome = useCallback(
+    (edge: "top" | "bottom") => (node: HTMLDivElement | null) => {
+      if (!node) return;
+      const ro = new ResizeObserver(() => {
+        const h = node.offsetHeight;
+        setChromeHeights((prev) =>
+          prev[edge] === h ? prev : { ...prev, [edge]: h }
+        );
+      });
+      ro.observe(node);
+    },
+    []
+  );
+  const headerRef = useRef<HTMLDivElement | null>(null);
+  const [activeTab, setActiveTab] = useState<Bucket | null>(null);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const { preferences } = usePreferences();
-  const airportPref = preferences.display.airportIdentifier;
+  const displayPrefs = preferences.display;
 
   const partitioned = useMemo(() => {
     const out: Record<Bucket, Entry[]> = {
       creates: [],
       safe: [],
       consult: [],
-      edited: [],
       deletions: [],
-      stale: [],
-      identical: [],
+      decided: [],
+      protected: [],
     };
     if (!plan) return out;
 
@@ -105,25 +197,62 @@ export function ImportReviewModalV2({
           break;
         case "update_consult":
         case "update_conflict":
-          out.consult.push(entry);
-          break;
         case "edited_conflict":
-          out.edited.push(entry);
+          // One list: the action is identical (tick to take the report's
+          // value). The only thing that differs is what it costs you, and
+          // that belongs on the card, not in a separate tab.
+          out.consult.push(entry);
           break;
         case "delete_missing":
           out.deletions.push(entry);
           break;
-        case "skip_stale_report":
-          out.stale.push(entry);
+        case "skip_decided":
+          out.decided.push(entry);
           break;
+        case "skip_stale_report":
+          out.protected.push(entry);
+          break;
+        // Flights that already match the report need no attention and are
+        // never listed — they are only counted, below.
         case "skip_identical":
         case "skip_non_airline":
-          out.identical.push(entry);
           break;
       }
     });
+    // Rows that would overwrite something the user authored sink to the
+    // bottom, so "Select all" (which skips them) reads as a clean top block
+    // and the ones needing a real decision cluster where they're noticed.
+    out.consult.sort(
+      (a, b) => Number(isUserAuthored(a.op)) - Number(isUserAuthored(b.op))
+    );
     return out;
   }, [plan]);
+
+  // Flights already matching the report: counted for reassurance, never listed.
+  const unchangedCount = useMemo(
+    () =>
+      plan?.operations.filter(
+        (op) => op.kind === "skip_identical" || op.kind === "skip_non_airline"
+      ).length ?? 0,
+    [plan]
+  );
+
+  const tabs = useMemo(
+    () =>
+      BUCKET_ORDER.filter((b) => partitioned[b].length > 0).map((b) => ({
+        value: b,
+        label: BUCKET_META[b].label,
+        count: partitioned[b].length,
+      })),
+    [partitioned]
+  );
+
+  // Default to the first bucket that wants attention (BUCKET_ORDER puts the
+  // consent-required buckets first), without fighting an explicit choice.
+  const current: Bucket | null =
+    activeTab && partitioned[activeTab].length > 0
+      ? activeTab
+      : (tabs[0]?.value as Bucket | undefined) ?? null;
 
   if (!plan) return null;
 
@@ -131,42 +260,125 @@ export function ImportReviewModalV2({
     acceptance.has(index) ? acceptance.get(index)! : defaultValue;
 
   const setAccept = (index: number, value: boolean) => {
-    const next = new Map(acceptance);
-    next.set(index, value);
-    setAcceptance(next);
+    setAcceptance((prev) => {
+      const next = new Map(prev);
+      next.set(index, value);
+      return next;
+    });
+  };
+
+  /**
+   * Bulk toggle. Ticking never touches rows that would overwrite the user's
+   * own entries — those stay a per-row decision, which is the whole reason
+   * they no longer need a separate tab. Clearing applies to everything.
+   */
+  const setBucketAccept = (bucket: Bucket, value: boolean) => {
+    setAcceptance((prev) => {
+      const next = new Map(prev);
+      for (const { op, index } of partitioned[bucket]) {
+        if (value && isUserAuthored(op)) continue;
+        next.set(index, value);
+      }
+      return next;
+    });
+  };
+
+  const toggleCompanyToLdg = (index: number, value: boolean) => {
+    setUseCompanyToLdg((prev) => {
+      const next = new Set(prev);
+      if (value) next.add(index);
+      else next.delete(index);
+      return next;
+    });
+  };
+
+  const setRoleOverride = (index: number, role: PilotRole) => {
+    setRoleOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(index, role);
+      return next;
+    });
+  };
+
+  const toggleRecordedPf = (index: number, value: boolean) => {
+    setUseRecordedPf((prev) => {
+      const next = new Set(prev);
+      if (value) next.add(index);
+      else next.delete(index);
+      return next;
+    });
   };
 
   const handleConfirm = () => {
     const updatedOperations = plan.operations.map((op, index) => {
-      if (
-        op.kind === "create" ||
-        op.kind === "skip_identical" ||
-        op.kind === "skip_non_airline" ||
-        op.kind === "skip_stale_report" ||
-        op.kind === "update_safe"
-      ) {
-        return { ...op, accepted: true };
+      const accepted = isAutoAccepted(op.kind) ? true : getAccept(index, false);
+
+      // Deliberate opt-out: swap our calculated day/night figures back to the
+      // company's for this flight only. Untouched otherwise — our calculator
+      // is the default everywhere.
+      const wantsCompany = useCompanyToLdg.has(index);
+      const keepsRecordedPf = useRecordedPf.has(index);
+      const role = roleOverrides.get(index);
+      if ((wantsCompany || role || keepsRecordedPf) && "changes" in op && op.changes) {
+        const all = op.changes as FieldDiff[];
+        // Keeping the recorded pilot-flying value drops both halves of that
+        // decision — the flag and the role it would have forced. Those dropped
+        // diffs are remembered so the same report doesn't re-ask next time.
+        const isPfPair = (c: FieldDiff) =>
+          c.field === "pilotFlying" || c.field === "pilotRole";
+        const declinedChanges = keepsRecordedPf ? all.filter(isPfPair) : [];
+        const changes = all
+          .filter((c) => !keepsRecordedPf || !isPfPair(c))
+          .map((c) => {
+            if (wantsCompany && c.companyValue !== undefined) {
+              return { ...c, to: c.companyValue };
+            }
+            if (role && c.field === "pilotRole") return { ...c, to: role };
+            return c;
+          });
+        return { ...op, changes, accepted, declinedChanges };
       }
-      return { ...op, accepted: getAccept(index, false) };
+      return { ...op, accepted };
     });
     onConfirm({ ...plan, operations: updatedOperations });
   };
 
-  const consultAccepted = partitioned.consult.filter((e) =>
-    getAccept(e.index, false)
-  ).length;
-  const editedAccepted = partitioned.edited.filter((e) =>
-    getAccept(e.index, false)
-  ).length;
-  const deleteAccepted = partitioned.deletions.filter((e) =>
-    getAccept(e.index, false)
-  ).length;
+  const countAccepted = (bucket: Bucket) =>
+    partitioned[bucket].filter((e) => getAccept(e.index, false)).length;
+
+  const consultAccepted = countAccepted("consult");
+  const deleteAccepted = countAccepted("deletions");
+  const revertAccepted = countAccepted("decided");
+
+  const totalActions =
+    partitioned.creates.length +
+    partitioned.safe.length +
+    consultAccepted +
+    revertAccepted +
+    deleteAccepted;
+
+  const breakdown = [
+    partitioned.creates.length && `${partitioned.creates.length} new`,
+    partitioned.safe.length && `${partitioned.safe.length} updated`,
+    consultAccepted && `${consultAccepted} overwritten`,
+    revertAccepted && `${revertAccepted} reversed`,
+    deleteAccepted && `${deleteAccepted} deleted`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const generatedDate = plan.generatedAt
     ? new Date(plan.generatedAt).toLocaleString(undefined, {
         timeZone: "UTC",
+        dateStyle: "medium",
+        timeStyle: "short",
       })
     : null;
+
+  const entries = current ? partitioned[current] : [];
+  const meta = current ? BUCKET_META[current] : null;
+  const shown = entries.slice(0, visibleCount);
+  const selectedInTab = current ? countAccepted(current) : 0;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
@@ -175,600 +387,165 @@ export function ImportReviewModalV2({
         // isn't hidden behind it. Constrain to the visible viewport with
         // safe-area insets top + bottom so it never extends under the nav
         // pill or the mobile bottom nav.
-        className="z-[110] flex max-w-3xl flex-col p-4 sm:p-6 max-h-[calc(100dvh-7rem)] top-[calc(env(safe-area-inset-top)+4.5rem)] translate-y-0 sm:top-[50%] sm:-translate-y-1/2"
-        overlayClassName="z-[105]"
+        // Reads as an app surface rather than a plain modal: translucent panel
+        // over a blurred backdrop, matching the glass chrome used by the nav
+        // pill and the floating action buttons.
+        className="z-[110] block max-w-3xl gap-0 overflow-hidden rounded-3xl border-white/10 bg-card/70 p-0 shadow-2xl backdrop-saturate-150 h-[calc(100dvh-7rem)] max-h-[46rem] top-[calc(env(safe-area-inset-top)+4.5rem)] translate-y-0 sm:top-[50%] sm:-translate-y-1/2"
+        // The backdrop blur is strongest around the dialog and clears toward
+        // the screen edges, so the app stays readable behind it.
+        overlayClassName={cn("z-[105]", MODAL_SCRIM)}
+        // Rendered inside the dialog's own portal, between the overlay and the
+        // panel — the panel itself is `overflow-hidden` AND transformed, so it
+        // would clip even a fixed-position child.
+        backdropSlot={<RadialBlurBackdrop className="fixed inset-0 z-[106]" />}
       >
-        <DialogHeader>
-          <DialogTitle>Review Import</DialogTitle>
-          <DialogDescription>
-            {plan.dateRange.start} – {plan.dateRange.end}
-            {generatedDate ? ` • Generated ${generatedDate} UTC` : ""}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex-1 overflow-y-auto space-y-6 pr-2">
-          <SummaryBar
-            creates={partitioned.creates.length}
-            safe={partitioned.safe.length}
-            consult={partitioned.consult.length}
-            edited={partitioned.edited.length}
-            deletions={partitioned.deletions.length}
-            stale={partitioned.stale.length}
-            identical={partitioned.identical.length}
-          />
-
-          {partitioned.creates.length > 0 && (
-            <Section
-              title={`New flights (${partitioned.creates.length})`}
-              icon={<Plus className="h-4 w-4" />}
-            >
-              <p className="text-xs text-muted-foreground mb-3">
-                These will be created automatically.
-              </p>
-              <div className="space-y-1">
-                {partitioned.creates.slice(0, 12).map(({ op, index }) =>
-                  op.kind === "create" ? (
-                    <CreateRow
-                      key={`${index}-${op.sector.sourceLine}`}
-                      sector={op.sector}
-                      airportPref={airportPref}
-                    />
-                  ) : null
-                )}
-                {partitioned.creates.length > 12 && (
-                  <p className="text-xs text-muted-foreground pl-6">
-                    …and {partitioned.creates.length - 12} more
-                  </p>
-                )}
-              </div>
-            </Section>
-          )}
-
-          {partitioned.safe.length > 0 && (
-            <Section
-              title={`Auto-applied safe updates (${partitioned.safe.length})`}
-              icon={<CheckCircle2 className="h-4 w-4 text-status-valid" />}
-            >
-              <p className="text-xs text-muted-foreground mb-3">
-                Future flights and existing flights with only crew/route metadata
-                changes are updated automatically.
-              </p>
-              <div className="space-y-2">
-                {partitioned.safe.slice(0, 12).map(({ op, index }) =>
-                  op.kind === "update_safe" ? (
-                    <DiffRow
-                      key={`${index}-${op.flight.id}`}
-                      op={op}
-                      airportPref={airportPref}
-                    />
-                  ) : null
-                )}
-                {partitioned.safe.length > 12 && (
-                  <p className="text-xs text-muted-foreground pl-6">
-                    …and {partitioned.safe.length - 12} more
-                  </p>
-                )}
-              </div>
-            </Section>
-          )}
-
-          {partitioned.consult.length > 0 && (
-            <Section
-              title={`Past flight updates needing your consent (${partitioned.consult.length})`}
-              icon={<Edit3 className="h-4 w-4" />}
-            >
-              <p className="text-xs text-muted-foreground mb-3">
-                These already-flown flights have critical-field differences.
-                Check rows you want to overwrite.
-              </p>
-              <div className="space-y-2">
-                {partitioned.consult.map(({ op, index }) =>
-                  op.kind === "update_consult" ||
-                  op.kind === "update_conflict" ? (
-                    <ConsentRow
-                      key={`${index}-${op.flight.id}`}
-                      op={op}
-                      checked={getAccept(index, false)}
-                      onCheckedChange={(v) => setAccept(index, v)}
-                      airportPref={airportPref}
-                    />
-                  ) : null
-                )}
-              </div>
-            </Section>
-          )}
-
-          {partitioned.edited.length > 0 && (
-            <Section
-              title={`Edited flights (${partitioned.edited.length})`}
-              icon={<AlertTriangle className="h-4 w-4 text-status-warning" />}
-            >
-              <p className="text-xs text-muted-foreground mb-3">
-                These flights have your edits (signatures, remarks, manual
-                overrides). Accepting will overwrite those edits.
-              </p>
-              <div className="space-y-2">
-                {partitioned.edited.map(({ op, index }) =>
-                  op.kind === "edited_conflict" ? (
-                    <EditedRow
-                      key={`${index}-${op.flight.id}`}
-                      op={op}
-                      checked={getAccept(index, false)}
-                      onCheckedChange={(v) => setAccept(index, v)}
-                      airportPref={airportPref}
-                    />
-                  ) : null
-                )}
-              </div>
-            </Section>
-          )}
-
-          {partitioned.deletions.length > 0 && (
-            <Section
-              title={`Missing from roster (${partitioned.deletions.length})`}
-              icon={<Trash2 className="h-4 w-4" />}
-            >
-              <p className="text-xs text-muted-foreground mb-3">
-                These TR-numbered flights are in your logbook but not in this
-                report. Check to delete.
-              </p>
-              <div className="space-y-2">
-                {partitioned.deletions.map(({ op, index }) =>
-                  op.kind === "delete_missing" ? (
-                    <DeletionRow
-                      key={`${index}-${op.flight.id}`}
-                      op={op}
-                      checked={getAccept(index, false)}
-                      onCheckedChange={(v) => setAccept(index, v)}
-                      airportPref={airportPref}
-                    />
-                  ) : null
-                )}
-              </div>
-            </Section>
-          )}
-
-          {partitioned.stale.length > 0 && (
-            <CollapsibleSection
-              title={`Skipped — older report (${partitioned.stale.length})`}
-              icon={<History className="h-4 w-4 text-muted-foreground" />}
-              hint="Existing flights came from a newer report than this one."
-            >
-              <div className="space-y-2">
-                {partitioned.stale.map(({ op, index }) =>
-                  op.kind === "skip_stale_report" ? (
-                    <StaleRow
-                      key={`${index}-${op.flight.id}`}
-                      op={op}
-                      airportPref={airportPref}
-                    />
-                  ) : null
-                )}
-              </div>
-            </CollapsibleSection>
-          )}
-        </div>
-
-        <DialogFooter className="border-t pt-4">
-          <Button variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button onClick={handleConfirm}>
-            Import {partitioned.creates.length} new
-            {partitioned.safe.length > 0 &&
-              `, ${partitioned.safe.length} safe`}
-            {consultAccepted > 0 && `, ${consultAccepted} consulted`}
-            {editedAccepted > 0 && `, ${editedAccepted} edited`}
-            {deleteAccepted > 0 && `, delete ${deleteAccepted}`}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ============================================================
-// Sub-components
-// ============================================================
-
-function Section({
-  title,
-  icon,
-  children,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <h3 className="text-sm font-semibold flex items-center gap-2 mb-2">
-        {icon}
-        {title}
-      </h3>
-      {children}
-    </div>
-  );
-}
-
-function CollapsibleSection({
-  title,
-  icon,
-  hint,
-  children,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="text-sm font-semibold flex items-center gap-2 mb-2 hover:underline"
-      >
-        {icon}
-        {title}
-        <ArrowRight
-          className={
-            "h-3 w-3 opacity-50 transition-transform " +
-            (open ? "rotate-90" : "")
-          }
-        />
-      </button>
-      {hint && !open && (
-        <p className="text-xs text-muted-foreground mb-3">{hint}</p>
-      )}
-      {open && <div className="space-y-2">{children}</div>}
-    </div>
-  );
-}
-
-function SummaryBar(props: {
-  creates: number;
-  safe: number;
-  consult: number;
-  edited: number;
-  deletions: number;
-  stale: number;
-  identical: number;
-}) {
-  return (
-    <div className="flex flex-wrap gap-2 text-xs">
-      {props.creates > 0 && (
-        <Badge variant="default" className="bg-status-valid text-primary-foreground">
-          {props.creates} new
-        </Badge>
-      )}
-      {props.safe > 0 && (
-        <Badge variant="secondary" className="bg-status-info/15 text-status-info">
-          {props.safe} safe updates
-        </Badge>
-      )}
-      {props.consult > 0 && (
-        <Badge variant="outline">{props.consult} need consent</Badge>
-      )}
-      {props.edited > 0 && (
-        <Badge variant="outline" className="border-status-warning text-status-warning">
-          {props.edited} edited
-        </Badge>
-      )}
-      {props.deletions > 0 && (
-        <Badge variant="outline" className="border-status-error text-status-error">
-          {props.deletions} orphan
-        </Badge>
-      )}
-      {props.stale > 0 && (
-        <Badge variant="outline" className="text-muted-foreground">
-          {props.stale} stale-skipped
-        </Badge>
-      )}
-      {props.identical > 0 && (
-        <Badge variant="secondary">{props.identical} unchanged</Badge>
-      )}
-    </div>
-  );
-}
-
-function CreateRow({
-  sector,
-  airportPref,
-}: {
-  sector: {
-    flightNumber: string;
-    date: string;
-    departureIata: string;
-    arrivalIata: string;
-    departureIcao?: string;
-    arrivalIcao?: string;
-  };
-  airportPref: AirportPref;
-}) {
-  return (
-    <div className="text-xs pl-6 text-muted-foreground">
-      {sector.date} · {sector.flightNumber || "—"} ·{" "}
-      {depDisplay(sector, airportPref)}→{arrDisplay(sector, airportPref)}
-    </div>
-  );
-}
-
-function DiffRow({
-  op,
-  airportPref,
-}: {
-  op: Extract<AcceptableOperation, { kind: "update_safe" }>;
-  airportPref: AirportPref;
-}) {
-  return (
-    <div className="pl-6 border-l-2 border-status-info/30 py-1">
-      <div className="text-sm font-medium">
-        {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
-        {depDisplay(op.flight, airportPref)}→{arrDisplay(op.flight, airportPref)}
-        {op.flight.outTime && op.flight.inTime && (
-          <span className="ml-2 text-xs font-normal text-muted-foreground">
-            {op.flight.outTime}Z – {op.flight.inTime}Z
-          </span>
-        )}
-      </div>
-      <SunCheck op={op} />
-      <ChangeList changes={op.changes} />
-    </div>
-  );
-}
-
-function ConsentRow({
-  op,
-  checked,
-  onCheckedChange,
-  airportPref,
-}: {
-  op: Extract<
-    AcceptableOperation,
-    { kind: "update_consult" } | { kind: "update_conflict" }
-  >;
-  checked: boolean;
-  onCheckedChange: (v: boolean) => void;
-  airportPref: AirportPref;
-}) {
-  return (
-    <label className="flex items-start gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer">
-      <Checkbox
-        checked={checked}
-        onCheckedChange={(v) => onCheckedChange(Boolean(v))}
-      />
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium">
-          {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
-          {depDisplay(op.flight, airportPref)}→{arrDisplay(op.flight, airportPref)}
-          {op.flight.outTime && op.flight.inTime && (
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {op.flight.outTime}Z – {op.flight.inTime}Z
-            </span>
-          )}
-        </div>
-        <SunCheck op={op} />
-        <ChangeList changes={op.changes} />
-      </div>
-    </label>
-  );
-}
-
-function EditedRow({
-  op,
-  checked,
-  onCheckedChange,
-  airportPref,
-}: {
-  op: Extract<AcceptableOperation, { kind: "edited_conflict" }>;
-  checked: boolean;
-  onCheckedChange: (v: boolean) => void;
-  airportPref: AirportPref;
-}) {
-  const reasonLabel = (r: string) => {
-    switch (r) {
-      case "has_signature":
-        return "signed";
-      case "user_modified_after_sync":
-        return "edited after sync";
-      case "has_remarks":
-        return "has remarks";
-      case "has_manual_overrides":
-        return "manual overrides";
-      default:
-        return r;
-    }
-  };
-  return (
-    <label className="flex items-start gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer border-l-2 border-status-warning">
-      <Checkbox
-        checked={checked}
-        onCheckedChange={(v) => onCheckedChange(Boolean(v))}
-      />
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
-          {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
-          {depDisplay(op.flight, airportPref)}→{arrDisplay(op.flight, airportPref)}
-          {op.flight.outTime && op.flight.inTime && (
-            <span className="text-xs font-normal text-muted-foreground">
-              {op.flight.outTime}Z – {op.flight.inTime}Z
-            </span>
-          )}
-          <div className="flex gap-1">
-            {op.editReasons.map((r) => (
-              <Badge
-                key={r}
-                variant="outline"
-                className="text-[10px] border-status-warning text-status-warning"
-              >
-                {reasonLabel(r)}
-              </Badge>
-            ))}
-          </div>
-        </div>
-        <SunCheck op={op} />
-        <ChangeList changes={op.changes} />
-      </div>
-    </label>
-  );
-}
-
-function DeletionRow({
-  op,
-  checked,
-  onCheckedChange,
-  airportPref,
-}: {
-  op: Extract<AcceptableOperation, { kind: "delete_missing" }>;
-  checked: boolean;
-  onCheckedChange: (v: boolean) => void;
-  airportPref: AirportPref;
-}) {
-  return (
-    <label className="flex items-start gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer">
-      <Checkbox
-        checked={checked}
-        onCheckedChange={(v) => onCheckedChange(Boolean(v))}
-      />
-      <div className="text-sm">
-        {op.flight.date} · {op.flight.flightNumber} ·{" "}
-        {depDisplay(op.flight, airportPref)}→{arrDisplay(op.flight, airportPref)}
-      </div>
-    </label>
-  );
-}
-
-function StaleRow({
-  op,
-  airportPref,
-}: {
-  op: Extract<AcceptableOperation, { kind: "skip_stale_report" }>;
-  airportPref: AirportPref;
-}) {
-  return (
-    <div className="text-xs pl-6 text-muted-foreground">
-      {op.flight.date} · {op.flight.flightNumber || "—"} ·{" "}
-      {depDisplay(op.flight, airportPref)}→{arrDisplay(op.flight, airportPref)}
-      <span className="ml-2 opacity-70">
-        existing report{" "}
-        {new Date(op.existingGeneratedAt).toLocaleString(undefined, {
-          timeZone: "UTC",
-          dateStyle: "medium",
-          timeStyle: "short",
-        })}{" "}
-        &gt; this report{" "}
-        {new Date(op.reportGeneratedAt).toLocaleString(undefined, {
-          timeZone: "UTC",
-          dateStyle: "medium",
-          timeStyle: "short",
-        })}
-      </span>
-    </div>
-  );
-}
-
-/**
- * Day/night cutoff summary for a flight, shown whenever a TO/LDG diff is
- * present so the user can sanity-check whether the imported value or the
- * sun-position calc is right. Reads the pre-computed context the logbook
- * parser attached to the sector.
- */
-function SunCheck({
-  op,
-}: {
-  op: AcceptableOperation;
-}) {
-  if (
-    op.kind !== "update_safe" &&
-    op.kind !== "update_consult" &&
-    op.kind !== "update_conflict" &&
-    op.kind !== "edited_conflict"
-  ) {
-    return null;
-  }
-  const ctx = op.sector?.toLdgContext;
-  if (!ctx) return null;
-
-  const hasToLdgChange = op.changes.some((c) =>
-    ["dayTakeoffs", "nightTakeoffs", "dayLandings", "nightLandings"].includes(
-      c.field
-    )
-  );
-  if (!hasToLdgChange) return null;
-
-  const tz = (n?: number) =>
-    n === undefined ? "" : ` (UTC${n >= 0 ? "+" : ""}${n})`;
-  const bounds = (rise?: string | null, set?: string | null) => {
-    const parts: string[] = [];
-    if (rise) parts.push(`sunrise ${rise}Z`);
-    if (set) parts.push(`sunset ${set}Z`);
-    return parts.length ? ` · ${parts.join(", ")}` : "";
-  };
-
-  return (
-    <div className="mt-1 mb-1 rounded bg-muted/40 px-2 py-1 text-[11px] leading-relaxed">
-      <div className="font-medium text-foreground/80">Day/night check</div>
-      <div className="text-muted-foreground">
-        OUT {ctx.outUtc}Z
-        {ctx.depLocal ? ` / ${ctx.depLocal} local${tz(ctx.depTzOffset)}` : ""} @{" "}
-        {op.sector.departureIata} →{" "}
-        <span
-          className={
-            ctx.depSunStatus === "night"
-              ? "text-indigo-500 dark:text-indigo-300 font-medium"
-              : "text-status-warning font-medium"
-          }
-        >
-          {ctx.depSunStatus ?? "?"}
-        </span>
-        {bounds(ctx.depSunriseUtc, ctx.depSunsetUtc)}
-      </div>
-      <div className="text-muted-foreground">
-        IN {ctx.inUtc}Z
-        {ctx.arrLocal ? ` / ${ctx.arrLocal} local${tz(ctx.arrTzOffset)}` : ""} @{" "}
-        {op.sector.arrivalIata} →{" "}
-        <span
-          className={
-            ctx.arrSunStatus === "night"
-              ? "text-indigo-500 dark:text-indigo-300 font-medium"
-              : "text-status-warning font-medium"
-          }
-        >
-          {ctx.arrSunStatus ?? "?"}
-        </span>
-        {bounds(ctx.arrSunriseUtc, ctx.arrSunsetUtc)}
-      </div>
-    </div>
-  );
-}
-
-function ChangeList({
-  changes,
-}: {
-  changes: Array<{ field: string; from: string; to: string; note?: string }>;
-}) {
-  return (
-    <div className="mt-1 space-y-0.5">
-      {changes.map((change) => (
+        {/* Floating top chrome: title + tab chips over a progressive blur. */}
         <div
-          key={change.field}
-          className="text-xs text-muted-foreground"
+          ref={(node) => {
+            headerRef.current = node;
+            observeChrome("top")(node);
+          }}
+          className="absolute inset-x-0 top-0 z-20"
         >
-          <div className="flex items-center gap-1">
-            <span className=" ">{change.field}:</span>
-            <span className=" ">{change.from || "—"}</span>
-            <ArrowRight className="h-3 w-3" />
-            <span className=" text-foreground">{change.to}</span>
+          <ChromeFade side="top" />
+          <div className="relative">
+            {/* Title and report meta share one row — stacked, the meta wrapped
+                to two lines and pushed the tabs (and the whole list) down. */}
+            <DialogHeader className="flex-row items-baseline gap-x-3 gap-y-0 space-y-0 px-4 pt-4 sm:px-6 sm:pt-5">
+              <DialogTitle className="shrink-0 text-base">
+                Review import
+              </DialogTitle>
+              <DialogDescription className="min-w-0 flex-1 truncate text-right text-xs tabular-nums">
+                {plan.dateRange.start} – {plan.dateRange.end}
+                {generatedDate ? ` · ${generatedDate}` : ""}
+                {unchangedCount > 0 ? ` · ${unchangedCount} match` : ""}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="px-4 pb-3 pt-2.5 sm:px-6">
+              <SegmentedTabs
+                tabs={tabs}
+                value={(current ?? tabs[0]?.value) as Bucket}
+                onChange={(v) => {
+                  setActiveTab(v);
+                  setVisibleCount(PAGE_SIZE);
+                }}
+              />
+            </div>
           </div>
-          {change.note && (
-            <div className="pl-3 text-[11px] italic text-status-warning">
-              {change.note}
+        </div>
+
+        {/* Panel.
+            `overscroll-contain` stops the scroll chaining into the page behind
+            the dialog once this list hits its end — that chaining scrolled the
+            flight list underneath, and the glass action buttons re-sampled
+            their backdrop as it moved, which read as them being tapped. */}
+        <div
+          className="h-full overflow-y-auto overscroll-contain px-4 sm:px-6"
+          style={{
+            // Exactly the chrome height, like the main panel's pt-16 under its
+            // h-16 header: content starts where the gradient has faded out.
+            paddingTop: chromeHeights.top,
+            paddingBottom: chromeHeights.bottom,
+          }}
+        >
+          {meta && (
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <p className="text-xs text-muted-foreground">{meta.hint}</p>
+              {meta.selectable && entries.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setBucketAccept(current!, selectedInTab === 0)}
+                  className="shrink-0 text-xs font-medium text-primary hover:underline"
+                >
+                  {selectedInTab === 0 ? "Select all" : "Clear all"}
+                </button>
+              )}
             </div>
           )}
+
+          <div
+            key={current ?? "empty"}
+            className="space-y-2 duration-200 animate-in fade-in-0"
+          >
+            {shown.map(({ op, index }) => (
+              <ImportFlightCard
+                key={`${index}-${op.kind}`}
+                op={op}
+                displayPrefs={displayPrefs}
+                tone={
+                  isUserAuthored(op) ? "conflict" : meta?.tone ?? "safe"
+                }
+                checked={meta?.selectable ? getAccept(index, false) : undefined}
+                onCheckedChange={
+                  meta?.selectable ? (v) => setAccept(index, v) : undefined
+                }
+                useCompany={useCompanyToLdg.has(index)}
+                onUseCompanyChange={(v) => toggleCompanyToLdg(index, v)}
+                roleOverride={roleOverrides.get(index)}
+                onRoleChange={(role) => setRoleOverride(index, role)}
+                useRecordedPf={useRecordedPf.has(index)}
+                onUseRecordedPfChange={(v) => toggleRecordedPf(index, v)}
+              />
+            ))}
+
+            {entries.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                Nothing to review here.
+              </p>
+            )}
+
+            {entries.length > shown.length && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+              >
+                Show {Math.min(PAGE_SIZE, entries.length - shown.length)} more
+                <span className="ml-1 text-muted-foreground tabular-nums">
+                  ({entries.length - shown.length} left)
+                </span>
+              </Button>
+            )}
+          </div>
         </div>
-      ))}
-    </div>
+
+        {/* Floating bottom chrome: glass actions over a progressive blur. */}
+        <div
+          ref={observeChrome("bottom")}
+          className="absolute inset-x-0 bottom-0 z-20"
+        >
+          <ChromeFade side="bottom" />
+          <DialogFooter className="relative flex-row items-center justify-between gap-3 px-4 py-3 sm:px-6">
+            <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+              {breakdown || "No changes selected"}
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <GlassContainer cornerRadius={20}>
+                <Button
+                  variant="ghost"
+                  onClick={onCancel}
+                  className="h-10 rounded-full px-4"
+                >
+                  Cancel
+                </Button>
+              </GlassContainer>
+              <GlassContainer cornerRadius={20}>
+                <Button
+                  variant="ghost"
+                  onClick={handleConfirm}
+                  className="h-10 rounded-full px-5 font-semibold text-primary"
+                >
+                  Apply
+                  {totalActions > 0 && (
+                    <span className="ml-1 tabular-nums">{totalActions}</span>
+                  )}
+                </Button>
+              </GlassContainer>
+            </div>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

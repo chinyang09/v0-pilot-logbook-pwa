@@ -50,6 +50,7 @@ import {
 } from "@/lib/utils/flight-calculations";
 import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
+  formatClockDisplay,
   formatTimeShort,
   utcToLocal,
   formatTimezoneOffset,
@@ -62,6 +63,14 @@ import { ImageImportButton } from "@/components/image-import-button";
 import { GlassContainer } from "@/components/ui/glass-container";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { useRegisterDetailActions } from "@/hooks/use-page-actions";
+import { cn } from "@/lib/utils";
+import {
+  ENTRY_TYPES,
+  entryTypePatch,
+  getEntryType,
+} from "@/lib/utils/entry-type";
+import type { EntryType } from "@/types/entities/flight.types";
+import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { ExtractedFlightData } from "@/lib/ocr";
 
 // Swipeable row — thin wrapper over the shared SwipeableCard primitive so the
@@ -131,6 +140,20 @@ function SettingsRow({
 // times before snapping to the real values. Cleared when the PWA is closed.
 const flightDataCache = new Map<string, FlightLog>();
 
+/**
+ * Seed the cache before the panel mounts.
+ *
+ * The form holds its first render until `useLiveQuery` resolves, so opening a
+ * flight for the FIRST time showed the empty panel for a beat — the cache was
+ * only ever written from inside the form, which is too late to help the open
+ * that populates it. A list already has the whole flight object in hand, so it
+ * can hand it over on the way in and the panel paints immediately. Re-opening
+ * was always instant; this makes the first time match.
+ */
+export function primeFlightCache(flight: FlightLog): void {
+  flightDataCache.set(flight.id, flight);
+}
+
 // Time row with UTC and Local display
 function TimeRow({
   label,
@@ -139,6 +162,7 @@ function TimeRow({
   onTap,
   onNow,
   showNow = true,
+  clockSeparator = "colon",
 }: {
   label: string;
   utcValue: string;
@@ -146,6 +170,7 @@ function TimeRow({
   onTap: () => void;
   onNow?: () => void;
   showNow?: boolean;
+  clockSeparator?: DisplayPreferences["clockSeparator"];
 }) {
   const localValue = utcToLocal(utcValue, timezoneOffset);
   const tzLabel = formatTimezoneOffset(timezoneOffset);
@@ -161,7 +186,9 @@ function TimeRow({
               hasValue ? "text-foreground" : "text-muted-foreground"
             }`}
           >
-            {hasValue ? utcValue : "--:--"}
+            {hasValue
+              ? formatClockDisplay(utcValue, clockSeparator)
+              : formatClockDisplay("--:--", clockSeparator, "--:--")}
           </span>
           <span className="text-xs text-muted-foreground">UTC</span>
         </div>
@@ -185,7 +212,9 @@ function TimeRow({
                   hasValue ? "text-foreground" : "text-muted-foreground"
                 }`}
               >
-                {hasValue ? localValue : "--:--"}
+                {hasValue
+                  ? formatClockDisplay(localValue, clockSeparator)
+                  : "--:--"}
               </span>
               <span className="text-xs text-muted-foreground">{tzLabel}</span>
             </>
@@ -325,6 +354,7 @@ export function FlightForm({
   const { airports } = useAirportDatabase();
   const { personnel } = usePersonnel();
   const { preferences } = usePreferences();
+  const clockSeparator = preferences.display.clockSeparator;
   const [, setIsSubmitting] = useState(false);
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
 
@@ -867,6 +897,49 @@ export function FlightForm({
     []
   );
 
+  /**
+   * Switch this record between flight and simulator.
+   *
+   * The two carry their duration in different fields on purpose: a flight's is
+   * `blockTime` (which feeds every flight-hour total), a simulator's is
+   * `simulatedInstrumentTime` (which does not). Switching moves the duration
+   * across rather than leaving it in the field the new type ignores, so a
+   * mis-typed entry stops inflating flight hours the moment it is corrected.
+   */
+  const setEntryType = useCallback((type: EntryType) => {
+    setFormData((prev) => {
+      if (getEntryType(prev) === type) return prev;
+      const patch = entryTypePatch(type);
+      if (type === "simulator") {
+        const duration =
+          prev.simulatedInstrumentTime && prev.simulatedInstrumentTime !== "00:00"
+            ? prev.simulatedInstrumentTime
+            : prev.blockTime || "00:00";
+        return {
+          ...prev,
+          ...patch,
+          simulatedInstrumentTime: duration,
+          blockTime: "00:00",
+          flightTime: "00:00",
+          manualOverrides: {
+            ...(prev.manualOverrides ?? {}),
+            simulatedInstrumentTime: true,
+          },
+        };
+      }
+      const duration =
+        prev.blockTime && prev.blockTime !== "00:00"
+          ? prev.blockTime
+          : prev.simulatedInstrumentTime || "00:00";
+      return {
+        ...prev,
+        ...patch,
+        blockTime: duration,
+        simulatedInstrumentTime: "00:00",
+      };
+    });
+  }, []);
+
   // Clear a field
   const clearField = useCallback(
     (field: keyof FlightLog) => {
@@ -1262,6 +1335,34 @@ export function FlightForm({
             </h2>
           </div>
 
+          {/* Entry type — first row, above the date, because it decides what
+              the rest of the form means. A simulator session is logged here
+              like a flight but must never reach flight-hour totals. */}
+          <SettingsRow label="Type">
+            <div className="flex items-center gap-1">
+              {ENTRY_TYPES.map(({ value, label }) => {
+                const active = getEntryType(formData) === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => setEntryType(value)}
+                    className={cn(
+                      "rounded-full px-3 py-1 text-sm font-medium transition-colors",
+                      active
+                        ? "bg-primary/15 text-primary"
+                        : "text-muted-foreground/60 hover:text-muted-foreground"
+                    )}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </SettingsRow>
+
           <SwipeableRow onClear={() => clearField("date")}>
             <SettingsRow
               label="Date"
@@ -1355,6 +1456,7 @@ export function FlightForm({
               timezoneOffset={depTimezone}
               onTap={() => setActiveTimePicker("scheduledOut")}
               onNow={() => setNowTime("scheduledOut")}
+            clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -1365,6 +1467,7 @@ export function FlightForm({
               timezoneOffset={arrTimezone}
               onTap={() => setActiveTimePicker("scheduledIn")}
               onNow={() => setNowTime("scheduledIn")}
+            clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -1375,6 +1478,7 @@ export function FlightForm({
               timezoneOffset={depTimezone}
               onTap={() => setActiveTimePicker("outTime")}
               onNow={() => setNowTime("outTime")}
+            clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -1385,6 +1489,7 @@ export function FlightForm({
               timezoneOffset={depTimezone}
               onTap={() => setActiveTimePicker("offTime")}
               onNow={() => setNowTime("offTime")}
+            clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -1395,6 +1500,7 @@ export function FlightForm({
               timezoneOffset={arrTimezone}
               onTap={() => setActiveTimePicker("onTime")}
               onNow={() => setNowTime("onTime")}
+            clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -1405,6 +1511,7 @@ export function FlightForm({
               timezoneOffset={arrTimezone}
               onTap={() => setActiveTimePicker("inTime")}
               onNow={() => setNowTime("inTime")}
+            clockSeparator={clockSeparator}
             />
           </SwipeableRow>
         </div>

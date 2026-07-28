@@ -48,3 +48,28 @@ export function parseGeneratedAt(text: string): number | null {
   );
   return Number.isFinite(epoch) ? epoch : null;
 }
+
+/**
+ * UTC calendar date (YYYY-MM-DD) of the report snapshot — the boundary
+ * between flown and planned rows. Falls back to "now" when the footer is
+ * absent.
+ */
+export function reportBoundaryDateIso(generatedAtMs: number | null): string {
+  const d = generatedAtMs != null ? new Date(generatedAtMs) : new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
+
+/**
+ * A dated row is "planned" (not yet flown) when it falls strictly AFTER the
+ * report's generation date: the snapshot cannot carry actual times, block, or
+ * takeoff/landing counts for a flight that hasn't happened. Used to stop the
+ * logbook parser hydrating future roster sectors as if they were flown.
+ */
+export function isPlannedDate(
+  dateIso: string,
+  generatedAtMs: number | null
+): boolean {
+  if (!dateIso) return false;
+  return dateIso > reportBoundaryDateIso(generatedAtMs);
+}

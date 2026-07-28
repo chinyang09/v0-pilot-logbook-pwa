@@ -6,7 +6,9 @@
     "build": "NODE_OPTIONS='--max-old-space-size=8192' next build --webpack",
     "dev": "next dev --webpack",
     "lint": "eslint .",
-    "start": "next start"
+    "start": "next start",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@gutenye/ocr-browser": "^1.4.8",

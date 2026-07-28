@@ -95,6 +95,28 @@ export function calculateDuration(
  * @param hhmm - Time in HH:MM format
  * @param format - Display format: "24h" (2:30), "24h-padded" (02:30), "12h" (2:30 PM)
  */
+/**
+ * Format a CLOCK time (an instant: out/off/on/in, sunrise, a picker value)
+ * for display, honouring the user's separator preference.
+ *
+ * Deliberately separate from `formatHHMMDisplay`, which formats DURATIONS —
+ * those always keep their colon, because "400" cannot be read as four hours.
+ * Anything that shows a point in time should come through here so one setting
+ * governs the whole app.
+ */
+export function formatClockDisplay(
+  hhmm: string | undefined | null,
+  separator: "colon" | "none" = "colon",
+  placeholder = ""
+): string {
+  if (!hhmm || typeof hhmm !== "string") return placeholder
+  const trimmed = hhmm.trim().slice(0, 5)
+  if (!/^\d{1,2}:\d{2}$/.test(trimmed)) return trimmed || placeholder
+  const [h, m] = trimmed.split(":")
+  const hours = h.padStart(2, "0")
+  return separator === "none" ? `${hours}${m}` : `${hours}:${m}`
+}
+
 export function formatHHMMDisplay(
   hhmm: string | undefined | null,
   format: "24h" | "24h-padded" | "12h" = "24h"

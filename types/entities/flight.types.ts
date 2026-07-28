@@ -75,6 +75,13 @@ export interface AdditionalCrew {
 
 export type PilotRole = "PIC" | "SIC" | "PICUS" | "Dual" | "Instructor"
 
+/**
+ * What a logbook record is. Only flight and simulator today; the union exists
+ * so ground duties (standby, leave, training) can be added without another
+ * boolean flag per kind.
+ */
+export type EntryType = "flight" | "simulator"
+
 export type SyncStatus = "synced" | "pending" | "error"
 
 export interface ManualOverrides {
@@ -170,9 +177,55 @@ export interface FlightLog {
   serverSeq?: number
   // Sync engine: authoring device id, used as a deterministic LWW tiebreaker
   deviceId?: string
-  // Import provenance — used to gate older reports from regressing newer data
+  // Import provenance — used to gate older reports from regressing newer data.
+  // `reportGeneratedAt` is the legacy single watermark (newest report of ANY
+  // kind); the two per-source stamps below supersede it because a schedule and
+  // a logbook report are independent streams: uploading a Jul-24 schedule after
+  // a Jul-25 logbook must not look "stale", and vice versa.
   reportGeneratedAt?: number
+  /** "Generated on" of the newest SCHEDULE report applied to this flight. */
+  scheduleReportAt?: number
+  /**
+   * "Generated on" of the newest CREW LOGBOOK report applied to this flight —
+   * i.e. when this flight was last tallied against the company's logbook.
+   * Absent means never tallied.
+   */
+  logbookReportAt?: number
   importSource?: "logbook" | "schedule" | "cross_hydrated" | "manual"
+  /**
+   * When the user last made a call on this flight's day/night takeoff+landing
+   * split, so a re-import doesn't keep raising the same question. Previously
+   * recorded as a marker appended to `remarks`, which polluted a user-owned
+   * field; the legacy marker is still honoured when reading.
+   */
+  toLdgDecidedAt?: number
+  /**
+   * What the user already decided about this flight's fields, so a re-uploaded
+   * report doesn't ask the same question twice — and so a decision can still
+   * be reversed on purpose later. Keyed by field name; see
+   * `lib/utils/roster/import-decisions.ts` for the shape, the two directions
+   * (declined / replaced) and the retention window.
+   */
+  importDecisions?: Record<
+    string,
+    { declined?: string; replaced?: string; at: number }
+  >
+  /**
+   * What this record IS. Kept deliberately open-ended — "standby" and other
+   * non-flying duties are the obvious next entries — but only flight and
+   * simulator exist today.
+   *
+   * Absent on every row written before the field existed, so read it through
+   * `getEntryType()` rather than directly: that falls back to the legacy
+   * `isSimulator` flag. Writers must keep the two in sync (`setEntryType`).
+   */
+  entryType?: EntryType
+  // Simulator sessions are logged as flight entries (no aircraftReg / airports)
+  // so they count toward dashboard simulator-instrument totals. These optional
+  // fields are non-indexed, so they need no Dexie migration.
+  isSimulator?: boolean
+  /** Stable per-date key for deduping sim sessions on re-import (e.g. "EBT1"). */
+  simSessionCode?: string
 }
 
 export type FlightLogCreate = Omit<FlightLog, "id" | "createdAt" | "updatedAt" | "syncStatus">

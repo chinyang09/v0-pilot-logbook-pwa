@@ -20,10 +20,10 @@ import type {
 import type { ParsedSimSession } from "@/lib/utils/parsers/logbook-parser-v2";
 import type { FlightLog, FlightLogCreate } from "@/types/entities/flight.types";
 import type { Personnel } from "@/types/entities/crew.types";
+import type { Aircraft } from "@/types/entities/aircraft.types";
 import type {
   Currency,
   Discrepancy,
-  ScheduleEntryCreate,
 } from "@/types/entities/roster.types";
 import {
   addFlight,
@@ -33,16 +33,43 @@ import {
   getAirportTimeInfo,
   getCurrentUserPersonnel,
   getUserPreferences,
+  getAllAircraft,
+  addAircraft,
+  updateAircraft,
+  getAircraftType,
   userDb,
   DEFAULT_IMPORT_DEFAULTS,
 } from "@/lib/db";
+import {
+  toEngineType,
+  toDashboardCategory,
+} from "@/lib/utils/parsers/shared/aircraft-classify";
+import {
+  recordReportImport,
+  stampsFor,
+  type ReportSource,
+} from "@/lib/utils/roster/report-tracking";
 import type { ImportDefaults } from "@/types/db/stores.types";
-import { addScheduleEntry } from "@/lib/db/stores/user/schedule.store";
 import { recalculateFlightFields } from "@/lib/utils/flight-calculations";
+import { normalizeAircraftType } from "@/lib/utils/parsers/shared/aircraft-type-map";
+import { hhmmToMinutes } from "@/lib/utils/time";
 import {
   TOLDG_DECISION_MARKER,
+  deriveSectorCrew,
   type ParsedSector,
+  type FieldDiff,
 } from "@/lib/utils/roster/reconciler";
+import {
+  clearDecisions,
+  mergeDecisions,
+  type ImportDecisions,
+} from "@/lib/utils/roster/import-decisions";
+import { TRACKED_FIELDS } from "@/lib/utils/roster/classification";
+import { entryTypePatch, isSimulatorEntry } from "@/lib/utils/entry-type";
+import {
+  isSameSimSession,
+  looksLikeSimulator,
+} from "@/lib/utils/roster/sim-sessions";
 
 const TOLDG_FIELDS = new Set([
   "dayTakeoffs",
@@ -51,13 +78,10 @@ const TOLDG_FIELDS = new Set([
   "nightLandings",
 ]);
 
-function appendToLdgMarker(remarks: string | undefined): string {
-  const base = remarks ?? "";
-  if (base.includes(TOLDG_DECISION_MARKER)) return base;
-  const today = new Date().toISOString().slice(0, 10);
-  const tag = `${TOLDG_DECISION_MARKER} ${today}`;
-  return base ? `${base}\n${tag}` : tag;
-}
+// The TO/LDG decision is now recorded in `FlightLog.toLdgDecidedAt` rather than
+// appended to `remarks` — remarks belong to the user. TOLDG_DECISION_MARKER is
+// still imported so the reconciler can honour it on legacy rows.
+void TOLDG_DECISION_MARKER;
 
 // ============================================================
 // Result type
@@ -71,8 +95,12 @@ export interface ExecutionResult {
   ignored: number;
   staleSkipped: number;
   simSessionsCreated: number;
+  /** Duplicate sim rows an earlier build created, cleaned up on this import. */
+  simDuplicatesRemoved: number;
   personnelCreated: number;
   personnelUpdated: number;
+  aircraftCreated: number;
+  aircraftUpdated: number;
   currenciesSaved: number;
   discrepancies: Discrepancy[];
   errors: Array<{ operation: string; message: string }>;
@@ -83,6 +111,14 @@ export interface ExecuteOptions {
   simSessions?: ParsedSimSession[];
   /** Source of this import — written into every created/updated FlightLog. */
   importSource?: FlightLog["importSource"];
+  /**
+   * Per-stream "Generated on" stamps. Written onto every touched flight as
+   * `scheduleReportAt` / `logbookReportAt` so we can tell which report version
+   * a flight reflects — and, for the logbook stamp, whether it has ever been
+   * tallied against the company logbook at all.
+   */
+  scheduleGeneratedAt?: number | null;
+  logbookGeneratedAt?: number | null;
 }
 
 // ============================================================
@@ -105,35 +141,13 @@ async function hydrateFlightFromSector(
   const arrOffset = arrAirport ? getAirportTimeInfo(arrAirport.tz).offset : 0;
 
   // Crew: schedule provides full crew with crewIds; logbook-only path uses
-  // the resolved truncation.
-  const captain = sector.crew?.find((c) => c.role === "CPT" || c.role === "PIC");
-  const fo = sector.crew?.find((c) => c.role === "FO");
-  const isSelfCPT =
-    captain && currentUser.crewId && captain.crewId === currentUser.crewId;
-  const isSelfFO = fo && currentUser.crewId && fo.crewId === currentUser.crewId;
-
-  let picId = captain?.personnelId || sector.picPersonnelId || "";
-  let picName = captain?.name || sector.picResolvedName || "";
-  let sicId = fo?.personnelId || "";
-  let sicName = fo?.name || "";
+  // the resolved truncation. `deriveSectorCrew` is the shared resolver the
+  // reconciler's update-diff also uses, so create and re-import agree.
+  const { picId, picName, sicId, sicName, isSelfCPT } = deriveSectorCrew(
+    sector,
+    currentUser
+  );
   const isUserPic = isSelfCPT || sector.isUserPic === true;
-
-  if (isSelfCPT) {
-    picId = currentUser.id;
-    picName = "Self";
-  } else if (sector.isUserPic && !captain) {
-    // Logbook-only sector where we know the user is PIC.
-    picId = currentUser.id;
-    picName = "Self";
-  }
-  if (isSelfFO) {
-    sicId = currentUser.id;
-    sicName = "Self";
-  } else if (sector.isUserPic === false && !fo) {
-    // Logbook says someone else was PIC — current user is SIC.
-    sicId = currentUser.id;
-    sicName = "Self";
-  }
 
   // PF inference: prefer the explicit logbook signal (TO/LDG-derived);
   // schedule-only imports default to true (no actuals to infer from).
@@ -154,11 +168,12 @@ async function hydrateFlightFromSector(
     pilotRole = currentUser.roles?.includes("PIC") ? "PIC" : "SIC";
   }
 
-  const remarks = sector.remarks
-    ? sector.remarks
-    : sector.flightNumber
-      ? `Imported from roster: ${sector.flightNumber}`
-      : "Imported from logbook";
+  // Remarks belong to the user. We only carry through what the source report
+  // actually said (the logbook's remarks column); we no longer synthesise
+  // "Imported from roster: TRxxx", which was redundant with importSource and —
+  // because any non-empty remarks count as a user edit — made every re-import
+  // of a previously-imported flight look like an edited conflict.
+  const remarks = sector.remarks ?? "";
 
   const create: FlightLogCreate = {
     date: sector.date,
@@ -219,6 +234,113 @@ async function hydrateFlightFromSector(
   return create;
 }
 
+/**
+ * Record what the user decided about a set of field changes.
+ *
+ * `declined` are values they turned down — the reconciler withholds a future
+ * diff proposing that same value, so re-uploading the same report stops
+ * re-asking. `applied` are changes they took: the value each one overwrote is
+ * kept so it can be restored later if they change their mind.
+ *
+ * Only changes that overwrite something the user actually had are worth
+ * remembering — filling a blank field leaves nothing to restore.
+ */
+/**
+ * Turn user-vs-company differences on the TRACKED fields into discrepancy
+ * rows for the licence record.
+ *
+ * Unlike the times (which the company simply owns now), PF/PM and the day/
+ * night takeoff-landing split are the pilot's own account of the sector. A
+ * difference there is worth keeping visible whichever way it was decided —
+ * that is what a licence submission gets checked against — so it is written
+ * as a `Discrepancy` rather than resolved and forgotten.
+ *
+ * The id is DETERMINISTIC (`mismatch:<flight>:<field>`) so re-importing the
+ * same report refreshes the row in place instead of stacking duplicates.
+ */
+function trackedMismatches(
+  flight: FlightLog,
+  changes: readonly FieldDiff[],
+  accepted: boolean
+): Discrepancy[] {
+  const now = Date.now();
+  const out: Discrepancy[] = [];
+
+  for (const change of changes) {
+    if (!TRACKED_FIELDS.has(change.field)) continue;
+    // For day/night the applied value is OUR sun calculation; `companyValue`
+    // carries what the company logged. Everywhere else `to` is the company's.
+    const companyValue = change.companyValue ?? change.to;
+    const pilotValue = change.from;
+    if (companyValue === pilotValue) continue;
+
+    const appliedValue = accepted ? change.to : pilotValue;
+    out.push({
+      id: `mismatch:${flight.id}:${change.field}`,
+      type: TOLDG_FIELDS.has(change.field)
+        ? "day_night_mismatch"
+        : "pilot_flying_mismatch",
+      severity: "info",
+      flightLogId: flight.id,
+      field: change.field,
+      scheduleValue: companyValue,
+      logbookValue: pilotValue,
+      holding: appliedValue === companyValue ? "schedule" : "logbook",
+      resolved: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return out;
+}
+
+function recordDecisions(
+  flight: FlightLog,
+  {
+    declined = [],
+    applied = [],
+  }: { declined?: readonly FieldDiff[]; applied?: readonly FieldDiff[] }
+): ImportDecisions | null {
+  const updates = [
+    ...declined.map((d) => ({ field: d.field, declined: d.to })),
+    // Only the TRACKED fields keep what they overwrote. The company's OOOI
+    // times are the record now, so there is nothing to preserve or restore
+    // there — and filling a blank field leaves nothing to restore either.
+    ...applied
+      .filter(
+        (d) => TRACKED_FIELDS.has(d.field) && d.from !== "" && d.from !== d.to
+      )
+      .map((d) => ({ field: d.field, replaced: d.from })),
+  ];
+  if (updates.length === 0) return null;
+  return mergeDecisions(flight, updates);
+}
+
+const NUMERIC_FIELDS = new Set([
+  "dayTakeoffs",
+  "nightTakeoffs",
+  "dayLandings",
+  "nightLandings",
+  "departureTimezone",
+  "arrivalTimezone",
+]);
+
+/**
+ * Write one field onto a patch, coercing back from the string form a
+ * `FieldDiff` carries. Shared by the normal update path and the revert path.
+ */
+function assignFieldValue(
+  patch: Partial<FlightLog>,
+  field: string,
+  value: string
+): void {
+  const target = patch as Record<string, unknown>;
+  if (NUMERIC_FIELDS.has(field)) target[field] = Number(value) || 0;
+  else if (field === "pilotFlying") target[field] = value === "true";
+  else target[field] = value;
+}
+
 function buildUpdatePatch(op: AcceptableOperation): Partial<FlightLog> {
   if (
     op.kind !== "update_conflict" &&
@@ -230,24 +352,7 @@ function buildUpdatePatch(op: AcceptableOperation): Partial<FlightLog> {
   }
   const patch: Partial<FlightLog> = {};
   for (const change of op.changes) {
-    const value: unknown = change.to;
-    // Numeric fields stored as numbers — coerce strings back.
-    if (
-      change.field === "dayTakeoffs" ||
-      change.field === "nightTakeoffs" ||
-      change.field === "dayLandings" ||
-      change.field === "nightLandings" ||
-      change.field === "departureTimezone" ||
-      change.field === "arrivalTimezone"
-    ) {
-      (patch as Record<string, unknown>)[change.field] =
-        Number(value) || 0;
-    } else if (change.field === "pilotFlying") {
-      // FieldDiff carries strings; coerce back to boolean for storage.
-      (patch as Record<string, unknown>)[change.field] = value === "true";
-    } else {
-      (patch as Record<string, unknown>)[change.field] = value;
-    }
+    assignFieldValue(patch, change.field, change.to);
   }
   return patch;
 }
@@ -271,6 +376,251 @@ async function postWriteRecalculate(
   }
 }
 
+/**
+ * Ensure a user `Aircraft` record exists for every registration flown in
+ * this import, deriving engine group + category from the ICAO type so the
+ * dashboard's by-engine / by-category rings populate. New records are
+ * created; existing records are only BACKFILLED where a field is blank —
+ * user-entered values are never clobbered.
+ */
+async function ensureAircraftForFlights(
+  pairs: Array<{ reg: string; type: string }>,
+  result: ExecutionResult
+): Promise<void> {
+  const wanted = new Map<string, string>(); // REG → type designator
+  for (const { reg, type } of pairs) {
+    const R = (reg || "").toUpperCase().trim();
+    if (!R) continue;
+    if (!wanted.has(R) || (!wanted.get(R) && type)) wanted.set(R, type || "");
+  }
+  if (wanted.size === 0) return;
+
+  let existing: Aircraft[] = [];
+  try {
+    existing = await getAllAircraft();
+  } catch {
+    return;
+  }
+  const byReg = new Map(existing.map((a) => [a.registration.toUpperCase(), a]));
+
+  for (const [reg, type] of wanted) {
+    try {
+      const doc = type ? await getAircraftType(type).catch(() => null) : null;
+      const engineType = doc
+        ? toEngineType(doc.engineType, doc.engineCount)
+        : undefined;
+      const category = doc ? toDashboardCategory(doc.category) : undefined;
+      const model = doc ? `${doc.manufacturer} ${doc.designator}`.trim() : "";
+
+      const ex = byReg.get(reg);
+      if (!ex) {
+        await addAircraft({
+          registration: reg,
+          type: type || "",
+          typeDesignator: type || "",
+          model,
+          // Airline schedule imports are jets by domain; DOC 8643 lookup
+          // refines this when the designator resolves.
+          category: category || "Airplane",
+          engineType: engineType || "JET",
+          isComplex: false,
+          isHighPerformance: false,
+        });
+        result.aircraftCreated++;
+      } else {
+        const patch: Partial<Aircraft> = {};
+        if (!ex.typeDesignator && type) patch.typeDesignator = type;
+        if (!ex.type && type) patch.type = type;
+        if (!ex.category && category) patch.category = category;
+        if (!ex.model && model) patch.model = model;
+        if (Object.keys(patch).length > 0) {
+          await updateAircraft(ex.id, patch);
+          result.aircraftUpdated++;
+        }
+      }
+    } catch (error) {
+      result.errors.push({
+        operation: `ensure aircraft ${reg}`,
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+}
+
+/**
+ * Build a FlightLog for a simulator session. Sims are logged as flight
+ * entries (no aircraftReg / airports) so they surface in the logbook and
+ * count toward the dashboard's simulator-instrument totals. The session time
+ * populates simulatedInstrumentTime; block/flight time stay zero so a sim
+ * never inflates flight-hour totals.
+ */
+
+/**
+ * Write the report's simulator sessions, skipping any already logged and
+ * clearing duplicates a previous build left behind.
+ */
+async function applySimSessions(
+  simSessions: ParsedSimSession[],
+  ctx: {
+    currentUser: Personnel;
+    reportGeneratedAt: number | null | undefined;
+    importSource: FlightLog["importSource"];
+    reportStamps: Partial<FlightLog>;
+    result: ExecutionResult;
+  }
+): Promise<void> {
+  const { currentUser, reportGeneratedAt, importSource, reportStamps, result } =
+    ctx;
+
+  let existingSims: FlightLog[] = [];
+  try {
+    const allFlights = await userDb.flights.toArray();
+    existingSims = allFlights.filter(looksLikeSimulator);
+  } catch {
+    // Can't read what's there — fall through and create (rare).
+  }
+
+  for (const sim of simSessions) {
+    try {
+      const code = (sim.sessionCode || sim.component || "SIM").toUpperCase();
+      const incoming = { date: sim.date, code, outUtc: sim.outUtc };
+      const already = existingSims.filter((f) =>
+        isSameSimSession(f, incoming)
+      );
+
+      if (already.length > 0) {
+        // Collapse anything a previous build duplicated: keep the earliest
+        // (the one the user has most likely edited or signed) and drop the
+        // rest, so the list stops growing an entry per upload.
+        const [keep, ...extras] = [...already].sort(
+          (a, b) => a.createdAt - b.createdAt
+        );
+        for (const extra of extras) {
+          await deleteFlight(extra.id);
+          existingSims = existingSims.filter((f) => f.id !== extra.id);
+          result.simDuplicatesRemoved++;
+        }
+        // Backfill the identity fields on the survivor so the next import
+        // recognises it without needing the structural fallback.
+        if (!isSimulatorEntry(keep) || !keep.simSessionCode) {
+          await updateFlight(keep.id, {
+            ...entryTypePatch("simulator"),
+            simSessionCode: keep.simSessionCode || code,
+          });
+        }
+        continue;
+      }
+
+      const payload = buildSimFlight(
+        sim,
+        currentUser,
+        reportGeneratedAt,
+        importSource
+      );
+      const created = await addFlight({ ...payload, ...reportStamps });
+      existingSims.push(created);
+      result.simSessionsCreated++;
+    } catch (error) {
+      result.errors.push({
+        operation: `sim session ${sim.date}`,
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+}
+
+function buildSimFlight(
+  sim: ParsedSimSession,
+  currentUser: Personnel,
+  reportGeneratedAt: number | null | undefined,
+  importSource: FlightLog["importSource"]
+): FlightLogCreate {
+  const duration =
+    sim.duration && sim.duration !== "00:00"
+      ? sim.duration
+      : sim.outUtc && sim.inUtc
+        ? (() => {
+            let d = hhmmToMinutes(sim.inUtc) - hhmmToMinutes(sim.outUtc);
+            if (d < 0) d += 1440;
+            return `${String(Math.floor(d / 60)).padStart(2, "0")}:${String(
+              d % 60
+            ).padStart(2, "0")}`;
+          })()
+        : "00:00";
+
+  const deviceType = normalizeAircraftType(sim.deviceType || "SIM");
+  const sessionCode = sim.sessionCode || sim.component || "SIM";
+
+  const remarkParts: string[] = [];
+  remarkParts.push(`Simulator: ${sim.sessionCode || sim.component || "session"}`);
+  if (sim.courseName) remarkParts.push(sim.courseName);
+  if (sim.component && sim.component !== sim.sessionCode)
+    remarkParts.push(sim.component);
+  if (sim.facility) remarkParts.push(`@ ${sim.facility}`);
+  if (sim.instructorName) remarkParts.push(`Instructor: ${sim.instructorName}`);
+  if (sim.remarks && sim.remarks !== sim.sessionCode)
+    remarkParts.push(sim.remarks);
+  const remarks = remarkParts.filter(Boolean).join(" — ");
+
+  return {
+    date: sim.date,
+    flightNumber: "",
+    aircraftReg: "",
+    aircraftType: deviceType,
+    departureIcao: "",
+    departureIata: "",
+    arrivalIcao: "",
+    arrivalIata: "",
+    departureTimezone: 0,
+    arrivalTimezone: 0,
+    scheduledOut: "",
+    scheduledIn: "",
+    outTime: sim.outUtc || "",
+    offTime: "",
+    onTime: "",
+    inTime: sim.inUtc || "",
+    blockTime: "00:00",
+    flightTime: "00:00",
+    nightTime: "00:00",
+    dayTime: "00:00",
+    picId: "",
+    picName: sim.instructorName || "",
+    sicId: currentUser.id,
+    sicName: "Self",
+    additionalCrew: [],
+    pilotFlying: false,
+    pilotRole: "Dual",
+    picTime: "00:00",
+    sicTime: "00:00",
+    picusTime: "00:00",
+    dualTime: "00:00",
+    instructorTime: "00:00",
+    dayTakeoffs: 0,
+    dayLandings: 0,
+    nightTakeoffs: 0,
+    nightLandings: 0,
+    autolands: 0,
+    remarks,
+    endorsements: "",
+    // Protect the sim-specific fields from recalculation (empty airports).
+    manualOverrides: {
+      simulatedInstrumentTime: true,
+      nightTime: true,
+    },
+    ifrTime: "00:00",
+    actualInstrumentTime: "00:00",
+    simulatedInstrumentTime: duration,
+    crossCountryTime: "00:00",
+    approaches: [],
+    holds: 0,
+    ipcIcc: false,
+    reportGeneratedAt: reportGeneratedAt ?? undefined,
+    importSource,
+    ...entryTypePatch("simulator"),
+    simSessionCode: sessionCode.toUpperCase(),
+  };
+}
+
 // ============================================================
 // Main executor
 // ============================================================
@@ -287,8 +637,11 @@ export async function executeRosterImport(
     ignored: 0,
     staleSkipped: 0,
     simSessionsCreated: 0,
+    simDuplicatesRemoved: 0,
     personnelCreated: 0,
     personnelUpdated: 0,
+    aircraftCreated: 0,
+    aircraftUpdated: 0,
     currenciesSaved: 0,
     discrepancies: [],
     errors: [],
@@ -306,6 +659,27 @@ export async function executeRosterImport(
   const reportGeneratedAt = plan.generatedAt ?? null;
   const importSource: FlightLog["importSource"] =
     options.importSource ?? "schedule";
+
+  // Per-stream stamps written onto every touched flight. Defaulted from the
+  // plan so a schedule-only / logbook-only import stamps the right stream even
+  // when the caller doesn't pass them explicitly.
+  const trackingSource: ReportSource =
+    importSource === "logbook"
+      ? "logbook"
+      : importSource === "cross_hydrated"
+        ? "cross_hydrated"
+        : "schedule";
+  const scheduleGeneratedAt =
+    options.scheduleGeneratedAt ??
+    (trackingSource === "schedule" ? reportGeneratedAt : null);
+  const logbookGeneratedAt =
+    options.logbookGeneratedAt ??
+    (trackingSource === "logbook" ? reportGeneratedAt : null);
+  const reportStamps = stampsFor(
+    trackingSource,
+    scheduleGeneratedAt,
+    logbookGeneratedAt
+  );
 
   // Fetch user import preferences once — reused across every create op.
   const storedPrefs = await getUserPreferences().catch(() => null);
@@ -358,42 +732,37 @@ export async function executeRosterImport(
     const hasToLdgDiff = opChanges.some((c) => TOLDG_FIELDS.has(c.field));
 
     if (!op.accepted) {
-      // Record discrepancies for declined updates so the audit trail captures
-      // what the user said no to.
-      if (
-        op.kind === "update_conflict" ||
-        op.kind === "edited_conflict" ||
-        op.kind === "update_consult"
-      ) {
-        result.discrepancies.push({
-          id: crypto.randomUUID(),
-          type: "time_mismatch",
-          severity: op.kind === "edited_conflict" ? "warning" : "info",
-          flightLogId: op.flight.id,
-          field: "times",
-          scheduleValue: op.changes.map((c) => `${c.field}=${c.to}`).join(", "),
-          logbookValue: op.changes.map((c) => `${c.field}=${c.from}`).join(", "),
-          message: `User declined roster update for flight ${op.flight.flightNumber}`,
-          resolved: false,
-          createdAt: Date.now(),
-        });
+      // Keep the pilot-vs-company differences on the record. A declined row
+      // keeps the pilot's values, which is exactly the case worth being able
+      // to show later.
+      if ("flight" in op) {
+        result.discrepancies.push(
+          ...trackedMismatches(op.flight, opChanges, false)
+        );
       }
 
-      // Even when rejected, persist the TO/LDG decision so subsequent
-      // imports don't keep raising the same question.
-      if (hasToLdgDiff && "flight" in op) {
+      // Even when rejected, persist the decision so subsequent imports don't
+      // keep raising the same question: the TO/LDG call as a timestamp, and
+      // every turned-down field as `field -> rejected value`. Both are stored
+      // as fields — remarks stay the user's.
+      if ("flight" in op && (hasToLdgDiff || opChanges.length > 0)) {
         try {
           const fresh = await userDb.flights.get(op.flight.id);
           if (fresh) {
-            const updatedRemarks = appendToLdgMarker(fresh.remarks);
-            if (updatedRemarks !== fresh.remarks) {
-              await updateFlight(op.flight.id, { remarks: updatedRemarks });
+            const patch: Partial<FlightLog> = {};
+            if (hasToLdgDiff && fresh.toLdgDecidedAt === undefined) {
+              patch.toLdgDecidedAt = Date.now();
+            }
+            const decisions = recordDecisions(fresh, { declined: opChanges });
+            if (decisions) patch.importDecisions = decisions;
+            if (Object.keys(patch).length > 0) {
+              await updateFlight(op.flight.id, patch);
               touchedFlightIds.push(op.flight.id);
             }
           }
         } catch (error) {
           result.errors.push({
-            operation: `mark TO/LDG decision on ${op.flight.flightNumber}`,
+            operation: `record declined changes on ${op.flight.flightNumber}`,
             message:
               error instanceof Error ? error.message : "Unknown error",
           });
@@ -413,7 +782,7 @@ export async function executeRosterImport(
             importSource,
             importDefaults
           );
-          const created = await addFlight(payload);
+          const created = await addFlight({ ...payload, ...reportStamps });
           touchedFlightIds.push(created.id);
           result.created++;
           break;
@@ -425,14 +794,27 @@ export async function executeRosterImport(
           const patch = buildUpdatePatch(op);
           if (reportGeneratedAt) patch.reportGeneratedAt = reportGeneratedAt;
           patch.importSource = importSource;
-          // Persist the user's TO/LDG decision in remarks so subsequent
-          // imports skip the re-flag (see reconciler's
-          // hasToLdgDecisionMarker gate).
-          if (hasToLdgDiff) {
-            const baseRemarks =
-              patch.remarks !== undefined ? patch.remarks : op.flight.remarks;
-            patch.remarks = appendToLdgMarker(baseRemarks);
+          Object.assign(patch, reportStamps);
+          // Record the user's TO/LDG decision so subsequent imports skip the
+          // re-flag (see the reconciler's hasToLdgDecisionMarker gate).
+          if (hasToLdgDiff && op.flight.toLdgDecidedAt === undefined) {
+            patch.toLdgDecidedAt = Date.now();
           }
+          // Both halves of the decision are remembered: the parts the user
+          // turned down (e.g. keeping their recorded PF/PM) so they aren't
+          // re-asked, and the values the accepted changes overwrote so they
+          // can be restored later.
+          const decisions = recordDecisions(op.flight, {
+            declined: op.declinedChanges ?? [],
+            applied: op.changes,
+          });
+          if (decisions) patch.importDecisions = decisions;
+          // Same record for an accepted row — the difference happened either
+          // way, and the row notes which side the flight now holds.
+          result.discrepancies.push(
+            ...trackedMismatches(op.flight, op.changes, true),
+            ...trackedMismatches(op.flight, op.declinedChanges ?? [], false)
+          );
           const updated = await updateFlight(op.flight.id, patch);
           if (!updated) {
             // Row vanished between plan build and execute — surface so the
@@ -450,6 +832,34 @@ export async function executeRosterImport(
               (k) => k !== "reportGeneratedAt" && k !== "importSource"
             )
           );
+          touchedFlightIds.push(op.flight.id);
+          result.updated++;
+          break;
+        }
+        case "skip_decided": {
+          // The user deliberately reversed an earlier decision. Apply the
+          // reverted values and drop the memory for those fields, so the
+          // flight goes back to being driven by the report (or by their own
+          // restored entry) with a clean slate.
+          const patch: Partial<FlightLog> = {};
+          for (const revert of op.reverts) {
+            assignFieldValue(patch, revert.field, revert.to);
+          }
+          const cleared = clearDecisions(
+            op.flight,
+            op.reverts.map((r) => r.field)
+          );
+          if (cleared) patch.importDecisions = cleared;
+          Object.assign(patch, reportStamps);
+          const reverted = await updateFlight(op.flight.id, patch);
+          if (!reverted) {
+            result.errors.push({
+              operation: `revert ${op.flight.flightNumber || op.flight.id}`,
+              message:
+                "Flight no longer exists in IndexedDB — revert was not applied.",
+            });
+            break;
+          }
           touchedFlightIds.push(op.flight.id);
           result.updated++;
           break;
@@ -493,28 +903,16 @@ export async function executeRosterImport(
     }
   }
 
-  // ----- 3. Sim sessions (logbook only) -----
-  for (const sim of options.simSessions ?? []) {
-    try {
-      const entry: ScheduleEntryCreate = {
-        date: sim.date,
-        timeReference: "UTC",
-        dutyType: "training",
-        dutyCode: sim.sessionCode || `SIM-${sim.deviceType}`,
-        dutyDescription: `Simulator session (${sim.deviceType})`,
-        sectors: [],
-        crew: [],
-        importedAt: Date.now(),
-        sourceFile: "logbook",
-      };
-      await addScheduleEntry(entry);
-      result.simSessionsCreated++;
-    } catch (error) {
-      result.errors.push({
-        operation: `sim session ${sim.date}`,
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
+  // ----- 3. Sim sessions → logbook flight entries (deduped on re-import) ----
+  const simSessions = options.simSessions ?? [];
+  if (simSessions.length > 0) {
+    await applySimSessions(simSessions, {
+      currentUser,
+      reportGeneratedAt,
+      importSource,
+      reportStamps,
+      result,
+    });
   }
 
   // ----- 4. Currencies (always applied) -----
@@ -558,13 +956,43 @@ export async function executeRosterImport(
     }
   }
 
-  // ----- 6. Recompute derived fields on every touched flight -----
+  // ----- 6. Recompute derived fields on every touched flight, and gather
+  //          (reg, type) pairs so we can populate the user Aircraft store. --
+  const aircraftPairs: Array<{ reg: string; type: string }> = [];
   for (const id of touchedFlightIds) {
     try {
+      const flight = await userDb.flights.get(id);
+      if (flight?.isSimulator) continue; // sim fields are set explicitly
+      if (flight?.aircraftReg) {
+        aircraftPairs.push({
+          reg: flight.aircraftReg,
+          type: flight.aircraftType || "",
+        });
+      }
       await postWriteRecalculate(id);
     } catch {
       // Recompute failures aren't fatal — leave the flight as-is.
     }
+  }
+
+  // ----- 7. Correlate flights with aircraft records (engine/category) so
+  //          the dashboard reflects 2-engine / jet totals correctly. --------
+  try {
+    await ensureAircraftForFlights(aircraftPairs, result);
+  } catch {
+    // Non-fatal — flights are already written.
+  }
+
+  // ----- 8. Advance the device-level report watermarks so a later upload of
+  //          an OLDER file can be recognised as such. Never moves backwards. --
+  try {
+    await recordReportImport(trackingSource, reportGeneratedAt);
+    if (trackingSource === "cross_hydrated") {
+      await recordReportImport("schedule", scheduleGeneratedAt);
+      await recordReportImport("logbook", logbookGeneratedAt);
+    }
+  } catch {
+    // Watermarks are advisory — never fail an import over them.
   }
 
   return result;

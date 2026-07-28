@@ -30,9 +30,15 @@ import type { FlightLog } from "@/types/entities/flight.types";
 import {
   userDb,
   getAirportByIata,
+  getAirportTimeInfo,
   getAllPersonnel,
   getCurrentUserPersonnel,
+  getUserPreferences,
+  DEFAULT_IMPORT_DEFAULTS,
 } from "@/lib/db";
+import type { ImportDefaults } from "@/types/db/stores.types";
+import type { ParsedSimSession } from "./logbook-parser-v2";
+import { parseTrainingDetails } from "./shared/training-details";
 import {
   normalizeTimeToUTC,
   parseTimeToken,
@@ -41,11 +47,16 @@ import {
   reconcileRoster,
   type ParsedSector,
   type ReconcilerOperation,
+  type FieldDiff,
 } from "@/lib/utils/roster/reconciler";
 import { parseDDMMYYYY } from "./shared/csv-split";
 import type { NormalizedDocument, NormalizedRow } from "./types";
 import { normalize } from "./shared/name-normalize";
 import { parseGeneratedAt } from "./shared/generated-at";
+import {
+  applyDefaultAcceptance,
+  summarizeOperations,
+} from "@/lib/utils/roster/plan-summary";
 import { normalizeAircraftType } from "./shared/aircraft-type-map";
 import { enrichAirportBatch } from "./shared/airport-enricher";
 
@@ -71,6 +82,12 @@ export interface PlannedImport {
   };
   /** Operations from the reconciler — user opts in per row. */
   operations: AcceptableOperation[];
+  /**
+   * Simulator / training sessions (EBT etc.) parsed from the schedule. The
+   * executor logs these as FlightLog entries so they count toward the
+   * dashboard's simulator totals. Applied outside the flight review modal.
+   */
+  simSessions: ParsedSimSession[];
   /** Currency updates — always executed, not user-reviewed. */
   currencies: Omit<Currency, "id" | "createdAt" | "syncStatus">[];
   /** New pilot crew discovered — always executed. */
@@ -88,8 +105,17 @@ export interface PlannedImport {
   };
 }
 
-/** A reconciler op plus an acceptance flag. Defaults vary by kind. */
-export type AcceptableOperation = ReconcilerOperation & { accepted: boolean };
+/**
+ * A reconciler op plus an acceptance flag. Defaults vary by kind.
+ *
+ * `declinedChanges` carries field changes the user explicitly turned down on
+ * an otherwise-accepted row (e.g. keeping their recorded pilot-flying value),
+ * so the executor can remember the decision and not re-raise it next time.
+ */
+export type AcceptableOperation = ReconcilerOperation & {
+  accepted: boolean;
+  declinedChanges?: FieldDiff[];
+};
 
 export interface ParseOptions {
   onProgress?: (percent: number, stage: string, detail?: string) => void;
@@ -538,25 +564,138 @@ async function normalizeSector(
 // Crew parsing (pilots only)
 // ============================================================
 
-function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
+/**
+ * A line that STARTS a crew member: "CPT - PIC - 2644 - Prorok Andriy",
+ * "FO - 9766 - Lim Chin Yang", "CC - 9966 - Camelia Shome Binte". The role
+ * token is 1-4 uppercase letters; an optional sub-role ("PIC") sits between
+ * the role and the crew id.
+ */
+const CREW_MEMBER_START_RE =
+  /^([A-Z]{1,4})\s-\s(?:[A-Z]{1,5}\s-\s)?(\d+)\s-\s(.+)$/;
+
+/**
+ * Parse the multi-line Crew column into pilot crew members (CPT + FO only).
+ *
+ * The schedule PDF wraps long names onto a second line, e.g.
+ *
+ *   CPT - PIC - 6409 - Siah Yang Tek,
+ *   Timothy
+ *   FO - 9766 - Lim Chin Yang
+ *
+ * A continuation line ("Timothy") has no "ROLE - id - name" shape, so it is
+ * appended to the crew member the previous line started. Without this the
+ * captain's full name is truncated to "Siah Yang Tek," — the exact
+ * lost-detail the schedule report is supposed to supply (owner: "very
+ * important"). Continuation tracking spans NON-pilot rows too (CC/CL wrap as
+ * well) so a wrapped cabin-crew name never bleeds onto the previous pilot.
+ */
+export function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
   const crew: ScheduledCrewMember[] = [];
-  const lines = crewCell.split(/\r?\n/).filter(Boolean);
+  const lines = crewCell.split(/\r?\n/);
 
-  for (const line of lines) {
-    const match = line.match(
-      /^([A-Z\s]+?)\s-\s(?:[A-Z\s]+?\s-\s)?(\d+)\s-\s(.+)$/
-    );
-    if (!match) continue;
+  let pending: { role: string; crewId: string; nameParts: string[] } | null =
+    null;
 
-    const rolePart = match[1].trim().toUpperCase();
-    const crewId = match[2];
-    const name = match[3].trim();
+  const flush = () => {
+    if (!pending) return;
+    const roleKey = pending.role.toUpperCase();
+    if (CREW_ROLE_MAP[roleKey]) {
+      const name = pending.nameParts.join(" ").replace(/\s+/g, " ").trim();
+      crew.push({ role: CREW_ROLE_MAP[roleKey], crewId: pending.crewId, name });
+    }
+    pending = null;
+  };
 
-    if (CREW_ROLE_MAP[rolePart]) {
-      crew.push({ role: CREW_ROLE_MAP[rolePart], crewId, name });
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = line.match(CREW_MEMBER_START_RE);
+    if (match) {
+      flush();
+      pending = {
+        role: match[1].trim(),
+        crewId: match[2],
+        nameParts: [match[3].trim()],
+      };
+    } else if (pending) {
+      // Wrapped continuation of the previous member's name.
+      pending.nameParts.push(line);
     }
   }
+  flush();
+
   return crew;
+}
+
+// ============================================================
+// Simulator / training duty detection
+// ============================================================
+
+interface RawSimDuty {
+  date: string; // YYYY-MM-DD
+  dutyCode: string; // "EBT1"
+  description: string; // "EBT Day 1"
+  startLocal?: string; // HH:MM (report time reference)
+  endLocal?: string; // HH:MM
+  sourceLine: number;
+}
+
+/**
+ * A non-flight duty row is a simulator / training session when its code or
+ * description matches a known sim/check pattern. EBT (Evidence-Based
+ * Training), OPC/LPC (Operator/Licence Proficiency Check), LOFT, LOE and
+ * bare "SIM" all run in the simulator. Standby / leave / off codes (SBY*,
+ * LOFF, PSL, WSL, BKUP) are deliberately excluded.
+ */
+export function isSimulatorDuty(code: string, description: string): boolean {
+  const c = (code || "").toUpperCase().trim();
+  const d = (description || "").toLowerCase();
+  if (/^(EBT|OPC|LPC|LOFT|LOE|LST|SIM|SIC?U|PC|LC)\d*$/.test(c)) return true;
+  if (/^EBT/.test(c)) return true;
+  if (
+    d.includes("ebt") ||
+    d.includes("simulator") ||
+    d.includes("proficiency") ||
+    d.includes(" sim ") ||
+    d.includes("loft")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Try to read a simulator/training session out of a NON-flight schedule row.
+ * Returns null for standby / leave / off rows.
+ */
+function tryExtractSimDuty(
+  cols: string[],
+  header: ParsedHeader,
+  lineNumber: number
+): RawSimDuty | null {
+  const date = parseDDMMYYYY(cols[header.columnIndices.date] || "");
+  if (!date) return null;
+
+  const dutyCell = (cols[header.columnIndices.duties] || "").trim();
+  const detailCell = (cols[header.columnIndices.details] || "").trim();
+  if (!dutyCell) return null;
+
+  const dutyCode = dutyCell.split(/[\s\n]+/)[0];
+  if (!isSimulatorDuty(dutyCode, detailCell)) return null;
+
+  // The duty window ("06:15 - 10:15") can land in the report / actual columns
+  // depending on the export — scan the whole row for the first HH:MM range.
+  const joined = cols.join(" ");
+  const range = joined.match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
+
+  return {
+    date,
+    dutyCode,
+    description: detailCell,
+    startLocal: range?.[1],
+    endLocal: range?.[2],
+    sourceLine: lineNumber,
+  };
 }
 
 // ============================================================
@@ -616,6 +755,7 @@ export async function parseScheduleCSV(
     generatedAt: null,
     crewMember: { crewId: "", name: "", base: "", role: "", aircraftType: "" },
     operations: [],
+    simSessions: [],
     currencies: [],
     personnelToCreate: [],
     personnelToUpdate: [],
@@ -652,6 +792,13 @@ export async function parseScheduleCSV(
     const rowsForParse = mergePdfTableRows(doc.rows, header);
 
     onProgress?.(10, "Validating", "Checking user profile...");
+    // The user's PICUS-vs-SIC convention, so a PF/PM change can carry the
+    // matching pilotRole correction.
+    const storedPrefs = await getUserPreferences().catch(() => null);
+    const importDefaults: ImportDefaults = {
+      ...DEFAULT_IMPORT_DEFAULTS,
+      ...(storedPrefs?.importDefaults ?? {}),
+    };
     const currentUser = await getCurrentUserPersonnel();
     if (!currentUser) {
       throw new Error(
@@ -692,6 +839,7 @@ export async function parseScheduleCSV(
 
     // Stage A: raw extraction per row
     const rawSectors: RawSector[] = [];
+    const rawSimDuties: RawSimDuty[] = [];
     const currencyStartMarker = "Code,,,Description";
     let currencyStartIdx = -1;
 
@@ -705,7 +853,12 @@ export async function parseScheduleCSV(
 
       const cols = cells;
       const duties = cols[header.columnIndices.duties] || "";
-      if (!duties.match(/\d+\s*\[/)) continue; // not a flight row
+      if (!duties.match(/\d+\s*\[/)) {
+        // Not a flight — capture simulator / training duty rows (EBT etc.).
+        const sim = tryExtractSimDuty(cols, header, i + 1);
+        if (sim) rawSimDuties.push(sim);
+        continue;
+      }
 
       try {
         const sectors = extractSectorsFromRow(cols, header, i + 1);
@@ -823,43 +976,78 @@ export async function parseScheduleCSV(
       existingFlights: flightsInRange,
       csvDateRange: { start: rangeStart, end: rangeEnd },
       reportGeneratedAt: plan.generatedAt,
+      reportSource: "schedule",
+      scheduleGeneratedAt: plan.generatedAt,
+      currentUser: { id: currentUser.id, crewId: currentUser.crewId },
+      nonPicPfRole: importDefaults.nonPicPfRole,
+      // Use the v2 safe/consult split so crew-only changes (incl. the
+      // truncated→full name upgrade) auto-apply, while time/route changes on
+      // already-flown flights still ask for confirmation.
+      useLegacyUpdateConflict: false,
     });
 
-    // Apply default acceptance flags
-    plan.operations = operations.map((op) => ({
-      ...op,
-      accepted:
-        op.kind === "create" ||
-        op.kind === "skip_identical" ||
-        op.kind === "skip_non_airline" ||
-        op.kind === "skip_stale_report" ||
-        op.kind === "update_safe",
-    }));
+    // Apply default acceptance flags + summary counts (shared helpers).
+    plan.operations = applyDefaultAcceptance(operations);
+    plan.summary = summarizeOperations(plan.operations);
 
-    // Summary counts
-    for (const op of plan.operations) {
-      switch (op.kind) {
-        case "create":
-          plan.summary.toCreate++;
-          break;
-        case "update_conflict":
-        case "edited_conflict":
-        case "update_safe":
-        case "update_consult":
-          plan.summary.toUpdate++;
-          break;
-        case "delete_missing":
-          plan.summary.toDelete++;
-          break;
-        case "skip_identical":
-          plan.summary.identical++;
-          break;
-        case "skip_non_airline":
-          plan.summary.ignored++;
-          break;
-        case "skip_stale_report":
-          plan.summary.staleSkipped++;
-          break;
+    // Simulator / training sessions — duty rows enriched from the report's
+    // "Training Details" section (times, course, facility, instructor). Times
+    // are converted from the report's Local Base reference to UTC.
+    onProgress?.(88, "Parsing", "Reading simulator sessions...");
+    if (rawSimDuties.length > 0) {
+      // Sims run at the home base facility; Local Base / Local Station times
+      // convert to UTC via the base offset. A UTC report needs no shift.
+      const baseOffset =
+        header.timeReference === "UTC"
+          ? 0
+          : baseTz
+            ? getAirportTimeInfo(baseTz).offset
+            : 0;
+      const trainingByDate = parseTrainingDetails(doc.rawText);
+
+      const shiftToUtc = (hhmm?: string): string | undefined => {
+        if (!hhmm) return undefined;
+        const [h, m] = hhmm.split(":").map(Number);
+        if (Number.isNaN(h) || Number.isNaN(m)) return undefined;
+        let total = h * 60 + m - Math.round(baseOffset * 60);
+        total = ((total % 1440) + 1440) % 1440;
+        return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(
+          total % 60
+        ).padStart(2, "0")}`;
+      };
+      const durationHHMM = (start?: string, end?: string): string => {
+        if (!start || !end) return "00:00";
+        const [sh, sm] = start.split(":").map(Number);
+        const [eh, em] = end.split(":").map(Number);
+        if ([sh, sm, eh, em].some(Number.isNaN)) return "00:00";
+        let diff = eh * 60 + em - (sh * 60 + sm);
+        if (diff < 0) diff += 1440;
+        return `${String(Math.floor(diff / 60)).padStart(2, "0")}:${String(
+          diff % 60
+        ).padStart(2, "0")}`;
+      };
+
+      for (const sim of rawSimDuties) {
+        const td = trainingByDate.get(sim.date);
+        const startLocal = td?.startLocal ?? sim.startLocal;
+        const endLocal = td?.endLocal ?? sim.endLocal;
+        plan.simSessions.push({
+          date: sim.date,
+          duration: durationHHMM(startLocal, endLocal),
+          deviceType:
+            td?.deviceType ||
+            normalizeAircraftType(header.crewInfo.aircraftType) ||
+            "SIM",
+          sessionCode: sim.dutyCode || td?.component || "SIM",
+          remarks: sim.description || "",
+          sourceLine: sim.sourceLine,
+          outUtc: shiftToUtc(startLocal),
+          inUtc: shiftToUtc(endLocal),
+          courseName: td?.courseName,
+          component: td?.component,
+          facility: td?.facility,
+          instructorName: td?.instructorName,
+        });
       }
     }
 

@@ -8,37 +8,36 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import {
-  Upload,
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  AlertTriangle,
-} from "lucide-react";
+import { Upload, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Progress } from "@/components/ui/progress";
 import { extractDocuments } from "@/lib/utils/parsers/extractors";
 import {
   parseScheduleCSV,
   type PlannedImport,
 } from "@/lib/utils/parsers/schedule-parser";
 import { parseLogbookV2 } from "@/lib/utils/parsers/logbook-parser-v2";
-import { crossHydrate } from "@/lib/utils/parsers/cross-hydrate";
+import {
+  crossHydrate,
+  logbookSectorToParsedSector,
+} from "@/lib/utils/parsers/cross-hydrate";
 import { reconcileRoster } from "@/lib/utils/roster/reconciler";
 import {
   executeRosterImport,
   type ExecutionResult,
 } from "@/lib/utils/roster/executor";
-import { userDb } from "@/lib/db";
+import {
+  applyDefaultAcceptance,
+  summarizeOperations,
+} from "@/lib/utils/roster/plan-summary";
+import {
+  userDb,
+  getCurrentUserPersonnel,
+  getUserPreferences,
+  DEFAULT_IMPORT_DEFAULTS,
+} from "@/lib/db";
 import type { FlightLog } from "@/types/entities/flight.types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
+import { ImportStatusDialog, type ImportStage } from "./import-status-dialog";
 import { DetectedFilesChip } from "./detected-files-chip";
 
 interface Props {
@@ -48,15 +47,9 @@ interface Props {
   onComplete?: () => void;
 }
 
-interface Stage {
-  percent: number;
-  stage: string;
-  detail?: string;
-}
-
 export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [progress, setProgress] = useState<Stage | null>(null);
+  const [progress, setProgress] = useState<ImportStage | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [pendingPlan, setPendingPlan] = useState<PlannedImport | null>(null);
   const [showReview, setShowReview] = useState(false);
@@ -69,6 +62,12 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
     >["simSessions"]
   >([]);
   const importSourceRef = useRef<FlightLog["importSource"]>("schedule");
+  // Per-stream "Generated on" stamps, so the executor can record which report
+  // version each flight reflects (schedule vs logbook are tracked separately).
+  const reportStampsRef = useRef<{
+    scheduleGeneratedAt: number | null;
+    logbookGeneratedAt: number | null;
+  }>({ scheduleGeneratedAt: null, logbookGeneratedAt: null });
 
   const reset = () => {
     setProgress(null);
@@ -86,6 +85,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         const result: ExecutionResult = await executeRosterImport(plan, {
           simSessions: simSessionsRef.current ?? [],
           importSource: importSourceRef.current,
+          scheduleGeneratedAt: reportStampsRef.current.scheduleGeneratedAt,
+          logbookGeneratedAt: reportStampsRef.current.logbookGeneratedAt,
         });
         const parts: string[] = [];
         if (result.created) parts.push(`${result.created} created`);
@@ -93,6 +94,10 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         if (result.deleted) parts.push(`${result.deleted} deleted`);
         if (result.simSessionsCreated)
           parts.push(`${result.simSessionsCreated} sim sessions`);
+        if (result.simDuplicatesRemoved)
+          parts.push(`${result.simDuplicatesRemoved} duplicate sims removed`);
+        if (result.aircraftCreated)
+          parts.push(`${result.aircraftCreated} aircraft`);
         if (result.staleSkipped)
           parts.push(`${result.staleSkipped} skipped (older report)`);
         if (result.identical) parts.push(`${result.identical} unchanged`);
@@ -123,6 +128,21 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
 
       try {
         const docs = await extractDocuments(files);
+
+        // Needed so the reconciler can resolve "Self" crew seats and diff the
+        // full PIC + SIC crew (not just the logbook-derived PIC) on updates.
+        const currentUserForRecon = await getCurrentUserPersonnel().catch(
+          () => null
+        );
+        const reconCurrentUser = currentUserForRecon
+          ? { id: currentUserForRecon.id, crewId: currentUserForRecon.crewId }
+          : undefined;
+        // PICUS-vs-SIC convention, so a PF/PM change carries the matching
+        // pilotRole correction.
+        const storedPrefs = await getUserPreferences().catch(() => null);
+        const nonPicPfRole =
+          storedPrefs?.importDefaults?.nonPicPfRole ??
+          DEFAULT_IMPORT_DEFAULTS.nonPicPfRole;
 
         const logbooks = docs.filter((d) => d.reportType === "logbook");
         const schedules = docs.filter((d) => d.reportType === "schedule");
@@ -160,6 +180,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           Parameters<typeof executeRosterImport>[1]
         >["simSessions"] = [];
         let importSource: FlightLog["importSource"] = "schedule";
+        let scheduleGeneratedAt: number | null = null;
+        let logbookGeneratedAt: number | null = null;
 
         if (logbooks.length === 1 && schedules.length === 1) {
           // Combined flow.
@@ -188,11 +210,26 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           });
           const merged = crossHydrate(logbookPlan, schedulePlan);
 
+          // Simulator sessions: prefer the schedule's richer EBT/Training
+          // Details entries; add any logbook-only sim dates the schedule
+          // didn't carry. Deduped by date so one sim isn't logged twice.
+          const schedSimDates = new Set(
+            schedulePlan.simSessions.map((s) => s.date)
+          );
+          simSessions = [
+            ...schedulePlan.simSessions,
+            ...logbookPlan.simSessions.filter(
+              (s) => !schedSimDates.has(s.date)
+            ),
+          ];
+
           // Re-reconcile against full DB using merged sectors and the report
           // generation timestamp from whichever side has it (prefer logbook
           // since it's the authoritative actuals).
           const reportGeneratedAt =
             logbookPlan.generatedAt ?? schedulePlan.generatedAt;
+          scheduleGeneratedAt = schedulePlan.generatedAt;
+          logbookGeneratedAt = logbookPlan.generatedAt;
 
           const dateRange = {
             start:
@@ -217,63 +254,28 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             existingFlights: flightsInRange,
             csvDateRange: dateRange,
             reportGeneratedAt,
+            reportSource: "cross_hydrated",
+            scheduleGeneratedAt,
+            logbookGeneratedAt,
             useLegacyUpdateConflict: false,
+            currentUser: reconCurrentUser,
+            nonPicPfRole,
           });
 
+          const acceptedOps = applyDefaultAcceptance(operations);
           plan = {
             ...schedulePlan,
             generatedAt: reportGeneratedAt ?? null,
             dateRange,
-            operations: operations.map((op) => ({
-              ...op,
-              accepted:
-                op.kind === "create" ||
-                op.kind === "skip_identical" ||
-                op.kind === "skip_non_airline" ||
-                op.kind === "skip_stale_report" ||
-                op.kind === "update_safe",
-            })),
+            operations: acceptedOps,
             personnelToCreate: [
               ...schedulePlan.personnelToCreate,
               ...logbookPlan.personnelToCreate,
             ],
             errors: [...schedulePlan.errors, ...logbookPlan.errors],
             warnings: [...schedulePlan.warnings, ...logbookPlan.warnings],
-            summary: {
-              toCreate: 0,
-              toUpdate: 0,
-              toDelete: 0,
-              identical: 0,
-              ignored: 0,
-              staleSkipped: 0,
-            },
+            summary: summarizeOperations(acceptedOps),
           };
-
-          for (const op of plan.operations) {
-            switch (op.kind) {
-              case "create":
-                plan.summary.toCreate++;
-                break;
-              case "update_conflict":
-              case "edited_conflict":
-              case "update_safe":
-              case "update_consult":
-                plan.summary.toUpdate++;
-                break;
-              case "delete_missing":
-                plan.summary.toDelete++;
-                break;
-              case "skip_identical":
-                plan.summary.identical++;
-                break;
-              case "skip_non_airline":
-                plan.summary.ignored++;
-                break;
-              case "skip_stale_report":
-                plan.summary.staleSkipped++;
-                break;
-            }
-          }
         } else if (logbooks.length === 1) {
           importSource = "logbook";
           setProgress({ percent: 15, stage: "Parsing", detail: "Logbook" });
@@ -282,40 +284,9 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           });
           simSessions = logbookPlan.simSessions;
 
-          // Wrap logbook sectors as ParsedSector (they already extend it).
-          const sectors = logbookPlan.sectors.map((s) => ({
-            date: s.date,
-            flightNumber: s.flightNumber ?? "",
-            aircraftType: s.aircraftType,
-            departureIata: s.departureIata,
-            arrivalIata: s.arrivalIata,
-            scheduledOut: undefined,
-            scheduledIn: undefined,
-            actualOut: s.outTime,
-            actualIn: s.inTime,
-            sourceLine: s.sourceLine,
-            crew: undefined,
-            aircraftReg: s.aircraftReg,
-            dayTakeoffs: s.dayTakeoffs,
-            nightTakeoffs: s.nightTakeoffs,
-            dayLandings: s.dayLandings,
-            nightLandings: s.nightLandings,
-            blockTime: s.blockTime,
-            picRawName: s.picRawName,
-            isUserPic: s.isUserPic,
-            picPersonnelId: s.picPersonnelId,
-            picResolvedName: s.picResolvedName,
-            isPilotFlying: s.isPilotFlying,
-            // Sun-position suggestion + day/night cutoff context — must be
-            // carried through so the reconciler can annotate TO/LDG diffs
-            // and the modal can render the day/night check.
-            suggestedDayTakeoffs: s.suggestedDayTakeoffs,
-            suggestedNightTakeoffs: s.suggestedNightTakeoffs,
-            suggestedDayLandings: s.suggestedDayLandings,
-            suggestedNightLandings: s.suggestedNightLandings,
-            toLdgContext: s.toLdgContext,
-            remarks: s.remarks,
-          }));
+          // Promote logbook sectors to ParsedSector via the shared mapper,
+          // which routes planned (future) sectors to scheduled times.
+          const sectors = logbookPlan.sectors.map(logbookSectorToParsedSector);
 
           const allFlights = await userDb.flights.toArray();
           const flightsInRange = allFlights.filter(
@@ -323,69 +294,35 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
               f.date >= logbookPlan.dateRange.start &&
               f.date <= logbookPlan.dateRange.end
           );
+          logbookGeneratedAt = logbookPlan.generatedAt;
           const operations = reconcileRoster({
             sectors,
             existingFlights: flightsInRange,
             csvDateRange: logbookPlan.dateRange,
             reportGeneratedAt: logbookPlan.generatedAt,
+            reportSource: "logbook",
+            logbookGeneratedAt: logbookPlan.generatedAt,
             useLegacyUpdateConflict: false,
+            currentUser: reconCurrentUser,
+            nonPicPfRole,
           });
 
+          const acceptedOps = applyDefaultAcceptance(operations);
           plan = {
             success: logbookPlan.success,
             timeReference: "UTC",
             dateRange: logbookPlan.dateRange,
             generatedAt: logbookPlan.generatedAt,
             crewMember: { crewId: "", name: "", base: "", role: "", aircraftType: "" },
-            operations: operations.map((op) => ({
-              ...op,
-              accepted:
-                op.kind === "create" ||
-                op.kind === "skip_identical" ||
-                op.kind === "skip_non_airline" ||
-                op.kind === "skip_stale_report" ||
-                op.kind === "update_safe",
-            })),
+            operations: acceptedOps,
+            simSessions: [],
             currencies: [],
             personnelToCreate: logbookPlan.personnelToCreate,
             personnelToUpdate: [],
             errors: logbookPlan.errors,
             warnings: logbookPlan.warnings,
-            summary: {
-              toCreate: 0,
-              toUpdate: 0,
-              toDelete: 0,
-              identical: 0,
-              ignored: 0,
-              staleSkipped: 0,
-            },
+            summary: summarizeOperations(acceptedOps),
           };
-
-          for (const op of plan.operations) {
-            switch (op.kind) {
-              case "create":
-                plan.summary.toCreate++;
-                break;
-              case "update_conflict":
-              case "edited_conflict":
-              case "update_safe":
-              case "update_consult":
-                plan.summary.toUpdate++;
-                break;
-              case "delete_missing":
-                plan.summary.toDelete++;
-                break;
-              case "skip_identical":
-                plan.summary.identical++;
-                break;
-              case "skip_non_airline":
-                plan.summary.ignored++;
-                break;
-              case "skip_stale_report":
-                plan.summary.staleSkipped++;
-                break;
-            }
-          }
         } else {
           // Schedule-only path.
           importSource = "schedule";
@@ -393,6 +330,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           plan = await parseScheduleCSV(schedules[0], {
             onProgress: onParseProgress,
           });
+          simSessions = plan.simSessions;
+          scheduleGeneratedAt = plan.generatedAt;
         }
 
         if (!plan.success && plan.errors.length > 0) {
@@ -401,6 +340,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
 
         simSessionsRef.current = simSessions;
         importSourceRef.current = importSource;
+        reportStampsRef.current = { scheduleGeneratedAt, logbookGeneratedAt };
 
         const needsReview =
           plan.summary.toUpdate > 0 ||
@@ -470,71 +410,19 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         )}
       </Button>
 
-      <Dialog
+      <ImportStatusDialog
         open={isOpen && !showReview}
         onOpenChange={onDialogChange}
-      >
-        <DialogContent className="sm:max-w-md" showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>
-              {progress
-                ? "Importing"
-                : errorMsg
-                  ? "Import Failed"
-                  : summary
-                    ? "Import Complete"
-                    : "Import"}
-            </DialogTitle>
-            <DialogDescription>
-              {progress?.stage || (errorMsg ? "" : summary || "")}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3 py-2">
-            {progress && (
-              <>
-                <Progress value={progress.percent} className="h-2" />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{progress.detail}</span>
-                  <span>{progress.percent}%</span>
-                </div>
-              </>
-            )}
-            {errorMsg && (
-              <div className="flex items-start gap-2 text-sm text-destructive">
-                <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-            {summary && !errorMsg && !progress && (
-              <div className="flex items-start gap-2 text-sm">
-                <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0 text-status-valid" />
-                <span>{summary}</span>
-              </div>
-            )}
-            {context && progress && (
-              <p className="text-[11px] text-muted-foreground">
-                Context: {context}
-              </p>
-            )}
-          </div>
-
-          {(errorMsg || (summary && !progress)) && (
-            <div className="flex justify-end pt-2">
-              <Button
-                size="sm"
-                onClick={() => {
-                  setIsOpen(false);
-                  setSummary(null);
-                  setErrorMsg(null);
-                }}
-              >
-                Close
-              </Button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+        progress={progress}
+        errorMsg={errorMsg}
+        summary={summary}
+        context={context}
+        onDone={() => {
+          setIsOpen(false);
+          setSummary(null);
+          setErrorMsg(null);
+        }}
+      />
 
       <ImportReviewModalV2
         plan={pendingPlan}

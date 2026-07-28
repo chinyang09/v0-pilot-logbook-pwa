@@ -65,6 +65,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
           onClick: onDelete,
           variant: "destructive",
           holdToConfirm: true,
+          cancelLabel: "Cancel delete",
         },
       ]}
     >

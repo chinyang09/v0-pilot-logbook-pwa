@@ -3,7 +3,31 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseGeneratedAt } from "../shared/generated-at";
+import {
+  parseGeneratedAt,
+  reportBoundaryDateIso,
+  isPlannedDate,
+} from "../shared/generated-at";
+
+describe("isPlannedDate", () => {
+  // Report generated Jul 25, 2026 02:10 UTC (like the real logbook export).
+  const gen = Date.UTC(2026, 6, 25, 2, 10);
+
+  it("treats rows strictly after the generation date as planned", () => {
+    expect(isPlannedDate("2026-07-27", gen)).toBe(true); // future
+    expect(isPlannedDate("2026-08-15", gen)).toBe(true);
+  });
+
+  it("treats rows on/before the generation date as flown", () => {
+    expect(isPlannedDate("2026-07-25", gen)).toBe(false); // same day
+    expect(isPlannedDate("2026-07-24", gen)).toBe(false); // past
+    expect(isPlannedDate("2025-06-04", gen)).toBe(false);
+  });
+
+  it("boundary date is the UTC calendar date of the snapshot", () => {
+    expect(reportBoundaryDateIso(gen)).toBe("2026-07-25");
+  });
+});
 
 describe("parseGeneratedAt", () => {
   it("parses the canonical ecrew footer with double space", () => {

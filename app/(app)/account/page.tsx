@@ -42,7 +42,7 @@ const QRCodeSVG = dynamic(() => import("qrcode.react").then((m) => m.QRCodeSVG),
   loading: () => <Skeleton className="h-[150px] w-[150px] rounded" />,
 })
 import { SwipeableCard } from "@/components/swipeable-card"
-import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button"
+import { CountdownConfirmButton } from "@/components/ui/countdown-confirm-button"
 import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
 import { parseUserAgent } from "@/lib/utils/user-agent"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
@@ -123,6 +123,8 @@ export default function AccountPage() {
   // Session revoke loading
   const [revokingToken, setRevokingToken] = useState<string | null>(null)
   const [isLoggingOutAll, setIsLoggingOutAll] = useState(false)
+  // Armed = the countdown is running and the button now cancels it.
+  const [logoutArmed, setLogoutArmed] = useState(false)
 
   // Passkey removal loading
   const [removingPasskey, setRemovingPasskey] = useState<string | null>(null)
@@ -547,14 +549,35 @@ export default function AccountPage() {
     <PageContainer>
       <div className="px-4 pt-4 space-y-4 max-w-2xl mx-auto w-full">
 
-        {/* Global logout — prominent, at the very top */}
-        <HoldToConfirmButton
-          label={isLoggingOutAll ? "Logging out…" : "Hold to log out of all devices"}
-          icon={isLoggingOutAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-          onConfirm={handleLogoutAll}
-          disabled={isLoggingOutAll}
-          className="w-full"
-        />
+        {/* Global logout — prominent, at the very top. Tapping ARMS it: the
+            logout then runs on a countdown the same button cancels, matching
+            every other destructive action in the app. */}
+        {logoutArmed ? (
+          <CountdownConfirmButton
+            label="Cancel log out"
+            icon={<LogOut className="h-4 w-4" />}
+            onConfirm={() => {
+              setLogoutArmed(false)
+              handleLogoutAll()
+            }}
+            onCancel={() => setLogoutArmed(false)}
+            className="w-full"
+          />
+        ) : (
+          <Button
+            variant="outline"
+            className="w-full h-11 gap-2"
+            disabled={isLoggingOutAll}
+            onClick={() => setLogoutArmed(true)}
+          >
+            {isLoggingOutAll ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <LogOut className="h-4 w-4" />
+            )}
+            {isLoggingOutAll ? "Logging out…" : "Log out of all devices"}
+          </Button>
+        )}
 
         {/* Profile */}
         <FormSection title="Profile">
@@ -776,6 +799,7 @@ export default function AccountPage() {
                       ariaLabel: "Delete passkey",
                       variant: "destructive",
                       holdToConfirm: true,
+                      cancelLabel: "Cancel revoke",
                       disabled: !canRemove,
                       onClick: () => handleRemovePasskey(pk.credentialId),
                     },
@@ -852,6 +876,7 @@ export default function AccountPage() {
                       ariaLabel: session.isCurrent ? "Sign out this device" : "Revoke session",
                       variant: "destructive",
                       holdToConfirm: true,
+                      cancelLabel: "Cancel revoke",
                       onClick: () => handleRevokeSession(session),
                     },
                   ]}

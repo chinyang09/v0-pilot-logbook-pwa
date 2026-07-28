@@ -44,6 +44,11 @@ export type DiscrepancyType =
   | "missing_in_logbook"  // In schedule but not logged
   | "missing_in_schedule" // In logbook but not in schedule
   | "stale_report"        // Older report tried to overwrite newer data
+  // Kept on the record permanently rather than resolved-and-forgotten: these
+  // are the pilot's own account of the sector, and a licence submission is
+  // checked against them. Recorded whichever way the user decided.
+  | "pilot_flying_mismatch" // PF/PM (and the role it implies) differs from the company
+  | "day_night_mismatch"    // Day/night takeoff or landing split differs
 
 // Only track flight crew (pilots) - cabin crew not tracked
 export type CrewRole = "CPT" | "PIC" | "FO"
@@ -319,9 +324,16 @@ export interface Discrepancy {
 
   // Details
   field?: string                    // Which field differs
-  scheduleValue?: string
-  logbookValue?: string
+  scheduleValue?: string            // What the company reported
+  logbookValue?: string             // What the pilot has
   message?: string                  // Human-readable description
+  /**
+   * For company-vs-pilot mismatches: which side the flight currently holds.
+   * Drives the discrepancy page's "yours / company" state and its undo, and
+   * survives independently of `resolved` (a resolved row still records which
+   * way it went, for the licence trail).
+   */
+  holding?: "logbook" | "schedule"
 
   // Resolution
   resolved: boolean

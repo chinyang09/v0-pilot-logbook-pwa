@@ -25,6 +25,7 @@ import {
   ChevronDown,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
 import { OVERSHOOT_BEZIER, SETTLE_BEZIER, MORPH_EASE } from "@/lib/motion"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
@@ -680,12 +681,18 @@ function PillBarContent({
 
 // ─── Shared sidebar nav content ──────────────────────────────
 
+/** Height of the floating toggle/sync strip the nav scrolls beneath. */
+const SIDEBAR_HEADER_HEIGHT = 56
+
 function SidebarNav({
   pathname,
   className,
+  topInset = 0,
 }: {
   pathname: string
   className?: string
+  /** Space reserved at the top for chrome floating over the list. */
+  topInset?: number
 }) {
   const navRef = useRef<HTMLElement>(null)
   const blobLayerRef = useRef<HTMLDivElement>(null)
@@ -741,9 +748,27 @@ function SidebarNav({
       </div>
       <nav
         ref={navRef}
-        className="relative z-[1] h-full overflow-y-auto overscroll-contain px-3 pb-4"
-        style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+        className="relative z-[1] h-full overflow-y-scroll overscroll-contain px-3 pb-4 scrollbar-hide"
+        style={{
+          WebkitOverflowScrolling: "touch",
+          touchAction: "pan-y",
+          paddingTop: topInset,
+          // Content dissolves as it passes under the floating toggle/sync
+          // strip, the same read as the main panel's header fade. A painted
+          // scrim can't be used here — the panel is translucent glass, so the
+          // list is masked out instead of covered up.
+          ...(topInset
+            ? {
+                maskImage: `linear-gradient(to bottom, transparent 0, transparent ${topInset * 0.35}px, black ${topInset}px)`,
+                WebkitMaskImage: `linear-gradient(to bottom, transparent 0, transparent ${topInset * 0.35}px, black ${topInset}px)`,
+              }
+            : {}),
+        }}
       >
+      {/* One pixel taller than the scroller so the list always has somewhere to
+          go: a short nav would otherwise be inert to a drag, which reads as the
+          panel being stuck rather than simply full. */}
+      <div className="min-h-[calc(100%+1px)]">
       <SidebarNavItem
         href={dashboardNavItem.href}
         icon={dashboardNavItem.icon}
@@ -758,12 +783,12 @@ function SidebarNav({
               onClick={() => toggleSection(section.label)}
               className="flex items-center justify-between w-full px-3 mb-1 group cursor-pointer"
             >
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
                 {section.label}
               </span>
               <ChevronDown
                 className={cn(
-                  "h-3.5 w-3.5 text-muted-foreground/40 transition-transform duration-200",
+                  "h-4 w-4 text-muted-foreground/50 transition-transform duration-200",
                   isCollapsed && "-rotate-90"
                 )}
               />
@@ -781,6 +806,7 @@ function SidebarNav({
           </div>
         )
       })}
+      </div>
       </nav>
     </div>
   )
@@ -1077,18 +1103,30 @@ function DesktopPillMorph({
               transition: contentTransition,
             }}
           >
-            {/* Sidebar top row — toggle + sync flushed right */}
-            <div className="flex items-center justify-end h-14 px-3 gap-1 flex-shrink-0">
-              <button
-                onClick={onToggleSidebar}
-                className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
+            {/* The nav fills the panel and the header floats over it, so the
+                list scrolls UNDER the toggle and sync icons rather than
+                stopping short of them. The icons stay hit-testable; the strip
+                between them does not swallow scrolls (pointer-events-none on
+                the bar, re-enabled on the controls). */}
+            <div className="relative flex-1 min-h-0">
+              <SidebarNav
+                pathname={pathname}
+                className="h-full"
+                topInset={SIDEBAR_HEADER_HEIGHT}
+              />
+              <div
+                className="pointer-events-none absolute inset-x-0 top-0 z-[2] flex items-center justify-end px-3 gap-1"
+                style={{ height: SIDEBAR_HEADER_HEIGHT }}
               >
-                <PanelLeft className="h-5 w-5" />
-              </button>
-              <SyncIconButton />
+                <button
+                  onClick={onToggleSidebar}
+                  className="pointer-events-auto flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
+                >
+                  <PanelLeft className="h-6 w-6" />
+                </button>
+                <SyncIconButton className="pointer-events-auto" />
+              </div>
             </div>
-
-            <SidebarNav pathname={pathname} className="flex-1 min-h-0" />
           </div>
         </GlassContainer>
     </div>
@@ -1168,7 +1206,10 @@ function MobilePillMorph({
     <>
       {/* Backdrop — dark overlay + progressive blur from sidebar edge */}
       <div
-        className="fixed inset-0 z-[58] bg-black/50 transition-opacity duration-200"
+        className={cn(
+          "fixed inset-0 z-[58] transition-opacity duration-200",
+          MODAL_SCRIM
+        )}
         style={{
           opacity: sidebarOpen ? 1 : 0,
           pointerEvents: sidebarOpen ? "auto" : "none",
@@ -1244,7 +1285,7 @@ function MobilePillMorph({
                 onClick={() => setSidebarOpen(false)}
                 className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
               >
-                <PanelLeft className="h-5 w-5" />
+                <PanelLeft className="h-6 w-6" />
               </button>
               <SyncIconButton />
             </div>

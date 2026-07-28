@@ -102,22 +102,72 @@ export function GlassContainer({
   const syS = useSpring(sy, PRESS_SPRING)
   const pressedRef = useRef(false)
 
-  const setSpotlight = (e: React.PointerEvent) => {
+  const setSpotlightAt = (clientX: number, clientY: number) => {
     const el = rootRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
-    el.style.setProperty("--press-x", `${e.clientX - rect.left}px`)
-    el.style.setProperty("--press-y", `${e.clientY - rect.top}px`)
+    el.style.setProperty("--press-x", `${clientX - rect.left}px`)
+    el.style.setProperty("--press-y", `${clientY - rect.top}px`)
+  }
+
+  const setSpotlight = (e: React.PointerEvent) => {
+    setSpotlightAt(e.clientX, e.clientY)
+  }
+
+  /**
+   * The press glow is driven imperatively rather than through framer's
+   * `whileTap`. A native scroll inside the surface (the sidebar list) steals
+   * the pointer and fires `pointercancel`, which ends a tap gesture — so the
+   * glow died the instant you started scrolling, even though the finger was
+   * still down on the glass. Owning the variable means the glow survives the
+   * cancel and is closed out by the real lift instead.
+   */
+  const setGlow = (on: boolean) => {
+    rootRef.current?.style.setProperty("--glass-press", on ? "1" : "0")
   }
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!spotlightOn) return
+    // Ignore presses while this surface sits behind a modal. Radix marks
+    // everything outside an open dialog `aria-hidden`, so a touch that leaks
+    // through (or a scroll that Safari reports as a press) would otherwise
+    // bloom the glass — the "phantom tap" on the calendar/upload buttons while
+    // scrolling the import dialog.
+    if (rootRef.current?.closest('[aria-hidden="true"]')) return
     pressedRef.current = true
     setSpotlight(e)
+    setGlow(true)
     if (interactive) {
       sx.set(BLOOM)
       sy.set(BLOOM)
       setPressed(true)
+    }
+  }
+
+  /**
+   * Touch moves keep firing while the browser scrolls, where pointer moves do
+   * not — so this is what keeps the spotlight under the finger during a
+   * rubber-band scroll of the sidebar.
+   */
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!spotlightOn || !pressedRef.current) return
+    const touch = e.touches[0]
+    if (touch) setSpotlightAt(touch.clientX, touch.clientY)
+  }
+
+  /**
+   * The scroller took the pointer. Drop the bloom/pull (scaling a scrolling
+   * surface janks) but keep the glow and keep tracking — `handleTouchMove`
+   * feeds it until the finger actually lifts.
+   */
+  const handlePointerCancel = () => {
+    if (!pressedRef.current) return
+    if (interactive) {
+      sx.set(1)
+      sy.set(1)
+      tx.set(0)
+      ty.set(0)
+      setPressed(false)
     }
   }
 
@@ -142,6 +192,7 @@ export function GlassContainer({
   const endPress = () => {
     if (!pressedRef.current) return
     pressedRef.current = false
+    setGlow(false)
     tx.set(0)
     ty.set(0)
     sx.set(1)
@@ -193,16 +244,16 @@ export function GlassContainer({
       } as React.CSSProperties}
       // The spotlight overlay fades in via --glass-press (custom properties
       // animate through framer); position is set imperatively above.
-      whileTap={
-        spotlightOn
-          ? ({ "--glass-press": 1 } as Record<string, number | string>)
-          : undefined
-      }
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
+      onTouchMove={handleTouchMove}
       onPointerUp={endPress}
       onPointerLeave={endPress}
-      onPointerCancel={endPress}
+      /* NOT endPress: a scroll cancels the pointer while the finger is still
+         down. See handlePointerCancel. */
+      onPointerCancel={handlePointerCancel}
+      onTouchEnd={endPress}
+      onTouchCancel={endPress}
     >
       <div className={cn("GlassContent", contentClassName)}>
         {tintColor && (

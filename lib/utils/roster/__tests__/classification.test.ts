@@ -75,12 +75,21 @@ describe("isSafeChange", () => {
     ).toBe(true);
   });
 
-  it("treats outTime changes as critical", () => {
+  it("treats company OOOI times as safe — they are the record of record", () => {
     expect(
       isSafeChange(
         { field: "outTime", from: "04:00", to: "04:49" },
         flight
       )
+    ).toBe(true);
+  });
+
+  it("treats the pilot's own day/night and PF call as critical", () => {
+    expect(
+      isSafeChange({ field: "pilotFlying", from: "true", to: "false" }, flight)
+    ).toBe(false);
+    expect(
+      isSafeChange({ field: "nightLandings", from: "1", to: "0" }, flight)
     ).toBe(false);
   });
 
@@ -128,9 +137,17 @@ describe("classifyChanges", () => {
 
   it("past flight + critical field → update_consult", () => {
     const changes: FieldDiff[] = [
-      { field: "outTime", from: "04:00", to: "04:49" },
+      { field: "nightLandings", from: "1", to: "0" },
     ];
     expect(classifyChanges(flight, changes, [], today)).toBe("update_consult");
+  });
+
+  it("past flight + company times only → update_safe", () => {
+    const changes: FieldDiff[] = [
+      { field: "outTime", from: "04:00", to: "04:49" },
+      { field: "blockTime", from: "02:00", to: "02:33" },
+    ];
+    expect(classifyChanges(flight, changes, [], today)).toBe("update_safe");
   });
 
   it("past flight + edits → edited_conflict regardless of fields", () => {

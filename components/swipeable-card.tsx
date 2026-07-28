@@ -14,7 +14,13 @@ import {
 } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { SPRING, POP_SPRING } from "@/lib/motion"
-import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button"
+import { CountdownConfirmButton } from "@/components/ui/countdown-confirm-button"
+import {
+  armPendingAction,
+  cancelPendingAction,
+  getPendingDeadline,
+  subscribePendingActions,
+} from "@/lib/utils/pending-actions"
 import { HoldProgressBorder } from "@/components/ui/hold-progress-border"
 
 const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
@@ -45,14 +51,18 @@ export interface SwipeAction {
   disabled?: boolean
   /**
    * When true the action is not fired on a tap. Instead, tapping closes the
-   * action panel and raises a translucent confirm button over the row that the
-   * user must **press and hold** (an animated progress border draws around it).
-   * Releasing early dismisses it. Used for destructive actions in place of a
-   * dialog.
+   * action panel and raises a confirm overlay over the row: the action is now
+   * COUNTING DOWN, and the button cancels it. Left alone, it fires when the
+   * countdown ends. Used for destructive actions in place of a dialog.
+   *
+   * (Previously a press-and-hold. Holding asked the person who wanted the
+   * outcome to work for it and gave the person who mis-tapped nothing to grab.)
    */
   holdToConfirm?: boolean
-  /** Hold duration in ms (default 2500). */
+  /** Countdown in ms before the action fires (default 10000). */
   holdDuration?: number
+  /** Verb shown on the cancel button, e.g. "Cancel delete". */
+  cancelLabel?: string
 }
 
 interface SwipeableCardProps {
@@ -120,8 +130,8 @@ function SwipeActionButton({
       onClick={(e: React.MouseEvent) => {
         e.stopPropagation()
         if (action.disabled) return
-        // Hold-to-confirm actions don't fire on tap — they hand off to a
-        // translucent confirm overlay the user must press-and-hold.
+        // Confirm actions don't fire on tap — they hand off to an overlay
+        // where the action counts down and the button cancels it.
         if (action.holdToConfirm) {
           onRequestConfirm(action)
           return
@@ -166,8 +176,11 @@ export function SwipeableCard({
   variant = "card",
   separated = false,
 }: SwipeableCardProps) {
-  // Stable, SSR-safe identity for the multi-card close-others coordination —
-  // useId avoids calling Math.random() during every render.
+  // Identity for close-others coordination AND for the pending-action registry.
+  //
+  // Pass a `id` derived from the row's data wherever a row can be armed: the
+  // fallback `useId()` changes when a virtualised list recycles the component,
+  // which orphans the registry entry and loses the overlay mid-countdown.
   const autoId = useId()
   const cardId = useRef(id || autoId)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -192,6 +205,9 @@ export function SwipeableCard({
   // fire the action. `confirmProgress` mirrors the button's hold 0→1 so the tint
   // fills together with it.
   const [confirmingAction, setConfirmingAction] = useState<SwipeAction | null>(null)
+  // Epoch ms the armed action fires at. Owned by the pending-actions registry
+  // so it outlives this component.
+  const [pendingDeadline, setPendingDeadline] = useState<number | undefined>(undefined)
   const confirmProgress = useMotionValue(0)
 
   // Tracks whether the last pointer interaction actually moved (drag vs tap).
@@ -213,11 +229,15 @@ export function SwipeableCard({
 
   const close = useCallback(() => settle(0), [settle])
 
-  // Close this card when another card opens or is tapped.
+  // Close this card's SWIPE PANEL when another card opens or is tapped.
+  //
+  // It must not touch a pending confirm: this event fires on any interaction
+  // with any other row, so clearing `confirmingAction` here made it impossible
+  // to arm a delete and carry on — the overlay vanished the moment you touched
+  // the next row, leaving a countdown running with no way to cancel it.
   useEffect(() => {
     const handler = (e: Event) => {
       if ((e as CustomEvent).detail?.id !== cardId.current) {
-        setConfirmingAction(null)
         animate(x, 0, { ...SPRING, onComplete: () => setActive(false) })
       }
     }
@@ -225,31 +245,42 @@ export function SwipeableCard({
     return () => window.removeEventListener(SWIPE_CLOSE_EVENT, handler)
   }, [x])
 
-  // Tapping a hold-to-confirm action: close the panel and raise the overlay.
+  // Tapping a confirm action ARMS it: the action is scheduled in the registry
+  // (so it outlives this row), the panel closes and the overlay goes up.
   const requestConfirm = useCallback(
     (action: SwipeAction) => {
       confirmProgress.set(0)
+      armPendingAction(
+        cardId.current,
+        action.holdDuration ?? 10_000,
+        action.onClick
+      )
       setConfirmingAction(action)
       settle(0)
     },
     [settle, confirmProgress]
   )
 
-  // The confirm overlay is dismissed only by interacting *outside* this card
-  // (release just resets the hold). A capture-phase pointerdown anywhere outside
-  // the container clears it. The listener is added after the overlay mounts, so
-  // the tap that opened it never self-dismisses.
+  // NOTE: tapping outside deliberately does NOT disarm. Once armed the action
+  // is running, and the user is free to carry on with other rows while it does
+  // — only the Cancel button stops it. (An outside-tap dismissal made it
+  // impossible to arm one delete and move on, which is the whole point of a
+  // countdown over a modal.)
+
+  // Follow the armed action so the overlay survives this row unmounting and
+  // remounting (a virtualised list recycles rows as it scrolls).
   useEffect(() => {
-    if (!confirmingAction) return
-    const onPointerDown = (e: PointerEvent) => {
-      if (!containerRef.current?.contains(e.target as Node)) {
+    const sync = () => {
+      const deadline = getPendingDeadline(cardId.current)
+      setPendingDeadline(deadline)
+      if (deadline === undefined) {
+        setConfirmingAction((prev) => (prev ? null : prev))
         confirmProgress.set(0)
-        setConfirmingAction(null)
       }
     }
-    document.addEventListener("pointerdown", onPointerDown, true)
-    return () => document.removeEventListener("pointerdown", onPointerDown, true)
-  }, [confirmingAction, confirmProgress])
+    sync()
+    return subscribePendingActions(sync)
+  }, [confirmProgress])
 
   const closeOthers = useCallback(() => {
     window.dispatchEvent(
@@ -390,10 +421,9 @@ export function SwipeableCard({
           >
             {children}
           </div>
-          {/* Hold-to-confirm overlay: a black mute + a red wash that intensifies
-              with the hold, the progress border traced around the CARD, and a
-              centred pill (held to confirm) whose fill sweeps red left→right.
-              Above the content (and the .row-divider z-2). */}
+          {/* Confirm overlay: a black mute, the progress border traced around
+              the CARD as the countdown runs, and a centred pill that cancels
+              it. Above the content (and the .row-divider z-2). */}
           <AnimatePresence>
             {confirmingAction && (
               <motion.div
@@ -409,20 +439,27 @@ export function SwipeableCard({
                 <div aria-hidden className="pointer-events-none absolute inset-0 bg-black/45" />
                 {/* Progress border traced around the card */}
                 <HoldProgressBorder progress={confirmProgress} radius={isCard || active ? 8 : 0} />
-                <HoldToConfirmButton
+                <CountdownConfirmButton
                   className="h-10 rounded-full px-6 text-[15px] shadow-md"
                   radius={999}
                   showBorder={false}
                   progress={confirmProgress}
-                  ariaLabel={confirmingAction.ariaLabel ?? confirmingAction.label ?? "Hold to confirm"}
+                  /* No ariaLabel override: the button CANCELS, so it must not
+                     inherit the delete action's label. The countdown component
+                     announces itself with the seconds remaining. */
                   icon={confirmingAction.icon}
-                  label="Hold to confirm"
-                  duration={confirmingAction.holdDuration ?? 2500}
-                  onConfirm={() => {
-                    const a = confirmingAction
+                  label={confirmingAction.cancelLabel ?? "Cancel"}
+                  duration={confirmingAction.holdDuration ?? 10_000}
+                  deadline={pendingDeadline}
+                  onCancel={() => {
+                    cancelPendingAction(cardId.current)
                     confirmProgress.set(0)
                     setConfirmingAction(null)
-                    a.onClick()
+                  }}
+                  /* The registry fires the action; this only clears the UI. */
+                  onConfirm={() => {
+                    confirmProgress.set(0)
+                    setConfirmingAction(null)
                   }}
                 />
               </motion.div>
