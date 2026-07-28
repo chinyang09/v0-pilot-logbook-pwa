@@ -31,13 +31,35 @@ Deployed on **Vercel** and synced from [v0.app](https://v0.app/chat/eXgJay4h1Jy)
 pnpm dev          # Start dev server (Next.js with Webpack)
 pnpm build        # Production build (8GB heap for OCR models)
 pnpm lint         # Run ESLint
+pnpm test         # Run the Vitest suite once
+pnpm test:watch   # Vitest in watch mode
 pnpm start        # Run production server
 pnpm install      # Install dependencies (MUST use pnpm, not npm)
 ```
 
 **Important:** This project uses **pnpm** as its package manager. Vercel deploys with `frozen-lockfile`, so the `pnpm-lock.yaml` must stay in sync with `package.json`. **Never use `npm install`** to add dependencies — always use `pnpm add <package>` (or `pnpm add -D <package>` for dev deps). Using npm will only update `package-lock.json` and the Vercel build will fail.
 
-There is no test framework configured. No Jest, Vitest, or Playwright.
+### Testing
+
+**Vitest** is configured (`vitest.config.ts`, devDependency) and the suite must
+stay green. There is no Playwright/browser test runner and no component
+rendering tests — everything is **pure-function** coverage of the logic that is
+expensive to get wrong, kept next to its subject in `__tests__/`:
+
+| Area | What it pins down |
+|---|---|
+| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields |
+| `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation |
+| `lib/ocr/__tests__/` | both OCR screenshot layouts, from synthetic bounding boxes |
+| `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, sync compaction, conflict resolution |
+
+Tests that touch a parser must mock `@/lib/db` and
+`lib/utils/parsers/shared/airport-enricher` — both reach for IndexedDB at
+module scope. See `pdf-schedule-merge.test.ts` for the established stub set.
+
+Note the OCR tests build synthetic OCR boxes, so they catch a **geometry** or
+mapping regression but NOT a recognition regression. Changing OCR engine needs
+real screenshots as fixtures first.
 
 ## Project Structure
 
@@ -258,6 +280,187 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
   `registrationNormalized` dedup key). Do not reintroduce per-file copies.
 - `recalculateFlightFields()` — respects `manualOverrides`, won't overwrite user's manual entries
 
+### Report Import Pipeline (schedule + crew logbook)
+
+The company issues two PDF/CSV reports — a **Personal Crew Schedule Report**
+and a **Crew Logbook Report** — and both land through one entry point
+(`components/import/unified-import-button.tsx`). Uploading both together
+cross-hydrates them into one plan.
+
+```
+extractDocuments → parseScheduleCSV / parseLogbookV2 → crossHydrate
+  → reconcileRoster (classify)  → review modal (consent) → executeRosterImport
+```
+
+**Matching is decided globally, never row-by-row**
+(`lib/utils/roster/match-assign.ts`). Every plausible (sector, flight) pair is
+scored `tier × 10000 + |Δout| + |Δin|` and claimed cheapest-first. The tier
+keeps the precedence flight number → full route → arrival+reg → departure+reg;
+the time distance compares actual-vs-actual AND scheduled-vs-scheduled and
+takes whichever agrees better, so an unflown leg still pairs on its schedule.
+
+> Do **not** go back to "first unclaimed flight on this route". The crew
+> logbook report has **no flight-number column**, so on a day that repeats a
+> route (SIN→PEN→SIN→PEN→SIN) the answer then depends purely on the order the
+> two lists happen to be in — every leg paired with the wrong one and the
+> import proposed swapping all their times. `repeat-route-day.test.ts` pins the
+> real 12-Jul case, both list orders, and the scheduled-only variant.
+
+**Who owns which field** (`lib/utils/roster/classification.ts`):
+
+| | Fields | Behaviour |
+|---|---|---|
+| SAFE — company owns | OOOI (`outTime`/`offTime`/`onTime`/`inTime`), `scheduledOut`/`In`, `blockTime`, `flightTime`, crew names/ids, flight number, ICAO, timezones | applied without asking; the company's recorded times ARE the record of when the aircraft moved |
+| CRITICAL — the pilot's account | `pilotFlying`, `pilotRole`, day/night takeoffs + landings, IATA, reg, type, role times | consulted, and the difference is kept on the record |
+| `TRACKED_FIELDS` | `pilotFlying`, `pilotRole`, day/night TO/LDG | written as a `Discrepancy` whichever way the user decided — a licence submission is checked against these |
+
+`detectEditReasons` runs **before** classification, so anything the user
+authored (signature, remarks, manual overrides, edited-after-sync) routes to
+`edited_conflict` regardless of which bucket the field is in.
+
+**Decision memory** (`lib/utils/roster/import-decisions.ts`). `FlightLog.importDecisions`
+records both directions per field — `declined` (a report value turned down) and
+`replaced` (a user value an accepted change overwrote) — with a **90-day**
+retention window (`IMPORT_DECISION_RETENTION_MS`), pruned on every write. The
+reconciler filters a diff whose `field`+`to` matches a live `declined`, so
+re-uploading the same report stops re-asking; a *different* proposed value
+still surfaces. When a flight's only remaining differences are already-answered
+ones the reconciler emits `skip_decided` carrying `RevertOption[]`, which the
+review modal shows under "Earlier decisions".
+
+**Report tracking** (`lib/utils/roster/report-tracking.ts`). Per-source
+watermarks — `scheduleReportAt` / `logbookReportAt` — gate an older report from
+regressing newer data. A cross-hydrated import contributes two streams and is
+only skipped when BOTH are stale.
+
+**Simulator sessions** (`lib/utils/roster/sim-sessions.ts`). Sim rows are
+excluded from `sectors` and applied separately. Recognition is **structural**
+(no route, no registration — what every version has always written) rather than
+by `simSessionCode`, and matching accepts the code OR the start time, ±1 day for
+the UTC-vs-local-base shift. Rows a previous build duplicated are collapsed on
+the next import (earliest kept, rest deleted, counted in the summary).
+
+> The old `date|simSessionCode` key only recognised sims written by a build that
+> stored both fields, so a sim logged by an earlier build was invisible to the
+> check and duplicated on **every** upload.
+
+**Op kinds** (`ReconcilerOperation`): `create`, `skip_identical`,
+`skip_decided`, `skip_stale_report`, `skip_non_airline`, `update_safe`,
+`update_consult`, `update_conflict` (legacy), `edited_conflict`,
+`delete_missing`. `plan-summary.ts` owns the default-acceptance set and the
+summary counts — one definition, not a switch per call site.
+
+### Entry Type (flight vs simulator)
+
+`FlightLog.entryType: "flight" | "simulator"` — a union rather than another
+boolean so ground duties (standby, leave) can follow. Rows written before it
+exists carry only the legacy `isSimulator` flag, so **read through
+`getEntryType()`** (`lib/utils/entry-type.ts`) and **write through
+`entryTypePatch()`**, which sets both — the dashboard aggregate and the FDP
+pipeline still branch on `isSimulator`.
+
+A simulator carries its duration in `simulatedInstrumentTime`, NOT `blockTime`
+(which stays `00:00`), so it never reaches flight-hour totals;
+`entryDuration()` is what a card should display. The flight form's **Type** row
+sits above the date and moves the duration across when the type changes.
+
+### The Flight Card (`components/flight-card-body.tsx`)
+
+One visual definition of "a flight card", shared by the logbook list, the
+import review and the discrepancies page. Layout:
+
+```
+28   02:30 ──────── 4:00 hrs ──────── 06:30
+JUL  WSSS                             WICA        ← "SIMULATOR" for a sim
+26   ⧉ 9V-NCE, A21N                  TR318        ← icon only on sims
+     Lim Chin Yang                    ☀ 1D ✎
+```
+
+- An optional `diffs` map turns any covered slot into `old struck through in
+  grey` + `new in the accent colour` — that is how the import review renders.
+- Clock times honour `displayPrefs.clockSeparator`; the duration always keeps
+  its colon.
+- The out—block—in connector is `bg-current` (the same colour as the times it
+  joins) and is **hidden entirely** when there are no times — two bare rules
+  across a just-created row read as damage.
+- `showLandingChips` / `showStatusIcons` / `showPilotRole` let a consumer drop
+  parts; the signed (✎) and locked (🔒) icons are how the card says "this entry
+  is yours" — do not reintroduce a separate "replaces yours" banner.
+
+### Discrepancies as the Comparison Record
+
+`app/(app)/discrepancies/page.tsx` leads with **Comparisons**: one
+`FlightMismatchCard` per flight showing each tracked field with your value and
+the company's side by side (`OptionPair`), the held side lit. Tapping the other
+side writes it to the flight and updates the row, so this — not the review
+modal — is the single home for undoing an import decision, reachable whether
+the change was accepted or rejected at import time. One-off notes (duplicates,
+stale reports, missing sectors) sit in a second tab.
+
+`Discrepancy.holding: "logbook" | "schedule"` records which side the flight
+currently holds, independently of `resolved`.
+
+### Chrome Overlays (`components/ui/chrome-overlays.tsx`)
+
+- **`ChromeFade`** — the floating-header treatment, identical to the main and
+  detail panels in `desktop-layout.tsx`: a single background gradient (solid →
+  60% → transparent), **no `backdrop-filter`**. Anchored to a fixed 64px tail so
+  taller chrome keeps the same boundary instead of stretching the ramp until
+  content shows through the title. If you change the panel header's gradient,
+  change both.
+- **`MODAL_SCRIM`** — `bg-black/15 dark:bg-black/50`. A flat `bg-black/50` is
+  invisible over a dark app and turns the light theme (white panels, glass
+  sidebar) into grey mush. Used by every dialog overlay, the nav sidebar
+  backdrop and the date/time pickers.
+- **`RadialBlurBackdrop`** — heaviest around the dialog, clearing toward the
+  screen edges.
+
+On a **translucent** surface (the glass sidebar) a painted scrim would flatten
+the material — mask the content out instead.
+
+### Destructive Actions: Countdown, not Hold
+
+Press-and-hold is gone. Tapping a destructive action **arms** it: the row blurs
+and a pill reads `Cancel delete 9` while the action counts down (10s default),
+the border tracing the time remaining. Left alone it fires; the pill cancels it.
+
+- The timer lives in **`lib/utils/pending-actions.ts`**, at module scope, NOT in
+  the card. A virtualised list recycles rows as it scrolls, and an in-component
+  timer meant scrolling away silently cancelled the deletion — with the user
+  every reason to think it went through. `SwipeableCard` only renders the
+  remaining time and offers the cancel; a remount resumes from the stored
+  deadline.
+- Pass a **data-derived `id`** to any `SwipeableCard` that can be armed. The
+  `useId()` fallback changes on recycle and orphans the registry entry.
+- The `swipe-card-close-others` handler must close the swipe **panel only**. It
+  fires on any interaction with any other row, so clearing the pending confirm
+  there made it impossible to arm a delete and move on.
+- Tapping outside deliberately does NOT disarm.
+- `HoldToConfirmButton` / `useHoldToConfirm` still exist but nothing
+  destructive uses them.
+
+### Camera OCR (`lib/ocr/oooi-extractor.ts`)
+
+Two screenshot layouts are understood, plus a plain-text fallback. All three
+run and the **best-scoring read wins** — a crop can look like either layout, and
+`validateTimes` (OUT < OFF < ON < IN, plausible taxi/flight durations, computed
+vs reported block) scores a nonsense parse near zero.
+
+| Source | Shape | Extractor |
+|---|---|---|
+| Airbus MCDU AOC VOYAGE RPT | label row above value row, two columns | `extractFromLayout` |
+| EFB flight-record **Time Summary** | one labelled row per event, PLANNED and ACTUAL columns | `extractFromTimeSummary` |
+
+Time Summary maps Off Block / Takeoff / Landing / On Block → OUT / OFF / ON /
+IN from the ACTUAL column, plus the planned times and the `3h50m` durations.
+Two traps it handles explicitly: the yellow **delta** (`+00:05`) sits right
+next to each value and parses as a perfectly good time (tokens starting `+`/`-`
+are excluded), and the actual cell carries a **date** (`27 Jul 01:25`) that may
+arrive as one OCR box or three.
+
+The flight number is deliberately NOT read from the Time Summary header — it is
+the ICAO callsign (`TGW216`) where the logbook uses IATA (`TR216`).
+
 ### Component Architecture
 
 - Root layout is server-rendered; app content uses `"use client"`
@@ -287,16 +490,15 @@ re-renders).
   "Clear" are allowed). Destructive **delete/logout** actions are **icon-only**
   app-wide — omit `label` and set `ariaLabel` for accessibility (don't reintroduce
   visible "Delete"/"Revoke" text).
-- **Hold-to-confirm** (`holdToConfirm`): a tap does **not** fire the action.
-  Instead the panel closes and a **confirm overlay** covers the row — the content
+- **Confirm-by-countdown** (`holdToConfirm`, `holdDuration`, `cancelLabel` —
+  names kept for the call sites): a tap does **not** fire the action, it ARMS
+  it. The panel closes and a **confirm overlay** covers the row — the content
   behind is greyscaled + slightly blurred + black-tinted ("the past"), a
-  translucent pill ("Hold to confirm") sits centred, and a progress border
-  (`HoldProgressBorder`) traces the **card** from 12 o'clock clockwise as you
-  press-and-hold (2.5s default). The pill fills with a soft red left→right
-  gradient and shrinks slightly. Releasing early just **resets**; it's dismissed
-  only by tapping **outside** the card (a capture-phase `pointerdown`) or
-  swiping. Dragging is disabled while the overlay is up. There is **no** red
-  full-row fill anymore.
+  progress border (`HoldProgressBorder`) traces the **card** from 12 o'clock
+  clockwise as the time runs out, and a centred pill reads `Cancel delete 9`.
+  Left alone it fires; the pill cancels. Dragging is disabled while the overlay
+  is up. See "Destructive Actions: Countdown, not Hold" above for the timer
+  ownership rules — they are the load-bearing part.
 - **Variants:** `variant="card"` (default — standalone rounded card) and
   `variant="row"` (inline divider row inside a grouped `FormSection`). A
   swiped `row` **morphs** into a rounded, lifted card (`bg-secondary`).
@@ -369,6 +571,15 @@ re-renders).
   the height group's delay/duration) so the reveal and the growth are **one
   motion** — not the list fading in while the glass is still resizing (which read
   as two separate motions, "opens up while the glass expands down").
+- **Sidebar list** (`SidebarNav` in `components/nav-pill.tsx`) — the toggle +
+  sync strip **floats over** the nav (`pointer-events-none` on the bar, the two
+  controls re-enabled) so the list scrolls underneath it; the nav reserves the
+  strip's height as `paddingTop` and masks its content out over that band, so
+  the list dissolves under the icons. A **mask**, not a painted scrim — the
+  panel is translucent glass. The scroller is `overflow-y-scroll` with its
+  content one pixel taller (`min-h-[calc(100%+1px)]`), so even a short list has
+  somewhere to go and the rubber-band gesture is always available; without it a
+  full-but-not-overflowing nav is inert to a drag, which reads as stuck.
 - **Nav drag lens** (`PillBarContent` in `components/nav-pill.tsx`, `.PillDragLens*`
   in `globals.css`) — an iPadOS-tab-bar-style **hold-and-slide** over the pill
   tabs. A plain tap still navigates (10px slop before it activates; a
@@ -481,6 +692,25 @@ AppLayout → ScrollNavbarProvider → SidebarProvider → DetailPanelProvider
     ├── /logbook, /aircraft, /airports, /crew (lazy, persistent)
     └── children (other routes, normal unmount)
 ```
+
+### Display Preferences
+
+`DisplayPreferences` (`types/db/stores.types.ts`) drives formatting app-wide.
+Two of them are easy to conflate:
+
+- **`timeFormat`** — how a **duration** is written (`2:30` / `02:30` / 12h).
+  `formatHHMMDisplay`.
+- **`clockSeparator`** — how a **clock time** is punctuated: `02:30` vs `0230`.
+  `formatClockDisplay`.
+
+A duration always keeps its colon regardless of the setting, because `400`
+cannot be read as four hours. Anything showing a point in time (out/off/on/in,
+the sun timeline, the flight form's time rows) must go through
+`formatClockDisplay` so one setting governs the whole app.
+
+`airportIdentifier` (`icao` / `iata` / `both`) goes through
+`getAirportDisplayCode` — which needs BOTH codes populated on whatever it is
+given, or it silently falls back to the other one.
 
 ### State Management
 
@@ -675,6 +905,24 @@ worse than the current behavior. Do **not** change these casually.
    never runs on a merged overnight duty — an over-long merged duty can read as
    compliant.
 
+### OCR engine (owner is weighing a change)
+
+The offline engine is `@gutenye/ocr-browser` + ONNX (~16MB of models). The
+owner has asked about **PaddleOCR JS**, server-when-online / local-when-offline.
+Assessment on record:
+
+- The speed gap in the PaddleOCR web demo is mostly **server hardware**, not the
+  engine. Locally the cost is dominated by **model load**, and Paddle's JS
+  models are comparable in size — swapping engines does not fix that by itself.
+- Highest-value first step is **server-first routing**, which is largely already
+  built: `/api/ocr` exists and `checkServerOCRAvailability()` is wired. Route
+  online requests there, keep the local model as the offline fallback.
+- The extractors take `{text, box, confidence}` so they are engine-shaped, but
+  the digit repair (`O`→`0`, `I`→`1`) and row-grouping tolerances are tuned to
+  gutenye's output. An engine swap needs **real screenshots as fixtures** first
+  — the current OCR tests use synthetic boxes and would not catch a recognition
+  regression.
+
 ### Deferred design work (owner-approved to-do)
 
 - **Populate the split-view detail panel on non-detail routes** (layout audit
@@ -733,6 +981,7 @@ worse than the current behavior. Do **not** change these casually.
 | Table | Purpose | Key Indexes |
 |---|---|---|
 | `flights` | Flight log entries | id, date, syncStatus, aircraftReg, userId |
+| ↳ | Non-indexed additions need no migration: `entryType`, `isSimulator`, `simSessionCode`, `importDecisions`, `scheduleReportAt`, `logbookReportAt`, `toLdgDecidedAt` | |
 | `aircraft` | Aircraft records | id, registration, type, userId |
 | `personnel` | Crew members | id, name, userId, crewId |
 | `preferences` | User settings | key |
@@ -818,9 +1067,37 @@ When making changes, be aware of these high-impact files:
     CSS-transitioned (blur↔url can't interpolate — a transition only adds a
     discrete-swap delay). Do **not** keep the SVG `url(#filter)` on a resizing/
     scaling glass element.
+  - **Even face (ring path):** `.GlassBlur` spans the WHOLE face, corner to
+    corner. It used to be inset by the ring widths, leaving the perimeter a
+    shade darker than the middle — the material read as a grey slab inside a
+    darker frame instead of one even fill (iOS Control Center controls are
+    uniform edge to edge). Do not reintroduce the inset, and do not feather the
+    face outward either — that pulls the tone DOWN at the edges, which is the
+    opposite problem.
+  - **Press glow survives a scroll:** `--glass-press` is set **imperatively**
+    on pointer down/up, not through framer's `whileTap`. A native scroll inside
+    the surface (the sidebar list) steals the pointer and fires
+    `pointercancel`, which ends a tap gesture — so the glow died the instant
+    you started scrolling with your finger still on the glass. `pointercancel`
+    now only drops the bloom/pull (scaling a scrolling surface janks) and
+    `touchmove` keeps feeding the spotlight position until the real lift. The
+    fade lives on `.GlassContent::after`'s `transition`.
+
+**Report Import:**
+- `lib/utils/roster/reconciler.ts` — classification + the global match assignment
+- `lib/utils/roster/match-assign.ts` — cost-ranked pairing shared with cross-hydrate
+- `lib/utils/roster/classification.ts` — SAFE / CRITICAL / `TRACKED_FIELDS`
+- `lib/utils/roster/executor.ts` — applies a confirmed plan (flights, sims, aircraft, discrepancies)
+- `lib/utils/roster/import-decisions.ts` — decision memory + 90-day retention
+- `lib/utils/roster/report-tracking.ts` — per-source "generated on" watermarks
+- `lib/utils/roster/sim-sessions.ts` — structural simulator recognition/dedup
+- `lib/utils/parsers/cross-hydrate.ts` — merge a logbook plan with a schedule plan
+- `components/import/import-review-modal-v2.tsx` — the consent surface
+- `components/flight-card-body.tsx` — the one flight-card definition
 
 **Swipe & Forms:**
 - `components/swipeable-card.tsx` — The single swipe-to-reveal primitive (framer-motion). Used by all lists, the flight form rows, and the crew/aircraft detail rows.
+- `lib/utils/pending-actions.ts` — armed destructive actions; outlives the row that armed them.
 - `components/ui/form-section.tsx` — Shared grouped section card + header.
 - `components/ui/settings-row.tsx` — Shared `SettingsRow`/`ToggleRow`/`ReadOnlyRow` (inset divider, blended inline inputs, swipe-to-clear).
 - `hooks/use-crew-form.tsx` + `components/crew-form-body.tsx` — Shared crew form state + body (crew detail panel and `[id]` page are thin wrappers).
@@ -862,7 +1139,8 @@ When making changes, be aware of these high-impact files:
 - Do not add pages to `PERSISTENT_PAGES` in `keep-alive-pages.tsx` without considering memory impact — only heavy virtualized pages should be persistent
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
 - Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
-- Do not make a `holdToConfirm` action fire on tap, dismiss the confirm overlay on release, or bring back the red full-row fill — the overlay is dismissed only by an outside tap/swipe, release just resets, and the destructive cue is the card progress border + the pill's gradient fill
+- Do not bring back press-and-hold for destructive actions. A `holdToConfirm` action ARMS a countdown that only its own Cancel button stops — tapping outside must not disarm, and the `swipe-card-close-others` handler must close the swipe panel only (it fires on any interaction with any other row, so clearing the pending confirm there makes it impossible to arm a delete and move on)
+- Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
 - Do not keep the SVG displacement `backdrop-filter: url(#filter)` on a glass element while it resizes (morph) or scales (press bloom) — it re-rasterises every frame and janks; `GlassContainer` swaps to a cheap `blur()` via `cheapMode` (`morphing || pressed`) and restores the lens when settled. And do not CSS-transition `.GlassLens` `backdrop-filter` (blur↔url can't interpolate — it only adds a discrete-swap delay)
 - Do not rasterise the glass maps at CSS resolution — `generateGlassMaps` **supersamples to the device pixel ratio** (capped 3× and by a ~1.2M-px budget) or the thin specular rim upscales into jaggies on hi-DPI phones; keep the displacement magnitude/`displacementScale` in CSS px (resolution-independent)
@@ -874,3 +1152,17 @@ When making changes, be aware of these high-impact files:
 - Do not put row dividers as a full-width `border-b` — use the inset `.row-divider` class so the line aligns with the `px-4` text
 - Do not give inline form inputs a visible box — keep `border-0 bg-transparent dark:bg-transparent shadow-none rounded-none` so they blend with the row (and `md:text-base` so the font doesn't shrink in edit mode)
 - Do not hardcode `orange-400` for scheduled flight cards — light and dark themes use separate colors (`orange-600` light / `orange-400` dark) for contrast
+
+**Report import:**
+- Do not match an imported sector to a flight by "first unclaimed on this route" — pairing is decided globally in `match-assign.ts` with time as part of the key. The crew logbook report has no flight-number column, so on a repeated-route day the greedy version pairs every leg with the wrong one (see `repeat-route-day.test.ts`)
+- Do not reclassify the company's OOOI/scheduled/block times as CRITICAL — they are the record of when the aircraft moved and apply without asking. Conversely do not make `pilotFlying`/`pilotRole`/day-night TO-LDG safe: they are the pilot's own account, and every difference is kept as a `Discrepancy` for the licence record
+- Do not skip `detectEditReasons` before classification — it is what protects a signed/remarked/manually-overridden flight regardless of which fields changed
+- Do not dedupe simulator sessions on `date|simSessionCode` alone — recognition must stay structural (no route, no registration), or sims written by an older build duplicate on every import
+- Do not read `FlightLog.entryType` directly — go through `getEntryType()`, and write through `entryTypePatch()` so the legacy `isSimulator` flag stays in step for the dashboard and FDP pipeline
+- Do not let a simulator's duration reach `blockTime` — it belongs in `simulatedInstrumentTime`, which is what keeps sims out of flight-hour totals
+
+**Formatting & chrome:**
+- Do not format a clock time with `formatHHMMDisplay` — that is for durations (which always keep their colon). Points in time go through `formatClockDisplay` so `clockSeparator` governs them all
+- Do not use a flat `bg-black/50` for a modal overlay — use `MODAL_SCRIM`; black at 50% is invisible over a dark app and turns the light theme into grey mush
+- Do not give `ChromeFade` a `backdrop-filter` — it is the main panel's plain gradient, deliberately. And do not paint a `--background` scrim over a translucent glass surface (the sidebar) — mask the content out instead
+- Do not inset `.GlassBlur` from the face or feather it outward — the fill must be even corner to corner, and `--glass-press` must stay imperative so a scroll's `pointercancel` doesn't kill the spotlight
