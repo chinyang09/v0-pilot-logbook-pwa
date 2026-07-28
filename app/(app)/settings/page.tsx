@@ -169,13 +169,23 @@ function DisplaySection({ preferences, updateDisplay }: {
       <FormSection>
         <SelectRow<DisplayPreferences["timeFormat"]>
           label="Time Format"
-          description="How duration and block times are shown"
+          description="How durations and block times are shown"
           value={preferences.display.timeFormat}
           onValueChange={(value) => updateDisplay({ timeFormat: value })}
           options={[
             { value: "24h", label: "24h (2:30)" },
             { value: "24h-padded", label: "24h (02:30)" },
             { value: "12h", label: "12h (2:30 PM)" },
+          ]}
+        />
+        <SelectRow<DisplayPreferences["clockSeparator"]>
+          label="Clock Times"
+          description="How out/off/on/in and other clock times are punctuated. Durations always keep the colon."
+          value={preferences.display.clockSeparator}
+          onValueChange={(value) => updateDisplay({ clockSeparator: value })}
+          options={[
+            { value: "colon", label: "With colon (02:30)" },
+            { value: "none", label: "No colon (0230)" },
           ]}
         />
         <ToggleRow

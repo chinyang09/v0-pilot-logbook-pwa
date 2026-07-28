@@ -14,12 +14,12 @@
 
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { Sun, Moon, Pen, Lock, Plane, MonitorPlay } from "lucide-react";
+import { Sun, Moon, Pen, Lock, MonitorPlay } from "lucide-react";
 import type { FlightLog } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { FieldDiff } from "@/lib/utils/roster/reconciler";
 import { getDepartureDisplay, getArrivalDisplay } from "@/lib/utils/airport-display";
-import { formatHHMMDisplay } from "@/lib/utils/time";
+import { formatClockDisplay, formatHHMMDisplay } from "@/lib/utils/time";
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date";
 import { entryDuration, isSimulatorEntry } from "@/lib/utils/entry-type";
 
@@ -79,7 +79,7 @@ function Slot({
   );
 }
 
-const hhmm = (v: string) => (v.length >= 5 ? v.slice(0, 5) : v);
+
 
 /** Stored pilotFlying is a boolean string; pilots read it as PF / PM. */
 const pfLabel = (v: string) => (v === "true" ? "PF" : "PM");
@@ -117,6 +117,10 @@ export function FlightCardBody({
   showPilotRole = false,
 }: FlightCardBodyProps) {
   const d = (field: string) => diffs?.get(field);
+  // Clock times (out/in) follow the user's separator preference; the duration
+  // in the middle always keeps its colon.
+  const clock = (v: string) =>
+    formatClockDisplay(v, displayPrefs?.clockSeparator);
 
   const isLocked = flight.isLocked || false;
   const hasOut = !!flight.outTime;
@@ -204,7 +208,6 @@ export function FlightCardBody({
   const hasFlightNumber =
     Boolean(flightNumberDiff) || Boolean((flight.flightNumber || "").trim());
   const isSim = isSimulatorEntry(flight);
-  const TypeIcon = isSim ? MonitorPlay : Plane;
 
   return (
     <div
@@ -236,20 +239,17 @@ export function FlightCardBody({
                 isScheduled && hasOut && "text-foreground"
               )}
             >
-              <Slot diff={outDiff} current={displayOut} format={hhmm} />
+              <Slot diff={outDiff} current={displayOut} format={clock} />
             </span>
             <div className="flex items-center gap-1 flex-1 justify-center">
               <div
                 className={cn(
-                  "h-0.5 flex-1 rounded-full",
-                  durationInfo.scheduled
-                    ? "bg-orange-600/50 dark:bg-orange-400/40"
-                    : "bg-muted-foreground/30"
+                  "h-0.5 flex-1 rounded-full bg-current"
                 )}
               />
               <span className="text-base font-medium whitespace-nowrap px-1">
                 {blockDiff ? (
-                  <Slot diff={blockDiff} format={hhmm} />
+                  <Slot diff={blockDiff} />
                 ) : (
                   <>
                     {durationInfo.text}
@@ -259,10 +259,7 @@ export function FlightCardBody({
               </span>
               <div
                 className={cn(
-                  "h-0.5 flex-1 rounded-full",
-                  durationInfo.scheduled
-                    ? "bg-orange-600/50 dark:bg-orange-400/40"
-                    : "bg-muted-foreground/30"
+                  "h-0.5 flex-1 rounded-full bg-current"
                 )}
               />
             </div>
@@ -272,18 +269,18 @@ export function FlightCardBody({
                 isScheduled && hasIn && "text-foreground"
               )}
             >
-              <Slot diff={inDiff} current={displayIn} format={hhmm} />
+              <Slot diff={inDiff} current={displayIn} format={clock} />
             </span>
           </div>
 
-          <div className="flex items-center justify-between mt-0">
+          <div className="flex items-center justify-between -mt-0.5">
             {isSim ? (
-              <span className="text-2xl font-bold leading-tight tracking-tight">
-                Simulator
+              <span className="text-[1.65rem] font-bold leading-tight tracking-tight">
+                SIMULATOR
               </span>
             ) : (
               <>
-                <span className="text-2xl font-bold leading-tight tracking-tight">
+                <span className="text-[1.65rem] font-bold leading-tight tracking-tight">
                   <Slot
                     diff={d("departureIata")}
                     current={getDepartureDisplay(
@@ -292,7 +289,7 @@ export function FlightCardBody({
                     )}
                   />
                 </span>
-                <span className="text-2xl font-bold leading-tight tracking-tight">
+                <span className="text-[1.65rem] font-bold leading-tight tracking-tight">
                   <Slot
                     diff={d("arrivalIata")}
                     current={getArrivalDisplay(
@@ -308,7 +305,7 @@ export function FlightCardBody({
 
         <div
           className={cn(
-            "flex items-center gap-1.5 text-xs leading-tight mt-0.5",
+            "flex items-center gap-1.5 text-xs leading-tight mt-1",
             isScheduled
               ? "text-orange-600/70 dark:text-orange-400/60"
               : "text-muted-foreground"
@@ -316,7 +313,9 @@ export function FlightCardBody({
         >
           {metaParts.length > 0 && (
             <span className="inline-flex min-w-0 items-center gap-1">
-              <TypeIcon className="size-3 shrink-0" aria-hidden />
+              {/* Only the simulator carries an icon — it is the thing worth
+                  calling out. A plane on every flight row said nothing. */}
+              {isSim && <MonitorPlay className="size-3 shrink-0" aria-hidden />}
               {/* One inline run so the comma sits tight against the value it
                   follows — a gapped flex row reads "9V-NCE , A21N". Separators
                   go only BETWEEN present values, so a sector with no aircraft
@@ -333,7 +332,7 @@ export function FlightCardBody({
           )}
           {hasFlightNumber && (
             <span className="ml-auto shrink-0 pl-2">
-              Flt <Slot diff={flightNumberDiff} current={flight.flightNumber} />
+              <Slot diff={flightNumberDiff} current={flight.flightNumber} />
             </span>
           )}
         </div>

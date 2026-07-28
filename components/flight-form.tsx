@@ -50,6 +50,7 @@ import {
 } from "@/lib/utils/flight-calculations";
 import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
+  formatClockDisplay,
   formatTimeShort,
   utcToLocal,
   formatTimezoneOffset,
@@ -69,6 +70,7 @@ import {
   getEntryType,
 } from "@/lib/utils/entry-type";
 import type { EntryType } from "@/types/entities/flight.types";
+import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { ExtractedFlightData } from "@/lib/ocr";
 
 // Swipeable row — thin wrapper over the shared SwipeableCard primitive so the
@@ -146,6 +148,7 @@ function TimeRow({
   onTap,
   onNow,
   showNow = true,
+  clockSeparator = "colon",
 }: {
   label: string;
   utcValue: string;
@@ -153,6 +156,7 @@ function TimeRow({
   onTap: () => void;
   onNow?: () => void;
   showNow?: boolean;
+  clockSeparator?: DisplayPreferences["clockSeparator"];
 }) {
   const localValue = utcToLocal(utcValue, timezoneOffset);
   const tzLabel = formatTimezoneOffset(timezoneOffset);
@@ -168,7 +172,9 @@ function TimeRow({
               hasValue ? "text-foreground" : "text-muted-foreground"
             }`}
           >
-            {hasValue ? utcValue : "--:--"}
+            {hasValue
+              ? formatClockDisplay(utcValue, clockSeparator)
+              : formatClockDisplay("--:--", clockSeparator, "--:--")}
           </span>
           <span className="text-xs text-muted-foreground">UTC</span>
         </div>
@@ -192,7 +198,9 @@ function TimeRow({
                   hasValue ? "text-foreground" : "text-muted-foreground"
                 }`}
               >
-                {hasValue ? localValue : "--:--"}
+                {hasValue
+                  ? formatClockDisplay(localValue, clockSeparator)
+                  : "--:--"}
               </span>
               <span className="text-xs text-muted-foreground">{tzLabel}</span>
             </>
@@ -332,6 +340,7 @@ export function FlightForm({
   const { airports } = useAirportDatabase();
   const { personnel } = usePersonnel();
   const { preferences } = usePreferences();
+  const clockSeparator = preferences.display.clockSeparator;
   const [, setIsSubmitting] = useState(false);
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
 
@@ -1433,6 +1442,7 @@ export function FlightForm({
               timezoneOffset={depTimezone}
               onTap={() => setActiveTimePicker("scheduledOut")}
               onNow={() => setNowTime("scheduledOut")}
+            clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -1443,6 +1453,7 @@ export function FlightForm({
               timezoneOffset={arrTimezone}
               onTap={() => setActiveTimePicker("scheduledIn")}
               onNow={() => setNowTime("scheduledIn")}
+            clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -1453,6 +1464,7 @@ export function FlightForm({
               timezoneOffset={depTimezone}
               onTap={() => setActiveTimePicker("outTime")}
               onNow={() => setNowTime("outTime")}
+            clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -1463,6 +1475,7 @@ export function FlightForm({
               timezoneOffset={depTimezone}
               onTap={() => setActiveTimePicker("offTime")}
               onNow={() => setNowTime("offTime")}
+            clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -1473,6 +1486,7 @@ export function FlightForm({
               timezoneOffset={arrTimezone}
               onTap={() => setActiveTimePicker("onTime")}
               onNow={() => setNowTime("onTime")}
+            clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -1483,6 +1497,7 @@ export function FlightForm({
               timezoneOffset={arrTimezone}
               onTap={() => setActiveTimePicker("inTime")}
               onNow={() => setNowTime("inTime")}
+            clockSeparator={clockSeparator}
             />
           </SwipeableRow>
         </div>

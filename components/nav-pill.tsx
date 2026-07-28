@@ -742,9 +742,13 @@ function SidebarNav({
       </div>
       <nav
         ref={navRef}
-        className="relative z-[1] h-full overflow-y-auto overscroll-contain px-3 pb-4"
+        className="relative z-[1] h-full overflow-y-scroll overscroll-contain px-3 pb-4 scrollbar-hide"
         style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
       >
+      {/* One pixel taller than the scroller so the list always has somewhere to
+          go: a short nav would otherwise be inert to a drag, which reads as the
+          panel being stuck rather than simply full. */}
+      <div className="min-h-[calc(100%+1px)]">
       <SidebarNavItem
         href={dashboardNavItem.href}
         icon={dashboardNavItem.icon}
@@ -759,12 +763,12 @@ function SidebarNav({
               onClick={() => toggleSection(section.label)}
               className="flex items-center justify-between w-full px-3 mb-1 group cursor-pointer"
             >
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
                 {section.label}
               </span>
               <ChevronDown
                 className={cn(
-                  "h-3.5 w-3.5 text-muted-foreground/40 transition-transform duration-200",
+                  "h-4 w-4 text-muted-foreground/50 transition-transform duration-200",
                   isCollapsed && "-rotate-90"
                 )}
               />
@@ -782,6 +786,7 @@ function SidebarNav({
           </div>
         )
       })}
+      </div>
       </nav>
     </div>
   )
@@ -1084,7 +1089,7 @@ function DesktopPillMorph({
                 onClick={onToggleSidebar}
                 className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
               >
-                <PanelLeft className="h-5 w-5" />
+                <PanelLeft className="h-6 w-6" />
               </button>
               <SyncIconButton />
             </div>
@@ -1248,7 +1253,7 @@ function MobilePillMorph({
                 onClick={() => setSidebarOpen(false)}
                 className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
               >
-                <PanelLeft className="h-5 w-5" />
+                <PanelLeft className="h-6 w-6" />
               </button>
               <SyncIconButton />
             </div>

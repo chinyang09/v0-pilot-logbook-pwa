@@ -123,6 +123,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           onClick: () => onDelete(flight),
           variant: "destructive",
           holdToConfirm: true,
+          cancelLabel: "Cancel delete",
           disabled: isLocked,
         },
       ]}

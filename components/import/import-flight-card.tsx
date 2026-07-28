@@ -258,6 +258,7 @@ function DayNightFlag({
               sunriseUtc={isTakeoff ? ctx?.depSunriseUtc : ctx?.arrSunriseUtc}
               sunsetUtc={isTakeoff ? ctx?.depSunsetUtc : ctx?.arrSunsetUtc}
               zulu={displayPrefs?.useZuluTime ?? true}
+              clockSeparator={displayPrefs?.clockSeparator}
               tzOffsetHours={
                 (isTakeoff ? ctx?.depTzOffset : ctx?.arrTzOffset) ?? 0
               }

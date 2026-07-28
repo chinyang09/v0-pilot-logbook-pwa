@@ -15,6 +15,7 @@
 import { useId } from "react";
 import { PlaneTakeoff, PlaneLanding, Sunrise, Sunset } from "lucide-react";
 import { OptionPair } from "./option-pair";
+import { formatClockDisplay } from "@/lib/utils/time";
 
 function toMinutes(hhmm: string): number | null {
   const m = hhmm?.match(/^(\d{1,2}):(\d{2})/);
@@ -68,6 +69,8 @@ export interface SunTimelineProps {
   sunsetUtc?: string | null;
   /** Zulu display (adds "Z"); otherwise shifted to the airport's local clock. */
   zulu?: boolean;
+  /** Clock punctuation preference — "02:30" vs "0230". */
+  clockSeparator?: "colon" | "none";
   tzOffsetHours?: number;
   /** Rendered on the header row, opposite the title. */
   action?: React.ReactNode;
@@ -80,6 +83,7 @@ export function SunTimeline({
   sunriseUtc,
   sunsetUtc,
   zulu = true,
+  clockSeparator = "colon",
   tzOffsetHours = 0,
   action,
 }: SunTimelineProps) {
@@ -108,15 +112,16 @@ export function SunTimeline({
   // Times follow the user's display preference. The curve stays plotted in
   // UTC — shifting it would move the sun, not the labels.
   const fmt = (utc: string): string => {
-    if (zulu) return `${utc}Z`;
+    if (zulu) return `${formatClockDisplay(utc, clockSeparator)}Z`;
     const mins = toMinutes(utc);
     if (mins === null) return utc;
     const shifted =
       ((mins + Math.round(tzOffsetHours * 60)) % DAY_MINUTES + DAY_MINUTES) %
       DAY_MINUTES;
-    return `${String(Math.floor(shifted / 60)).padStart(2, "0")}:${String(
+    const local = `${String(Math.floor(shifted / 60)).padStart(2, "0")}:${String(
       shifted % 60
     ).padStart(2, "0")}`;
+    return formatClockDisplay(local, clockSeparator);
   };
 
   return (

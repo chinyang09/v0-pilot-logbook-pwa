@@ -74,6 +74,7 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
           onClick: onDelete,
           variant: "destructive",
           holdToConfirm: true,
+          cancelLabel: "Cancel delete",
         },
       ]}
     >

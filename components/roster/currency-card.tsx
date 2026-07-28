@@ -119,6 +119,7 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDel
       ariaLabel: "Delete",
       variant: "destructive",
       holdToConfirm: true,
+          cancelLabel: "Cancel delete",
       onClick: () => onDelete(currency),
     })
   }

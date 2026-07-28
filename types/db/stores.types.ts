@@ -17,6 +17,11 @@ export type ThemePreference = "light" | "dark" | "system"
 
 export interface DisplayPreferences {
   timeFormat: "24h" | "24h-padded" | "12h"
+  /**
+   * How CLOCK times are punctuated — "02:30" vs "0230". Durations always keep
+   * the colon: "4:00" has to read as four hours, not four hundred.
+   */
+  clockSeparator: "colon" | "none"
   useZuluTime: boolean
   airportIdentifier: "icao" | "iata" | "both"
   coordinateFormat: "decimal" | "dms"
@@ -62,6 +67,7 @@ export interface ImportDefaults {
 
 export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   timeFormat: "24h",
+  clockSeparator: "colon",
   useZuluTime: true,
   airportIdentifier: "icao",
   coordinateFormat: "decimal",
