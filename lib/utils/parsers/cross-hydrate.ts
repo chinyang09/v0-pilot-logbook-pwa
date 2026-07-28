@@ -9,10 +9,15 @@
  *
  * Matching key (UTC):
  *   `${date}|${depIata}|${arrIata}|${aircraftFamily}`
- * Tiebreaker: minimum |logbookOut − scheduleOut| within 90 minutes.
+ * Within a key, pairs are chosen by departure-time agreement, decided across
+ * the whole import at once (see `assignSchedule`).
  */
 
-import { hhmmToMinutes } from "@/lib/utils/time";
+import {
+  assignByCost,
+  endpointDelta,
+  type ScoredPair,
+} from "@/lib/utils/roster/match-assign";
 import { normalize } from "./shared/name-normalize";
 import {
   familyOfNormalizedType,
@@ -28,12 +33,11 @@ import type {
   ScheduledCrewMember,
 } from "@/types/entities/roster.types";
 
-// Preferred time window for disambiguating MULTIPLE same-route legs on one
-// day. It is a preference, not a hard cutoff: when only one schedule sector
-// shares a logbook sector's full key (date|dep|arr|family) we bind them even
-// if the delay exceeds this, because leaving both unmatched makes the
+// Cost charged when neither side offers a comparable departure time, so a
+// timeless pair ranks below every pair whose times actually agree but still
+// beats no pair at all — leaving both sides unmatched would make the
 // reconciler create TWO flights for one leg (the duplicate-flight bug).
-const MATCH_WINDOW_MIN = 90;
+const NO_TIME_COST = 90;
 
 function familyOf(typeCode: string): string {
   return familyOfNormalizedType(normalizeAircraftType(typeCode));
@@ -62,40 +66,58 @@ interface ScheduleSectorWithIndex {
   index: number;
 }
 
-function pickScheduleMatch(
-  log: ParsedLogbookSector,
-  pool: ScheduleSectorWithIndex[]
-): ScheduleSectorWithIndex | null {
-  if (pool.length === 0) return null;
-
-  // Single same-key candidate → it IS this leg (same date + route + family).
-  // Bind it regardless of any delay so a >90-min delay doesn't spawn a
-  // duplicate flight.
-  if (pool.length === 1) return pool[0];
-
-  const logOut = hhmmToMinutes(log.outTime || "00:00");
-  let best: ScheduleSectorWithIndex | null = null;
-  let bestDelta = Infinity;
-  let bestWithinWindow: ScheduleSectorWithIndex | null = null;
-  let bestWithinWindowDelta = Infinity;
-
-  for (const entry of pool) {
-    const sched = entry.sector;
-    const cmpRaw = sched.actualOut || sched.scheduledOut || "00:00";
-    const cmp = hhmmToMinutes(cmpRaw);
-    const delta = Math.abs(cmp - logOut);
-    if (delta < bestDelta) {
-      bestDelta = delta;
-      best = entry;
-    }
-    if (delta <= MATCH_WINDOW_MIN && delta < bestWithinWindowDelta) {
-      bestWithinWindowDelta = delta;
-      bestWithinWindow = entry;
+/**
+ * Pair logbook rows with schedule sectors globally rather than row by row.
+ *
+ * Same reasoning as the reconciler's own matcher: on a day that repeats a
+ * route, walking the logbook in order and taking the closest remaining
+ * schedule sector can strand the true pair — the first row claims a sector the
+ * second row needed. Scoring every candidate pair and claiming cheapest-first
+ * is order-independent and lands the exact-time pairs first.
+ *
+ * Returns logbook index → schedule entry.
+ */
+function assignSchedule(
+  logbookSectors: ParsedLogbookSector[],
+  scheduleIndex: Map<string, ScheduleSectorWithIndex[]>
+): Map<number, ScheduleSectorWithIndex> {
+  // Schedule entries are addressed by their position in a flat list so the
+  // shared assigner can claim each at most once.
+  const entries: ScheduleSectorWithIndex[] = [];
+  const entryPosition = new Map<number, number>();
+  for (const list of scheduleIndex.values()) {
+    for (const entry of list) {
+      entryPosition.set(entry.index, entries.length);
+      entries.push(entry);
     }
   }
-  // Prefer the closest within-window candidate when disambiguating multiple
-  // legs; otherwise fall back to the overall closest so the leg still merges.
-  return bestWithinWindow ?? best;
+
+  const pairs: ScoredPair[] = [];
+  logbookSectors.forEach((log, left) => {
+    const key = keyFor(
+      log.date,
+      log.departureIata,
+      log.arrivalIata,
+      log.aircraftType
+    );
+    for (const entry of scheduleIndex.get(key) ?? []) {
+      const right = entryPosition.get(entry.index);
+      if (right === undefined) continue;
+      const delta =
+        endpointDelta(
+          log.outTime,
+          undefined,
+          entry.sector.actualOut,
+          entry.sector.scheduledOut
+        ) ?? NO_TIME_COST;
+      pairs.push({ left, right, cost: delta });
+    }
+  });
+
+  const assignment = assignByCost(pairs);
+  const matches = new Map<number, ScheduleSectorWithIndex>();
+  for (const [left, right] of assignment) matches.set(left, entries[right]);
+  return matches;
 }
 
 function mergeCrew(
@@ -207,18 +229,16 @@ export function crossHydrate(
   const merged: ParsedSector[] = [];
   const unmatchedLogbook: ParsedLogbookSector[] = [];
 
-  for (const log of logbook.sectors) {
-    const key = keyFor(log.date, log.departureIata, log.arrivalIata, log.aircraftType);
-    const candidates = (scheduleIndex.get(key) ?? []).filter(
-      (e) => !usedScheduleIndices.has(e.index)
-    );
-    const match = pickScheduleMatch(log, candidates);
+  const scheduleMatches = assignSchedule(logbook.sectors, scheduleIndex);
+
+  logbook.sectors.forEach((log, logIndex) => {
+    const match = scheduleMatches.get(logIndex);
 
     if (!match) {
       unmatchedLogbook.push(log);
       // Promote the logbook sector (no schedule info; flightNumber/crew empty).
       merged.push(logbookSectorToParsedSector(log));
-      continue;
+      return;
     }
 
     usedScheduleIndices.add(match.index);
@@ -243,7 +263,7 @@ export function crossHydrate(
       actualIn: base.actualIn ?? sched.actualIn,
       crew: mergeCrew(log, sched.crew ?? []),
     });
-  }
+  });
 
   // Pass through unmatched schedule sectors so the reconciler still creates
   // them (future flights without a corresponding logbook entry yet).

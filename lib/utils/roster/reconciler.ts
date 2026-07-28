@@ -32,6 +32,11 @@ import { classifyChanges } from "./classification";
 import { newestStamp, type ReportSource } from "./report-tracking";
 import { reconcilePilotRole } from "./pilot-role";
 import { liveDecisions } from "./import-decisions";
+import {
+  assignByCost,
+  endpointDelta,
+  type ScoredPair,
+} from "./match-assign";
 import type { ImportDefaults } from "@/types/db/stores.types";
 
 // ============================================================
@@ -436,72 +441,112 @@ function dateInRange(
 }
 
 /**
- * Find the best match for a parsed sector in the existing flights.
+ * How strongly a sector and a flight are the same leg, ignoring time.
+ * Lower is stronger; `null` means they cannot be the same leg at all.
  *
- * Order, strongest → weakest:
- *   1. Date + flight number (when both sides have it).
- *   2. Date + departure + arrival IATA (full route).
- *   3. Date + arrival + aircraftReg — covers cases where the existing
- *      flight has a stale departure airport (e.g. XSP vs SIN); arrival is
- *      the disambiguator for a turnaround.
- *   4. Date + departure + aircraftReg — same idea for arrival drift.
+ *   0. Date + flight number (only when the report carries one — the crew
+ *      logbook report has no flight-number column at all).
+ *   1. Date + departure + arrival.
+ *   2. Date + arrival + aircraft — covers a stored flight whose departure
+ *      airport is stale (e.g. "XSP" instead of "SIN").
+ *   3. Date + departure + aircraft — same idea for arrival drift.
  *
- * Importantly, we never fall back to `date + aircraftReg` alone: a same-day
- * turnaround uses one airframe for two legs, so that match would put
- * Leg 1's data onto Leg 2's flight (the bug behind the user's "wrong leg
- * picked for amendment" report).
+ * There is deliberately no "date + aircraft" tier: a turnaround flies one
+ * airframe over several legs, so that would make every leg of the day a
+ * candidate for every other.
  */
-function findMatch(
-  sector: ParsedSector,
+function matchTier(sector: ParsedSector, flight: FlightLog): number | null {
+  if (flight.date !== sector.date) return null;
+
+  const sectorNumber = normalizeFlightNumber(sector.flightNumber || "");
+  if (
+    sectorNumber &&
+    normalizeFlightNumber(flight.flightNumber) === sectorNumber
+  ) {
+    return 0;
+  }
+
+  if (
+    sector.departureIata &&
+    sector.arrivalIata &&
+    flight.departureIata === sector.departureIata &&
+    flight.arrivalIata === sector.arrivalIata
+  ) {
+    return 1;
+  }
+
+  const reg = (sector.aircraftReg || "").toUpperCase();
+  if (reg && (flight.aircraftReg || "").toUpperCase() === reg) {
+    if (sector.arrivalIata && flight.arrivalIata === sector.arrivalIata) return 2;
+    if (sector.departureIata && flight.departureIata === sector.departureIata) {
+      return 3;
+    }
+  }
+
+  return null;
+}
+
+/** A tier is always worth more than any possible time distance (2 × 720). */
+const TIER_WEIGHT = 10_000;
+
+/**
+ * Charged per endpoint when neither side offers a comparable time. High
+ * enough that a pair whose times actually agree always wins, low enough that
+ * a timeless pair still beats no pair at all.
+ */
+const NO_TIME_PENALTY = 300;
+
+/**
+ * Pair every sector with the flight it actually is, deciding globally rather
+ * than sector by sector.
+ *
+ * Time is part of the key, not a tiebreaker applied after the fact: on a day
+ * that repeats a route, the departure and arrival times ARE what tells the
+ * legs apart, and the crew logbook report has no flight number to fall back
+ * on. Scheduled times count too, so a leg that has not flown yet still pairs
+ * with the right row.
+ *
+ * Returns sector index → flight. Sectors with no plausible flight are absent.
+ */
+function assignSectorsToFlights(
+  sectors: ParsedSector[],
   flights: FlightLog[]
-): FlightLog | undefined {
-  const csvNumeric = normalizeFlightNumber(sector.flightNumber || "");
+): Map<number, FlightLog> {
+  const pairs: ScoredPair[] = [];
 
-  if (csvNumeric) {
-    const byNumber = flights.find(
-      (f) =>
-        f.date === sector.date &&
-        normalizeFlightNumber(f.flightNumber) === csvNumeric
-    );
-    if (byNumber) return byNumber;
-  }
+  sectors.forEach((sector, left) => {
+    flights.forEach((flight, right) => {
+      const tier = matchTier(sector, flight);
+      if (tier === null) return;
 
-  const byRoute = flights.find(
-    (f) =>
-      f.date === sector.date &&
-      f.departureIata === sector.departureIata &&
-      f.arrivalIata === sector.arrivalIata
-  );
-  if (byRoute) return byRoute;
-
-  if (sector.aircraftReg) {
-    const regUpper = sector.aircraftReg.toUpperCase();
-
-    // (3) Same date + arrival + aircraft → handles legacy rows whose
-    // `departureIata` was stored wrong (e.g. "XSP" instead of "SIN").
-    if (sector.arrivalIata) {
-      const byArrAndReg = flights.find(
-        (f) =>
-          f.date === sector.date &&
-          f.arrivalIata === sector.arrivalIata &&
-          (f.aircraftReg || "").toUpperCase() === regUpper
+      const outDelta = endpointDelta(
+        sector.actualOut,
+        sector.scheduledOut,
+        flight.outTime,
+        flight.scheduledOut
       );
-      if (byArrAndReg) return byArrAndReg;
-    }
-
-    // (4) Same date + departure + aircraft → covers arrival drift.
-    if (sector.departureIata) {
-      const byDepAndReg = flights.find(
-        (f) =>
-          f.date === sector.date &&
-          f.departureIata === sector.departureIata &&
-          (f.aircraftReg || "").toUpperCase() === regUpper
+      const inDelta = endpointDelta(
+        sector.actualIn,
+        sector.scheduledIn,
+        flight.inTime,
+        flight.scheduledIn
       );
-      if (byDepAndReg) return byDepAndReg;
-    }
-  }
 
-  return undefined;
+      pairs.push({
+        left,
+        right,
+        cost:
+          tier * TIER_WEIGHT +
+          (outDelta ?? NO_TIME_PENALTY) +
+          (inDelta ?? NO_TIME_PENALTY),
+      });
+    });
+  });
+
+  const assignment = assignByCost(pairs);
+  const matches = new Map<number, FlightLog>();
+  for (const [left, right] of assignment) matches.set(left, flights[right]);
+  return matches;
 }
 
 // ============================================================
@@ -901,16 +946,16 @@ export function reconcileRoster(
   } = input;
   const todayUtc = input.todayUtc || todayUtcDate();
   const operations: ReconcilerOperation[] = [];
+
+  // Decide every pairing up front, cheapest-first across the whole import, so
+  // two same-route legs on one day bind by their times instead of by whichever
+  // list happened to be ordered which way.
+  const matches = assignSectorsToFlights(sectors, existingFlights);
   const matchedFlightIds = new Set<string>();
 
-  for (const sector of sectors) {
-    // Exclude flights already claimed by an earlier sector so two same-route
-    // legs on one day (e.g. SIN→BKK twice) each bind to a distinct flight
-    // instead of both matching — then clobbering — the first one.
-    const match = findMatch(
-      sector,
-      existingFlights.filter((f) => !matchedFlightIds.has(f.id))
-    );
+  for (let index = 0; index < sectors.length; index++) {
+    const sector = sectors[index];
+    const match = matches.get(index);
 
     if (!match) {
       operations.push({ kind: "create", sector });
