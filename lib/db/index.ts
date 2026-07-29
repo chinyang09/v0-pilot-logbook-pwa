@@ -182,6 +182,8 @@ export {
   getDiscrepancyById,
   resolveDiscrepancy,
   unresolveDiscrepancy,
+  setDiscrepancyHolding,
+  purgeExpiredAcceptedDiscrepancies,
   getAllDiscrepancies,
   getUnresolvedDiscrepancies,
   getResolvedDiscrepancies,

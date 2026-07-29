@@ -10,6 +10,7 @@ import type {
 } from "@/types/entities/roster.types"
 import { addToSyncQueue, enqueueMany, getDeviceId } from "./sync-queue.store"
 import { updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
+import { isWithinRetention } from "@/lib/utils/retention"
 
 /**
  * Add new discrepancy
@@ -86,6 +87,52 @@ export async function unresolveDiscrepancy(id: string): Promise<Discrepancy | nu
     resolvedBy: undefined,
     resolutionNotes: undefined,
   })
+}
+
+/**
+ * Take one side of a pilot-vs-company comparison.
+ *
+ * Taking the COMPANY's value starts the undo clock: the row leaves the standing
+ * comparisons and is retained for 90 days holding the pilot's original value,
+ * after which it is purged and the change can no longer be put back. Taking
+ * (or going back to) the PILOT's value clears the clock — the difference is a
+ * standing one again, and those are kept indefinitely because a licence
+ * submission is checked against them.
+ */
+export async function setDiscrepancyHolding(
+  id: string,
+  holding: "logbook" | "schedule"
+): Promise<Discrepancy | null> {
+  return updateEntity<Discrepancy>(userDb.discrepancies, "discrepancies", id, {
+    holding,
+    acceptedAt: holding === "schedule" ? Date.now() : undefined,
+  })
+}
+
+/**
+ * Drop accepted comparisons whose 90-day undo window has closed.
+ *
+ * This is the point at which the original value is really gone — the row is the
+ * only place it was kept. Rows still holding the pilot's own value are never
+ * touched: nothing was overwritten, so there is nothing to expire.
+ *
+ * Deleted through the normal path so the removal propagates to other devices
+ * rather than reappearing on the next pull. Returns how many went.
+ */
+export async function purgeExpiredAcceptedDiscrepancies(
+  now = Date.now()
+): Promise<number> {
+  const expired = await userDb.discrepancies
+    .filter(
+      (d: Discrepancy) =>
+        d.acceptedAt !== undefined && !isWithinRetention(d.acceptedAt, now)
+    )
+    .toArray()
+
+  for (const d of expired) {
+    await deleteEntity<Discrepancy>(userDb.discrepancies, "discrepancies", d.id)
+  }
+  return expired.length
 }
 
 /**
