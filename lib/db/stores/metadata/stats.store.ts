@@ -4,6 +4,7 @@
 
 import { userDb } from "../../user-db"
 import { sumHHMM } from "@/lib/utils/time"
+import { isLiveFlight } from "../user/flights.store"
 
 export interface FlightStats {
   totalFlights: number
@@ -27,7 +28,9 @@ export interface FlightStats {
  * Get flight statistics
  */
 export async function getFlightStats(): Promise<FlightStats> {
-  const flights = await userDb.flights.toArray()
+  // Deleted flights are still in the table for 90 days; they must not reach a
+  // single total on the dashboard.
+  const flights = (await userDb.flights.toArray()).filter(isLiveFlight)
 
   const totalFlights = flights.length
   const blockTime = sumHHMM(flights.map((f) => f.blockTime))

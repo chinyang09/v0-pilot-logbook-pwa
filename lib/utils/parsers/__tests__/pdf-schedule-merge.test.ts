@@ -38,6 +38,7 @@ vi.mock("@/lib/db", () => {
     userDb: {
       flights: { toArray: vi.fn(async () => []) },
     },
+    isLiveFlight: (f: { deletedAt?: number }) => f.deletedAt === undefined,
     getAirportByIata: vi.fn(async (iata: string) => airports[iata?.toUpperCase()] ?? null),
     getAllPersonnel: vi.fn(async () => []),
     getCurrentUserPersonnel: vi.fn(async () => ({

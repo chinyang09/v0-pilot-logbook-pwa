@@ -38,6 +38,13 @@ describe("isWithinRetention", () => {
     // difference, kept for as long as it stands.
     expect(isWithinRetention(undefined, T0)).toBe(false);
   });
+
+  it("treats a CLEARED timestamp the same as a missing one", () => {
+    // Restoring a flight / reverting a comparison writes null rather than
+    // undefined, because an undefined would not survive the sync push and the
+    // server's stamp would come straight back. Both mean no clock running.
+    expect(isWithinRetention(null, T0)).toBe(false);
+  });
 });
 
 describe("retentionDaysLeft", () => {

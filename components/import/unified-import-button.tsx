@@ -31,6 +31,7 @@ import {
 } from "@/lib/utils/roster/plan-summary";
 import {
   userDb,
+  isLiveFlight,
   getCurrentUserPersonnel,
   getUserPreferences,
   DEFAULT_IMPORT_DEFAULTS,
@@ -246,7 +247,10 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
 
           const allFlights = await userDb.flights.toArray();
           const flightsInRange = allFlights.filter(
-            (f) => f.date >= dateRange.start && f.date <= dateRange.end
+            (f) =>
+              isLiveFlight(f) &&
+              f.date >= dateRange.start &&
+              f.date <= dateRange.end
           );
 
           const operations = reconcileRoster({
@@ -291,6 +295,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           const allFlights = await userDb.flights.toArray();
           const flightsInRange = allFlights.filter(
             (f) =>
+              isLiveFlight(f) &&
               f.date >= logbookPlan.dateRange.start &&
               f.date <= logbookPlan.dateRange.end
           );

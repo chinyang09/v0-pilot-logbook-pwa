@@ -169,7 +169,24 @@ export interface FlightLog {
   // Timestamps
   createdAt: number
   updatedAt?: number
-  deleteddAt?: number
+  /**
+   * In the recycle bin since (epoch ms). A deleted flight is kept for 90 days
+   * (`lib/utils/retention.ts`) so it can be restored, then really deleted.
+   *
+   * Deleting is therefore an UPDATE, not a delete — which is what lets the bin
+   * work across devices: the soft delete and a later restore both ride the
+   * normal sync path, and only the final purge writes a tombstone. Nothing but
+   * the bin should ever show a flight that has this set; read lists through
+   * `getAllFlights()` (or filter with `isLiveFlight`) rather than the table.
+   *
+   * A restore writes `null`, NOT `undefined`. `/api/sync/bulk` applies an
+   * update as a `$set` of the fields the payload carries, and `JSON.stringify`
+   * drops undefined keys — so clearing the field by setting it undefined would
+   * leave the server's value in place and the next pull would put the flight
+   * straight back in the bin. `null` survives serialisation and clears it. Test
+   * with `isLiveFlight` (or `== null`) rather than `=== undefined`.
+   */
+  deletedAt?: number | null
   // Sync metadata
   syncStatus: SyncStatus
   lastSyncedAt?: number

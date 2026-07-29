@@ -22,9 +22,18 @@ export const RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Still inside the window (and therefore still reversible). */
-export function isWithinRetention(at: number | undefined, now = Date.now()): boolean {
-  if (at === undefined) return false;
+/**
+ * Still inside the window (and therefore still reversible).
+ *
+ * Accepts null as well as undefined: a stamp that has been CLEARED is written
+ * as null rather than undefined so the clear survives the sync push (see
+ * `FlightLog.deletedAt`), and both mean "no clock running".
+ */
+export function isWithinRetention(
+  at: number | null | undefined,
+  now = Date.now()
+): boolean {
+  if (at == null) return false;
   return now - at < RETENTION_MS;
 }
 

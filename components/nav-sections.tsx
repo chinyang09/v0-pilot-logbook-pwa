@@ -12,6 +12,7 @@ import {
   Clock,
   UserCircle,
   Settings,
+  Trash2,
 } from "lucide-react"
 
 export interface NavItem {
@@ -34,6 +35,7 @@ export const navSections: NavSection[] = [
       { label: "Airports", href: "/airports", icon: <MapPin className="h-4 w-4" /> },
       { label: "Crew", href: "/crew", icon: <Users className="h-4 w-4" /> },
       { label: "Currencies", href: "/currencies", icon: <Award className="h-4 w-4" /> },
+      { label: "Recycle bin", href: "/recycle-bin", icon: <Trash2 className="h-4 w-4" /> },
     ],
   },
   {

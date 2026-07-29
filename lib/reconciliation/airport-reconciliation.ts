@@ -8,7 +8,7 @@
  */
 
 import { userDb } from "@/lib/db/user-db"
-import { updateFlight } from "@/lib/db/stores/user/flights.store"
+import { updateFlight, isLiveFlight } from "@/lib/db/stores/user/flights.store"
 import { getAirportByIcao } from "@/lib/db/stores/reference/airports.store"
 import { getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
 import { recalculateFlightFields } from "@/lib/utils/flight-calculations"
@@ -39,8 +39,9 @@ export async function reconcileFlightsForAirport(
 ): Promise<number> {
   const icaoUpper = icao.toUpperCase()
 
-  // Find all flights referencing this airport
-  const allFlights = await userDb.flights.toArray()
+  // Find all flights referencing this airport. The recycle bin is skipped —
+  // enriching a flight the user deleted would only bring it back changed.
+  const allFlights = (await userDb.flights.toArray()).filter(isLiveFlight)
   const matchingFlights = allFlights.filter(
     (f) => f.departureIcao === icaoUpper || f.arrivalIcao === icaoUpper
   )

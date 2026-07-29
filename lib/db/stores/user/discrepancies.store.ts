@@ -105,7 +105,10 @@ export async function setDiscrepancyHolding(
 ): Promise<Discrepancy | null> {
   return updateEntity<Discrepancy>(userDb.discrepancies, "discrepancies", id, {
     holding,
-    acceptedAt: holding === "schedule" ? Date.now() : undefined,
+    // Explicitly null when going back to the pilot's value — an undefined would
+    // not survive the push and the server's stamp would re-file the row as
+    // accepted on the next pull. See `acceptedAt` on Discrepancy.
+    acceptedAt: holding === "schedule" ? Date.now() : null,
   })
 }
 
@@ -125,7 +128,7 @@ export async function purgeExpiredAcceptedDiscrepancies(
   const expired = await userDb.discrepancies
     .filter(
       (d: Discrepancy) =>
-        d.acceptedAt !== undefined && !isWithinRetention(d.acceptedAt, now)
+        d.acceptedAt != null && !isWithinRetention(d.acceptedAt, now)
     )
     .toArray()
 

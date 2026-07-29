@@ -29,6 +29,7 @@ import {
   addFlight,
   updateFlight,
   deleteFlight,
+  isLiveFlight,
   getAirportByIata,
   getAirportTimeInfo,
   getCurrentUserPersonnel,
@@ -485,7 +486,10 @@ async function applySimSessions(
   let existingSims: FlightLog[] = [];
   try {
     const allFlights = await userDb.flights.toArray();
-    existingSims = allFlights.filter(looksLikeSimulator);
+    // A binned sim is not one to match against or dedupe into.
+    existingSims = allFlights.filter(
+      (f) => isLiveFlight(f) && looksLikeSimulator(f)
+    );
   } catch {
     // Can't read what's there — fall through and create (rare).
   }

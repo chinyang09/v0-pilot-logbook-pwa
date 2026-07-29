@@ -48,10 +48,11 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 
 | Area | What it pins down |
 |---|---|
-| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields |
+| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts, from synthetic bounding boxes |
-| `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, sync compaction, conflict resolution |
+| `lib/glass/__tests__/` | the rim-only raster scan, byte-for-byte against a full scan |
+| `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution |
 
 Tests that touch a parser must mock `@/lib/db` and
 `lib/utils/parsers/shared/airport-enricher` — both reach for IndexedDB at
@@ -89,9 +90,9 @@ app/                              # Next.js App Router
     ├── crew/                     #   Personnel management
     ├── roster/                   #   Schedule management
     ├── currencies/               #   Certificate tracking
-    ├── discrepancies/            #   Schedule conflicts
-    ├── fdp/                      #   Flight Duty Period tracking
-    └── data/                     #   Data management
+    ├── discrepancies/            #   Pilot-vs-company comparisons + import notes
+    ├── recycle-bin/              #   Deleted flights, restorable for 90 days
+    └── fdp/                      #   Flight Duty Period tracking
 
 components/                       # React components
 ├── ui/                           # shadcn/ui base components
@@ -398,7 +399,55 @@ the change was accepted or rejected at import time. One-off notes (duplicates,
 stale reports, missing sectors) sit in a second tab.
 
 `Discrepancy.holding: "logbook" | "schedule"` records which side the flight
-currently holds, independently of `resolved`.
+currently holds, independently of `resolved`. Tabs split on it:
+
+| Tab | Rows | Retained |
+|---|---|---|
+| **Comparisons** | `holding: "logbook"` — a standing difference | forever; it IS the licence record |
+| **Accepted** | `holding: "schedule"` — the pilot conceded | 90 days, then purged |
+
+Taking the company's value stamps `acceptedAt` and starts the undo window;
+taking your own back clears it. Accepting at IMPORT time stamps it too — same
+act, same clock — and a re-import keeps the original stamp rather than
+restarting it. The card shows the days left, because when
+`purgeExpiredAcceptedDiscrepancies()` takes the row the pilot's original value
+goes with it. `tracked-mismatch.test.ts` pins the stamp both ways round: on the
+wrong row, the sweep eventually deletes a difference the pilot never conceded.
+
+### The 90-Day Undo Window (`lib/utils/retention.ts`)
+
+`RETENTION_MS` is defined **once** and shared by everything reversible-for-a-
+while: import decisions, accepted comparisons, and the flight recycle bin.
+Roughly three company report cycles — long enough to catch a mistake in a
+quarterly review, short enough that what's retained stays a handful of rows.
+
+**Clearing a retention stamp writes `null`, never `undefined`.**
+`/api/sync/bulk` applies an update as a `$set` of the payload's keys and
+`JSON.stringify` drops undefined ones, so `undefined` leaves the server's stamp
+in place and the next pull undoes the undo — a restored flight drops straight
+back in the bin. `isWithinRetention` and `isLiveFlight` therefore test `== null`.
+
+### Recycle Bin (deleted flights)
+
+`deleteFlight()` is a **soft delete**: it sets `FlightLog.deletedAt` and pushes
+an **update**. That is what makes the bin work across devices — binning and
+restoring both ride the ordinary sync path, and only
+`purgeExpiredDeletedFlights()` (at 90 days) writes a tombstone.
+`app/(app)/recycle-bin/page.tsx` sweeps on load, then lists what's left with the
+days remaining; `permanentlyDeleteFlight()` is the explicit "now, not in three
+months".
+
+The cost is that `userDb.flights` now holds rows nothing should show. Read lists
+through `getAllFlights()`, or filter with **`isLiveFlight`** when reading the
+table directly — the totals (`stats.store`), both reconciliations, the schedule
+parser and the import button all do. A binned flight reaching an import match
+would silently update, and so resurrect, a flight the user deleted.
+
+`normalizeFlightFromServer` **spreads the server record first** and applies
+defaults over it. Building it from an explicit field list quietly dropped every
+field added since it was written (`entryType`/`isSimulator` — a simulator came
+back from a second device as an ordinary flight — the import decisions, the
+report watermarks). Do not go back to an allowlist.
 
 ### Chrome Overlays (`components/ui/chrome-overlays.tsx`)
 
@@ -956,6 +1005,21 @@ Assessment on record:
   explicit time-frame header and is normalized via `time-reference-normalizer`.
   (An earlier audit guessed these were local station times; that was a false
   positive.)
+- **A sync push can add or change a field, but not REMOVE one** — `/api/sync/bulk`
+  applies an update as `$set: {...payload}`, and `JSON.stringify` drops keys
+  whose value is `undefined`, so a field the client cleared keeps its old value
+  on the server and comes back on the next pull. Worked around per-field with a
+  `null` sentinel (`FlightLog.deletedAt`, `Discrepancy.acceptedAt`), which is why
+  those test `== null`. **`unresolveDiscrepancy` still has the un-fixed form** —
+  it clears `resolvedAt`/`resolvedBy`/`resolutionNotes` with `undefined`, so a
+  reopened note keeps its resolution metadata server-side (harmless today: the
+  page keys off `resolved`, which is a real `false`).
+  The general fix is for the server to `$unset` the keys the payload omits — the
+  existing document is already in hand as `existingMap`, and both enqueue sites
+  send a COMPLETE entity, so replacement semantics are correct. Deferred because
+  a device running an older build sends the field set that build knows about: if
+  it pushes an edit before updating, `$unset` would wipe fields a newer device
+  had set. Needs a rollout story (and a real Mongo integration test) first.
 - **Service worker** (`public/sw.js`) — two items needing offline testing
   before any change (a bad SW is hard to roll back): (1) `install` calls
   `self.skipWaiting()` unconditionally while the registration
@@ -981,7 +1045,7 @@ Assessment on record:
 | Table | Purpose | Key Indexes |
 |---|---|---|
 | `flights` | Flight log entries | id, date, syncStatus, aircraftReg, userId |
-| ↳ | Non-indexed additions need no migration: `entryType`, `isSimulator`, `simSessionCode`, `importDecisions`, `scheduleReportAt`, `logbookReportAt`, `toLdgDecidedAt` | |
+| ↳ | Non-indexed additions need no migration: `entryType`, `isSimulator`, `simSessionCode`, `importDecisions`, `scheduleReportAt`, `logbookReportAt`, `toLdgDecidedAt`, `deletedAt` (recycle bin) | |
 | `aircraft` | Aircraft records | id, registration, type, userId |
 | `personnel` | Crew members | id, name, userId, crewId |
 | `preferences` | User settings | key |
@@ -990,7 +1054,7 @@ Assessment on record:
 | `userSession` | Local session mirror | id |
 | `scheduleEntries` | Roster schedule | id, date, dutyType |
 | `currencies` | Certificate tracking | id, code, expiryDate, syncStatus |
-| `discrepancies` | Schedule conflicts | id, type, resolved |
+| `discrepancies` | Comparisons + import notes (`holding`, `acceptedAt`) | id, type, resolved |
 
 ### Reference Database (Dexie — `referenceDb`)
 
@@ -1067,6 +1131,29 @@ When making changes, be aware of these high-impact files:
     CSS-transitioned (blur↔url can't interpolate — a transition only adds a
     discrete-swap delay). Do **not** keep the SVG `url(#filter)` on a resizing/
     scaling glass element.
+
+    The stand-in mirrors the filter chain term for term — `blur(3px)` because
+    CSS `blur(Npx)` **is** `feGaussianBlur stdDeviation N` and the filter uses
+    3, plus `saturate(1.5)` for its `feColorMatrix`. It was 6px, which made the
+    material visibly change *weight* at the swap rather than just gain a rim.
+  - **Never paint a map built for another shape (the ~1s Android settle):** the
+    maps are tagged with the `cornerRadius` they were built for, and `cheapMode`
+    stays on while they don't match (`awaitingMaps`). The morph flips the radius
+    28→20 the instant it starts, so without this the settle re-enabled the lens
+    with the PILL's map stretched over the open sidebar — wrong refraction edge
+    to edge, which is why the sidebar looked unlike every other glass panel.
+  - **Generation is debounced, cached, and skipped mid-morph.**
+    `generateGlassMaps` memoises by geometry (small LRU): the nav lands on the
+    same two sizes every time, so a cycle costs ~120ms once and ~0ms after.
+    Nothing is generated while `morphing` (moving target, lens off anyway), and
+    the whole effect is driven off the `ResizeObserver` — its first callback
+    covers the initial build — so the expensive call is never in an effect body.
+  - **`buildGlassRasters` scans only the rim.** Both maps are neutral everywhere
+    else, so a tall surface was spending its whole budget rewriting the fill.
+    `lib/glass/__tests__/displacement.test.ts` pins the fast scan **byte for
+    byte** against `scanEveryPixel`, including where the bands degenerate
+    (radius ≥ half the side, bezel wider than the radius, a 3px-wide element) —
+    a missed band is a seam that only shows on one device at one size.
   - **Even face (ring path):** `.GlassBlur` spans the WHOLE face, corner to
     corner. It used to be inset by the ring widths, leaving the perimeter a
     shade darker than the middle — the material read as a grey slab inside a
@@ -1088,12 +1175,14 @@ When making changes, be aware of these high-impact files:
 - `lib/utils/roster/match-assign.ts` — cost-ranked pairing shared with cross-hydrate
 - `lib/utils/roster/classification.ts` — SAFE / CRITICAL / `TRACKED_FIELDS`
 - `lib/utils/roster/executor.ts` — applies a confirmed plan (flights, sims, aircraft, discrepancies)
-- `lib/utils/roster/import-decisions.ts` — decision memory + 90-day retention
+- `lib/utils/roster/import-decisions.ts` — decision memory, on the shared window
 - `lib/utils/roster/report-tracking.ts` — per-source "generated on" watermarks
 - `lib/utils/roster/sim-sessions.ts` — structural simulator recognition/dedup
 - `lib/utils/parsers/cross-hydrate.ts` — merge a logbook plan with a schedule plan
 - `components/import/import-review-modal-v2.tsx` — the consent surface
 - `components/flight-card-body.tsx` — the one flight-card definition
+- `lib/utils/retention.ts` — the single 90-day undo window (decisions, accepted comparisons, recycle bin)
+- `lib/db/stores/user/flights.store.ts` — soft delete / restore / purge + `isLiveFlight`
 
 **Swipe & Forms:**
 - `components/swipeable-card.tsx` — The single swipe-to-reveal primitive (framer-motion). Used by all lists, the flight form rows, and the crew/aircraft detail rows.
@@ -1144,6 +1233,11 @@ When making changes, be aware of these high-impact files:
 - Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
 - Do not keep the SVG displacement `backdrop-filter: url(#filter)` on a glass element while it resizes (morph) or scales (press bloom) — it re-rasterises every frame and janks; `GlassContainer` swaps to a cheap `blur()` via `cheapMode` (`morphing || pressed`) and restores the lens when settled. And do not CSS-transition `.GlassLens` `backdrop-filter` (blur↔url can't interpolate — it only adds a discrete-swap delay)
 - Do not rasterise the glass maps at CSS resolution — `generateGlassMaps` **supersamples to the device pixel ratio** (capped 3× and by a ~1.2M-px budget) or the thin specular rim upscales into jaggies on hi-DPI phones; keep the displacement magnitude/`displacementScale` in CSS px (resolution-independent)
+- Do not paint the lens with maps built for a different shape, and do not generate maps while `morphing` — that pair is what made the Android sidebar take ~1s to look right (the pill's map stretched over the open sidebar, then a full regenerate blocking the main thread after a 150ms debounce). Keep the radius tag + `awaitingMaps` gate, keep the memoisation by geometry, keep the build driven off the ResizeObserver rather than an effect body, and keep the rim-only raster scan (pinned byte-for-byte in `displacement.test.ts`)
+- Do not delete a flight outright — `deleteFlight` is a **soft delete** into the 90-day recycle bin and pushes an UPDATE; only `purgeExpiredDeletedFlights` writes a tombstone. Push a delete when the user merely binned it and the flight is gone on every device with nothing to restore
+- Do not read `userDb.flights` for a list, a total or an import match without `isLiveFlight` — a binned flight reaching the reconciler silently updates, and so resurrects, a flight the user deleted
+- Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
+- Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
 - Do not put the drag-lens (`.PillDragLens`) release settle back on a bouncy geometry spring — position eases in with **no overshoot** (never springs left/right); the "spring to shape" is the underdamped `SQUISH_SPRING` squash-and-stretch (drop-splat). Keep it clamped to the tab strip (edge overshoot → the liquid bounce), keep the transform imperative (constant className so drag re-renders can't strip it), and keep the handoff timer longer than the springy rebound (or the last wobble is cut)
 - Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`

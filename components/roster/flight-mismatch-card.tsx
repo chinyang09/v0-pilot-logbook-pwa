@@ -108,7 +108,7 @@ export function FlightMismatchCard({
   const acceptedAt = useMemo(() => {
     const stamps = rows
       .map((r) => r.acceptedAt)
-      .filter((v): v is number => v !== undefined);
+      .filter((v): v is number => v != null);
     return stamps.length ? Math.min(...stamps) : undefined;
   }, [rows]);
   const holdsOwn = rows.some((r) => r.holding === "logbook");
@@ -166,7 +166,7 @@ export function FlightMismatchCard({
             ? "Your entry is on record; the company's figure is kept alongside it."
             : "The company's figure is on record. Tap yours to put it back."}
         </p>
-        {!holdsOwn && acceptedAt !== undefined && (
+        {!holdsOwn && acceptedAt != null && (
           <span
             className={cn(
               "shrink-0 tabular-nums",

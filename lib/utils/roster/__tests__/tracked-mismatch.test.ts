@@ -21,6 +21,7 @@ import { describe, it, expect, vi } from "vitest";
 // below actually reaches them.
 vi.mock("@/lib/db", () => ({
   userDb: { flights: {}, discrepancies: {} },
+  isLiveFlight: (f: { deletedAt?: number }) => f.deletedAt === undefined,
   addFlight: vi.fn(),
   updateFlight: vi.fn(),
   deleteFlight: vi.fn(),

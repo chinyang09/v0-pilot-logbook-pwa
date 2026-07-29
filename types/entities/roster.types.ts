@@ -343,8 +343,14 @@ export interface Discrepancy {
    * standing difference to defend, only a change to keep undoable for a while
    * — and once the window closes the row is purged, so the original value is
    * genuinely gone.
+   *
+   * Switching back writes `null`, NOT `undefined`: `/api/sync/bulk` applies an
+   * update as a `$set` of the payload's fields and `JSON.stringify` drops
+   * undefined keys, so an undefined would leave the server's stamp in place and
+   * the next pull would re-file the row as accepted — and eventually purge a
+   * comparison the pilot never conceded. Test with `== null`.
    */
-  acceptedAt?: number
+  acceptedAt?: number | null
 
   // Resolution
   resolved: boolean

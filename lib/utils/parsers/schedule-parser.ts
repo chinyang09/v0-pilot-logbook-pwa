@@ -29,6 +29,7 @@ import type { Personnel } from "@/types/entities/crew.types";
 import type { FlightLog } from "@/types/entities/flight.types";
 import {
   userDb,
+  isLiveFlight,
   getAirportByIata,
   getAirportTimeInfo,
   getAllPersonnel,
@@ -967,8 +968,12 @@ export async function parseScheduleCSV(
     const rangeStart = header.dateRange.start;
     const rangeEnd = header.dateRange.end;
     const allFlights = await userDb.flights.toArray();
+    // Flights in the recycle bin are not "existing" as far as a report is
+    // concerned — matching one would silently update, and so resurrect, a
+    // flight the user deleted.
     const flightsInRange = allFlights.filter(
-      (f: FlightLog) => f.date >= rangeStart && f.date <= rangeEnd
+      (f: FlightLog) =>
+        isLiveFlight(f) && f.date >= rangeStart && f.date <= rangeEnd
     );
 
     const operations = reconcileRoster({
