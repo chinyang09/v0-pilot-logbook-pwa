@@ -40,6 +40,8 @@ interface GlassContainerProps {
 
 /** Spring for press bloom / drag-follow — snappy with a soft settle. */
 const PRESS_SPRING = { stiffness: 420, damping: 26, mass: 0.6 }
+/** Coalesce a run of resizes into one regenerate. */
+const RESIZE_DEBOUNCE_MS = 90
 /** Bloom scale while pressed (Apple controls grow, they don't compress). */
 const BLOOM = 1.045
 /** How much of the finger's offset from centre the glass follows — kept LOW:
@@ -80,16 +82,29 @@ export function GlassContainer({
 }: GlassContainerProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const filterId = useId().replace(/[^a-zA-Z0-9_-]/g, "") + "-lens"
-  const [maps, setMaps] = useState<GlassMaps | null>(null)
+  // Tagged with the radius they were built for: when the prop moves ahead of
+  // the tag the maps describe a different shape (the pill's 28 vs the
+  // sidebar's 20) and must not be painted — see `awaitingMaps` below.
+  const [built, setBuilt] = useState<{ maps: GlassMaps; radius: number } | null>(null)
+  const maps = built?.maps ?? null
   // True while the slab is animating its geometry (morph) or scale (press
   // bloom). An SVG-displacement backdrop-filter re-rasterises every frame that
   // the element resizes/scales — the jank source — so while animating we drop
   // it for a cheap plain blur and restore the lens once it settles.
   const [pressed, setPressed] = useState(false)
+  // True from the moment a new size is known until its maps are built. The maps
+  // already on screen belong to the OLD size, and the feImage stretches them
+  // (preserveAspectRatio="none") — a pill-sized map smeared over the open
+  // sidebar refracts wrongly across the whole surface, which is what made the
+  // Android sidebar look unlike every other glass panel for the first second.
+  // Painting the cheap blur until the real map lands keeps the material
+  // continuous with the morph instead.
+  const [rebuilding, setRebuilding] = useState(false)
+  const awaitingMaps = rebuilding || (built !== null && built.radius !== cornerRadius)
   const reduceMotion = useReducedMotion()
   const interactive = !disableTapFeedback && !reduceMotion
   const spotlightOn = (spotlight ?? !disableTapFeedback) && !reduceMotion
-  const cheapMode = !!morphing || (pressed && interactive)
+  const cheapMode = !!morphing || awaitingMaps || (pressed && interactive)
 
   // Press-follow springs: translate toward the held finger + bloom/stretch.
   const tx = useMotionValue(0)
@@ -201,31 +216,54 @@ export function GlassContainer({
   }
 
   // Chromium only: (re)generate the refraction maps for the current size.
-  // Debounced so morphs/resizes regenerate once at settle — mid-flight the
-  // feImage stretches with the element (preserveAspectRatio="none"), which is
-  // visually acceptable for ~350ms.
+  //
+  // Everything here is driven off the ResizeObserver — including the first
+  // build, since observing fires once with the current size. That keeps the
+  // (expensive) generate out of the effect body, so it never blocks a commit
+  // and never sets state synchronously during one.
+  //
+  // Nothing is generated while `morphing`: the size is a moving target, the
+  // lens is off for the duration anyway (cheapMode), and building a map per
+  // resize tick is main-thread work landing right on top of the animation. The
+  // effect re-runs when the morph clears and builds once, at the final size.
   useEffect(() => {
     if (!supportsSvgBackdropFilter()) return
     const el = rootRef.current
     if (!el) return
     let timer: ReturnType<typeof setTimeout> | null = null
+    let first = true
+
     const regenerate = () => {
+      timer = null
+      setRebuilding(false)
       const w = el.offsetWidth
       const h = el.offsetHeight
       if (w < 8 || h < 8) return
-      setMaps(generateGlassMaps({ width: w, height: h, radius: cornerRadius }))
+      setBuilt({
+        maps: generateGlassMaps({ width: w, height: h, radius: cornerRadius }),
+        radius: cornerRadius,
+      })
     }
-    regenerate()
-    const ro = new ResizeObserver(() => {
+
+    const schedule = (delay: number) => {
       if (timer) clearTimeout(timer)
-      timer = setTimeout(regenerate, 150)
+      setRebuilding(true)
+      timer = setTimeout(regenerate, delay)
+    }
+
+    const ro = new ResizeObserver(() => {
+      if (morphing) return
+      // The observer's own first callback is this element settling into its
+      // size — build immediately. Later ones are a real resize, so coalesce.
+      schedule(first ? 0 : RESIZE_DEBOUNCE_MS)
+      first = false
     })
     ro.observe(el)
     return () => {
       ro.disconnect()
       if (timer) clearTimeout(timer)
     }
-  }, [cornerRadius])
+  }, [cornerRadius, morphing])
 
   const lensActive = maps !== null
 
@@ -271,16 +309,22 @@ export function GlassContainer({
 
       {lensActive ? (
         <>
-          {/* While animating (morph or press bloom) the SVG displacement is
-              dropped for a cheap plain blur — the lens would otherwise
-              re-rasterise every frame the element resizes/scales (the jank).
-              The blur radius ≈ the SVG's internal feGaussianBlur so the glass
-              keeps the same weight; the refraction rim returns once settled. */}
+          {/* While animating (morph or press bloom), or until the maps for the
+              current size exist, the SVG displacement is dropped for a cheap
+              plain blur — the lens would otherwise re-rasterise every frame the
+              element resizes/scales (the jank), or paint a map built for a
+              different shape.
+
+              The stand-in mirrors the filter chain term for term so the swap is
+              only the refraction appearing, not the material changing weight:
+              CSS blur(Npx) IS feGaussianBlur stdDeviation N, so 3px matches the
+              filter's own blur, saturate(1.5) matches its feColorMatrix, and the
+              slight brightness stands in for the specular screen. */}
           <div
             className="GlassLens"
             style={{
               backdropFilter: cheapMode
-                ? `blur(6px) saturate(1.5) brightness(1.05)`
+                ? `blur(3px) saturate(1.5) brightness(1.05)`
                 : `url(#${filterId}) blur(0px) brightness(1) saturate(1)`,
             }}
           />
