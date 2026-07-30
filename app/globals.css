@@ -500,7 +500,20 @@ textarea:focus-within {
     rgba(255, 255, 255, 0.22) 300deg,
     rgba(255, 255, 255, 0.65) 360deg
   );
-  --glass-veil: transparent;
+  /* A backdrop-filter can do NOTHING over pure black: blurring black gives
+     black, saturating it gives black, and brightness is multiplicative — 1.25
+     x 0 is still 0. So over an empty dark screen the slab had no face at all
+     and only its rim showed. This veil is the painted, additive part of the
+     material, and it is what iOS Control Center leans on over a dark
+     wallpaper too.
+
+     Warm off-white rather than plain white, and 10% rather than more: over
+     black it lifts the face from +16 to +40 luminance above the background,
+     while over a flight card it costs essentially none of the colour the
+     glass picks up (warmth 37 vs 38 with no veil). Plain white at the same
+     presence (12%) drops that to 34 and the material starts reading grey
+     again — the exact thing the single-filter fix was for. */
+  --glass-veil: rgba(255, 244, 232, 0.10);
   --glass-shadow:
     inset 0 -1px 1px rgba(0, 0, 0, 0.10),
     0 2px 6px rgba(0, 0, 0, 0.10),
@@ -591,8 +604,10 @@ textarea:focus-within {
   z-index: 3;
   overflow: hidden;
   border-radius: var(--corner-radius);
-  /* Light theme: a faint warm veil that separates the slab from the cream
-     background (dark themes keep it transparent). */
+  /* The material's PAINTED component — the part that does not come from the
+     backdrop. Both themes need it, for opposite reasons: light so the slab
+     separates from cream, dark so it has a face at all over black (a
+     backdrop-filter has nothing to work with there). See `--glass-veil`. */
   background-color: var(--glass-veil, transparent);
   transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
