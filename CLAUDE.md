@@ -51,7 +51,6 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts, from synthetic bounding boxes |
-| `lib/glass/__tests__/` | the rim-only raster scan, byte-for-byte against a full scan |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution |
 
 Tests that touch a parser must mock `@/lib/db` and
@@ -670,13 +669,12 @@ re-renders).
     over narrow tabs) that **overhangs** the pill top/bottom (`LENS_OVERHANG`).
     **Clamped** to the first/last tab centres so it never leaves the tab strip;
     finger travel *past* an end tab becomes `overshoot`.
-  - **Refraction:** on Chromium a real Snell's-law displacement map (from
-    `lib/glass/displacement`, wide bezel / deep glass / `refractionScale` ~2.4)
-    so the pill visibly **minifies** through the lens; regenerated per tab so the
-    `feImage` px stays aligned. Safari (no SVG backdrop-filter) uses the
-    `.PillDragLens-glass` convex CSS material (inner thickness vignette fakes the
-    pinch). A chromatic-dispersion `.PillDragLens-rim` adds the liquid fringe on
-    both paths.
+  - **Material:** `.PillDragLens-glass` on every platform — layered shadows for
+    the convex bulge plus an inner thickness vignette that fakes the pinch, and
+    a chromatic-dispersion `.PillDragLens-rim` for the liquid fringe. The
+    Chromium-only real-refraction layer went with the rest of the SVG glass: it
+    rebuilt and PNG-encoded a displacement map every time the finger crossed to
+    another tab, which is main-thread work in the middle of a gesture.
   - **Liquid edge bounce:** `overshoot` past an end tab compresses the lens into
     the wall (`squishX`↓ `squishY`↑) and strains it toward the finger (`nudgeX`)
     via **very underdamped** framer `useSpring`s (`SQUISH_SPRING`); leaving the
@@ -1134,63 +1132,37 @@ When making changes, be aware of these high-impact files:
 - `components/desktop-layout.tsx` — Responsive app shell (sidebar + detail panel)
 
 **Glass system:**
-- `components/ui/glass-container.tsx` + `lib/glass/displacement.ts` — the glass
-  surface has TWO rendering paths: **lens** (Chromium only — a per-element
-  Snell's-law displacement map + computed rim specular applied via
-  `backdrop-filter: url(#filter)`, adapted from winaviation/liquid-web, MIT)
-  and **rings** (Safari/Firefox — the layered backdrop-filter stack in
-  `globals.css`, with the specular approximated by a conic-gradient rim).
-  Safari is the primary iPad PWA target and does NOT support SVG filters in
-  backdrop-filter — never remove the ring fallback, and never gate the ring
-  path behind the lens detection being merely "not yet ready" (lens maps
-  generate async client-side; rings render first).
-  - **Smooth specular (hi-DPI / Android):** `generateGlassMaps` **supersamples
-    the raster to the device pixel ratio** (capped 3×, and further capped by a
-    ~1.2M-px budget so a large surface like the sidebar doesn't allocate a huge
-    map / hitch on regen). Without it the sub-2px specular rim upscaled ~3× on a
-    phone and read as **jaggies**. A ~0.5px `feGaussianBlur` on the specular
-    (shared filter + the drag lens) softens it into a glow, not a hard line. The
-    displacement magnitude / `displacementScale` stay in **CSS px** (resolution-
-    independent), so supersampling changes only sharpness, not refraction.
-  - **No SVG lens while animating (jank fix):** an SVG-displacement
-    `backdrop-filter` **re-rasterises every frame** the element resizes (morph)
-    or scales (press bloom) — the on-device jank source. `GlassContainer` drops
-    the lens for a **cheap plain `blur()`** whenever `morphing` **or** an
-    interactive `pressed` bloom is active (`cheapMode`), and restores the
-    refraction rim once settled. The `.GlassLens` `backdrop-filter` is **not**
-    CSS-transitioned (blur↔url can't interpolate — a transition only adds a
-    discrete-swap delay). Do **not** keep the SVG `url(#filter)` on a resizing/
-    scaling glass element.
+- `components/ui/glass-container.tsx` — ONE material on every platform: the
+  layered ring stack in `globals.css` (blur + edge reflections + a
+  conic-gradient specular rim). iOS and Android render the same thing.
 
-    The stand-in mirrors the filter chain term for term — `blur(3px)` because
-    CSS `blur(Npx)` **is** `feGaussianBlur stdDeviation N` and the filter uses
-    3, plus `saturate(1.5)` for its `feColorMatrix`. It was 6px, which made the
-    material visibly change *weight* at the swap rather than just gain a rim.
-  - **Never paint a map built for another shape (the ~1s Android settle):** the
-    maps are tagged with the `cornerRadius` they were built for, and `cheapMode`
-    stays on while they don't match (`awaitingMaps`). The morph flips the radius
-    28→20 the instant it starts, so without this the settle re-enabled the lens
-    with the PILL's map stretched over the open sidebar — wrong refraction edge
-    to edge, which is why the sidebar looked unlike every other glass panel.
-  - **Generation is debounced, cached, and skipped mid-morph.**
-    `generateGlassMaps` memoises by geometry (small LRU): the nav lands on the
-    same two sizes every time, so a cycle costs ~120ms once and ~0ms after.
-    Nothing is generated while `morphing` (moving target, lens off anyway), and
-    the whole effect is driven off the `ResizeObserver` — its first callback
-    covers the initial build — so the expensive call is never in an effect body.
-  - **`buildGlassRasters` scans only the rim.** Both maps are neutral everywhere
-    else, so a tall surface was spending its whole budget rewriting the fill.
-    `lib/glass/__tests__/displacement.test.ts` pins the fast scan **byte for
-    byte** against `scanEveryPixel`, including where the bands degenerate
-    (radius ≥ half the side, bezel wider than the radius, a 3px-wide element) —
-    a missed band is a seam that only shows on one device at one size.
-  - **Even face (ring path):** `.GlassBlur` spans the WHOLE face, corner to
-    corner. It used to be inset by the ring widths, leaving the perimeter a
-    shade darker than the middle — the material read as a grey slab inside a
-    darker frame instead of one even fill (iOS Control Center controls are
-    uniform edge to edge). Do not reintroduce the inset, and do not feather the
-    face outward either — that pulls the tone DOWN at the edges, which is the
-    opposite problem.
+  There used to be a second, Chromium-only **lens** path — a per-element
+  Snell's-law displacement map + computed rim specular applied through
+  `backdrop-filter: url(#filter)` (`lib/glass/displacement.ts`, adapted from
+  winaviation/liquid-web, MIT). It is **removed**, deliberately, because it
+  made the PWA feel slow rather than crisp:
+  - an SVG backdrop-filter **re-rasterises every frame** the element resizes or
+    scales, so every morph and every press had to swap the lens out for a plain
+    blur and back;
+  - each surface rastered and PNG-encoded a pair of up-to-megapixel maps on the
+    main thread, which needed a geometry cache, a debounce, a radius tag and a
+    cheap stand-in to cover the gap;
+  - and it only ran on Chromium, so a phone and an iPad showed different
+    materials.
+
+  That is a lot of machinery whose whole output is a rim. **Do not reintroduce
+  a platform-conditional material.** If the rim needs more presence, change the
+  ring stack — every device gets it.
+  - **Even face:** `.GlassBlur` spans the WHOLE face, corner to corner. It used
+    to be inset by the ring widths, leaving the perimeter a shade darker than
+    the middle — the material read as a grey slab inside a darker frame instead
+    of one even fill (iOS Control Center controls are uniform edge to edge). Do
+    not reintroduce the inset, and do not feather the face outward either —
+    that pulls the tone DOWN at the edges, which is the opposite problem.
+  - **Morph surge:** `data-morphing` on the container drives a heavier
+    `.GlassBlur` backdrop-filter in CSS, so the material swells as the pill and
+    sidebar merge and settles when it lands. Compositor-friendly — it is one
+    filter value changing, not a filter graph being rebuilt.
   - **Press glow survives a scroll:** `--glass-press` is set **imperatively**
     on pointer down/up, not through framer's `whileTap`. A native scroll inside
     the surface (the sidebar list) steals the pointer and fires
@@ -1261,9 +1233,7 @@ When making changes, be aware of these high-impact files:
 - Do not bring back press-and-hold for destructive actions. A `holdToConfirm` action ARMS a countdown that only its own Cancel button stops — tapping outside must not disarm, and the `swipe-card-close-others` handler must close the swipe panel only (it fires on any interaction with any other row, so clearing the pending confirm there makes it impossible to arm a delete and move on)
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
-- Do not keep the SVG displacement `backdrop-filter: url(#filter)` on a glass element while it resizes (morph) or scales (press bloom) — it re-rasterises every frame and janks; `GlassContainer` swaps to a cheap `blur()` via `cheapMode` (`morphing || pressed`) and restores the lens when settled. And do not CSS-transition `.GlassLens` `backdrop-filter` (blur↔url can't interpolate — it only adds a discrete-swap delay)
-- Do not rasterise the glass maps at CSS resolution — `generateGlassMaps` **supersamples to the device pixel ratio** (capped 3× and by a ~1.2M-px budget) or the thin specular rim upscales into jaggies on hi-DPI phones; keep the displacement magnitude/`displacementScale` in CSS px (resolution-independent)
-- Do not paint the lens with maps built for a different shape, and do not generate maps while `morphing` — that pair is what made the Android sidebar take ~1s to look right (the pill's map stretched over the open sidebar, then a full regenerate blocking the main thread after a 150ms debounce). Keep the radius tag + `awaitingMaps` gate, keep the memoisation by geometry, keep the build driven off the ResizeObserver rather than an effect body, and keep the rim-only raster scan (pinned byte-for-byte in `displacement.test.ts`)
+- Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
 - Do not delete a flight outright — `deleteFlight` is a **soft delete** into the 90-day recycle bin and pushes an UPDATE; only `purgeExpiredDeletedFlights` writes a tombstone. Push a delete when the user merely binned it and the flight is gone on every device with nothing to restore
 - Do not read `userDb.flights` for a list, a total or an import match without `isLiveFlight` — a binned flight reaching the reconciler silently updates, and so resurrects, a flight the user deleted
 - Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`

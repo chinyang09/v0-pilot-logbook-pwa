@@ -690,32 +690,6 @@ textarea:focus-within {
   backdrop-filter: blur(calc(var(--extra-blur) + 6px)) brightness(1.4) saturate(1.7);
 }
 
-/* ─── Lens mode (Chromium progressive enhancement) ───
-   A real Snell's-law displacement map applied via backdrop-filter: url(#…)
-   replaces the whole ring stack with ONE backdrop-filter surface (see
-   components/ui/glass-container.tsx + lib/glass/displacement.ts). The filter
-   itself carries blur, refraction, vibrancy, and the screen-blended rim
-   specular. Safari/Firefox never enter this mode. */
-.GlassLens {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  border-radius: var(--corner-radius);
-  overflow: hidden;
-  /* Only the corner radius transitions. The backdrop-filter swaps between the
-     SVG lens and a cheap blur (while animating) — those filter lists can't
-     interpolate, so transitioning it just adds a discrete-swap delay. */
-  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.GlassFilterSvg {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
 .GlassMaterial .BlendLayers {
   z-index: 3;
   backdrop-filter: blur(calc((var(--softness) * 0.2) + (var(--extra-blur) * 0.2)));
@@ -789,16 +763,14 @@ textarea:focus-within {
   .GlassMaterial,
   .GlassMaterial > div,
   .GlassMaterial::before,
-  .GlassMaterial::after,
-  .GlassLens {
+  .GlassMaterial::after {
     backdrop-filter: none !important;
   }
   .GlassContainer,
   .GlassContent,
   .GlassMaterial > div,
   .GlassMaterial::before,
-  .GlassMaterial::after,
-  .GlassLens {
+  .GlassMaterial::after {
     transition: none !important;
   }
   .GlassContainer {
@@ -877,7 +849,6 @@ textarea:focus-within {
   opacity: 1;
   scale: 1;
 }
-.PillDragLens-lens,
 .PillDragLens-glass,
 .PillDragLens-rim,
 .PillDragLens-grey {
@@ -885,20 +856,10 @@ textarea:focus-within {
   inset: 0;
   border-radius: inherit;
 }
-/* Chromium path — the backdrop-filter (a real refraction map) is set inline;
-   these shadows are just the convex bulge + drop shadow around it. */
-.PillDragLens-lens {
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.28),
-    inset 0 14px 18px -14px rgba(255, 255, 255, 0.55),
-    inset 0 -14px 18px -14px rgba(255, 255, 255, 0.30),
-    0 6px 18px rgba(0, 0, 0, 0.20);
-  transition: opacity 0.26s ease;
-}
-/* Safari fallback — no SVG backdrop-filter, so the convex look is faked with
-   layered shadows: bright top+bottom bulges (the glass swell) and an inner
-   thickness vignette that darkens toward the rim, reading as the pill being
-   pinched/minified through the glass. */
+/* The lens material, on every platform: layered shadows fake the convex look —
+   bright top+bottom bulges (the glass swell) and an inner thickness vignette
+   that darkens toward the rim, reading as the pill being pinched through the
+   glass. */
 .PillDragLens-glass {
   backdrop-filter: saturate(1.7) brightness(1.12);
   box-shadow:
@@ -939,7 +900,6 @@ textarea:focus-within {
   opacity: 0;
   transition: opacity 0.26s ease;
 }
-.PillDragLens--settle .PillDragLens-lens,
 .PillDragLens--settle .PillDragLens-glass,
 .PillDragLens--settle .PillDragLens-rim {
   opacity: 0;

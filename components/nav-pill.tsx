@@ -1,16 +1,11 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useRef, useCallback, useId } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
 import { animate, useReducedMotion, useSpring } from "framer-motion"
-import {
-  generateGlassMaps,
-  supportsSvgBackdropFilter,
-  type GlassMaps,
-} from "@/lib/glass/displacement"
 import {
   LayoutDashboard,
   Book,
@@ -295,8 +290,6 @@ function PillBarContent({
   // Chromium-only real refraction map — the backdrop (the pill) genuinely
   // MINIFIES through the lens's bezel, like Apple's glass. Generated once when
   // the drag starts (Safari keeps null → the CSS convex material fallback).
-  const [lensMaps, setLensMaps] = useState<GlassMaps | null>(null)
-  const lensFilterId = useId().replace(/[^a-zA-Z0-9_-]/g, "") + "-drag-lens"
   const suppressClickRef = useRef(false)
   const lastPtRef = useRef({ x: 0, y: 0 })
   const settleAnimRef = useRef<ReturnType<typeof animate> | null>(null)
@@ -332,28 +325,6 @@ function PillBarContent({
     return () => unsub.forEach((u) => u())
   }, [squishX, squishY, nudgeX])
 
-  // Chromium: (re)build the refraction map to match the lens over the current
-  // tab so the feImage's fixed px size stays aligned with the element. The id
-  // is stable, so a tab change only swaps the map href — no reflow, no remount.
-  useEffect(() => {
-    if (lensPhase !== "drag" || lensIndex < 0) return
-    if (!supportsSvgBackdropFilter()) return
-    const drag = dragRef.current
-    const r = drag?.rects[lensIndex]
-    if (!drag || !r) return
-    setLensMaps(
-      generateGlassMaps({
-        width: r.width + LENS_PAD_X,
-        height: drag.base.height + LENS_OVERHANG,
-        radius: (drag.base.height + LENS_OVERHANG) / 2,
-        // Wide bezel + deep glass so the pill visibly MINIFIES through the
-        // lens (the shipped 14/70/1.6 read as flat on-device).
-        bezelWidth: 18,
-        glassThickness: 100,
-        refractionScale: 2.4,
-      }),
-    )
-  }, [lensPhase, lensIndex])
 
   const paintSpotlight = useCallback((clientX: number, clientY: number) => {
     const gr = glassRootRef.current
@@ -477,7 +448,6 @@ function PillBarContent({
       squishY.jump(1)
       setLensPhase("idle")
       setLensIndex(-1)
-      setLensMaps(null)
       return
     }
 
@@ -510,7 +480,6 @@ function PillBarContent({
     settleTimerRef.current = setTimeout(() => {
       setLensPhase("idle")
       setLensIndex(-1)
-      setLensMaps(null)
     }, 640)
   }, [tabs, router, squishX, squishY, nudgeX])
 
@@ -601,72 +570,23 @@ function PillBarContent({
       </div>
 
       {/* Drag lens portal — fixed-positioned so it can overhang the pill
-          (GlassContent clips its own overflow). On Chromium the -lens layer
-          refracts the pill through a real Snell's-law map (the pill minifies);
-          Safari falls back to the -glass convex material. The chromatic -rim
-          adds the liquid dispersion fringe. All fade to the grey child
-          (--settle) as the lens morphs into the blob. */}
+          (GlassContent clips its own overflow). The convex `-glass` material
+          is the lens on every platform: an inner thickness vignette fakes the
+          pinch, and the chromatic `-rim` adds the liquid dispersion fringe.
+          Both fade to the grey child (--settle) as the lens morphs into the
+          blob.
+
+          There used to be a Chromium-only `-lens` layer that refracted the
+          pill through a real Snell's-law displacement map. It was removed with
+          the rest of the SVG glass: it rebuilt and PNG-encoded a map every time
+          the finger crossed to another tab — main-thread work in the middle of
+          a gesture — and it made the same drag look different on iOS and
+          Android. */}
       {lensActive &&
         typeof document !== "undefined" &&
         createPortal(
           <div ref={lensMountRef} aria-hidden className="PillDragLens">
-            {lensMaps ? (
-              <>
-                <div
-                  className="PillDragLens-lens"
-                  style={{
-                    backdropFilter: `url(#${lensFilterId}) saturate(1.5) brightness(1.06)`,
-                    WebkitBackdropFilter: `url(#${lensFilterId}) saturate(1.5) brightness(1.06)`,
-                  }}
-                />
-                <svg className="GlassFilterSvg" aria-hidden="true">
-                  <defs>
-                    <filter
-                      id={lensFilterId}
-                      x="-20%"
-                      y="-20%"
-                      width="140%"
-                      height="140%"
-                      colorInterpolationFilters="sRGB"
-                    >
-                      <feImage
-                        href={lensMaps.displacementUrl}
-                        x="0"
-                        y="0"
-                        width={lensMaps.width}
-                        height={lensMaps.height}
-                        preserveAspectRatio="none"
-                        result="dmap"
-                      />
-                      <feDisplacementMap
-                        in="SourceGraphic"
-                        in2="dmap"
-                        scale={lensMaps.displacementScale}
-                        xChannelSelector="R"
-                        yChannelSelector="G"
-                        result="displaced"
-                      />
-                      <feImage
-                        href={lensMaps.specularUrl}
-                        x="0"
-                        y="0"
-                        width={lensMaps.width}
-                        height={lensMaps.height}
-                        preserveAspectRatio="none"
-                        result="spec"
-                      />
-                      <feGaussianBlur in="spec" stdDeviation={0.5} result="specSoft" />
-                      <feComponentTransfer in="specSoft" result="specFaded">
-                        <feFuncA type="linear" slope={0.7} />
-                      </feComponentTransfer>
-                      <feBlend in="specFaded" in2="displaced" mode="screen" />
-                    </filter>
-                  </defs>
-                </svg>
-              </>
-            ) : (
-              <div className="PillDragLens-glass" />
-            )}
+            <div className="PillDragLens-glass" />
             <div className="PillDragLens-rim" />
             <div className="PillDragLens-grey" />
           </div>,
