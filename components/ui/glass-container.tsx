@@ -231,16 +231,17 @@ export function GlassContainer({
         {children}
       </div>
 
+      {/* `GlassBlur` is the face and carries the ONLY full-face
+          backdrop-filter — see globals.css for why there used to be six of
+          them and why that made iOS and Android look different. The rest are
+          masked to a rim: they refract only the edge band, which is what gives
+          the slab its thickness. */}
       <div className="GlassMaterial">
         <div className="GlassEdgeReflection" />
         <div className="GlassEmbossReflection" />
         <div className="GlassRefraction" />
         <div className="GlassBlur" />
-        <div className="BlendLayers" />
-        <div className="BlendEdge" />
         <div className="Highlight" />
-        <div className="Contrast" />
-        <div className="Brightness" />
       </div>
     </motion.div>
   )

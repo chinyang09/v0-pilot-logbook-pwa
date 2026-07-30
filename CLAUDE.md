@@ -1175,6 +1175,27 @@ When making changes, be aware of these high-impact files:
   That is a lot of machinery whose whole output is a rim. **Do not reintroduce
   a platform-conditional material.** If the rim needs more presence, change the
   ring stack — every device gets it.
+  - **ONE full-face `backdrop-filter`, on `.GlassBlur`.** This is what makes
+    iOS and Android agree. There used to be SIX, stacked on separate elements
+    — `.GlassBlur`, `.BlendLayers`, `.BlendEdge`, `.Contrast`, `.Brightness`
+    and an `invert(0.1)` on `.GlassContent` — each meant to sample the
+    composite of the ones below it. Stacked backdrop-filters are the least
+    interoperable construct in CSS: Blink composes the whole chain, WebKit
+    does not, so the same code gave a warm dark slab on iPad and a flat grey
+    one on a Pixel. Measured in Blink the chain landed on `rgb(71,71,70)` —
+    an R-B warmth of **1**, i.e. neutral grey; one list gives `rgb(40,29,19)`,
+    warmth **21**.
+    A filter *list* on a single element is well-specified; several elements
+    each with their own backdrop-filter is not. Do not add a second one.
+  - **The washing terms are gone deliberately.** `contrast(0.69)` pulled the
+    whole face toward mid-grey (the single biggest grey-maker — 69 units of
+    delta on its own) and `invert(0.1)` lifted the blacks. With the chain
+    collapsed they were no longer cancelled by anything, so the face is now
+    blur + a themed brightness lift + `saturate(1.5)` (the vibrancy term —
+    without it the material reads as frosted film rather than glass).
+  - **`--glass-face-blur` is one blur, not three.** The old stack blurred
+    2px + 2.4px + 0.52px on three elements; sequential Gaussians compose as
+    the root-sum-square, so 3.2px is identical optics for a third of the work.
   - **Even face:** `.GlassBlur` spans the WHOLE face, corner to corner. It used
     to be inset by the ring widths, leaving the perimeter a shade darker than
     the middle — the material read as a grey slab inside a darker frame instead
@@ -1256,6 +1277,7 @@ When making changes, be aware of these high-impact files:
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
 - Do not add a rule, material or layout that only one engine gets — iOS and Android must render the app identically. In particular do not reintroduce `@supports (-webkit-touch-callout: none)`, the WebKit-only sniff: it silently made Android's date fields shorter and its focused fields slower to take a tap. A vendor-prefixed property paired with the standard one, or inert elsewhere, is fine. The sole exception is the PWA install prompt, where the OS flow itself differs
+- Do not add a second full-face `backdrop-filter` to the glass — `.GlassBlur` carries the only one, as a single filter *list*. Six of them stacked on separate elements is what made the nav pill warm-and-dark on iOS and flat grey on Android: Blink composes the chain, WebKit doesn't, and neither is wrong. Anything the material needs goes into that one list (and the rim layers stay masked to the edge band)
 - Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
 - Do not delete a flight outright — `deleteFlight` is a **soft delete** into the 90-day recycle bin and pushes an UPDATE; only `purgeExpiredDeletedFlights` writes a tombstone. Push a delete when the user merely binned it and the flight is gone on every device with nothing to restore
 - Do not read `userDb.flights` for a list, a total or an import match without `isLiveFlight` — a binned flight reaching the reconciler silently updates, and so resurrects, a flight the user deleted

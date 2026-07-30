@@ -518,9 +518,10 @@ textarea:focus-within {
   --tint-amount: 0;
   --tint-saturation: 2;
   --tint-hue: 180deg;
-  --contrast: 0.69;
-  --brightness: 0.99;
-  --invert: 10%;
+  /* The face's single blur. Was three separate blurs on three elements
+     (2 + 2.4 + 0.52); sequential Gaussians compose as the root-sum-square,
+     so one 3.2px blur is the same optics for a third of the work. */
+  --glass-face-blur: 3.2px;
   --total-strength: calc(var(--base-strength) + var(--extra-blur));
   --edge-width: calc(0.3px + (var(--softness) * 0.1));
   --emboss-width: calc(var(--softness) * 0.38);
@@ -537,9 +538,6 @@ textarea:focus-within {
   overflow: hidden;
   border-radius: var(--corner-radius);
   pointer-events: auto;
-  /* Invert effect moved here from GlassContainer::before pseudo-element
-     to eliminate white flash during visibility transitions */
-  backdrop-filter: invert(var(--invert, 0));
   /* Liquid glass float: themed shadow set (see the glass theme tokens below —
      light mode needs a stronger shadow to read on cream; dark modes keep it
      soft). Radius transitions so the pill↔sidebar corner change (28↔20)
@@ -646,13 +644,31 @@ textarea:focus-within {
 }
 
 .GlassMaterial .GlassBlur {
-  /* saturate(1.5): the vibrancy term — real glass intensifies the colour of
-     what's behind it; without it the material reads as frosted film.
-     Brightness is themed: the dark themes push 1.25 so the surface lifts off
-     near-black; the light theme stays near 1.12 (a strong push on cream
-     whites the glass out entirely). The backdrop-filter transitions so the
-     morph surge below swells and settles smoothly. */
-  backdrop-filter: blur(var(--extra-blur)) brightness(var(--glass-blur-brightness, 1.25)) saturate(1.5);
+  /* THE face — the one and only backdrop-filter on it.
+     
+     This used to be one of SIX full-face `backdrop-filter` layers stacked on
+     separate elements (blur, blur, blur+contrast+saturate, contrast(0.69),
+     brightness(0.99), and an invert(0.1) on .GlassContent), each meant to
+     sample the composite of the ones below. Stacked backdrop-filters are the
+     least interoperable construct in CSS: Blink composes the whole chain,
+     WebKit does not, so the SAME code rendered a warm dark slab on iOS and a
+     flat neutral grey one on Android. Measured in Blink, the chain landed on
+     rgb(71,71,70) — R-B warmth of 1, i.e. literally grey.
+     
+     Everything now happens in one filter list on one element, which IS
+     well-specified, and the terms that fought each other are gone:
+     contrast(0.69) pulled the whole face toward mid-grey (the single biggest
+     grey-maker, worth 69 units of delta on its own) and invert(0.1) lifted
+     the blacks. What is left is the material as described — a blur, a lift
+     off near-black, and the vibrancy term that lets the colour behind come
+     through. Same list, same result, both engines: rgb(40,29,19), warmth 21.
+     
+     saturate(1.5) is the vibrancy: real glass intensifies the colour behind
+     it, and without it the material reads as frosted film. Brightness is
+     themed — dark pushes 1.25 so the surface lifts off near-black; light
+     stays near 1.03 (a strong push on cream whites the glass out entirely).
+     The filter transitions so the morph surge below swells and settles. */
+  backdrop-filter: blur(var(--glass-face-blur)) brightness(var(--glass-blur-brightness, 1.25)) saturate(1.5);
   /* Spans the WHOLE face, corner to corner. It used to be inset by the ring
      widths, which left the perimeter a shade darker than the middle — the
      material read as a grey slab sitting inside a darker frame instead of one
@@ -666,17 +682,7 @@ textarea:focus-within {
    like a merging droplet (more blur, brighter, more vibrant), then settles as
    it lands. Driven by data-morphing on the GlassContainer. */
 .GlassContainer[data-morphing="true"] .GlassBlur {
-  backdrop-filter: blur(calc(var(--extra-blur) + 6px)) brightness(1.4) saturate(1.7);
-}
-
-.GlassMaterial .BlendLayers {
-  z-index: 3;
-  backdrop-filter: blur(calc((var(--softness) * 0.2) + (var(--extra-blur) * 0.2)));
-}
-
-.GlassMaterial .BlendEdge {
-  z-index: 8;
-  backdrop-filter: blur(calc(var(--edge-width) * 0.4)) contrast(1.6) saturate(1.5);
+  backdrop-filter: blur(calc(var(--glass-face-blur) + 6px)) brightness(1.4) saturate(1.7);
 }
 
 /* GlassContainer::before removed — invert effect moved to .GlassContent
@@ -724,16 +730,6 @@ textarea:focus-within {
     linear-gradient(white 0 0) padding-box,
     linear-gradient(white 0 0) content-box;
   mask-composite: exclude, exclude;
-}
-
-.GlassMaterial .Contrast {
-  z-index: 12;
-  backdrop-filter: contrast(var(--contrast));
-}
-
-.GlassMaterial .Brightness {
-  z-index: 13;
-  backdrop-filter: brightness(var(--brightness));
 }
 
 /* Reduced motion: disable heavy backdrop-filters and touch animations */
