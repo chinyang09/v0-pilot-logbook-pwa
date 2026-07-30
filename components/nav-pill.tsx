@@ -732,19 +732,50 @@ function SidebarNav({
   ]
   const activeIndex = orderedHrefs.findIndex((href) => isItemActive(href))
 
+  /**
+   * The dissolve as the list passes under the floating toggle/sync strip — the
+   * same read as the main panel's header fade. A painted scrim can't be used
+   * here: the panel is translucent glass, so the content is masked out rather
+   * than covered up.
+   *
+   * A plain ramp across the whole inset, so an item travelling under the icons
+   * stays READABLE while it fades. It used to hold at fully transparent for the
+   * first third, which meant the band under the icons was simply blank — the
+   * list appeared to stop at the icons rather than run beneath them.
+   *
+   * Applied to the blob layer as well as the nav. The blob lives in its own
+   * non-scrolling overlay (see below) and so was the one thing NOT masked: it
+   * stayed solid in a band where its own row had vanished, which is the state
+   * that gets reported as "I can see the blob but not the nav contents".
+   */
+  const chromeMask = topInset
+    ? `linear-gradient(to bottom, transparent 0, black ${topInset}px)`
+    : undefined
+  const maskStyle = chromeMask
+    ? { maskImage: chromeMask, WebkitMaskImage: chromeMask }
+    : {}
+
   return (
     <div className={cn("relative min-h-0", className)}>
       {/* Gravity blob lives in a NON-scrolling overlay so the overshoot spring
           can travel above the first item without being clipped by the nav's
-          overflow. `blobLayerRef` is translated by -scrollTop (above) to stay
-          pinned to the scrolling content. Sits behind the nav items (z-0). */}
-      <div ref={blobLayerRef} aria-hidden className="pointer-events-none absolute inset-0 z-0">
-        <GravityIndicator
-          containerRef={navRef}
-          activeIndex={activeIndex}
-          className="rounded-full"
-          revision={orderedHrefs.join(",")}
-        />
+          overflow. The inner layer is translated by -scrollTop (above) to stay
+          pinned to the scrolling content; the mask goes on the OUTER element so
+          it stays put in viewport space while the blob scrolls under it. Sits
+          behind the nav items (z-0). */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-0"
+        style={maskStyle}
+      >
+        <div ref={blobLayerRef} className="absolute inset-0">
+          <GravityIndicator
+            containerRef={navRef}
+            activeIndex={activeIndex}
+            className="rounded-full"
+            revision={orderedHrefs.join(",")}
+          />
+        </div>
       </div>
       <nav
         ref={navRef}
@@ -753,16 +784,7 @@ function SidebarNav({
           WebkitOverflowScrolling: "touch",
           touchAction: "pan-y",
           paddingTop: topInset,
-          // Content dissolves as it passes under the floating toggle/sync
-          // strip, the same read as the main panel's header fade. A painted
-          // scrim can't be used here — the panel is translucent glass, so the
-          // list is masked out instead of covered up.
-          ...(topInset
-            ? {
-                maskImage: `linear-gradient(to bottom, transparent 0, transparent ${topInset * 0.35}px, black ${topInset}px)`,
-                WebkitMaskImage: `linear-gradient(to bottom, transparent 0, transparent ${topInset * 0.35}px, black ${topInset}px)`,
-              }
-            : {}),
+          ...maskStyle,
         }}
       >
       {/* One pixel taller than the scroller so the list always has somewhere to
@@ -1279,18 +1301,31 @@ function MobilePillMorph({
               transition: contentTransition,
             }}
           >
-            {/* Sidebar top row — toggle + sync flushed right */}
-            <div className="flex items-center justify-end h-14 px-3 gap-1 flex-shrink-0">
-              <button
-                onClick={() => setSidebarOpen(false)}
-                className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
+            {/* Same arrangement as the desktop sidebar: the nav fills the
+                panel and the toggle + sync strip FLOATS over it, so the list
+                scrolls under the icons rather than starting below them. This
+                branch used to lay the strip out as an ordinary row, which is
+                why the scroll-under only ever worked on desktop — on a phone
+                the list simply stopped at the icons. */}
+            <div className="relative flex-1 min-h-0">
+              <SidebarNav
+                pathname={pathname}
+                className="h-full"
+                topInset={SIDEBAR_HEADER_HEIGHT}
+              />
+              <div
+                className="pointer-events-none absolute inset-x-0 top-0 z-[2] flex items-center justify-end px-3 gap-1"
+                style={{ height: SIDEBAR_HEADER_HEIGHT }}
               >
-                <PanelLeft className="h-6 w-6" />
-              </button>
-              <SyncIconButton />
+                <button
+                  onClick={() => setSidebarOpen(false)}
+                  className="pointer-events-auto flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
+                >
+                  <PanelLeft className="h-6 w-6" />
+                </button>
+                <SyncIconButton className="pointer-events-auto" />
+              </div>
             </div>
-
-            <SidebarNav pathname={pathname} className="flex-1 min-h-0" />
           </div>
         </GlassContainer>
       </div>

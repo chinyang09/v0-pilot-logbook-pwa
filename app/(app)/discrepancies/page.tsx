@@ -51,7 +51,18 @@ import type { Discrepancy } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
 import { cn } from "@/lib/utils"
 
-type FilterType = "comparisons" | "accepted" | "notes" | "resolved"
+/**
+ * Three tabs, not four. The page holds two kinds of thing, each with an open
+ * and a settled state:
+ *
+ *   a tracked field difference → Comparisons (standing) / Accepted (conceded)
+ *   a one-off import note      → Notes, with the handled ones below the open
+ *
+ * Giving the notes' settled state its own tab called "Resolved" put two
+ * synonyms in the tab bar next to each other and made the split look arbitrary.
+ */
+const TABS = ["comparisons", "accepted", "notes"] as const
+type FilterType = (typeof TABS)[number]
 
 /** Discrepancy types that are a standing pilot-vs-company comparison. */
 const MISMATCH_TYPES = new Set(["pilot_flying_mismatch", "day_night_mismatch"])
@@ -80,10 +91,6 @@ const EMPTY_STATES: Record<FilterType, { title: string; description: string }> =
     description:
       "Duplicates, skipped reports and missing sectors show up here after an import.",
   },
-  resolved: {
-    title: "Nothing resolved yet",
-    description: "Notes you have marked as handled will be listed here.",
-  },
 }
 
 function coerce(field: string, value: string): string | number | boolean {
@@ -96,10 +103,16 @@ export default function DiscrepanciesPage() {
   const { discrepancies, isLoading, refresh } = useDiscrepancies()
   const { flights } = useFlights()
   const { preferences } = usePreferences()
-  const [filterType, setFilterType] = useSessionState<FilterType>(
+  const [storedFilter, setFilterType] = useSessionState<FilterType>(
     "discrepancies:filter",
     "comparisons"
   )
+  // A session open across the deploy that dropped the "Resolved" tab still has
+  // it in sessionStorage; without this the page comes back on a tab that no
+  // longer renders anything.
+  const filterType: FilterType = TABS.includes(storedFilter)
+    ? storedFilter
+    : "comparisons"
   const [discrepancyToResolve, setDiscrepancyToResolve] =
     useState<Discrepancy | null>(null)
 
@@ -126,6 +139,16 @@ export default function DiscrepanciesPage() {
       ),
     [discrepancies]
   )
+  // Notes are the one-off events (duplicates, stale reports, missing sectors),
+  // and `resolved` is just their settled state — so they live in ONE tab with
+  // the handled ones listed under the open ones, not in a second tab called
+  // "Resolved". Two tabs whose names both mean "dealt with" (Accepted /
+  // Resolved) read as duplicates of each other; they were actually the settled
+  // halves of two different things.
+  //
+  // Both lists are scoped to non-mismatch types: a resolved comparison would
+  // otherwise fall through to here and render as a prose card, which is the
+  // presentation the comparison cards exist to replace.
   const notes = useMemo(
     () =>
       discrepancies
@@ -133,11 +156,11 @@ export default function DiscrepanciesPage() {
         .sort((a, b) => b.createdAt - a.createdAt),
     [discrepancies]
   )
-  const resolved = useMemo(
+  const handledNotes = useMemo(
     () =>
       discrepancies
-        .filter((d) => d.resolved)
-        .sort((a, b) => b.createdAt - a.createdAt),
+        .filter((d) => !MISMATCH_TYPES.has(d.type) && d.resolved)
+        .sort((a, b) => (b.resolvedAt ?? b.createdAt) - (a.resolvedAt ?? a.createdAt)),
     [discrepancies]
   )
 
@@ -191,6 +214,15 @@ export default function DiscrepanciesPage() {
     [refresh]
   )
 
+  const handleReopen = useCallback(
+    async (d: Discrepancy) => {
+      const { unresolveDiscrepancy } = await import("@/lib/db")
+      await unresolveDiscrepancy(d.id)
+      await refresh()
+    },
+    [refresh]
+  )
+
   const discrepancyActions = useMemo(
     () => (
       <GlassIconButton
@@ -211,9 +243,7 @@ export default function DiscrepanciesPage() {
       ? groups.length
       : filterType === "accepted"
         ? acceptedGroups.length
-        : filterType === "notes"
-          ? notes.length
-          : resolved.length
+        : notes.length + handledNotes.length
 
   const cardGroups = filterType === "accepted" ? acceptedGroups : groups
 
@@ -235,7 +265,6 @@ export default function DiscrepanciesPage() {
               count: acceptedGroups.length,
             },
             { value: "notes", label: "Notes", count: notes.length },
-            { value: "resolved", label: "Resolved", count: resolved.length },
           ]}
         />
 
@@ -278,32 +307,54 @@ export default function DiscrepanciesPage() {
           </>
         )}
 
-        {(filterType === "notes" || filterType === "resolved") && (
+        {filterType === "notes" && (
           <div className="space-y-3">
             <AnimatePresence initial={false} mode="popLayout">
-              {(filterType === "notes" ? notes : resolved).map(
-                (discrepancy) => (
-                  <motion.div
-                    key={discrepancy.id}
-                    layout
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.97 }}
-                    transition={LIST_ITEM_TRANSITION}
-                  >
-                    <DiscrepancyCard
-                      discrepancy={discrepancy}
-                      onResolve={(d) => setDiscrepancyToResolve(d)}
-                      onReopen={async (d) => {
-                        const { unresolveDiscrepancy } = await import("@/lib/db")
-                        await unresolveDiscrepancy(d.id)
-                        await refresh()
-                      }}
-                    />
-                  </motion.div>
-                )
-              )}
+              {notes.map((discrepancy) => (
+                <motion.div
+                  key={discrepancy.id}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  transition={LIST_ITEM_TRANSITION}
+                >
+                  <DiscrepancyCard
+                    discrepancy={discrepancy}
+                    onResolve={(d) => setDiscrepancyToResolve(d)}
+                    onReopen={handleReopen}
+                  />
+                </motion.div>
+              ))}
             </AnimatePresence>
+
+            {/* Handled notes stay in the same tab, below the open ones — they
+                are the same list in its settled state, not a separate concern. */}
+            {handledNotes.length > 0 && (
+              <>
+                <h2 className="pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  Handled
+                </h2>
+                <AnimatePresence initial={false} mode="popLayout">
+                  {handledNotes.map((discrepancy) => (
+                    <motion.div
+                      key={discrepancy.id}
+                      layout
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.97 }}
+                      transition={LIST_ITEM_TRANSITION}
+                    >
+                      <DiscrepancyCard
+                        discrepancy={discrepancy}
+                        onResolve={(d) => setDiscrepancyToResolve(d)}
+                        onReopen={handleReopen}
+                      />
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </>
+            )}
           </div>
         )}
 

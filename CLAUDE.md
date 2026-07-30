@@ -398,8 +398,22 @@ modal — is the single home for undoing an import decision, reachable whether
 the change was accepted or rejected at import time. One-off notes (duplicates,
 stale reports, missing sectors) sit in a second tab.
 
+**Three tabs, not four.** The page holds two kinds of thing, each with an open
+and a settled state, so the settled state is never its own tab:
+
+| | Open | Settled |
+|---|---|---|
+| tracked field difference | **Comparisons** | **Accepted** |
+| one-off import note | **Notes** | "Handled", below the open notes in the same tab |
+
+A fourth "Resolved" tab put two synonyms side by side in the tab bar and made
+the split look arbitrary — it was only ever the notes' settled half. Both note
+lists are scoped to non-mismatch types so a comparison can never fall through
+and render as a prose `DiscrepancyCard`, which is the presentation the
+comparison cards exist to replace.
+
 `Discrepancy.holding: "logbook" | "schedule"` records which side the flight
-currently holds, independently of `resolved`. Tabs split on it:
+currently holds, independently of `resolved`. The comparison tabs split on it:
 
 | Tab | Rows | Retained |
 |---|---|---|
@@ -629,6 +643,22 @@ re-renders).
   content one pixel taller (`min-h-[calc(100%+1px)]`), so even a short list has
   somewhere to go and the rubber-band gesture is always available; without it a
   full-but-not-overflowing nav is inert to a drag, which reads as stuck.
+
+  **Both morphs use this arrangement** — `DesktopPillMorph` AND
+  `MobilePillMorph`. The mobile one used to lay the strip out as an ordinary
+  flex row above the nav, so the scroll-under existed only on desktop; on a
+  phone the list simply stopped at the icons. If you touch one, touch both.
+
+  The mask is a plain ramp (`transparent 0 → black topInset`) and it goes on the
+  **blob overlay too**. The gravity blob lives in its own non-scrolling layer
+  (so its overshoot spring isn't clipped) and was therefore the one thing not
+  masked — it stayed solid in a band where its own row had already dissolved,
+  which is the state that gets reported as "I can see the blob but not the nav
+  contents". The mask belongs on the OUTER element of that layer: the inner one
+  is translated by `-scrollTop`, and a mask on it would scroll with the blob
+  instead of staying put. The ramp also has no dead zone at the top — holding
+  fully transparent for the first third made the band under the icons simply
+  blank, which reads as the list stopping rather than running beneath.
 - **Nav drag lens** (`PillBarContent` in `components/nav-pill.tsx`, `.PillDragLens*`
   in `globals.css`) — an iPadOS-tab-bar-style **hold-and-slide** over the pill
   tabs. A plain tap still navigates (10px slop before it activates; a
@@ -1258,5 +1288,6 @@ When making changes, be aware of these high-impact files:
 **Formatting & chrome:**
 - Do not format a clock time with `formatHHMMDisplay` — that is for durations (which always keep their colon). Points in time go through `formatClockDisplay` so `clockSeparator` governs them all
 - Do not use a flat `bg-black/50` for a modal overlay — use `MODAL_SCRIM`; black at 50% is invisible over a dark app and turns the light theme into grey mush
+- Do not add the sidebar's floating-strip treatment to only one morph — `DesktopPillMorph` and `MobilePillMorph` must both float the toggle/sync strip over the nav with `topInset`, or the scroll-under silently works on desktop and not on a phone. And keep the dissolve mask on the blob overlay as well as the nav (on the OUTER, untranslated element), or the blob stays solid in a band where its own row has faded out
 - Do not give `ChromeFade` a `backdrop-filter` — it is the main panel's plain gradient, deliberately. And do not paint a `--background` scrim over a translucent glass surface (the sidebar) — mask the content out instead
 - Do not inset `.GlassBlur` from the face or feather it outward — the fill must be even corner to corner, and `--glass-press` must stay imperative so a scroll's `pointercancel` doesn't kill the spotlight
