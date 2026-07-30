@@ -248,12 +248,12 @@ input[type="date"]::-webkit-date-and-time-value {
   text-align: left;
 }
 
-/* iOS specific fixes */
-@supports (-webkit-touch-callout: none) {
-  input[type="date"] {
-    min-height: 2.5rem;
-    line-height: 1.5rem;
-  }
+/* Date fields keep a consistent height on every platform. This used to be
+   wrapped in `@supports (-webkit-touch-callout: none)` — the WebKit-only
+   sniff — so Android rendered a shorter field than iOS for the same input. */
+input[type="date"] {
+  min-height: 2.5rem;
+  line-height: 1.5rem;
 }
 
 /* Hide scrollbar for calendar horizontal scroll */
@@ -278,17 +278,12 @@ input[type="time"] {
   appearance: none;
 }
 
-/* Prevent iOS first-tap swipe trigger - add touch delay */
-@supports (-webkit-touch-callout: none) {
-  [data-swipeable] {
-    touch-action: pan-y;
-  }
-
-  input:focus,
-  textarea:focus,
-  select:focus {
-    touch-action: manipulation;
-  }
+/* A focused field takes taps immediately rather than waiting on a
+   double-tap-zoom gesture. Also formerly WebKit-only. */
+input:focus,
+textarea:focus,
+select:focus {
+  touch-action: manipulation;
 }
 
 /* Hide select dropdown arrows and improve touch dragging */
@@ -436,27 +431,11 @@ textarea:focus-within {
   transition: opacity 0.15s ease-out, transform 0.15s ease-out;
 }
 
-/* Improve touch scrolling on iOS */
-@supports (-webkit-touch-callout: none) {
-  [data-rwp] {
-    -webkit-overflow-scrolling: touch;
-  }
+/* Momentum scrolling in the wheel picker. The property only means anything
+   to WebKit and is ignored elsewhere, so it needs no platform gate. */
+[data-rwp] {
+  -webkit-overflow-scrolling: touch;
 }
-
-/* ─── Squircle (iOS-style superellipse) Clipping ─── */
-.squircle {
-  --squircle-radius: 22%;
-  border-radius: var(--squircle-radius);
-  /* Continuous corners via mask for true superellipse on supporting browsers */
-  mask-image: paint(squircle);
-  -webkit-mask-image: paint(squircle);
-}
-
-/* Squircle size variants */
-.squircle-sm { --squircle-radius: 16%; }
-.squircle-md { --squircle-radius: 22%; }
-.squircle-lg { --squircle-radius: 28%; }
-.squircle-xl { --squircle-radius: 34%; }
 
 /* ─── Liquid Glass UI ─── */
 

@@ -1066,6 +1066,28 @@ Assessment on record:
 - **Offline fallback**: full offline operation with cached data; `offline.html` as last resort
 - **OCR models** (~16MB): cached by service worker after first load
 
+### One look on every platform
+
+iOS and Android render the app **identically**. There is no engine sniff, no
+`@supports (-webkit-touch-callout: none)` (the WebKit-only hack), and no
+material or layout that one browser gets and another doesn't. Vendor-prefixed
+properties are fine where they are paired with the standard one or simply inert
+elsewhere (`-webkit-overflow-scrolling`, `::-webkit-scrollbar`) — what is not
+fine is a rule whose *effect* only lands on one platform.
+
+Three of those were removed: the date-field height and the focused-field
+`touch-action`, both gated to WebKit so Android quietly rendered a shorter
+input and a laggier tap; and the `.squircle` helpers, which masked with the
+Chromium-only Houdini `paint(squircle)` worklet that was never registered, so
+the class did nothing anywhere.
+
+The **one** legitimate exception is `components/pwa-install-prompt.tsx`. Adding
+to the home screen is a genuinely different flow per OS (iOS: Share → Add to
+Home Screen; Android: browser menu → Install app, via `beforeinstallprompt`),
+so it detects the platform to show the right instructions. That is a difference
+in the OS, not in the app's look — do not "unify" it, or iOS users lose the
+only path to installing.
+
 ## Database Schema
 
 ### User Database (Dexie — `userDb`)
@@ -1233,6 +1255,7 @@ When making changes, be aware of these high-impact files:
 - Do not bring back press-and-hold for destructive actions. A `holdToConfirm` action ARMS a countdown that only its own Cancel button stops — tapping outside must not disarm, and the `swipe-card-close-others` handler must close the swipe panel only (it fires on any interaction with any other row, so clearing the pending confirm there makes it impossible to arm a delete and move on)
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
+- Do not add a rule, material or layout that only one engine gets — iOS and Android must render the app identically. In particular do not reintroduce `@supports (-webkit-touch-callout: none)`, the WebKit-only sniff: it silently made Android's date fields shorter and its focused fields slower to take a tap. A vendor-prefixed property paired with the standard one, or inert elsewhere, is fine. The sole exception is the PWA install prompt, where the OS flow itself differs
 - Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
 - Do not delete a flight outright — `deleteFlight` is a **soft delete** into the 90-day recycle bin and pushes an UPDATE; only `purgeExpiredDeletedFlights` writes a tombstone. Push a delete when the user merely binned it and the flight is gone on every device with nothing to restore
 - Do not read `userDb.flights` for a list, a total or an import match without `isLiveFlight` — a binned flight reaching the reconciler silently updates, and so resurrects, a flight the user deleted
