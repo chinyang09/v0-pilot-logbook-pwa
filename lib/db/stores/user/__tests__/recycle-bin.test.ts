@@ -43,13 +43,8 @@ const flightsTable = {
   delete: async (id: string) => {
     rows = rows.filter((f) => f.id !== id);
   },
+  toArray: async () => [...rows],
   filter: (fn: Predicate) => ({ toArray: async () => rows.filter(fn) }),
-  orderBy: (key: keyof FlightLog) => ({
-    reverse: () => ({
-      toArray: async () =>
-        [...rows].sort((a, b) => String(b[key]).localeCompare(String(a[key]))),
-    }),
-  }),
 };
 
 vi.mock("../../../user-db", () => ({

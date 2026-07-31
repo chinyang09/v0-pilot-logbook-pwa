@@ -25,6 +25,7 @@ import { AnimatePresence, motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date"
+import { insertFlightSorted } from "@/lib/utils/flight-sort"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useSearchParams } from "next/navigation"
@@ -398,9 +399,13 @@ export default function LogbookPage() {
           creatingFlightRef.current = true
           try {
             const newFlight = await createFlight(selectedDateRef.current || undefined)
+            // Placed by the shared comparator, not prepended: a new flight
+            // belongs at its date and time straight away, or it sits at the
+            // top of the logbook until the next refetch and then jumps.
             mutate(
               CACHE_KEYS.flights,
-              (prev: FlightLog[] | undefined) => [newFlight, ...(prev ?? [])],
+              (prev: FlightLog[] | undefined) =>
+                insertFlightSorted(prev ?? [], newFlight),
               { revalidate: false }
             )
             setSelectedFlightId(newFlight.id)

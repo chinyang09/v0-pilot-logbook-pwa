@@ -18,6 +18,7 @@ import { userDb } from "../../user-db"
 import type { FlightLog, FlightLogCreate } from "@/types/entities/flight.types"
 import { createEntity, updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
 import { isWithinRetention } from "@/lib/utils/retention"
+import { sortFlights } from "@/lib/utils/flight-sort"
 
 /**
  * Not in the recycle bin — i.e. a flight that still counts for anything.
@@ -109,11 +110,14 @@ export async function silentDeleteFlight(id: string): Promise<boolean> {
 }
 
 /**
- * Get all flights sorted by date (newest first). Excludes the recycle bin.
+ * Every live flight, in list order (`lib/utils/flight-sort.ts`). Excludes the
+ * recycle bin. Sorting here rather than at each call site is what keeps the
+ * order the same on every surface — Dexie's `orderBy("date")` alone leaves
+ * same-day flights in whatever order the index happens to return.
  */
 export async function getAllFlights(): Promise<FlightLog[]> {
-  const flights = await userDb.flights.orderBy("date").reverse().toArray()
-  return flights.filter(isLiveFlight)
+  const flights = await userDb.flights.toArray()
+  return sortFlights(flights.filter(isLiveFlight))
 }
 
 /**

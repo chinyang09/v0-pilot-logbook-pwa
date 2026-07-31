@@ -604,6 +604,43 @@ function PillBarContent({
 /** Height of the floating toggle/sync strip the nav scrolls beneath. */
 const SIDEBAR_HEADER_HEIGHT = 56
 
+/**
+ * The sidebar's floating top strip: the drawer toggle and the sync icon, over
+ * a band that the list scrolls beneath.
+ *
+ * ONE definition for both morphs. These were two copies, and they drifted —
+ * the mobile one spent a while laid out as an ordinary row, so the
+ * scroll-under only worked on desktop.
+ *
+ * The band CAPTURES taps. It used to be `pointer-events-none` so only the two
+ * controls were hit-testable, which meant a nav item dissolving underneath the
+ * icons could still be tapped — you would aim at nothing and land on Airports.
+ * The strip is a real surface now: the buttons work, the rest of the band
+ * swallows the touch.
+ */
+function SidebarTopStrip({ onToggle }: { onToggle: () => void }) {
+  return (
+    <div
+      className="absolute inset-x-0 top-0 z-[2] flex items-center justify-end px-3 gap-1"
+      style={{ height: SIDEBAR_HEADER_HEIGHT }}
+    >
+      {/* Frosts whatever is passing underneath. Masked so the blur is
+          strongest at the very top and gone by the bottom of the band, which
+          is what makes it read as content emerging rather than a hard edge.
+          One element, one filter list — see globals.css on why the glass
+          itself must never go back to stacking these. */}
+      <div aria-hidden className="SidebarTopBlur" />
+      <button
+        onClick={onToggle}
+        className="relative flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
+      >
+        <PanelLeft className="h-6 w-6" />
+      </button>
+      <SyncIconButton className="relative" />
+    </div>
+  )
+}
+
 function SidebarNav({
   pathname,
   className,
@@ -1056,18 +1093,7 @@ function DesktopPillMorph({
                 className="h-full"
                 topInset={SIDEBAR_HEADER_HEIGHT}
               />
-              <div
-                className="pointer-events-none absolute inset-x-0 top-0 z-[2] flex items-center justify-end px-3 gap-1"
-                style={{ height: SIDEBAR_HEADER_HEIGHT }}
-              >
-                <button
-                  onClick={onToggleSidebar}
-                  className="pointer-events-auto flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
-                >
-                  <PanelLeft className="h-6 w-6" />
-                </button>
-                <SyncIconButton className="pointer-events-auto" />
-              </div>
+              <SidebarTopStrip onToggle={onToggleSidebar} />
             </div>
           </div>
         </GlassContainer>
@@ -1233,18 +1259,7 @@ function MobilePillMorph({
                 className="h-full"
                 topInset={SIDEBAR_HEADER_HEIGHT}
               />
-              <div
-                className="pointer-events-none absolute inset-x-0 top-0 z-[2] flex items-center justify-end px-3 gap-1"
-                style={{ height: SIDEBAR_HEADER_HEIGHT }}
-              >
-                <button
-                  onClick={() => setSidebarOpen(false)}
-                  className="pointer-events-auto flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
-                >
-                  <PanelLeft className="h-6 w-6" />
-                </button>
-                <SyncIconButton className="pointer-events-auto" />
-              </div>
+              <SidebarTopStrip onToggle={() => setSidebarOpen(false)} />
             </div>
           </div>
         </GlassContainer>

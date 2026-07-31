@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { motion, useMotionValue, useReducedMotion, useSpring } from "framer-motion"
 import { cn } from "@/lib/utils"
 
@@ -42,6 +42,8 @@ const BLOOM = 1.045
  *  feedback: too much movement reads as the button sliding, not gelling). */
 const PULL = 0.05
 const PULL_MAX = 4
+/** How long the glow survives a cancelled gesture before letting go. */
+const CANCEL_GRACE_MS = 700
 
 /**
  * Liquid glass surface.
@@ -95,6 +97,23 @@ export function GlassContainer({
   const sxS = useSpring(sx, PRESS_SPRING)
   const syS = useSpring(sy, PRESS_SPRING)
   const pressedRef = useRef(false)
+  /** Tears down the window listeners for the current press. */
+  const detachRef = useRef<(() => void) | null>(null)
+  const graceRef = useRef<number | undefined>(undefined)
+  const rippleKeyRef = useRef(0)
+  /** One release ripple at a time; keyed so a re-press restarts the animation. */
+  const [ripple, setRipple] = useState<{ x: number; y: number; key: number } | null>(null)
+
+  // A surface can unmount mid-press (a morph, a route change). Drop the
+  // window listeners with it, or they outlive the element they were tracking.
+  useEffect(
+    () => () => {
+      detachRef.current?.()
+      detachRef.current = null
+      window.clearTimeout(graceRef.current)
+    },
+    []
+  )
 
   const setSpotlightAt = (clientX: number, clientY: number) => {
     const el = rootRef.current
@@ -104,20 +123,115 @@ export function GlassContainer({
     el.style.setProperty("--press-y", `${clientY - rect.top}px`)
   }
 
-  const setSpotlight = (e: React.PointerEvent) => {
-    setSpotlightAt(e.clientX, e.clientY)
-  }
-
   /**
    * The press glow is driven imperatively rather than through framer's
-   * `whileTap`. A native scroll inside the surface (the sidebar list) steals
-   * the pointer and fires `pointercancel`, which ends a tap gesture — so the
-   * glow died the instant you started scrolling, even though the finger was
-   * still down on the glass. Owning the variable means the glow survives the
-   * cancel and is closed out by the real lift instead.
+   * `whileTap`, because a tap gesture ends the moment the browser decides the
+   * finger is scrolling — and then the glow died while the finger was still
+   * on the glass.
    */
   const setGlow = (on: boolean) => {
     rootRef.current?.style.setProperty("--glass-press", on ? "1" : "0")
+  }
+
+  const trackTo = (clientX: number, clientY: number) => {
+    setSpotlightAt(clientX, clientY)
+    if (!interactive) return
+    const el = rootRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const dx = clientX - (rect.left + rect.width / 2)
+    const dy = clientY - (rect.top + rect.height / 2)
+    const clamp = (v: number) => Math.max(-PULL_MAX, Math.min(PULL_MAX, v))
+    tx.set(clamp(dx * PULL))
+    ty.set(clamp(dy * PULL))
+    // Stretch along the pull axis — the glass "gives" toward the drag. The
+    // stretch dominates over the translation (see PULL above).
+    sx.set(BLOOM + Math.min(Math.abs(dx) * 0.0012, 0.05))
+    sy.set(BLOOM + Math.min(Math.abs(dy) * 0.0012, 0.05))
+  }
+
+  const dropBloom = () => {
+    if (!interactive) return
+    tx.set(0)
+    ty.set(0)
+    sx.set(1)
+    sy.set(1)
+  }
+
+  /**
+   * Finger lifted. The glow rides outward from where it left as a ripple
+   * rather than just fading where it stood — the light leaves with the touch.
+   */
+  const releasePress = (clientX?: number, clientY?: number) => {
+    if (!pressedRef.current) return
+    pressedRef.current = false
+    detachRef.current?.()
+    detachRef.current = null
+    const el = rootRef.current
+    if (el && clientX !== undefined && clientY !== undefined) {
+      const rect = el.getBoundingClientRect()
+      setRipple({
+        x: clientX - rect.left,
+        y: clientY - rect.top,
+        key: rippleKeyRef.current++,
+      })
+    }
+    setGlow(false)
+    dropBloom()
+  }
+
+  /**
+   * Tracking runs on the WINDOW for the life of the press, not on the element.
+   *
+   * Two things this fixes, both Android:
+   *
+   * - The element stops receiving pointer moves once the finger wanders off
+   *   it, so the spotlight froze at the edge.
+   * - Chrome fires `touchcancel`/`pointercancel` as soon as a move starts to
+   *   look like a scroll. That used to run `endPress`, which is why the glow
+   *   appeared on touch and then died the instant the finger moved. A cancel
+   *   now only drops the bloom (scaling a scrolling surface janks) and keeps
+   *   the light — touch moves usually keep coming, and if they don't, the
+   *   grace timer closes it out so a glow can never stick.
+   */
+  const attachTracking = () => {
+    const onPointerMove = (e: PointerEvent) => trackTo(e.clientX, e.clientY)
+    const onTouchMove = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (t) {
+        window.clearTimeout(graceRef.current)
+        trackTo(t.clientX, t.clientY)
+      }
+    }
+    const onPointerUp = (e: PointerEvent) => releasePress(e.clientX, e.clientY)
+    const onTouchEnd = (e: TouchEvent) => {
+      const t = e.changedTouches[0]
+      releasePress(t?.clientX, t?.clientY)
+    }
+    // A cancelled gesture gives us no lift to close on, so hold the light
+    // briefly and let it go if nothing else arrives.
+    const onCancel = () => {
+      dropBloom()
+      window.clearTimeout(graceRef.current)
+      graceRef.current = window.setTimeout(() => releasePress(), CANCEL_GRACE_MS)
+    }
+
+    window.addEventListener("pointermove", onPointerMove, { passive: true })
+    window.addEventListener("touchmove", onTouchMove, { passive: true })
+    window.addEventListener("pointerup", onPointerUp, { passive: true })
+    window.addEventListener("touchend", onTouchEnd, { passive: true })
+    window.addEventListener("pointercancel", onCancel, { passive: true })
+    window.addEventListener("touchcancel", onCancel, { passive: true })
+
+    return () => {
+      window.clearTimeout(graceRef.current)
+      window.removeEventListener("pointermove", onPointerMove)
+      window.removeEventListener("touchmove", onTouchMove)
+      window.removeEventListener("pointerup", onPointerUp)
+      window.removeEventListener("touchend", onTouchEnd)
+      window.removeEventListener("pointercancel", onCancel)
+      window.removeEventListener("touchcancel", onCancel)
+    }
   }
 
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -128,67 +242,15 @@ export function GlassContainer({
     // bloom the glass — the "phantom tap" on the calendar/upload buttons while
     // scrolling the import dialog.
     if (rootRef.current?.closest('[aria-hidden="true"]')) return
+    detachRef.current?.()
     pressedRef.current = true
-    setSpotlight(e)
+    setSpotlightAt(e.clientX, e.clientY)
     setGlow(true)
     if (interactive) {
       sx.set(BLOOM)
       sy.set(BLOOM)
     }
-  }
-
-  /**
-   * Touch moves keep firing while the browser scrolls, where pointer moves do
-   * not — so this is what keeps the spotlight under the finger during a
-   * rubber-band scroll of the sidebar.
-   */
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!spotlightOn || !pressedRef.current) return
-    const touch = e.touches[0]
-    if (touch) setSpotlightAt(touch.clientX, touch.clientY)
-  }
-
-  /**
-   * The scroller took the pointer. Drop the bloom/pull (scaling a scrolling
-   * surface janks) but keep the glow and keep tracking — `handleTouchMove`
-   * feeds it until the finger actually lifts.
-   */
-  const handlePointerCancel = () => {
-    if (!pressedRef.current) return
-    if (interactive) {
-      sx.set(1)
-      sy.set(1)
-      tx.set(0)
-      ty.set(0)
-    }
-  }
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!spotlightOn || !pressedRef.current) return
-    setSpotlight(e)
-    if (!interactive) return
-    const el = rootRef.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    const dx = e.clientX - (rect.left + rect.width / 2)
-    const dy = e.clientY - (rect.top + rect.height / 2)
-    const clamp = (v: number) => Math.max(-PULL_MAX, Math.min(PULL_MAX, v))
-    tx.set(clamp(dx * PULL))
-    ty.set(clamp(dy * PULL))
-    // Stretch along the pull axis — the glass "gives" toward the drag. The
-    // stretch dominates over the translation (see PULL above).
-    sx.set(BLOOM + Math.min(Math.abs(dx) * 0.0012, 0.05))
-    sy.set(BLOOM + Math.min(Math.abs(dy) * 0.0012, 0.05))
-  }
-
-  const endPress = () => {
-    if (!pressedRef.current) return
-    pressedRef.current = false
-    setGlow(false)
-    tx.set(0)
-    ty.set(0)
-    sx.set(1)
-    sy.set(1)
+    detachRef.current = attachTracking()
   }
 
   return (
@@ -204,18 +266,10 @@ export function GlassContainer({
           : null),
         ...style,
       } as React.CSSProperties}
-      // The spotlight overlay fades in via --glass-press (custom properties
-      // animate through framer); position is set imperatively above.
+      // Only the press STARTS here — everything after it is tracked on the
+      // window (see attachTracking), so the gesture survives the finger
+      // leaving the element and survives the browser cancelling the pointer.
       onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onTouchMove={handleTouchMove}
-      onPointerUp={endPress}
-      onPointerLeave={endPress}
-      /* NOT endPress: a scroll cancels the pointer while the finger is still
-         down. See handlePointerCancel. */
-      onPointerCancel={handlePointerCancel}
-      onTouchEnd={endPress}
-      onTouchCancel={endPress}
     >
       <div className={cn("GlassContent", contentClassName)}>
         {tintColor && (
@@ -230,6 +284,20 @@ export function GlassContainer({
         )}
         {children}
       </div>
+
+      {/* Release ripple — the light rides outward from where the finger left
+          and fades. Keyed so a quick second press restarts it rather than
+          being swallowed by the still-running animation, and it clears itself
+          on animationend so nothing accumulates. */}
+      {ripple && (
+        <span
+          key={ripple.key}
+          aria-hidden
+          className="GlassRipple"
+          style={{ left: ripple.x, top: ripple.y }}
+          onAnimationEnd={() => setRipple(null)}
+        />
+      )}
 
       {/* `GlassBlur` is the face and carries the ONLY full-face
           backdrop-filter — see globals.css for why there used to be six of

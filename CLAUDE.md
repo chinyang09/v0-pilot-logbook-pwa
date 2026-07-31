@@ -643,6 +643,16 @@ re-renders).
   somewhere to go and the rubber-band gesture is always available; without it a
   full-but-not-overflowing nav is inert to a drag, which reads as stuck.
 
+  The strip is ONE component (`SidebarTopStrip`) used by both morphs, and it
+  **captures taps**: it used to be `pointer-events-none` so only the two
+  controls were hit-testable, which meant a nav item dissolving underneath the
+  icons could still be tapped — you aimed at nothing and landed on Airports.
+  `.SidebarTopBlur` frosts whatever passes under it, masked so the blur is
+  strongest at the top and gone by the bottom of the band. One element, one
+  filter list — a true multi-stop progressive blur means stacking several
+  masked blur layers, which is the construct that made the glass render
+  differently on iOS and Android.
+
   **Both morphs use this arrangement** — `DesktopPillMorph` AND
   `MobilePillMorph`. The mobile one used to lay the strip out as an ordinary
   flex row above the nav, so the scroll-under existed only on desktop; on a
@@ -1215,6 +1225,18 @@ When making changes, be aware of these high-impact files:
     `.GlassBlur` backdrop-filter in CSS, so the material swells as the pill and
     sidebar merge and settles when it lands. Compositor-friendly — it is one
     filter value changing, not a filter graph being rebuilt.
+  - **The press is tracked on the WINDOW, not the element.** Only
+    `pointerdown` is bound to the glass; everything after it listens on
+    `window` until release. The element stops receiving pointer moves once the
+    finger wanders off it, and — the Android bug — Chrome fires
+    `touchcancel`/`pointercancel` as soon as a move starts to look like a
+    scroll. That used to run `endPress`, so the glow appeared on touch and died
+    the instant the finger moved. A cancel now only drops the bloom and keeps
+    the light; a `CANCEL_GRACE_MS` timer closes it out if no further touch
+    arrives, so a glow can never stick.
+  - **Release ripples.** On lift the light expands from the release point and
+    fades (`.GlassRipple` + `glass-ripple`), keyed so a quick second press
+    restarts it and self-clearing on `animationend`.
   - **Press glow survives a scroll:** `--glass-press` is set **imperatively**
     on pointer down/up, not through framer's `whileTap`. A native scroll inside
     the surface (the sidebar list) steals the pointer and fires
@@ -1236,6 +1258,7 @@ When making changes, be aware of these high-impact files:
 - `components/import/import-review-modal-v2.tsx` — the consent surface
 - `components/flight-card-body.tsx` — the one flight-card definition
 - `lib/utils/retention.ts` — the single 90-day undo window (decisions, accepted comparisons, recycle bin)
+- `lib/utils/flight-sort.ts` — the one list order (date, out time, departure, id)
 - `lib/db/stores/user/flights.store.ts` — soft delete / restore / purge + `isLiveFlight`
 
 **Swipe & Forms:**
@@ -1286,10 +1309,12 @@ When making changes, be aware of these high-impact files:
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
 - Do not add a rule, material or layout that only one engine gets — iOS and Android must render the app identically. In particular do not reintroduce `@supports (-webkit-touch-callout: none)`, the WebKit-only sniff: it silently made Android's date fields shorter and its focused fields slower to take a tap. A vendor-prefixed property paired with the standard one, or inert elsewhere, is fine. The sole exception is the PWA install prompt, where the OS flow itself differs
+- Do not end the glass press on `touchcancel`/`pointercancel` — Chrome fires those the moment a move looks like a scroll, which is what made the Android spotlight die as soon as the finger moved. Track on the window, treat a cancel as bloom-only, and let the grace timer close it out
 - Do not set the dark theme's `--glass-veil` back to `transparent` — a backdrop-filter has nothing to work with over pure black (blur/saturate of black is black; brightness is multiplicative), so the veil is the only thing giving the slab a face on an empty screen. Keep it warm rather than plain white, or the material reads grey over content again
 - Do not add a second full-face `backdrop-filter` to the glass — `.GlassBlur` carries the only one, as a single filter *list*. Six of them stacked on separate elements is what made the nav pill warm-and-dark on iOS and flat grey on Android: Blink composes the chain, WebKit doesn't, and neither is wrong. Anything the material needs goes into that one list (and the rim layers stay masked to the edge band)
 - Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
 - Do not delete a flight outright — `deleteFlight` is a **soft delete** into the 90-day recycle bin and pushes an UPDATE; only `purgeExpiredDeletedFlights` writes a tombstone. Push a delete when the user merely binned it and the flight is gone on every device with nothing to restore
+- Do not order flights anywhere but `lib/utils/flight-sort.ts` — the order must be TOTAL (date, then actual-or-SCHEDULED out time, then departure, then id) or rows move on their own: a new flight sat at the top of the logbook until the next refetch and then jumped, and reading `outTime` alone treated every unflown sector as 00:00 so scheduled flights sank below completed ones on the same day. An optimistic cache write inserts with `insertFlightSorted`, never by prepending
 - Do not read `userDb.flights` for a list, a total or an import match without `isLiveFlight` — a binned flight reaching the reconciler silently updates, and so resurrects, a flight the user deleted
 - Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
 - Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
