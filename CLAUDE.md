@@ -364,6 +364,37 @@ A simulator carries its duration in `simulatedInstrumentTime`, NOT `blockTime`
 `entryDuration()` is what a card should display. The flight form's **Type** row
 sits above the date and moves the duration across when the type changes.
 
+### The Logbook's Virtualized List
+
+`components/flight-list.tsx` uses `@tanstack/react-virtual` with dynamic
+measurement, and there is one non-obvious rule holding it together: **every
+flight card must be the same height.**
+
+When a measured row turns out taller or shorter than `estimateSize`, the
+virtualizer keeps the view stable by programmatically scrolling by the
+difference — and a programmatic scroll **cancels an in-progress momentum
+scroll** on touch. Jumping into the middle of the list and then scrolling UP
+walks through rows that have never been measured, so the correction fired on
+almost every row: the list stopped dead and needed another swipe, over and
+over.
+
+Three things keep the delta at zero:
+
+- The two optional rows in `flight-card-body` reserve their line (`min-h-[1.25em]`,
+  which is `leading-tight` at their font size) so a flight with no aircraft or
+  no crew is not a shorter card. **Do not drop those** — a variable row height
+  brings the corrections straight back.
+- `estimateSize` is **calibrated** from the first row that reports a real
+  height, so the constant is measured rather than guessed (it was 104 against a
+  real 110). The virtualizer reads it through a ref; the state exists only to
+  re-render once when the calibration lands.
+- `getItemKey` keys the size cache by **flight id**, not index — keyed by index
+  the cached heights get misattributed the moment the list changes, so a delete
+  or re-sort hands row N whatever used to be there.
+
+Measured after the fix: jumping to the middle and scrolling up 40 steps
+produces **zero** scroll corrections.
+
 ### The Flight Card (`components/flight-card-body.tsx`)
 
 One visual definition of "a flight card", shared by the logbook list, the
@@ -601,8 +632,21 @@ re-renders).
   OTP group while verifying. The full-border "confirmed" glow stays via the
   `.totp-success` box-shadow.
 - **Gravity nav indicator** (`GravityIndicator` in `components/nav-pill.tsx`) —
-  the active-tab/​item highlight blob (pill bar + bottom nav + sidebar). It moves
-  via a **CSS `transform` transition** (compositor-driven), NOT a Framer/JS spring
+  the active-tab/​item highlight blob (pill bar + bottom nav + sidebar). Its
+  elasticity is deliberately in the SIZE, not the position:
+  `GRAVITY_POSITION_BEZIER` carries only a small overshoot (a big one reads as
+  the blob springing left and right to find its seat) while
+  `GRAVITY_SIZE_BEZIER` overshoots harder and runs longer, so the blob arrives,
+  overshoots its width and compresses back — squash-and-stretch rather than
+  sideways bounce.
+  `instant` places it with NO animation, for the frames where animating is
+  wrong rather than pretty: while the sidebar is still morphing (its metrics
+  re-measure as the panel grows, so a spring started mid-morph only gets going
+  as the panel lands and the blob visibly arrived a beat late), and under the
+  drag lens — where the blob also tracks the tab UNDER THE LENS rather than the
+  route's, so that when the lens fades it is already exactly where the lens
+  landed instead of springing across the whole bar once the route catches up.
+  It moves via a **CSS `transform` transition** (compositor-driven), NOT a Framer/JS spring
   — Framer springs tick on the main thread and **hitch** when a heavy page
   (dashboard/FDP) mounts. Position uses a bouncy overshoot bezier; size settles a
   touch faster for a subtle stretch. Tab metrics are measured with a
@@ -782,11 +826,14 @@ re-renders).
     re-renders can't strip it); the pop-in uses the separate CSS `scale`
     property, so the two never fight.
   - **Drop-splat settle — compositor only.** On release the lens rides the
-    standalone CSS `translate` and `scale` properties, each with its **own**
-    transition: position with a **no-overshoot ease** (it must never spring
-    left/right) and shape with an overshoot, which is the splat. Two easings on
-    one element is only possible because they are separate properties — a
-    single `transform` could not carry both. A CSS `--settle` crossfade swaps
+    standalone CSS `translate` (a transition, **no-overshoot ease** — it must
+    never spring left/right) and `scale` (a **keyframe** animation,
+    `pill-lens-splat`). The shape has to be keyframed: a transition can only
+    overshoot both axes together, which reads as the blob growing past its size
+    and coming back. Squash-and-stretch needs the axes to go OPPOSITE ways —
+    wide+flat on impact (timed to land with the translate), then narrow+tall on
+    the rebound, then neutral. `scale` is a composited property, so the
+    keyframes run on the compositor exactly as the transition did. A CSS `--settle` crossfade swaps
     the glass material for the grey blob; a timer (must outlast the scale's
     rebound) hands off to the real blob invisibly, and the lens lands on the
     blob's rect exactly, so the swap is invisible.
@@ -883,8 +930,16 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   would auto-open the full-screen mobile overlay when the viewport crosses
   below 720px (iPad Split View / resize). Only real user taps use the default
   explicit path
-- **System back undoes the last move.** OPENING a detail (no selection → one)
-  `router.push`es `?selected=`; the param going away again is what closes it.
+- **System back undoes the last move.** OPENING a detail — meaning `?selected=`
+  is not already in the URL — `router.push`es it; the param going away again is
+  what closes it. "Is a detail open" must be read off the URL, NOT off the
+  stored selection: a section remembers its last selection in state and
+  sessionStorage while the detail is closed, so keying off that made the first
+  tap after a reload look like switching items. And the re-sync effect below
+  must stand down while a write is in flight (`pendingUrlWriteRef`) — it runs
+  on the state change from the same tap, before the router has updated the
+  params, so it wrote `?selected=` again with `replace` and landed on top of
+  the `push`, erasing the entry.
   That is what makes Android's edge-swipe (and the browser Back button) return
   from an open flight to the logbook instead of skipping the section entirely —
   it used to `replace`, which writes no history entry at all. Switching between
@@ -1471,7 +1526,8 @@ When making changes, be aware of these high-impact files:
 - Do not read `userDb.flights` for a list, a total or an import match without `isLiveFlight` — a binned flight reaching the reconciler silently updates, and so resurrects, a flight the user deleted
 - Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
 - Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
-- Do not open a detail with `router.replace` — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as the back-clear and will put the param straight back
+- Do not open a detail with `router.replace` — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
+- Do not let flight cards vary in height — the logbook virtualizer corrects the scroll offset when a measured row differs from the estimate, and a programmatic scroll cancels a momentum scroll on touch (that is the "scrolling up stops every row" bug). Keep the optional rows' `min-h`, keep `estimateSize` calibrated from a real row, and keep `getItemKey` on the flight id
 - Do not leave the cloned pill's `backdrop-filter`s (or `mix-blend-mode` anywhere in the lens subtree) in place during a drag or landing — they re-sample every frame and block layerisation, which is what made the release jank
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
 - Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely

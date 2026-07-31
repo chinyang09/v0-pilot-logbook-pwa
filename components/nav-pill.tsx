@@ -21,7 +21,13 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
-import { OVERSHOOT_BEZIER, SETTLE_BEZIER, MORPH_EASE } from "@/lib/motion"
+import {
+  OVERSHOOT_BEZIER,
+  SETTLE_BEZIER,
+  MORPH_EASE,
+  GRAVITY_POSITION_BEZIER,
+  GRAVITY_SIZE_BEZIER,
+} from "@/lib/motion"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
@@ -190,6 +196,7 @@ function GravityIndicator({
   className,
   revision = "",
   hidden = false,
+  instant = false,
 }: {
   containerRef: React.RefObject<HTMLElement | null>
   activeIndex: number
@@ -198,6 +205,14 @@ function GravityIndicator({
   revision?: string
   /** Fade the blob out (drag-lens active) while its transform keeps tracking. */
   hidden?: boolean
+  /**
+   * Place the blob with NO animation. For the frames where animating would be
+   * wrong rather than pretty: while the sidebar is still opening (the spring
+   * would only get going as the panel lands, so the blob visibly arrived a
+   * beat late), and under the drag lens (it must already be where the lens
+   * lands, or it springs across the bar the moment the route catches up).
+   */
+  instant?: boolean
 }) {
   const reduce = useReducedMotion()
   const [rects, setRects] = useState<{ left: number; top: number; width: number; height: number }[]>([])
@@ -234,13 +249,14 @@ function GravityIndicator({
   // Position transitions with a bouncy overshoot (compositor-driven); size
   // settles a touch faster so the trailing edge lags → a subtle stretch. CSS
   // transitions don't fire on first paint, so there's no fly-in on mount.
-  const transition = reduce
-    ? "none"
-    : [
-        `transform 0.5s ${OVERSHOOT_BEZIER}`,
-        `width 0.4s ${SETTLE_BEZIER}`,
-        `height 0.4s ${SETTLE_BEZIER}`,
-      ].join(", ")
+  const transition =
+    reduce || instant
+      ? "none"
+      : [
+          `transform 0.44s ${GRAVITY_POSITION_BEZIER}`,
+          `width 0.52s ${GRAVITY_SIZE_BEZIER}`,
+          `height 0.52s ${GRAVITY_SIZE_BEZIER}`,
+        ].join(", ")
 
   return (
     <div
@@ -662,18 +678,21 @@ function PillBarContent({
     squishX.jump(1)
     squishY.jump(1)
     lens.style.transform = "none"
+    // The splat keyframes read these; `scale` itself is left to the animation
+    // (an animation outranks inline style, but setting both invites confusion).
+    lens.style.setProperty("--lens-to-x", `${r.width / lensW}`)
+    lens.style.setProperty("--lens-to-y", `${r.height / lensH}`)
     lens.classList.add("PillDragLens--settle")
     lens.style.translate = `${dx}px ${dy}px`
-    lens.style.scale = `${r.width / lensW} ${r.height / lensH}`
     const tab = TAB_CONFIG[tabs[drag.nearest]]
     if (tab) router.push(tab.href)
-    // Outlast the scale's overshoot before handing off to the real blob, or the
-    // rebound gets cut.
+    // Outlast the splat's rebound before handing off to the real blob, or the
+    // last of the squash gets cut.
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
     settleTimerRef.current = setTimeout(() => {
       setLensPhase("idle")
       setLensIndex(-1)
-    }, 420)
+    }, 470)
   }, [tabs, router, squishX, squishY, nudgeX])
 
   useEffect(() => () => {
@@ -714,9 +733,16 @@ function PillBarContent({
       >
         <GravityIndicator
           containerRef={tabsRef}
-          activeIndex={activeIndex}
+          // While the lens is up the blob tracks the tab UNDER IT, instantly.
+          // It is invisible then, so the move costs nothing to look at — and it
+          // means that when the lens fades the blob is already exactly where
+          // the lens landed. Left on the old active tab it would spring across
+          // the whole bar the moment the route caught up, which is the
+          // left-and-right springing that made the landing look mechanical.
+          activeIndex={lensActive && lensIndex >= 0 ? lensIndex : activeIndex}
           revision={tabs.join(",")}
           hidden={lensActive}
+          instant={lensActive}
         />
         {tabs.map((tabKey, i) => {
           const tab = TAB_CONFIG[tabKey]
@@ -853,11 +879,19 @@ function SidebarNav({
   pathname,
   className,
   topInset = 0,
+  settled = true,
 }: {
   pathname: string
   className?: string
   /** Space reserved at the top for chrome floating over the list. */
   topInset?: number
+  /**
+   * False while the panel is still morphing. The blob is placed without
+   * animation then: its metrics are re-measured as the panel grows, so a spring
+   * started mid-morph only gets going as the panel lands and the blob visibly
+   * arrives a beat after the sidebar has finished opening.
+   */
+  settled?: boolean
 }) {
   const navRef = useRef<HTMLElement>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
@@ -925,6 +959,7 @@ function SidebarNav({
         activeIndex={activeIndex}
         className="rounded-full"
         revision={orderedHrefs.join(",")}
+        instant={!settled}
       />
 
       {/* One pixel taller than the scroller so the list always has somewhere to
@@ -1335,6 +1370,7 @@ function DesktopPillMorph({
                 pathname={pathname}
                 className="h-full"
                 topInset={SIDEBAR_HEADER_HEIGHT}
+                settled={phase === "sidebar"}
               />
               <SidebarTopStrip onToggle={onToggleSidebar} />
             </div>
@@ -1513,6 +1549,7 @@ function MobilePillMorph({
                 pathname={pathname}
                 className="h-full"
                 topInset={SIDEBAR_HEADER_HEIGHT}
+                settled={phase === "sidebar"}
               />
               <SidebarTopStrip onToggle={() => setSidebarOpen(false)} />
             </div>

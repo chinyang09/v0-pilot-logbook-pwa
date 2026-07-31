@@ -1048,9 +1048,33 @@ textarea:focus-within {
    thread is busy mounting the next page. */
 .PillDragLens--settle {
   transition:
-    translate 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-    scale 0.36s cubic-bezier(0.34, 1.5, 0.64, 1),
+    translate 0.26s cubic-bezier(0.22, 1, 0.36, 1),
     opacity 0.26s ease;
+  /* The shape is KEYFRAMED, not transitioned. A transition can only overshoot
+     both axes together, which reads as "grew past its size and came back" —
+     the blob getting bigger and smaller, not a body landing. Squash-and-
+     stretch needs the axes to go OPPOSITE ways: wide+flat on impact, then
+     narrow+tall on the rebound, then neutral. `scale` is a composited
+     property, so the keyframes run on the compositor exactly like the
+     transition did. */
+  animation: pill-lens-splat 0.42s cubic-bezier(0.33, 0, 0.2, 1) forwards;
+}
+@keyframes pill-lens-splat {
+  0% {
+    scale: 1 1;
+  }
+  /* Impact — timed to land with the translate (0.26s of 0.42s ≈ 62%). */
+  62% {
+    scale: calc(var(--lens-to-x, 1) * 1.14) calc(var(--lens-to-y, 1) * 0.84);
+  }
+  /* Rebound the other way, smaller than the squash so it settles rather than
+     oscillates. */
+  82% {
+    scale: calc(var(--lens-to-x, 1) * 0.95) calc(var(--lens-to-y, 1) * 1.07);
+  }
+  100% {
+    scale: var(--lens-to-x, 1) var(--lens-to-y, 1);
+  }
 }
 .PillDragLens--settle .PillDragLens-glass,
 .PillDragLens--settle .PillDragLens-refract {

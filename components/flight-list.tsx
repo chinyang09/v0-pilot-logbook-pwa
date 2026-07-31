@@ -224,13 +224,53 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     // Generate FastScroll items from flights (year-based)
     const fastScrollItems = useMemo(() => generateFlightYearItems(flights), [flights]);
 
+    // The row height, calibrated from the first card actually laid out.
+    //
+    // This matters more than it looks. When a measured row turns out taller or
+    // shorter than the estimate, the virtualizer keeps the view stable by
+    // programmatically scrolling by the difference — and a programmatic scroll
+    // CANCELS an in-progress momentum scroll on touch. Scrolling up through
+    // rows that had never been measured (after jumping into the middle of the
+    // list) therefore killed the fling on almost every row: the list stopped
+    // dead and needed another swipe, over and over.
+    //
+    // Every flight card is the same height by construction (the two optional
+    // rows in flight-card-body reserve their line), so ONE measurement is the
+    // right answer for all of them. Calibrate from it and the correction never
+    // fires. 104 is only the opening guess, used for the first paint.
+    const [rowHeight, setRowHeight] = useState(104);
+    const rowHeightRef = useRef(104);
+
     // Create virtualizer instance
     const rowVirtualizer = useVirtualizer({
       count: flights.length,
       getScrollElement: () => scrollContainerRef.current,
-      estimateSize: () => 104, // Measured: 86px content + 8px py-1 + 2px border + 8px container padding
-      overscan: 5, // Render 5 extra items above/below viewport
+      estimateSize: () => rowHeightRef.current,
+      // Enough that a fast flick doesn't outrun the rendered window. Cheap now
+      // that the rows aren't re-measuring into scroll corrections.
+      overscan: 8,
+      // Sizes are cached per FLIGHT, not per index. Keyed by index they get
+      // misattributed the moment the list changes — a delete or a re-sort
+      // hands row N the height that belonged to whatever used to be there.
+      getItemKey: (index) => flights[index]?.id ?? index,
     });
+
+    // Take the calibration off the first row that reports a real height.
+    const measureRow = useCallback(
+      (el: HTMLElement | null) => {
+        rowVirtualizer.measureElement(el);
+        if (!el) return;
+        const h = el.getBoundingClientRect().height;
+        if (h > 0 && Math.abs(h - rowHeightRef.current) > 0.5) {
+          rowHeightRef.current = h;
+          setRowHeight(h);
+        }
+      },
+      [rowVirtualizer],
+    );
+    // `rowHeight` exists to re-render once when the calibration lands; the
+    // virtualizer reads the ref, which is already current.
+    void rowHeight;
 
     // Get virtual items
     const virtualItems = rowVirtualizer.getVirtualItems();
@@ -568,7 +608,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                         transform: `translateY(${virtualRow.start}px)`,
                       }}
                       data-index={virtualRow.index}
-                      ref={rowVirtualizer.measureElement}
+                      ref={measureRow}
                     >
                       {/* Shift div: slides cards below the deleting card upward
                           using a CSS translateY transition. This keeps the

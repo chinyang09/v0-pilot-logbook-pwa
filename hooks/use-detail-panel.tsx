@@ -136,6 +136,15 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
   const lastUrlSelectedRef = useRef<string | null>(searchParams.get("selected"))
   const lastBaseRef = useRef(currentBase)
   const backClearedRef = useRef(false)
+  /**
+   * True from the moment we route a selection until `searchParams` catches up.
+   * The re-sync effect below runs on the state change from the SAME tap, before
+   * the router has updated the params — so it saw "explicit selection, no
+   * `?selected=` in the URL" and helpfully wrote one with `router.replace`,
+   * landing on top of the `push` we had just issued and erasing the history
+   * entry. That is why the back gesture still skipped the section.
+   */
+  const pendingUrlWriteRef = useRef(false)
 
   useEffect(() => {
     const urlSelected = searchParams.get("selected")
@@ -143,6 +152,8 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     const prevBase = lastBaseRef.current
     lastUrlSelectedRef.current = urlSelected
     lastBaseRef.current = currentBase
+    // The router has caught up with whatever we last wrote.
+    pendingUrlWriteRef.current = false
     // Only a back WITHIN a section closes its detail. Leaving the section drops
     // `?selected=` too, and treating that as a close would wipe the section we
     // just arrived at — including its stored selection.
@@ -179,8 +190,16 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
       }
 
       const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname
-      const hadSelection = selections[currentBase] != null
-      if (id && !hadSelection) {
+      // "Is a detail OPEN?" is the URL, not the stored selection. A section
+      // remembers its last selection in state + sessionStorage even while the
+      // detail is closed, so keying off that made the very first tap after a
+      // reload look like "switching items" — it replaced, wrote no history
+      // entry, and the back gesture sailed straight past the section. The
+      // `?selected=` param is written for every explicit open, so its presence
+      // is exactly "we already own a pushed entry here".
+      const detailIsOpen = searchParams.has("selected")
+      pendingUrlWriteRef.current = true
+      if (id && !detailIsOpen) {
         // Opening a detail is a move, so it gets a history entry to undo.
         pushedBaseRef.current = currentBase
         router.push(newUrl || "/", { scroll: false })
@@ -202,7 +221,7 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     if (!id?.startsWith("__")) {
       saveSelection(currentBase, id)
     }
-  }, [currentBase, pathname, router, searchParams, selections])
+  }, [currentBase, pathname, router, searchParams])
 
   // Re-sync ?selected= into the URL when returning to a keep-alive tab whose
   // EXPLICIT selection survived in state (tab navigation links carry no query,
@@ -218,6 +237,9 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     // state — without this guard it would put the param straight back and the
     // detail would refuse to close.
     if (backClearedRef.current) return
+    // A selection we just routed hasn't reached `searchParams` yet — writing
+    // the param again here would replace the entry that write pushed.
+    if (pendingUrlWriteRef.current) return
     const sel = selections[currentBase]
     if (!sel || sel.startsWith("__") || !explicitBases[currentBase]) return
     const params = new URLSearchParams(searchParams.toString())
