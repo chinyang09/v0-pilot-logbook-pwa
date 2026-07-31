@@ -140,6 +140,20 @@ const MORPH_DUR = 265
 const MORPH_LEAD = 135
 
 
+/**
+ * Kill the browser's long-press link menu on nav items — Android's "Open in new
+ * tab / Copy link address" sheet, iOS's link preview. Neither is ever what a tap
+ * on the nav meant, and on the pill the press-and-hold is the drag lens's own
+ * gesture, so the menu interrupts it outright.
+ *
+ * This is the engine-independent half: both Chrome and modern Safari drive that
+ * menu off a `contextmenu` event and both honour `preventDefault`. The
+ * `-webkit-touch-callout: none` on `[data-nav-link]` in globals.css stays for
+ * older WebKit, which suppresses the callout without firing the event at all —
+ * a prefixed property that is simply inert elsewhere, not a platform branch.
+ */
+const suppressLinkMenu = (e: React.MouseEvent) => e.preventDefault()
+
 // ─── Sync status icon ────────────────────────────────────────
 
 /**
@@ -651,8 +665,9 @@ function PillBarContent({
 
       {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
           behind the labels and stretches between tabs as the route changes.
-          touch-action:none so hold-and-slide streams pointermoves on iOS;
-          [-webkit-touch-callout:none] kills the iOS long-press link popup. */}
+          touch-action:none so hold-and-slide streams pointermoves on iOS; the
+          links cancel `contextmenu` so the hold never pops the browser's own
+          link menu on top of the lens (see suppressLinkMenu). */}
       <div
         ref={tabsRef}
         className="relative flex items-center flex-1 min-w-0 justify-evenly touch-none"
@@ -689,6 +704,7 @@ function PillBarContent({
               href={tab.href}
               data-nav-link
               draggable={false}
+              onContextMenu={suppressLinkMenu}
               className="relative z-[1]"
             >
               {mode === "desktop" ? (
@@ -946,6 +962,7 @@ function SidebarNavItem({
       data-grav-item
       data-nav-link
       draggable={false}
+      onContextMenu={suppressLinkMenu}
       className={cn(
         "relative z-[1] flex items-center gap-3 px-3.5 py-2.5 rounded-full text-sm transition-all duration-150",
         "active:scale-[0.98]",

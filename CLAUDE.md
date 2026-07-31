@@ -712,6 +712,14 @@ re-renders).
   has no dead zone at the top — holding fully transparent for the first third
   made the band under the icons simply blank, which reads as the list stopping
   rather than running beneath.
+- **No long-press link menu on the nav.** Every `[data-nav-link]` (pill tabs and
+  sidebar items alike) cancels `contextmenu`, which is the gate both Chrome and
+  modern Safari check before showing "Open in new tab / Copy link address" or
+  the iOS link preview. On the pill the press-and-hold IS the drag lens's
+  gesture, so the menu interrupted it outright. `-webkit-touch-callout: none`
+  in `globals.css` stays for older WebKit, which suppresses the callout without
+  firing the event at all — a prefixed property that is inert elsewhere, not a
+  platform branch.
 - **Nav drag lens** (`PillBarContent` in `components/nav-pill.tsx`, `.PillDragLens*`
   in `globals.css`) — an iPadOS-tab-bar-style **hold-and-slide** over the pill
   tabs. A plain tap still navigates (10px slop before it activates; a
