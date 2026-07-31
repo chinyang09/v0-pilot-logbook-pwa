@@ -625,6 +625,17 @@ re-renders).
   It used to be 160 opening / 185 closing, which made the open overlap more
   than the close and the two directions read as different animations.
 
+  **The pill's width is MEASURED (`usePillWidth`), never `auto`.** `width` rides
+  in the position group so the pill resizes *while* it moves, and CSS cannot
+  interpolate a length to `auto` — with `width: auto` as the pill endpoint the
+  width snapped on the morph's first frame, so the pill visibly resized to its
+  final size before it had moved anywhere ("collapse and resize, then move").
+  A px value at BOTH ends is the whole fix. It is taken off the element itself
+  while it is still `auto`, in the ResizeObserver's first callback (no
+  `setState` in an effect body), and only while the nav is settled as a pill —
+  measuring in sidebar shape stores 191 as the pill width. The stored value is
+  released back to `auto` for a frame when the tab set or the viewport changes.
+
   `useMorphPhase` advances on a timer (`DUR + max(lead)` fallback) **and** on the
   *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed
   group isn't cut) — the latter settles the phase the instant the morph finishes
@@ -1342,6 +1353,7 @@ When making changes, be aware of these high-impact files:
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not move the sidebar's gravity blob back into a non-scrolling overlay translated from a scroll listener — that is a main-thread reaction to a scroll that already happened, so the blob trails the items by a frame. It belongs inside the scroller, where it moves on the compositor; the top band is masked anyway, so there is no overshoot clipping to protect it from
 - Do not give the morph different open and close leads — one `MORPH_LEAD` keeps the two directions exact mirrors, which is what makes the top pill and the bottom pill read as the same animation
+- Do not put `width: auto` back on the nav pill — `width` animates alongside `left`/`transform`, and CSS can't interpolate to `auto`, so it snaps on the morph's first frame and the pill resizes before it moves. Keep the measured px endpoint from `usePillWidth` (measured only while settled as a pill, in a ResizeObserver callback)
 - Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
 - Do not add a rule, material or layout that only one engine gets — iOS and Android must render the app identically. In particular do not reintroduce `@supports (-webkit-touch-callout: none)`, the WebKit-only sniff: it silently made Android's date fields shorter and its focused fields slower to take a tap. A vendor-prefixed property paired with the standard one, or inert elsewhere, is fine. The sole exception is the PWA install prompt, where the OS flow itself differs
 - Do not end the glass press on `touchcancel`/`pointercancel` — Chrome fires those the moment a move looks like a scroll, which is what made the Android spotlight die as soon as the finger moved. Track on the window, treat a cancel as bloom-only, and let the grace timer close it out

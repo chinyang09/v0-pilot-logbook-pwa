@@ -1032,6 +1032,59 @@ function morphTransition(phase: MorphPhase, dur: number, lead: number, positionP
     : `${group("height", 0)}, ${group(positionProps, lead)}`
 }
 
+/**
+ * The pill's natural (content) width in px — measured, because `width: auto`
+ * CANNOT be transitioned.
+ *
+ * `width` rides in the same transition group as `left`/`transform` so the pill
+ * resizes WHILE it moves. With `auto` as the pill endpoint there is nothing to
+ * interpolate from or to, so the width snapped on the morph's first frame: the
+ * pill visibly shrank to its final size before it had moved anywhere, which
+ * read as "resize, then move" instead of one motion. A px value at BOTH ends is
+ * the whole fix.
+ *
+ * Measured off the element itself while it is still `auto`, in the
+ * ResizeObserver's first callback (so no `setState` sits in an effect body).
+ * Once a width is stored the observer disconnects — the element is then sized
+ * by us, so there is nothing left to measure. It is released back to `auto` for
+ * a frame and re-measured whenever `revision` (the tab set) changes.
+ *
+ * `canMeasure` must be false unless the element is currently in PILL shape,
+ * otherwise the sidebar's width gets stored as the pill's.
+ */
+function usePillWidth(
+  ref: React.RefObject<HTMLElement | null>,
+  revision: string,
+  canMeasure: boolean,
+): number | null {
+  const [measured, setMeasured] = useState<{ revision: string; width: number } | null>(null)
+  const width = measured?.revision === revision ? measured.width : null
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el || width !== null || !canMeasure) return
+    const ro = new ResizeObserver(() => {
+      const w = el.getBoundingClientRect().width
+      if (w > 0) setMeasured({ revision, width: Math.round(w) })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [ref, revision, width, canMeasure])
+
+  // A viewport change can change the natural width (the pill is shrink-to-fit
+  // inside it), so drop the stored value and let the observer above take a
+  // fresh one. Only while settled as a pill — dropping it mid-morph would
+  // leave `auto` as an endpoint again, which is the very thing this avoids.
+  useEffect(() => {
+    if (!canMeasure) return
+    const onResize = () => setMeasured(null)
+    window.addEventListener("resize", onResize)
+    return () => window.removeEventListener("resize", onResize)
+  }, [canMeasure])
+
+  return width
+}
+
 // ─── Desktop: top pill ↔ sidebar ─────────────────────────────
 
 function DesktopPillMorph({
@@ -1069,6 +1122,10 @@ function DesktopPillMorph({
     [phase, advancePhase],
   )
 
+  // A px endpoint for the pill so `width` actually interpolates alongside
+  // `left`/`transform` instead of snapping (see usePillWidth).
+  const pillWidth = usePillWidth(ref, tabs.join(","), phase === "pill")
+
   const transition = morphTransition(phase, DUR, LEAD, "top, left, transform, width")
   // Reveal the sidebar list in lock-step with the growing/shrinking HEIGHT
   // (drawer clip), not on its own opacity timeline — otherwise the list fades
@@ -1086,7 +1143,7 @@ function DesktopPillMorph({
       : `calc(${PILL_TOP}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
     left: isSidebarShape ? SIDEBAR_MARGIN : "50%",
     transform: isSidebarShape ? "translateX(0)" : "translateX(-50%)",
-    width: isSidebarShape ? SIDEBAR_INNER_WIDTH : "auto",
+    width: isSidebarShape ? SIDEBAR_INNER_WIDTH : (pillWidth ?? "auto"),
     height: isSidebarShape ? expandedHeight : PILL_HEIGHT,
     transition,
   }
@@ -1204,8 +1261,12 @@ function MobilePillMorph({
     [phase, advancePhase],
   )
 
-  // Mobile morph — always bottom-anchored. pill: bottom-centre, auto width, pill
-  // height. opening/closing: height and position+width morph in a sequenced
+  // A px endpoint for the pill so `width` actually interpolates alongside
+  // `left`/`transform` instead of snapping (see usePillWidth).
+  const pillWidth = usePillWidth(ref, tabs.join(","), phase === "pill")
+
+  // Mobile morph — always bottom-anchored. pill: bottom-centre, measured pill
+  // width, pill height. opening/closing: height and position+width morph in a sequenced
   // overlap (bottom-anchored, so it grows upward). On CLOSE the height collapses
   // almost fully (LEAD) before position+width move into the pill. sidebar:
   // full height, bottom-left. In the pill state only `transform` animates.
@@ -1228,7 +1289,7 @@ function MobilePillMorph({
     transform: isSidebarShape
       ? "translateX(0)"
       : `translateX(-50%) translateY(${hideNavbar ? "calc(100% + 24px)" : "0%"})`,
-    width: isSidebarShape ? SIDEBAR_INNER_WIDTH : "auto",
+    width: isSidebarShape ? SIDEBAR_INNER_WIDTH : (pillWidth ?? "auto"),
     height: isSidebarShape ? expandedHeight : PILL_HEIGHT,
     transition,
   }
