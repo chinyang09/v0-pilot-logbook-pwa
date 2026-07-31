@@ -617,13 +617,20 @@ re-renders).
   motion:
   - **closing** (sidebar→pill) collapses height first (delay 0) — the top pill
     upward, the bottom pill downward, since one is top-anchored and the other
-    bottom-anchored — then, once it is nearly flat, moves position+width into
-    the pill.
+    bottom-anchored — then, at **~85% collapsed**, moves position+width into
+    the pill, finishing the last of the collapse on the way.
   - **opening** (pill→sidebar) is that played backwards: position+width first
     (delay 0), then height.
-  The lead is **near-full** on purpose: the two groups must not move at once.
-  It used to be 160 opening / 185 closing, which made the open overlap more
-  than the close and the two directions read as different animations.
+  The lead is sized so the second group starts while the first still has
+  10-15% to run — with `MORPH_EASE`, 85% of the travel is done at ~57% of the
+  duration, hence **LEAD ≈ 0.6 × DUR**. The whole morph takes **~1s**: at
+  375ms (190/185) the lead was near-FULL, so the collapse was all but over
+  before anything moved and the morph read as two snaps back to back. Fast,
+  but not fluid. (The leads used to differ too — 160 opening / 185 closing —
+  which made the two directions feel like different animations.)
+  `MORPH_EASE` was retuned with them: the old fast-launch curve put the
+  collapse 94% home in the first HALF of its duration, which over a 1s morph
+  is a snap followed by a crawl.
 
   **The pill's width is MEASURED (`usePillWidth`), never `auto`.** `width` rides
   in the position group so the pill resizes *while* it moves, and CSS cannot
@@ -694,26 +701,54 @@ re-renders).
     over narrow tabs) that **overhangs** the pill top/bottom (`LENS_OVERHANG`).
     **Clamped** to the first/last tab centres so it never leaves the tab strip;
     finger travel *past* an end tab becomes `overshoot`.
-  - **Refraction (`-refract`):** a CLIPPED COPY of the tab strip, laid exactly
-    over the real one and scaled about the LENS CENTRE — so the pill is
-    visibly smaller inside the lens and untouched outside it. Engine-
-    independent by construction: one composited transform, no filter, nothing
-    to rasterise. The copy is re-cloned when the lens crosses to another tab so
-    its pre-highlight matches.
-    The copy is the WHOLE glass pill, not just the tab strip, and the lens is
-    sized and centred on the pill (`drag.pill`) rather than the strip — so the
-    control's rounded top and bottom shrink too and sit inside the lens with
-    clear space around them. Sizing off the strip left ~7px of clearance and
-    read as a crop rather than something under glass.
-    The layer carries the page background at ~94%, because it has to COVER the
-    pill it duplicates or you see both at once and it reads as a ghost. A blur
-    can't do that job: the lens is portalled to `<body>` and the nav sits in
-    its own stacking context, so **the lens's `backdrop-filter` never samples
-    the pill at all** — verified by hiding the copy, which leaves the label
-    underneath perfectly sharp. `.PillDragLens-refractCopy` also paints its own
-    face and hairline: a backdrop-filter inside a clipped, transformed layer
-    has almost nothing to sample, so the cloned glass alone came out barely 10%
-    lighter than the scrim and the pill's outline vanished.
+  - **Refraction (`-refract`):** a CLIPPED COPY of the whole glass pill, laid
+    exactly over the real one and **squeezed on ONE axis** about the LENS
+    CENTRE — `scaleY(LENS_SQUASH)` — so inside the lens the control is
+    **shorter, not smaller**. The row inside the copy is counter-scaled by
+    `1/LENS_SQUASH`, so the labels keep their true size and shape and nothing
+    moves horizontally (the copy stays aligned with the original and the lens
+    edge reads as continuous). Engine-independent by construction: composited
+    transforms, no filter, nothing to rasterise. The copy is re-cloned when the
+    lens crosses to another tab so its pre-highlight matches.
+    A uniform `scale(0.82)` came first and shrank the text too — that reads as
+    a minifying lens held above the bar, not as glass resting on it. How far
+    the squeeze can go is set by the CONTENT: the counter-scaled row must still
+    fit the copy's box (the pill's true height), and the mobile pill's 44px tab
+    item in a 56px bar caps it at ~0.84. At 0.72 the icons and labels were
+    clipped away by the copy's own edge.
+  - **The pill is CUT under the lens, not covered** (`[data-lens-hole]` in
+    `globals.css`, offsets written per frame from `positionLens`). Both masks
+    are the same four offsets in the pill's coordinate space: the pill is
+    hidden between them, the copy is shown only between them, so the bar fades
+    out as it enters the lens and the squeezed copy fades in over the same 14px
+    instead of both drawing at once. The band is inset to stay inside the
+    lens's **stadium** at the pill's top/bottom edge, or it takes bites out of
+    the bar either side of the bubble.
+    It has to be a cut. The lens's own `backdrop-filter` **never samples the
+    pill at all** — verified, `blur(10px)` there leaves the label underneath
+    perfectly sharp (the lens is portalled to `<body>` and carries its own
+    `scale`, so it forms a backdrop root). The previous fix was to fill the
+    whole lens with the page colour, which blanked out everything the bubble
+    overhung: the pill is TRANSLUCENT, so covering it punches a hole in the
+    list behind the bar. Cutting shows the real content through, above and
+    below the squeezed copy. One mask on ONE element — don't push it down onto
+    the material layers individually, `GlassEdgeReflection` and friends already
+    carry rim masks and combining mask layers with `mask-composite` is the
+    least interoperable corner of CSS there is. Measured in Blink: the pill's
+    backdrop-filters still sample the page normally with the mask applied.
+    Strip `data-lens-hole` from the CLONE — `cloneNode` copies the attribute
+    and the inline offsets, so the copy came through with the same band missing.
+  - `.PillDragLens-refractCopy` paints its own face and hairline: a
+    backdrop-filter inside a clipped, transformed layer has almost nothing to
+    sample, so the cloned glass alone came out barely 10% lighter than what is
+    behind it and the pill's outline vanished. It stands in for the real face —
+    a mostly-opaque wash of the page colour plus a light veil — and has to be
+    that solid now the pill is cut away underneath, because the list shows at
+    full contrast right up to the copy's edge.
+    The copy also carries the pill's **live press transform** (read off
+    `style.transform`, which framer wrote this frame — no style flush). Without
+    it the copy sits at the pill's resting size while the original is bloomed
+    ~4.5% larger, and the labels visibly double at the lens edge.
   - **Material:** `.PillDragLens-glass` on every platform — layered shadows for
     the convex bulge plus an inner thickness vignette that fakes the pinch, and
     a chromatic-dispersion `.PillDragLens-rim` for the liquid fringe. The
@@ -1359,7 +1394,8 @@ When making changes, be aware of these high-impact files:
 - Do not end the glass press on `touchcancel`/`pointercancel` — Chrome fires those the moment a move looks like a scroll, which is what made the Android spotlight die as soon as the finger moved. Track on the window, treat a cancel as bloom-only, and let the grace timer close it out
 - Do not set the dark theme's `--glass-veil` back to `transparent` — a backdrop-filter has nothing to work with over pure black (blur/saturate of black is black; brightness is multiplicative), so the veil is the only thing giving the slab a face on an empty screen. Keep it warm rather than plain white, or the material reads grey over content again
 - Do not add a second full-face `backdrop-filter` to the glass — `.GlassBlur` carries the only one, as a single filter *list*. Six of them stacked on separate elements is what made the nav pill warm-and-dark on iOS and flat grey on Android: Blink composes the chain, WebKit doesn't, and neither is wrong. Anything the material needs goes into that one list (and the rim layers stay masked to the edge band)
-- Do not give the drag lens's `-refract` layer a `backdrop-filter` instead of its background — the lens is portalled to `<body>` and the nav is in its own stacking context, so a backdrop-filter there does not sample the pill at all (measured). The layer must paint over the strip it duplicates, or the copy and the original show at once
+- Do not fill the drag lens with the page colour to hide the pill — the pill is translucent, so a full-lens cover blanks out whatever the list has behind the bar (that is the "content behind the nav is missing inside the lens" bug). CUT the pill instead (`[data-lens-hole]`) and mask the copy to exactly the complement, so the two crossfade at the lens's ends. A `backdrop-filter` can do neither job: the lens is portalled to `<body>` and carries its own `scale`, so it forms a backdrop root and never samples the pill at all (measured — `blur(10px)` leaves the label underneath perfectly sharp)
+- Do not minify the drag lens's copy uniformly — the squeeze is `scaleY` ONLY, with the row counter-scaled so the labels keep their size and only the control gets shorter. And do not push `LENS_SQUASH` much below 0.84: the counter-scaled row has to fit the copy's box, and the mobile pill's 44px tab item in a 56px bar is what sets that floor (at 0.72 the icons and labels were clipped away entirely)
 - Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
 - Do not delete a flight outright — `deleteFlight` is a **soft delete** into the 90-day recycle bin and pushes an UPDATE; only `purgeExpiredDeletedFlights` writes a tombstone. Push a delete when the user merely binned it and the flight is gone on every device with nothing to restore
 - Do not order flights anywhere but `lib/utils/flight-sort.ts` — the order must be TOTAL (date, then actual-or-SCHEDULED out time, then departure, then id) or rows move on their own: a new flight sat at the top of the logbook until the next refetch and then jumped, and reading `outTime` alone treated every unflown sector as 00:00 so scheduled flights sank below completed ones on the same day. An optimistic cache write inserts with `insertFlightSorted`, never by prepending

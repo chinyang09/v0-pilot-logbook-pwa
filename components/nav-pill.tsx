@@ -119,16 +119,24 @@ const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header
 // as themselves in reverse:
 //
 //   closing  collapse the height (the top pill upward, the bottom pill
-//            downward) → once it is nearly flat, slide into position while the
-//            width resizes to the pill → settle.
+//            downward) → at ~85% collapsed, start sliding into position and
+//            resizing to the pill, finishing the last of the collapse on the
+//            way → settle.
 //   opening  the same played backwards: move + resize first, then grow the
 //            height back out.
 //
-// The lead is near-full on purpose: the two groups must not move at once.
-// (These used to be 160 opening / 185 closing, which made the open overlap
-// more than the close and the two directions feel like different animations.)
-const MORPH_DUR = 190
-const MORPH_LEAD = 185
+// The lead is sized so the SECOND group starts while the first still has
+// ~10-15% to run — the two overlap into one continuous motion instead of
+// stalling between two steps. With MORPH_EASE, 85% of the travel is done at
+// ~57% of the duration, hence LEAD ≈ 0.6 × DUR.
+//
+// ~1s in total, on purpose. At 375ms (190/185) the lead was near-FULL: the
+// collapse was all but over before anything moved, and the whole morph read as
+// two snaps back to back. Fast, but not fluid.
+// (The leads used to differ too — 160 opening / 185 closing — which made the
+// two directions feel like different animations. One lead, both ways.)
+const MORPH_DUR = 620
+const MORPH_LEAD = 380
 
 
 // ─── Sync status icon ────────────────────────────────────────
@@ -250,17 +258,34 @@ function GravityIndicator({
  *  on the drop-splat settle (a springier squash-and-stretch rebound). */
 const SQUISH_SPRING = { stiffness: 600, damping: 10, mass: 0.85 }
 
-/** Extra height beyond the pill — the drag lens overhangs top and bottom. */
-const LENS_OVERHANG = 26
+/** Extra height beyond the pill — the drag lens overhangs top and bottom by
+ *  half this. Only a little: the lens is a bead lying ON the bar, not a bubble
+ *  floating over it. */
+const LENS_OVERHANG = 12
 /** Extra width beyond the tab — keeps the bubble a horizontal stadium, not a
  *  circle, over narrow tabs (matches Apple's tab-bar lens proportions). */
 const LENS_PAD_X = 26
 /**
- * How much the tab strip shrinks inside the lens. Below ~0.75 the copy stops
- * lining up with the blurred original at the lens edge and reads as a second
- * pill rather than the same one seen through glass.
+ * How much the PILL is squeezed inside the lens — vertically ONLY.
+ *
+ * A horizontal bar of glass lying across the pill compresses it along one axis:
+ * the control gets shorter, it does not get smaller. The copy's content is
+ * counter-scaled by 1/this, so the labels keep their true size and shape while
+ * the control around them squashes — which is what makes it read as the SAME
+ * pill seen through glass rather than a smaller pill drawn on top.
+ *
+ * (It used to be a uniform `scale(0.82)`, which shrank the text too. That
+ * reads as a minifying lens held well above the bar, not as glass resting on
+ * it.)
+ *
+ * How far it can go is set by the CONTENT, not by taste: the counter-scaled row
+ * still has to fit inside the copy's box, which is the pill's true height. The
+ * mobile pill's tab item is 44px inside a 56px bar, so 44 / 0.84 ≈ 52px — just
+ * inside. Squeeze harder and the icons and labels get clipped by the copy's own
+ * edge, which is what a first pass at 0.72 did: the labels vanished inside the
+ * lens entirely.
  */
-const LENS_MINIFY = 0.82
+const LENS_SQUASH = 0.84
 
 /**
  * Shared pill bar row — used in both desktop and mobile collapsed states.
@@ -299,7 +324,7 @@ function PillBarContent({
   // (--on / --settle) are managed IMPERATIVELY and its React className stays
   // constant, so drag re-renders can't strip them.
   const lensRef = useRef<HTMLDivElement | null>(null)
-  /** Scaled about the lens centre — this is what minifies the copy. */
+  /** Scaled about the lens centre — this is what squeezes the copy. */
   const refractInnerRef = useRef<HTMLDivElement | null>(null)
   /** Holds the cloned tab strip, positioned to sit exactly over the real one. */
   const refractCopyRef = useRef<HTMLDivElement | null>(null)
@@ -367,10 +392,36 @@ function PillBarContent({
     // frozen transform on top of the lens's own scaling.
     clone.style.transform = "none"
     clone.setAttribute("aria-hidden", "true")
+    // The source is currently cut open for this very lens — cloneNode copies
+    // the attribute AND the inline hole offsets, so the copy came through with
+    // the same band missing and the lens showed a pill with a hole in it.
+    clone.removeAttribute("data-lens-hole")
     clone.removeAttribute("id")
     clone.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"))
+    // The wrapper squeezes the copy vertically; counter-scale the row inside it
+    // so only the CONTROL gets shorter and the labels keep their true size and
+    // shape. Squashing the glyphs too is what made the old uniform-scale lens
+    // read as a smaller pill rather than the same one under glass.
+    const row = clone.querySelector<HTMLElement>("[data-pill-row]")
+    if (row) {
+      row.style.transformOrigin = "50% 50%"
+      row.style.transform = `scaleY(${1 / LENS_SQUASH})`
+    }
     host.appendChild(clone)
   }, [lensPhase, lensIndex])
+
+  /**
+   * Cut the pill away under the lens only while it is actually being dragged.
+   * On release the lens's refracted copy fades out as it morphs into the grey
+   * blob, so the hole has to close on the same beat — leave it open through the
+   * settle and there is a gap in the bar with nothing drawn in it.
+   */
+  useEffect(() => {
+    const gr = glassRootRef.current
+    if (!gr) return
+    if (lensPhase === "drag") gr.setAttribute("data-lens-hole", "")
+    else gr.removeAttribute("data-lens-hole")
+  }, [lensPhase])
 
   const paintSpotlight = useCallback((clientX: number, clientY: number) => {
     const gr = glassRootRef.current
@@ -423,21 +474,57 @@ function PillBarContent({
     lens.style.left = `${lensLeft}px`
     lens.style.top = `${lensTop}px`
 
-    // The refraction: a copy of the tab strip laid exactly over the real one,
-    // then scaled about the LENS CENTRE. Content at the centre stays put and
-    // everything else pulls inward, so the pill genuinely reads as minified —
-    // but only inside the lens, because the layer clips to it.
+    // The refraction: a copy of the pill laid exactly over the real one, then
+    // squeezed VERTICALLY about the LENS CENTRE. Nothing moves horizontally,
+    // so the copy stays aligned with the original and the lens edge reads as
+    // continuous — the control just gets shorter inside the lens.
     //
     // A copy rather than a displacement filter because this has to look the
     // same on both engines: `backdrop-filter: url(#…)` is Chromium-only, and
     // the map it needs was what made the gesture stutter. This is one
     // composited transform.
+    //
+    // `drag.pill` is the pill's UNTRANSFORMED box (taken at pointerdown, before
+    // the press bloom lands), so the copy carries the pill's live transform on
+    // top of it — the same translate+scale framer is writing inline while the
+    // finger is down. Without it the copy sits at the pill's resting size while
+    // the original is bloomed ~4.5% larger, and the labels visibly double at
+    // the lens edge. Read off the inline style, not getComputedStyle: framer
+    // wrote it this frame, so there's no style flush to force.
     const copy = refractCopyRef.current
     if (copy) {
       copy.style.left = `${drag.pill.left - lensLeft}px`
       copy.style.top = `${drag.pill.top - lensTop}px`
       copy.style.width = `${drag.pill.width}px`
       copy.style.height = `${drag.pill.height}px`
+      copy.style.transform = glassRootRef.current?.style.transform ?? ""
+    }
+
+    // Cut the real pill away under the lens (see `[data-lens-hole]`), so the
+    // only pill visible there is the squeezed copy and the page shows through
+    // around it.
+    //
+    // The cut is a band, and it has to stay INSIDE the lens's stadium or it
+    // takes bites out of the pill either side of the bubble. At the pill's top
+    // and bottom edge the stadium has already curved in, so the widest safe
+    // half-band there is the straight section plus the cap's chord — anything
+    // past that pokes out. The edges are feathered, which reads as the bar
+    // dissolving into the glass instead of ending on a cut line.
+    //
+    // The copy gets the SAME four offsets — it lives in the pill's coordinate
+    // space too — but masked the other way round, so it is drawn only where the
+    // pill is cut. The two feathers are then exact complements: the bar fades
+    // out as it enters the lens and the squeezed copy fades in over the same
+    // 14px, instead of both being drawn at once at the lens's ends.
+    const cap = h / 2
+    const half =
+      Math.max(w, h) / 2 - cap + Math.sqrt(Math.max(0, cap * cap - (drag.pill.height / 2) ** 2))
+    const cx = centerX - drag.pill.left
+    const feather = 14
+    const stops = [cx - half, cx - half + feather, cx + half - feather, cx + half]
+    for (const el of [glassRootRef.current, copy]) {
+      if (!el) continue
+      stops.forEach((v, i) => el.style.setProperty(`--lens-hole-${i}`, `${v}px`))
     }
     // Liquid wall: compress into the edge + strain toward the finger. The
     // underdamped springs make leaving the edge / releasing bounce back.
@@ -566,7 +653,7 @@ function PillBarContent({
   const lensActive = lensPhase !== "idle"
 
   return (
-    <div className="flex items-center h-14 px-2">
+    <div data-pill-row className="flex items-center h-14 px-2">
       {/* Sidebar toggle — fixed width bookend */}
       <button
         onClick={onToggleSidebar}
@@ -651,11 +738,13 @@ function PillBarContent({
           Both fade to the grey child (--settle) as the lens morphs into the
           blob.
 
-          `-refract` is the actual refraction: a clipped copy of the tab strip
-          scaled about the lens centre, so the pill is visibly SMALLER inside
-          the lens and unchanged outside it. The glass beneath blurs the real
-          strip, which is what lets the crisp copy read as the same content
-          seen through the lens rather than a second one drawn on top.
+          `-refract` is the actual refraction: a copy of the pill, squeezed
+          vertically about the lens centre, drawn into the gap the pill's own
+          `[data-lens-hole]` mask cuts underneath. The control is visibly
+          SHORTER inside the lens and unchanged outside it — the way a bar of
+          glass lying across it would compress it — and because the bar is CUT
+          rather than covered, the page behind it still shows through around
+          the squeezed copy.
 
           This replaced a Chromium-only displacement map applied through
           `backdrop-filter: url(#…)`. Same effect, both engines, and it is one
@@ -670,7 +759,7 @@ function PillBarContent({
               <div
                 ref={refractInnerRef}
                 className="PillDragLens-refractInner"
-                style={{ "--lens-minify": LENS_MINIFY } as React.CSSProperties}
+                style={{ "--lens-squash": LENS_SQUASH } as React.CSSProperties}
               >
                 <div ref={refractCopyRef} className="PillDragLens-refractCopy" />
               </div>

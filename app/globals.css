@@ -546,6 +546,39 @@ textarea:focus-within {
   pointer-events: none;
 }
 
+/* The drag lens's HOLE. While the lens is being dragged along the pill, the
+   pill is cut away underneath it and the lens draws the control itself —
+   shorter — in that gap. Without the cut you get two pills at once: the real
+   one at full height and the squeezed copy inside the lens, so the illusion
+   dies on the double outline.
+
+   It has to be a cut, not a painted cover. The pill is TRANSLUCENT: filling
+   the lens with the page colour blanks out whatever the list has behind the
+   bar, which is exactly what made the old lens punch a dark hole in the page.
+   Cut instead and the real content shows through, above and below the squeezed
+   pill, like glass.
+
+   One mask on ONE element. Do not push it down onto the material layers
+   individually — `GlassEdgeReflection` and friends already carry rim masks of
+   their own, and combining two mask layers with `mask-composite` is the least
+   interoperable corner of CSS there is. Measured in Blink: the pill's
+   backdrop-filters still sample the page normally with this mask applied, so
+   the glass around the hole is unchanged. */
+.GlassContainer[data-lens-hole] {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 0 var(--lens-hole-0, 0px),
+    transparent var(--lens-hole-1, 0px) var(--lens-hole-2, 0px),
+    #000 var(--lens-hole-3, 0px) 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    #000 0 var(--lens-hole-0, 0px),
+    transparent var(--lens-hole-1, 0px) var(--lens-hole-2, 0px),
+    #000 var(--lens-hole-3, 0px) 100%
+  );
+}
+
 .GlassContent {
   position: relative;
   display: block;
@@ -944,45 +977,68 @@ textarea:focus-within {
   overflow: hidden;
   border-radius: inherit;
   pointer-events: none;
-  /* The refracted image has to COVER the strip it is a copy of, or you see
-     both at once and it reads as a ghost rather than a lens.
-     
-     A blur can't do that job here: the lens is portalled to <body> and the nav
-     is in its own stacking context, so the lens's backdrop-filter never
-     samples the pill at all (verified — with the copy hidden, the label under
-     the lens is perfectly sharp). So the layer carries the page's own
-     background instead, which hides the original and gives the minified copy
-     something to sit on. Themed, so it works in both. */
-  /* Plain page background, no lift: the minified PILL is what lifts the middle
-     of the lens, and it can only read as a pill if the space above and below it
-     is darker. Adding a white wash here flattened the two together and the
-     control's rounded top and bottom disappeared inside the lens. */
-  background: color-mix(in oklab, var(--background) 94%, transparent);
+  /* NO background of its own. This layer used to be filled edge to edge with
+     the page colour, which blanked out everything the lens overhung — the list
+     behind the pill simply disappeared inside the bubble. The cover below is
+     confined to the pill's own rectangle instead, so the lens shows the real
+     page above and below it. */
   transition: opacity 0.26s ease;
 }
 .PillDragLens-refractInner {
   position: absolute;
   inset: 0;
   /* The lens fills this box, so its centre IS the lens centre — which is the
-     point the minification pulls toward. */
+     point the squeeze pulls toward. */
   transform-origin: 50% 50%;
-  transform: scale(var(--lens-minify, 0.82));
+  /* ONE axis. A bar of glass lying across the pill makes the control shorter,
+     not smaller — the row inside the copy is counter-scaled so the labels keep
+     their true size (see LENS_SQUASH). Nothing moves horizontally, so the copy
+     stays aligned with the real pill and the lens edge reads as continuous. */
+  transform: scaleY(var(--lens-squash, 0.72));
   will-change: transform;
 }
 .PillDragLens-refractCopy {
   position: absolute;
   overflow: hidden;
+  /* Exactly the complement of the pill's `[data-lens-hole]` cut (same four
+     offsets, same coordinate space, inverted) — the copy exists only where the
+     bar has been taken away, so the two crossfade into each other at the lens's
+     ends instead of both being drawn there. */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0 var(--lens-hole-0, 0px),
+    #000 var(--lens-hole-1, 0px) var(--lens-hole-2, 0px),
+    transparent var(--lens-hole-3, 0px) 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0 var(--lens-hole-0, 0px),
+    #000 var(--lens-hole-1, 0px) var(--lens-hole-2, 0px),
+    transparent var(--lens-hole-3, 0px) 100%
+  );
   /* The pill's own radius. This sits inside the scaled wrapper, so it shrinks
      with everything else and the copy keeps the control's proportions. */
   border-radius: 28px;
   /* An explicit face and hairline. The clone brings its own glass, but a
      backdrop-filter inside a clipped, transformed layer has almost nothing to
-     sample, so on its own the copy came out barely 10% lighter than the scrim
-     and the pill's rounded top and bottom vanished inside the lens. This is
-     what makes the whole control — not just its labels — read as being under
-     the glass. */
-  background: color-mix(in oklab, var(--foreground) 8%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 14%, transparent);
+     sample, so on its own the copy came out barely 10% lighter than what is
+     behind it and the pill's rounded top and bottom vanished inside the lens.
+     This is what makes the whole control — not just its labels — read as being
+     under the glass.
+
+     Two layers, standing in for what the real pill's backdrop-filter does: a
+     mostly-opaque wash of the page colour (the blur, which is what stops the
+     content behind reading THROUGH the control) and a light veil over it. It
+     has to be this solid — the pill is cut away underneath, so whatever the
+     list has behind the bar is showing at full contrast right up to the copy's
+     edge, and a 10% face simply disappeared against it. */
+  background:
+    linear-gradient(
+      color-mix(in oklab, var(--foreground) 9%, transparent),
+      color-mix(in oklab, var(--foreground) 9%, transparent)
+    ),
+    color-mix(in oklab, var(--background) 82%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 16%, transparent);
 }
 
 /* Chromatic dispersion fringe on the rim — the liquid-glass rainbow edge.
