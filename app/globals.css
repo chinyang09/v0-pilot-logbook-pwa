@@ -953,9 +953,11 @@ textarea:focus-within {
      the lens is perfectly sharp). So the layer carries the page's own
      background instead, which hides the original and gives the minified copy
      something to sit on. Themed, so it works in both. */
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.06)),
-    color-mix(in oklab, var(--background) 91%, transparent);
+  /* Plain page background, no lift: the minified PILL is what lifts the middle
+     of the lens, and it can only read as a pill if the space above and below it
+     is darker. Adding a white wash here flattened the two together and the
+     control's rounded top and bottom disappeared inside the lens. */
+  background: color-mix(in oklab, var(--background) 94%, transparent);
   transition: opacity 0.26s ease;
 }
 .PillDragLens-refractInner {
@@ -970,6 +972,17 @@ textarea:focus-within {
 .PillDragLens-refractCopy {
   position: absolute;
   overflow: hidden;
+  /* The pill's own radius. This sits inside the scaled wrapper, so it shrinks
+     with everything else and the copy keeps the control's proportions. */
+  border-radius: 28px;
+  /* An explicit face and hairline. The clone brings its own glass, but a
+     backdrop-filter inside a clipped, transformed layer has almost nothing to
+     sample, so on its own the copy came out barely 10% lighter than the scrim
+     and the pill's rounded top and bottom vanished inside the lens. This is
+     what makes the whole control — not just its labels — read as being under
+     the glass. */
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 14%, transparent);
 }
 
 /* Chromatic dispersion fringe on the rim — the liquid-glass rainbow edge.

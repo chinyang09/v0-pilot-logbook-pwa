@@ -112,15 +112,23 @@ const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header
 
 // ─── Morph timing ────────────────────────────────────────────
 // Each geometry property animates over MORPH_DUR; the second group starts a
-// LEAD ms in so the two overlap. Leads are ASYMMETRIC:
-// - opening (pill→sidebar): position+width lead, height follows (OPEN_LEAD) —
-//   it slides into place then grows, which reads correctly.
-// - closing (sidebar→pill): height leads, position+width follow at CLOSE_LEAD,
-//   which is near-full so the sidebar COLLAPSES almost completely before it
-//   moves into the pill position (owner feedback: they shouldn't move at once).
+// LEAD ms in so the two overlap without running at once.
+//
+// ONE lead for both directions, so opening and closing are exact mirrors — the
+// top pill and the bottom pill then perform the same motion as each other and
+// as themselves in reverse:
+//
+//   closing  collapse the height (the top pill upward, the bottom pill
+//            downward) → once it is nearly flat, slide into position while the
+//            width resizes to the pill → settle.
+//   opening  the same played backwards: move + resize first, then grow the
+//            height back out.
+//
+// The lead is near-full on purpose: the two groups must not move at once.
+// (These used to be 160 opening / 185 closing, which made the open overlap
+// more than the close and the two directions feel like different animations.)
 const MORPH_DUR = 190
-const MORPH_OPEN_LEAD = 160
-const MORPH_CLOSE_LEAD = 185
+const MORPH_LEAD = 185
 
 
 // ─── Sync status icon ────────────────────────────────────────
@@ -243,7 +251,7 @@ function GravityIndicator({
 const SQUISH_SPRING = { stiffness: 600, damping: 10, mass: 0.85 }
 
 /** Extra height beyond the pill — the drag lens overhangs top and bottom. */
-const LENS_OVERHANG = 16
+const LENS_OVERHANG = 26
 /** Extra width beyond the tab — keeps the bubble a horizontal stadium, not a
  *  circle, over narrow tabs (matches Apple's tab-bar lens proportions). */
 const LENS_PAD_X = 26
@@ -313,6 +321,8 @@ function PillBarContent({
     active: boolean
     nearest: number
     base: { left: number; top: number; width: number; height: number }
+    /** The whole glass pill, which is what the lens shows a smaller copy of. */
+    pill: { left: number; top: number; width: number; height: number }
     rects: { left: number; top: number; width: number; height: number }[]
   } | null>(null)
 
@@ -344,14 +354,20 @@ function PillBarContent({
    */
   useEffect(() => {
     const host = refractCopyRef.current
-    const source = tabsRef.current
+    // The whole glass pill, not just the tab strip: the lens has to show the
+    // control's rounded top and bottom edges shrunk too, or the labels look
+    // shrunk while the pill around them doesn't and the illusion breaks.
+    const source = tabsRef.current?.closest(".GlassContainer") as HTMLElement | null
     if (!host || !source || lensPhase === "idle") return
     host.replaceChildren()
     const clone = source.cloneNode(true) as HTMLElement
-    clone.removeAttribute("id")
     clone.style.width = "100%"
     clone.style.height = "100%"
+    // The live pill blooms under the finger; the copy must not inherit that
+    // frozen transform on top of the lens's own scaling.
+    clone.style.transform = "none"
     clone.setAttribute("aria-hidden", "true")
+    clone.removeAttribute("id")
     clone.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"))
     host.appendChild(clone)
   }, [lensPhase, lensIndex])
@@ -386,7 +402,10 @@ function PillBarContent({
     }
     const r = rects[nearest]
     const w = r.width + LENS_PAD_X
-    const h = drag.base.height + LENS_OVERHANG
+    // Sized and centred on the PILL. It used to use the tab strip's height,
+    // which is shorter than the control — the minified copy then sat with ~7px
+    // of clearance and looked like a crop rather than something under glass.
+    const h = drag.pill.height + LENS_OVERHANG
     // Clamp the lens CENTRE to the first/last tab centres so the bubble never
     // leaves the tab strip. The finger's pull PAST an end tab has nowhere to
     // go — it becomes `overshoot`, which drives the liquid edge bounce.
@@ -398,7 +417,7 @@ function PillBarContent({
     // Pure finger follow (1:1) via direct px writes — no CSS transition on
     // geometry, so it never lags or snaps. The release spring is framer.
     const lensLeft = centerX - w / 2
-    const lensTop = drag.base.top + drag.base.height / 2 - h / 2
+    const lensTop = drag.pill.top + drag.pill.height / 2 - h / 2
     lens.style.width = `${w}px`
     lens.style.height = `${h}px`
     lens.style.left = `${lensLeft}px`
@@ -415,10 +434,10 @@ function PillBarContent({
     // composited transform.
     const copy = refractCopyRef.current
     if (copy) {
-      copy.style.left = `${drag.base.left - lensLeft}px`
-      copy.style.top = `${drag.base.top - lensTop}px`
-      copy.style.width = `${drag.base.width}px`
-      copy.style.height = `${drag.base.height}px`
+      copy.style.left = `${drag.pill.left - lensLeft}px`
+      copy.style.top = `${drag.pill.top - lensTop}px`
+      copy.style.width = `${drag.pill.width}px`
+      copy.style.height = `${drag.pill.height}px`
     }
     // Liquid wall: compress into the edge + strain toward the finger. The
     // underdamped springs make leaving the edge / releasing bounce back.
@@ -446,11 +465,18 @@ function PillBarContent({
     const base = el.getBoundingClientRect()
     lastPtRef.current = { x: e.clientX, y: e.clientY }
     glassRootRef.current = (el.closest(".GlassContainer") as HTMLElement) ?? null
+    const pillRect = (glassRootRef.current ?? el).getBoundingClientRect()
     dragRef.current = {
       startX: e.clientX,
       active: false,
       nearest: -1,
       base: { left: base.left, top: base.top, width: base.width, height: base.height },
+      pill: {
+        left: pillRect.left,
+        top: pillRect.top,
+        width: pillRect.width,
+        height: pillRect.height,
+      },
       rects: Array.from(el.querySelectorAll<HTMLElement>("[data-grav-item]")).map((it) => {
         const r = it.getBoundingClientRect()
         return { left: r.left - base.left, top: r.top - base.top, width: r.width, height: r.height }
@@ -714,29 +740,10 @@ function SidebarNav({
   topInset?: number
 }) {
   const navRef = useRef<HTMLElement>(null)
-  const blobLayerRef = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const toggleSection = (label: string) => {
     setCollapsed((prev) => ({ ...prev, [label]: !prev[label] }))
   }
-
-  // Keep the (un-clipped) gravity-blob overlay in lock-step with the nav's
-  // scroll. The blob is measured in the scroller's CONTENT coordinates; the
-  // overlay isn't a scroll container, so translating it by -scrollTop projects
-  // the blob into the right viewport position WITHOUT the overflow clipping that
-  // used to slice the overshoot spring off above the top item. Imperative DOM
-  // write on a passive scroll listener — no re-render, stays on the compositor.
-  useEffect(() => {
-    const sc = navRef.current
-    const layer = blobLayerRef.current
-    if (!sc || !layer) return
-    const sync = () => {
-      layer.style.transform = `translateY(${-sc.scrollTop}px)`
-    }
-    sync()
-    sc.addEventListener("scroll", sync, { passive: true })
-    return () => sc.removeEventListener("scroll", sync)
-  }, [])
 
   const isItemActive = (href: string) => {
     if (href === "/") return pathname === "/"
@@ -762,10 +769,10 @@ function SidebarNav({
    * first third, which meant the band under the icons was simply blank — the
    * list appeared to stop at the icons rather than run beneath them.
    *
-   * Applied to the blob layer as well as the nav. The blob lives in its own
-   * non-scrolling overlay (see below) and so was the one thing NOT masked: it
-   * stayed solid in a band where its own row had vanished, which is the state
-   * that gets reported as "I can see the blob but not the nav contents".
+   * The blob is inside this scroller, so this one mask covers it too and it
+   * dissolves under the strip along with its own row. It used to sit in a
+   * separate overlay that needed the mask applying twice — and when it didn't,
+   * the blob stayed solid in a band where its row had already vanished.
    */
   const chromeMask = topInset
     ? `linear-gradient(to bottom, transparent 0, black ${topInset}px)`
@@ -776,26 +783,6 @@ function SidebarNav({
 
   return (
     <div className={cn("relative min-h-0", className)}>
-      {/* Gravity blob lives in a NON-scrolling overlay so the overshoot spring
-          can travel above the first item without being clipped by the nav's
-          overflow. The inner layer is translated by -scrollTop (above) to stay
-          pinned to the scrolling content; the mask goes on the OUTER element so
-          it stays put in viewport space while the blob scrolls under it. Sits
-          behind the nav items (z-0). */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 z-0"
-        style={maskStyle}
-      >
-        <div ref={blobLayerRef} className="absolute inset-0">
-          <GravityIndicator
-            containerRef={navRef}
-            activeIndex={activeIndex}
-            className="rounded-full"
-            revision={orderedHrefs.join(",")}
-          />
-        </div>
-      </div>
       <nav
         ref={navRef}
         className="relative z-[1] h-full overflow-y-scroll overscroll-contain px-3 pb-4 scrollbar-hide"
@@ -806,6 +793,20 @@ function SidebarNav({
           ...maskStyle,
         }}
       >
+      {/* The blob lives INSIDE the scroller, so it scrolls with the content on
+          the compositor. It used to sit in a non-scrolling overlay translated
+          by -scrollTop from a scroll listener, which is a main-thread response
+          to a scroll that has already happened — hence the blob visibly
+          trailing the items by a frame. Being inside means the nav's own mask
+          covers it too, so it dissolves under the top strip along with its own
+          row (which is why it no longer needs a separate masked layer). */}
+      <GravityIndicator
+        containerRef={navRef}
+        activeIndex={activeIndex}
+        className="rounded-full"
+        revision={orderedHrefs.join(",")}
+      />
+
       {/* One pixel taller than the scroller so the list always has somewhere to
           go: a short nav would otherwise be inert to a drag, which reads as the
           panel being stuck rather than simply full. */}
@@ -1013,9 +1014,9 @@ function useMorphPhase(isOpen: boolean, phaseDuration: number) {
 /**
  * Build the per-property CSS `transition` for the morph so the two property
  * groups OVERLAP rather than running as a stalled two-step:
- * - opening (pill→sidebar): position+width lead (delay 0), height follows (delay
- *   `lead`, i.e. starts ~85% through the position move).
+ * - opening (pill→sidebar): position+width lead (delay 0), height follows.
  * - closing (sidebar→pill): height leads (delay 0), position+width follow.
+ * Same `lead` both ways, so the two directions are mirrors of each other.
  * Settled phases get `"none"`. `positionProps` is the comma-separated geometry
  * (desktop includes `top`; mobile is bottom-anchored so it doesn't).
  */
@@ -1049,9 +1050,8 @@ function DesktopPillMorph({
   const ref = useRef<HTMLDivElement>(null)
   const { expandedHeight } = useViewportMeasure()
   const DUR = prefersReducedMotion ? 0 : MORPH_DUR
-  const OPEN_LEAD = prefersReducedMotion ? 0 : MORPH_OPEN_LEAD
-  const CLOSE_LEAD = prefersReducedMotion ? 0 : MORPH_CLOSE_LEAD
-  const TOTAL = DUR + Math.max(OPEN_LEAD, CLOSE_LEAD)
+  const LEAD = prefersReducedMotion ? 0 : MORPH_LEAD
+  const TOTAL = DUR + LEAD
 
   const { phase, advancePhase, isSidebarShape } = useMorphPhase(sidebarOpen, TOTAL)
 
@@ -1069,13 +1069,12 @@ function DesktopPillMorph({
     [phase, advancePhase],
   )
 
-  const lead = phase === "closing" ? CLOSE_LEAD : OPEN_LEAD
-  const transition = morphTransition(phase, DUR, lead, "top, left, transform, width")
+  const transition = morphTransition(phase, DUR, LEAD, "top, left, transform, width")
   // Reveal the sidebar list in lock-step with the growing/shrinking HEIGHT
   // (drawer clip), not on its own opacity timeline — otherwise the list fades
   // while the glass is still resizing and you see two separate motions. Height
-  // is delayed by OPEN_LEAD on open, leads (delay 0) on close.
-  const heightDelay = phase === "opening" ? OPEN_LEAD : 0
+  // is delayed by LEAD on open, leads (delay 0) on close.
+  const heightDelay = phase === "opening" ? LEAD : 0
   const contentTransition =
     phase === "opening" || phase === "closing"
       ? `opacity ${DUR}ms ease ${heightDelay}ms`
@@ -1184,9 +1183,8 @@ function MobilePillMorph({
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { expandedHeight } = useViewportMeasure()
   const DUR = prefersReducedMotion ? 0 : MORPH_DUR
-  const OPEN_LEAD = prefersReducedMotion ? 0 : MORPH_OPEN_LEAD
-  const CLOSE_LEAD = prefersReducedMotion ? 0 : MORPH_CLOSE_LEAD
-  const TOTAL = DUR + Math.max(OPEN_LEAD, CLOSE_LEAD)
+  const LEAD = prefersReducedMotion ? 0 : MORPH_LEAD
+  const TOTAL = DUR + LEAD
 
   const { phase, advancePhase, isSidebarShape } = useMorphPhase(sidebarOpen, TOTAL)
 
@@ -1209,16 +1207,15 @@ function MobilePillMorph({
   // Mobile morph — always bottom-anchored. pill: bottom-centre, auto width, pill
   // height. opening/closing: height and position+width morph in a sequenced
   // overlap (bottom-anchored, so it grows upward). On CLOSE the height collapses
-  // almost fully (CLOSE_LEAD) before position+width move into the pill. sidebar:
+  // almost fully (LEAD) before position+width move into the pill. sidebar:
   // full height, bottom-left. In the pill state only `transform` animates.
-  const lead = phase === "closing" ? CLOSE_LEAD : OPEN_LEAD
   const transition =
     phase === "pill"
       ? `transform ${prefersReducedMotion ? 0 : 300}ms ${OVERSHOOT_BEZIER}`
-      : morphTransition(phase, DUR, lead, "left, transform, width")
+      : morphTransition(phase, DUR, LEAD, "left, transform, width")
   // Sidebar content reveal timed to the height (drawer), so growth + reveal are
   // one motion instead of the list fading while the glass is still expanding.
-  const heightDelay = phase === "opening" ? OPEN_LEAD : 0
+  const heightDelay = phase === "opening" ? LEAD : 0
   const contentTransition =
     phase === "opening" || phase === "closing"
       ? `opacity ${DUR}ms ease ${heightDelay}ms`

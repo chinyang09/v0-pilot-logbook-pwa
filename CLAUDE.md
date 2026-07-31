@@ -612,15 +612,18 @@ re-renders).
   `morphTransition`) — the pill ↔ sidebar morph is a single `opening`/`closing`
   transition whose two geometry groups (**position+width** and **height**)
   **overlap** via per-property CSS `transition-delay` (no phase stall, no
-  "stuck"). Order is deliberate and the leads are **asymmetric** (module consts
-  `MORPH_DUR` / `MORPH_OPEN_LEAD` / `MORPH_CLOSE_LEAD`, picked per phase as
-  `lead`):
-  - **opening** (pill→sidebar) moves position+width first (delay 0), then grows
-    height (delay `OPEN_LEAD`) — it slides into place then expands.
-  - **closing** (sidebar→pill) collapses height first (delay 0), then moves
-    position+width (delay `CLOSE_LEAD`, **near-full** so the sidebar collapses
-    almost completely *before* it slides to the pill — owner feedback: they must
-    not move at once).
+  "stuck"). ONE lead for both directions (`MORPH_DUR` / `MORPH_LEAD`), so the
+  two are exact mirrors and the top pill and the bottom pill perform the same
+  motion:
+  - **closing** (sidebar→pill) collapses height first (delay 0) — the top pill
+    upward, the bottom pill downward, since one is top-anchored and the other
+    bottom-anchored — then, once it is nearly flat, moves position+width into
+    the pill.
+  - **opening** (pill→sidebar) is that played backwards: position+width first
+    (delay 0), then height.
+  The lead is **near-full** on purpose: the two groups must not move at once.
+  It used to be 160 opening / 185 closing, which made the open overlap more
+  than the close and the two directions read as different animations.
 
   `useMorphPhase` advances on a timer (`DUR + max(lead)` fallback) **and** on the
   *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed
@@ -658,16 +661,17 @@ re-renders).
   flex row above the nav, so the scroll-under existed only on desktop; on a
   phone the list simply stopped at the icons. If you touch one, touch both.
 
-  The mask is a plain ramp (`transparent 0 → black topInset`) and it goes on the
-  **blob overlay too**. The gravity blob lives in its own non-scrolling layer
-  (so its overshoot spring isn't clipped) and was therefore the one thing not
-  masked — it stayed solid in a band where its own row had already dissolved,
-  which is the state that gets reported as "I can see the blob but not the nav
-  contents". The mask belongs on the OUTER element of that layer: the inner one
-  is translated by `-scrollTop`, and a mask on it would scroll with the blob
-  instead of staying put. The ramp also has no dead zone at the top — holding
-  fully transparent for the first third made the band under the icons simply
-  blank, which reads as the list stopping rather than running beneath.
+  The mask is a plain ramp (`transparent 0 → black topInset`), and the gravity
+  blob sits INSIDE the scroller so this one mask covers it too. The blob used
+  to live in a separate non-scrolling overlay translated by `-scrollTop` from a
+  scroll listener — which is a main-thread reaction to a scroll that already
+  happened, so the blob visibly trailed the items by a frame. Inside the
+  scroller it moves on the compositor, 1:1 and in the same frame. Do not put it
+  back in an overlay to protect the overshoot spring from clipping: the top
+  band is masked out anyway, so there is nothing there to see. The ramp also
+  has no dead zone at the top — holding fully transparent for the first third
+  made the band under the icons simply blank, which reads as the list stopping
+  rather than running beneath.
 - **Nav drag lens** (`PillBarContent` in `components/nav-pill.tsx`, `.PillDragLens*`
   in `globals.css`) — an iPadOS-tab-bar-style **hold-and-slide** over the pill
   tabs. A plain tap still navigates (10px slop before it activates; a
@@ -685,12 +689,20 @@ re-renders).
     independent by construction: one composited transform, no filter, nothing
     to rasterise. The copy is re-cloned when the lens crosses to another tab so
     its pre-highlight matches.
-    The layer carries the page background at ~91%, because it has to COVER the
-    strip it duplicates or you see both at once and it reads as a ghost. A blur
+    The copy is the WHOLE glass pill, not just the tab strip, and the lens is
+    sized and centred on the pill (`drag.pill`) rather than the strip — so the
+    control's rounded top and bottom shrink too and sit inside the lens with
+    clear space around them. Sizing off the strip left ~7px of clearance and
+    read as a crop rather than something under glass.
+    The layer carries the page background at ~94%, because it has to COVER the
+    pill it duplicates or you see both at once and it reads as a ghost. A blur
     can't do that job: the lens is portalled to `<body>` and the nav sits in
     its own stacking context, so **the lens's `backdrop-filter` never samples
     the pill at all** — verified by hiding the copy, which leaves the label
-    underneath perfectly sharp.
+    underneath perfectly sharp. `.PillDragLens-refractCopy` also paints its own
+    face and hairline: a backdrop-filter inside a clipped, transformed layer
+    has almost nothing to sample, so the cloned glass alone came out barely 10%
+    lighter than the scrim and the pill's outline vanished.
   - **Material:** `.PillDragLens-glass` on every platform — layered shadows for
     the convex bulge plus an inner thickness vignette that fakes the pinch, and
     a chromatic-dispersion `.PillDragLens-rim` for the liquid fringe. The
@@ -1328,6 +1340,8 @@ When making changes, be aware of these high-impact files:
 - Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
 - Do not bring back press-and-hold for destructive actions. A `holdToConfirm` action ARMS a countdown that only its own Cancel button stops — tapping outside must not disarm, and the `swipe-card-close-others` handler must close the swipe panel only (it fires on any interaction with any other row, so clearing the pending confirm there makes it impossible to arm a delete and move on)
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
+- Do not move the sidebar's gravity blob back into a non-scrolling overlay translated from a scroll listener — that is a main-thread reaction to a scroll that already happened, so the blob trails the items by a frame. It belongs inside the scroller, where it moves on the compositor; the top band is masked anyway, so there is no overshoot clipping to protect it from
+- Do not give the morph different open and close leads — one `MORPH_LEAD` keeps the two directions exact mirrors, which is what makes the top pill and the bottom pill read as the same animation
 - Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
 - Do not add a rule, material or layout that only one engine gets — iOS and Android must render the app identically. In particular do not reintroduce `@supports (-webkit-touch-callout: none)`, the WebKit-only sniff: it silently made Android's date fields shorter and its focused fields slower to take a tap. A vendor-prefixed property paired with the standard one, or inert elsewhere, is fine. The sole exception is the PWA install prompt, where the OS flow itself differs
 - Do not end the glass press on `touchcancel`/`pointercancel` — Chrome fires those the moment a move looks like a scroll, which is what made the Android spotlight die as soon as the finger moved. Track on the window, treat a cancel as bloom-only, and let the grace timer close it out
