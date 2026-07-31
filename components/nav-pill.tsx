@@ -130,13 +130,14 @@ const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header
 // between two steps. With MORPH_EASE, 80% of the travel is done at ~50% of the
 // duration, hence LEAD ≈ 0.5 × DUR.
 //
-// ~700ms in total. At 375ms (190/185) the lead was near-FULL: the collapse was
+// ~400ms in total. At 375ms (190/185) the lead was near-FULL: the collapse was
 // all but over before anything moved, and the morph read as two snaps back to
-// back — fast, but not fluid. A second was fluid but slow to sit through.
+// back — fast, but not fluid. The same 400ms with the groups genuinely
+// overlapping is fast AND fluid. A second was fluid but slow to sit through.
 // (The leads used to differ too — 160 opening / 185 closing — which made the
 // two directions feel like different animations. One lead, both ways.)
-const MORPH_DUR = 460
-const MORPH_LEAD = 240
+const MORPH_DUR = 265
+const MORPH_LEAD = 135
 
 
 // ─── Sync status icon ────────────────────────────────────────
@@ -266,6 +267,34 @@ const LENS_OVERHANG = 10
 /** Extra width beyond the tab — keeps the bubble a horizontal stadium, not a
  *  circle, over narrow tabs (matches Apple's tab-bar lens proportions). */
 const LENS_PAD_X = 26
+/**
+ * The mobile sidebar's backdrop blur, as a real PROGRESSIVE blur: heaviest
+ * against the sidebar's edge and gone by the far side of the screen.
+ *
+ * A single blurred layer behind an alpha ramp — which is what this was — does
+ * not do that. It cross-fades a fully blurred page with a fully sharp one, so
+ * the middle reads as a ghosted double image rather than as "less blurred".
+ * A ramp of RADII is what reads as depth.
+ *
+ * Ordered smallest-radius/widest first, so each layer completely covers the
+ * ones below it wherever they are opaque: the stack can then only ever add
+ * blur, and the ramp stays monotonic whether or not the engine composes one
+ * layer's output into the next one's backdrop (Blink does, WebKit may not).
+ * That is the whole reason this is safe to stack when the glass material is
+ * not — these are PURE blurs, so the two engines differ by a few px of
+ * effective radius near the edge instead of by colour.
+ *
+ * Each layer is only as WIDE as it needs to be, rather than full-screen: the
+ * total blur work is ~20% more than the single 16px full-screen layer it
+ * replaces, not 3x. `solid` is where that layer's own ramp starts, as a
+ * fraction of its own width.
+ */
+const SIDEBAR_BACKDROP_BLUR = [
+  { blur: 4, width: "92%", solid: "45%" },
+  { blur: 10, width: "68%", solid: "40%" },
+  { blur: 20, width: "46%", solid: "35%" },
+] as const
+
 /**
  * How much the PILL is squeezed inside the lens — vertically ONLY.
  *
@@ -1342,29 +1371,35 @@ function MobilePillMorph({
 
   return (
     <>
-      {/* Backdrop — dark overlay + progressive blur from sidebar edge */}
+      {/* Backdrop — dark scrim + progressive blur ramping out from the sidebar.
+          Both fade on the MORPH's own clock (`TOTAL`), so the veil arrives with
+          the panel instead of on a timing of its own. */}
       <div
-        className={cn(
-          "fixed inset-0 z-[58] transition-opacity duration-200",
-          MODAL_SCRIM
-        )}
+        className={cn("fixed inset-0 z-[58]", MODAL_SCRIM)}
         style={{
           opacity: sidebarOpen ? 1 : 0,
           pointerEvents: sidebarOpen ? "auto" : "none",
+          transition: `opacity ${TOTAL}ms ${MORPH_EASE}`,
         }}
         onClick={() => setSidebarOpen(false)}
       />
-      <div
-        className="fixed inset-0 z-[59] transition-opacity duration-200"
-        style={{
-          opacity: sidebarOpen ? 1 : 0,
-          pointerEvents: "none",
-          backdropFilter: "blur(16px)",
-          WebkitBackdropFilter: "blur(16px)",
-          maskImage: "linear-gradient(to right, black, transparent 60%)",
-          WebkitMaskImage: "linear-gradient(to right, black, transparent 60%)",
-        }}
-      />
+      {SIDEBAR_BACKDROP_BLUR.map(({ blur, width, solid }) => (
+        <div
+          key={blur}
+          aria-hidden
+          className="fixed left-0 top-0 bottom-0 z-[59]"
+          style={{
+            width,
+            opacity: sidebarOpen ? 1 : 0,
+            pointerEvents: "none",
+            transition: `opacity ${TOTAL}ms ${MORPH_EASE}`,
+            backdropFilter: `blur(${blur}px)`,
+            WebkitBackdropFilter: `blur(${blur}px)`,
+            maskImage: `linear-gradient(to right, #000 0 ${solid}, transparent 100%)`,
+            WebkitMaskImage: `linear-gradient(to right, #000 0 ${solid}, transparent 100%)`,
+          }}
+        />
+      ))}
 
       <div
         ref={ref}

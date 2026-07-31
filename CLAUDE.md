@@ -624,15 +624,33 @@ re-renders).
     (delay 0), then height.
   The lead is sized so the second group starts while the first still has ~20%
   to run — with `MORPH_EASE`, 80% of the travel is done at ~50% of the
-  duration, hence **LEAD ≈ 0.5 × DUR**. The whole morph takes **~700ms**: at
-  375ms (190/185) the lead was near-FULL, so the collapse was all but over
-  before anything moved and the morph read as two snaps back to back (fast but
-  not fluid); a full second was fluid but slow to sit through. (The leads used
-  to differ too — 160 opening / 185 closing — which made the two directions
-  feel like different animations.)
+  duration, hence **LEAD ≈ 0.5 × DUR**. The whole morph takes **~400ms**
+  (265 + 135). Note that the ORIGINAL was also ~375ms and felt wrong: the lead
+  there was near-full, so the collapse was over before anything moved and the
+  morph read as two snaps back to back. It is the overlap, not the length, that
+  makes it fluid — a full second was fluid but slow to sit through. (The leads
+  used to differ too — 160 opening / 185 closing — which made the two
+  directions feel like different animations.)
   `MORPH_EASE` was retuned with them: the old fast-launch curve put the
-  collapse 94% home in the first HALF of its duration, which at this length is
-  a snap followed by a crawl.
+  collapse 94% home in the first HALF of its duration, which is a snap followed
+  by a crawl at any of these lengths.
+
+  **The mobile backdrop rides the morph's clock.** The scrim and the blur
+  layers fade over `TOTAL` with `MORPH_EASE`, not on a duration of their own,
+  so the veil arrives with the panel. `SIDEBAR_BACKDROP_BLUR` makes that blur
+  genuinely **progressive** — three layers of increasing radius (4 / 10 / 20px)
+  and decreasing width (92 / 68 / 46%), each with its own alpha ramp, so it is
+  heaviest against the sidebar and gone by the far edge. A single blurred layer
+  behind an alpha ramp — what this was — cross-fades a fully blurred page with
+  a sharp one, which reads as a ghosted double image rather than as "less
+  blurred"; a ramp of RADII is what reads as depth. Ordered smallest-radius-
+  first so each layer fully covers the ones below wherever they are opaque: the
+  stack can then only ADD blur, and the ramp stays monotonic whether or not the
+  engine feeds one layer's output into the next one's backdrop (Blink does,
+  WebKit may not). Each layer is only as wide as it needs to be, so the total
+  blur work is ~20% more than the single full-screen 16px layer it replaced,
+  not 3x. Desktop has no backdrop at all — its sidebar sits alongside the
+  content rather than over it.
 
   **The pill's width is MEASURED (`usePillWidth`), never `auto`.** `width` rides
   in the position group so the pill resizes *while* it moves, and CSS cannot
@@ -673,8 +691,10 @@ re-renders).
   `.SidebarTopBlur` frosts whatever passes under it, masked so the blur is
   strongest at the top and gone by the bottom of the band. One element, one
   filter list — a true multi-stop progressive blur means stacking several
-  masked blur layers, which is the construct that made the glass render
-  differently on iOS and Android.
+  masked blur layers, and over the glass panel that is the construct that made
+  the material render differently on iOS and Android. (The sidebar's BACKDROP
+  does stack — see `SIDEBAR_BACKDROP_BLUR` below — but that stack is pure
+  blur over the page, with no material underneath to diverge.)
 
   **Both morphs use this arrangement** — `DesktopPillMorph` AND
   `MobilePillMorph`. The mobile one used to lay the strip out as an ordinary
@@ -1379,6 +1399,7 @@ When making changes, be aware of these high-impact files:
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not move the sidebar's gravity blob back into a non-scrolling overlay translated from a scroll listener — that is a main-thread reaction to a scroll that already happened, so the blob trails the items by a frame. It belongs inside the scroller, where it moves on the compositor; the top band is masked anyway, so there is no overshoot clipping to protect it from
 - Do not give the morph different open and close leads — one `MORPH_LEAD` keeps the two directions exact mirrors, which is what makes the top pill and the bottom pill read as the same animation
+- Do not put the sidebar backdrop's fade on a duration of its own — it rides the morph's `TOTAL`/`MORPH_EASE` so the veil arrives with the panel. And do not collapse `SIDEBAR_BACKDROP_BLUR` back to one blurred layer behind an alpha ramp: that cross-fades blurred and sharp copies of the page (a ghosted double image), it does not ramp the blur. Keep the layers ordered smallest-radius-first so the stack can only add blur and stays monotonic on both engines
 - Do not put `width: auto` back on the nav pill — `width` animates alongside `left`/`transform`, and CSS can't interpolate to `auto`, so it snaps on the morph's first frame and the pill resizes before it moves. Keep the measured px endpoint from `usePillWidth` (measured only while settled as a pill, in a ResizeObserver callback)
 - Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
 - Do not add a rule, material or layout that only one engine gets — iOS and Android must render the app identically. In particular do not reintroduce `@supports (-webkit-touch-callout: none)`, the WebKit-only sniff: it silently made Android's date fields shorter and its focused fields slower to take a tap. A vendor-prefixed property paired with the standard one, or inert elsewhere, is fine. The sole exception is the PWA install prompt, where the OS flow itself differs
