@@ -468,18 +468,21 @@ textarea:focus-within {
   --glass-rim:
     conic-gradient(
       from var(--glass-specular-angle, 315deg),
-      rgba(255, 255, 255, 0.85) 0deg,
-      rgba(255, 255, 255, 0.25) 55deg,
+      rgba(255, 255, 255, 0.96) 0deg,
+      rgba(255, 255, 255, 0.30) 55deg,
       rgba(255, 255, 255, 0) 100deg,
-      rgba(255, 255, 255, 0.10) 150deg,
-      rgba(255, 255, 255, 0.40) 180deg,
-      rgba(255, 255, 255, 0.10) 210deg,
+      rgba(255, 255, 255, 0.12) 150deg,
+      rgba(255, 255, 255, 0.48) 180deg,
+      rgba(255, 255, 255, 0.12) 210deg,
       rgba(255, 255, 255, 0) 260deg,
-      rgba(255, 255, 255, 0.25) 305deg,
-      rgba(255, 255, 255, 0.85) 360deg
+      rgba(255, 255, 255, 0.30) 305deg,
+      rgba(255, 255, 255, 0.96) 360deg
     ),
     linear-gradient(rgba(60, 50, 40, 0.07), rgba(60, 50, 40, 0.07));
-  --glass-veil: rgba(255, 255, 255, 0.62);
+  /* Eased back with the dark veil (0.62 → 0.55) — the raised face blur carries
+     the difference, so the surface is a touch more see-through without losing
+     its separation from cream. */
+  --glass-veil: rgba(255, 255, 255, 0.55);
   --glass-shadow:
     0 1px 2px rgba(45, 38, 30, 0.05),
     0 8px 28px rgba(45, 38, 30, 0.10);
@@ -488,17 +491,22 @@ textarea:focus-within {
 .dark {
   --glass-blur-brightness: 1.25;
   /* Top-left / bottom-right specular lobes (see :root note). */
+  /* Glints carried up (0.65 → 0.80 at the lobes) while the ring UNDER them was
+     thinned: a finer edge with a brighter catch reads as a sharper piece of
+     glass, where a thick ring at the same brightness reads as a painted
+     border. The dim flanks stay dim — that contrast is what makes it a glint
+     rather than an outline. */
   --glass-rim: conic-gradient(
     from var(--glass-specular-angle, 315deg),
-    rgba(255, 255, 255, 0.65) 0deg,
-    rgba(255, 255, 255, 0.22) 60deg,
+    rgba(255, 255, 255, 0.80) 0deg,
+    rgba(255, 255, 255, 0.26) 60deg,
     rgba(255, 255, 255, 0.04) 105deg,
-    rgba(255, 255, 255, 0.12) 150deg,
-    rgba(255, 255, 255, 0.34) 180deg,
-    rgba(255, 255, 255, 0.12) 210deg,
+    rgba(255, 255, 255, 0.13) 150deg,
+    rgba(255, 255, 255, 0.40) 180deg,
+    rgba(255, 255, 255, 0.13) 210deg,
     rgba(255, 255, 255, 0.04) 255deg,
-    rgba(255, 255, 255, 0.22) 300deg,
-    rgba(255, 255, 255, 0.65) 360deg
+    rgba(255, 255, 255, 0.26) 300deg,
+    rgba(255, 255, 255, 0.80) 360deg
   );
   /* A backdrop-filter can do NOTHING over pure black: blurring black gives
      black, saturating it gives black, and brightness is multiplicative — 1.25
@@ -512,8 +520,13 @@ textarea:focus-within {
      while over a flight card it costs essentially none of the colour the
      glass picks up (warmth 37 vs 38 with no veil). Plain white at the same
      presence (12%) drops that to 34 and the material starts reading grey
-     again — the exact thing the single-filter fix was for. */
-  --glass-veil: rgba(255, 244, 232, 0.10);
+     again — the exact thing the single-filter fix was for.
+
+     Eased back from 0.10 to 0.075 with the face blur raised to compensate:
+     less PAINT and more OPTICS for the same presence, which is the difference
+     between a tinted panel and glass. Do not take it much below this — the
+     lift off pure black is the whole reason it exists. */
+  --glass-veil: rgba(255, 244, 232, 0.075);
   --glass-shadow:
     inset 0 -1px 1px rgba(0, 0, 0, 0.10),
     0 2px 6px rgba(0, 0, 0, 0.10),
@@ -528,15 +541,18 @@ textarea:focus-within {
   --base-strength: 24px;
   --extra-blur: 2px;
   /* Drives the rim band widths below. Lower = a finer edge; the material's
-     presence comes from the veil and the face, not from a thick ring. */
-  --softness: 7px;
+     presence comes from the veil and the face, not from a thick ring — and the
+     specular glint carries the edge, so the ring under it can stay fine. */
+  --softness: 5.6px;
   --tint-amount: 0;
   --tint-saturation: 2;
   --tint-hue: 180deg;
   /* The face's single blur. Was three separate blurs on three elements
      (2 + 2.4 + 0.52); sequential Gaussians compose as the root-sum-square,
-     so one 3.2px blur is the same optics for a third of the work. */
-  --glass-face-blur: 3.2px;
+     so ONE blur is the same optics for a third of the work. Carried up from
+     3.2px: with the veil thinned the face leans more on the blur for its
+     presence, which is the more glass-like of the two ways to get it. */
+  --glass-face-blur: 4.4px;
   --total-strength: calc(var(--base-strength) + var(--extra-blur));
   --edge-width: calc(0.2px + (var(--softness) * 0.08));
   --emboss-width: calc(var(--softness) * 0.30);
@@ -1037,9 +1053,16 @@ textarea:focus-within {
     opacity 0.26s ease;
 }
 .PillDragLens--settle .PillDragLens-glass,
-.PillDragLens--settle .PillDragLens-refract,
-.PillDragLens--settle .PillDragLens-rim {
+.PillDragLens--settle .PillDragLens-refract {
   opacity: 0;
+}
+/* The rim is REMOVED, not faded. `mix-blend-mode` cannot be composited on its
+   own, so a blended child anywhere in the subtree keeps the whole lens off the
+   compositor — the landing then re-rasterises every frame, which is exactly
+   the jank this animation cannot afford (it runs while a route mounts). It is
+   a 1px chromatic fringe on a bubble that is disappearing; nobody sees it go. */
+.PillDragLens--settle .PillDragLens-rim {
+  display: none;
 }
 /* Drop the per-frame work for the landing. A backdrop-filter on a box that is
    being scaled re-samples and re-blurs the backdrop every frame, and the

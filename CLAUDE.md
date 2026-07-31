@@ -796,11 +796,20 @@ re-renders).
     with a route mount and stalled (the same reason the gravity blob is a CSS
     transition). And animating left/top/width/height is a layout pass plus a
     re-rastered `backdrop-filter` every frame on a box that is changing size.
-    Three things keep it cheap now: nothing touches layout, `--settle` drops
-    the glass's `backdrop-filter` outright (it is fading out anyway), and the
-    refracted clone is NOT re-cloned on release — `lensPhase` changes then too,
-    so the clone effect must be gated on `"drag"`, or a deep clone of the whole
-    pill runs on the first frame of the landing.
+    Four things keep it cheap now: nothing touches layout, `--settle` drops the
+    glass's `backdrop-filter` outright (it is fading out anyway), the refracted
+    clone is NOT re-cloned on release (`lensPhase` changes then too, so the
+    clone effect is gated on `"drag"`, or a deep clone of the whole pill runs
+    on the landing's first frame), and `--settle` **removes** `-rim` rather
+    than fading it — `mix-blend-mode` cannot be composited on its own, so a
+    blended child anywhere in the subtree keeps the WHOLE lens off the
+    compositor and the landing re-rasterises every frame.
+    The clone is also stripped of the pill's FIVE `backdrop-filter`s (and its
+    ambient specular keyframe) when it is taken. Inside a clipped, transformed
+    layer they have almost nothing to sample — which is why `-refractCopy`
+    paints its own face at all — but they re-sample every frame the lens moves
+    and they block layerisation. That is the single biggest cost the lens used
+    to carry, during the drag as well as the landing.
     Do **not** put the settle back on a bouncy geometry spring (that was the
     left/right springing that got removed), and do not put it back on JS.
 
@@ -874,6 +883,19 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   would auto-open the full-screen mobile overlay when the viewport crosses
   below 720px (iPad Split View / resize). Only real user taps use the default
   explicit path
+- **System back undoes the last move.** OPENING a detail (no selection → one)
+  `router.push`es `?selected=`; the param going away again is what closes it.
+  That is what makes Android's edge-swipe (and the browser Back button) return
+  from an open flight to the logbook instead of skipping the section entirely —
+  it used to `replace`, which writes no history entry at all. Switching between
+  items still `replace`s (a push per tap would turn Back into a tour of
+  everything you looked at), and the in-app close calls `router.back()` when we
+  own the current entry, so it is consumed rather than left as a dead press.
+  Two guards make it safe: leaving the section is not treated as a close (it
+  drops `?selected=` too, and acting on that wiped the section just arrived
+  at), and the "re-sync `?selected=` into the URL" effect bails while a
+  back-clear is in flight — it runs in the same commit and would otherwise put
+  the param straight back and refuse to close
 
 **Provider hierarchy:**
 ```
@@ -1310,14 +1332,27 @@ When making changes, be aware of these high-impact files:
     it.** A backdrop-filter can do nothing over pure black — blurring black is
     black, saturating it is black, and brightness is multiplicative, so
     1.25 x 0 is still 0. With the dark veil at `transparent` the slab had no
-    face at all on an empty screen and only its rim showed. Warm off-white at
-    10% lifts it from +16 to +40 luminance over the background while costing
-    essentially none of the colour it picks up over content (warmth 37 vs 38).
-    Plain white at matching presence (12%) drops that to 34 and the material
-    starts reading grey again — do not "simplify" the tint back to white.
+    face at all on an empty screen and only its rim showed. Warm off-white
+    lifts it from +16 to +40 luminance over the background while costing
+    essentially none of the colour it picks up over content (measured at 10%:
+    warmth 37 vs 38). Plain white at matching presence drops that to 34 and the
+    material starts reading grey again — do not "simplify" the tint back to
+    white. Currently 0.075 dark / 0.55 light, eased back from 0.10 / 0.62 with
+    the face blur raised to compensate: **less paint and more optics for the
+    same presence**, which is the difference between a tinted panel and glass.
+    Do not take it much lower — the lift off pure black is why it exists.
   - **`--glass-face-blur` is one blur, not three.** The old stack blurred
     2px + 2.4px + 0.52px on three elements; sequential Gaussians compose as
-    the root-sum-square, so 3.2px is identical optics for a third of the work.
+    the root-sum-square, so ONE blur is identical optics for a third of the
+    work. It carries more of the material's presence now that the veil is
+    thinner (4.4px).
+  - **A fine ring under a bright glint.** `--softness` (5.6px) drives the
+    edge/emboss/refraction band widths and the specular conic (`--glass-rim`)
+    peaks at 0.80 dark / 0.96 light. Those two move together and in opposite
+    directions on purpose: a thin edge with a strong catch reads as a sharp
+    piece of glass, where a thick ring at the same brightness reads as a
+    painted border. The dim flanks between the lobes stay dim — that contrast
+    is what makes it a glint rather than an outline.
   - **Even face:** `.GlassBlur` spans the WHOLE face, corner to corner. It used
     to be inset by the ring widths, leaving the perimeter a shade darker than
     the middle — the material read as a grey slab inside a darker frame instead
@@ -1436,6 +1471,8 @@ When making changes, be aware of these high-impact files:
 - Do not read `userDb.flights` for a list, a total or an import match without `isLiveFlight` — a binned flight reaching the reconciler silently updates, and so resurrects, a flight the user deleted
 - Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
 - Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
+- Do not open a detail with `router.replace` — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as the back-clear and will put the param straight back
+- Do not leave the cloned pill's `backdrop-filter`s (or `mix-blend-mode` anywhere in the lens subtree) in place during a drag or landing — they re-sample every frame and block layerisation, which is what made the release jank
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
 - Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`

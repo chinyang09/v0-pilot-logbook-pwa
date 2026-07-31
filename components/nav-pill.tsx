@@ -442,6 +442,19 @@ function PillBarContent({
     clone.setAttribute("aria-hidden", "true")
     clone.removeAttribute("id")
     clone.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"))
+    // Strip the cloned glass's FIVE backdrop-filters. They are the single most
+    // expensive thing the lens carried: inside a clipped, transformed layer
+    // they have almost nothing to sample (which is why -refractCopy paints its
+    // own face at all), yet they re-sample every frame the lens moves or
+    // scales AND they stop the lens being promoted to a plain composited
+    // layer — so the landing was re-rasterising a text-laden subtree while the
+    // main thread mounted a route. The ambient specular animation goes with
+    // them; a 60s keyframe on a copy that lives for one gesture is pure cost.
+    clone.style.animation = "none"
+    clone.querySelectorAll<HTMLElement>(".GlassMaterial > div").forEach((n) => {
+      n.style.backdropFilter = "none"
+      n.style.setProperty("-webkit-backdrop-filter", "none")
+    })
     // The wrapper squeezes the copy vertically; counter-scale the row inside it
     // so only the CONTROL gets shorter and the labels keep their true size and
     // shape. Squashing the glyphs too is what made the old uniform-scale lens
