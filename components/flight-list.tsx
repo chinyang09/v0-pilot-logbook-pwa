@@ -238,8 +238,9 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     // rows in flight-card-body reserve their line), so ONE measurement is the
     // right answer for all of them. Calibrate from it and the correction never
     // fires. 104 is only the opening guess, used for the first paint.
-    const [rowHeight, setRowHeight] = useState(104);
-    const rowHeightRef = useRef(104);
+    const [rowHeight, setRowHeight] = useState(0); // 0 = not calibrated yet
+    const rowHeightRef = useRef(104); // opening guess, for the first paint only
+    const calibratedRef = useRef(false);
 
     // Create virtualizer instance
     const rowVirtualizer = useVirtualizer({
@@ -247,30 +248,43 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       getScrollElement: () => scrollContainerRef.current,
       estimateSize: () => rowHeightRef.current,
       // Enough that a fast flick doesn't outrun the rendered window. Cheap now
-      // that the rows aren't re-measuring into scroll corrections.
+      // that the rows aren't measured individually.
       overscan: 8,
-      // Sizes are cached per FLIGHT, not per index. Keyed by index they get
+      // Sizes are keyed per FLIGHT, not per index. Keyed by index they get
       // misattributed the moment the list changes — a delete or a re-sort
       // hands row N the height that belonged to whatever used to be there.
-      getItemKey: (index) => flights[index]?.id ?? index,
+      getItemKey: (index) => flights[index]?.id ?? `row-${index}`,
     });
 
-    // Take the calibration off the first row that reports a real height.
-    const measureRow = useCallback(
-      (el: HTMLElement | null) => {
-        rowVirtualizer.measureElement(el);
-        if (!el) return;
-        const h = el.getBoundingClientRect().height;
-        if (h > 0 && Math.abs(h - rowHeightRef.current) > 0.5) {
-          rowHeightRef.current = h;
-          setRowHeight(h);
-        }
-      },
-      [rowVirtualizer],
-    );
-    // `rowHeight` exists to re-render once when the calibration lands; the
-    // virtualizer reads the ref, which is already current.
-    void rowHeight;
+    // Calibrate ONCE off the first card that lays out, then never measure again.
+    //
+    // Not measuring is the point. Every card is the same height by
+    // construction, so one number is exact for all of them — and with no
+    // per-row measurement the virtualizer can never discover a size it didn't
+    // expect, which means it can never correct the scroll offset. That is what
+    // makes the momentum scroll survive anywhere in the list, including
+    // upwards through rows that have never been on screen.
+    //
+    // It is also strictly one-shot on purpose. Feeding every row's measurement
+    // back into the estimate is a setState in a ref callback: two rows that
+    // disagree by a fraction of a pixel (subpixel layout, a device's font
+    // scaling) ping-pong it and React tears the page down with "maximum update
+    // depth exceeded".
+    const measureRow = useCallback((el: HTMLElement | null) => {
+      if (!el || calibratedRef.current) return;
+      const h = Math.round(el.getBoundingClientRect().height);
+      if (h <= 0) return;
+      calibratedRef.current = true;
+      rowHeightRef.current = h;
+      setRowHeight(h);
+    }, []);
+
+    // Rebuild every row's position from the calibrated height. `estimateSize`
+    // is read through a ref, which the virtualizer does not watch — this is
+    // what tells it to look again.
+    useEffect(() => {
+      if (rowHeight > 0) rowVirtualizer.measure();
+    }, [rowHeight, rowVirtualizer]);
 
     // Get virtual items
     const virtualItems = rowVirtualizer.getVirtualItems();
@@ -650,7 +664,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             </div>
 
             {/* Bottom padding */}
-            <div className="h-16" />
+            <div className="h-chrome" />
           </div>
 
           {/* FastScroll rail (year-based navigation) - positioned in visible area below calendar/header */}

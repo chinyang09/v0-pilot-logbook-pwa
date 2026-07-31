@@ -73,7 +73,7 @@ export function CrewDetailPanel({ crewId, isNew = false, onUpdated, onCancelNew 
 
   return (
     <div className="h-full relative flex flex-col">
-      <div className="flex-1 overflow-auto pt-16">
+      <div className="flex-1 overflow-auto pt-chrome">
         <div className="px-2 pt-4 pb-safe">
           <CrewFormBody
             formData={formData}

@@ -384,10 +384,15 @@ Three things keep the delta at zero:
   which is `leading-tight` at their font size) so a flight with no aircraft or
   no crew is not a shorter card. **Do not drop those** — a variable row height
   brings the corrections straight back.
-- `estimateSize` is **calibrated** from the first row that reports a real
-  height, so the constant is measured rather than guessed (it was 104 against a
-  real 110). The virtualizer reads it through a ref; the state exists only to
-  re-render once when the calibration lands.
+- `estimateSize` is **calibrated ONCE** from the first row that lays out (it was
+  104 against a real 110), and after that nothing is measured at all. Not
+  measuring is the point: the virtualizer can never discover a size it did not
+  expect, so it can never correct the scroll offset, and the list's total height
+  stops changing as you scroll (measured: a constant 13376px, where it used to
+  creep upward as rows were measured). One-shot for a second reason too —
+  feeding every row's measurement back into the estimate is a `setState` in a
+  ref callback, and two rows disagreeing by a fraction of a pixel ping-pong it
+  until React tears the page down with "maximum update depth exceeded".
 - `getItemKey` keys the size cache by **flight id**, not index — keyed by index
   the cached heights get misattributed the moment the list changes, so a delete
   or re-sort hands row N whatever used to be there.
@@ -633,12 +638,18 @@ re-renders).
   `.totp-success` box-shadow.
 - **Gravity nav indicator** (`GravityIndicator` in `components/nav-pill.tsx`) —
   the active-tab/​item highlight blob (pill bar + bottom nav + sidebar). Its
-  elasticity is deliberately in the SIZE, not the position:
-  `GRAVITY_POSITION_BEZIER` carries only a small overshoot (a big one reads as
-  the blob springing left and right to find its seat) while
-  `GRAVITY_SIZE_BEZIER` overshoots harder and runs longer, so the blob arrives,
-  overshoots its width and compresses back — squash-and-stretch rather than
-  sideways bounce.
+  elasticity is a real **squash-and-stretch**, not a positional spring: position
+  and size just ease (`SETTLE_BEZIER`, no overshoot — a bouncy position curve
+  reads as the blob hunting for its seat), and on every move a keyframe
+  animation stretches it ALONG its direction of travel, recoils the other way as
+  it arrives, then settles.
+  That animation lives on a **child** of the positioned element, because the
+  parent's `transform` already carries the position and one element cannot run
+  two. (The standalone `scale` property would have kept it on one element, but
+  Blink does not animate `scale` from WAAPI — measured, the animation simply
+  never starts. `transform` on a child does, and both layers composite.) It is
+  fired imperatively because it has to RE-FIRE on every move, and a CSS
+  animation only restarts if you tear it off and back on.
   `instant` places it with NO animation, for the frames where animating is
   wrong rather than pretty: while the sidebar is still morphing (its metrics
   re-measure as the panel grows, so a spring started mid-morph only gets going
@@ -1527,7 +1538,8 @@ When making changes, be aware of these high-impact files:
 - Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
 - Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
 - Do not open a detail with `router.replace` — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
-- Do not let flight cards vary in height — the logbook virtualizer corrects the scroll offset when a measured row differs from the estimate, and a programmatic scroll cancels a momentum scroll on touch (that is the "scrolling up stops every row" bug). Keep the optional rows' `min-h`, keep `estimateSize` calibrated from a real row, and keep `getItemKey` on the flight id
+- Do not let flight cards vary in height, and do not put per-row `measureElement` back on the logbook list — the virtualizer corrects the scroll offset when a measured row differs from the estimate, and a programmatic scroll cancels a momentum scroll on touch (that is the "scrolling up stops every row" bug). Keep the optional rows' `min-h`, keep the calibration ONE-SHOT (feeding every row back in is a setState loop that crashes the page), and keep `getItemKey` on the flight id
+- Do not inset the app shell by the safe area — the PWA runs edge to edge and content scrolls UNDER the status bar and Android's gesture pill. The insets belong inside each scroller (`.pt-chrome`) and on the header's gradient (`.pt-chrome-bar`), and `theme-color` must stay equal to the app background or the system bar reads as a band bolted on
 - Do not leave the cloned pill's `backdrop-filter`s (or `mix-blend-mode` anywhere in the lens subtree) in place during a drag or landing — they re-sample every frame and block layerisation, which is what made the release jank
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
 - Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely

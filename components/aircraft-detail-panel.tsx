@@ -172,7 +172,7 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
 
   return (
     <div className="h-full relative flex flex-col">
-      <div className="flex-1 overflow-y-auto pt-16">
+      <div className="flex-1 overflow-y-auto pt-chrome">
         <div className="px-2 pt-4 pb-safe space-y-4">
           <FormSection title="Details">
             <SettingsRow

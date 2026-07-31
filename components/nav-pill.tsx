@@ -21,13 +21,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
-import {
-  OVERSHOOT_BEZIER,
-  SETTLE_BEZIER,
-  MORPH_EASE,
-  GRAVITY_POSITION_BEZIER,
-  GRAVITY_SIZE_BEZIER,
-} from "@/lib/motion"
+import { OVERSHOOT_BEZIER, SETTLE_BEZIER, MORPH_EASE } from "@/lib/motion"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
@@ -243,29 +237,55 @@ function GravityIndicator({
     return () => ro.disconnect()
   }, [containerRef, revision])
 
+  // Squash-and-stretch on every move. The blob leads with a stretch ALONG its
+  // direction of travel (and a matching squash across it), recoils the other
+  // way as it arrives, then settles — the way a soft body moves. That is the
+  // whole elasticity budget: position and size themselves just ease, so the
+  // liquid feel comes from the shape rather than from the blob springing back
+  // and forth about its target.
+  //
+  // Driven imperatively rather than through CSS classes because it has to
+  // RE-FIRE on every move, and a CSS animation only restarts if you tear it off
+  // and back on. It animates `transform` on a CHILD of the positioned element:
+  // the parent's transform is already carrying the position, and one element
+  // cannot run two. (The standalone `scale` property would have kept it on one
+  // element, but Blink does not animate it from WAAPI — measured, the animation
+  // simply never starts.) Both layers animate `transform`, so both composite.
   const target = rects[activeIndex]
-  if (!target || activeIndex < 0) return null
+  const blobRef = useRef<HTMLDivElement>(null)
+  const prevTargetRef = useRef<{ left: number; top: number } | null>(null)
 
-  // Position transitions with a bouncy overshoot (compositor-driven); size
-  // settles a touch faster so the trailing edge lags → a subtle stretch. CSS
-  // transitions don't fire on first paint, so there's no fly-in on mount.
-  const transition =
-    reduce || instant
-      ? "none"
-      : [
-          `transform 0.44s ${GRAVITY_POSITION_BEZIER}`,
-          `width 0.52s ${GRAVITY_SIZE_BEZIER}`,
-          `height 0.52s ${GRAVITY_SIZE_BEZIER}`,
-        ].join(", ")
+  useEffect(() => {
+    const el = blobRef.current
+    const t = rects[activeIndex]
+    const prev = prevTargetRef.current
+    prevTargetRef.current = t ? { left: t.left, top: t.top } : null
+    // No squash on the first placement, when the blob is parked instantly, or
+    // for a re-measure that didn't actually move it.
+    if (!el || !t || !prev || reduce || instant) return
+    const dx = Math.abs(t.left - prev.left)
+    const dy = Math.abs(t.top - prev.top)
+    if (dx < 1 && dy < 1) return
+
+    const along = dx >= dy ? ([1.1, 0.9] as const) : ([0.9, 1.1] as const)
+    const back = dx >= dy ? ([0.96, 1.04] as const) : ([1.04, 0.96] as const)
+    el.animate(
+      [
+        { transform: "scale(1, 1)" },
+        { transform: `scale(${along[0]}, ${along[1]})`, offset: 0.28 },
+        { transform: `scale(${back[0]}, ${back[1]})`, offset: 0.62 },
+        { transform: "scale(1, 1)" },
+      ],
+      { duration: 520, easing: "cubic-bezier(0.33, 0, 0.2, 1)" },
+    )
+  }, [activeIndex, rects, reduce, instant])
 
   return (
     <div
       aria-hidden
       data-grav-blob
-      className={cn(
-        "absolute left-0 top-0 z-0 rounded-full bg-foreground/10",
-        className,
-      )}
+      hidden={!target || activeIndex < 0}
+      className="absolute left-0 top-0 z-0"
       // `pointer-events:none` inline (belt-and-suspenders) — the blob sits over
       // the active item, and on iOS a *composited* layer (it transforms) can
       // occasionally swallow a touch despite the class. No `will-change` so the
@@ -274,12 +294,27 @@ function GravityIndicator({
       style={{
         pointerEvents: "none",
         opacity: hidden ? 0 : 1,
-        transform: `translate(${target.left}px, ${target.top}px)`,
-        width: target.width,
-        height: target.height,
-        transition,
+        transform: target ? `translate(${target.left}px, ${target.top}px)` : undefined,
+        width: target?.width,
+        height: target?.height,
+        // Glide, don't spring. The elasticity is the squash on the child — a
+        // bouncy position curve on top of it just reads as the blob hunting for
+        // its seat, which is the mechanical-looking part.
+        transition:
+          reduce || instant
+            ? "none"
+            : [
+                `transform 0.42s ${SETTLE_BEZIER}`,
+                `width 0.42s ${SETTLE_BEZIER}`,
+                `height 0.42s ${SETTLE_BEZIER}`,
+              ].join(", "),
       }}
-    />
+    >
+      <div
+        ref={blobRef}
+        className={cn("h-full w-full rounded-full bg-foreground/10", className)}
+      />
+    </div>
   )
 }
 

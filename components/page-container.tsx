@@ -62,7 +62,7 @@ export function PageContainer({ children, header, className, rightContent, mainR
       <main
         ref={setMainRef}
         onScroll={onMainScroll}
-        className={cn("flex-1 overflow-y-auto overscroll-contain", header ? "pt-12" : "pt-16", className)}
+        className={cn("flex-1 overflow-y-auto overscroll-contain", header ? "pt-chrome-sm" : "pt-chrome", className)}
       >
         <div className="pb-24">
           {children}

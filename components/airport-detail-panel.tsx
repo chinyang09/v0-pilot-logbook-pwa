@@ -74,7 +74,7 @@ export function AirportDetailPanel({ icao, onBack, onToggleFavorite }: AirportDe
   return (
     <div className="h-full relative flex flex-col">
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto pt-16">
+      <div className="flex-1 overflow-auto pt-chrome">
         <div className="px-4 pt-4 pb-safe">
           {/* Airport header */}
           <div className="bg-card border border-border rounded-lg p-4 shadow-sm">

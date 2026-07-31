@@ -1323,7 +1323,7 @@ export function FlightForm({
   return (
     <div className="h-full relative">
     <div ref={scrollContainerRef} onScroll={handleScrollSave} className="h-full overflow-y-auto bg-background">
-      <div className="min-h-full pt-16 pb-20">
+      <div className="min-h-full pt-chrome pb-20">
 
       {/* Form Content */}
       <div className="space-y-4 px-2 py-4">

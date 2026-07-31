@@ -23,16 +23,6 @@ export const OVERSHOOT_BEZIER = "cubic-bezier(0.34, 1.5, 0.64, 1)"
 /** Ease-out that settles slightly faster than the overshoot (size trailing position → stretch). */
 export const SETTLE_BEZIER = "cubic-bezier(0.22, 1, 0.36, 1)"
 
-/**
- * The gravity blob's two halves. POSITION carries only a small overshoot —
- * a big one reads as the blob springing left and right to find its seat, which
- * is the mechanical-looking part. SIZE overshoots harder and runs longer, so
- * the blob arrives, overshoots its width, and compresses back: the elasticity
- * shows up as squash-and-stretch rather than as sideways bounce, which is what
- * makes it read as one fluid body instead of a rectangle being moved.
- */
-export const GRAVITY_POSITION_BEZIER = "cubic-bezier(0.3, 1.22, 0.5, 1)"
-export const GRAVITY_SIZE_BEZIER = "cubic-bezier(0.25, 1.45, 0.45, 1)"
 
 /**
  * Ease for the nav pill ↔ sidebar morph geometry — an even accelerate/

@@ -195,6 +195,32 @@
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* ─── Edge to edge ───
+   The app fills the whole display: content runs UNDER the status bar and under
+   Android's gesture pill, the way a native app does. Nothing is inset by the
+   safe area at the shell level — if it were, those strips would be dead bands
+   in the app's colour and the PWA would read as a web page in a frame.
+
+   What the safe area does instead is offset the CONTENT INSIDE each scroller,
+   so a list starts below the status bar at rest and slides under it as you
+   scroll. `.pt-chrome` is that offset: the floating header's 64px bar plus
+   whatever the status bar overlays. `.pt-chrome-bar` is for the header itself,
+   whose gradient has to cover the status bar for the content to fade out
+   beneath it. All of these collapse to the plain value on desktop, where the
+   insets are 0. */
+.pt-chrome {
+  padding-top: calc(4rem + env(safe-area-inset-top, 0px));
+}
+.pt-chrome-sm {
+  padding-top: calc(3rem + env(safe-area-inset-top, 0px));
+}
+.h-chrome {
+  height: calc(4rem + env(safe-area-inset-top, 0px));
+}
+.pt-chrome-bar {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
 /* ─── Native touch feel ─── */
 
 /* Remove 300ms tap delay on all interactive elements */

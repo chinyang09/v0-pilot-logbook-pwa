@@ -467,7 +467,7 @@ export function AircraftNewForm({
     // the global header (matches AircraftDetailPanel layout).
     return (
       <div className="h-full relative flex flex-col">
-        <div className="flex-1 overflow-y-auto pt-16">
+        <div className="flex-1 overflow-y-auto pt-chrome">
           {formContent}
         </div>
       </div>
