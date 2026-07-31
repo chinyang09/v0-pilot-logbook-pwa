@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
-import { animate, useReducedMotion, useSpring } from "framer-motion"
+import { useReducedMotion, useSpring } from "framer-motion"
 import {
   LayoutDashboard,
   Book,
@@ -136,8 +136,8 @@ const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header
 // overlapping is fast AND fluid. A second was fluid but slow to sit through.
 // (The leads used to differ too — 160 opening / 185 closing — which made the
 // two directions feel like different animations. One lead, both ways.)
-const MORPH_DUR = 265
-const MORPH_LEAD = 135
+const MORPH_DUR = 200
+const MORPH_LEAD = 100
 
 
 /**
@@ -359,10 +359,10 @@ function PillBarContent({
   // clear glass bubble — TALLER than the pill, so it rides over its edges —
   // follows the finger 1:1 (no snapping mid-drag). The nearest tab's label
   // pre-highlights and the grey blob hides. On RELEASE the lens itself
-  // SHRINKS + MORPHS into the grey highlight blob with spring physics
-  // (framer `animate` on the geometry; a CSS crossfade swaps its glass
-  // material for the blob's grey), landing exactly where the real blob sits —
-  // then the real blob is swapped in invisibly. A plain tap never activates
+  // SHRINKS + MORPHS into the grey highlight blob — a compositor-only landing
+  // (CSS `translate` + `scale`, a crossfade swapping its glass material for
+  // the blob's grey), landing exactly where the real blob sits — then the real
+  // blob is swapped in invisibly. A plain tap never activates
   // it (10px slop). Rendered through a portal — the pill's GlassContent clips
   // overflow, and the lens must overhang it. The lens's animation classes
   // (--on / --settle) are managed IMPERATIVELY and its React className stays
@@ -379,7 +379,6 @@ function PillBarContent({
   // the drag starts (Safari keeps null → the CSS convex material fallback).
   const suppressClickRef = useRef(false)
   const lastPtRef = useRef({ x: 0, y: 0 })
-  const settleAnimRef = useRef<ReturnType<typeof animate> | null>(null)
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // The pill's GlassContainer — its finger-tracking spotlight is driven
   // imperatively while the lens has pointer capture (its own move handler
@@ -427,7 +426,12 @@ function PillBarContent({
     // control's rounded top and bottom edges shrunk too, or the labels look
     // shrunk while the pill around them doesn't and the illusion breaks.
     const source = tabsRef.current?.closest(".GlassContainer") as HTMLElement | null
-    if (!host || !source || lensPhase === "idle") return
+    // Only while DRAGGING. This is a deep clone of the whole pill plus a layout
+    // pass, and `lensPhase` also changes on RELEASE — so the settle used to
+    // rebuild the copy synchronously on the very frame the landing starts, and
+    // then throw it away as it faded. That hitch was the first thing you saw of
+    // the morph into the blob.
+    if (!host || !source || lensPhase !== "drag") return
     host.replaceChildren()
     const clone = source.cloneNode(true) as HTMLElement
     clone.style.width = "100%"
@@ -615,39 +619,51 @@ function PillBarContent({
     }
 
     // Release = a slime drop, seen bird's-eye: the lens descends straight onto
-    // the tab (position eases in with NO overshoot, so it never springs left/
-    // right) and SPLATS on impact — jump to a squashed shape, then let the
-    // underdamped springs rebound to neutral. That vertical squash-and-settle
-    // is the "spring to shape". The --settle crossfade swaps glass → the grey
-    // blob underneath, so the handoff to the real blob is invisible.
+    // the tab and lands with a squash-and-stretch. The --settle crossfade swaps
+    // glass → the grey blob underneath, so the handoff to the real blob is
+    // invisible.
+    //
+    // It rides `translate` + `scale` — the standalone CSS properties, each with
+    // its OWN transition — so the whole landing is a compositor animation and
+    // the two halves keep their separate characters: position with no
+    // overshoot (it must never spring left/right), shape with one, which is the
+    // splat. Splitting them is only possible because they are separate
+    // properties; a single `transform` could not carry two easings.
+    //
+    // It used to be framer `animate()` on left/top/width/height. Both halves of
+    // that were wrong for this moment: JS springs tick on the MAIN thread, and
+    // the release also fires `router.push`, so the landing was competing with a
+    // route mount and visibly stalled — the same reason the gravity blob is a
+    // CSS transition. And animating left/top/width/height means a layout pass
+    // AND a re-rastered backdrop-filter every frame, on a box that is changing
+    // size. Nothing here touches layout now.
     setLensPhase("settle")
     const r = drag.rects[drag.nearest]
-    const targetLeft = drag.base.left + r.left
-    const targetTop = drag.base.top + r.top
+    const lensW = parseFloat(lens.style.width) || r.width
+    const lensH = parseFloat(lens.style.height) || r.height
+    const dx = drag.base.left + r.left + r.width / 2 - (parseFloat(lens.style.left) + lensW / 2)
+    const dy = drag.base.top + r.top + r.height / 2 - (parseFloat(lens.style.top) + lensH / 2)
+    // Hand the shape over to `scale`: the springs' job (the edge bounce) is
+    // done, and leaving them mid-flight would have them writing `transform` on
+    // the main thread underneath the landing.
+    squishX.jump(1)
+    squishY.jump(1)
+    lens.style.transform = "none"
     lens.classList.add("PillDragLens--settle")
-    settleAnimRef.current?.stop()
-    settleAnimRef.current = animate(
-      lens,
-      { left: targetLeft, top: targetTop, width: r.width, height: r.height },
-      { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
-    )
-    squishX.jump(1.14)
-    squishY.jump(0.82)
-    squishX.set(1)
-    squishY.set(1)
+    lens.style.translate = `${dx}px ${dy}px`
+    lens.style.scale = `${r.width / lensW} ${r.height / lensH}`
     const tab = TAB_CONFIG[tabs[drag.nearest]]
     if (tab) router.push(tab.href)
-    // Outlast both the position ease and the (springier) squash rebound before
-    // handing off to the real blob, or the last wobble gets cut.
+    // Outlast the scale's overshoot before handing off to the real blob, or the
+    // rebound gets cut.
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
     settleTimerRef.current = setTimeout(() => {
       setLensPhase("idle")
       setLensIndex(-1)
-    }, 640)
+    }, 420)
   }, [tabs, router, squishX, squishY, nudgeX])
 
   useEffect(() => () => {
-    settleAnimRef.current?.stop()
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
   }, [])
 

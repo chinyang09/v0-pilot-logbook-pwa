@@ -624,8 +624,8 @@ re-renders).
     (delay 0), then height.
   The lead is sized so the second group starts while the first still has ~20%
   to run — with `MORPH_EASE`, 80% of the travel is done at ~50% of the
-  duration, hence **LEAD ≈ 0.5 × DUR**. The whole morph takes **~400ms**
-  (265 + 135). Note that the ORIGINAL was also ~375ms and felt wrong: the lead
+  duration, hence **LEAD ≈ 0.5 × DUR**. The whole morph takes **~300ms**
+  (200 + 100). Note that the ORIGINAL was also ~375ms and felt wrong: the lead
   there was near-full, so the collapse was over before anything moved and the
   morph read as two snaps back to back. It is the overlap, not the length, that
   makes it fluid — a full second was fluid but slow to sit through. (The leads
@@ -781,14 +781,28 @@ re-renders).
     `transform` **imperatively** (its React className stays constant so drag
     re-renders can't strip it); the pop-in uses the separate CSS `scale`
     property, so the two never fight.
-  - **Drop-splat settle:** on release the lens descends onto the tab with a
-    **no-overshoot ease** on position (never springs left/right) and **splats** —
-    `jump()` to a squashed shape then `set()` to neutral so the underdamped
-    springs rebound (a bird's-eye slime drop that "springs to shape"). A CSS
-    `--settle` crossfade swaps the glass material for the grey blob; a timer
-    (must outlast the springy rebound) hands off to the real blob invisibly.
+  - **Drop-splat settle — compositor only.** On release the lens rides the
+    standalone CSS `translate` and `scale` properties, each with its **own**
+    transition: position with a **no-overshoot ease** (it must never spring
+    left/right) and shape with an overshoot, which is the splat. Two easings on
+    one element is only possible because they are separate properties — a
+    single `transform` could not carry both. A CSS `--settle` crossfade swaps
+    the glass material for the grey blob; a timer (must outlast the scale's
+    rebound) hands off to the real blob invisibly, and the lens lands on the
+    blob's rect exactly, so the swap is invisible.
+    This used to be framer `animate()` on `left`/`top`/`width`/`height` and it
+    **janked**, for two independent reasons. JS springs tick on the MAIN
+    thread, and the release also fires `router.push` — so the landing competed
+    with a route mount and stalled (the same reason the gravity blob is a CSS
+    transition). And animating left/top/width/height is a layout pass plus a
+    re-rastered `backdrop-filter` every frame on a box that is changing size.
+    Three things keep it cheap now: nothing touches layout, `--settle` drops
+    the glass's `backdrop-filter` outright (it is fading out anyway), and the
+    refracted clone is NOT re-cloned on release — `lensPhase` changes then too,
+    so the clone effect must be gated on `"drag"`, or a deep clone of the whole
+    pill runs on the first frame of the landing.
     Do **not** put the settle back on a bouncy geometry spring (that was the
-    left/right springing that got removed).
+    left/right springing that got removed), and do not put it back on JS.
 
 ### Unified Settings/Form Layout
 
@@ -1422,7 +1436,7 @@ When making changes, be aware of these high-impact files:
 - Do not read `userDb.flights` for a list, a total or an import match without `isLiveFlight` — a binned flight reaching the reconciler silently updates, and so resurrects, a flight the user deleted
 - Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
 - Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
-- Do not put the drag-lens (`.PillDragLens`) release settle back on a bouncy geometry spring — position eases in with **no overshoot** (never springs left/right); the "spring to shape" is the underdamped `SQUISH_SPRING` squash-and-stretch (drop-splat). Keep it clamped to the tab strip (edge overshoot → the liquid bounce), keep the transform imperative (constant className so drag re-renders can't strip it), and keep the handoff timer longer than the springy rebound (or the last wobble is cut)
+- Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
 - Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`
 - Do not give `register/complete`, `add-passkey`, the callsign change, or the TOTP-reveal routes a path that skips `verifyAuthenticationResponse`/`verifyStepUpAssertion` — the TOTP seed must never be revealed without a fresh passkey step-up

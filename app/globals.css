@@ -904,7 +904,11 @@ textarea:focus-within {
   border-radius: 999px;
   opacity: 0;
   scale: 0.7;
-  /* Only the pop-in animates via CSS; geometry is imperative / framer. */
+  /* An explicit identity, so the settle's `translate` has a length to
+     interpolate FROM rather than the keyword `none`. */
+  translate: 0 0;
+  /* The pop-in and the landing animate via CSS; the follow-the-finger geometry
+     is written imperatively. */
   transition:
     opacity 0.16s ease,
     scale 0.28s cubic-bezier(0.34, 1.5, 0.64, 1);
@@ -1020,10 +1024,34 @@ textarea:focus-within {
   opacity: 0;
   transition: opacity 0.26s ease;
 }
+/* The landing. `translate` and `scale` are separate CSS properties, so each
+   gets its OWN easing: position eases in with NO overshoot (the lens must never
+   spring left/right) while the shape overshoots and rebounds — that is the
+   splat. Both are compositor properties, so the landing keeps running at full
+   frame rate even though the release also kicks off a route change and the main
+   thread is busy mounting the next page. */
+.PillDragLens--settle {
+  transition:
+    translate 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    scale 0.36s cubic-bezier(0.34, 1.5, 0.64, 1),
+    opacity 0.26s ease;
+}
 .PillDragLens--settle .PillDragLens-glass,
 .PillDragLens--settle .PillDragLens-refract,
 .PillDragLens--settle .PillDragLens-rim {
   opacity: 0;
+}
+/* Drop the per-frame work for the landing. A backdrop-filter on a box that is
+   being scaled re-samples and re-blurs the backdrop every frame, and the
+   refracted copy is a clone of the whole pill — both for layers that are
+   fading out anyway. The refract goes quickly (it is the detailed one); the
+   glass keeps its shadows so the bubble still reads as it leaves. */
+.PillDragLens--settle .PillDragLens-glass {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.PillDragLens--settle .PillDragLens-refract {
+  transition: opacity 0.12s ease;
 }
 .PillDragLens--settle .PillDragLens-grey {
   opacity: 1;
