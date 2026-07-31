@@ -247,6 +247,12 @@ const LENS_OVERHANG = 16
 /** Extra width beyond the tab — keeps the bubble a horizontal stadium, not a
  *  circle, over narrow tabs (matches Apple's tab-bar lens proportions). */
 const LENS_PAD_X = 26
+/**
+ * How much the tab strip shrinks inside the lens. Below ~0.75 the copy stops
+ * lining up with the blurred original at the lens edge and reads as a second
+ * pill rather than the same one seen through glass.
+ */
+const LENS_MINIFY = 0.82
 
 /**
  * Shared pill bar row — used in both desktop and mobile collapsed states.
@@ -285,6 +291,10 @@ function PillBarContent({
   // (--on / --settle) are managed IMPERATIVELY and its React className stays
   // constant, so drag re-renders can't strip them.
   const lensRef = useRef<HTMLDivElement | null>(null)
+  /** Scaled about the lens centre — this is what minifies the copy. */
+  const refractInnerRef = useRef<HTMLDivElement | null>(null)
+  /** Holds the cloned tab strip, positioned to sit exactly over the real one. */
+  const refractCopyRef = useRef<HTMLDivElement | null>(null)
   const [lensPhase, setLensPhase] = useState<"idle" | "drag" | "settle">("idle")
   const [lensIndex, setLensIndex] = useState(-1)
   // Chromium-only real refraction map — the backdrop (the pill) genuinely
@@ -325,6 +335,26 @@ function PillBarContent({
     return () => unsub.forEach((u) => u())
   }, [squishX, squishY, nudgeX])
 
+
+  /**
+   * Snapshot the live tab strip into the lens. Re-taken when the lens crosses
+   * to another tab so the copy shows the same pre-highlight the real strip
+   * does — it is a few icons and labels, nothing like the raster the old
+   * displacement map rebuilt on the same event.
+   */
+  useEffect(() => {
+    const host = refractCopyRef.current
+    const source = tabsRef.current
+    if (!host || !source || lensPhase === "idle") return
+    host.replaceChildren()
+    const clone = source.cloneNode(true) as HTMLElement
+    clone.removeAttribute("id")
+    clone.style.width = "100%"
+    clone.style.height = "100%"
+    clone.setAttribute("aria-hidden", "true")
+    clone.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"))
+    host.appendChild(clone)
+  }, [lensPhase, lensIndex])
 
   const paintSpotlight = useCallback((clientX: number, clientY: number) => {
     const gr = glassRootRef.current
@@ -367,10 +397,29 @@ function PillBarContent({
     const overshoot = clientX - centerX // signed; 0 unless past an end tab
     // Pure finger follow (1:1) via direct px writes — no CSS transition on
     // geometry, so it never lags or snaps. The release spring is framer.
+    const lensLeft = centerX - w / 2
+    const lensTop = drag.base.top + drag.base.height / 2 - h / 2
     lens.style.width = `${w}px`
     lens.style.height = `${h}px`
-    lens.style.left = `${centerX - w / 2}px`
-    lens.style.top = `${drag.base.top + drag.base.height / 2 - h / 2}px`
+    lens.style.left = `${lensLeft}px`
+    lens.style.top = `${lensTop}px`
+
+    // The refraction: a copy of the tab strip laid exactly over the real one,
+    // then scaled about the LENS CENTRE. Content at the centre stays put and
+    // everything else pulls inward, so the pill genuinely reads as minified —
+    // but only inside the lens, because the layer clips to it.
+    //
+    // A copy rather than a displacement filter because this has to look the
+    // same on both engines: `backdrop-filter: url(#…)` is Chromium-only, and
+    // the map it needs was what made the gesture stutter. This is one
+    // composited transform.
+    const copy = refractCopyRef.current
+    if (copy) {
+      copy.style.left = `${drag.base.left - lensLeft}px`
+      copy.style.top = `${drag.base.top - lensTop}px`
+      copy.style.width = `${drag.base.width}px`
+      copy.style.height = `${drag.base.height}px`
+    }
     // Liquid wall: compress into the edge + strain toward the finger. The
     // underdamped springs make leaving the edge / releasing bounce back.
     const t = Math.min(Math.abs(overshoot) / 90, 1)
@@ -576,17 +625,30 @@ function PillBarContent({
           Both fade to the grey child (--settle) as the lens morphs into the
           blob.
 
-          There used to be a Chromium-only `-lens` layer that refracted the
-          pill through a real Snell's-law displacement map. It was removed with
-          the rest of the SVG glass: it rebuilt and PNG-encoded a map every time
-          the finger crossed to another tab — main-thread work in the middle of
-          a gesture — and it made the same drag look different on iOS and
-          Android. */}
+          `-refract` is the actual refraction: a clipped copy of the tab strip
+          scaled about the lens centre, so the pill is visibly SMALLER inside
+          the lens and unchanged outside it. The glass beneath blurs the real
+          strip, which is what lets the crisp copy read as the same content
+          seen through the lens rather than a second one drawn on top.
+
+          This replaced a Chromium-only displacement map applied through
+          `backdrop-filter: url(#…)`. Same effect, both engines, and it is one
+          composited transform instead of a megapixel raster rebuilt every time
+          the finger crossed to another tab. */}
       {lensActive &&
         typeof document !== "undefined" &&
         createPortal(
           <div ref={lensMountRef} aria-hidden className="PillDragLens">
             <div className="PillDragLens-glass" />
+            <div className="PillDragLens-refract">
+              <div
+                ref={refractInnerRef}
+                className="PillDragLens-refractInner"
+                style={{ "--lens-minify": LENS_MINIFY } as React.CSSProperties}
+              >
+                <div ref={refractCopyRef} className="PillDragLens-refractCopy" />
+              </div>
+            </div>
             <div className="PillDragLens-rim" />
             <div className="PillDragLens-grey" />
           </div>,
@@ -1041,7 +1103,11 @@ function DesktopPillMorph({
           cornerRadius={isSidebarShape ? 20 : 28}
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
-          disableTapFeedback
+          // In PILL shape the nav is a control and behaves like one: it blooms
+          // under the finger and settles back like every other glass button.
+          // As the SIDEBAR it doesn't — scaling a full-height panel around a
+          // scrolling list reads as the layout wobbling, not as a press.
+          disableTapFeedback={isSidebarShape}
           spotlight
           morphing={phase === "opening" || phase === "closing"}
         >
@@ -1206,7 +1272,11 @@ function MobilePillMorph({
           cornerRadius={isSidebarShape ? 20 : 28}
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
-          disableTapFeedback
+          // In PILL shape the nav is a control and behaves like one: it blooms
+          // under the finger and settles back like every other glass button.
+          // As the SIDEBAR it doesn't — scaling a full-height panel around a
+          // scrolling list reads as the layout wobbling, not as a press.
+          disableTapFeedback={isSidebarShape}
           spotlight
           morphing={phase === "opening" || phase === "closing"}
         >

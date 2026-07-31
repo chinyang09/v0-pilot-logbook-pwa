@@ -679,6 +679,18 @@ re-renders).
     over narrow tabs) that **overhangs** the pill top/bottom (`LENS_OVERHANG`).
     **Clamped** to the first/last tab centres so it never leaves the tab strip;
     finger travel *past* an end tab becomes `overshoot`.
+  - **Refraction (`-refract`):** a CLIPPED COPY of the tab strip, laid exactly
+    over the real one and scaled about the LENS CENTRE — so the pill is
+    visibly smaller inside the lens and untouched outside it. Engine-
+    independent by construction: one composited transform, no filter, nothing
+    to rasterise. The copy is re-cloned when the lens crosses to another tab so
+    its pre-highlight matches.
+    The layer carries the page background at ~91%, because it has to COVER the
+    strip it duplicates or you see both at once and it reads as a ghost. A blur
+    can't do that job: the lens is portalled to `<body>` and the nav sits in
+    its own stacking context, so **the lens's `backdrop-filter` never samples
+    the pill at all** — verified by hiding the copy, which leaves the label
+    underneath perfectly sharp.
   - **Material:** `.PillDragLens-glass` on every platform — layered shadows for
     the convex bulge plus an inner thickness vignette that fakes the pinch, and
     a chromatic-dispersion `.PillDragLens-rim` for the liquid fringe. The
@@ -1236,7 +1248,16 @@ When making changes, be aware of these high-impact files:
     arrives, so a glow can never stick.
   - **Release ripples.** On lift the light expands from the release point and
     fades (`.GlassRipple` + `glass-ripple`), keyed so a quick second press
-    restarts it and self-clearing on `animationend`.
+    restarts it and self-clearing on `animationend`. Deliberately faint — it is
+    a trace of the touch leaving, not an event of its own.
+  - **Press bloom and release settle.** Press grows the control to `BLOOM`
+    (1.045); release passes UNDER 1 to `RELEASE_DIP` and springs back, the way
+    an Apple control lands. `RELEASE_DIP_MS` is how long the dip is HELD, not
+    how deep it goes — the spring lags the target, so at 90ms it only reached
+    0.983 before being pulled back; 140ms lets it actually arrive (measured min
+    0.9722, settled by ~330ms). The NAV PILL gets this too, but only in pill
+    shape: `disableTapFeedback={isSidebarShape}`, because scaling a full-height
+    panel around a scrolling list reads as the layout wobbling, not a press.
   - **Press glow survives a scroll:** `--glass-press` is set **imperatively**
     on pointer down/up, not through framer's `whileTap`. A native scroll inside
     the surface (the sidebar list) steals the pointer and fires
@@ -1312,6 +1333,7 @@ When making changes, be aware of these high-impact files:
 - Do not end the glass press on `touchcancel`/`pointercancel` — Chrome fires those the moment a move looks like a scroll, which is what made the Android spotlight die as soon as the finger moved. Track on the window, treat a cancel as bloom-only, and let the grace timer close it out
 - Do not set the dark theme's `--glass-veil` back to `transparent` — a backdrop-filter has nothing to work with over pure black (blur/saturate of black is black; brightness is multiplicative), so the veil is the only thing giving the slab a face on an empty screen. Keep it warm rather than plain white, or the material reads grey over content again
 - Do not add a second full-face `backdrop-filter` to the glass — `.GlassBlur` carries the only one, as a single filter *list*. Six of them stacked on separate elements is what made the nav pill warm-and-dark on iOS and flat grey on Android: Blink composes the chain, WebKit doesn't, and neither is wrong. Anything the material needs goes into that one list (and the rim layers stay masked to the edge band)
+- Do not give the drag lens's `-refract` layer a `backdrop-filter` instead of its background — the lens is portalled to `<body>` and the nav is in its own stacking context, so a backdrop-filter there does not sample the pill at all (measured). The layer must paint over the strip it duplicates, or the copy and the original show at once
 - Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
 - Do not delete a flight outright — `deleteFlight` is a **soft delete** into the 90-day recycle bin and pushes an UPDATE; only `purgeExpiredDeletedFlights` writes a tombstone. Push a delete when the user merely binned it and the flight is gone on every device with nothing to restore
 - Do not order flights anywhere but `lib/utils/flight-sort.ts` — the order must be TOTAL (date, then actual-or-SCHEDULED out time, then departure, then id) or rows move on their own: a new flight sat at the top of the logbook until the next refetch and then jumped, and reading `outTime` alone treated every unflown sector as 00:00 so scheduled flights sank below completed ones on the same day. An optimistic cache write inserts with `insertFlightSorted`, never by prepending

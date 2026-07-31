@@ -37,6 +37,17 @@ interface GlassContainerProps {
 const PRESS_SPRING = { stiffness: 420, damping: 26, mass: 0.6 }
 /** Bloom scale while pressed (Apple controls grow, they don't compress). */
 const BLOOM = 1.045
+/**
+ * Release settle: the control doesn't just return to 1, it passes slightly
+ * UNDER and springs back up — the weight of the press carrying through, the
+ * way an Apple control lands. Small on purpose; past about 0.96 it reads as
+ * the button being pushed again rather than settling.
+ */
+const RELEASE_DIP = 0.97
+/* The spring lags the target, so this is how long the dip is HELD, not how
+   deep it gets: at 90ms it only reached 0.983 before being pulled back. 140ms
+   lets it actually arrive at the dip and settle from there. */
+const RELEASE_DIP_MS = 140
 /** How much of the finger's offset from centre the glass follows — kept LOW:
  *  the glass should STRETCH toward the drag more than it travels (owner
  *  feedback: too much movement reads as the button sliding, not gelling). */
@@ -100,6 +111,7 @@ export function GlassContainer({
   /** Tears down the window listeners for the current press. */
   const detachRef = useRef<(() => void) | null>(null)
   const graceRef = useRef<number | undefined>(undefined)
+  const settleRef = useRef<number | undefined>(undefined)
   const rippleKeyRef = useRef(0)
   /** One release ripple at a time; keyed so a re-press restarts the animation. */
   const [ripple, setRipple] = useState<{ x: number; y: number; key: number } | null>(null)
@@ -111,6 +123,7 @@ export function GlassContainer({
       detachRef.current?.()
       detachRef.current = null
       window.clearTimeout(graceRef.current)
+      window.clearTimeout(settleRef.current)
     },
     []
   )
@@ -150,12 +163,27 @@ export function GlassContainer({
     sy.set(BLOOM + Math.min(Math.abs(dy) * 0.0012, 0.05))
   }
 
+  /** Home, with no settle — for a cancelled gesture, which isn't a release. */
   const dropBloom = () => {
     if (!interactive) return
     tx.set(0)
     ty.set(0)
     sx.set(1)
     sy.set(1)
+  }
+
+  /** Home via the under-and-back settle. */
+  const settleFromPress = () => {
+    if (!interactive) return dropBloom()
+    tx.set(0)
+    ty.set(0)
+    sx.set(RELEASE_DIP)
+    sy.set(RELEASE_DIP)
+    window.clearTimeout(settleRef.current)
+    settleRef.current = window.setTimeout(() => {
+      sx.set(1)
+      sy.set(1)
+    }, RELEASE_DIP_MS)
   }
 
   /**
@@ -177,7 +205,7 @@ export function GlassContainer({
       })
     }
     setGlow(false)
-    dropBloom()
+    settleFromPress()
   }
 
   /**
