@@ -219,7 +219,7 @@
   --chrome-top-sm: calc(3rem + env(safe-area-inset-top, 0px));
   /* And at the BOTTOM: clearance for the floating nav pill plus the gesture
      bar, so the last row is reachable rather than parked underneath them. */
-  --chrome-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+  --chrome-bottom: calc(4rem + max(env(safe-area-inset-bottom, 0px), 16px));
 }
 
 .pt-chrome {
@@ -237,10 +237,35 @@
 .pt-chrome-bar {
   padding-top: env(safe-area-inset-top, 0px);
 }
+
+/* The floating header's gradient.
+
+   It used to be a plain `--background → 60% → transparent` over the whole
+   block. Once the block grew to cover the status bar (`.pt-chrome-bar`), its
+   SOLID end sat exactly over that strip — so content scrolling underneath was
+   painted out and the status bar read as a blank pad bolted to the top, which
+   is the opposite of what edge-to-edge is for.
+
+   The ramp is anchored to the 64px action row instead: barely tinted across
+   the status bar (content is clearly visible under it, the way it is in a
+   native app), solid by the time it is behind the buttons, gone by the bottom
+   of the row. Used by BOTH headers — the main panel's and the mobile detail
+   overlay's. If one changes, they both do. */
+.chrome-header-fade {
+  --chrome-bar: env(safe-area-inset-top, 0px);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--background) 22%, transparent) 0,
+    color-mix(in srgb, var(--background) 34%, transparent) var(--chrome-bar),
+    var(--background) calc(var(--chrome-bar) + 20px),
+    color-mix(in srgb, var(--background) 60%, transparent) calc(var(--chrome-bar) + 44px),
+    transparent 100%
+  );
+}
 /* A page's own bottom padding: enough to clear the floating nav pill AND the
    gesture bar, so the last row lands above both instead of under them. */
 .pb-chrome {
-  padding-bottom: calc(6rem + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(6rem + max(env(safe-area-inset-bottom, 0px), 16px));
 }
 
 /* ─── Native touch feel ─── */

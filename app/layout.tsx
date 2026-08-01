@@ -6,6 +6,7 @@ import { AuthProvider } from "@/components/providers/auth-provider"
 import { ThemeProvider } from "@/components/providers/theme-provider"
 
 import { OCRModelsPreloader } from "@/components/ocr-models-preloader"
+import { ThemeColorMeta } from "@/components/theme-color-meta"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -55,7 +56,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         {/* Windows tile color */}
-        <meta name="msapplication-TileColor" content="#05080B" />
+        <meta name="msapplication-TileColor" content="#0e0a07" />
         {/* Inter is the single app typeface (sans + numbers). */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -63,6 +64,7 @@ export default function RootLayout({
       </head>
       <body className="bg-background font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+          <ThemeColorMeta />
           <ServiceWorkerRegister />
           <OCRModelsPreloader />
           <AuthProvider>

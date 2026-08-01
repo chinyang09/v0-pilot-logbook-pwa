@@ -1476,7 +1476,12 @@ function MobilePillMorph({
 
   const style: React.CSSProperties = {
     position: "fixed" as const,
-    bottom: `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-bottom, 0px))`,
+    // `max()` because the inset alone is not enough to trust. iOS reports 34px
+    // for the home indicator and this lands just above it; Chrome on Android
+    // reports 0 whenever it is not drawing edge to edge, which would leave the
+    // pill sitting on top of the gesture bar. The floor keeps it clear either
+    // way, and never moves the pill on a device that does report an inset.
+    bottom: `calc(${SIDEBAR_MARGIN}px + max(env(safe-area-inset-bottom, 0px), 16px))`,
     left: isSidebarShape ? SIDEBAR_MARGIN : "50%",
     transform: isSidebarShape
       ? "translateX(0)"
