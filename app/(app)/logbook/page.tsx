@@ -429,7 +429,7 @@ export default function LogbookPage() {
       <div
         ref={calendarContainerRef}
         className="z-40 absolute left-0 right-0"
-        style={{ top: "4rem", contain: "layout style paint" }}
+        style={{ top: "var(--chrome-top)", contain: "layout style paint" }}
       >
         <AnimatePresence initial={false}>
           {showCalendar && (
@@ -487,7 +487,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={64 + (showCalendar ? calendarNaturalHeight : 0)}
+          topSpacerHeight={`calc(var(--chrome-top) + ${showCalendar ? calendarNaturalHeight : 0}px)`}
           selectedFlightId={selectedFlightId}
           headerContent={
             <div className="flex-shrink-0 top-0 z-40 px-2 py-1">

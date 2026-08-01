@@ -208,17 +208,39 @@
    whose gradient has to cover the status bar for the content to fade out
    beneath it. All of these collapse to the plain value on desktop, where the
    insets are 0. */
+:root {
+  /* The offset content needs at the TOP of a panel to clear the floating
+     header: its 64px bar plus whatever the status bar overlays. ONE definition
+     — anything that positions itself against the header (a page's padding, the
+     logbook's list spacer, its calendar overlay) reads this, because a
+     hardcoded 4rem somewhere is exactly how the search field ended up sliding
+     under the action buttons. */
+  --chrome-top: calc(4rem + env(safe-area-inset-top, 0px));
+  --chrome-top-sm: calc(3rem + env(safe-area-inset-top, 0px));
+  /* And at the BOTTOM: clearance for the floating nav pill plus the gesture
+     bar, so the last row is reachable rather than parked underneath them. */
+  --chrome-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+}
+
 .pt-chrome {
-  padding-top: calc(4rem + env(safe-area-inset-top, 0px));
+  padding-top: var(--chrome-top);
 }
 .pt-chrome-sm {
-  padding-top: calc(3rem + env(safe-area-inset-top, 0px));
+  padding-top: var(--chrome-top-sm);
 }
-.h-chrome {
-  height: calc(4rem + env(safe-area-inset-top, 0px));
+.h-chrome-top {
+  height: var(--chrome-top);
+}
+.h-chrome-bottom {
+  height: var(--chrome-bottom);
 }
 .pt-chrome-bar {
   padding-top: env(safe-area-inset-top, 0px);
+}
+/* A page's own bottom padding: enough to clear the floating nav pill AND the
+   gesture bar, so the last row lands above both instead of under them. */
+.pb-chrome {
+  padding-bottom: calc(6rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* ─── Native touch feel ─── */

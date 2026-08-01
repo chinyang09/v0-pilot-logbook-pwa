@@ -64,14 +64,19 @@ export function PageContainer({ children, header, className, rightContent, mainR
         onScroll={onMainScroll}
         className={cn("flex-1 overflow-y-auto overscroll-contain", header ? "pt-chrome-sm" : "pt-chrome", className)}
       >
-        <div className="pb-24">
+        <div className="pb-chrome">
           {children}
         </div>
       </main>
 
         {/* Right content (e.g., FastScroll) positioned relative to viewport, not scrolling content */}
         {rightContent && (
-          <div className={cn("absolute right-1 bottom-0 z-40 flex items-center pointer-events-none", header ? "top-12" : "top-16")}>
+          <div
+            className="absolute right-1 bottom-0 z-40 flex items-center pointer-events-none"
+            // Below the floating header, status bar included — a bare top-16
+            // started the rail underneath it once the app went edge to edge.
+            style={{ top: header ? "var(--chrome-top-sm)" : "var(--chrome-top)" }}
+          >
             <div className="pointer-events-auto">
               {rightContent}
             </div>

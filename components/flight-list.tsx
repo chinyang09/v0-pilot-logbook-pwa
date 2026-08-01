@@ -53,7 +53,8 @@ interface FlightListProps {
   onTopFlightChange?: (flight: FlightLog | null) => void;
   onScrollStart?: () => void;
   onScroll?: (e: React.UIEvent<HTMLElement>) => void;
-  topSpacerHeight?: number; // Height of the calendar
+  /** CSS length: the header offset plus the calendar, when open. */
+  topSpacerHeight?: string;
   headerContent?: React.ReactNode; // Height of the top bar (48px)
   selectedFlightId?: string | null; // Currently selected flight for visual highlighting
 }
@@ -202,7 +203,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       onTopFlightChange,
       onScrollStart,
       onScroll,
-      topSpacerHeight = 0,
+      topSpacerHeight = "0px",
       headerContent,
       selectedFlightId,
     },
@@ -555,7 +556,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             onWheel={handleWheelStart}
           >
             <div
-              style={{ height: `${topSpacerHeight}px` }}
+              style={{ height: topSpacerHeight }}
               className="transition-[height] duration-300 ease-in-out"
             />
             {headerContent}
@@ -585,7 +586,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           >
             {/* Top spacer for calendar */}
             <div
-              style={{ height: `${topSpacerHeight}px` }}
+              style={{ height: topSpacerHeight }}
               className="transition-[height] duration-300 ease-in-out"
             />
 
@@ -664,14 +665,14 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             </div>
 
             {/* Bottom padding */}
-            <div className="h-chrome" />
+            <div className="h-chrome-bottom" />
           </div>
 
           {/* FastScroll rail (year-based navigation) - positioned in visible area below calendar/header */}
           {fastScrollItems.length > 1 && (
             <div
               className="absolute right-0 bottom-0 z-40 flex items-center pointer-events-none transition-[top] duration-300 ease-in-out"
-              style={{ top: `${topSpacerHeight}px` }}
+              style={{ top: topSpacerHeight }}
             >
               <div className="pointer-events-auto">
                 <FastScroll
