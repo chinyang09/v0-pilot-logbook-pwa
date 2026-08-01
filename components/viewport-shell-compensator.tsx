@@ -34,6 +34,15 @@ export function ViewportShellCompensator() {
   useEffect(() => {
     const root = document.documentElement
 
+    // Body is in flow and, on buggy iOS standalone, can transiently be taller
+    // than the reported viewport — which gives the document a scroll range.
+    // Nothing should ever scroll it (the app's scrollers all contain their
+    // overscroll), but pin it so a stray chained gesture, a programmatic
+    // scroll, or a gap correction can't leave the shell shifted.
+    const pin = () => {
+      if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0)
+    }
+
     const apply = () => {
       let gap = 0
       const nav = navigator as Navigator & { standalone?: boolean }
@@ -58,25 +67,34 @@ export function ViewportShellCompensator() {
         if (measured > 0 && measured <= cap) gap = measured
       }
       root.style.setProperty("--shell-bottom-gap", `${gap}px`)
-    }
-
-    // Body is in flow and, on buggy iOS standalone, taller than the reported
-    // viewport — which technically gives the document a scroll range of the
-    // compensated gap. Nothing should ever scroll it (the app's scrollers all
-    // contain their overscroll), but pin it anyway so a stray chained gesture
-    // or programmatic scroll can't shift the shell.
-    const pin = () => {
-      if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0)
+      pin()
     }
 
     apply()
     pin()
+    // With the in-flow shell, WebKit CORRECTS innerHeight to the full screen
+    // shortly after first layout (measured: 788 at launch, 820 moments later)
+    // — and fires no `resize` for it. A stale gap measured against the early
+    // value then overshoots the shell by exactly that gap, which is a
+    // scrollable shell until the next resize. Re-measure on the events that
+    // do fire around the correction, plus a short settling series.
+    const settle = [300, 1000, 3000].map((ms) => window.setTimeout(apply, ms))
+    const onVisible = () => {
+      if (document.visibilityState === "visible") apply()
+    }
     window.addEventListener("resize", apply)
     window.addEventListener("orientationchange", apply)
+    window.addEventListener("pageshow", apply)
+    window.visualViewport?.addEventListener("resize", apply)
+    document.addEventListener("visibilitychange", onVisible)
     window.addEventListener("scroll", pin, { passive: true })
     return () => {
+      settle.forEach(clearTimeout)
       window.removeEventListener("resize", apply)
       window.removeEventListener("orientationchange", apply)
+      window.removeEventListener("pageshow", apply)
+      window.visualViewport?.removeEventListener("resize", apply)
+      document.removeEventListener("visibilitychange", onVisible)
       window.removeEventListener("scroll", pin)
     }
   }, [])

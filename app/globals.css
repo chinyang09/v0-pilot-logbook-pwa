@@ -224,10 +224,14 @@
   }
   /* The WebKit installed-PWA compensation (see the body comment above).
      `--shell-bottom-gap` is the measured shortfall, set by
-     ViewportShellCompensator (0 outside iOS standalone); until it runs, the
-     bottom inset is the best static approximation. */
+     ViewportShellCompensator (0 outside iOS standalone). The fallback is 0,
+     NOT an env() term: overshooting makes the shell taller than the viewport,
+     which is a scrollable document that iOS can shift upward — strictly worse
+     than a brief bottom band while hydration runs. In the in-flow regime
+     WebKit also corrects innerHeight (and dvh) to the full screen shortly
+     after launch, so the steady-state gap is usually 0 anyway. */
   body {
-    height: calc(100dvh + var(--shell-bottom-gap, env(safe-area-inset-bottom, 0px)));
+    height: calc(100dvh + var(--shell-bottom-gap, 0px));
   }
 }
 

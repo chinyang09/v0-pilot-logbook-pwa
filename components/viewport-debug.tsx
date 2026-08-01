@@ -29,6 +29,7 @@ interface Readout {
   navStandalone: string
   orientation: string
   shellGap: string
+  scrollY: number
 }
 
 function measure(): Readout {
@@ -64,6 +65,7 @@ function measure(): Readout {
     orientation: screen.orientation ? `${screen.orientation.type} ${screen.orientation.angle}` : "n/a",
     shellGap:
       document.documentElement.style.getPropertyValue("--shell-bottom-gap") || "(unset)",
+    scrollY: Math.round(window.scrollY * 10) / 10,
   }
 }
 
@@ -88,8 +90,9 @@ export function ViewportDebug() {
   if (!r) return null
 
   const rows: [string, string | number | boolean | null][] = [
-    ["build", "vd-4"],
+    ["build", "vd-5"],
     ["shell gap", r.shellGap],
+    ["scrollY", r.scrollY],
     ["innerH", r.innerH],
     ["doc.clientH", r.docClientH],
     ["visualViewport.h", r.vvH],
