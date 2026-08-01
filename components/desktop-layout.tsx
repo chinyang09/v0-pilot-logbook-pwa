@@ -18,6 +18,7 @@ import { ChevronLeft } from "lucide-react"
 import { GlassIconButton } from "@/components/ui/glass-icon-button"
 import { cn } from "@/lib/utils"
 import { NavPill } from "@/components/nav-pill"
+import { BottomEdgeBlur } from "@/components/bottom-edge-blur"
 import { PushSidebar } from "@/components/push-sidebar"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { usePageActions } from "@/hooks/use-page-actions"
@@ -254,6 +255,10 @@ function AppShellContent({ children }: AppShellProps) {
     <div className="relative h-full w-full flex flex-col bg-background overflow-hidden">
       {/* PWA install banner — in layout flow, pushes content down when visible */}
       <PWAInstallPrompt />
+
+      {/* Progressive blur toward the home indicator (iOS standalone only);
+          z-40 keeps it under the nav pill, the sidebar and the overlays */}
+      <BottomEdgeBlur />
 
       {/* No safe-area inset here on purpose — the panels run edge to edge and
           content scrolls UNDER the status bar. The inset lives inside each

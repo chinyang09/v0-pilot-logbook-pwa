@@ -90,7 +90,7 @@ export function ViewportDebug() {
   if (!r) return null
 
   const rows: [string, string | number | boolean | null][] = [
-    ["build", "vd-5"],
+    ["build", "vd-6"],
     ["shell gap", r.shellGap],
     ["scrollY", r.scrollY],
     ["innerH", r.innerH],
@@ -127,20 +127,8 @@ export function ViewportDebug() {
       >
         {rows.map(([k, v]) => `${k.padEnd(17)} ${String(v)}`).join("\n")}
       </div>
-      {/* orange: paint probe for the sub-viewport strip — if the band below the
-          buggy viewport is paintable at all, this stripe shows there */}
-      <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, height: 48, background: "rgba(255,140,0,0.45)", zIndex: 99990, pointerEvents: "none" }} />
-      {/* purple: same probe via position:absolute — a pure document-layer path,
-          in case fixed (even with a transformed containing block) stays clipped */}
-      <div style={{ position: "absolute", left: "25%", right: "25%", bottom: 0, height: 48, background: "rgba(168,85,247,0.5)", zIndex: 99990, pointerEvents: "none" }} />
-      {/* red: body's own bottom edge (bottom:0 of the shell) */}
-      <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, height: 3, background: "red", zIndex: 99991, pointerEvents: "none" }} />
-      {/* blue: where window.innerHeight says the viewport ends */}
-      <div style={{ position: "fixed", left: 0, width: "50%", top: r.innerH - 3, height: 3, background: "#3b82f6", zIndex: 99992, pointerEvents: "none" }} />
-      {/* green: where the visual viewport ends */}
-      {r.vvH != null && (
-        <div style={{ position: "fixed", right: 0, width: "50%", top: (r.vvTop ?? 0) + r.vvH - 3, height: 3, background: "#22c55e", zIndex: 99993, pointerEvents: "none" }} />
-      )}
+      {/* marker lines and paint probes removed — the paint question is
+          settled; only the readout remains while the bottom chrome is tuned */}
     </>
   )
 }

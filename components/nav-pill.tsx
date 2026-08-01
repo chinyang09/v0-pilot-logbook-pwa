@@ -1095,17 +1095,20 @@ function SidebarNavItem({
  * tall as the app shell on every surface, with no listener and nothing to
  * fall out of sync.
  *
- * BOTH insets come off, not just the top. The desktop panel is top-anchored and
- * the mobile one bottom-anchored, and each has to end a margin clear of the
- * OTHER end too: subtracting only the top inset left the desktop panel running
- * into the home indicator and put the mobile panel's top strip under the status
- * bar. With both, the two are exact mirrors — `SIDEBAR_MARGIN` clear of the safe
- * area at each end, whichever end it is anchored to.
+ * BOTH ends come off, not just the top. The desktop panel is top-anchored and
+ * the mobile one bottom-anchored, and each has to end clear of the OTHER end
+ * too: subtracting only the top left the desktop panel running into the home
+ * indicator and put the mobile panel's top strip under the status bar. The
+ * lower end is `--nav-bottom-offset` (globals.css) — the ONE "how far above
+ * the physical bottom the nav rests" number shared with the bottom pill and
+ * the scroll clearance, so the sidebar's lower edge, the pill, and a
+ * scrolled-to-rest last row all land on the same line just above the home
+ * indicator's bar.
  */
+const NAV_BOTTOM_OFFSET = `var(--nav-bottom-offset, ${SIDEBAR_MARGIN}px)`
 const EXPANDED_HEIGHT =
-  `calc(100% - ${SIDEBAR_MARGIN * 2}px` +
-  ` - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)` +
-  ` - var(--install-banner-height, 0px))`
+  `calc(100% - ${SIDEBAR_MARGIN}px - env(safe-area-inset-top, 0px)` +
+  ` - ${NAV_BOTTOM_OFFSET} - var(--install-banner-height, 0px))`
 
 // ─── Main export ─────────────────────────────────────────────
 
@@ -1471,7 +1474,7 @@ function MobilePillMorph({
 
   const style: React.CSSProperties = {
     position: "fixed" as const,
-    bottom: `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-bottom, 0px))`,
+    bottom: NAV_BOTTOM_OFFSET,
     left: isSidebarShape ? SIDEBAR_MARGIN : "50%",
     transform: isSidebarShape
       ? "translateX(0)"
