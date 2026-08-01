@@ -80,7 +80,7 @@ export default function AirportDetailPage() {
         </header>
       }
     >
-      <div className="container mx-auto px-3 pt-3 pb-safe">
+      <div className="container mx-auto px-3 pt-3">
         {!airport ? (
           <p className="text-center text-muted-foreground py-12">
             Airport {icao.toUpperCase()} not found

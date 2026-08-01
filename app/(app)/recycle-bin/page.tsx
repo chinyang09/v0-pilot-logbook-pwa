@@ -92,7 +92,7 @@ export default function RecycleBinPage() {
 
   return (
     <PageContainer>
-      <div className="px-4 pt-4 pb-safe space-y-3">
+      <div className="px-4 pt-4 space-y-3">
         {!isLoading && flights.length > 0 && (
           <p className="text-xs text-muted-foreground">
             Deleted flights are kept for 90 days and count towards nothing while

@@ -180,7 +180,7 @@ export default function RosterPage() {
           ) : null
         }
       >
-        <div className="px-4 pt-4 pb-safe space-y-4">
+        <div className="px-4 pt-4 space-y-4">
 
         {/* Stats Cards */}
         <div className="grid grid-cols-3 gap-2">

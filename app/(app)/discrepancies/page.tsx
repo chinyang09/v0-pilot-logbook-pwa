@@ -249,7 +249,7 @@ export default function DiscrepanciesPage() {
 
   return (
     <PageContainer>
-      <div className="px-4 pt-4 pb-safe space-y-4">
+      <div className="px-4 pt-4 space-y-4">
         <FilterChips<FilterType>
           value={filterType}
           onChange={setFilterType}

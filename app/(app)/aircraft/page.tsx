@@ -686,7 +686,7 @@ export default function AircraftPage() {
         </div>
       ) : (
         <div>
-          <div className="px-4 pt-4 pb-safe">
+          <div className="px-4 pt-4">
             {/* Non-virtualized content above the virtual list */}
             <div ref={aboveVirtualRef}>
               {!debouncedSearchQuery.trim() && (

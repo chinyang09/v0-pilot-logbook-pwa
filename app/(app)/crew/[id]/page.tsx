@@ -124,7 +124,7 @@ export default function CrewDetailPage() {
 
   return (
     <PageContainer>
-      <div className="container mx-auto px-2 pt-4 pb-safe">
+      <div className="container mx-auto px-2 pt-4">
         {!isNew && !crew ? (
           <p className="text-center text-muted-foreground py-12">
             Crew member not found

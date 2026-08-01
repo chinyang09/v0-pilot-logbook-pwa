@@ -217,9 +217,18 @@
      under the action buttons. */
   --chrome-top: calc(4rem + env(safe-area-inset-top, 0px));
   --chrome-top-sm: calc(3rem + env(safe-area-inset-top, 0px));
-  /* And at the BOTTOM: clearance for the floating nav pill plus the gesture
-     bar, so the last row is reachable rather than parked underneath them. */
-  --chrome-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+  /* And at the BOTTOM: the ONE clearance a scroller's content needs, so the
+     last row lands above the floating nav pill and above the home indicator /
+     gesture bar rather than under them.
+     
+     The pill occupies 4px + inset .. 60px + inset from the bottom edge, so
+     4.75rem + inset leaves a real gap above it. Declared once and applied once
+     per scroller: page content used to carry `pb-safe` INSIDE a container that
+     already had this, which on iOS meant 96px + TWO home-indicator insets of
+     dead space at the end of every list — the "the bottom is padded" strip.
+     Nothing here insets the layout: it is padding inside the scroller, so
+     content still runs to the true bottom edge as you scroll. */
+  --chrome-bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));
 }
 
 .pt-chrome {
@@ -237,10 +246,18 @@
 .pt-chrome-bar {
   padding-top: env(safe-area-inset-top, 0px);
 }
+
+/* At the desktop tier the nav pill lives at the TOP, so the bottom owes only
+   the inset — carrying the pill's clearance there is just a dead gap. */
+@media (min-width: 1120px) {
+  :root {
+    --chrome-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
 /* A page's own bottom padding: enough to clear the floating nav pill AND the
    gesture bar, so the last row lands above both instead of under them. */
 .pb-chrome {
-  padding-bottom: calc(6rem + env(safe-area-inset-bottom, 0px));
+  padding-bottom: var(--chrome-bottom);
 }
 
 /* ─── Native touch feel ─── */
