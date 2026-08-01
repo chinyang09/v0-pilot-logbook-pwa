@@ -6,6 +6,7 @@ import { AuthProvider } from "@/components/providers/auth-provider"
 import { ThemeProvider } from "@/components/providers/theme-provider"
 
 import { OCRModelsPreloader } from "@/components/ocr-models-preloader"
+import { ViewportDebug } from "@/components/viewport-debug"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -63,6 +64,8 @@ export default function RootLayout({
       </head>
       <body className="bg-background font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+          {/* TEMP DIAGNOSTIC — remove after the iOS standalone viewport investigation */}
+          <ViewportDebug />
           <ServiceWorkerRegister />
           <OCRModelsPreloader />
           <AuthProvider>
