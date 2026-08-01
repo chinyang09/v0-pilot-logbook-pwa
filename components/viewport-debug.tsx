@@ -28,6 +28,7 @@ interface Readout {
   fullscreenMQ: boolean
   navStandalone: string
   orientation: string
+  shellGap: string
 }
 
 function measure(): Readout {
@@ -61,6 +62,8 @@ function measure(): Readout {
     fullscreenMQ: matchMedia("(display-mode: fullscreen)").matches,
     navStandalone: String((navigator as { standalone?: boolean }).standalone),
     orientation: screen.orientation ? `${screen.orientation.type} ${screen.orientation.angle}` : "n/a",
+    shellGap:
+      document.documentElement.style.getPropertyValue("--shell-bottom-gap") || "(unset)",
   }
 }
 
@@ -85,7 +88,8 @@ export function ViewportDebug() {
   if (!r) return null
 
   const rows: [string, string | number | boolean | null][] = [
-    ["build", "vd-1"],
+    ["build", "vd-2"],
+    ["shell gap", r.shellGap],
     ["innerH", r.innerH],
     ["doc.clientH", r.docClientH],
     ["visualViewport.h", r.vvH],

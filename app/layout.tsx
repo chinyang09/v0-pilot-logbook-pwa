@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/providers/theme-provider"
 
 import { OCRModelsPreloader } from "@/components/ocr-models-preloader"
 import { ViewportDebug } from "@/components/viewport-debug"
+import { ViewportShellCompensator } from "@/components/viewport-shell-compensator"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -64,6 +65,8 @@ export default function RootLayout({
       </head>
       <body className="bg-background font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+          {/* Measures the iOS standalone viewport shortfall into --shell-bottom-gap */}
+          <ViewportShellCompensator />
           {/* TEMP DIAGNOSTIC — remove after the iOS standalone viewport investigation */}
           <ViewportDebug />
           <ServiceWorkerRegister />
