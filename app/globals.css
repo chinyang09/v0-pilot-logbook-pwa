@@ -193,20 +193,25 @@
        shortfall (screen height − innerHeight), written by
        ViewportShellCompensator on iOS standalone only and 0 everywhere else;
        the env() fallback below only covers the pre-hydration frames. The
-       safe-area padding lives in the bottom nav, never on body. */
-    position: fixed;
-    top: 0;
-    left: 0;
+       safe-area padding lives in the bottom nav, never on body.
+
+       Body is IN FLOW — deliberately NOT position:fixed. WebKit renders in
+       two regimes here: the DOCUMENT layer paints onto the whole physical
+       surface (that is how a page paints under Safari's collapsed toolbar,
+       and how the canvas background reaches the screen bottom), but
+       VIEWPORT-ANCHORED layers are hard-clipped at the buggy viewport edge —
+       measured: a fixed probe never painted below the line no matter what.
+       A fixed body put the entire app into the clipped regime. In flow, the
+       app lives in the document layer and paints to the physical bottom. */
     width: 100%;
     height: 100dvh;
     /* The transform makes BODY the containing block for every
        `position: fixed` descendant (nav pill, sidebar morph, drag lens,
-       overlays). Without it they anchor to the initial containing block —
-       the very box the WebKit bug shrinks — so the pill floated a full inset
-       above the home indicator while the shell reached the bottom. With it,
-       everything positions and sizes against the one compensated shell.
-       Body's origin is the viewport origin and it doesn't scroll, so in the
-       non-buggy case this is an identity change. */
+       overlays, portalled dialogs). Two jobs: they position and size against
+       the one compensated shell instead of the buggy viewport, AND — because
+       their containing block is a transformed in-flow element — they render
+       in the DOCUMENT layer, the one WebKit paints below the viewport line,
+       rather than as viewport-anchored layers that get clipped there. */
     transform: translateZ(0);
   }
 }

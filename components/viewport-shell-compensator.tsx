@@ -60,12 +60,24 @@ export function ViewportShellCompensator() {
       root.style.setProperty("--shell-bottom-gap", `${gap}px`)
     }
 
+    // Body is in flow and, on buggy iOS standalone, taller than the reported
+    // viewport — which technically gives the document a scroll range of the
+    // compensated gap. Nothing should ever scroll it (the app's scrollers all
+    // contain their overscroll), but pin it anyway so a stray chained gesture
+    // or programmatic scroll can't shift the shell.
+    const pin = () => {
+      if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0)
+    }
+
     apply()
+    pin()
     window.addEventListener("resize", apply)
     window.addEventListener("orientationchange", apply)
+    window.addEventListener("scroll", pin, { passive: true })
     return () => {
       window.removeEventListener("resize", apply)
       window.removeEventListener("orientationchange", apply)
+      window.removeEventListener("scroll", pin)
     }
   }, [])
 

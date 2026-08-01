@@ -88,7 +88,7 @@ export function ViewportDebug() {
   if (!r) return null
 
   const rows: [string, string | number | boolean | null][] = [
-    ["build", "vd-3"],
+    ["build", "vd-4"],
     ["shell gap", r.shellGap],
     ["innerH", r.innerH],
     ["doc.clientH", r.docClientH],
@@ -127,6 +127,9 @@ export function ViewportDebug() {
       {/* orange: paint probe for the sub-viewport strip — if the band below the
           buggy viewport is paintable at all, this stripe shows there */}
       <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, height: 48, background: "rgba(255,140,0,0.45)", zIndex: 99990, pointerEvents: "none" }} />
+      {/* purple: same probe via position:absolute — a pure document-layer path,
+          in case fixed (even with a transformed containing block) stays clipped */}
+      <div style={{ position: "absolute", left: "25%", right: "25%", bottom: 0, height: 48, background: "rgba(168,85,247,0.5)", zIndex: 99990, pointerEvents: "none" }} />
       {/* red: body's own bottom edge (bottom:0 of the shell) */}
       <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, height: 3, background: "red", zIndex: 99991, pointerEvents: "none" }} />
       {/* blue: where window.innerHeight says the viewport ends */}
