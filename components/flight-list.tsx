@@ -664,8 +664,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
               })()}
             </div>
 
-            {/* Bottom padding */}
-            <div className="h-chrome-bottom" />
+            {/* Bottom padding — minus the 8px trailing gap every row wrapper
+                already carries, so the LAST card's edge rests on the same
+                line as the sidebar's lower end and the other panels' last
+                rows (they end flush with their spacers; this list doesn't) */}
+            <div style={{ height: "calc(var(--chrome-bottom) - 8px)" }} />
           </div>
 
           {/* FastScroll rail (year-based navigation) - positioned in visible area below calendar/header */}

@@ -90,7 +90,7 @@ export function ViewportDebug() {
   if (!r) return null
 
   const rows: [string, string | number | boolean | null][] = [
-    ["build", "vd-6"],
+    ["build", "vd-7"],
     ["shell gap", r.shellGap],
     ["scrollY", r.scrollY],
     ["innerH", r.innerH],

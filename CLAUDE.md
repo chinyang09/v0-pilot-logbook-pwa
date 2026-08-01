@@ -500,12 +500,19 @@ report watermarks). Do not go back to an allowlist.
 
 ### Chrome Overlays (`components/ui/chrome-overlays.tsx`)
 
-- **`ChromeFade`** — the floating-header treatment, identical to the main and
-  detail panels in `desktop-layout.tsx`: a single background gradient (solid →
-  60% → transparent), **no `backdrop-filter`**. Anchored to a fixed 64px tail so
-  taller chrome keeps the same boundary instead of stretching the ramp until
-  content shows through the title. If you change the panel header's gradient,
-  change both.
+- **`ChromeFade`** — THE floating-header treatment, rendered directly by the
+  main shell header and the mobile detail overlay header in
+  `desktop-layout.tsx` (no more inline copies): a native-style bar of
+  progressive **blur + darken** — three masked backdrop-blur layers (smallest
+  radius first, widest coverage, so the stack only ever adds blur toward the
+  edge) under the background gradient (solid → 60% → transparent). The
+  gradient is anchored to a fixed 64px tail so taller chrome keeps the same
+  boundary instead of stretching the ramp until content shows through the
+  title. The owner chose blur at the TOP and darken-only at the BOTTOM
+  (`components/bottom-edge-blur.tsx` — a short home-indicator fade, iOS
+  standalone only): at the bottom band's height a blur reads as smearing.
+  The anchored top band also makes an iOS rubber-band read as bouncing from
+  under the action buttons rather than the screen edge.
 - **`MODAL_SCRIM`** — `bg-black/15 dark:bg-black/50`. A flat `bg-black/50` is
   invisible over a dark app and turns the light theme (white panels, glass
   sidebar) into grey mush. Used by every dialog overlay, the nav sidebar
@@ -1568,5 +1575,5 @@ When making changes, be aware of these high-impact files:
 - Do not format a clock time with `formatHHMMDisplay` — that is for durations (which always keep their colon). Points in time go through `formatClockDisplay` so `clockSeparator` governs them all
 - Do not use a flat `bg-black/50` for a modal overlay — use `MODAL_SCRIM`; black at 50% is invisible over a dark app and turns the light theme into grey mush
 - Do not add the sidebar's floating-strip treatment to only one morph — `DesktopPillMorph` and `MobilePillMorph` must both float the toggle/sync strip over the nav with `topInset`, or the scroll-under silently works on desktop and not on a phone. And keep the dissolve mask on the blob overlay as well as the nav (on the OUTER, untranslated element), or the blob stays solid in a band where its own row has faded out
-- Do not give `ChromeFade` a `backdrop-filter` — it is the main panel's plain gradient, deliberately. And do not paint a `--background` scrim over a translucent glass surface (the sidebar) — mask the content out instead
+- Do not add an inline copy of the header gradient — render `ChromeFade` (it now carries the progressive blur + fade as one treatment; an inline gradient silently loses the blur). Do not swap the top/bottom edge treatments: blur belongs to the TOP band only (the bottom band is too short — blur there read as smearing and the owner rejected it; the bottom gets the darkening fade in `bottom-edge-blur.tsx`). And do not paint a `--background` scrim over a translucent glass surface (the sidebar) — mask the content out instead
 - Do not inset `.GlassBlur` from the face or feather it outward — the fill must be even corner to corner, and `--glass-press` must stay imperative so a scroll's `pointercancel` doesn't kill the spotlight

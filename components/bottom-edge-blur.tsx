@@ -3,21 +3,18 @@
 import { useEffect, useState } from "react"
 
 /**
- * A short progressive blur across the very bottom of the screen, heaviest at
- * the edge and gone a few px above the home indicator's band — so content
- * scrolling under the indicator frosts out instead of colliding with it.
+ * A short darkening fade across the very bottom of the screen, deepest at the
+ * edge and gone a few px above the home indicator's band — content scrolling
+ * under the indicator dims out instead of colliding with it. A progressive
+ * BLUR was tried here first and looked wrong (the owner's call): at 25–34px
+ * tall the blur band reads as smearing rather than depth, so the bottom gets
+ * the darken only; the blur treatment lives at the TOP, in `ChromeFade`,
+ * where the band is tall enough to read as a bar.
  *
  * iOS standalone only: it keys off a real bottom safe-area inset in an
  * installed app. Android's window already excludes its gesture bar and
  * desktop has no inset, so it renders nothing there (and the browser tab is
  * left alone — Safari manages its own chrome).
- *
- * Layered per the app's progressive-blur rule (see SIDEBAR_BACKDROP_BLUR):
- * several radii, smallest first and widest coverage, each masked so the
- * stack only ADDS blur toward the edge — a single masked blur cross-fades a
- * blurred copy with a sharp one, which reads as ghosting, not depth. It sits
- * BELOW the nav in z-order, so the sidebar and the pill render over it
- * un-blurred.
  */
 export function BottomEdgeBlur() {
   const [inset, setInset] = useState(0)
@@ -48,27 +45,20 @@ export function BottomEdgeBlur() {
 
   if (inset <= 0) return null
 
-  const height = inset + 12
-  const layer = (blur: number, coverage: string, rampFrom: string): React.CSSProperties => ({
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: coverage,
-    backdropFilter: `blur(${blur}px)`,
-    WebkitBackdropFilter: `blur(${blur}px)`,
-    maskImage: `linear-gradient(to bottom, transparent 0, black ${rampFrom})`,
-    WebkitMaskImage: `linear-gradient(to bottom, transparent 0, black ${rampFrom})`,
-  })
-
   return (
     <div
       aria-hidden
-      style={{ position: "fixed", left: 0, right: 0, bottom: 0, height, zIndex: 40, pointerEvents: "none" }}
-    >
-      <div style={layer(2.5, "100%", "60%")} />
-      <div style={layer(6, "70%", "55%")} />
-      <div style={layer(10, "45%", "55%")} />
-    </div>
+      style={{
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: inset + 12,
+        zIndex: 40,
+        pointerEvents: "none",
+        background:
+          "linear-gradient(to bottom, transparent 0, color-mix(in srgb, var(--background) 55%, transparent) 55%, color-mix(in srgb, var(--background) 85%, transparent) 100%)",
+      }}
+    />
   )
 }

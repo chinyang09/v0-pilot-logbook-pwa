@@ -1,16 +1,16 @@
 /**
  * Overlay helpers for floating chrome and modal backdrops.
  *
- * `ChromeFade` is the SAME treatment the main panel and detail panel use for
- * their floating header (see `components/desktop-layout.tsx`): a single
- * background gradient — solid at the edge, 60% at the midpoint, transparent at
- * the far end — and no `backdrop-filter` at all. Content scrolls under it and
- * fades out; nothing is blurred, nothing steps.
- *
- * An earlier version here stacked masked blur layers. It was heavier, it
- * didn't match the rest of the app, and the blur/scrim boundary was visible.
- * If this needs to change, change `desktop-layout.tsx` too — they should stay
- * the same treatment.
+ * `ChromeFade` is THE floating-header treatment — the main panel, the detail
+ * panel and the mobile detail overlay all render it directly (see
+ * `components/desktop-layout.tsx`), so changing it changes every header at
+ * once. It is a native-style bar: a progressive BLUR (stacked masked layers,
+ * smallest radius first and widest coverage so the stack only ever adds blur
+ * toward the edge) under the darkening background gradient — content
+ * scrolling beneath frosts out and dims the way it does under an iOS
+ * navigation bar, and the anchored band visually holds during a rubber-band
+ * so the bounce reads as starting below the header instead of at the screen
+ * edge.
  */
 
 "use client";
@@ -39,6 +39,19 @@ function fadeFor(side: Side): string {
   ].join(", ");
 }
 
+/**
+ * The progressive blur under the fade: heaviest at the anchored edge, gone by
+ * the far end. Ordered smallest-radius-first with decreasing coverage so each
+ * layer fully covers the ones below wherever it is opaque — the stack can
+ * then only ADD blur and the ramp stays monotonic on both engines (see
+ * SIDEBAR_BACKDROP_BLUR in nav-pill for the same rule).
+ */
+const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
+  { blur: 2.5, coverage: "100%", ramp: "45%" },
+  { blur: 6, coverage: "72%", ramp: "42%" },
+  { blur: 12, coverage: "48%", ramp: "42%" },
+];
+
 export function ChromeFade({
   side,
   className,
@@ -46,17 +59,32 @@ export function ChromeFade({
   side: Side;
   className?: string;
 }) {
+  const anchor = side === "top" ? { top: 0 } : { bottom: 0 };
   return (
     <div
       aria-hidden
       className={cn("pointer-events-none absolute inset-x-0 z-0", className)}
-      style={{
-        top: side === "top" ? 0 : undefined,
-        bottom: side === "bottom" ? 0 : undefined,
-        height: "100%",
-        background: fadeFor(side),
-      }}
-    />
+      style={{ ...anchor, height: "100%" }}
+    >
+      {BLUR_LAYERS.map(({ blur, coverage, ramp }) => {
+        const mask = `linear-gradient(to ${side}, transparent 0, black ${ramp})`;
+        return (
+          <div
+            key={blur}
+            className="absolute inset-x-0"
+            style={{
+              ...anchor,
+              height: coverage,
+              backdropFilter: `blur(${blur}px)`,
+              WebkitBackdropFilter: `blur(${blur}px)`,
+              maskImage: mask,
+              WebkitMaskImage: mask,
+            }}
+          />
+        );
+      })}
+      <div className="absolute inset-0" style={{ background: fadeFor(side) }} />
+    </div>
   );
 }
 

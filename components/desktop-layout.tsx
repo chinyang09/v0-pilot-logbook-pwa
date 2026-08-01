@@ -19,6 +19,7 @@ import { GlassIconButton } from "@/components/ui/glass-icon-button"
 import { cn } from "@/lib/utils"
 import { NavPill } from "@/components/nav-pill"
 import { BottomEdgeBlur } from "@/components/bottom-edge-blur"
+import { ChromeFade } from "@/components/ui/chrome-overlays"
 import { PushSidebar } from "@/components/push-sidebar"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { usePageActions } from "@/hooks/use-page-actions"
@@ -273,16 +274,15 @@ function AppShellContent({ children }: AppShellProps) {
             Hidden on mobile when detail overlay is shown (detail overlay has its own header). */}
         <div
           className={cn(
-            // `pt-chrome-bar` extends the gradient up over the status bar, so
+            // `pt-chrome-bar` extends the treatment up over the status bar, so
             // content fades out beneath it instead of stopping at a hard edge.
             "absolute top-0 left-0 right-0 z-[99] flex pt-chrome-bar",
             showMobileOverlay && "hidden md:flex"
           )}
-          style={{
-            background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
-          }}
         >
-          <div className="flex items-center px-4 w-full h-16">
+          {/* The one floating-header treatment: progressive blur + fade */}
+          <ChromeFade side="top" />
+          <div className="relative z-[1] flex items-center px-4 w-full h-16">
             {/* Main panel actions — flush left on desktop, fills width on mobile (for
                 search expansion). Tapping its bare area scrolls the main panel to top
                 (the e.target===currentTarget guard excludes the action buttons). */}
@@ -370,13 +370,10 @@ function AppShellContent({ children }: AppShellProps) {
           }}
         >
           {/* Mobile detail header bar — gradient overlay with back button + detail actions */}
-          <div
-            className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none pt-chrome-bar"
-            style={{
-              background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
-            }}
-          >
-            <div className="flex items-center justify-between px-4 w-full pointer-events-auto h-16">
+          <div className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none pt-chrome-bar">
+            {/* Same header treatment as the main shell */}
+            <ChromeFade side="top" />
+            <div className="relative z-[1] flex items-center justify-between px-4 w-full pointer-events-auto h-16">
               {/* Back button — flush left */}
               <GlassIconButton
                 ariaLabel="Back"
