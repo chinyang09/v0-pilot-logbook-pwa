@@ -1,6 +1,7 @@
 "use client";
 
 import type React from "react";
+import { ScrollIndicator } from "@/components/ui/scroll-indicator";
 
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -1322,11 +1323,13 @@ export function FlightForm({
 
   return (
     <div className="h-full relative">
-    <div ref={scrollContainerRef} onScroll={handleScrollSave} className="h-full overflow-y-auto bg-background">
+    <div ref={scrollContainerRef} onScroll={handleScrollSave} className="h-full overflow-y-auto bg-background scrollbar-hide">
+      <ScrollIndicator />
       <div className="min-h-full pt-chrome pb-chrome">
 
-      {/* Form Content */}
-      <div className="space-y-4 px-2 py-4">
+      {/* Form Content — pt only: a pb here would stack under pb-chrome and
+          push this panel's rest line 16px above every other panel's */}
+      <div className="space-y-4 px-2 pt-4">
         {/* FLIGHT Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
           <div className="px-4 py-2 bg-muted/30">

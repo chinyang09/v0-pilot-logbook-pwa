@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { ScrollIndicator } from "@/components/ui/scroll-indicator"
 import { useCallback, useEffect, useMemo } from "react"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { PageContainer } from "@/components/page-container"
@@ -81,7 +82,8 @@ const SECTIONS: SectionDef[] = [
 function SettingsDetailPanel({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-full relative">
-      <div className="h-full overflow-auto">
+      <div className="h-full overflow-auto scrollbar-hide">
+        <ScrollIndicator />
         <div className="h-chrome-top" />
         {children}
         <div className="h-chrome-bottom" />

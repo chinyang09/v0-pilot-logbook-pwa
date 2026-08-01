@@ -892,6 +892,16 @@ function SidebarTopStrip({ onToggle }: { onToggle: () => void }) {
     <div
       className="absolute inset-x-0 top-0 z-[2] flex items-center justify-end px-3 gap-1"
       style={{ height: SIDEBAR_HEADER_HEIGHT }}
+      // Bare-area tap scrolls the nav list back to top, same as tapping the
+      // main/detail headers. The strip captures taps anyway (see above), so
+      // anything that isn't one of the two buttons is "bare" — including the
+      // blur layer, which covers the band.
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest("button")) return
+        e.currentTarget.parentElement
+          ?.querySelector("nav")
+          ?.scrollTo({ top: 0, behavior: "smooth" })
+      }}
     >
       {/* Frosts whatever is passing underneath. Masked so the blur is
           strongest at the very top and gone by the bottom of the band, which

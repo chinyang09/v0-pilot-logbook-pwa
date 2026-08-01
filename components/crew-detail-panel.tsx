@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useRef } from "react"
+import { ScrollIndicator } from "@/components/ui/scroll-indicator"
 import { Button } from "@/components/ui/button"
 import { GlassTextButton } from "@/components/ui/glass-icon-button"
 import { useRegisterDetailActions } from "@/hooks/use-page-actions"
@@ -73,7 +74,8 @@ export function CrewDetailPanel({ crewId, isNew = false, onUpdated, onCancelNew 
 
   return (
     <div className="h-full relative flex flex-col">
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto scrollbar-hide">
+        <ScrollIndicator />
         <div className="h-chrome-top" />
         <div className="px-2 pt-4">
           <CrewFormBody

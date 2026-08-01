@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useScrollRestoration } from "@/hooks/use-scroll-restoration"
 import { cn } from "@/lib/utils"
+import { ScrollIndicator } from "@/components/ui/scroll-indicator"
 
 interface PageContainerProps {
   children: ReactNode
@@ -62,8 +63,13 @@ export function PageContainer({ children, header, className, rightContent, mainR
       <main
         ref={setMainRef}
         onScroll={onMainScroll}
-        className={cn("flex-1 overflow-y-auto overscroll-contain", className)}
+        // scrollbar-hide: the native overlay indicator spans the scroller's
+        // full box, i.e. from the screen edge over the status bar — the inset
+        // ScrollIndicator below replaces it, running from under the action
+        // buttons like a native scroll view's.
+        className={cn("flex-1 overflow-y-auto overscroll-contain scrollbar-hide", className)}
       >
+        <ScrollIndicator />
         {/* Spacers, not padding on the scroller. A scroll container's
             `padding-bottom` is historically dropped from its scrollable area in
             WebKit, which strands the last row under the nav pill; an in-flow

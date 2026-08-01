@@ -27,14 +27,21 @@ type Side = "top" | "bottom";
  */
 const FADE = 64;
 
-/** The main panel header's gradient, anchored to the fading edge. */
+/**
+ * The main panel header's gradient, anchored to the fading edge. Deliberately
+ * NEVER fully solid: the band is a translucent veil over the blur, so content
+ * scrolling under the status bar stays visible as a frosted ghost — a solid
+ * run here read as the app stopping at the status bar, which is exactly the
+ * web-page-in-a-frame look the edge-to-edge work removed. The blur carries
+ * the legibility; the veil only dims.
+ */
 function fadeFor(side: Side): string {
   const to = side === "top" ? "bottom" : "top";
   return [
     `linear-gradient(to ${to}`,
-    `var(--background) 0`,
-    `var(--background) calc(100% - ${FADE}px)`,
-    `color-mix(in srgb, var(--background) 60%, transparent) calc(100% - ${FADE / 2}px)`,
+    `color-mix(in srgb, var(--background) 72%, transparent) 0`,
+    `color-mix(in srgb, var(--background) 72%, transparent) calc(100% - ${FADE}px)`,
+    `color-mix(in srgb, var(--background) 45%, transparent) calc(100% - ${FADE / 2}px)`,
     `transparent 100%)`,
   ].join(", ");
 }

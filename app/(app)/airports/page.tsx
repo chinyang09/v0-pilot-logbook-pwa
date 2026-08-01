@@ -757,7 +757,7 @@ export default function AirportsPage() {
                     data-index={virtualRow.index}
                     ref={rowVirtualizer.measureElement}
                   >
-                    <div className="pb-1">
+                    <div className="pt-1">
                       <AirportCard
                         airport={airport}
                         isSelected={!fieldType && selectedAirportIcao === airport.icao}

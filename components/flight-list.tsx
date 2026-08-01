@@ -40,6 +40,7 @@ import { cn } from "@/lib/utils";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { primeFlightCache } from "@/components/flight-form";
 import { FastScroll, type FastScrollItem } from "@/components/ui/fast-scroll";
+import { ScrollIndicator } from "@/components/ui/scroll-indicator";
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, instant?: boolean) => void;
@@ -578,12 +579,16 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           {/* Main scrollable container */}
           <div
             ref={scrollContainerRef}
-            className="h-full overflow-y-auto flex-1 overscroll-contain"
+            // scrollbar-hide + ScrollIndicator: the native overlay indicator
+            // spans from the screen edge over the status bar; the inset
+            // replacement starts below the action buttons, like native.
+            className="h-full overflow-y-auto flex-1 overscroll-contain scrollbar-hide"
             style={{ contain: "strict" }}
             onTouchStart={handleTouchStart}
             onMouseDown={handleTouchStart}
             onWheel={handleWheelStart}
           >
+            <ScrollIndicator />
             {/* Top spacer for calendar */}
             <div
               style={{ height: topSpacerHeight }}

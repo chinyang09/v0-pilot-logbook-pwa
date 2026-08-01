@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
+import { ScrollIndicator } from "@/components/ui/scroll-indicator"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { GlassTextButton } from "@/components/ui/glass-icon-button"
@@ -172,7 +173,8 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
 
   return (
     <div className="h-full relative flex flex-col">
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto scrollbar-hide">
+        <ScrollIndicator />
         <div className="h-chrome-top" />
         <div className="px-2 pt-4 space-y-4">
           <FormSection title="Details">

@@ -677,7 +677,7 @@ export default function CrewPage() {
                       data-index={virtualRow.index}
                       ref={rowVirtualizer.measureElement}
                     >
-                      <div className="pb-1">
+                      <div className="pt-1">
                         <SwipeableCrewCard
                           crew={crew}
                           onSelect={() => handleCrewSelect(crew)}

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
+import { ScrollIndicator } from "@/components/ui/scroll-indicator"
 import { Button } from "@/components/ui/button"
 import { getAirportByIcao, getAirportLocalTime, toggleAirportFavorite, type Airport } from "@/lib/db"
 import {
@@ -74,7 +75,8 @@ export function AirportDetailPanel({ icao, onBack, onToggleFavorite }: AirportDe
   return (
     <div className="h-full relative flex flex-col">
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto scrollbar-hide">
+        <ScrollIndicator />
         <div className="h-chrome-top" />
         <div className="px-4 pt-4">
           {/* Airport header */}
