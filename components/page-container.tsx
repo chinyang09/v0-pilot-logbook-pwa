@@ -62,11 +62,16 @@ export function PageContainer({ children, header, className, rightContent, mainR
       <main
         ref={setMainRef}
         onScroll={onMainScroll}
-        className={cn("flex-1 overflow-y-auto overscroll-contain", header ? "pt-chrome-sm" : "pt-chrome", className)}
+        className={cn("flex-1 overflow-y-auto overscroll-contain", className)}
       >
-        <div className="pb-chrome">
-          {children}
-        </div>
+        {/* Spacers, not padding on the scroller. A scroll container's
+            `padding-bottom` is historically dropped from its scrollable area in
+            WebKit, which strands the last row under the nav pill; an in-flow
+            element is always counted. The top one keeps the first row clear of
+            the floating header + status bar, and content slides under both. */}
+        <div className={header ? "h-chrome-top-sm" : "h-chrome-top"} />
+        {children}
+        <div className="h-chrome-bottom" />
       </main>
 
         {/* Right content (e.g., FastScroll) positioned relative to viewport, not scrolling content */}

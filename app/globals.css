@@ -231,6 +231,11 @@
   --chrome-bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));
 }
 
+/* Prefer the `h-chrome-*` SPACERS over these padding utilities inside a
+   scroller: WebKit has long dropped a scroll container's `padding-bottom` from
+   its scrollable area, which strands the last row under the nav pill. An
+   in-flow element is always counted. These remain for content wrappers that
+   are themselves inside a scroller, where padding is just padding. */
 .pt-chrome {
   padding-top: var(--chrome-top);
 }
@@ -239,6 +244,9 @@
 }
 .h-chrome-top {
   height: var(--chrome-top);
+}
+.h-chrome-top-sm {
+  height: var(--chrome-top-sm);
 }
 .h-chrome-bottom {
   height: var(--chrome-bottom);

@@ -81,8 +81,10 @@ const SECTIONS: SectionDef[] = [
 function SettingsDetailPanel({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-full relative">
-      <div className="h-full overflow-auto pt-chrome">
+      <div className="h-full overflow-auto">
+        <div className="h-chrome-top" />
         {children}
+        <div className="h-chrome-bottom" />
       </div>
     </div>
   )

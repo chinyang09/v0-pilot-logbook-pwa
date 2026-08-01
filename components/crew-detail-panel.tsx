@@ -73,7 +73,8 @@ export function CrewDetailPanel({ crewId, isNew = false, onUpdated, onCancelNew 
 
   return (
     <div className="h-full relative flex flex-col">
-      <div className="flex-1 overflow-auto pt-chrome pb-chrome">
+      <div className="flex-1 overflow-auto">
+        <div className="h-chrome-top" />
         <div className="px-2 pt-4">
           <CrewFormBody
             formData={formData}
@@ -84,6 +85,7 @@ export function CrewDetailPanel({ crewId, isNew = false, onUpdated, onCancelNew 
             toggleRole={form.toggleRole}
           />
         </div>
+        <div className="h-chrome-bottom" />
       </div>
     </div>
   )
