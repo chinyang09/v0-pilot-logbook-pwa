@@ -268,12 +268,14 @@ function AppShellContent({ children }: AppShellProps) {
             Hidden on mobile when detail overlay is shown (detail overlay has its own header). */}
         <div
           className={cn(
-            // `pt-chrome-bar` extends the header up over the status bar and
-            // `chrome-header-fade` keeps that strip see-through, so content
-            // passing underneath is visible rather than painted out.
-            "absolute top-0 left-0 right-0 z-[99] flex pt-chrome-bar chrome-header-fade",
+            // `pt-chrome-bar` extends the gradient up over the status bar, so
+            // content fades out beneath it instead of stopping at a hard edge.
+            "absolute top-0 left-0 right-0 z-[99] flex pt-chrome-bar",
             showMobileOverlay && "hidden md:flex"
           )}
+          style={{
+            background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
+          }}
         >
           <div className="flex items-center px-4 w-full h-16">
             {/* Main panel actions — flush left on desktop, fills width on mobile (for
@@ -364,7 +366,10 @@ function AppShellContent({ children }: AppShellProps) {
         >
           {/* Mobile detail header bar — gradient overlay with back button + detail actions */}
           <div
-            className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none pt-chrome-bar chrome-header-fade"
+            className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none pt-chrome-bar"
+            style={{
+              background: "linear-gradient(to bottom, var(--background) 0%, color-mix(in srgb, var(--background) 60%, transparent) 50%, transparent 100%)",
+            }}
           >
             <div className="flex items-center justify-between px-4 w-full pointer-events-auto h-16">
               {/* Back button — flush left */}
