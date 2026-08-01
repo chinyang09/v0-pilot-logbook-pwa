@@ -168,16 +168,30 @@
     @apply bg-background text-foreground;
     background-color: var(--background);
     overflow: hidden;
-    /* Pinned to the viewport by INSET, not by a height unit. `100dvh` is not
-       the full screen everywhere it matters: in an iOS standalone PWA it
-       resolves to the SAFE viewport, so the app stopped short of the home
-       indicator and left a dead band there — content could never reach the
-       bottom edge. `inset: 0` on a fixed element is the initial containing
-       block, which with `viewport-fit=cover` IS the whole screen. Everything
-       inside then sizes off `100%` of this, so there is one basis for the
-       whole app. */
+    /* THE application shell. WebKit has an open installed-PWA bug: in a Home
+       Screen web app with `viewport-fit=cover`, viewport units AND the initial
+       containing block report the height MINUS `safe-area-inset-bottom`, so
+       nothing laid out against the viewport can ever reach the home indicator
+       — `100dvh`, `inset: 0` on a fixed element, all of it stops one inset
+       short. The workaround is to compensate at the shell: body is `100dvh`
+       PLUS the bottom inset (standalone only — in a browser tab 100dvh is
+       already correct and adding the inset would overshoot, which is exactly
+       the iPad-portrait sidebar bug), and the safe-area padding lives in the
+       bottom nav, never on body. */
     position: fixed;
-    inset: 0;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100dvh;
+    /* The transform makes BODY the containing block for every
+       `position: fixed` descendant (nav pill, sidebar morph, drag lens,
+       overlays). Without it they anchor to the initial containing block —
+       the very box the WebKit bug shrinks — so the pill floated a full inset
+       above the home indicator while the shell reached the bottom. With it,
+       everything positions and sizes against the one compensated shell.
+       Body's origin is the viewport origin and it doesn't scroll, so in the
+       non-buggy case this is an identity change. */
+    transform: translateZ(0);
   }
 }
 
@@ -186,6 +200,11 @@
   html,
   body {
     background-color: var(--background) !important;
+  }
+  /* The WebKit installed-PWA compensation (see the body comment above). On
+     Android standalone the bottom inset is 0, so this is inert there. */
+  body {
+    height: calc(100dvh + env(safe-area-inset-bottom, 0px));
   }
 }
 
