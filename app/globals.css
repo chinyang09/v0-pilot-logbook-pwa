@@ -158,16 +158,30 @@
   * {
     @apply border-border outline-ring/50;
   }
-  /* Force background color on html for Android PWA */
+  /* Force background color on html for Android PWA.
+
+     NO `overflow` on html OR body — deliberately. Any overflow value set on
+     the root (or, failing that, on body) is PROPAGATED TO THE VIEWPORT, and a
+     hidden viewport clips document painting at the viewport's edge. In an iOS
+     standalone PWA the reported viewport is SHORTER than the physical screen
+     (the WebKit bug below), so that clip was exactly the dead band above the
+     home indicator: body laid out to the full 820px but nothing below the
+     788px viewport line ever painted. With the default overflow the engine
+     paints the document onto the whole surface — the same machinery that
+     paints a page under Safari's translucent toolbars. The document still
+     cannot scroll: body is position:fixed (out of flow), so html has no
+     in-flow content and the scroll range is zero; overscroll-behavior pins
+     the rubber-band. App content is clipped by the shell's own
+     overflow-hidden containers, not by the root. */
   html {
     background-color: var(--background);
     height: 100%;
-    overflow: hidden;
+    overscroll-behavior: none;
   }
   body {
     @apply bg-background text-foreground;
     background-color: var(--background);
-    overflow: hidden;
+    overscroll-behavior: none;
     /* THE application shell. WebKit has an open installed-PWA bug: in a Home
        Screen web app with `viewport-fit=cover`, the reported viewport (units
        AND the initial containing block) is SHORTER than the physical screen,

@@ -88,7 +88,7 @@ export function ViewportDebug() {
   if (!r) return null
 
   const rows: [string, string | number | boolean | null][] = [
-    ["build", "vd-2"],
+    ["build", "vd-3"],
     ["shell gap", r.shellGap],
     ["innerH", r.innerH],
     ["doc.clientH", r.docClientH],
@@ -124,6 +124,9 @@ export function ViewportDebug() {
       >
         {rows.map(([k, v]) => `${k.padEnd(17)} ${String(v)}`).join("\n")}
       </div>
+      {/* orange: paint probe for the sub-viewport strip — if the band below the
+          buggy viewport is paintable at all, this stripe shows there */}
+      <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, height: 48, background: "rgba(255,140,0,0.45)", zIndex: 99990, pointerEvents: "none" }} />
       {/* red: body's own bottom edge (bottom:0 of the shell) */}
       <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, height: 3, background: "red", zIndex: 99991, pointerEvents: "none" }} />
       {/* blue: where window.innerHeight says the viewport ends */}
