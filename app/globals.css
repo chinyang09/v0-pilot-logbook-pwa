@@ -277,6 +277,19 @@
      there is no bottom inset (Android — its window already excludes the
      gesture bar — and desktop) it is the plain 4px margin, unchanged. */
   --nav-bottom-offset: max(4px, env(safe-area-inset-bottom, 0px) - 10px);
+  /* What CONTENT owes the home indicator: the FULL inset, the platform
+     convention — a scrolled-to-rest last row clears the indicator rather than
+     tucking under it. Deliberately larger than `--nav-bottom-offset`: the nav
+     is a floating control that is MEANT to hug the indicator, and the sidebar
+     runs down the side where the indicator never reaches it, so those two
+     keep the tighter offset and only the panels use this. */
+  --content-bottom-inset: max(4px, env(safe-area-inset-bottom, 0px));
+  /* The horizontal gutter EVERY panel's content sits in — main panel, detail
+     panel and the sidebar's nav list alike. It was 8px in the logbook and the
+     flight form, 12px in the sidebar and 16px on the reference/settings
+     pages, so the three panels visibly disagreed at their edges. One value,
+     matching the sidebar (which is the one that was already right). */
+  --panel-gutter: 0.75rem;
   /* And at the BOTTOM: the ONE clearance a scroller's content needs, so the
      last row lands above the floating nav pill and above the home indicator /
      gesture bar rather than under them.
@@ -289,7 +302,7 @@
      bottom is padded" strip. Nothing here insets the layout: it is padding
      inside the scroller, so content still runs to the true bottom edge as
      you scroll. */
-  --chrome-bottom: calc(4.5rem + var(--nav-bottom-offset));
+  --chrome-bottom: calc(4.5rem + var(--content-bottom-inset));
 }
 
 /* Prefer the `h-chrome-*` SPACERS over these padding utilities inside a
@@ -317,18 +330,27 @@
 }
 
 /* At the desktop tier the nav pill lives at the TOP, so the bottom owes only
-   the nav offset — the last row rests just above the home indicator's bar
-   (aligned with the sidebar's lower end), and carrying the pill's clearance
-   there is just a dead gap. */
+   the home indicator — carrying the pill's clearance there is a dead gap. The
+   panels still clear the indicator by the FULL inset (the sidebar keeps the
+   tighter `--nav-bottom-offset`; it runs down the side, where the indicator
+   never reaches it). */
 @media (min-width: 1120px) {
   :root {
-    --chrome-bottom: var(--nav-bottom-offset);
+    --chrome-bottom: var(--content-bottom-inset);
   }
 }
 /* A page's own bottom padding: enough to clear the floating nav pill AND the
    gesture bar, so the last row lands above both instead of under them. */
 .pb-chrome {
   padding-bottom: var(--chrome-bottom);
+}
+
+/* The one panel gutter — see `--panel-gutter`. Use this on a panel's content
+   wrapper instead of a hand-picked `px-*`, so main, detail and the sidebar
+   keep the same edge. */
+.px-panel {
+  padding-left: var(--panel-gutter);
+  padding-right: var(--panel-gutter);
 }
 
 /* ─── Native touch feel ─── */

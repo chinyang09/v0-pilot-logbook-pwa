@@ -78,7 +78,7 @@ export function AirportDetailPanel({ icao, onBack, onToggleFavorite }: AirportDe
       <div className="flex-1 overflow-auto scrollbar-hide">
         <ScrollIndicator />
         <div className="h-chrome-top" />
-        <div className="px-4 pt-4">
+        <div className="px-panel pt-4">
           {/* Airport header */}
           <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
             <div className="flex items-center justify-between mb-2">

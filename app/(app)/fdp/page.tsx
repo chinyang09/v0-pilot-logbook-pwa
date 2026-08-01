@@ -224,7 +224,7 @@ export default function FDPPage() {
 
   return (
     <PageContainer>
-      <div className="px-4 pt-2 space-y-2">
+      <div className="px-panel pt-2 space-y-2">
         {/* Next duty banner — reports next scheduled duty + rest vs. requirement.
             Static snapshot from useFDPData; no tick interval to avoid setState
             churn that could crash the chart (React error #185). */}

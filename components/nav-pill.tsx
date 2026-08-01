@@ -984,7 +984,7 @@ function SidebarNav({
     <div className={cn("relative min-h-0", className)}>
       <nav
         ref={navRef}
-        className="relative z-[1] h-full overflow-y-scroll overscroll-contain px-3 pb-4 scrollbar-hide"
+        className="relative z-[1] h-full overflow-y-scroll overscroll-contain px-panel pb-4 scrollbar-hide"
         style={{
           WebkitOverflowScrolling: "touch",
           touchAction: "pan-y",

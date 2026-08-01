@@ -176,7 +176,7 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
       <div className="flex-1 overflow-y-auto scrollbar-hide">
         <ScrollIndicator />
         <div className="h-chrome-top" />
-        <div className="px-2 pt-4 space-y-4">
+        <div className="px-panel pt-4 space-y-4">
           <FormSection title="Details">
             <SettingsRow
               label="Registration"

@@ -39,9 +39,9 @@ function fadeFor(side: Side): string {
   const to = side === "top" ? "bottom" : "top";
   return [
     `linear-gradient(to ${to}`,
-    `color-mix(in srgb, var(--background) 72%, transparent) 0`,
-    `color-mix(in srgb, var(--background) 72%, transparent) calc(100% - ${FADE}px)`,
-    `color-mix(in srgb, var(--background) 45%, transparent) calc(100% - ${FADE / 2}px)`,
+    `color-mix(in srgb, var(--background) 50%, transparent) 0`,
+    `color-mix(in srgb, var(--background) 50%, transparent) calc(100% - ${FADE}px)`,
+    `color-mix(in srgb, var(--background) 30%, transparent) calc(100% - ${FADE / 2}px)`,
     `transparent 100%)`,
   ].join(", ");
 }
@@ -52,11 +52,17 @@ function fadeFor(side: Side): string {
  * layer fully covers the ones below wherever it is opaque — the stack can
  * then only ADD blur and the ramp stays monotonic on both engines (see
  * SIDEBAR_BACKDROP_BLUR in nav-pill for the same rule).
+ *
+ * Deliberately SLIGHT — the band is a **darken with a hint of blur**, not a
+ * frosted panel. Text passing under the status bar has to stay legible
+ * enough to make out roughly what it says; at the earlier 12px peak it was
+ * an unreadable smear, so the whole ramp is ~a fifth of that and the veil
+ * above carries the treatment.
  */
 const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
-  { blur: 2.5, coverage: "100%", ramp: "45%" },
-  { blur: 6, coverage: "72%", ramp: "42%" },
-  { blur: 12, coverage: "48%", ramp: "42%" },
+  { blur: 0.6, coverage: "100%", ramp: "45%" },
+  { blur: 1.4, coverage: "72%", ramp: "42%" },
+  { blur: 2.4, coverage: "48%", ramp: "42%" },
 ];
 
 export function ChromeFade({

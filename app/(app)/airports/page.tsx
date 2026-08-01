@@ -627,7 +627,7 @@ export default function AirportsPage() {
       mainRef={scrollContainerCallbackRef}
     >
       <div>
-        <div className="px-4 pt-4">
+        <div className="px-panel pt-4">
           {/* Non-virtualized content above the virtual list */}
           <div ref={aboveVirtualRef}>
             {!debouncedSearchQuery.trim() && (

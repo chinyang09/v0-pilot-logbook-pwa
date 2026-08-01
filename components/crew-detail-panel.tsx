@@ -77,7 +77,7 @@ export function CrewDetailPanel({ crewId, isNew = false, onUpdated, onCancelNew 
       <div className="flex-1 overflow-auto scrollbar-hide">
         <ScrollIndicator />
         <div className="h-chrome-top" />
-        <div className="px-2 pt-4">
+        <div className="px-panel pt-4">
           <CrewFormBody
             formData={formData}
             isEditing={isEditing}

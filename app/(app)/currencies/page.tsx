@@ -78,7 +78,7 @@ export default function CurrenciesPage() {
   return (
     <PageContainer
     >
-      <div className="px-4 pt-4 space-y-4">
+      <div className="px-panel pt-4 space-y-4">
         {/* Status Cards */}
         <div className="grid grid-cols-4 gap-2">
           <Card>

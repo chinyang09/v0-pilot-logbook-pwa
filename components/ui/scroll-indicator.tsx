@@ -48,9 +48,29 @@ export function ScrollIndicator() {
       const bottomInset = bottomProbe.offsetHeight + 6
       const track = clientHeight - topInset - bottomInset
       if (track <= 0) return
-      const thumbH = Math.max(36, (track * clientHeight) / scrollHeight)
+
+      const restH = Math.max(36, (track * clientHeight) / scrollHeight)
+
+      // Native overscroll behaviour: at either end the indicator does NOT ride
+      // the rubber-band down — it stays pinned to its end of the track and
+      // COMPRESSES against it, springing back as the bounce returns. iOS
+      // reports scrollTop past the ends during a bounce, so the overscroll
+      // distance drives the squash directly and the release animates itself
+      // (the scroll events of the bounce are the animation).
+      const overTop = Math.max(0, -scrollTop)
+      const overBottom = Math.max(0, scrollTop - range)
+      const over = overTop + overBottom
+      // Asymptotic so a hard fling compresses a lot but never to nothing.
+      const squash = 1 - (over / (over + 90)) * 0.62
+      const thumbH = Math.max(12, restH * squash)
+
+      // Progress is CLAMPED, so during a bounce the thumb is already parked at
+      // its end; the compression then grows from that end rather than sliding.
       const progress = Math.min(1, Math.max(0, scrollTop / range))
-      const y = topInset + (track - thumbH) * progress
+      const y = overBottom > 0
+        ? topInset + track - thumbH
+        : topInset + (track - thumbH) * progress
+
       thumb.style.transform = `translateY(${y}px)`
       thumb.style.height = `${thumbH}px`
       thumb.style.opacity = "1"

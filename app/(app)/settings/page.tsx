@@ -100,7 +100,7 @@ function AppearanceSection({ preferences, updateDisplay }: {
 }) {
   const { setTheme } = useTheme()
   return (
-    <div className="p-4 space-y-4">
+    <div className="px-panel py-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Appearance</h2>
         <p className="text-sm text-muted-foreground">Choose your preferred theme.</p>
@@ -141,7 +141,7 @@ function NavigationSection({ preferences, updateNavigation }: {
   updateNavigation: ReturnType<typeof usePreferences>["updateNavigation"]
 }) {
   return (
-    <div className="p-4 space-y-4">
+    <div className="px-panel py-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Navigation</h2>
         <p className="text-sm text-muted-foreground">Choose up to 4 tabs for the bottom tab bar (mobile) and the navigation pill (desktop).</p>
@@ -164,7 +164,7 @@ function DisplaySection({ preferences, updateDisplay }: {
   updateDisplay: ReturnType<typeof usePreferences>["updateDisplay"]
 }) {
   return (
-    <div className="p-4 space-y-4">
+    <div className="px-panel py-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Display Options</h2>
         <p className="text-sm text-muted-foreground">Configure how times, airports, and coordinates are displayed.</p>
@@ -229,7 +229,7 @@ function AutoFillSection({ preferences, updateAutoFill }: {
   updateAutoFill: ReturnType<typeof usePreferences>["updateAutoFill"]
 }) {
   return (
-    <div className="p-4 space-y-4">
+    <div className="px-panel py-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Auto-Fill Time Fields</h2>
         <p className="text-sm text-muted-foreground">
@@ -258,7 +258,7 @@ function DutyTimeSection({ preferences, updateDutyTimeDefaults }: {
 }) {
   const regulation = preferences.dutyTimeDefaults.regulationType ?? "CAAS"
   return (
-    <div className="p-4 space-y-4">
+    <div className="px-panel py-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Duty Time Defaults</h2>
         <p className="text-sm text-muted-foreground">Default report and debrief times used for duty period calculations.</p>
@@ -315,7 +315,7 @@ function ImportDefaultsSection({ preferences, updateImportDefaults }: {
 }) {
   const role = preferences.importDefaults.nonPicPfRole
   return (
-    <div className="p-4 space-y-4">
+    <div className="px-panel py-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Import Defaults</h2>
         <p className="text-sm text-muted-foreground">

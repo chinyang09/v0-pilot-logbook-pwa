@@ -561,7 +561,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
               className="transition-[height] duration-300 ease-in-out"
             />
             {headerContent}
-            <div className="px-2 pt-2">
+            <div className="px-panel pt-2">
               <EmptyState
                 icon={Plane}
                 title="No flights logged"
@@ -644,7 +644,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                         {/* Content wrapper: padding + fade-out for the deleting card */}
                         <div
                           style={{
-                            padding: "0 8px 8px 8px",
+                            // Horizontal = the shared --panel-gutter, so the
+                            // logbook's cards line up with the detail panel
+                            // and the sidebar. Bottom 8px is this list's
+                            // per-row gap (its spacer subtracts it).
+                            padding: "0 var(--panel-gutter) 8px var(--panel-gutter)",
                             ...(isDeleting && {
                               opacity: 0,
                               transform: "translateX(-40px)",
