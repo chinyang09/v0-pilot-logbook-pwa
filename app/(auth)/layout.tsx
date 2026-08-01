@@ -16,7 +16,7 @@ export default function AuthLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="dark h-[100dvh] w-full overflow-auto overscroll-contain pt-safe relative">
+    <div className="dark h-full w-full overflow-auto overscroll-contain pt-safe relative">
       {/* Cockpit background image */}
       <div className="absolute inset-0 z-0">
         <Image

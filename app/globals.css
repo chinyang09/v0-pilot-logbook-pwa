@@ -166,13 +166,18 @@
   }
   body {
     @apply bg-background text-foreground;
-    height: 100dvh;
     background-color: var(--background);
     overflow: hidden;
+    /* Pinned to the viewport by INSET, not by a height unit. `100dvh` is not
+       the full screen everywhere it matters: in an iOS standalone PWA it
+       resolves to the SAFE viewport, so the app stopped short of the home
+       indicator and left a dead band there — content could never reach the
+       bottom edge. `inset: 0` on a fixed element is the initial containing
+       block, which with `viewport-fit=cover` IS the whole screen. Everything
+       inside then sizes off `100%` of this, so there is one basis for the
+       whole app. */
     position: fixed;
-    width: 100%;
-    top: 0;
-    left: 0;
+    inset: 0;
   }
 }
 

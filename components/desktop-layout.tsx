@@ -251,7 +251,7 @@ function AppShellContent({ children }: AppShellProps) {
     !isDesktop && !!selectedId && (selectionExplicit || searchParams.has("selected"))
 
   return (
-    <div className="relative h-[100dvh] w-full flex flex-col bg-background overflow-hidden">
+    <div className="relative h-full w-full flex flex-col bg-background overflow-hidden">
       {/* PWA install banner — in layout flow, pushes content down when visible */}
       <PWAInstallPrompt />
 

@@ -1080,35 +1080,29 @@ function SidebarNavItem({
 
 // ─── Viewport measurement hook ───────────────────────────────
 
-function useViewportMeasure() {
-  const [vh, setVh] = useState(typeof window !== "undefined" ? window.innerHeight : 800)
-  const [safeAreaTop, setSafeAreaTop] = useState(0)
-  const [bannerHeight, setBannerHeight] = useState(0)
-
-  useEffect(() => {
-    const measure = () => {
-      setVh(window.innerHeight)
-      const el = document.createElement("div")
-      el.style.position = "fixed"
-      el.style.top = "env(safe-area-inset-top, 0px)"
-      el.style.visibility = "hidden"
-      document.body.appendChild(el)
-      const top = el.getBoundingClientRect().top
-      document.body.removeChild(el)
-      setSafeAreaTop(top)
-      const bh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--install-banner-height") || "0")
-      setBannerHeight(bh || 0)
-    }
-    measure()
-    window.addEventListener("resize", measure)
-    const obs = new MutationObserver(measure)
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] })
-    return () => { window.removeEventListener("resize", measure); obs.disconnect() }
-  }, [])
-
-  const expandedHeight = vh - SIDEBAR_MARGIN * 2 - safeAreaTop - bannerHeight
-  return { expandedHeight, safeAreaTop, bannerHeight }
-}
+/**
+ * The sidebar's open height, as a CSS length rather than a measurement.
+ *
+ * It used to be `window.innerHeight` minus the margins, re-measured on resize.
+ * That is not the box a `position: fixed` element is laid out in once a
+ * browser has chrome of its own: on iPad Safari in PORTRAIT the sidebar came
+ * out taller than the visible page and overshot both ends, its top strip
+ * clipped away. `100%` on a fixed element resolves against the initial
+ * containing block — the same box `body` is pinned to — so the panel can only
+ * ever be exactly as tall as the app is, on every surface, with no listener
+ * and nothing to fall out of sync.
+ *
+ * BOTH insets come off, not just the top. The desktop panel is top-anchored and
+ * the mobile one bottom-anchored, and each has to end a margin clear of the
+ * OTHER end too: subtracting only the top inset left the desktop panel running
+ * into the home indicator and put the mobile panel's top strip under the status
+ * bar. With both, the two are exact mirrors — `SIDEBAR_MARGIN` clear of the safe
+ * area at each end, whichever end it is anchored to.
+ */
+const EXPANDED_HEIGHT =
+  `calc(100% - ${SIDEBAR_MARGIN * 2}px` +
+  ` - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)` +
+  ` - var(--install-banner-height, 0px))`
 
 // ─── Main export ─────────────────────────────────────────────
 
@@ -1292,7 +1286,6 @@ function DesktopPillMorph({
   prefersReducedMotion: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const { expandedHeight } = useViewportMeasure()
   const DUR = prefersReducedMotion ? 0 : MORPH_DUR
   const LEAD = prefersReducedMotion ? 0 : MORPH_LEAD
   const TOTAL = DUR + LEAD
@@ -1335,7 +1328,7 @@ function DesktopPillMorph({
     left: isSidebarShape ? SIDEBAR_MARGIN : "50%",
     transform: isSidebarShape ? "translateX(0)" : "translateX(-50%)",
     width: isSidebarShape ? SIDEBAR_INNER_WIDTH : (pillWidth ?? "auto"),
-    height: isSidebarShape ? expandedHeight : PILL_HEIGHT,
+    height: isSidebarShape ? EXPANDED_HEIGHT : PILL_HEIGHT,
     transition,
   }
 
@@ -1430,7 +1423,6 @@ function MobilePillMorph({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { expandedHeight } = useViewportMeasure()
   const DUR = prefersReducedMotion ? 0 : MORPH_DUR
   const LEAD = prefersReducedMotion ? 0 : MORPH_LEAD
   const TOTAL = DUR + LEAD
@@ -1482,7 +1474,7 @@ function MobilePillMorph({
       ? "translateX(0)"
       : `translateX(-50%) translateY(${hideNavbar ? "calc(100% + 24px)" : "0%"})`,
     width: isSidebarShape ? SIDEBAR_INNER_WIDTH : (pillWidth ?? "auto"),
-    height: isSidebarShape ? expandedHeight : PILL_HEIGHT,
+    height: isSidebarShape ? EXPANDED_HEIGHT : PILL_HEIGHT,
     transition,
   }
 
