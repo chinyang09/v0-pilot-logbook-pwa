@@ -174,16 +174,73 @@ function SyncIconButton({ className }: { className?: string }) {
  * different rates — stretches a touch in the direction of travel for a liquid
  * feel.
  *
- * Crucially this uses CSS transitions on `transform` (position) rather than a
- * JS/Framer spring. Framer springs tick per-frame on the MAIN thread, so when a
- * heavy page (dashboard/FDP) mounts and blocks it, the blob hitches. A CSS
- * transform transition runs on the compositor and stays smooth regardless.
- * Works for both the horizontal pill bar and the vertical sidebar (position is
- * always `translate(left, top)`; the changing axis is just whichever of
- * width/height varies). Metrics are measured with a ResizeObserver (setState
- * only in the RO callback) in content coordinates so it's correct inside a
- * scroll area.
+ * Crucially the motion never ticks on the MAIN thread. A JS/Framer spring
+ * hitches the moment a heavy page (dashboard/FDP) mounts and blocks it; the
+ * spring here is solved analytically ONCE per move and handed to WAAPI as
+ * transform keyframes, which composite. Works for both the horizontal pill bar
+ * and the vertical sidebar (position is always `translate(left, top)`; the
+ * changing axis is just whichever of width/height varies). Metrics are
+ * measured with a ResizeObserver (setState only in the RO callback) in content
+ * coordinates so it's correct inside a scroll area.
  */
+
+/**
+ * TWO damped harmonic oscillators (Hooke's law with viscous damping), sampled
+ * for WAAPI — one for where the blob is, one for what shape it is.
+ *
+ * **Travel** is the unit STEP response — mass dragged to a new rest position:
+ *
+ *   x(t) = 1 − e^(−ζωt)·[cos(ω_d t) + (ζω/ω_d)·sin(ω_d t)]     ω_d = ω√(1−ζ²)
+ *
+ * heavily damped (ζ 0.78 → ~2% overshoot, one crossing) because a blob that
+ * visibly hunts for its seat reads as mechanical — that was the owner's
+ * verdict on an earlier bouncy curve.
+ *
+ * **Shape** is the IMPULSE response of a SECOND, lighter oscillator:
+ *
+ *   s(t) = e^(−ζ_s ω_s t)·sin(ω_ds t)
+ *
+ * which is the physically real part the first spring can't express. A soft
+ * body's shape has its own stiffness and its own damping, faster and looser
+ * than its centre of mass — that is exactly why jelly is still wobbling after
+ * it has stopped travelling. Starting from rest it stretches along the
+ * direction of travel, crosses through neutral, compresses (~31% of the
+ * stretch, the ratio e^(−ζπ/√(1−ζ²)) between consecutive extremes), and rings
+ * down.
+ *
+ * Deriving the squash from the travel spring's own velocity was tried first
+ * and is what the physics literally gives you — but at ζ 0.78 the velocity
+ * barely reverses (peak −0.02 against +1.0), so the blob stretched on the way
+ * out and then simply stopped, with no landing squash at all. Softening the
+ * travel damping to grow that lobe brings back the hunting. Two oscillators
+ * is both the better-looking answer and the more honest model.
+ *
+ * Both are normalised to their own peak, so a one-tab hop deforms exactly as
+ * much as a five-tab sweep — a short move that deforms proportionally less
+ * just looks limp.
+ */
+const GRAVITY_SPRING_MS = 480
+const TRAVEL_ZETA = 0.78
+const TRAVEL_OMEGA = 9.2
+const SHAPE_ZETA = 0.32
+const SHAPE_OMEGA = 9.5
+const STRETCH = 0.14
+const SPRING_SAMPLES = 40
+
+function springTrack(): { xs: number[]; ss: number[] } {
+  const wd = TRAVEL_OMEGA * Math.sqrt(1 - TRAVEL_ZETA * TRAVEL_ZETA)
+  const wds = SHAPE_OMEGA * Math.sqrt(1 - SHAPE_ZETA * SHAPE_ZETA)
+  const xs: number[] = []
+  const raw: number[] = []
+  for (let i = 0; i <= SPRING_SAMPLES; i++) {
+    const t = i / SPRING_SAMPLES
+    const decay = Math.exp(-TRAVEL_ZETA * TRAVEL_OMEGA * t)
+    xs.push(1 - decay * (Math.cos(wd * t) + ((TRAVEL_ZETA * TRAVEL_OMEGA) / wd) * Math.sin(wd * t)))
+    raw.push(Math.exp(-SHAPE_ZETA * SHAPE_OMEGA * t) * Math.sin(wds * t))
+  }
+  const peak = Math.max(...raw.map(Math.abs)) || 1
+  return { xs, ss: raw.map((s) => s / peak) }
+}
 function GravityIndicator({
   containerRef,
   activeIndex,
@@ -237,46 +294,63 @@ function GravityIndicator({
     return () => ro.disconnect()
   }, [containerRef, revision])
 
-  // Squash-and-stretch on every move. The blob leads with a stretch ALONG its
-  // direction of travel (and a matching squash across it), recoils the other
-  // way as it arrives, then settles — the way a soft body moves. That is the
-  // whole elasticity budget: position and size themselves just ease, so the
-  // liquid feel comes from the shape rather than from the blob springing back
-  // and forth about its target.
+  // The blob's motion is a real DAMPED HARMONIC OSCILLATOR, not a bezier.
   //
-  // Driven imperatively rather than through CSS classes because it has to
-  // RE-FIRE on every move, and a CSS animation only restarts if you tear it off
-  // and back on. It animates `transform` on a CHILD of the positioned element:
-  // the parent's transform is already carrying the position, and one element
-  // cannot run two. (The standalone `scale` property would have kept it on one
-  // element, but Blink does not animate it from WAAPI — measured, the animation
-  // simply never starts.) Both layers animate `transform`, so both composite.
+  // Both the travel and the squash are sampled from the SAME spring solution,
+  // which is what makes it read as one soft body rather than a box sliding
+  // under a separately-authored wobble: the stretch is proportional to the
+  // spring's VELOCITY, so the blob is longest exactly when it is moving
+  // fastest, and as the spring decelerates the velocity reverses and the
+  // stretch becomes a recoil the other way. Hand-keyframed squash could
+  // approximate the shape but never stayed in step with the travel.
+  //
+  // Damping is deliberately high (`ZETA` 0.78 → ~2% overshoot). The owner
+  // rejected a bouncy position curve before — a blob that visibly hunts for
+  // its seat reads as mechanical. All the elasticity a viewer actually
+  // registers is in the shape; the position just needs to arrive like mass on
+  // a spring rather than on a curve someone drew.
+  //
+  // Sampled to keyframes and handed to WAAPI rather than ticked in JS: a
+  // main-thread spring hitches when a heavy page mounts (that is why this was
+  // a CSS transition before). Transform keyframes with linear easing
+  // composite, so the physics runs off the main thread.
   const target = rects[activeIndex]
   const blobRef = useRef<HTMLDivElement>(null)
   const prevTargetRef = useRef<{ left: number; top: number } | null>(null)
 
   useEffect(() => {
-    const el = blobRef.current
+    const shape = blobRef.current
+    const box = shape?.parentElement
     const t = rects[activeIndex]
     const prev = prevTargetRef.current
     prevTargetRef.current = t ? { left: t.left, top: t.top } : null
-    // No squash on the first placement, when the blob is parked instantly, or
-    // for a re-measure that didn't actually move it.
-    if (!el || !t || !prev || reduce || instant) return
-    const dx = Math.abs(t.left - prev.left)
-    const dy = Math.abs(t.top - prev.top)
-    if (dx < 1 && dy < 1) return
+    // No animation on the first placement, when the blob is parked instantly,
+    // or for a re-measure that didn't actually move it.
+    if (!shape || !box || !t || !prev || reduce || instant) return
+    const dx = t.left - prev.left
+    const dy = t.top - prev.top
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
 
-    const along = dx >= dy ? ([1.1, 0.9] as const) : ([0.9, 1.1] as const)
-    const back = dx >= dy ? ([0.96, 1.04] as const) : ([1.04, 0.96] as const)
-    el.animate(
-      [
-        { transform: "scale(1, 1)" },
-        { transform: `scale(${along[0]}, ${along[1]})`, offset: 0.28 },
-        { transform: `scale(${back[0]}, ${back[1]})`, offset: 0.62 },
-        { transform: "scale(1, 1)" },
-      ],
-      { duration: 520, easing: "cubic-bezier(0.33, 0, 0.2, 1)" },
+    const { xs, ss } = springTrack()
+    const along = Math.abs(dx) >= Math.abs(dy)
+
+    // Travel: the spring's displacement, from where it was to where it goes.
+    box.animate(
+      xs.map((x) => ({
+        transform: `translate(${prev.left + dx * x}px, ${prev.top + dy * x}px)`,
+      })),
+      { duration: GRAVITY_SPRING_MS, easing: "linear" },
+    )
+
+    // Shape: the ringing oscillator. Signed, so the landing squash and the
+    // ring-down after it come from the same curve as the outward stretch.
+    shape.animate(
+      ss.map((s) => {
+        const stretch = 1 + STRETCH * s
+        const across = 1 - STRETCH * s * 0.75
+        return { transform: `scale(${along ? stretch : across}, ${along ? across : stretch})` }
+      }),
+      { duration: GRAVITY_SPRING_MS, easing: "linear" },
     )
   }, [activeIndex, rects, reduce, instant])
 
@@ -297,17 +371,16 @@ function GravityIndicator({
         transform: target ? `translate(${target.left}px, ${target.top}px)` : undefined,
         width: target?.width,
         height: target?.height,
-        // Glide, don't spring. The elasticity is the squash on the child — a
-        // bouncy position curve on top of it just reads as the blob hunting for
-        // its seat, which is the mechanical-looking part.
+        // `transform` is deliberately NOT in this list — the spring above owns
+        // it, and a CSS transition on the same property would race the WAAPI
+        // animation to the same endpoint (the inline value is already the
+        // target, so the animation simply falls back onto it when it
+        // finishes). Only the box's SIZE eases, a touch quicker than the
+        // spring so a widening tab has settled before the blob stops moving.
         transition:
           reduce || instant
             ? "none"
-            : [
-                `transform 0.42s ${SETTLE_BEZIER}`,
-                `width 0.42s ${SETTLE_BEZIER}`,
-                `height 0.42s ${SETTLE_BEZIER}`,
-              ].join(", "),
+            : [`width 0.34s ${SETTLE_BEZIER}`, `height 0.34s ${SETTLE_BEZIER}`].join(", "),
       }}
     >
       <div

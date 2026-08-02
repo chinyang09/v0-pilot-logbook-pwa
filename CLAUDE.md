@@ -654,18 +654,39 @@ re-renders).
   `.totp-success` box-shadow.
 - **Gravity nav indicator** (`GravityIndicator` in `components/nav-pill.tsx`) —
   the active-tab/​item highlight blob (pill bar + bottom nav + sidebar). Its
-  elasticity is a real **squash-and-stretch**, not a positional spring: position
-  and size just ease (`SETTLE_BEZIER`, no overshoot — a bouncy position curve
-  reads as the blob hunting for its seat), and on every move a keyframe
-  animation stretches it ALONG its direction of travel, recoils the other way as
-  it arrives, then settles.
-  That animation lives on a **child** of the positioned element, because the
-  parent's `transform` already carries the position and one element cannot run
-  two. (The standalone `scale` property would have kept it on one element, but
-  Blink does not animate `scale` from WAAPI — measured, the animation simply
-  never starts. `transform` on a child does, and both layers composite.) It is
-  fired imperatively because it has to RE-FIRE on every move, and a CSS
-  animation only restarts if you tear it off and back on.
+  motion is **two damped harmonic oscillators** (`springTrack()`), solved
+  analytically per move and sampled into WAAPI `transform` keyframes:
+  - **Travel** is the unit STEP response, damped hard (ζ 0.78 → ~2% overshoot,
+    one crossing, monotonic rise). A bouncy position curve reads as the blob
+    hunting for its seat — that was the owner's verdict on an earlier version.
+  - **Shape** is the IMPULSE response of a SECOND, looser oscillator (ζ 0.32),
+    which is the part the travel spring cannot express: a soft body's shape has
+    its own stiffness and damping, faster and looser than its centre of mass,
+    which is why jelly still wobbles after it has stopped. It stretches ALONG
+    the direction of travel, crosses neutral, compresses on landing (~31% of
+    the stretch — the ratio e^(−ζπ/√(1−ζ²)) between consecutive extremes) and
+    rings down. Measured on a real move: 1.132/0.901 → 0.964/1.027 →
+    1.012/0.991 → neutral.
+
+  Driving the squash from the travel spring's own **velocity** is what the
+  physics literally gives you, and it was tried first — but at ζ 0.78 the
+  velocity barely reverses (−0.02 against a +1.0 peak), so the blob stretched
+  out and then just stopped, with no landing squash. Loosening the travel
+  damping to grow that lobe brings the hunting back. Two oscillators is both
+  the better-looking answer and the more honest model. Both tracks are
+  normalised to their own peak, so a one-tab hop deforms as much as a five-tab
+  sweep (proportional deformation makes a short move look limp).
+
+  The shape animation lives on a **child** of the positioned element, because
+  the parent's `transform` carries the position and one element cannot run two.
+  (The standalone `scale` property would have kept it on one element, but Blink
+  does not animate `scale` from WAAPI — measured, the animation simply never
+  starts. `transform` on a child does, and both layers composite.) Both are
+  fired imperatively because they have to RE-FIRE on every move, and a CSS
+  animation only restarts if you tear it off and back on. `transform` is
+  deliberately absent from the box's CSS `transition` list — the spring owns
+  it, and the inline style is already the target, so the animation falls back
+  onto it cleanly when it finishes (measured: lands exactly, no drift).
   `instant` places it with NO animation, for the frames where animating is
   wrong rather than pretty: while the sidebar is still morphing (its metrics
   re-measure as the panel grows, so a spring started mid-morph only gets going
@@ -673,12 +694,13 @@ re-renders).
   drag lens — where the blob also tracks the tab UNDER THE LENS rather than the
   route's, so that when the lens fades it is already exactly where the lens
   landed instead of springing across the whole bar once the route catches up.
-  It moves via a **CSS `transform` transition** (compositor-driven), NOT a Framer/JS spring
-  — Framer springs tick on the main thread and **hitch** when a heavy page
-  (dashboard/FDP) mounts. Position uses a bouncy overshoot bezier; size settles a
-  touch faster for a subtle stretch. Tab metrics are measured with a
-  ResizeObserver in **content coordinates** (so it's correct inside the scrollable
-  sidebar). Do **not** revert this to a Framer `animate()`/motion-value spring.
+  The springs are **solved once and handed to the compositor**, never ticked in
+  JS — a Framer/JS spring ticks on the main thread and **hitches** when a heavy
+  page (dashboard/FDP) mounts. Only the box's `width`/`height` still ease on a
+  CSS transition, a touch quicker than the spring so a widening tab has settled
+  before the blob stops moving. Tab metrics are measured with a ResizeObserver
+  in **content coordinates** (so it's correct inside the scrollable sidebar).
+  Do **not** revert this to a Framer `animate()`/motion-value spring.
 - **Nav morph** (`useMorphPhase` + `DesktopPillMorph`/`MobilePillMorph` +
   `morphTransition`) — the pill ↔ sidebar morph is a single `opening`/`closing`
   transition whose two geometry groups (**position+width** and **height**)
@@ -1540,7 +1562,7 @@ When making changes, be aware of these high-impact files:
 - Do not give the morph different open and close leads — one `MORPH_LEAD` keeps the two directions exact mirrors, which is what makes the top pill and the bottom pill read as the same animation
 - Do not put the sidebar backdrop's fade on a duration of its own — it rides the morph's `TOTAL`/`MORPH_EASE` so the veil arrives with the panel. And do not collapse `SIDEBAR_BACKDROP_BLUR` back to one blurred layer behind an alpha ramp: that cross-fades blurred and sharp copies of the page (a ghosted double image), it does not ramp the blur. Keep the layers ordered smallest-radius-first so the stack can only add blur and stays monotonic on both engines
 - Do not put `width: auto` back on the nav pill — `width` animates alongside `left`/`transform`, and CSS can't interpolate to `auto`, so it snaps on the morph's first frame and the pill resizes before it moves. Keep the measured px endpoint from `usePillWidth` (measured only while settled as a pill, in a ResizeObserver callback)
-- Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
+- Do not animate the gravity nav indicator with a Framer/JS spring, and do not put its motion back on a bezier — it is two damped harmonic oscillators (`springTrack()`) sampled into WAAPI transform keyframes, so the physics runs on the compositor. A JS spring hitches when a heavy page mounts; a bezier can't express a landing squash that stays in step with the travel. Keep the travel heavily damped (no hunting) and the SHAPE on its own looser oscillator — deriving the squash from the travel spring's velocity gives no landing compression at that damping, and loosening the travel to fix it reintroduces the hunting For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
 - Do not add a rule, material or layout that only one engine gets — iOS and Android must render the app identically. In particular do not reintroduce `@supports (-webkit-touch-callout: none)`, the WebKit-only sniff: it silently made Android's date fields shorter and its focused fields slower to take a tap. A vendor-prefixed property paired with the standard one, or inert elsewhere, is fine. The sole exception is the PWA install prompt, where the OS flow itself differs
 - Do not end the glass press on `touchcancel`/`pointercancel` — Chrome fires those the moment a move looks like a scroll, which is what made the Android spotlight die as soon as the finger moved. Track on the window, treat a cancel as bloom-only, and let the grace timer close it out
 - Do not set the dark theme's `--glass-veil` back to `transparent` — a backdrop-filter has nothing to work with over pure black (blur/saturate of black is black; brightness is multiplicative), so the veil is the only thing giving the slab a face on an empty screen. Keep it warm rather than plain white, or the material reads grey over content again

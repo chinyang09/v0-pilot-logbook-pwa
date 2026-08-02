@@ -35,6 +35,49 @@ export function ScrollIndicator() {
 
     let hideTimer = 0
     let raf = 0
+    // How far the sticky anchor sits below the scroller's top edge when the
+    // scroller is at rest. Normally 0; measured rather than assumed so any
+    // border/padding on a scroller is carried rather than corrected away.
+    let restDelta = 0
+    let applied = 0
+
+    const calibrate = () => {
+      if (applied !== 0) return
+      restDelta = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+    }
+    requestAnimationFrame(calibrate)
+
+    /**
+     * Keep the TRACK pinned to the scroller's top edge during a rubber-band.
+     *
+     * `position: sticky` only ever pushes an element DOWN to keep it in view —
+     * it will not pull one above its flow position. At the top of an iOS
+     * overscroll the flow position IS below the scrollport, so the anchor (and
+     * with it the whole track) rides the bounce down, which is exactly the
+     * "track moves with the list" artefact. The correction is measured, not
+     * derived from `scrollTop`, so it is right whichever way an engine chooses
+     * to translate its contents at either end.
+     */
+    const pinTrack = (atAnEnd: boolean): number => {
+      if (!atAnEnd) {
+        if (applied !== 0) {
+          applied = 0
+          anchor.style.transform = ""
+        }
+        return 0
+      }
+      const natural = anchor.getBoundingClientRect().top - applied
+      const want = scroller.getBoundingClientRect().top + restDelta
+      const next = want - natural
+      if (Math.abs(next - applied) > 0.5) {
+        applied = next
+        anchor.style.transform = `translateY(${next}px)`
+      }
+      // The drift we just cancelled IS the rubber-band distance, which also
+      // makes the compression work on engines that clamp `scrollTop` to the
+      // range instead of reporting past it.
+      return Math.abs(next)
+    }
 
     const update = () => {
       raf = 0
@@ -59,7 +102,10 @@ export function ScrollIndicator() {
       // (the scroll events of the bounce are the animation).
       const overTop = Math.max(0, -scrollTop)
       const overBottom = Math.max(0, scrollTop - range)
-      const over = overTop + overBottom
+      // Only measure at the ends — that is the only place a bounce can be in
+      // progress, so the two rect reads stay out of the scrolling hot path.
+      const drift = pinTrack(scrollTop <= 0 || scrollTop >= range)
+      const over = Math.max(overTop + overBottom, drift)
       // Asymptotic so a hard fling compresses a lot but never to nothing.
       const squash = 1 - (over / (over + 90)) * 0.62
       const thumbH = Math.max(12, restH * squash)
