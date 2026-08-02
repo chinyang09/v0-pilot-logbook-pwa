@@ -224,7 +224,10 @@ const TRAVEL_ZETA = 0.78
 const TRAVEL_OMEGA = 9.2
 const SHAPE_ZETA = 0.32
 const SHAPE_OMEGA = 9.5
-const STRETCH = 0.14
+/** Peak deformation along the direction of travel. */
+const STRETCH = 0.2
+/** How much of it the cross axis gives back — near 1 reads as volume held. */
+const CROSS = 0.85
 const SPRING_SAMPLES = 40
 
 function springTrack(): { xs: number[]; ss: number[] } {
@@ -317,6 +320,9 @@ function GravityIndicator({
   const target = rects[activeIndex]
   const blobRef = useRef<HTMLDivElement>(null)
   const prevTargetRef = useRef<{ left: number; top: number } | null>(null)
+  const travelRef = useRef<Animation | null>(null)
+  const shapeRef = useRef<Animation | null>(null)
+  const animatedToRef = useRef<{ left: number; top: number } | null>(null)
 
   useEffect(() => {
     const shape = blobRef.current
@@ -327,27 +333,51 @@ function GravityIndicator({
     // No animation on the first placement, when the blob is parked instantly,
     // or for a re-measure that didn't actually move it.
     if (!shape || !box || !t || !prev || reduce || instant) return
-    const dx = t.left - prev.left
-    const dy = t.top - prev.top
-    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
+    if (Math.abs(t.left - prev.left) < 1 && Math.abs(t.top - prev.top) < 1) return
+
+    // Already on the way there. This effect re-runs whenever `rects` is
+    // re-measured — the sidebar's ResizeObserver fires as the route settles —
+    // and firing a SECOND spring to the same destination mid-flight is what
+    // made the blob look like it flashed twice on its way across.
+    const going = animatedToRef.current
+    if (going && Math.abs(going.left - t.left) < 1 && Math.abs(going.top - t.top) < 1) return
+
+    // An interrupted move continues from where the blob actually IS, not from
+    // where the last one started — otherwise a tap mid-flight snaps it back to
+    // the previous tab before setting off again. Read BEFORE cancelling: once
+    // cancelled the computed value reverts to the inline style, which is
+    // already the new target.
+    let fromLeft = prev.left
+    let fromTop = prev.top
+    if (travelRef.current?.playState === "running") {
+      const m = new DOMMatrixReadOnly(getComputedStyle(box).transform)
+      fromLeft = m.m41
+      fromTop = m.m42
+    }
+    travelRef.current?.cancel()
+    shapeRef.current?.cancel()
+
+    const dx = t.left - fromLeft
+    const dy = t.top - fromTop
+    animatedToRef.current = { left: t.left, top: t.top }
 
     const { xs, ss } = springTrack()
     const along = Math.abs(dx) >= Math.abs(dy)
 
     // Travel: the spring's displacement, from where it was to where it goes.
-    box.animate(
+    travelRef.current = box.animate(
       xs.map((x) => ({
-        transform: `translate(${prev.left + dx * x}px, ${prev.top + dy * x}px)`,
+        transform: `translate(${fromLeft + dx * x}px, ${fromTop + dy * x}px)`,
       })),
       { duration: GRAVITY_SPRING_MS, easing: "linear" },
     )
 
     // Shape: the ringing oscillator. Signed, so the landing squash and the
     // ring-down after it come from the same curve as the outward stretch.
-    shape.animate(
+    shapeRef.current = shape.animate(
       ss.map((s) => {
         const stretch = 1 + STRETCH * s
-        const across = 1 - STRETCH * s * 0.75
+        const across = 1 - STRETCH * s * CROSS
         return { transform: `scale(${along ? stretch : across}, ${along ? across : stretch})` }
       }),
       { duration: GRAVITY_SPRING_MS, easing: "linear" },

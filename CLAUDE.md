@@ -518,10 +518,12 @@ report watermarks). Do not go back to an allowlist.
 - **`ScrollIndicator`** (`components/ui/scroll-indicator.tsx`) — the app's own
   scroll indicator, because iOS draws its own across the scroller's whole box
   (from the screen edge, over the status bar) and CSS has no
-  `scrollIndicatorInsets`. Rendered as a scroller's FIRST CHILD: a zero-height
-  sticky anchor, a passive rAF'd scroll listener, and a thumb inset to
-  `--chrome-top` … `--nav-bottom-offset`. At either end it compresses against
-  the track instead of riding the rubber-band.
+  `scrollIndicatorInsets`. Mounted as a scroller's FIRST CHILD, but only the
+  zero-height sticky MARKER lives there; the thumb itself is a
+  `position: fixed` element appended to `document.body`, placed against the
+  scroller's cached box and inset to `--chrome-top` … `--nav-bottom-offset`.
+  At either end it compresses against the track instead of riding the
+  rubber-band.
 - **`MODAL_SCRIM`** — `bg-black/15 dark:bg-black/50`. A flat `bg-black/50` is
   invisible over a dark app and turns the light theme (white panels, glass
   sidebar) into grey mush. Used by every dialog overlay, the nav sidebar
@@ -665,8 +667,16 @@ re-renders).
     which is why jelly still wobbles after it has stopped. It stretches ALONG
     the direction of travel, crosses neutral, compresses on landing (~31% of
     the stretch — the ratio e^(−ζπ/√(1−ζ²)) between consecutive extremes) and
-    rings down. Measured on a real move: 1.132/0.901 → 0.964/1.027 →
-    1.012/0.991 → neutral.
+    rings down. Measured on a real move: 1.20/0.83 at the stretch, 0.94/1.05
+    on the landing squash, then neutral.
+
+  The effect **re-fires only for a new destination** (`animatedToRef`) and, if
+  it interrupts a move in flight, resumes from the blob's CURRENT transform
+  rather than the last move's origin. `rects` is re-measured by a
+  ResizeObserver as a route settles, so without the first guard a second
+  spring to the same place started mid-flight — the "blob flashes twice while
+  moving" report — and without the second, a tap during a move snapped it back
+  to the previous tab before setting off again.
 
   Driving the squash from the travel spring's own **velocity** is what the
   physics literally gives you, and it was tried first — but at ζ 0.78 the
@@ -1607,7 +1617,8 @@ When making changes, be aware of these high-impact files:
 - Do not use a flat `bg-black/50` for a modal overlay — use `MODAL_SCRIM`; black at 50% is invisible over a dark app and turns the light theme into grey mush
 - Do not add the sidebar's floating-strip treatment to only one morph — `DesktopPillMorph` and `MobilePillMorph` must both float the toggle/sync strip over the nav with `topInset`, or the scroll-under silently works on desktop and not on a phone. And keep the dissolve mask on the blob overlay as well as the nav (on the OUTER, untranslated element), or the blob stays solid in a band where its own row has faded out
 - Do not let the header veil go solid or lean on blur for the treatment — `ChromeFade` is a **darken with a hint of blur**: the gradient tops out at 50% `--background` and the blur ramp peaks at 2.4px. A solid veil hides the content passing under the status bar (reads as the app stopping there — the web-page-in-a-frame look the edge-to-edge work removed), and a heavy blur smears it into an unreadable band. Text sliding under the bar must stay legible enough to make out roughly what it says
-- Do not re-enable the native scrollbar on an app scroller — iOS draws its indicator across the scroller's whole box, i.e. from the screen edge over the status bar. Scrollers carry `scrollbar-hide` + `components/ui/scroll-indicator.tsx` as the FIRST CHILD; it draws the same affordance inset to `--chrome-top` / `--nav-bottom-offset`, so it starts below the action buttons like a native scroll view's `scrollIndicatorInsets` while content still scrolls under the chrome. It is a zero-height **sticky** anchor (never scrolls, no layout cost) driven by a passive scroll listener through rAF. At either end it must **compress against the end of its track**, not ride the rubber-band: progress is clamped so the thumb is already parked, and the overscroll distance squashes it (asymptotically, so a hard fling never collapses it to nothing) — the bounce's own scroll events are the animation
+- Do not re-enable the native scrollbar on an app scroller — iOS draws its indicator across the scroller's whole box, i.e. from the screen edge over the status bar. Scrollers carry `scrollbar-hide` + `components/ui/scroll-indicator.tsx` as the FIRST CHILD; it draws the same affordance inset to `--chrome-top` / `--nav-bottom-offset`, so it starts below the action buttons like a native scroll view's `scrollIndicatorInsets` while content still scrolls under the chrome. At either end it must **compress against the end of its track**, not ride the rubber-band: progress is clamped so the thumb is already parked, and the overscroll distance squashes it (asymptotically, so a hard fling never collapses it to nothing)
+- Do not move the scroll indicator's thumb back INSIDE the scroller — it is a `position: fixed` element in `document.body`, placed against the scroller's cached box. It lived on a sticky anchor inside the scroller once, with its drift measured and cancelled per frame: that pinned correctly while a finger dragged, but the rubber-band RELEASE is compositor-animated and the correction runs on the main thread from coalesced scroll events, so the track visibly snapped back with the bounce. Nothing inside the scroller can win that race. The zero-height sticky marker that remains is only a rubber-band **sensor** (its drift is the bounce distance for engines that clamp `scrollTop`) and is read at the TOP only — at the bottom it stays pinned, so measuring there returns the whole scrolled distance and collapses the thumb
 - Do not give a page's content its own bottom padding on top of the shared clearance — one clearance per scroller, from `--chrome-bottom` (`.pb-chrome` / `.h-chrome-bottom`), and a card list's per-row gap belongs on the row's TOP (`pt-1`), never its bottom. A trailing per-row gap stacks on the spacer and lands that panel's last row lower than every other panel's (the logbook, aircraft, airports and crew lists each had one; the logbook's 8px is subtracted from its spacer because its wrapper padding can't move)
 - Do not pick a `px-*` by hand for a panel's content wrapper — use `.px-panel` (`--panel-gutter`). The logbook and flight form were at 8px, the sidebar at 12px and the reference/settings pages at 16px, so the three panels visibly disagreed at their edges
 - Do not conflate the two bottom numbers: **content** clears the home indicator by the FULL inset (`--content-bottom-inset`, which `--chrome-bottom` is built from — the platform convention), while the **nav pill and the sidebar** hug it with the tighter `--nav-bottom-offset`. The pill is a floating control that is meant to sit close, and the sidebar runs down the side where the indicator never reaches it; giving content the nav's offset tucks the last row under the indicator
