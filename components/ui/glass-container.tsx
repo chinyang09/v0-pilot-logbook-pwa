@@ -1,14 +1,9 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useId, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { motion, useMotionValue, useReducedMotion, useSpring } from "framer-motion"
 import { cn } from "@/lib/utils"
-import {
-  generateGlassMaps,
-  supportsSvgBackdropFilter,
-  type GlassMaps,
-} from "@/lib/glass/displacement"
 
 interface GlassContainerProps {
   children: React.ReactNode
@@ -42,24 +37,44 @@ interface GlassContainerProps {
 const PRESS_SPRING = { stiffness: 420, damping: 26, mass: 0.6 }
 /** Bloom scale while pressed (Apple controls grow, they don't compress). */
 const BLOOM = 1.045
+/**
+ * Release settle: the control doesn't just return to 1, it passes slightly
+ * UNDER and springs back up — the weight of the press carrying through, the
+ * way an Apple control lands. Small on purpose; past about 0.96 it reads as
+ * the button being pushed again rather than settling.
+ */
+const RELEASE_DIP = 0.97
+/* The spring lags the target, so this is how long the dip is HELD, not how
+   deep it gets: at 90ms it only reached 0.983 before being pulled back. 140ms
+   lets it actually arrive at the dip and settle from there. */
+const RELEASE_DIP_MS = 140
 /** How much of the finger's offset from centre the glass follows — kept LOW:
  *  the glass should STRETCH toward the drag more than it travels (owner
  *  feedback: too much movement reads as the button sliding, not gelling). */
 const PULL = 0.05
 const PULL_MAX = 4
+/** How long the glow survives a cancelled gesture before letting go. */
+const CANCEL_GRACE_MS = 700
 
 /**
  * Liquid glass surface.
  *
- * Two rendering paths (adapted from winaviation/liquid-web, MIT — itself from
- * kube's Liquid Glass article):
+ * ONE material on every platform: the layered ring stack in `globals.css`
+ * (blur + edge reflections + a conic-gradient specular rim).
  *
- * - **Lens** (Chromium): a real Snell's-law displacement map + rim specular
- *   applied through `backdrop-filter: url(#filter)` — genuine edge refraction
- *   with a clean centre, fewer layers than the fallback.
- * - **Rings** (Safari/Firefox — the primary iPad PWA target): WebKit doesn't
- *   support SVG filters in backdrop-filter, so the layered ring material
- *   stays, with the specular approximated by a conic gradient on the rim.
+ * There used to be a second, Chromium-only path — a per-element Snell's-law
+ * displacement map applied through `backdrop-filter: url(#filter)`. It was
+ * removed deliberately. An SVG backdrop-filter re-rasterises every frame the
+ * element resizes or scales, so every morph and every press needed the lens
+ * swapped out for a plain blur and back; each surface had to raster and
+ * PNG-encode a pair of megapixel maps on the main thread, keyed and cached by
+ * geometry, and held a cheap stand-in until they landed. That is a lot of
+ * machinery whose entire output is a rim, and on a phone it read as the app
+ * being slow rather than as glass. It also meant iOS and Android rendered
+ * visibly different materials.
+ *
+ * So: do not reintroduce a platform-conditional material here. If the rim
+ * needs more presence, change the ring stack — every device gets it.
  *
  * Interaction (unless disableTapFeedback): press BLOOMS the glass (~1.045)
  * with a spotlight glow anchored to the finger; holding and moving drags the
@@ -79,17 +94,9 @@ export function GlassContainer({
   morphing,
 }: GlassContainerProps) {
   const rootRef = useRef<HTMLDivElement>(null)
-  const filterId = useId().replace(/[^a-zA-Z0-9_-]/g, "") + "-lens"
-  const [maps, setMaps] = useState<GlassMaps | null>(null)
-  // True while the slab is animating its geometry (morph) or scale (press
-  // bloom). An SVG-displacement backdrop-filter re-rasterises every frame that
-  // the element resizes/scales — the jank source — so while animating we drop
-  // it for a cheap plain blur and restore the lens once it settles.
-  const [pressed, setPressed] = useState(false)
   const reduceMotion = useReducedMotion()
   const interactive = !disableTapFeedback && !reduceMotion
   const spotlightOn = (spotlight ?? !disableTapFeedback) && !reduceMotion
-  const cheapMode = !!morphing || (pressed && interactive)
 
   // Press-follow springs: translate toward the held finger + bloom/stretch.
   const tx = useMotionValue(0)
@@ -101,6 +108,25 @@ export function GlassContainer({
   const sxS = useSpring(sx, PRESS_SPRING)
   const syS = useSpring(sy, PRESS_SPRING)
   const pressedRef = useRef(false)
+  /** Tears down the window listeners for the current press. */
+  const detachRef = useRef<(() => void) | null>(null)
+  const graceRef = useRef<number | undefined>(undefined)
+  const settleRef = useRef<number | undefined>(undefined)
+  const rippleKeyRef = useRef(0)
+  /** One release ripple at a time; keyed so a re-press restarts the animation. */
+  const [ripple, setRipple] = useState<{ x: number; y: number; key: number } | null>(null)
+
+  // A surface can unmount mid-press (a morph, a route change). Drop the
+  // window listeners with it, or they outlive the element they were tracking.
+  useEffect(
+    () => () => {
+      detachRef.current?.()
+      detachRef.current = null
+      window.clearTimeout(graceRef.current)
+      window.clearTimeout(settleRef.current)
+    },
+    []
+  )
 
   const setSpotlightAt = (clientX: number, clientY: number) => {
     const el = rootRef.current
@@ -110,20 +136,130 @@ export function GlassContainer({
     el.style.setProperty("--press-y", `${clientY - rect.top}px`)
   }
 
-  const setSpotlight = (e: React.PointerEvent) => {
-    setSpotlightAt(e.clientX, e.clientY)
-  }
-
   /**
    * The press glow is driven imperatively rather than through framer's
-   * `whileTap`. A native scroll inside the surface (the sidebar list) steals
-   * the pointer and fires `pointercancel`, which ends a tap gesture — so the
-   * glow died the instant you started scrolling, even though the finger was
-   * still down on the glass. Owning the variable means the glow survives the
-   * cancel and is closed out by the real lift instead.
+   * `whileTap`, because a tap gesture ends the moment the browser decides the
+   * finger is scrolling — and then the glow died while the finger was still
+   * on the glass.
    */
   const setGlow = (on: boolean) => {
     rootRef.current?.style.setProperty("--glass-press", on ? "1" : "0")
+  }
+
+  const trackTo = (clientX: number, clientY: number) => {
+    setSpotlightAt(clientX, clientY)
+    if (!interactive) return
+    const el = rootRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const dx = clientX - (rect.left + rect.width / 2)
+    const dy = clientY - (rect.top + rect.height / 2)
+    const clamp = (v: number) => Math.max(-PULL_MAX, Math.min(PULL_MAX, v))
+    tx.set(clamp(dx * PULL))
+    ty.set(clamp(dy * PULL))
+    // Stretch along the pull axis — the glass "gives" toward the drag. The
+    // stretch dominates over the translation (see PULL above).
+    sx.set(BLOOM + Math.min(Math.abs(dx) * 0.0012, 0.05))
+    sy.set(BLOOM + Math.min(Math.abs(dy) * 0.0012, 0.05))
+  }
+
+  /** Home, with no settle — for a cancelled gesture, which isn't a release. */
+  const dropBloom = () => {
+    if (!interactive) return
+    tx.set(0)
+    ty.set(0)
+    sx.set(1)
+    sy.set(1)
+  }
+
+  /** Home via the under-and-back settle. */
+  const settleFromPress = () => {
+    if (!interactive) return dropBloom()
+    tx.set(0)
+    ty.set(0)
+    sx.set(RELEASE_DIP)
+    sy.set(RELEASE_DIP)
+    window.clearTimeout(settleRef.current)
+    settleRef.current = window.setTimeout(() => {
+      sx.set(1)
+      sy.set(1)
+    }, RELEASE_DIP_MS)
+  }
+
+  /**
+   * Finger lifted. The glow rides outward from where it left as a ripple
+   * rather than just fading where it stood — the light leaves with the touch.
+   */
+  const releasePress = (clientX?: number, clientY?: number) => {
+    if (!pressedRef.current) return
+    pressedRef.current = false
+    detachRef.current?.()
+    detachRef.current = null
+    const el = rootRef.current
+    if (el && clientX !== undefined && clientY !== undefined) {
+      const rect = el.getBoundingClientRect()
+      setRipple({
+        x: clientX - rect.left,
+        y: clientY - rect.top,
+        key: rippleKeyRef.current++,
+      })
+    }
+    setGlow(false)
+    settleFromPress()
+  }
+
+  /**
+   * Tracking runs on the WINDOW for the life of the press, not on the element.
+   *
+   * Two things this fixes, both Android:
+   *
+   * - The element stops receiving pointer moves once the finger wanders off
+   *   it, so the spotlight froze at the edge.
+   * - Chrome fires `touchcancel`/`pointercancel` as soon as a move starts to
+   *   look like a scroll. That used to run `endPress`, which is why the glow
+   *   appeared on touch and then died the instant the finger moved. A cancel
+   *   now only drops the bloom (scaling a scrolling surface janks) and keeps
+   *   the light — touch moves usually keep coming, and if they don't, the
+   *   grace timer closes it out so a glow can never stick.
+   */
+  const attachTracking = () => {
+    const onPointerMove = (e: PointerEvent) => trackTo(e.clientX, e.clientY)
+    const onTouchMove = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (t) {
+        window.clearTimeout(graceRef.current)
+        trackTo(t.clientX, t.clientY)
+      }
+    }
+    const onPointerUp = (e: PointerEvent) => releasePress(e.clientX, e.clientY)
+    const onTouchEnd = (e: TouchEvent) => {
+      const t = e.changedTouches[0]
+      releasePress(t?.clientX, t?.clientY)
+    }
+    // A cancelled gesture gives us no lift to close on, so hold the light
+    // briefly and let it go if nothing else arrives.
+    const onCancel = () => {
+      dropBloom()
+      window.clearTimeout(graceRef.current)
+      graceRef.current = window.setTimeout(() => releasePress(), CANCEL_GRACE_MS)
+    }
+
+    window.addEventListener("pointermove", onPointerMove, { passive: true })
+    window.addEventListener("touchmove", onTouchMove, { passive: true })
+    window.addEventListener("pointerup", onPointerUp, { passive: true })
+    window.addEventListener("touchend", onTouchEnd, { passive: true })
+    window.addEventListener("pointercancel", onCancel, { passive: true })
+    window.addEventListener("touchcancel", onCancel, { passive: true })
+
+    return () => {
+      window.clearTimeout(graceRef.current)
+      window.removeEventListener("pointermove", onPointerMove)
+      window.removeEventListener("touchmove", onTouchMove)
+      window.removeEventListener("pointerup", onPointerUp)
+      window.removeEventListener("touchend", onTouchEnd)
+      window.removeEventListener("pointercancel", onCancel)
+      window.removeEventListener("touchcancel", onCancel)
+    }
   }
 
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -134,100 +270,16 @@ export function GlassContainer({
     // bloom the glass — the "phantom tap" on the calendar/upload buttons while
     // scrolling the import dialog.
     if (rootRef.current?.closest('[aria-hidden="true"]')) return
+    detachRef.current?.()
     pressedRef.current = true
-    setSpotlight(e)
+    setSpotlightAt(e.clientX, e.clientY)
     setGlow(true)
     if (interactive) {
       sx.set(BLOOM)
       sy.set(BLOOM)
-      setPressed(true)
     }
+    detachRef.current = attachTracking()
   }
-
-  /**
-   * Touch moves keep firing while the browser scrolls, where pointer moves do
-   * not — so this is what keeps the spotlight under the finger during a
-   * rubber-band scroll of the sidebar.
-   */
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!spotlightOn || !pressedRef.current) return
-    const touch = e.touches[0]
-    if (touch) setSpotlightAt(touch.clientX, touch.clientY)
-  }
-
-  /**
-   * The scroller took the pointer. Drop the bloom/pull (scaling a scrolling
-   * surface janks) but keep the glow and keep tracking — `handleTouchMove`
-   * feeds it until the finger actually lifts.
-   */
-  const handlePointerCancel = () => {
-    if (!pressedRef.current) return
-    if (interactive) {
-      sx.set(1)
-      sy.set(1)
-      tx.set(0)
-      ty.set(0)
-      setPressed(false)
-    }
-  }
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!spotlightOn || !pressedRef.current) return
-    setSpotlight(e)
-    if (!interactive) return
-    const el = rootRef.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    const dx = e.clientX - (rect.left + rect.width / 2)
-    const dy = e.clientY - (rect.top + rect.height / 2)
-    const clamp = (v: number) => Math.max(-PULL_MAX, Math.min(PULL_MAX, v))
-    tx.set(clamp(dx * PULL))
-    ty.set(clamp(dy * PULL))
-    // Stretch along the pull axis — the glass "gives" toward the drag. The
-    // stretch dominates over the translation (see PULL above).
-    sx.set(BLOOM + Math.min(Math.abs(dx) * 0.0012, 0.05))
-    sy.set(BLOOM + Math.min(Math.abs(dy) * 0.0012, 0.05))
-  }
-
-  const endPress = () => {
-    if (!pressedRef.current) return
-    pressedRef.current = false
-    setGlow(false)
-    tx.set(0)
-    ty.set(0)
-    sx.set(1)
-    sy.set(1)
-    setPressed(false)
-  }
-
-  // Chromium only: (re)generate the refraction maps for the current size.
-  // Debounced so morphs/resizes regenerate once at settle — mid-flight the
-  // feImage stretches with the element (preserveAspectRatio="none"), which is
-  // visually acceptable for ~350ms.
-  useEffect(() => {
-    if (!supportsSvgBackdropFilter()) return
-    const el = rootRef.current
-    if (!el) return
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const regenerate = () => {
-      const w = el.offsetWidth
-      const h = el.offsetHeight
-      if (w < 8 || h < 8) return
-      setMaps(generateGlassMaps({ width: w, height: h, radius: cornerRadius }))
-    }
-    regenerate()
-    const ro = new ResizeObserver(() => {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(regenerate, 150)
-    })
-    ro.observe(el)
-    return () => {
-      ro.disconnect()
-      if (timer) clearTimeout(timer)
-    }
-  }, [cornerRadius])
-
-  const lensActive = maps !== null
 
   return (
     <motion.div
@@ -242,18 +294,10 @@ export function GlassContainer({
           : null),
         ...style,
       } as React.CSSProperties}
-      // The spotlight overlay fades in via --glass-press (custom properties
-      // animate through framer); position is set imperatively above.
+      // Only the press STARTS here — everything after it is tracked on the
+      // window (see attachTracking), so the gesture survives the finger
+      // leaving the element and survives the browser cancelling the pointer.
       onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onTouchMove={handleTouchMove}
-      onPointerUp={endPress}
-      onPointerLeave={endPress}
-      /* NOT endPress: a scroll cancels the pointer while the finger is still
-         down. See handlePointerCancel. */
-      onPointerCancel={handlePointerCancel}
-      onTouchEnd={endPress}
-      onTouchCancel={endPress}
     >
       <div className={cn("GlassContent", contentClassName)}>
         {tintColor && (
@@ -269,83 +313,32 @@ export function GlassContainer({
         {children}
       </div>
 
-      {lensActive ? (
-        <>
-          {/* While animating (morph or press bloom) the SVG displacement is
-              dropped for a cheap plain blur — the lens would otherwise
-              re-rasterise every frame the element resizes/scales (the jank).
-              The blur radius ≈ the SVG's internal feGaussianBlur so the glass
-              keeps the same weight; the refraction rim returns once settled. */}
-          <div
-            className="GlassLens"
-            style={{
-              backdropFilter: cheapMode
-                ? `blur(6px) saturate(1.5) brightness(1.05)`
-                : `url(#${filterId}) blur(0px) brightness(1) saturate(1)`,
-            }}
-          />
-          <svg className="GlassFilterSvg" aria-hidden="true">
-            <defs>
-              <filter
-                id={filterId}
-                x="-15%"
-                y="-15%"
-                width="130%"
-                height="130%"
-                colorInterpolationFilters="sRGB"
-              >
-                <feGaussianBlur in="SourceGraphic" stdDeviation={3} result="blurred" />
-                <feImage
-                  href={maps.displacementUrl}
-                  x="0"
-                  y="0"
-                  width={maps.width}
-                  height={maps.height}
-                  preserveAspectRatio="none"
-                  result="dmap"
-                />
-                <feDisplacementMap
-                  in="blurred"
-                  in2="dmap"
-                  scale={maps.displacementScale}
-                  xChannelSelector="R"
-                  yChannelSelector="G"
-                  result="displaced"
-                />
-                <feColorMatrix in="displaced" type="saturate" values="1.5" result="sat" />
-                <feImage
-                  href={maps.specularUrl}
-                  x="0"
-                  y="0"
-                  width={maps.width}
-                  height={maps.height}
-                  preserveAspectRatio="none"
-                  result="spec"
-                />
-                {/* Soften the rim ~0.5px so the specular reads as a glow, not a
-                    hard line — smoother highlight on top of the DPR supersample. */}
-                <feGaussianBlur in="spec" stdDeviation={0.5} result="specSoft" />
-                <feComponentTransfer in="specSoft" result="specFaded">
-                  <feFuncA type="linear" slope={0.65} />
-                </feComponentTransfer>
-                <feBlend in="specFaded" in2="sat" mode="screen" />
-              </filter>
-            </defs>
-          </svg>
-        </>
-      ) : (
-        <div className="GlassMaterial">
-          <div className="GlassEdgeReflection" />
-          <div className="GlassEmbossReflection" />
-          <div className="GlassRefraction" />
-          <div className="GlassBlur" />
-          <div className="BlendLayers" />
-          <div className="BlendEdge" />
-          <div className="Highlight" />
-          <div className="Contrast" />
-          <div className="Brightness" />
-        </div>
+      {/* Release ripple — the light rides outward from where the finger left
+          and fades. Keyed so a quick second press restarts it rather than
+          being swallowed by the still-running animation, and it clears itself
+          on animationend so nothing accumulates. */}
+      {ripple && (
+        <span
+          key={ripple.key}
+          aria-hidden
+          className="GlassRipple"
+          style={{ left: ripple.x, top: ripple.y }}
+          onAnimationEnd={() => setRipple(null)}
+        />
       )}
+
+      {/* `GlassBlur` is the face and carries the ONLY full-face
+          backdrop-filter — see globals.css for why there used to be six of
+          them and why that made iOS and Android look different. The rest are
+          masked to a rim: they refract only the edge band, which is what gives
+          the slab its thickness. */}
+      <div className="GlassMaterial">
+        <div className="GlassEdgeReflection" />
+        <div className="GlassEmbossReflection" />
+        <div className="GlassRefraction" />
+        <div className="GlassBlur" />
+        <div className="Highlight" />
+      </div>
     </motion.div>
   )
 }

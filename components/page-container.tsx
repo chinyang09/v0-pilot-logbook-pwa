@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useScrollRestoration } from "@/hooks/use-scroll-restoration"
 import { cn } from "@/lib/utils"
+import { ScrollIndicator } from "@/components/ui/scroll-indicator"
 
 interface PageContainerProps {
   children: ReactNode
@@ -62,16 +63,31 @@ export function PageContainer({ children, header, className, rightContent, mainR
       <main
         ref={setMainRef}
         onScroll={onMainScroll}
-        className={cn("flex-1 overflow-y-auto overscroll-contain", header ? "pt-12" : "pt-16", className)}
+        // scrollbar-hide: the native overlay indicator spans the scroller's
+        // full box, i.e. from the screen edge over the status bar — the inset
+        // ScrollIndicator below replaces it, running from under the action
+        // buttons like a native scroll view's.
+        className={cn("flex-1 overflow-y-auto overscroll-contain scrollbar-hide", className)}
       >
-        <div className="pb-24">
-          {children}
-        </div>
+        <ScrollIndicator />
+        {/* Spacers, not padding on the scroller. A scroll container's
+            `padding-bottom` is historically dropped from its scrollable area in
+            WebKit, which strands the last row under the nav pill; an in-flow
+            element is always counted. The top one keeps the first row clear of
+            the floating header + status bar, and content slides under both. */}
+        <div className={header ? "h-chrome-top-sm" : "h-chrome-top"} />
+        {children}
+        <div className="h-chrome-bottom" />
       </main>
 
         {/* Right content (e.g., FastScroll) positioned relative to viewport, not scrolling content */}
         {rightContent && (
-          <div className={cn("absolute right-1 bottom-0 z-40 flex items-center pointer-events-none", header ? "top-12" : "top-16")}>
+          <div
+            className="absolute right-1 bottom-0 z-40 flex items-center pointer-events-none"
+            // Below the floating header, status bar included — a bare top-16
+            // started the rail underneath it once the app went edge to edge.
+            style={{ top: header ? "var(--chrome-top-sm)" : "var(--chrome-top)" }}
+          >
             <div className="pointer-events-auto">
               {rightContent}
             </div>

@@ -48,10 +48,10 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 
 | Area | What it pins down |
 |---|---|
-| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields |
+| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts, from synthetic bounding boxes |
-| `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, sync compaction, conflict resolution |
+| `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution |
 
 Tests that touch a parser must mock `@/lib/db` and
 `lib/utils/parsers/shared/airport-enricher` — both reach for IndexedDB at
@@ -89,9 +89,9 @@ app/                              # Next.js App Router
     ├── crew/                     #   Personnel management
     ├── roster/                   #   Schedule management
     ├── currencies/               #   Certificate tracking
-    ├── discrepancies/            #   Schedule conflicts
-    ├── fdp/                      #   Flight Duty Period tracking
-    └── data/                     #   Data management
+    ├── discrepancies/            #   Pilot-vs-company comparisons + import notes
+    ├── recycle-bin/              #   Deleted flights, restorable for 90 days
+    └── fdp/                      #   Flight Duty Period tracking
 
 components/                       # React components
 ├── ui/                           # shadcn/ui base components
@@ -108,6 +108,9 @@ components/                       # React components
 ├── airport-new-form.tsx          # New airport form (FR24 auto-populate)
 ├── aircraft-detail-panel.tsx     # Aircraft detail view (desktop panel)
 ├── airport-detail-panel.tsx      # Airport detail view (desktop panel)
+├── nav-pill.tsx                  # Nav pill ↔ sidebar morph, gravity blob, drag lens
+├── viewport-shell-compensator.tsx # Measures the iOS standalone viewport shortfall
+├── bottom-edge-blur.tsx          # Home-indicator darkening fade (iOS standalone)
 ├── service-worker-register.tsx   # SW registration
 └── pwa-install-prompt.tsx        # PWA install prompts
 
@@ -364,6 +367,42 @@ A simulator carries its duration in `simulatedInstrumentTime`, NOT `blockTime`
 `entryDuration()` is what a card should display. The flight form's **Type** row
 sits above the date and moves the duration across when the type changes.
 
+### The Logbook's Virtualized List
+
+`components/flight-list.tsx` uses `@tanstack/react-virtual` with dynamic
+measurement, and there is one non-obvious rule holding it together: **every
+flight card must be the same height.**
+
+When a measured row turns out taller or shorter than `estimateSize`, the
+virtualizer keeps the view stable by programmatically scrolling by the
+difference — and a programmatic scroll **cancels an in-progress momentum
+scroll** on touch. Jumping into the middle of the list and then scrolling UP
+walks through rows that have never been measured, so the correction fired on
+almost every row: the list stopped dead and needed another swipe, over and
+over.
+
+Three things keep the delta at zero:
+
+- The two optional rows in `flight-card-body` reserve their line (`min-h-[1.25em]`,
+  which is `leading-tight` at their font size) so a flight with no aircraft or
+  no crew is not a shorter card. **Do not drop those** — a variable row height
+  brings the corrections straight back.
+- `estimateSize` is **calibrated ONCE** from the first row that lays out (it was
+  104 against a real 110), and after that nothing is measured at all. Not
+  measuring is the point: the virtualizer can never discover a size it did not
+  expect, so it can never correct the scroll offset, and the list's total height
+  stops changing as you scroll (measured: a constant 13376px, where it used to
+  creep upward as rows were measured). One-shot for a second reason too —
+  feeding every row's measurement back into the estimate is a `setState` in a
+  ref callback, and two rows disagreeing by a fraction of a pixel ping-pong it
+  until React tears the page down with "maximum update depth exceeded".
+- `getItemKey` keys the size cache by **flight id**, not index — keyed by index
+  the cached heights get misattributed the moment the list changes, so a delete
+  or re-sort hands row N whatever used to be there.
+
+Measured after the fix: jumping to the middle and scrolling up 40 steps
+produces **zero** scroll corrections.
+
 ### The Flight Card (`components/flight-card-body.tsx`)
 
 One visual definition of "a flight card", shared by the logbook list, the
@@ -397,17 +436,97 @@ modal — is the single home for undoing an import decision, reachable whether
 the change was accepted or rejected at import time. One-off notes (duplicates,
 stale reports, missing sectors) sit in a second tab.
 
+**Three tabs, not four.** The page holds two kinds of thing, each with an open
+and a settled state, so the settled state is never its own tab:
+
+| | Open | Settled |
+|---|---|---|
+| tracked field difference | **Comparisons** | **Accepted** |
+| one-off import note | **Notes** | "Handled", below the open notes in the same tab |
+
+A fourth "Resolved" tab put two synonyms side by side in the tab bar and made
+the split look arbitrary — it was only ever the notes' settled half. Both note
+lists are scoped to non-mismatch types so a comparison can never fall through
+and render as a prose `DiscrepancyCard`, which is the presentation the
+comparison cards exist to replace.
+
 `Discrepancy.holding: "logbook" | "schedule"` records which side the flight
-currently holds, independently of `resolved`.
+currently holds, independently of `resolved`. The comparison tabs split on it:
+
+| Tab | Rows | Retained |
+|---|---|---|
+| **Comparisons** | `holding: "logbook"` — a standing difference | forever; it IS the licence record |
+| **Accepted** | `holding: "schedule"` — the pilot conceded | 90 days, then purged |
+
+Taking the company's value stamps `acceptedAt` and starts the undo window;
+taking your own back clears it. Accepting at IMPORT time stamps it too — same
+act, same clock — and a re-import keeps the original stamp rather than
+restarting it. The card shows the days left, because when
+`purgeExpiredAcceptedDiscrepancies()` takes the row the pilot's original value
+goes with it. `tracked-mismatch.test.ts` pins the stamp both ways round: on the
+wrong row, the sweep eventually deletes a difference the pilot never conceded.
+
+### The 90-Day Undo Window (`lib/utils/retention.ts`)
+
+`RETENTION_MS` is defined **once** and shared by everything reversible-for-a-
+while: import decisions, accepted comparisons, and the flight recycle bin.
+Roughly three company report cycles — long enough to catch a mistake in a
+quarterly review, short enough that what's retained stays a handful of rows.
+
+**Clearing a retention stamp writes `null`, never `undefined`.**
+`/api/sync/bulk` applies an update as a `$set` of the payload's keys and
+`JSON.stringify` drops undefined ones, so `undefined` leaves the server's stamp
+in place and the next pull undoes the undo — a restored flight drops straight
+back in the bin. `isWithinRetention` and `isLiveFlight` therefore test `== null`.
+
+### Recycle Bin (deleted flights)
+
+`deleteFlight()` is a **soft delete**: it sets `FlightLog.deletedAt` and pushes
+an **update**. That is what makes the bin work across devices — binning and
+restoring both ride the ordinary sync path, and only
+`purgeExpiredDeletedFlights()` (at 90 days) writes a tombstone.
+`app/(app)/recycle-bin/page.tsx` sweeps on load, then lists what's left with the
+days remaining; `permanentlyDeleteFlight()` is the explicit "now, not in three
+months".
+
+The cost is that `userDb.flights` now holds rows nothing should show. Read lists
+through `getAllFlights()`, or filter with **`isLiveFlight`** when reading the
+table directly — the totals (`stats.store`), both reconciliations, the schedule
+parser and the import button all do. A binned flight reaching an import match
+would silently update, and so resurrect, a flight the user deleted.
+
+`normalizeFlightFromServer` **spreads the server record first** and applies
+defaults over it. Building it from an explicit field list quietly dropped every
+field added since it was written (`entryType`/`isSimulator` — a simulator came
+back from a second device as an ordinary flight — the import decisions, the
+report watermarks). Do not go back to an allowlist.
 
 ### Chrome Overlays (`components/ui/chrome-overlays.tsx`)
 
-- **`ChromeFade`** — the floating-header treatment, identical to the main and
-  detail panels in `desktop-layout.tsx`: a single background gradient (solid →
-  60% → transparent), **no `backdrop-filter`**. Anchored to a fixed 64px tail so
-  taller chrome keeps the same boundary instead of stretching the ramp until
-  content shows through the title. If you change the panel header's gradient,
-  change both.
+- **`ChromeFade`** — THE floating-header treatment, rendered directly by the
+  main shell header and the mobile detail overlay header in
+  `desktop-layout.tsx` (no more inline copies): a native-style bar of
+  progressive **blur + darken** — three masked backdrop-blur layers (smallest
+  radius first, widest coverage, so the stack only ever adds blur toward the
+  edge) under the background gradient (solid → 60% → transparent). The
+  gradient is anchored to a fixed 64px tail so taller chrome keeps the same
+  boundary instead of stretching the ramp until content shows through the
+  title. The owner chose blur at the TOP and darken-only at the BOTTOM
+  (`components/bottom-edge-blur.tsx` — a short home-indicator fade, iOS
+  standalone only): at the bottom band's height a blur reads as smearing.
+  The anchored top band also makes an iOS rubber-band read as bouncing from
+  under the action buttons rather than the screen edge. The mix is
+  deliberately **darken-led** — veil to 50% `--background`, blur peaking at
+  2.4px — so text passing under the status bar stays roughly readable.
+- **`ScrollIndicator`** (`components/ui/scroll-indicator.tsx`) — the app's own
+  scroll indicator, because iOS draws its own across the scroller's whole box
+  (from the screen edge, over the status bar) and CSS has no
+  `scrollIndicatorInsets`. Mounted as a scroller's FIRST CHILD, but only the
+  zero-height sticky MARKER lives there; the thumb itself is a
+  `position: fixed` element appended to `document.body`, placed against the
+  scroller's cached box and inset to `--chrome-top` … `--nav-bottom-offset`.
+  At either end it compresses against the track instead of riding the
+  rubber-band.
 - **`MODAL_SCRIM`** — `bg-black/15 dark:bg-black/50`. A flat `bg-black/50` is
   invisible over a dark app and turns the light theme (white panels, glass
   sidebar) into grey mush. Used by every dialog overlay, the nav sidebar
@@ -539,26 +658,116 @@ re-renders).
   OTP group while verifying. The full-border "confirmed" glow stays via the
   `.totp-success` box-shadow.
 - **Gravity nav indicator** (`GravityIndicator` in `components/nav-pill.tsx`) —
-  the active-tab/​item highlight blob (pill bar + bottom nav + sidebar). It moves
-  via a **CSS `transform` transition** (compositor-driven), NOT a Framer/JS spring
-  — Framer springs tick on the main thread and **hitch** when a heavy page
-  (dashboard/FDP) mounts. Position uses a bouncy overshoot bezier; size settles a
-  touch faster for a subtle stretch. Tab metrics are measured with a
-  ResizeObserver in **content coordinates** (so it's correct inside the scrollable
-  sidebar). Do **not** revert this to a Framer `animate()`/motion-value spring.
+  the active-tab/​item highlight blob (pill bar + bottom nav + sidebar). Its
+  motion is **two damped harmonic oscillators** (`springTrack()`), solved
+  analytically per move and sampled into WAAPI `transform` keyframes:
+  - **Travel** is the unit STEP response, damped hard (ζ 0.78 → ~2% overshoot,
+    one crossing, monotonic rise). A bouncy position curve reads as the blob
+    hunting for its seat — that was the owner's verdict on an earlier version.
+  - **Shape** is the IMPULSE response of a SECOND, looser oscillator (ζ 0.32),
+    which is the part the travel spring cannot express: a soft body's shape has
+    its own stiffness and damping, faster and looser than its centre of mass,
+    which is why jelly still wobbles after it has stopped. It stretches ALONG
+    the direction of travel, crosses neutral, compresses on landing (~31% of
+    the stretch — the ratio e^(−ζπ/√(1−ζ²)) between consecutive extremes) and
+    rings down. Measured on a real move: 1.20/0.83 at the stretch, 0.94/1.05
+    on the landing squash, then neutral.
+
+  The effect **re-fires only for a new destination** (`animatedToRef`) and, if
+  it interrupts a move in flight, resumes from the blob's CURRENT transform
+  rather than the last move's origin. `rects` is re-measured by a
+  ResizeObserver as a route settles, so without the first guard a second
+  spring to the same place started mid-flight — the "blob flashes twice while
+  moving" report — and without the second, a tap during a move snapped it back
+  to the previous tab before setting off again.
+
+  Driving the squash from the travel spring's own **velocity** is what the
+  physics literally gives you, and it was tried first — but at ζ 0.78 the
+  velocity barely reverses (−0.02 against a +1.0 peak), so the blob stretched
+  out and then just stopped, with no landing squash. Loosening the travel
+  damping to grow that lobe brings the hunting back. Two oscillators is both
+  the better-looking answer and the more honest model. Both tracks are
+  normalised to their own peak, so a one-tab hop deforms as much as a five-tab
+  sweep (proportional deformation makes a short move look limp).
+
+  The shape animation lives on a **child** of the positioned element, because
+  the parent's `transform` carries the position and one element cannot run two.
+  (The standalone `scale` property would have kept it on one element, but Blink
+  does not animate `scale` from WAAPI — measured, the animation simply never
+  starts. `transform` on a child does, and both layers composite.) Both are
+  fired imperatively because they have to RE-FIRE on every move, and a CSS
+  animation only restarts if you tear it off and back on. `transform` is
+  deliberately absent from the box's CSS `transition` list — the spring owns
+  it, and the inline style is already the target, so the animation falls back
+  onto it cleanly when it finishes (measured: lands exactly, no drift).
+  `instant` places it with NO animation, for the frames where animating is
+  wrong rather than pretty: while the sidebar is still morphing (its metrics
+  re-measure as the panel grows, so a spring started mid-morph only gets going
+  as the panel lands and the blob visibly arrived a beat late), and under the
+  drag lens — where the blob also tracks the tab UNDER THE LENS rather than the
+  route's, so that when the lens fades it is already exactly where the lens
+  landed instead of springing across the whole bar once the route catches up.
+  The springs are **solved once and handed to the compositor**, never ticked in
+  JS — a Framer/JS spring ticks on the main thread and **hitches** when a heavy
+  page (dashboard/FDP) mounts. Only the box's `width`/`height` still ease on a
+  CSS transition, a touch quicker than the spring so a widening tab has settled
+  before the blob stops moving. Tab metrics are measured with a ResizeObserver
+  in **content coordinates** (so it's correct inside the scrollable sidebar).
+  Do **not** revert this to a Framer `animate()`/motion-value spring.
 - **Nav morph** (`useMorphPhase` + `DesktopPillMorph`/`MobilePillMorph` +
   `morphTransition`) — the pill ↔ sidebar morph is a single `opening`/`closing`
   transition whose two geometry groups (**position+width** and **height**)
   **overlap** via per-property CSS `transition-delay` (no phase stall, no
-  "stuck"). Order is deliberate and the leads are **asymmetric** (module consts
-  `MORPH_DUR` / `MORPH_OPEN_LEAD` / `MORPH_CLOSE_LEAD`, picked per phase as
-  `lead`):
-  - **opening** (pill→sidebar) moves position+width first (delay 0), then grows
-    height (delay `OPEN_LEAD`) — it slides into place then expands.
-  - **closing** (sidebar→pill) collapses height first (delay 0), then moves
-    position+width (delay `CLOSE_LEAD`, **near-full** so the sidebar collapses
-    almost completely *before* it slides to the pill — owner feedback: they must
-    not move at once).
+  "stuck"). ONE lead for both directions (`MORPH_DUR` / `MORPH_LEAD`), so the
+  two are exact mirrors and the top pill and the bottom pill perform the same
+  motion:
+  - **closing** (sidebar→pill) collapses height first (delay 0) — the top pill
+    upward, the bottom pill downward, since one is top-anchored and the other
+    bottom-anchored — then, at **~80% collapsed** (still visibly a panel),
+    moves position+width into the pill, finishing the last fifth of the
+    collapse on the way.
+  - **opening** (pill→sidebar) is that played backwards: position+width first
+    (delay 0), then height.
+  The lead is sized so the second group starts while the first still has ~20%
+  to run — with `MORPH_EASE`, 80% of the travel is done at ~50% of the
+  duration, hence **LEAD ≈ 0.5 × DUR**. The whole morph takes **~300ms**
+  (200 + 100). Note that the ORIGINAL was also ~375ms and felt wrong: the lead
+  there was near-full, so the collapse was over before anything moved and the
+  morph read as two snaps back to back. It is the overlap, not the length, that
+  makes it fluid — a full second was fluid but slow to sit through. (The leads
+  used to differ too — 160 opening / 185 closing — which made the two
+  directions feel like different animations.)
+  `MORPH_EASE` was retuned with them: the old fast-launch curve put the
+  collapse 94% home in the first HALF of its duration, which is a snap followed
+  by a crawl at any of these lengths.
+
+  **The mobile backdrop rides the morph's clock.** The scrim and the blur
+  layers fade over `TOTAL` with `MORPH_EASE`, not on a duration of their own,
+  so the veil arrives with the panel. `SIDEBAR_BACKDROP_BLUR` makes that blur
+  genuinely **progressive** — three layers of increasing radius (4 / 10 / 20px)
+  and decreasing width (92 / 68 / 46%), each with its own alpha ramp, so it is
+  heaviest against the sidebar and gone by the far edge. A single blurred layer
+  behind an alpha ramp — what this was — cross-fades a fully blurred page with
+  a sharp one, which reads as a ghosted double image rather than as "less
+  blurred"; a ramp of RADII is what reads as depth. Ordered smallest-radius-
+  first so each layer fully covers the ones below wherever they are opaque: the
+  stack can then only ADD blur, and the ramp stays monotonic whether or not the
+  engine feeds one layer's output into the next one's backdrop (Blink does,
+  WebKit may not). Each layer is only as wide as it needs to be, so the total
+  blur work is ~20% more than the single full-screen 16px layer it replaced,
+  not 3x. Desktop has no backdrop at all — its sidebar sits alongside the
+  content rather than over it.
+
+  **The pill's width is MEASURED (`usePillWidth`), never `auto`.** `width` rides
+  in the position group so the pill resizes *while* it moves, and CSS cannot
+  interpolate a length to `auto` — with `width: auto` as the pill endpoint the
+  width snapped on the morph's first frame, so the pill visibly resized to its
+  final size before it had moved anywhere ("collapse and resize, then move").
+  A px value at BOTH ends is the whole fix. It is taken off the element itself
+  while it is still `auto`, in the ResizeObserver's first callback (no
+  `setState` in an effect body), and only while the nav is settled as a pill —
+  measuring in sidebar shape stores 191 as the pill width. The stored value is
+  released back to `auto` for a frame when the tab set or the viewport changes.
 
   `useMorphPhase` advances on a timer (`DUR + max(lead)` fallback) **and** on the
   *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed
@@ -580,6 +789,43 @@ re-renders).
   content one pixel taller (`min-h-[calc(100%+1px)]`), so even a short list has
   somewhere to go and the rubber-band gesture is always available; without it a
   full-but-not-overflowing nav is inert to a drag, which reads as stuck.
+
+  The strip is ONE component (`SidebarTopStrip`) used by both morphs, and it
+  **captures taps**: it used to be `pointer-events-none` so only the two
+  controls were hit-testable, which meant a nav item dissolving underneath the
+  icons could still be tapped — you aimed at nothing and landed on Airports.
+  `.SidebarTopBlur` frosts whatever passes under it, masked so the blur is
+  strongest at the top and gone by the bottom of the band. One element, one
+  filter list — a true multi-stop progressive blur means stacking several
+  masked blur layers, and over the glass panel that is the construct that made
+  the material render differently on iOS and Android. (The sidebar's BACKDROP
+  does stack — see `SIDEBAR_BACKDROP_BLUR` below — but that stack is pure
+  blur over the page, with no material underneath to diverge.)
+
+  **Both morphs use this arrangement** — `DesktopPillMorph` AND
+  `MobilePillMorph`. The mobile one used to lay the strip out as an ordinary
+  flex row above the nav, so the scroll-under existed only on desktop; on a
+  phone the list simply stopped at the icons. If you touch one, touch both.
+
+  The mask is a plain ramp (`transparent 0 → black topInset`), and the gravity
+  blob sits INSIDE the scroller so this one mask covers it too. The blob used
+  to live in a separate non-scrolling overlay translated by `-scrollTop` from a
+  scroll listener — which is a main-thread reaction to a scroll that already
+  happened, so the blob visibly trailed the items by a frame. Inside the
+  scroller it moves on the compositor, 1:1 and in the same frame. Do not put it
+  back in an overlay to protect the overshoot spring from clipping: the top
+  band is masked out anyway, so there is nothing there to see. The ramp also
+  has no dead zone at the top — holding fully transparent for the first third
+  made the band under the icons simply blank, which reads as the list stopping
+  rather than running beneath.
+- **No long-press link menu on the nav.** Every `[data-nav-link]` (pill tabs and
+  sidebar items alike) cancels `contextmenu`, which is the gate both Chrome and
+  modern Safari check before showing "Open in new tab / Copy link address" or
+  the iOS link preview. On the pill the press-and-hold IS the drag lens's
+  gesture, so the menu interrupted it outright. `-webkit-touch-callout: none`
+  in `globals.css` stays for older WebKit, which suppresses the callout without
+  firing the event at all — a prefixed property that is inert elsewhere, not a
+  platform branch.
 - **Nav drag lens** (`PillBarContent` in `components/nav-pill.tsx`, `.PillDragLens*`
   in `globals.css`) — an iPadOS-tab-bar-style **hold-and-slide** over the pill
   tabs. A plain tap still navigates (10px slop before it activates; a
@@ -591,13 +837,49 @@ re-renders).
     over narrow tabs) that **overhangs** the pill top/bottom (`LENS_OVERHANG`).
     **Clamped** to the first/last tab centres so it never leaves the tab strip;
     finger travel *past* an end tab becomes `overshoot`.
-  - **Refraction:** on Chromium a real Snell's-law displacement map (from
-    `lib/glass/displacement`, wide bezel / deep glass / `refractionScale` ~2.4)
-    so the pill visibly **minifies** through the lens; regenerated per tab so the
-    `feImage` px stays aligned. Safari (no SVG backdrop-filter) uses the
-    `.PillDragLens-glass` convex CSS material (inner thickness vignette fakes the
-    pinch). A chromatic-dispersion `.PillDragLens-rim` adds the liquid fringe on
-    both paths.
+  - **Refraction (`-refract`):** a CLIPPED COPY of the whole glass pill, laid
+    exactly over the real one and **squeezed on ONE axis** about the LENS
+    CENTRE — `scaleY(LENS_SQUASH)` — so inside the lens the control is
+    **shorter, not smaller**. The row inside the copy is counter-scaled by
+    `1/LENS_SQUASH`, so the labels keep their true size and shape and nothing
+    moves horizontally (the copy stays aligned with the original and the lens
+    edge reads as continuous). Engine-independent by construction: composited
+    transforms, no filter, nothing to rasterise. The copy is re-cloned when the
+    lens crosses to another tab so its pre-highlight matches.
+    A uniform `scale(0.82)` came first and shrank the text too — that reads as
+    a minifying lens held above the bar, not as glass resting on it. How far
+    the squeeze can go is set by the CONTENT: the counter-scaled row must still
+    fit the copy's box (the pill's true height), and the mobile pill's 44px tab
+    item in a 56px bar caps it at ~0.84. At 0.72 the icons and labels were
+    clipped away by the copy's own edge.
+  - **The layer COVERS the pill it duplicates** — `-refract` carries the page's
+    own background, or you see the original and the copy at once and it reads
+    as a ghost. A blur can't do that job: the lens is portalled to `<body>` and
+    carries its own `scale`, so it forms a backdrop root and **its
+    `backdrop-filter` never samples the pill at all** — verified, `blur(10px)`
+    there leaves the label underneath perfectly sharp.
+    A version that CUT the pill instead (a mask on `.GlassContainer` driven per
+    frame, so the live page showed through around the squeezed copy) was built
+    and rejected on the look. If it is ever revisited: the cut has to stay
+    inside the lens's stadium at the pill's top/bottom edge or it takes bites
+    out of the bar, the copy needs the exact complementary mask so the two
+    crossfade, and `data-lens-hole` must be stripped from the CLONE (cloneNode
+    copies the attribute and the inline offsets, so the copy came through with
+    the same band missing).
+  - `.PillDragLens-refractCopy` paints its own face and hairline: a
+    backdrop-filter inside a clipped, transformed layer has almost nothing to
+    sample, so the cloned glass alone came out barely 10% lighter than the
+    scrim and the pill's outline vanished inside the lens.
+    The copy also carries the pill's **live press transform** (read off
+    `style.transform`, which framer wrote this frame — no style flush). Without
+    it the copy sits at the pill's resting size while the original is bloomed
+    ~4.5% larger, and the labels visibly double at the lens edge.
+  - **Material:** `.PillDragLens-glass` on every platform — layered shadows for
+    the convex bulge plus an inner thickness vignette that fakes the pinch, and
+    a chromatic-dispersion `.PillDragLens-rim` for the liquid fringe. The
+    Chromium-only real-refraction layer went with the rest of the SVG glass: it
+    rebuilt and PNG-encoded a displacement map every time the finger crossed to
+    another tab, which is main-thread work in the middle of a gesture.
   - **Liquid edge bounce:** `overshoot` past an end tab compresses the lens into
     the wall (`squishX`↓ `squishY`↑) and strains it toward the finger (`nudgeX`)
     via **very underdamped** framer `useSpring`s (`SQUISH_SPRING`); leaving the
@@ -605,14 +887,40 @@ re-renders).
     `transform` **imperatively** (its React className stays constant so drag
     re-renders can't strip it); the pop-in uses the separate CSS `scale`
     property, so the two never fight.
-  - **Drop-splat settle:** on release the lens descends onto the tab with a
-    **no-overshoot ease** on position (never springs left/right) and **splats** —
-    `jump()` to a squashed shape then `set()` to neutral so the underdamped
-    springs rebound (a bird's-eye slime drop that "springs to shape"). A CSS
-    `--settle` crossfade swaps the glass material for the grey blob; a timer
-    (must outlast the springy rebound) hands off to the real blob invisibly.
+  - **Drop-splat settle — compositor only.** On release the lens rides the
+    standalone CSS `translate` (a transition, **no-overshoot ease** — it must
+    never spring left/right) and `scale` (a **keyframe** animation,
+    `pill-lens-splat`). The shape has to be keyframed: a transition can only
+    overshoot both axes together, which reads as the blob growing past its size
+    and coming back. Squash-and-stretch needs the axes to go OPPOSITE ways —
+    wide+flat on impact (timed to land with the translate), then narrow+tall on
+    the rebound, then neutral. `scale` is a composited property, so the
+    keyframes run on the compositor exactly as the transition did. A CSS `--settle` crossfade swaps
+    the glass material for the grey blob; a timer (must outlast the scale's
+    rebound) hands off to the real blob invisibly, and the lens lands on the
+    blob's rect exactly, so the swap is invisible.
+    This used to be framer `animate()` on `left`/`top`/`width`/`height` and it
+    **janked**, for two independent reasons. JS springs tick on the MAIN
+    thread, and the release also fires `router.push` — so the landing competed
+    with a route mount and stalled (the same reason the gravity blob is a CSS
+    transition). And animating left/top/width/height is a layout pass plus a
+    re-rastered `backdrop-filter` every frame on a box that is changing size.
+    Four things keep it cheap now: nothing touches layout, `--settle` drops the
+    glass's `backdrop-filter` outright (it is fading out anyway), the refracted
+    clone is NOT re-cloned on release (`lensPhase` changes then too, so the
+    clone effect is gated on `"drag"`, or a deep clone of the whole pill runs
+    on the landing's first frame), and `--settle` **removes** `-rim` rather
+    than fading it — `mix-blend-mode` cannot be composited on its own, so a
+    blended child anywhere in the subtree keeps the WHOLE lens off the
+    compositor and the landing re-rasterises every frame.
+    The clone is also stripped of the pill's FIVE `backdrop-filter`s (and its
+    ambient specular keyframe) when it is taken. Inside a clipped, transformed
+    layer they have almost nothing to sample — which is why `-refractCopy`
+    paints its own face at all — but they re-sample every frame the lens moves
+    and they block layerisation. That is the single biggest cost the lens used
+    to carry, during the drag as well as the landing.
     Do **not** put the settle back on a bouncy geometry spring (that was the
-    left/right springing that got removed).
+    left/right springing that got removed), and do not put it back on JS.
 
 ### Unified Settings/Form Layout
 
@@ -684,6 +992,27 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   would auto-open the full-screen mobile overlay when the viewport crosses
   below 720px (iPad Split View / resize). Only real user taps use the default
   explicit path
+- **System back undoes the last move.** OPENING a detail — meaning `?selected=`
+  is not already in the URL — `router.push`es it; the param going away again is
+  what closes it. "Is a detail open" must be read off the URL, NOT off the
+  stored selection: a section remembers its last selection in state and
+  sessionStorage while the detail is closed, so keying off that made the first
+  tap after a reload look like switching items. And the re-sync effect below
+  must stand down while a write is in flight (`pendingUrlWriteRef`) — it runs
+  on the state change from the same tap, before the router has updated the
+  params, so it wrote `?selected=` again with `replace` and landed on top of
+  the `push`, erasing the entry.
+  That is what makes Android's edge-swipe (and the browser Back button) return
+  from an open flight to the logbook instead of skipping the section entirely —
+  it used to `replace`, which writes no history entry at all. Switching between
+  items still `replace`s (a push per tap would turn Back into a tour of
+  everything you looked at), and the in-app close calls `router.back()` when we
+  own the current entry, so it is consumed rather than left as a dead press.
+  Two guards make it safe: leaving the section is not treated as a close (it
+  drops `?selected=` too, and acting on that wiped the section just arrived
+  at), and the "re-sync `?selected=` into the URL" effect bails while a
+  back-clear is in flight — it runs in the same commit and would otherwise put
+  the param straight back and refuse to close
 
 **Provider hierarchy:**
 ```
@@ -956,6 +1285,21 @@ Assessment on record:
   explicit time-frame header and is normalized via `time-reference-normalizer`.
   (An earlier audit guessed these were local station times; that was a false
   positive.)
+- **A sync push can add or change a field, but not REMOVE one** — `/api/sync/bulk`
+  applies an update as `$set: {...payload}`, and `JSON.stringify` drops keys
+  whose value is `undefined`, so a field the client cleared keeps its old value
+  on the server and comes back on the next pull. Worked around per-field with a
+  `null` sentinel (`FlightLog.deletedAt`, `Discrepancy.acceptedAt`), which is why
+  those test `== null`. **`unresolveDiscrepancy` still has the un-fixed form** —
+  it clears `resolvedAt`/`resolvedBy`/`resolutionNotes` with `undefined`, so a
+  reopened note keeps its resolution metadata server-side (harmless today: the
+  page keys off `resolved`, which is a real `false`).
+  The general fix is for the server to `$unset` the keys the payload omits — the
+  existing document is already in hand as `existingMap`, and both enqueue sites
+  send a COMPLETE entity, so replacement semantics are correct. Deferred because
+  a device running an older build sends the field set that build knows about: if
+  it pushes an edit before updating, `$unset` would wipe fields a newer device
+  had set. Needs a rollout story (and a real Mongo integration test) first.
 - **Service worker** (`public/sw.js`) — two items needing offline testing
   before any change (a bad SW is hard to roll back): (1) `install` calls
   `self.skipWaiting()` unconditionally while the registration
@@ -974,6 +1318,40 @@ Assessment on record:
 - **Offline fallback**: full offline operation with cached data; `offline.html` as last resort
 - **OCR models** (~16MB): cached by service worker after first load
 
+### One look on every platform
+
+iOS and Android render the app **identically**. There is no engine sniff, no
+`@supports (-webkit-touch-callout: none)` (the WebKit-only hack), and no
+material or layout that one browser gets and another doesn't. Vendor-prefixed
+properties are fine where they are paired with the standard one or simply inert
+elsewhere (`-webkit-overflow-scrolling`, `::-webkit-scrollbar`) — what is not
+fine is a rule whose *effect* only lands on one platform.
+
+Three of those were removed: the date-field height and the focused-field
+`touch-action`, both gated to WebKit so Android quietly rendered a shorter
+input and a laggier tap; and the `.squircle` helpers, which masked with the
+Chromium-only Houdini `paint(squircle)` worklet that was never registered, so
+the class did nothing anywhere.
+
+The legitimate exceptions are all cases where the OS itself differs, not the
+app's look:
+
+- `components/pwa-install-prompt.tsx` — adding to the home screen is a
+  genuinely different flow per OS (iOS: Share → Add to Home Screen; Android:
+  browser menu → Install app, via `beforeinstallprompt`), so it detects the
+  platform to show the right instructions. Do not "unify" it, or iOS users lose
+  the only path to installing.
+- `components/viewport-shell-compensator.tsx` — cancels a WebKit
+  installed-PWA bug (the reported viewport is shorter than the screen). The
+  RESULT is the same full-bleed shell everywhere; only the bug being cancelled
+  belongs to one engine. It must stay iOS-scoped: Android's standalone window
+  legitimately excludes the system bars, so compensating there would push the
+  shell below the visible window.
+- `components/bottom-edge-blur.tsx` — keys off a real bottom safe-area inset,
+  which only an installed iOS app has. Android's window already excludes its
+  gesture bar, so there is no band to fade toward and nothing renders. Same
+  rule, different OS geometry.
+
 ## Database Schema
 
 ### User Database (Dexie — `userDb`)
@@ -981,7 +1359,7 @@ Assessment on record:
 | Table | Purpose | Key Indexes |
 |---|---|---|
 | `flights` | Flight log entries | id, date, syncStatus, aircraftReg, userId |
-| ↳ | Non-indexed additions need no migration: `entryType`, `isSimulator`, `simSessionCode`, `importDecisions`, `scheduleReportAt`, `logbookReportAt`, `toLdgDecidedAt` | |
+| ↳ | Non-indexed additions need no migration: `entryType`, `isSimulator`, `simSessionCode`, `importDecisions`, `scheduleReportAt`, `logbookReportAt`, `toLdgDecidedAt`, `deletedAt` (recycle bin) | |
 | `aircraft` | Aircraft records | id, registration, type, userId |
 | `personnel` | Crew members | id, name, userId, crewId |
 | `preferences` | User settings | key |
@@ -990,7 +1368,7 @@ Assessment on record:
 | `userSession` | Local session mirror | id |
 | `scheduleEntries` | Roster schedule | id, date, dutyType |
 | `currencies` | Certificate tracking | id, code, expiryDate, syncStatus |
-| `discrepancies` | Schedule conflicts | id, type, resolved |
+| `discrepancies` | Comparisons + import notes (`holding`, `acceptedAt`) | id, type, resolved |
 
 ### Reference Database (Dexie — `referenceDb`)
 
@@ -1038,42 +1416,117 @@ When making changes, be aware of these high-impact files:
 - `hooks/use-page-active.tsx` — Active route context and `usePageActive` hook
 - `hooks/use-detail-panel.tsx` — Detail panel provider (keep-alive route awareness)
 - `components/desktop-layout.tsx` — Responsive app shell (sidebar + detail panel)
+- `components/nav-pill.tsx` — The pill↔sidebar morph, the gravity blob's two springs, and the drag lens
+
+**Edge-to-edge shell & chrome** (one number each — changing one moves every panel):
+- `app/globals.css` — `--chrome-top` / `--chrome-bottom` (scroller offsets),
+  `--nav-bottom-offset` (where the nav rests), `--content-bottom-inset` (what
+  content owes the home indicator), `--panel-gutter` (the shared horizontal
+  gutter), and the compensated `body` shell
+- `components/viewport-shell-compensator.tsx` — measures WebKit's installed-PWA
+  viewport shortfall into `--shell-bottom-gap`
+- `components/ui/chrome-overlays.tsx` — `ChromeFade`, the one floating-header
+  treatment (progressive blur under a darkening veil)
+- `components/ui/scroll-indicator.tsx` — the inset scroll indicator (fixed thumb
+  in `document.body`, sticky marker as the rubber-band sensor)
+- `components/bottom-edge-blur.tsx` — the home-indicator darkening fade
 
 **Glass system:**
-- `components/ui/glass-container.tsx` + `lib/glass/displacement.ts` — the glass
-  surface has TWO rendering paths: **lens** (Chromium only — a per-element
-  Snell's-law displacement map + computed rim specular applied via
-  `backdrop-filter: url(#filter)`, adapted from winaviation/liquid-web, MIT)
-  and **rings** (Safari/Firefox — the layered backdrop-filter stack in
-  `globals.css`, with the specular approximated by a conic-gradient rim).
-  Safari is the primary iPad PWA target and does NOT support SVG filters in
-  backdrop-filter — never remove the ring fallback, and never gate the ring
-  path behind the lens detection being merely "not yet ready" (lens maps
-  generate async client-side; rings render first).
-  - **Smooth specular (hi-DPI / Android):** `generateGlassMaps` **supersamples
-    the raster to the device pixel ratio** (capped 3×, and further capped by a
-    ~1.2M-px budget so a large surface like the sidebar doesn't allocate a huge
-    map / hitch on regen). Without it the sub-2px specular rim upscaled ~3× on a
-    phone and read as **jaggies**. A ~0.5px `feGaussianBlur` on the specular
-    (shared filter + the drag lens) softens it into a glow, not a hard line. The
-    displacement magnitude / `displacementScale` stay in **CSS px** (resolution-
-    independent), so supersampling changes only sharpness, not refraction.
-  - **No SVG lens while animating (jank fix):** an SVG-displacement
-    `backdrop-filter` **re-rasterises every frame** the element resizes (morph)
-    or scales (press bloom) — the on-device jank source. `GlassContainer` drops
-    the lens for a **cheap plain `blur()`** whenever `morphing` **or** an
-    interactive `pressed` bloom is active (`cheapMode`), and restores the
-    refraction rim once settled. The `.GlassLens` `backdrop-filter` is **not**
-    CSS-transitioned (blur↔url can't interpolate — a transition only adds a
-    discrete-swap delay). Do **not** keep the SVG `url(#filter)` on a resizing/
-    scaling glass element.
-  - **Even face (ring path):** `.GlassBlur` spans the WHOLE face, corner to
-    corner. It used to be inset by the ring widths, leaving the perimeter a
-    shade darker than the middle — the material read as a grey slab inside a
-    darker frame instead of one even fill (iOS Control Center controls are
-    uniform edge to edge). Do not reintroduce the inset, and do not feather the
-    face outward either — that pulls the tone DOWN at the edges, which is the
-    opposite problem.
+- `components/ui/glass-container.tsx` — ONE material on every platform: the
+  layered ring stack in `globals.css` (blur + edge reflections + a
+  conic-gradient specular rim). iOS and Android render the same thing.
+
+  There used to be a second, Chromium-only **lens** path — a per-element
+  Snell's-law displacement map + computed rim specular applied through
+  `backdrop-filter: url(#filter)` (`lib/glass/displacement.ts`, adapted from
+  winaviation/liquid-web, MIT). It is **removed**, deliberately, because it
+  made the PWA feel slow rather than crisp:
+  - an SVG backdrop-filter **re-rasterises every frame** the element resizes or
+    scales, so every morph and every press had to swap the lens out for a plain
+    blur and back;
+  - each surface rastered and PNG-encoded a pair of up-to-megapixel maps on the
+    main thread, which needed a geometry cache, a debounce, a radius tag and a
+    cheap stand-in to cover the gap;
+  - and it only ran on Chromium, so a phone and an iPad showed different
+    materials.
+
+  That is a lot of machinery whose whole output is a rim. **Do not reintroduce
+  a platform-conditional material.** If the rim needs more presence, change the
+  ring stack — every device gets it.
+  - **ONE full-face `backdrop-filter`, on `.GlassBlur`.** This is what makes
+    iOS and Android agree. There used to be SIX, stacked on separate elements
+    — `.GlassBlur`, `.BlendLayers`, `.BlendEdge`, `.Contrast`, `.Brightness`
+    and an `invert(0.1)` on `.GlassContent` — each meant to sample the
+    composite of the ones below it. Stacked backdrop-filters are the least
+    interoperable construct in CSS: Blink composes the whole chain, WebKit
+    does not, so the same code gave a warm dark slab on iPad and a flat grey
+    one on a Pixel. Measured in Blink the chain landed on `rgb(71,71,70)` —
+    an R-B warmth of **1**, i.e. neutral grey; one list gives `rgb(40,29,19)`,
+    warmth **21**.
+    A filter *list* on a single element is well-specified; several elements
+    each with their own backdrop-filter is not. Do not add a second one.
+  - **The washing terms are gone deliberately.** `contrast(0.69)` pulled the
+    whole face toward mid-grey (the single biggest grey-maker — 69 units of
+    delta on its own) and `invert(0.1)` lifted the blacks. With the chain
+    collapsed they were no longer cancelled by anything, so the face is now
+    blur + a themed brightness lift + `saturate(1.5)` (the vibrancy term —
+    without it the material reads as frosted film rather than glass).
+  - **`--glass-veil` is the PAINTED half of the material, and both themes need
+    it.** A backdrop-filter can do nothing over pure black — blurring black is
+    black, saturating it is black, and brightness is multiplicative, so
+    1.25 x 0 is still 0. With the dark veil at `transparent` the slab had no
+    face at all on an empty screen and only its rim showed. Warm off-white
+    lifts it from +16 to +40 luminance over the background while costing
+    essentially none of the colour it picks up over content (measured at 10%:
+    warmth 37 vs 38). Plain white at matching presence drops that to 34 and the
+    material starts reading grey again — do not "simplify" the tint back to
+    white. Currently 0.075 dark / 0.55 light, eased back from 0.10 / 0.62 with
+    the face blur raised to compensate: **less paint and more optics for the
+    same presence**, which is the difference between a tinted panel and glass.
+    Do not take it much lower — the lift off pure black is why it exists.
+  - **`--glass-face-blur` is one blur, not three.** The old stack blurred
+    2px + 2.4px + 0.52px on three elements; sequential Gaussians compose as
+    the root-sum-square, so ONE blur is identical optics for a third of the
+    work. It carries more of the material's presence now that the veil is
+    thinner (4.4px).
+  - **A fine ring under a bright glint.** `--softness` (5.6px) drives the
+    edge/emboss/refraction band widths and the specular conic (`--glass-rim`)
+    peaks at 0.80 dark / 0.96 light. Those two move together and in opposite
+    directions on purpose: a thin edge with a strong catch reads as a sharp
+    piece of glass, where a thick ring at the same brightness reads as a
+    painted border. The dim flanks between the lobes stay dim — that contrast
+    is what makes it a glint rather than an outline.
+  - **Even face:** `.GlassBlur` spans the WHOLE face, corner to corner. It used
+    to be inset by the ring widths, leaving the perimeter a shade darker than
+    the middle — the material read as a grey slab inside a darker frame instead
+    of one even fill (iOS Control Center controls are uniform edge to edge). Do
+    not reintroduce the inset, and do not feather the face outward either —
+    that pulls the tone DOWN at the edges, which is the opposite problem.
+  - **Morph surge:** `data-morphing` on the container drives a heavier
+    `.GlassBlur` backdrop-filter in CSS, so the material swells as the pill and
+    sidebar merge and settles when it lands. Compositor-friendly — it is one
+    filter value changing, not a filter graph being rebuilt.
+  - **The press is tracked on the WINDOW, not the element.** Only
+    `pointerdown` is bound to the glass; everything after it listens on
+    `window` until release. The element stops receiving pointer moves once the
+    finger wanders off it, and — the Android bug — Chrome fires
+    `touchcancel`/`pointercancel` as soon as a move starts to look like a
+    scroll. That used to run `endPress`, so the glow appeared on touch and died
+    the instant the finger moved. A cancel now only drops the bloom and keeps
+    the light; a `CANCEL_GRACE_MS` timer closes it out if no further touch
+    arrives, so a glow can never stick.
+  - **Release ripples.** On lift the light expands from the release point and
+    fades (`.GlassRipple` + `glass-ripple`), keyed so a quick second press
+    restarts it and self-clearing on `animationend`. Deliberately faint — it is
+    a trace of the touch leaving, not an event of its own.
+  - **Press bloom and release settle.** Press grows the control to `BLOOM`
+    (1.045); release passes UNDER 1 to `RELEASE_DIP` and springs back, the way
+    an Apple control lands. `RELEASE_DIP_MS` is how long the dip is HELD, not
+    how deep it goes — the spring lags the target, so at 90ms it only reached
+    0.983 before being pulled back; 140ms lets it actually arrive (measured min
+    0.9722, settled by ~330ms). The NAV PILL gets this too, but only in pill
+    shape: `disableTapFeedback={isSidebarShape}`, because scaling a full-height
+    panel around a scrolling list reads as the layout wobbling, not a press.
   - **Press glow survives a scroll:** `--glass-press` is set **imperatively**
     on pointer down/up, not through framer's `whileTap`. A native scroll inside
     the surface (the sidebar list) steals the pointer and fires
@@ -1088,12 +1541,15 @@ When making changes, be aware of these high-impact files:
 - `lib/utils/roster/match-assign.ts` — cost-ranked pairing shared with cross-hydrate
 - `lib/utils/roster/classification.ts` — SAFE / CRITICAL / `TRACKED_FIELDS`
 - `lib/utils/roster/executor.ts` — applies a confirmed plan (flights, sims, aircraft, discrepancies)
-- `lib/utils/roster/import-decisions.ts` — decision memory + 90-day retention
+- `lib/utils/roster/import-decisions.ts` — decision memory, on the shared window
 - `lib/utils/roster/report-tracking.ts` — per-source "generated on" watermarks
 - `lib/utils/roster/sim-sessions.ts` — structural simulator recognition/dedup
 - `lib/utils/parsers/cross-hydrate.ts` — merge a logbook plan with a schedule plan
 - `components/import/import-review-modal-v2.tsx` — the consent surface
 - `components/flight-card-body.tsx` — the one flight-card definition
+- `lib/utils/retention.ts` — the single 90-day undo window (decisions, accepted comparisons, recycle bin)
+- `lib/utils/flight-sort.ts` — the one list order (date, out time, departure, id)
+- `lib/db/stores/user/flights.store.ts` — soft delete / restore / purge + `isLiveFlight`
 
 **Swipe & Forms:**
 - `components/swipeable-card.tsx` — The single swipe-to-reveal primitive (framer-motion). Used by all lists, the flight form rows, and the crew/aircraft detail rows.
@@ -1117,7 +1573,7 @@ When making changes, be aware of these high-impact files:
 ## Things to Avoid
 
 - Do not introduce Turbopack — the project explicitly uses Webpack due to OCR/ONNX compatibility
-- Do not add a test framework without discussion — none exists currently
+- Do not add a second test framework — Vitest is the one in use (`pnpm test`), pure-function suites next to their subject; a browser/component runner is a separate discussion
 - Do not modify the Dexie schema without considering IndexedDB migration implications
 - Do not change sync conflict resolution strategy without understanding the tombstone system
 - Do not gate `SyncProvider`'s init on a one-shot `getUserSession()` check at mount — drive it off `useAuth().user` so a login *after* mount (cold-open-logged-out, or logout→login) still initializes triggers and runs the initial sync
@@ -1141,10 +1597,34 @@ When making changes, be aware of these high-impact files:
 - Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
 - Do not bring back press-and-hold for destructive actions. A `holdToConfirm` action ARMS a countdown that only its own Cancel button stops — tapping outside must not disarm, and the `swipe-card-close-others` handler must close the swipe panel only (it fires on any interaction with any other row, so clearing the pending confirm there makes it impossible to arm a delete and move on)
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
-- Do not animate the gravity nav indicator with a Framer/JS spring — it must use a CSS `transform` transition (compositor) or it hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
-- Do not keep the SVG displacement `backdrop-filter: url(#filter)` on a glass element while it resizes (morph) or scales (press bloom) — it re-rasterises every frame and janks; `GlassContainer` swaps to a cheap `blur()` via `cheapMode` (`morphing || pressed`) and restores the lens when settled. And do not CSS-transition `.GlassLens` `backdrop-filter` (blur↔url can't interpolate — it only adds a discrete-swap delay)
-- Do not rasterise the glass maps at CSS resolution — `generateGlassMaps` **supersamples to the device pixel ratio** (capped 3× and by a ~1.2M-px budget) or the thin specular rim upscales into jaggies on hi-DPI phones; keep the displacement magnitude/`displacementScale` in CSS px (resolution-independent)
-- Do not put the drag-lens (`.PillDragLens`) release settle back on a bouncy geometry spring — position eases in with **no overshoot** (never springs left/right); the "spring to shape" is the underdamped `SQUISH_SPRING` squash-and-stretch (drop-splat). Keep it clamped to the tab strip (edge overshoot → the liquid bounce), keep the transform imperative (constant className so drag re-renders can't strip it), and keep the handoff timer longer than the springy rebound (or the last wobble is cut)
+- Do not move the sidebar's gravity blob back into a non-scrolling overlay translated from a scroll listener — that is a main-thread reaction to a scroll that already happened, so the blob trails the items by a frame. It belongs inside the scroller, where it moves on the compositor; the top band is masked anyway, so there is no overshoot clipping to protect it from
+- Do not give the morph different open and close leads — one `MORPH_LEAD` keeps the two directions exact mirrors, which is what makes the top pill and the bottom pill read as the same animation
+- Do not put the sidebar backdrop's fade on a duration of its own — it rides the morph's `TOTAL`/`MORPH_EASE` so the veil arrives with the panel. And do not collapse `SIDEBAR_BACKDROP_BLUR` back to one blurred layer behind an alpha ramp: that cross-fades blurred and sharp copies of the page (a ghosted double image), it does not ramp the blur. Keep the layers ordered smallest-radius-first so the stack can only add blur and stays monotonic on both engines
+- Do not put `width: auto` back on the nav pill — `width` animates alongside `left`/`transform`, and CSS can't interpolate to `auto`, so it snaps on the morph's first frame and the pill resizes before it moves. Keep the measured px endpoint from `usePillWidth` (measured only while settled as a pill, in a ResizeObserver callback)
+- Do not animate the gravity nav indicator with a Framer/JS spring, and do not put its motion back on a bezier — it is two damped harmonic oscillators (`springTrack()`) sampled into WAAPI transform keyframes, so the physics runs on the compositor. A JS spring hitches when a heavy page mounts; a bezier can't express a landing squash that stays in step with the travel. Keep the travel heavily damped (no hunting) and the SHAPE on its own looser oscillator — deriving the squash from the travel spring's velocity gives no landing compression at that damping, and loosening the travel to fix it reintroduces the hunting For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
+- Do not add a rule, material or layout that only one engine gets — iOS and Android must render the app identically. In particular do not reintroduce `@supports (-webkit-touch-callout: none)`, the WebKit-only sniff: it silently made Android's date fields shorter and its focused fields slower to take a tap. A vendor-prefixed property paired with the standard one, or inert elsewhere, is fine. The sole exception is the PWA install prompt, where the OS flow itself differs
+- Do not end the glass press on `touchcancel`/`pointercancel` — Chrome fires those the moment a move looks like a scroll, which is what made the Android spotlight die as soon as the finger moved. Track on the window, treat a cancel as bloom-only, and let the grace timer close it out
+- Do not set the dark theme's `--glass-veil` back to `transparent` — a backdrop-filter has nothing to work with over pure black (blur/saturate of black is black; brightness is multiplicative), so the veil is the only thing giving the slab a face on an empty screen. Keep it warm rather than plain white, or the material reads grey over content again
+- Do not add a second full-face `backdrop-filter` to the glass — `.GlassBlur` carries the only one, as a single filter *list*. Six of them stacked on separate elements is what made the nav pill warm-and-dark on iOS and flat grey on Android: Blink composes the chain, WebKit doesn't, and neither is wrong. Anything the material needs goes into that one list (and the rim layers stay masked to the edge band)
+- Do not give the drag lens's `-refract` layer a `backdrop-filter` instead of its background — the lens is portalled to `<body>` and carries its own `scale`, so it forms a backdrop root and a backdrop-filter there does not sample the pill at all (measured — `blur(10px)` leaves the label underneath perfectly sharp). The layer must paint over the pill it duplicates, or the copy and the original show at once. Cutting the pill out with a mask instead was tried and rejected on the look
+- Do not minify the drag lens's copy uniformly — the squeeze is `scaleY` ONLY, with the row counter-scaled so the labels keep their size and only the control gets shorter. And do not push `LENS_SQUASH` much below 0.84: the counter-scaled row has to fit the copy's box, and the mobile pill's 44px tab item in a 56px bar is what sets that floor (at 0.72 the icons and labels were clipped away entirely)
+- Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
+- Do not delete a flight outright — `deleteFlight` is a **soft delete** into the 90-day recycle bin and pushes an UPDATE; only `purgeExpiredDeletedFlights` writes a tombstone. Push a delete when the user merely binned it and the flight is gone on every device with nothing to restore
+- Do not order flights anywhere but `lib/utils/flight-sort.ts` — the order must be TOTAL (date, then actual-or-SCHEDULED out time, then departure, then id) or rows move on their own: a new flight sat at the top of the logbook until the next refetch and then jumped, and reading `outTime` alone treated every unflown sector as 00:00 so scheduled flights sank below completed ones on the same day. An optimistic cache write inserts with `insertFlightSorted`, never by prepending
+- Do not read `userDb.flights` for a list, a total or an import match without `isLiveFlight` — a binned flight reaching the reconciler silently updates, and so resurrects, a flight the user deleted
+- Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
+- Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
+- Do not open a detail with `router.replace` — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
+- Do not let flight cards vary in height, and do not put per-row `measureElement` back on the logbook list — the virtualizer corrects the scroll offset when a measured row differs from the estimate, and a programmatic scroll cancels a momentum scroll on touch (that is the "scrolling up stops every row" bug). Keep the optional rows' `min-h`, keep the calibration ONE-SHOT (feeding every row back in is a setState loop that crashes the page), and keep `getItemKey` on the flight id
+- Do not inset the app shell by the safe area — the PWA runs edge to edge and content scrolls UNDER the status bar and Android's gesture pill. The insets belong inside each scroller
+- Do not resize or un-transform the `body` shell, and do not replace the measured `--shell-bottom-gap` with a static `env()` term. WebKit's installed-PWA bug reports a viewport (units AND the initial containing block) SHORTER than the physical screen under `viewport-fit=cover` — and the shortfall is **not** `env(safe-area-inset-bottom)` as the community recipe claims (measured on a real iPad in landscape: shortfall 32 = the TOP inset, bottom inset 25). `ViewportShellCompensator` measures `screen height − innerHeight` (portrait-major `screen.*`, orientation-aware), accepts it only when positive and within the insets' sum (a bigger value is Slide Over / Stage Manager / keyboard, not this bug), scopes it to iOS standalone (`"standalone" in navigator` — Android's window legitimately excludes its system bars), and writes it to `--shell-bottom-gap`; `body` is `100dvh + var(--shell-bottom-gap, env(safe-area-inset-bottom, 0px))` in standalone, plain `100dvh` in a browser tab (compensating there re-creates the iPad-portrait overshoot). The `transform: translateZ(0)` on `body` is load-bearing: it makes body the containing block for every `position: fixed` element (nav pill, sidebar morph, drag lens, overlays), so they anchor to the compensated shell instead of the buggy viewport — remove it and the pill floats a full inset above the home indicator. Safe-area padding stays inside the bottom nav (`bottom: 4px + env(...)`), never on `body`
+- Do not derive the sidebar's open height from `window.innerHeight` — use `calc(100% - …)`, which for a fixed element resolves against `body` (its containing block, via the transform above), the compensated shell. The measured version came out taller than the visible page on iPad Safari in portrait and overshot both ends. Subtract BOTH safe-area insets: one morph is top-anchored and the other bottom-anchored, and each still has to clear the other end
+- Do not put the chrome offsets on a SCROLL CONTAINER as padding — use the in-flow `h-chrome-top` / `h-chrome-bottom` spacers. WebKit has long dropped a scroll container's `padding-bottom` from its scrollable area, which strands the last row under the nav pill; an in-flow element is always counted. Padding is fine on a content wrapper that is itself inside a scroller
+- Do not add `pb-safe` to page content — a scroller gets its bottom clearance ONCE, from `--chrome-bottom` (via `.pb-chrome` / `.h-chrome-bottom`), and that value already carries the inset. Page wrappers used to add `pb-safe` inside a container that had it too, which on iOS meant a dead strip of ~96px plus TWO home-indicator insets at the end of every list — the "the bottom is padded" bug. One clearance per scroller, declared in one place
+- Do not hardcode `4rem`/`64` as the header offset anywhere — use `--chrome-top` (or `.pt-chrome` / `.h-chrome-top`). It is the 64px bar PLUS the status bar, and a bare 4rem is exactly how the logbook's search field ended up sliding under the action buttons once the shell stopped insetting itself. `--chrome-bottom` is the matching bottom clearance (nav pill + gesture bar)
+- Do not give the bottom pill, the sidebar's lower end, or a scroller's bottom clearance their own safe-area math — they all derive from `--nav-bottom-offset` (`max(4px, env(safe-area-inset-bottom) - 10px)`: hugs the iOS home indicator, plain 4px on Android/desktop). One number keeps the pill↔sidebar morph endpoints aligned and the scrolled-to-rest last row on the same line; `components/bottom-edge-blur.tsx` adds the progressive blur under that line on iOS standalone only (below the nav in z-order so the sidebar and pill stay sharp)
+- Do not leave the cloned pill's `backdrop-filter`s (or `mix-blend-mode` anywhere in the lens subtree) in place during a drag or landing — they re-sample every frame and block layerisation, which is what made the release jank
+- Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
 - Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`
 - Do not give `register/complete`, `add-passkey`, the callsign change, or the TOTP-reveal routes a path that skips `verifyAuthenticationResponse`/`verifyStepUpAssertion` — the TOTP seed must never be revealed without a fresh passkey step-up
@@ -1164,5 +1644,12 @@ When making changes, be aware of these high-impact files:
 **Formatting & chrome:**
 - Do not format a clock time with `formatHHMMDisplay` — that is for durations (which always keep their colon). Points in time go through `formatClockDisplay` so `clockSeparator` governs them all
 - Do not use a flat `bg-black/50` for a modal overlay — use `MODAL_SCRIM`; black at 50% is invisible over a dark app and turns the light theme into grey mush
-- Do not give `ChromeFade` a `backdrop-filter` — it is the main panel's plain gradient, deliberately. And do not paint a `--background` scrim over a translucent glass surface (the sidebar) — mask the content out instead
+- Do not add the sidebar's floating-strip treatment to only one morph — `DesktopPillMorph` and `MobilePillMorph` must both float the toggle/sync strip over the nav with `topInset`, or the scroll-under silently works on desktop and not on a phone. And keep the dissolve mask on the blob overlay as well as the nav (on the OUTER, untranslated element), or the blob stays solid in a band where its own row has faded out
+- Do not let the header veil go solid or lean on blur for the treatment — `ChromeFade` is a **darken with a hint of blur**: the gradient tops out at 50% `--background` and the blur ramp peaks at 2.4px. A solid veil hides the content passing under the status bar (reads as the app stopping there — the web-page-in-a-frame look the edge-to-edge work removed), and a heavy blur smears it into an unreadable band. Text sliding under the bar must stay legible enough to make out roughly what it says
+- Do not re-enable the native scrollbar on an app scroller — iOS draws its indicator across the scroller's whole box, i.e. from the screen edge over the status bar. Scrollers carry `scrollbar-hide` + `components/ui/scroll-indicator.tsx` as the FIRST CHILD; it draws the same affordance inset to `--chrome-top` / `--nav-bottom-offset`, so it starts below the action buttons like a native scroll view's `scrollIndicatorInsets` while content still scrolls under the chrome. At either end it must **compress against the end of its track**, not ride the rubber-band: progress is clamped so the thumb is already parked, and the overscroll distance squashes it (asymptotically, so a hard fling never collapses it to nothing)
+- Do not move the scroll indicator's thumb back INSIDE the scroller — it is a `position: fixed` element in `document.body`, placed against the scroller's cached box. It lived on a sticky anchor inside the scroller once, with its drift measured and cancelled per frame: that pinned correctly while a finger dragged, but the rubber-band RELEASE is compositor-animated and the correction runs on the main thread from coalesced scroll events, so the track visibly snapped back with the bounce. Nothing inside the scroller can win that race. The zero-height sticky marker that remains is only a rubber-band **sensor** (its drift is the bounce distance for engines that clamp `scrollTop`) and is read at the TOP only — at the bottom it stays pinned, so measuring there returns the whole scrolled distance and collapses the thumb
+- Do not give a page's content its own bottom padding on top of the shared clearance — one clearance per scroller, from `--chrome-bottom` (`.pb-chrome` / `.h-chrome-bottom`), and a card list's per-row gap belongs on the row's TOP (`pt-1`), never its bottom. A trailing per-row gap stacks on the spacer and lands that panel's last row lower than every other panel's (the logbook, aircraft, airports and crew lists each had one; the logbook's 8px is subtracted from its spacer because its wrapper padding can't move)
+- Do not pick a `px-*` by hand for a panel's content wrapper — use `.px-panel` (`--panel-gutter`). The logbook and flight form were at 8px, the sidebar at 12px and the reference/settings pages at 16px, so the three panels visibly disagreed at their edges
+- Do not conflate the two bottom numbers: **content** clears the home indicator by the FULL inset (`--content-bottom-inset`, which `--chrome-bottom` is built from — the platform convention), while the **nav pill and the sidebar** hug it with the tighter `--nav-bottom-offset`. The pill is a floating control that is meant to sit close, and the sidebar runs down the side where the indicator never reaches it; giving content the nav's offset tucks the last row under the indicator
+- Do not add an inline copy of the header gradient — render `ChromeFade` (it now carries the progressive blur + fade as one treatment; an inline gradient silently loses the blur). Do not swap the top/bottom edge treatments: blur belongs to the TOP band only (the bottom band is too short — blur there read as smearing and the owner rejected it; the bottom gets the darkening fade in `bottom-edge-blur.tsx`). And do not paint a `--background` scrim over a translucent glass surface (the sidebar) — mask the content out instead
 - Do not inset `.GlassBlur` from the face or feather it outward — the fill must be even corner to corner, and `--glass-press` must stay imperative so a scroll's `pointercancel` doesn't kill the spotlight

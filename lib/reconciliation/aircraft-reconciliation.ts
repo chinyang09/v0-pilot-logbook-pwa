@@ -8,7 +8,7 @@
  */
 
 import { userDb } from "@/lib/db/user-db"
-import { updateFlight } from "@/lib/db/stores/user/flights.store"
+import { updateFlight, isLiveFlight } from "@/lib/db/stores/user/flights.store"
 import { normalizeRegistration as normalizeReg } from "@/lib/utils/string"
 import type { FlightLog } from "@/types/entities/flight.types"
 
@@ -32,8 +32,10 @@ export async function reconcileFlightsForAircraft(
   const normalizedOriginal = normalizeReg(originalReg)
   const normalizedEnriched = normalizeReg(enrichedData.registration)
 
-  // Find all flights where aircraftReg matches (normalized)
-  const allFlights = await userDb.flights.toArray()
+  // Find all flights where aircraftReg matches (normalized). The recycle bin
+  // is skipped — enriching a flight the user deleted would only bring it back
+  // changed.
+  const allFlights = (await userDb.flights.toArray()).filter(isLiveFlight)
   const matchingFlights = allFlights.filter((f) => {
     const normalizedFlight = normalizeReg(f.aircraftReg)
     return normalizedFlight === normalizedOriginal || normalizedFlight === normalizedEnriched

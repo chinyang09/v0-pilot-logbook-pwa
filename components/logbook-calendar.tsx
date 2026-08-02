@@ -643,16 +643,15 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             {header && <div className="relative">{header}</div>}
             {activeContent}
           </div>
+          {/* Keep in step with `GlassContainer` — this is the same material,
+              inlined. `GlassBlur` is the face and holds the only full-face
+              backdrop-filter; the rest are masked to the rim. */}
           <div className="GlassMaterial">
             <div className="GlassEdgeReflection" />
             <div className="GlassEmbossReflection" />
             <div className="GlassRefraction" />
             <div className="GlassBlur" />
-            <div className="BlendLayers" />
-            <div className="BlendEdge" />
             <div className="Highlight" />
-            <div className="Contrast" />
-            <div className="Brightness" />
           </div>
         </div>
       );

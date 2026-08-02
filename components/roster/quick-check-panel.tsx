@@ -170,7 +170,7 @@ export function QuickCheckPanel({
   const addEntries = changes.filter((c) => c.type === "add")
 
   return (
-    <div className="flex flex-col h-full pt-16">
+    <div className="flex flex-col h-full pt-chrome">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
         <h2 className="text-sm font-semibold">Legality Check</h2>

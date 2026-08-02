@@ -334,6 +334,23 @@ export interface Discrepancy {
    * way it went, for the licence trail).
    */
   holding?: "logbook" | "schedule"
+  /**
+   * When the user took the company's value over their own (epoch ms), which
+   * starts the 90-day window in which the change can still be put back
+   * (`lib/utils/retention.ts`). Cleared if they switch back to their own value.
+   *
+   * A row with this set has moved out of Comparisons — there is no longer a
+   * standing difference to defend, only a change to keep undoable for a while
+   * — and once the window closes the row is purged, so the original value is
+   * genuinely gone.
+   *
+   * Switching back writes `null`, NOT `undefined`: `/api/sync/bulk` applies an
+   * update as a `$set` of the payload's fields and `JSON.stringify` drops
+   * undefined keys, so an undefined would leave the server's stamp in place and
+   * the next pull would re-file the row as accepted — and eventually purge a
+   * comparison the pilot never conceded. Test with `== null`.
+   */
+  acceptedAt?: number | null
 
   // Resolution
   resolved: boolean

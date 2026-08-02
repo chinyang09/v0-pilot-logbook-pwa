@@ -547,7 +547,7 @@ export default function AccountPage() {
 
   return (
     <PageContainer>
-      <div className="px-4 pt-4 space-y-4 max-w-2xl mx-auto w-full">
+      <div className="px-panel pt-4 space-y-4 max-w-2xl mx-auto w-full">
 
         {/* Global logout — prominent, at the very top. Tapping ARMS it: the
             logout then runs on a countdown the same button cancels, matching

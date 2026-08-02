@@ -550,7 +550,7 @@ export default function CrewPage() {
       mainRef={scrollContainerCallbackRef}
     >
       <div>
-        <div className="px-4 pt-4 pb-safe">
+        <div className="px-panel pt-4">
           {/* Non-virtualized content above the virtual list */}
           <div ref={aboveVirtualRef}>
             {!debouncedSearchQuery.trim() && (
@@ -677,7 +677,7 @@ export default function CrewPage() {
                       data-index={virtualRow.index}
                       ref={rowVirtualizer.measureElement}
                     >
-                      <div className="pb-1">
+                      <div className="pt-1">
                         <SwipeableCrewCard
                           crew={crew}
                           onSelect={() => handleCrewSelect(crew)}

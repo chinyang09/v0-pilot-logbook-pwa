@@ -313,7 +313,13 @@ export function FlightCardBody({
 
         <div
           className={cn(
-            "flex items-center gap-1.5 text-[13px] leading-tight mt-0.5",
+            // `min-h` reserves the line even when the row is empty (a flight
+            // with no aircraft and no number yet), so every card is the SAME
+            // height. That is what lets the logbook's virtualizer estimate row
+            // heights exactly — a variable row makes it correct the scroll
+            // offset as rows are measured, and a programmatic scroll cancels an
+            // in-progress fling. 1.25em is `leading-tight` at this font size.
+            "flex min-h-[1.25em] items-center gap-1.5 text-[13px] leading-tight mt-0.5",
             isScheduled
               ? "text-orange-600/70 dark:text-orange-400/60"
               : "text-muted-foreground"
@@ -345,7 +351,9 @@ export function FlightCardBody({
           )}
         </div>
 
-        <div className="flex items-center justify-between mt-0.5">
+        {/* Reserves its line for the same reason as the row above — a flight
+            with no crew and no chips must not make the card shorter. */}
+        <div className="flex min-h-[1.25em] items-center justify-between mt-0.5 text-[13px]">
           <div
             className={cn(
               "flex flex-1 min-w-0 text-[13px] leading-tight",

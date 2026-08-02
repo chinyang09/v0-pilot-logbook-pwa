@@ -686,7 +686,7 @@ export default function AircraftPage() {
         </div>
       ) : (
         <div>
-          <div className="px-4 pt-4 pb-safe">
+          <div className="px-panel pt-4">
             {/* Non-virtualized content above the virtual list */}
             <div ref={aboveVirtualRef}>
               {!debouncedSearchQuery.trim() && (
@@ -819,7 +819,7 @@ export default function AircraftPage() {
                       data-index={virtualRow.index}
                       ref={rowVirtualizer.measureElement}
                     >
-                      <div className="pb-1">
+                      <div className="pt-1">
                         <SwipeableAircraftCard
                           aircraft={aircraft}
                           onSelect={handleSelectAircraft}

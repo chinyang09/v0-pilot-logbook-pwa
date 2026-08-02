@@ -120,8 +120,58 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     )
   }, [searchParams, currentBase])
 
+  // ── System back / Android's edge-swipe should UNDO THE LAST MOVE ──────────
+  //
+  // Opening a detail used to `router.replace`, which writes no history entry —
+  // so a swipe-back from an open flight skipped straight past the logbook to
+  // whatever came before it. Opening now PUSHES, and the `?selected=` param
+  // going away again is what closes the detail. Together those make one back
+  // gesture mean "close this and go back to the list".
+  //
+  // `pushedBase` remembers that WE own the current entry, so the in-app close
+  // button can go back rather than replacing (which would leave a dead entry
+  // that swallows the next back press). It is cleared on any route change, so
+  // a stale ref can only ever fall back to the old replace behaviour.
+  const pushedBaseRef = useRef<string | null>(null)
+  const lastUrlSelectedRef = useRef<string | null>(searchParams.get("selected"))
+  const lastBaseRef = useRef(currentBase)
+  const backClearedRef = useRef(false)
+  /**
+   * True from the moment we route a selection until `searchParams` catches up.
+   * The re-sync effect below runs on the state change from the SAME tap, before
+   * the router has updated the params — so it saw "explicit selection, no
+   * `?selected=` in the URL" and helpfully wrote one with `router.replace`,
+   * landing on top of the `push` we had just issued and erasing the history
+   * entry. That is why the back gesture still skipped the section.
+   */
+  const pendingUrlWriteRef = useRef(false)
+
+  useEffect(() => {
+    const urlSelected = searchParams.get("selected")
+    const prev = lastUrlSelectedRef.current
+    const prevBase = lastBaseRef.current
+    lastUrlSelectedRef.current = urlSelected
+    lastBaseRef.current = currentBase
+    // The router has caught up with whatever we last wrote.
+    pendingUrlWriteRef.current = false
+    // Only a back WITHIN a section closes its detail. Leaving the section drops
+    // `?selected=` too, and treating that as a close would wipe the section we
+    // just arrived at — including its stored selection.
+    if (prevBase !== currentBase) {
+      pushedBaseRef.current = null
+      return
+    }
+    if (urlSelected !== null || prev === null) return
+    backClearedRef.current = true
+    pushedBaseRef.current = null
+    setSelections(p => (p[currentBase] == null ? p : { ...p, [currentBase]: null }))
+    setExplicitBases(p => (p[currentBase] ? { ...p, [currentBase]: false } : p))
+    saveSelection(currentBase, null)
+  }, [searchParams, currentBase])
+
   const setSelectedId = useCallback((id: string | null, opts?: SetSelectedIdOptions) => {
     const explicit = opts?.explicit !== false
+    backClearedRef.current = false
 
     setSelections(prev => ({ ...prev, [currentBase]: id }))
     const nextExplicit = explicit && !!id
@@ -140,7 +190,29 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
       }
 
       const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname
-      router.replace(newUrl || "/", { scroll: false })
+      // "Is a detail OPEN?" is the URL, not the stored selection. A section
+      // remembers its last selection in state + sessionStorage even while the
+      // detail is closed, so keying off that made the very first tap after a
+      // reload look like "switching items" — it replaced, wrote no history
+      // entry, and the back gesture sailed straight past the section. The
+      // `?selected=` param is written for every explicit open, so its presence
+      // is exactly "we already own a pushed entry here".
+      const detailIsOpen = searchParams.has("selected")
+      pendingUrlWriteRef.current = true
+      if (id && !detailIsOpen) {
+        // Opening a detail is a move, so it gets a history entry to undo.
+        pushedBaseRef.current = currentBase
+        router.push(newUrl || "/", { scroll: false })
+      } else if (!id && pushedBaseRef.current === currentBase) {
+        // Closing it in-app: go back rather than replace, so the entry we
+        // pushed is consumed instead of lingering as a dead back press.
+        pushedBaseRef.current = null
+        router.back()
+      } else {
+        // Switching between items isn't a new move — it would pile up an entry
+        // per tap and turn back into a tour of everything you looked at.
+        router.replace(newUrl || "/", { scroll: false })
+      }
     }
 
     // Persist to sessionStorage (keyed by base route, matching the map).
@@ -160,6 +232,14 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     if (pathname !== currentBase) return
     if (!KEEPALIVE_DETAIL_ROUTES.includes(currentBase)) return
     if (searchParams.has("selected")) return
+    // A back gesture just took `?selected=` away. This effect runs in the same
+    // commit as the one that clears the selection, so it still sees the old
+    // state — without this guard it would put the param straight back and the
+    // detail would refuse to close.
+    if (backClearedRef.current) return
+    // A selection we just routed hasn't reached `searchParams` yet — writing
+    // the param again here would replace the entry that write pushed.
+    if (pendingUrlWriteRef.current) return
     const sel = selections[currentBase]
     if (!sel || sel.startsWith("__") || !explicitBases[currentBase]) return
     const params = new URLSearchParams(searchParams.toString())

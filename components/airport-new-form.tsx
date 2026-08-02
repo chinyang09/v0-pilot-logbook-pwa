@@ -311,7 +311,7 @@ export function AirportNewForm({
   useRegisterMainActions(actions, !isDetailPanel)
 
   const formContent = (
-    <div className="container mx-auto px-3 pt-4 pb-safe">
+    <div className="container mx-auto px-3 pt-4">
       {/* Main Info Card */}
       <div className="bg-card rounded-xl overflow-hidden mb-6 border border-border">
         <div>
@@ -503,8 +503,10 @@ export function AirportNewForm({
     // the global header (matches AirportDetailPanel layout).
     return (
       <div className="h-full relative flex flex-col">
-        <div className="flex-1 overflow-y-auto pt-16">
+        <div className="flex-1 overflow-y-auto">
+          <div className="h-chrome-top" />
           {formContent}
+          <div className="h-chrome-bottom" />
         </div>
       </div>
     )

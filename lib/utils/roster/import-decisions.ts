@@ -20,17 +20,15 @@
  */
 
 import type { FlightLog } from "@/types/entities/flight.types";
+import { RETENTION_MS } from "@/lib/utils/retention";
 
 /**
- * How long a decision (and any value it overwrote) is kept.
- *
- * 90 days. Company reports arrive roughly monthly, so this spans about three
- * report cycles — long enough to notice a mistake during a quarterly logbook
- * review and undo it, short enough that the map stays a handful of entries on
- * a handful of flights rather than accumulating for the life of the logbook.
- * Entries are pruned on every write, so nothing lingers past the window.
+ * How long a decision (and any value it overwrote) is kept — the app-wide undo
+ * window (`lib/utils/retention.ts`), shared with the discrepancies page's
+ * accepted changes and the flight recycle bin. Entries are pruned on every
+ * write, so nothing lingers past it.
  */
-export const IMPORT_DECISION_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+export const IMPORT_DECISION_RETENTION_MS = RETENTION_MS;
 
 export interface ImportDecision {
   /** Report value the user turned down. */

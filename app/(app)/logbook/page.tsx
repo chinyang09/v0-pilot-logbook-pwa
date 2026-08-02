@@ -25,6 +25,7 @@ import { AnimatePresence, motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date"
+import { insertFlightSorted } from "@/lib/utils/flight-sort"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useSearchParams } from "next/navigation"
@@ -398,9 +399,13 @@ export default function LogbookPage() {
           creatingFlightRef.current = true
           try {
             const newFlight = await createFlight(selectedDateRef.current || undefined)
+            // Placed by the shared comparator, not prepended: a new flight
+            // belongs at its date and time straight away, or it sits at the
+            // top of the logbook until the next refetch and then jumps.
             mutate(
               CACHE_KEYS.flights,
-              (prev: FlightLog[] | undefined) => [newFlight, ...(prev ?? [])],
+              (prev: FlightLog[] | undefined) =>
+                insertFlightSorted(prev ?? [], newFlight),
               { revalidate: false }
             )
             setSelectedFlightId(newFlight.id)
@@ -424,7 +429,7 @@ export default function LogbookPage() {
       <div
         ref={calendarContainerRef}
         className="z-40 absolute left-0 right-0"
-        style={{ top: "4rem", contain: "layout style paint" }}
+        style={{ top: "var(--chrome-top)", contain: "layout style paint" }}
       >
         <AnimatePresence initial={false}>
           {showCalendar && (
@@ -482,7 +487,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={64 + (showCalendar ? calendarNaturalHeight : 0)}
+          topSpacerHeight={`calc(var(--chrome-top) + ${showCalendar ? calendarNaturalHeight : 0}px)`}
           selectedFlightId={selectedFlightId}
           headerContent={
             <div className="flex-shrink-0 top-0 z-40 px-2 py-1">

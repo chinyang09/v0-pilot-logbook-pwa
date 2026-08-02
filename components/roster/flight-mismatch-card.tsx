@@ -12,6 +12,12 @@
  * solid one; the other is muted and tappable, so switching is a single tap in
  * either direction — this is where an import decision gets undone, and it
  * stays available whether the change was accepted or rejected at import time.
+ *
+ * Once a row holds the COMPANY's value it is no longer a standing difference,
+ * only a change that is still undoable, so it moves to the Accepted tab and the
+ * card carries the time left on that (see `lib/utils/retention.ts`). The card
+ * is the same either way — what changes is the footer, because "you can still
+ * put this back, for 74 more days" is the fact the user needs there.
  */
 
 "use client";
@@ -20,6 +26,7 @@ import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { FlightCardBody } from "@/components/flight-card-body";
 import { OptionPair } from "@/components/import/option-pair";
+import { retentionDaysLeft, retentionLabel } from "@/lib/utils/retention";
 import type { Discrepancy } from "@/types/entities/roster.types";
 import type { FlightLog } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
@@ -96,8 +103,23 @@ export function FlightMismatchCard({
   // the point is the comparison, not a pending change.
   const noDiffs = useMemo(() => new Map(), []);
 
+  // The soonest expiry across the card's rows — that is the deadline the user
+  // is actually working to, since after it that field can't be put back.
+  const acceptedAt = useMemo(() => {
+    const stamps = rows
+      .map((r) => r.acceptedAt)
+      .filter((v): v is number => v != null);
+    return stamps.length ? Math.min(...stamps) : undefined;
+  }, [rows]);
+  const holdsOwn = rows.some((r) => r.holding === "logbook");
+
   return (
-    <div className="rounded-xl border border-l-2 border-l-status-warning bg-card px-3 py-2">
+    <div
+      className={cn(
+        "rounded-xl border border-l-2 bg-card px-3 py-2",
+        holdsOwn ? "border-l-status-warning" : "border-l-border"
+      )}
+    >
       <FlightCardBody
         flight={flight}
         displayPrefs={displayPrefs}
@@ -138,18 +160,25 @@ export function FlightMismatchCard({
         })}
       </div>
 
-      <p
-        className={cn(
-          "mt-1.5 text-[11px]",
-          rows.some((r) => r.holding === "logbook")
-            ? "text-muted-foreground"
-            : "text-muted-foreground/70"
+      <div className="mt-1.5 flex items-baseline justify-between gap-2 text-[11px]">
+        <p className={holdsOwn ? "text-muted-foreground" : "text-muted-foreground/70"}>
+          {holdsOwn
+            ? "Your entry is on record; the company's figure is kept alongside it."
+            : "The company's figure is on record. Tap yours to put it back."}
+        </p>
+        {!holdsOwn && acceptedAt != null && (
+          <span
+            className={cn(
+              "shrink-0 tabular-nums",
+              retentionDaysLeft(acceptedAt) <= 7
+                ? "text-status-warning"
+                : "text-muted-foreground/70"
+            )}
+          >
+            {retentionLabel(acceptedAt)}
+          </span>
         )}
-      >
-        {rows.some((r) => r.holding === "logbook")
-          ? "Your entry is on record; the company's figure is kept alongside it."
-          : "The company's figure is on record."}
-      </p>
+      </div>
     </div>
   );
 }

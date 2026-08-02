@@ -29,6 +29,7 @@ import {
   addFlight,
   updateFlight,
   deleteFlight,
+  isLiveFlight,
   getAirportByIata,
   getAirportTimeInfo,
   getCurrentUserPersonnel,
@@ -257,8 +258,12 @@ async function hydrateFlightFromSector(
  *
  * The id is DETERMINISTIC (`mismatch:<flight>:<field>`) so re-importing the
  * same report refreshes the row in place instead of stacking duplicates.
+ *
+ * Exported for `tracked-mismatch.test.ts`: `acceptedAt` decides whether the
+ * pilot's original value is deleted in 90 days, so it is worth testing without
+ * standing up the whole import.
  */
-function trackedMismatches(
+export function trackedMismatches(
   flight: FlightLog,
   changes: readonly FieldDiff[],
   accepted: boolean
@@ -275,6 +280,7 @@ function trackedMismatches(
     if (companyValue === pilotValue) continue;
 
     const appliedValue = accepted ? change.to : pilotValue;
+    const tookCompanyValue = appliedValue === companyValue;
     out.push({
       id: `mismatch:${flight.id}:${change.field}`,
       type: TOLDG_FIELDS.has(change.field)
@@ -285,7 +291,12 @@ function trackedMismatches(
       field: change.field,
       scheduleValue: companyValue,
       logbookValue: pilotValue,
-      holding: appliedValue === companyValue ? "schedule" : "logbook",
+      holding: tookCompanyValue ? "schedule" : "logbook",
+      // Accepting here and accepting later on the discrepancies page are the
+      // same act, so they start the same 90-day undo clock. Rows still holding
+      // the pilot's value have no clock — nothing was overwritten, and a
+      // standing difference is kept for as long as it stands.
+      acceptedAt: tookCompanyValue ? now : undefined,
       resolved: false,
       createdAt: now,
       updatedAt: now,
@@ -475,7 +486,10 @@ async function applySimSessions(
   let existingSims: FlightLog[] = [];
   try {
     const allFlights = await userDb.flights.toArray();
-    existingSims = allFlights.filter(looksLikeSimulator);
+    // A binned sim is not one to match against or dedupe into.
+    existingSims = allFlights.filter(
+      (f) => isLiveFlight(f) && looksLikeSimulator(f)
+    );
   } catch {
     // Can't read what's there — fall through and create (rare).
   }
@@ -947,7 +961,23 @@ export async function executeRosterImport(
   // ----- 5. Persist discrepancies as DB rows so /discrepancies surfaces them -----
   for (const d of result.discrepancies) {
     try {
-      await userDb.discrepancies.put(d);
+      // Mismatch ids are deterministic so a re-import refreshes the row in
+      // place. Carry the original timestamps across: the undo window runs from
+      // when the user first accepted, not from the last time they happened to
+      // re-upload the same report.
+      const existing = await userDb.discrepancies.get(d.id);
+      await userDb.discrepancies.put(
+        existing
+          ? {
+              ...d,
+              createdAt: existing.createdAt || d.createdAt,
+              acceptedAt:
+                d.acceptedAt !== undefined
+                  ? (existing.acceptedAt ?? d.acceptedAt)
+                  : undefined,
+            }
+          : d
+      );
     } catch (error) {
       result.errors.push({
         operation: `discrepancy ${d.id}`,

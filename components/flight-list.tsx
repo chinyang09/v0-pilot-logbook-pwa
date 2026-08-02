@@ -40,6 +40,7 @@ import { cn } from "@/lib/utils";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { primeFlightCache } from "@/components/flight-form";
 import { FastScroll, type FastScrollItem } from "@/components/ui/fast-scroll";
+import { ScrollIndicator } from "@/components/ui/scroll-indicator";
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, instant?: boolean) => void;
@@ -53,7 +54,8 @@ interface FlightListProps {
   onTopFlightChange?: (flight: FlightLog | null) => void;
   onScrollStart?: () => void;
   onScroll?: (e: React.UIEvent<HTMLElement>) => void;
-  topSpacerHeight?: number; // Height of the calendar
+  /** CSS length: the header offset plus the calendar, when open. */
+  topSpacerHeight?: string;
   headerContent?: React.ReactNode; // Height of the top bar (48px)
   selectedFlightId?: string | null; // Currently selected flight for visual highlighting
 }
@@ -202,7 +204,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       onTopFlightChange,
       onScrollStart,
       onScroll,
-      topSpacerHeight = 0,
+      topSpacerHeight = "0px",
       headerContent,
       selectedFlightId,
     },
@@ -224,13 +226,67 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     // Generate FastScroll items from flights (year-based)
     const fastScrollItems = useMemo(() => generateFlightYearItems(flights), [flights]);
 
+    // The row height, calibrated from the first card actually laid out.
+    //
+    // This matters more than it looks. When a measured row turns out taller or
+    // shorter than the estimate, the virtualizer keeps the view stable by
+    // programmatically scrolling by the difference — and a programmatic scroll
+    // CANCELS an in-progress momentum scroll on touch. Scrolling up through
+    // rows that had never been measured (after jumping into the middle of the
+    // list) therefore killed the fling on almost every row: the list stopped
+    // dead and needed another swipe, over and over.
+    //
+    // Every flight card is the same height by construction (the two optional
+    // rows in flight-card-body reserve their line), so ONE measurement is the
+    // right answer for all of them. Calibrate from it and the correction never
+    // fires. 104 is only the opening guess, used for the first paint.
+    const [rowHeight, setRowHeight] = useState(0); // 0 = not calibrated yet
+    const rowHeightRef = useRef(104); // opening guess, for the first paint only
+    const calibratedRef = useRef(false);
+
     // Create virtualizer instance
     const rowVirtualizer = useVirtualizer({
       count: flights.length,
       getScrollElement: () => scrollContainerRef.current,
-      estimateSize: () => 104, // Measured: 86px content + 8px py-1 + 2px border + 8px container padding
-      overscan: 5, // Render 5 extra items above/below viewport
+      estimateSize: () => rowHeightRef.current,
+      // Enough that a fast flick doesn't outrun the rendered window. Cheap now
+      // that the rows aren't measured individually.
+      overscan: 8,
+      // Sizes are keyed per FLIGHT, not per index. Keyed by index they get
+      // misattributed the moment the list changes — a delete or a re-sort
+      // hands row N the height that belonged to whatever used to be there.
+      getItemKey: (index) => flights[index]?.id ?? `row-${index}`,
     });
+
+    // Calibrate ONCE off the first card that lays out, then never measure again.
+    //
+    // Not measuring is the point. Every card is the same height by
+    // construction, so one number is exact for all of them — and with no
+    // per-row measurement the virtualizer can never discover a size it didn't
+    // expect, which means it can never correct the scroll offset. That is what
+    // makes the momentum scroll survive anywhere in the list, including
+    // upwards through rows that have never been on screen.
+    //
+    // It is also strictly one-shot on purpose. Feeding every row's measurement
+    // back into the estimate is a setState in a ref callback: two rows that
+    // disagree by a fraction of a pixel (subpixel layout, a device's font
+    // scaling) ping-pong it and React tears the page down with "maximum update
+    // depth exceeded".
+    const measureRow = useCallback((el: HTMLElement | null) => {
+      if (!el || calibratedRef.current) return;
+      const h = Math.round(el.getBoundingClientRect().height);
+      if (h <= 0) return;
+      calibratedRef.current = true;
+      rowHeightRef.current = h;
+      setRowHeight(h);
+    }, []);
+
+    // Rebuild every row's position from the calibrated height. `estimateSize`
+    // is read through a ref, which the virtualizer does not watch — this is
+    // what tells it to look again.
+    useEffect(() => {
+      if (rowHeight > 0) rowVirtualizer.measure();
+    }, [rowHeight, rowVirtualizer]);
 
     // Get virtual items
     const virtualItems = rowVirtualizer.getVirtualItems();
@@ -501,11 +557,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             onWheel={handleWheelStart}
           >
             <div
-              style={{ height: `${topSpacerHeight}px` }}
+              style={{ height: topSpacerHeight }}
               className="transition-[height] duration-300 ease-in-out"
             />
             {headerContent}
-            <div className="px-2 pt-2">
+            <div className="px-panel pt-2">
               <EmptyState
                 icon={Plane}
                 title="No flights logged"
@@ -523,15 +579,19 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           {/* Main scrollable container */}
           <div
             ref={scrollContainerRef}
-            className="h-full overflow-y-auto flex-1 overscroll-contain"
+            // scrollbar-hide + ScrollIndicator: the native overlay indicator
+            // spans from the screen edge over the status bar; the inset
+            // replacement starts below the action buttons, like native.
+            className="h-full overflow-y-auto flex-1 overscroll-contain scrollbar-hide"
             style={{ contain: "strict" }}
             onTouchStart={handleTouchStart}
             onMouseDown={handleTouchStart}
             onWheel={handleWheelStart}
           >
+            <ScrollIndicator />
             {/* Top spacer for calendar */}
             <div
-              style={{ height: `${topSpacerHeight}px` }}
+              style={{ height: topSpacerHeight }}
               className="transition-[height] duration-300 ease-in-out"
             />
 
@@ -568,7 +628,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                         transform: `translateY(${virtualRow.start}px)`,
                       }}
                       data-index={virtualRow.index}
-                      ref={rowVirtualizer.measureElement}
+                      ref={measureRow}
                     >
                       {/* Shift div: slides cards below the deleting card upward
                           using a CSS translateY transition. This keeps the
@@ -584,7 +644,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                         {/* Content wrapper: padding + fade-out for the deleting card */}
                         <div
                           style={{
-                            padding: "0 8px 8px 8px",
+                            // Horizontal = the shared --panel-gutter, so the
+                            // logbook's cards line up with the detail panel
+                            // and the sidebar. Bottom 8px is this list's
+                            // per-row gap (its spacer subtracts it).
+                            padding: "0 var(--panel-gutter) 8px var(--panel-gutter)",
                             ...(isDeleting && {
                               opacity: 0,
                               transform: "translateX(-40px)",
@@ -609,15 +673,18 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
               })()}
             </div>
 
-            {/* Bottom padding */}
-            <div className="h-16" />
+            {/* Bottom padding — minus the 8px trailing gap every row wrapper
+                already carries, so the LAST card's edge rests on the same
+                line as the sidebar's lower end and the other panels' last
+                rows (they end flush with their spacers; this list doesn't) */}
+            <div style={{ height: "calc(var(--chrome-bottom) - 8px)" }} />
           </div>
 
           {/* FastScroll rail (year-based navigation) - positioned in visible area below calendar/header */}
           {fastScrollItems.length > 1 && (
             <div
               className="absolute right-0 bottom-0 z-40 flex items-center pointer-events-none transition-[top] duration-300 ease-in-out"
-              style={{ top: `${topSpacerHeight}px` }}
+              style={{ top: topSpacerHeight }}
             >
               <div className="pointer-events-auto">
                 <FastScroll

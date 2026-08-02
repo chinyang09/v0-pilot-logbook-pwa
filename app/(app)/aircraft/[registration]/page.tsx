@@ -214,7 +214,7 @@ export default function AircraftDetailPage() {
         </header>
       }
     >
-      <div className="container mx-auto px-2 pt-4 pb-safe space-y-4">
+      <div className="container mx-auto px-2 pt-4 space-y-4">
         {!aircraft ? (
           <p className="text-center text-muted-foreground py-12">
             Aircraft not found: {registration}
