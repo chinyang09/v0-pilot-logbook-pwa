@@ -108,6 +108,9 @@ components/                       # React components
 ├── airport-new-form.tsx          # New airport form (FR24 auto-populate)
 ├── aircraft-detail-panel.tsx     # Aircraft detail view (desktop panel)
 ├── airport-detail-panel.tsx      # Airport detail view (desktop panel)
+├── nav-pill.tsx                  # Nav pill ↔ sidebar morph, gravity blob, drag lens
+├── viewport-shell-compensator.tsx # Measures the iOS standalone viewport shortfall
+├── bottom-edge-blur.tsx          # Home-indicator darkening fade (iOS standalone)
 ├── service-worker-register.tsx   # SW registration
 └── pwa-install-prompt.tsx        # PWA install prompts
 
@@ -1330,12 +1333,24 @@ input and a laggier tap; and the `.squircle` helpers, which masked with the
 Chromium-only Houdini `paint(squircle)` worklet that was never registered, so
 the class did nothing anywhere.
 
-The **one** legitimate exception is `components/pwa-install-prompt.tsx`. Adding
-to the home screen is a genuinely different flow per OS (iOS: Share → Add to
-Home Screen; Android: browser menu → Install app, via `beforeinstallprompt`),
-so it detects the platform to show the right instructions. That is a difference
-in the OS, not in the app's look — do not "unify" it, or iOS users lose the
-only path to installing.
+The legitimate exceptions are all cases where the OS itself differs, not the
+app's look:
+
+- `components/pwa-install-prompt.tsx` — adding to the home screen is a
+  genuinely different flow per OS (iOS: Share → Add to Home Screen; Android:
+  browser menu → Install app, via `beforeinstallprompt`), so it detects the
+  platform to show the right instructions. Do not "unify" it, or iOS users lose
+  the only path to installing.
+- `components/viewport-shell-compensator.tsx` — cancels a WebKit
+  installed-PWA bug (the reported viewport is shorter than the screen). The
+  RESULT is the same full-bleed shell everywhere; only the bug being cancelled
+  belongs to one engine. It must stay iOS-scoped: Android's standalone window
+  legitimately excludes the system bars, so compensating there would push the
+  shell below the visible window.
+- `components/bottom-edge-blur.tsx` — keys off a real bottom safe-area inset,
+  which only an installed iOS app has. Android's window already excludes its
+  gesture bar, so there is no band to fade toward and nothing renders. Same
+  rule, different OS geometry.
 
 ## Database Schema
 
@@ -1401,6 +1416,20 @@ When making changes, be aware of these high-impact files:
 - `hooks/use-page-active.tsx` — Active route context and `usePageActive` hook
 - `hooks/use-detail-panel.tsx` — Detail panel provider (keep-alive route awareness)
 - `components/desktop-layout.tsx` — Responsive app shell (sidebar + detail panel)
+- `components/nav-pill.tsx` — The pill↔sidebar morph, the gravity blob's two springs, and the drag lens
+
+**Edge-to-edge shell & chrome** (one number each — changing one moves every panel):
+- `app/globals.css` — `--chrome-top` / `--chrome-bottom` (scroller offsets),
+  `--nav-bottom-offset` (where the nav rests), `--content-bottom-inset` (what
+  content owes the home indicator), `--panel-gutter` (the shared horizontal
+  gutter), and the compensated `body` shell
+- `components/viewport-shell-compensator.tsx` — measures WebKit's installed-PWA
+  viewport shortfall into `--shell-bottom-gap`
+- `components/ui/chrome-overlays.tsx` — `ChromeFade`, the one floating-header
+  treatment (progressive blur under a darkening veil)
+- `components/ui/scroll-indicator.tsx` — the inset scroll indicator (fixed thumb
+  in `document.body`, sticky marker as the rubber-band sensor)
+- `components/bottom-edge-blur.tsx` — the home-indicator darkening fade
 
 **Glass system:**
 - `components/ui/glass-container.tsx` — ONE material on every platform: the
@@ -1544,7 +1573,7 @@ When making changes, be aware of these high-impact files:
 ## Things to Avoid
 
 - Do not introduce Turbopack — the project explicitly uses Webpack due to OCR/ONNX compatibility
-- Do not add a test framework without discussion — none exists currently
+- Do not add a second test framework — Vitest is the one in use (`pnpm test`), pure-function suites next to their subject; a browser/component runner is a separate discussion
 - Do not modify the Dexie schema without considering IndexedDB migration implications
 - Do not change sync conflict resolution strategy without understanding the tombstone system
 - Do not gate `SyncProvider`'s init on a one-shot `getUserSession()` check at mount — drive it off `useAuth().user` so a login *after* mount (cold-open-logged-out, or logout→login) still initializes triggers and runs the initial sync
