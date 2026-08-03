@@ -86,9 +86,9 @@ function DetailPanelContent() {
   // Logbook uses the Smart Switcher pattern and never sets detailContent, so skip the
   // fallback for logbook to prevent stale aircraft/airport/crew panels from bleeding in.
   return (
-    <div className="h-full overflow-auto bg-background">
+    <div className="h-full overflow-auto overscroll-contain bg-background">
       {!isLogbook && detailContent ? (
-        <div className="h-full overflow-auto">
+        <div className="h-full overflow-auto overscroll-contain">
           {detailContent}
         </div>
       ) : (

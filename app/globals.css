@@ -202,9 +202,20 @@
        VIEWPORT-ANCHORED layers are hard-clipped at the buggy viewport edge —
        measured: a fixed probe never painted below the line no matter what.
        A fixed body put the entire app into the clipped regime. In flow, the
-       app lives in the document layer and paints to the physical bottom. */
+       app lives in the document layer and paints to the physical bottom.
+
+       Height is `100%` — of `html`, which is `100%` of the initial containing
+       block — NOT `100dvh`. Those are different boxes: `dvh` tracks the
+       DYNAMIC viewport (it grows as a URL bar retracts), while the document's
+       scrollable box is the ICB. Whenever they disagreed, body was taller than
+       the document and the whole page gained a scroll range — and because body
+       carries the transform below, EVERY fixed element (nav pill, headers, the
+       mobile detail overlay) rode that scroll, which is how the action buttons
+       could be pushed off-screen on a page with nothing to scroll. Against the
+       ICB the shell can never overflow, so the document has no range to give.
+       The iOS compensation is added on top, deliberately. */
     width: 100%;
-    height: 100dvh;
+    height: 100%;
     /* The transform makes BODY the containing block for every
        `position: fixed` descendant (nav pill, sidebar morph, drag lens,
        overlays, portalled dialogs). Two jobs: they position and size against
@@ -231,7 +242,7 @@
      WebKit also corrects innerHeight (and dvh) to the full screen shortly
      after launch, so the steady-state gap is usually 0 anyway. */
   body {
-    height: calc(100dvh + var(--shell-bottom-gap, 0px));
+    height: calc(100% + var(--shell-bottom-gap, 0px));
   }
 }
 
@@ -351,6 +362,16 @@
 .px-panel {
   padding-left: var(--panel-gutter);
   padding-right: var(--panel-gutter);
+}
+
+/* Cancel the gutter, for a row that bleeds to the panel edge and re-applies
+   the padding itself (a horizontally scrolling chip strip). It MUST be the
+   negative of `--panel-gutter`: a hardcoded `-mx-4` against a 12px gutter
+   pushed the strip 4px past both edges, which is horizontal overflow the
+   root no longer clips. */
+.-mx-panel {
+  margin-left: calc(-1 * var(--panel-gutter));
+  margin-right: calc(-1 * var(--panel-gutter));
 }
 
 /* ─── Native touch feel ─── */

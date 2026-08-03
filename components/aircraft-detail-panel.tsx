@@ -173,7 +173,7 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
 
   return (
     <div className="h-full relative flex flex-col">
-      <div className="flex-1 overflow-y-auto scrollbar-hide">
+      <div className="flex-1 overflow-y-auto overscroll-contain scrollbar-hide">
         <ScrollIndicator />
         <div className="h-chrome-top" />
         <div className="px-panel pt-4 space-y-4">
