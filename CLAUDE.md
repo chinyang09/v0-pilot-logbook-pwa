@@ -425,12 +425,20 @@ at `--chrome-top`, and the list reserves their combined height in its
   conditionally rendered), so its natural height is always measurable and the
   collapse is a plain px transition the spacer can match exactly.
 
-The search floats with the chrome rather than scrolling away as the list's
-first row, so it is reachable without scrolling back to the top. Its category
-buttons (Flight / Aircraft / Airport / Crew) NARROW the typed query to one
-field — they are not a switch that has to be on for typing to do anything,
-which is what they used to be: with no category active, `filteredFlights`
-ignored the query completely.
+**Search is a token field, stowed by default.** A header button opens it
+between the action buttons and the calendar, and it collapses on the same
+`PANEL_MOTION`, so whichever panel is opening the list is pushed by one
+movement. Typing filters live; pressing Enter pins the text as a CHIP so the
+next term stacks on it, and every chip must match (AND) — `TR647` then `WSSS`
+is that flight number *and* that airport. Backspace on an empty field takes
+the last chip back, and stowing clears the terms, because a hidden filter
+quietly narrowing the logbook is the kind of thing you don't notice for ten
+minutes.
+
+The category tabs (Flight / Aircraft / Airport / Crew) are **gone**. They were
+a precondition rather than a refinement — with none active `filteredFlights`
+ignored the query completely — and once a term matches any field, stacking
+terms expresses everything the categories did without the mode.
 
 ### The Flight Card (`components/flight-card-body.tsx`)
 
@@ -1639,7 +1647,7 @@ When making changes, be aware of these high-impact files:
 - Do not open a detail with `router.replace` — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
 - Do not remove `overflow-anchor: none` from the logbook scroller — growing the top spacer is how the floating panels push the list, and scroll anchoring exists to cancel exactly that (it bumps `scrollTop` to keep the view still). With it on, the calendar only pushed the list when it was already scrolled to the top, and the compensating adjustment read as a downward scroll that hid the nav pill
 - Do not give the calendar's collapse and the list spacer separate animations — they share `PANEL_MOTION`, or the panel opens and the list catches up afterwards as a visible second stage. The calendar stays MOUNTED at `height: 0` so its natural height is measurable and the collapse is a px transition the spacer can match
-- Do not make the logbook's category buttons a precondition for searching — the typed query filters every field on its own, and a category only narrows WHERE it looks. Gating the search on a category meant typing did nothing at all until one was picked
+- Do not reintroduce search CATEGORIES on the logbook — search is a token field: the typed text filters live, Enter pins it as a chip, and chips AND together. The old category tabs were a precondition (typing did nothing until one was picked), and stacking terms covers what they did without the mode
 - Do not let flight cards vary in height, and do not put per-row `measureElement` back on the logbook list — the virtualizer corrects the scroll offset when a measured row differs from the estimate, and a programmatic scroll cancels a momentum scroll on touch (that is the "scrolling up stops every row" bug). Keep the optional rows' `min-h`, keep the calibration ONE-SHOT (feeding every row back in is a setState loop that crashes the page), and keep `getItemKey` on the flight id
 - Do not inset the app shell by the safe area — the PWA runs edge to edge and content scrolls UNDER the status bar and Android's gesture pill. The insets belong inside each scroller
 - Do not size the app shell with `100%` or with a measured/compensated height, and do not put a `transform` on `body`. The shell is ONE box — `html, body { margin:0; padding:0; overflow:hidden; height:100dvh }`, switched to `100vh` under `@media (display-mode: standalone)`. Each unit is wrong somewhere and the split is the point: `100%` resolves against the initial containing block, which under `viewport-fit=cover` + `black-translucent` EXCLUDES the area behind the status bar, so the shell lands short of the screen; `100dvh` is wrong at COLD START in an installed iOS app and does not reliably settle (it corrects after a portrait→landscape→portrait rotation), so sizing from it — and far worse, MEASURING the shortfall and compensating — is a feedback loop that made the app visibly vibrate; `100vh` is correct from cold start in standalone (no toolbar, so `vh`/`dvh`/`innerHeight`/`screen.height` converge) but is the LARGE viewport in a browser tab, where it would hide the bottom nav behind the URL bar. This is a display-mode split, not a platform one — it reads the same on iOS and Android. `overflow: hidden` propagates to the viewport and is what keeps the document unscrollable. A `transform` on `body` would make it the containing block for every `position: fixed` element, changing what "fixed" means app-wide (and what `100%` resolves against on those elements) for no gain once the shell is sized right. Safe-area padding stays inside the bottom nav (`bottom: 4px + env(...)`), never on `body`

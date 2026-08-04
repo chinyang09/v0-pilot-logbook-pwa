@@ -5,8 +5,6 @@ import { FlightList, type FlightListRef } from "@/components/flight-list"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useDebounce } from "@/hooks/use-debounce"
 import { LogbookCalendar, type CalendarHandle } from "@/components/logbook-calendar"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { type FlightLog } from "@/lib/db"
 import { syncService } from "@/lib/sync"
 import { useCreateFlight } from "@/hooks/use-create-flight"
@@ -14,15 +12,13 @@ import {
   useFlights,
   refreshAllData,
   useDBReady,
-  useAircraft,
-  useAirportDatabase,
-  usePersonnel,
   CACHE_KEYS,
 } from "@/hooks/data"
 import { mutate } from "swr"
 import { Calendar, Plus, Search, X, ChevronDown } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
+import { GlassContainer } from "@/components/ui/glass-container"
 import { MORPH_EASE } from "@/lib/motion"
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date"
 import { insertFlightSorted } from "@/lib/utils/flight-sort"
@@ -46,9 +42,6 @@ export default function LogbookPage() {
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
 
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
-  const { aircraft } = useAircraft()
-  const { airports } = useAirportDatabase()
-  const { personnel } = usePersonnel()
   const createFlight = useCreateFlight()
 
   // Initialize calendar state from URL (preserves state when switching layouts)
@@ -75,11 +68,12 @@ export default function LogbookPage() {
     return { year: now.getFullYear(), month: now.getMonth() }
   })
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
-  const [activeFilterType, setActiveFilterType] = useState<"none" | "flight" | "aircraft" | "airport" | "crew">("none")
   const [searchQuery, setSearchQuery] = useState("")
   const debouncedSearchQuery = useDebounce(searchQuery, 150)
-  const [searchFocused, setSearchFocused] = useState(false)
-  const [selectedFilters, setSelectedFilters] = useState<string[]>([])
+  /** Committed search terms. Every one must match (AND), so terms stack:
+   *  "TR647" + "WSSS" is that flight number AND that airport. */
+  const [searchTerms, setSearchTerms] = useState<string[]>([])
+  const [showSearch, setShowSearch] = useState(false)
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   const { handleScroll } = useScrollNavbarContext()
 
@@ -99,6 +93,7 @@ export default function LogbookPage() {
   const calendarContainerRef = useRef<HTMLDivElement>(null)
 
   const searchBlockRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const calendarContentRef = useRef<HTMLDivElement>(null)
 
   // Measure calendar's natural height + container width for dual-month detection
@@ -293,128 +288,69 @@ export default function LogbookPage() {
     await mutate(CACHE_KEYS.stats, undefined, { revalidate: true })
   }
 
-  const filterOptions = useMemo(() => {
-    const options = new Set<string>()
-    const query = debouncedSearchQuery.toLowerCase()
-
-    switch (activeFilterType) {
-      case "flight":
-        flights.forEach((f) => {
-          if (f.flightNumber && f.flightNumber.toLowerCase().includes(query)) {
-            options.add(f.flightNumber)
-          }
-        })
-        break
-      case "aircraft":
-        aircraft.forEach((a) => {
-          if (
-            (a.registration && a.registration.toLowerCase().includes(query)) ||
-            (a.type && a.type.toLowerCase().includes(query))
-          ) {
-            options.add(`${a.registration} (${a.type})`)
-          }
-        })
-        break
-      case "airport":
-        airports.forEach((a) => {
-          if ((a.icao && a.icao.toLowerCase().includes(query)) || (a.name && a.name.toLowerCase().includes(query))) {
-            options.add(`${a.icao} - ${a.name}`)
-          }
-        })
-        break
-      case "crew":
-        personnel.forEach((p) => {
-          const name = p.name || ""
-          if (name.toLowerCase().includes(query)) {
-            options.add(name)
-          }
-        })
-        break
-    }
-
-    // The list scrolls (max-h-48), so the cap only exists to keep rendering
-    // cheap — 10 was low enough that a common type code hid most matches.
-    return Array.from(options).slice(0, 50)
-  }, [activeFilterType, debouncedSearchQuery, flights, aircraft, airports, personnel])
+  /** Every searchable string on a flight, lowercased once per flight. */
+  const searchableFields = useCallback((f: FlightLog): string[] => [
+    f.flightNumber ?? "",
+    f.aircraftReg ?? "",
+    f.aircraftType ?? "",
+    f.departureIcao ?? "",
+    f.arrivalIcao ?? "",
+    f.departureIata ?? "",
+    f.arrivalIata ?? "",
+    f.picName ?? "",
+    f.sicName ?? "",
+    ...(f.additionalCrew?.map((c) => c.name ?? "") ?? []),
+    f.date ?? "",
+  ], [])
 
   const filteredFlights = useMemo(() => {
-    let result = flights
+    // Committed chips AND the text still being typed — so a query narrows the
+    // list live, and pressing Enter only pins it so the next one can stack.
+    const pending = debouncedSearchQuery.trim().toLowerCase()
+    const terms = [...searchTerms.map((t) => t.toLowerCase()), ...(pending ? [pending] : [])]
+    if (terms.length === 0) return flights
 
-    // FREE TEXT — always applied, whether or not a category is active. The
-    // category buttons narrow WHERE it looks; they are not a switch that has
-    // to be on for typing to do anything (it previously did nothing at all
-    // until you picked one).
-    const q = debouncedSearchQuery.trim().toLowerCase()
-    if (q) {
-      const fieldsFor = (f: FlightLog): string[] => {
-        switch (activeFilterType) {
-          case "flight":
-            return [f.flightNumber ?? ""]
-          case "aircraft":
-            return [f.aircraftReg ?? "", f.aircraftType ?? ""]
-          case "airport":
-            return [f.departureIcao ?? "", f.arrivalIcao ?? "", f.departureIata ?? "", f.arrivalIata ?? ""]
-          case "crew":
-            return [f.picName ?? "", f.sicName ?? "", ...(f.additionalCrew?.map((c) => c.name ?? "") ?? [])]
-          default:
-            return [
-              f.flightNumber ?? "",
-              f.aircraftReg ?? "",
-              f.aircraftType ?? "",
-              f.departureIcao ?? "",
-              f.arrivalIcao ?? "",
-              f.departureIata ?? "",
-              f.arrivalIata ?? "",
-              f.picName ?? "",
-              f.sicName ?? "",
-              ...(f.additionalCrew?.map((c) => c.name ?? "") ?? []),
-              f.date ?? "",
-            ]
-        }
+    return flights.filter((flight) => {
+      const fields = searchableFields(flight).map((v) => v.toLowerCase())
+      return terms.every((term) => fields.some((v) => v.includes(term)))
+    })
+  }, [flights, searchTerms, debouncedSearchQuery, searchableFields])
+
+  /** Stow/open the search row. Opening focuses the field; stowing clears the
+   *  filters, because a hidden filter silently narrowing the logbook is the
+   *  kind of thing you spend ten minutes not noticing. */
+  const toggleSearch = useCallback(() => {
+    setShowSearch((open) => {
+      if (open) {
+        setSearchQuery("")
+        setSearchTerms([])
+      } else {
+        // after the row has height
+        setTimeout(() => searchInputRef.current?.focus(), 120)
       }
-      result = result.filter((f) => fieldsFor(f).some((v) => v.toLowerCase().includes(q)))
-    }
+      return !open
+    })
+  }, [])
 
-    if (selectedFilters.length > 0 && activeFilterType !== "none") {
-      result = result.filter((flight) => {
-        switch (activeFilterType) {
-          case "flight":
-            return selectedFilters.some((filter) => flight.flightNumber === filter)
-          case "aircraft":
-            const acLabel = flight.aircraftReg ? `${flight.aircraftReg} (${flight.aircraftType})` : ""
-            return selectedFilters.includes(acLabel)
-          case "airport":
-            return selectedFilters.some((filter) => {
-              const icao = filter.split(" - ")[0]
-              return flight.departureIcao === icao || flight.arrivalIcao === icao
-            })
-          case "crew":
-            return selectedFilters.some((filter) => {
-              if (flight.picName === filter || flight.sicName === filter) return true
-              if (flight.additionalCrew?.some((c) => c.name === filter)) return true
-              return false
-            })
-          default:
-            return true
-        }
-      })
-    }
-
-    return result
-  }, [flights, selectedFilters, activeFilterType, debouncedSearchQuery])
-
-  const clearAllFilters = () => {
+  const clearAllFilters = useCallback(() => {
     setSelectedDate(null)
-    setActiveFilterType("none")
     setSearchQuery("")
-    setSelectedFilters([])
-  }
+    setSearchTerms([])
+  }, [])
 
-  const toggleFilterOption = (option: string) => {
-    setSelectedFilters((prev) => (prev.includes(option) ? prev.filter((f) => f !== option) : [...prev, option]))
-  }
+  /** Pin the typed text as a chip so the next term stacks on top of it. */
+  const commitSearchTerm = useCallback(() => {
+    const term = searchQuery.trim()
+    if (!term) return
+    setSearchTerms((prev) => (prev.some((t) => t.toLowerCase() === term.toLowerCase()) ? prev : [...prev, term]))
+    setSearchQuery("")
+  }, [searchQuery])
 
-  const hasActiveFilters = selectedFilters.length > 0
+  const removeSearchTerm = useCallback((term: string) => {
+    setSearchTerms((prev) => prev.filter((t) => t !== term))
+  }, [])
+
+  const hasActiveFilters = searchTerms.length > 0 || searchQuery.trim().length > 0
   const isLoading = dbLoading || !dbReady
 
   // Action buttons for the desktop floating glass bar — each in its own glass container.
@@ -430,13 +366,21 @@ export default function LogbookPage() {
     <>
       <GlassButtonGroup>
         <GlassGroupButton
+          ariaLabel="Toggle search"
+          ariaPressed={showSearch}
+          active={showSearch}
+          onClick={toggleSearch}
+        >
+          <Search className="h-5 w-5" />
+        </GlassGroupButton>
+
+        <GlassGroupButton
           ariaLabel="Toggle calendar"
           ariaPressed={showCalendar}
           active={showCalendar}
           onClick={() => {
             toggleCalendar(!showCalendar)
             setSelectedDate(null)
-            setSearchFocused(false)
             if (showCalendar) setShowMonthPicker(false)
           }}
         >
@@ -487,7 +431,7 @@ export default function LogbookPage() {
         <Plus className="h-5 w-5" />
       </GlassIconButton>
     </>
-  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId, selectedMonth, showMonthPicker])
+  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId, selectedMonth, showMonthPicker, showSearch, toggleSearch])
 
   // Register actions for the desktop floating bar
   useRegisterMainActions(logbookActions, isActive)
@@ -505,122 +449,76 @@ export default function LogbookPage() {
         className="z-40 absolute left-0 right-0"
         style={{ top: "var(--chrome-top)", contain: "layout style paint" }}
       >
-        {/* SEARCH — floats with the chrome instead of scrolling away with the
-            list, so it is reachable without scrolling back to the top. */}
-        <div ref={searchBlockRef} className="px-2 py-1">
-          <div className="relative">
-            <Input
-              placeholder="Search flights..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => setSearchFocused(true)}
-              className="pl-10 h-10 bg-background/30 backdrop-blur-xl border-border"
-            />
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
-            {(searchFocused || searchQuery || hasActiveFilters) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchFocused(false)
-                  setSearchQuery("")
-                  setActiveFilterType("none")
-                  setSelectedFilters([])
-                }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-sm text-primary font-medium"
-              >
-                Cancel
-              </button>
+        {/* SEARCH — stowed by default, opened from the header button. It sits
+            between the action buttons and the calendar, and collapses the same
+            way the calendar does so the list is pushed by one movement
+            whichever of the two is opening. */}
+        <div
+          className="overflow-hidden"
+          style={{
+            height: showSearch ? searchBlockHeight : 0,
+            transition: PANEL_MOTION,
+            willChange: "height",
+          }}
+          aria-hidden={!showSearch}
+        >
+          <div ref={searchBlockRef} className="px-2 pt-1 pb-2">
+            <GlassContainer cornerRadius={20} className="w-full">
+              <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
+                <Search className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+
+                {/* Committed terms. Each is one criterion and they AND together. */}
+                {searchTerms.map((term) => (
+                  <button
+                    key={term}
+                    type="button"
+                    onClick={() => removeSearchTerm(term)}
+                    className="flex items-center gap-1 rounded-full bg-primary/20 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/30"
+                  >
+                    {term}
+                    <X className="h-3 w-3" />
+                  </button>
+                ))}
+
+                <input
+                  ref={searchInputRef}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      commitSearchTerm()
+                    } else if (e.key === "Backspace" && !searchQuery && searchTerms.length) {
+                      // Standard token-field behaviour: backspace on an empty
+                      // field takes the last chip back.
+                      e.preventDefault()
+                      setSearchTerms((prev) => prev.slice(0, -1))
+                    }
+                  }}
+                  enterKeyHint="done"
+                  placeholder={searchTerms.length ? "Add filter…" : "Search flights…"}
+                  className="min-w-[6rem] flex-1 border-0 bg-transparent p-0 text-sm outline-none placeholder:text-muted-foreground"
+                />
+
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={clearAllFilters}
+                    aria-label="Clear all filters"
+                    className="flex-shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            </GlassContainer>
+
+            {hasActiveFilters && (
+              <div className="px-1 pt-1.5 text-xs text-muted-foreground">
+                {filteredFlights.length} flight{filteredFlights.length !== 1 ? "s" : ""}
+              </div>
             )}
           </div>
-
-          {/* Category buttons — narrow the free-text search to one field.
-              They are a REFINEMENT, not a switch: with none active the query
-              still searches every field. */}
-          {searchFocused && (
-            <div className="flex items-center gap-1.5 mt-3 animate-in fade-in slide-in-from-top-2 duration-200">
-              {[
-                { id: "flight", label: "Flight" },
-                { id: "aircraft", label: "Aircraft" },
-                { id: "airport", label: "Airport" },
-                { id: "crew", label: "Crew" },
-              ].map((filter) => (
-                <Button
-                  key={filter.id}
-                  variant={activeFilterType === filter.id ? "secondary" : "ghost"}
-                  size="sm"
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    const turningOff = activeFilterType === filter.id
-                    setActiveFilterType(turningOff ? "none" : (filter.id as typeof activeFilterType))
-                    // Only the chips belong to the category — the typed query
-                    // survives, because it still searches everything.
-                    if (turningOff) setSelectedFilters([])
-                  }}
-                  className="flex-1 text-xs h-8 font-medium"
-                >
-                  {filter.label}
-                </Button>
-              ))}
-            </div>
-          )}
-
-          {/* Selected filter chips */}
-          {selectedFilters.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-3 animate-in fade-in duration-200">
-              {selectedFilters.map((filter) => (
-                <button
-                  key={filter}
-                  type="button"
-                  onClick={() => toggleFilterOption(filter)}
-                  className="px-2.5 py-1 bg-primary/20 text-primary text-xs rounded-full flex items-center gap-1 font-medium hover:bg-primary/30 transition-colors"
-                >
-                  {filter}
-                  <X className="h-3 w-3" />
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Result count — shown whenever anything is narrowing the list */}
-          {(hasActiveFilters || debouncedSearchQuery.trim()) && !searchFocused && (
-            <div className="flex items-center justify-between mt-2 animate-in fade-in duration-200">
-              <span className="text-xs text-muted-foreground">
-                {filteredFlights.length} flight
-                {filteredFlights.length !== 1 ? "s" : ""}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearAllFilters}
-                className="text-xs h-7 hover:bg-destructive/10"
-              >
-                <X className="h-3 w-3 mr-1" />
-                Clear filters
-              </Button>
-            </div>
-          )}
-
-          {/* Suggestions for the active category */}
-          {searchFocused && activeFilterType !== "none" && filterOptions.length > 0 && (
-            <div className="mt-2 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto overscroll-contain animate-in fade-in slide-in-from-top-2 duration-200">
-              {filterOptions.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    toggleFilterOption(option)
-                  }}
-                  className={cn(
-                    "w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors",
-                    selectedFilters.includes(option) && "bg-primary/10 text-primary",
-                  )}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* CALENDAR — always mounted, collapsed to 0. Mounted rather than
@@ -679,7 +577,7 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={`calc(var(--chrome-top) + ${searchBlockHeight + (showCalendar ? calendarNaturalHeight : 0)}px)`}
+          topSpacerHeight={`calc(var(--chrome-top) + ${(showSearch ? searchBlockHeight : 0) + (showCalendar ? calendarNaturalHeight : 0)}px)`}
           topSpacerTransition={PANEL_MOTION}
           selectedFlightId={selectedFlightId}
         />
