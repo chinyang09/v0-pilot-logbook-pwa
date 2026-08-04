@@ -1200,13 +1200,13 @@ function SidebarNavItem({
  * That is not the box a `position: fixed` element is laid out in once a
  * browser has chrome of its own: on iPad Safari in PORTRAIT the sidebar came
  * out taller than the visible page and overshot both ends, its top strip
- * clipped away. `100%` here resolves against the fixed element's containing
- * block, which is BODY — body carries a `transform` precisely so that every
- * fixed element anchors to the application shell rather than to the initial
- * containing block, the box the WebKit installed-PWA bug shrinks by the bottom
- * inset (see the body rule in globals.css). The panel is therefore exactly as
- * tall as the app shell on every surface, with no listener and nothing to
- * fall out of sync.
+ * clipped away. `100%` here resolves against the fixed element's own
+ * containing block — the viewport, which is precisely the box a fixed element
+ * is allowed to occupy (a browser keeps fixed content clear of its toolbars,
+ * and an installed app has none). The panel is therefore exactly as tall as
+ * the visible app on every surface, with no listener and nothing to fall out
+ * of sync. Do not swap it for a viewport UNIT: `vh` is the large viewport in a
+ * browser tab and would overshoot again, which is the bug this replaced.
  *
  * BOTH ends come off, not just the top. The desktop panel is top-anchored and
  * the mobile one bottom-anchored, and each has to end clear of the OTHER end

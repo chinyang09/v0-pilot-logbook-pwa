@@ -158,72 +158,59 @@
   * {
     @apply border-border outline-ring/50;
   }
-  /* Force background color on html for Android PWA.
+  /* ─── THE APPLICATION SHELL ───
+     One box, sized by a VIEWPORT unit, clipped, and in normal flow. Which
+     unit is the whole question, and all three candidates are wrong somewhere:
 
-     NO `overflow` on html OR body — deliberately. Any overflow value set on
-     the root (or, failing that, on body) is PROPAGATED TO THE VIEWPORT, and a
-     hidden viewport clips document painting at the viewport's edge. In an iOS
-     standalone PWA the reported viewport is SHORTER than the physical screen
-     (the WebKit bug below), so that clip was exactly the dead band above the
-     home indicator: body laid out to the full 820px but nothing below the
-     788px viewport line ever painted. With the default overflow the engine
-     paints the document onto the whole surface — the same machinery that
-     paints a page under Safari's translucent toolbars. The document still
-     cannot scroll: body is position:fixed (out of flow), so html has no
-     in-flow content and the scroll range is zero; overscroll-behavior pins
-     the rubber-band. App content is clipped by the shell's own
-     overflow-hidden containers, not by the root. */
+     - `100%` resolves against the initial containing block, which under
+       `viewport-fit=cover` + `black-translucent` does NOT include the area
+       behind the status bar / notch. The shell comes out short of the screen.
+     - `100dvh` is wrong in an installed iOS app at COLD START and does not
+       reliably settle (it corrects after a portrait→landscape→portrait
+       rotation). Sizing the shell from it, and worse measuring the difference
+       and compensating, is a feedback loop: the correction changes the layout,
+       the layout changes the reading, and the app visibly vibrates.
+     - `100vh` is correct from cold start in standalone — with no toolbar,
+       `100vh`, `100dvh`, `innerHeight` and `screen.height` all converge — but
+       in a BROWSER tab it is the LARGE viewport, so it hides the bottom nav
+       behind the URL bar.
+
+     So: `dvh` in a browser tab (it tracks the toolbars, which is exactly what
+     it is for) and `vh` once installed (no toolbars to track, and it is the
+     only unit right at cold start). That is a display-mode split, not a
+     platform one — it reads the same on iOS and Android.
+
+     `overflow: hidden` propagates to the viewport and is what makes the
+     document unscrollable: without it the shell could exceed the document's
+     scrollable box and the whole page gained a scroll range, which on a page
+     with nothing to scroll read as "free play".
+
+     Body is IN FLOW and carries NO `transform`. A transform on body would make
+     it the containing block for every `position: fixed` descendant, which
+     changes what "fixed" means app-wide (and what `100%` resolves against on
+     those elements) — a large, subtle blast radius for no gain now that the
+     shell is sized correctly. */
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
   html {
     background-color: var(--background);
-    height: 100%;
-    overscroll-behavior: none;
   }
   body {
     @apply bg-background text-foreground;
     background-color: var(--background);
-    overscroll-behavior: none;
-    /* THE application shell. WebKit has an open installed-PWA bug: in a Home
-       Screen web app with `viewport-fit=cover`, the reported viewport (units
-       AND the initial containing block) is SHORTER than the physical screen,
-       so a shell clamped to `100dvh` ends above the home indicator and leaves
-       a dead band. How much shorter is NOT `env(safe-area-inset-bottom)` as
-       the community recipe claims — measured on a real iPad in landscape the
-       shortfall was 32px (the TOP inset) against a bottom inset of 25px — so
-       no static env() term can close it. `--shell-bottom-gap` is the MEASURED
-       shortfall (screen height − innerHeight), written by
-       ViewportShellCompensator on iOS standalone only and 0 everywhere else;
-       the env() fallback below only covers the pre-hydration frames. The
-       safe-area padding lives in the bottom nav, never on body.
-
-       Body is IN FLOW — deliberately NOT position:fixed. WebKit renders in
-       two regimes here: the DOCUMENT layer paints onto the whole physical
-       surface (that is how a page paints under Safari's collapsed toolbar,
-       and how the canvas background reaches the screen bottom), but
-       VIEWPORT-ANCHORED layers are hard-clipped at the buggy viewport edge —
-       measured: a fixed probe never painted below the line no matter what.
-       A fixed body put the entire app into the clipped regime. In flow, the
-       app lives in the document layer and paints to the physical bottom.
-
-       Height is `100%` — of `html`, which is `100%` of the initial containing
-       block — NOT `100dvh`. Those are different boxes: `dvh` tracks the
-       DYNAMIC viewport (it grows as a URL bar retracts), while the document's
-       scrollable box is the ICB. Whenever they disagreed, body was taller than
-       the document and the whole page gained a scroll range — and because body
-       carries the transform below, EVERY fixed element (nav pill, headers, the
-       mobile detail overlay) rode that scroll, which is how the action buttons
-       could be pushed off-screen on a page with nothing to scroll. Against the
-       ICB the shell can never overflow, so the document has no range to give.
-       The iOS compensation is added on top, deliberately. */
     width: 100%;
-    height: 100%;
-    /* The transform makes BODY the containing block for every
-       `position: fixed` descendant (nav pill, sidebar morph, drag lens,
-       overlays, portalled dialogs). Two jobs: they position and size against
-       the one compensated shell instead of the buggy viewport, AND — because
-       their containing block is a transformed in-flow element — they render
-       in the DOCUMENT layer, the one WebKit paints below the viewport line,
-       rather than as viewport-anchored layers that get clipped there. */
-    transform: translateZ(0);
+  }
+  @media (display-mode: standalone) {
+    html,
+    body {
+      height: 100vh;
+    }
   }
 }
 
@@ -232,17 +219,6 @@
   html,
   body {
     background-color: var(--background) !important;
-  }
-  /* The WebKit installed-PWA compensation (see the body comment above).
-     `--shell-bottom-gap` is the measured shortfall, set by
-     ViewportShellCompensator (0 outside iOS standalone). The fallback is 0,
-     NOT an env() term: overshooting makes the shell taller than the viewport,
-     which is a scrollable document that iOS can shift upward — strictly worse
-     than a brief bottom band while hydration runs. In the in-flow regime
-     WebKit also corrects innerHeight (and dvh) to the full screen shortly
-     after launch, so the steady-state gap is usually 0 anyway. */
-  body {
-    height: calc(100% + var(--shell-bottom-gap, 0px));
   }
 }
 
