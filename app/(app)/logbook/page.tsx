@@ -32,7 +32,25 @@ import { GlassButtonGroup, GlassGroupButton, GlassIconButton } from "@/component
 /** ONE clock for the floating panels and the list spacer they push. Both use
  *  this exact string, so the calendar's collapse and the list's reserved
  *  space are the same movement instead of two curves running side by side. */
-const PANEL_MOTION = `height 300ms ${MORPH_EASE}`
+/**
+ * In dual-month mode the two panes are a FIXED pair — odd month on the left,
+ * even month on the right (Jan|Feb, Mar|Apr, …). Anchoring the pair to the
+ * calendar rather than to whatever month you happened to scroll past is what
+ * stops it shuffling by one month at a time: the pair only changes when the
+ * top flight leaves it altogether.
+ */
+function pairStart(month: number): number {
+  return month - (month % 2)
+}
+
+/** Is `month` one of the two panes currently shown for `anchor`? */
+function inSamePair(anchorMonth: number, anchorYear: number, month: number, year: number): boolean {
+  const start = pairStart(anchorMonth)
+  return year === anchorYear && (month === start || month === start + 1)
+}
+
+const PANEL_MS = 300
+const PANEL_MOTION = `height ${PANEL_MS}ms ${MORPH_EASE}`
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -152,10 +170,12 @@ export default function LogbookPage() {
   // Track the topmost visible flight for calendar sync + date highlighting
   const topFlightIdRef = useRef<string | null>(null)
   const [topFlightDate, setTopFlightDate] = useState<string | null>(null)
+  const topFlightDateRef = useRef<string | null>(null)
 
   const syncSourceRef = useRef<"calendar" | "flights" | null>(null)
   const selectedMonthRef = useRef(selectedMonth)
   const showCalendarRef = useRef(showCalendar)
+  const dualMonthRef = useRef(false)
 
   useEffect(() => {
     const unsubscribe = syncService.onDataChanged(() => {
@@ -171,6 +191,33 @@ export default function LogbookPage() {
   useEffect(() => {
     showCalendarRef.current = showCalendar
   }, [showCalendar])
+
+  // Entering dual mode snaps the anchor to its pair boundary. LEAVING it keeps
+  // whichever pane the top flight is actually in — if that is the right-hand
+  // month, the left one stows rather than the right.
+  useEffect(() => {
+    const wasDual = dualMonthRef.current
+    dualMonthRef.current = dualMonth
+    if (wasDual === dualMonth) return
+
+    const current = selectedMonthRef.current
+    const top = topFlightDateRef.current ? parseDateLocal(topFlightDateRef.current) : null
+
+    if (dualMonth) {
+      const next = { year: current.year, month: pairStart(current.month) }
+      selectedMonthRef.current = next
+      setSelectedMonth(next)
+      return
+    }
+
+    // dual → single
+    const keep =
+      top && inSamePair(current.month, current.year, top.getMonth(), top.getFullYear())
+        ? { year: top.getFullYear(), month: top.getMonth() }
+        : current
+    selectedMonthRef.current = keep
+    setSelectedMonth(keep)
+  }, [dualMonth])
 
   const handleCalendarMonthChange = useCallback(
     (year: number, month: number) => {
@@ -206,6 +253,7 @@ export default function LogbookPage() {
     (topFlight: FlightLog | null) => {
       if (!topFlight) return
       topFlightIdRef.current = topFlight.id
+      topFlightDateRef.current = topFlight.date
       setTopFlightDate(topFlight.date)
 
       if (!showCalendarRef.current) return
@@ -215,7 +263,19 @@ export default function LogbookPage() {
       const newYear = flightDate.getFullYear()
       const newMonth = flightDate.getMonth()
 
-      if (newYear !== selectedMonthRef.current.year || newMonth !== selectedMonthRef.current.month) {
+      const current = selectedMonthRef.current
+      if (dualMonthRef.current) {
+        // The pair holds while the top flight is in either pane, and jumps a
+        // whole pair when it isn't — never one month at a time.
+        if (inSamePair(current.month, current.year, newMonth, newYear)) return
+        const target = { year: newYear, month: pairStart(newMonth) }
+        selectedMonthRef.current = target
+        setSelectedMonth(target)
+        calendarRef.current?.scrollToMonth(target.year, target.month)
+        return
+      }
+
+      if (newYear !== current.year || newMonth !== current.month) {
         selectedMonthRef.current = { year: newYear, month: newMonth }
         setSelectedMonth({ year: newYear, month: newMonth })
         calendarRef.current?.scrollToMonth(newYear, newMonth)
@@ -325,8 +385,11 @@ export default function LogbookPage() {
         setSearchQuery("")
         setSearchTerms([])
       } else {
-        // after the row has height
-        setTimeout(() => searchInputRef.current?.focus(), 120)
+        // Focus only once the row has finished opening, and never let the
+        // focus scroll anything into view: focusing mid-transition made the
+        // browser try to reveal a box that was still growing, which is what
+        // the open read as jank.
+        setTimeout(() => searchInputRef.current?.focus({ preventScroll: true }), PANEL_MS + 20)
       }
       return !open
     })
@@ -512,12 +575,6 @@ export default function LogbookPage() {
                 )}
               </div>
             </GlassContainer>
-
-            {hasActiveFilters && (
-              <div className="px-1 pt-1.5 text-xs text-muted-foreground">
-                {filteredFlights.length} flight{filteredFlights.length !== 1 ? "s" : ""}
-              </div>
-            )}
           </div>
         </div>
 

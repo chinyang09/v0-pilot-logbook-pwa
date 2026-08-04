@@ -120,9 +120,12 @@ function AppShellContent({ children }: AppShellProps) {
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
 
-  // Panel snap state — snaps main panel to 360px or 620px on drag end or sidebar toggle
-  const [isDragging, setIsDragging] = useState(false)
+  // The main panel has exactly TWO widths — one calendar month or two. The
+  // divider is a toggle rather than a drag handle: dragging it only ever
+  // ended at one of these anyway, and on the way there the calendar grew
+  // continuously and flipped layout mid-gesture, which looked broken.
   const [snapTrigger, setSnapTrigger] = useState(0)
+  const [wantDualMonth, setWantDualMonth] = useState(false)
 
   // Refs for scroll-to-top tap zones
   const mainPanelRef = useRef<HTMLDivElement>(null)
@@ -195,40 +198,40 @@ function AppShellContent({ children }: AppShellProps) {
     }
   }, [sidebarOpen, isDesktop, canPushSidebar])
 
-  // Snap main panel to 360px (single month) or 620px (dual month) on drag end
+  // Size the main panel to whichever of the two widths is selected. Runs on
+  // toggle, on sidebar open/close and on container resize, so the panel is
+  // always exactly one of them and never an in-between width.
+  const SINGLE_MONTH_PX = 360
+  const DUAL_MONTH_PX = 620
+  const DETAIL_MIN_PX = 360
+
+  const [canFitDualMonth, setCanFitDualMonth] = useState(false)
+
   useEffect(() => {
-    if (isDragging || !isDesktop) return
+    if (!isDesktop) return
     const container = panelGroupContainerRef.current
     const handle = mainPanelHandleRef.current
     if (!container || !handle) return
 
-    const containerWidth = container.offsetWidth
-    if (containerWidth <= 0) return
+    const apply = () => {
+      const containerWidth = container.offsetWidth
+      if (containerWidth <= 0) return
+      const availableWidth = containerWidth - HANDLE_WIDTH_PX
+      const fitsDual = availableWidth >= DUAL_MONTH_PX + DETAIL_MIN_PX
+      setCanFitDualMonth(fitsDual)
 
-    const SINGLE_MONTH = 360
-    const DUAL_MONTH = 620
-    const DETAIL_MIN = 360
-
-    // Available width for panels (container minus handle)
-    const availableWidth = containerWidth - HANDLE_WIDTH_PX
-
-    // Only offer dual-month snap if container can fit both panels
-    const canFitDualMonth = availableWidth >= DUAL_MONTH + DETAIL_MIN
-    const snapPoints = canFitDualMonth
-      ? [SINGLE_MONTH, DUAL_MONTH]
-      : [SINGLE_MONTH]
-
-    const currentPx = (availableWidth * handle.getSize()) / 100
-    const closest = snapPoints.reduce((prev, curr) =>
-      Math.abs(curr - currentPx) < Math.abs(prev - currentPx) ? curr : prev
-    )
-    const targetPercent = (closest / availableWidth) * 100
-
-    // Only snap if within a reasonable range (20%-80%)
-    if (targetPercent >= 20 && targetPercent <= 80) {
-      handle.resize(targetPercent)
+      const targetPx = fitsDual && wantDualMonth ? DUAL_MONTH_PX : SINGLE_MONTH_PX
+      const targetPercent = (targetPx / availableWidth) * 100
+      if (targetPercent >= 20 && targetPercent <= 80) {
+        handle.resize(targetPercent)
+      }
     }
-  }, [isDragging, isDesktop, snapTrigger])
+
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(container)
+    return () => ro.disconnect()
+  }, [isDesktop, wantDualMonth, snapTrigger])
 
   const smoothScrollToTop = useCallback((container: React.RefObject<HTMLDivElement | null>) => {
     // Scope to the given panel and skip mounted-but-hidden keep-alive pages so we
@@ -327,14 +330,20 @@ function AppShellContent({ children }: AppShellProps) {
             autoSaveId="desktop-panel-layout"
             className="h-full md:min-w-[720px]"
           >
-            <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={30} className="md:min-w-[360px]">
+            <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={20} className="md:min-w-[360px]">
               <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative">
                 {children}
               </div>
             </ResizablePanel>
 
             {/* Resize handle — desktop only, snaps to mobile-width multiples */}
-            <ResizableHandle withHandle className="hidden md:flex" onDragging={setIsDragging} />
+            <ResizableHandle
+              disabled
+              className="hidden md:flex"
+              toggle={canFitDualMonth ? () => setWantDualMonth((v) => !v) : undefined}
+              toggleLabel={wantDualMonth ? "Narrow the list panel" : "Widen the list panel"}
+              toggleActive={wantDualMonth}
+            />
 
             {/* Detail panel — desktop only. Pre-hydration, `isDesktop` is
                 forced false (server snapshot) while the CSS `md:` panel is

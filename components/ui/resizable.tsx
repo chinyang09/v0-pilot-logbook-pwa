@@ -1,6 +1,6 @@
 "use client"
 
-import { GripVertical } from "lucide-react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 import * as ResizablePrimitive from "react-resizable-panels"
 
 import { cn } from "@/lib/utils"
@@ -20,24 +20,53 @@ const ResizablePanelGroup = ({
 
 const ResizablePanel = ResizablePrimitive.Panel
 
+/**
+ * The divider between the main and detail panels.
+ *
+ * `toggle` turns it into a TWO-POSITION control rather than a drag handle.
+ * The main panel only ever has two useful widths — one calendar month or two
+ * — and a free drag always ended snapped to one of them anyway; on the way
+ * there the calendar grew continuously and flipped its layout mid-gesture,
+ * which read as the panel breaking rather than resizing. With a toggle the
+ * width changes in one step and the calendar switches with it.
+ */
 const ResizableHandle = ({
   withHandle,
   className,
+  toggle,
+  toggleLabel,
+  toggleActive,
   ...props
 }: React.ComponentProps<typeof ResizablePrimitive.PanelResizeHandle> & {
   withHandle?: boolean
+  /** Present = the divider is a two-position toggle, not a drag handle. */
+  toggle?: () => void
+  toggleLabel?: string
+  /** True when the panel is at its WIDE position (chevron points to collapse). */
+  toggleActive?: boolean
 }) => (
   <ResizablePrimitive.PanelResizeHandle
     className={cn(
-      "relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 data-[panel-group-direction=vertical]:h-px data-[panel-group-direction=vertical]:w-full data-[panel-group-direction=vertical]:after:left-0 data-[panel-group-direction=vertical]:after:h-1 data-[panel-group-direction=vertical]:after:w-full data-[panel-group-direction=vertical]:after:-translate-y-1/2 data-[panel-group-direction=vertical]:after:translate-x-0 [&[data-panel-group-direction=vertical]>div]:rotate-90",
+      "relative flex w-px items-center justify-center bg-border focus-visible:outline-none data-[panel-group-direction=vertical]:h-px data-[panel-group-direction=vertical]:w-full",
+      // Only a real drag handle should advertise a resize cursor.
+      toggle ? "cursor-default" : undefined,
       className
     )}
     {...props}
   >
-    {withHandle && (
-      <div className="z-10 flex h-4 w-3 items-center justify-center rounded-sm border bg-border">
-        <GripVertical className="h-2.5 w-2.5" />
-      </div>
+    {toggle && (
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={toggleLabel}
+        className="z-10 flex h-10 w-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+      >
+        {toggleActive ? (
+          <ChevronLeft className="h-3.5 w-3.5" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5" />
+        )}
+      </button>
     )}
   </ResizablePrimitive.PanelResizeHandle>
 )

@@ -440,6 +440,29 @@ a precondition rather than a refinement — with none active `filteredFlights`
 ignored the query completely — and once a term matches any field, stacking
 terms expresses everything the categories did without the mode.
 
+### The Logbook Calendar's Two Widths
+
+The main panel has exactly **two** widths — `360px` (one month) and `620px`
+(two) — and the divider between the panels is a **toggle**, not a drag handle
+(`ResizableHandle`'s `toggle` prop). A free drag always ended snapped to one of
+the two anyway, and on the way there the calendar grew continuously and flipped
+its layout mid-gesture, which read as the panel breaking rather than resizing.
+`minSize` is a PERCENT, so it has to stay low enough that 360px is reachable —
+at 30 it floored the panel at 420px on a 1400px container and single-month was
+never actually hit; the real floor is the CSS `min-width`.
+
+In **dual-month** mode the two panes are a FIXED pair: odd month on the left,
+even on the right (Jan|Feb, Mar|Apr, …), anchored by `pairStart()`. The pair
+holds while the top flight card is in either pane and jumps a WHOLE pair when
+it leaves — never one month at a time, which is what made the old carousel feel
+arbitrary. A swipe or wheel step therefore moves **two** months in dual mode
+(`stepMonths`); stepping by one would swap which side each month lands on and
+put the pairing out of phase.
+
+Going **dual → single** keeps whichever pane the top flight is actually in — if
+that is the right-hand month, the LEFT one stows. Going single → dual snaps the
+anchor to its pair boundary.
+
 ### The Flight Card (`components/flight-card-body.tsx`)
 
 One visual definition of "a flight card", shared by the logbook list, the
@@ -1647,6 +1670,8 @@ When making changes, be aware of these high-impact files:
 - Do not open a detail with `router.replace` — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
 - Do not remove `overflow-anchor: none` from the logbook scroller — growing the top spacer is how the floating panels push the list, and scroll anchoring exists to cancel exactly that (it bumps `scrollTop` to keep the view still). With it on, the calendar only pushed the list when it was already scrolled to the top, and the compensating adjustment read as a downward scroll that hid the nav pill
 - Do not give the calendar's collapse and the list spacer separate animations — they share `PANEL_MOTION`, or the panel opens and the list catches up afterwards as a visible second stage. The calendar stays MOUNTED at `height: 0` so its natural height is measurable and the collapse is a px transition the spacer can match
+- Do not make the panel divider draggable again, and do not raise the main panel's `minSize` percent above what 360px needs — the two widths are a toggle, and a free drag flips the calendar's layout mid-gesture
+- Do not step the dual-month calendar by one month — the panes are a fixed odd|even pair, so a step moves two; stepping by one swaps which side each month is on. The pair only re-anchors when the top flight card leaves it entirely
 - Do not reintroduce search CATEGORIES on the logbook — search is a token field: the typed text filters live, Enter pins it as a chip, and chips AND together. The old category tabs were a precondition (typing did nothing until one was picked), and stacking terms covers what they did without the mode
 - Do not let flight cards vary in height, and do not put per-row `measureElement` back on the logbook list — the virtualizer corrects the scroll offset when a measured row differs from the estimate, and a programmatic scroll cancels a momentum scroll on touch (that is the "scrolling up stops every row" bug). Keep the optional rows' `min-h`, keep the calibration ONE-SHOT (feeding every row back in is a setState loop that crashes the page), and keep `getItemKey` on the flight id
 - Do not inset the app shell by the safe area — the PWA runs edge to edge and content scrolls UNDER the status bar and Android's gesture pill. The insets belong inside each scroller

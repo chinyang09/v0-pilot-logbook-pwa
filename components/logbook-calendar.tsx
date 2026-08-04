@@ -279,6 +279,18 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       }
     };
 
+    /**
+     * One navigation step. In dual-month mode the two panes are a fixed pair
+     * (odd month left, even month right), so a step moves TWO months —
+     * stepping by one would swap which side each month is on and the pairing
+     * would drift out of phase.
+     */
+    const stepMonths = (forward: boolean) => {
+      const delta = (dualMonth ? 2 : 1) * (forward ? 1 : -1);
+      const total = selectedMonth.year * 12 + selectedMonth.month + delta;
+      onMonthChange(Math.floor(total / 12), ((total % 12) + 12) % 12);
+    };
+
     const handleTouchEnd = (e: React.TouchEvent) => {
       if (!isSwiping) return;
       setIsSwiping(false);
@@ -286,24 +298,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       const diffY = swipeStartY - e.changedTouches[0].clientY;
 
       if (Math.abs(diffY) > 50 && !isExternalScrollRef.current) {
-        let newYear = selectedMonth.year;
-        let newMonth = selectedMonth.month;
-
-        if (diffY > 0) {
-          newMonth = selectedMonth.month === 11 ? 0 : selectedMonth.month + 1;
-          newYear =
-            selectedMonth.month === 11
-              ? selectedMonth.year + 1
-              : selectedMonth.year;
-        } else {
-          newMonth = selectedMonth.month === 0 ? 11 : selectedMonth.month - 1;
-          newYear =
-            selectedMonth.month === 0
-              ? selectedMonth.year - 1
-              : selectedMonth.year;
-        }
-
-        onMonthChange(newYear, newMonth);
+        stepMonths(diffY > 0);
       }
 
       onInteractionEnd?.();
@@ -315,18 +310,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       if (isExternalScrollRef.current) return;
       onScrollStart?.();
 
-      let newYear = selectedMonth.year;
-      let newMonth = selectedMonth.month;
-
-      if (e.deltaY > 0) {
-        newMonth = selectedMonth.month === 11 ? 0 : selectedMonth.month + 1;
-        newYear = selectedMonth.month === 11 ? selectedMonth.year + 1 : selectedMonth.year;
-      } else {
-        newMonth = selectedMonth.month === 0 ? 11 : selectedMonth.month - 1;
-        newYear = selectedMonth.month === 0 ? selectedMonth.year - 1 : selectedMonth.year;
-      }
-
-      onMonthChange(newYear, newMonth);
+      stepMonths(e.deltaY > 0);
     };
 
     const handleDateClick = (dateStr: string, isCurrentMonth: boolean) => {
