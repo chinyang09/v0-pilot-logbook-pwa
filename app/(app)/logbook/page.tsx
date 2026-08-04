@@ -21,9 +21,9 @@ import {
 } from "@/hooks/data"
 import { mutate } from "swr"
 import { Calendar, Plus, Search, X, ChevronDown } from "lucide-react"
-import { AnimatePresence, motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
+import { MORPH_EASE } from "@/lib/motion"
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date"
 import { insertFlightSorted } from "@/lib/utils/flight-sort"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
@@ -32,6 +32,11 @@ import { useSearchParams } from "next/navigation"
 import { usePageActive } from "@/hooks/use-page-active"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassButtonGroup, GlassGroupButton, GlassIconButton } from "@/components/ui/glass-icon-button"
+
+/** ONE clock for the floating panels and the list spacer they push. Both use
+ *  this exact string, so the calendar's collapse and the list's reserved
+ *  space are the same movement instead of two curves running side by side. */
+const PANEL_MOTION = `height 300ms ${MORPH_EASE}`
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -93,16 +98,43 @@ export default function LogbookPage() {
   const flightListRef = useRef<FlightListRef>(null)
   const calendarContainerRef = useRef<HTMLDivElement>(null)
 
+  const searchBlockRef = useRef<HTMLDivElement>(null)
+  const calendarContentRef = useRef<HTMLDivElement>(null)
+
   // Measure calendar's natural height + container width for dual-month detection
   const [calendarNaturalHeight, setCalendarNaturalHeight] = useState(0)
+  const [searchBlockHeight, setSearchBlockHeight] = useState(0)
   const [mainPanelWidth, setMainPanelWidth] = useState(0)
+
+  // The search block floats above the list, so the list has to reserve its
+  // height. It only changes on focus/blur (the filter row and suggestions
+  // appear), so this is a handful of measurements, not a per-frame cost.
+  useEffect(() => {
+    const el = searchBlockRef.current
+    if (!el) return
+    let rafId = 0
+    const measure = () => setSearchBlockHeight(el.offsetHeight)
+    measure()
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(measure)
+    })
+    ro.observe(el)
+    return () => {
+      cancelAnimationFrame(rafId)
+      ro.disconnect()
+    }
+  }, [])
 
   useEffect(() => {
     const el = calendarContainerRef.current
     if (!el) return
     let rafId = 0
+    // The calendar stays MOUNTED and is collapsed to height 0, so its natural
+    // height is always readable — measuring the animating wrapper would read
+    // whatever the transition is passing through.
     const measure = () => {
-      const h = el.scrollHeight
+      const h = calendarContentRef.current?.offsetHeight ?? 0
       if (h > 0) setCalendarNaturalHeight(h)
       const w = el.offsetWidth
       if (w > 0) setMainPanelWidth(w)
@@ -113,6 +145,7 @@ export default function LogbookPage() {
       rafId = requestAnimationFrame(measure)
     })
     observer.observe(el)
+    if (calendarContentRef.current) observer.observe(calendarContentRef.current)
     return () => {
       observer.disconnect()
       cancelAnimationFrame(rafId)
@@ -299,11 +332,48 @@ export default function LogbookPage() {
         break
     }
 
-    return Array.from(options).slice(0, 10)
+    // The list scrolls (max-h-48), so the cap only exists to keep rendering
+    // cheap — 10 was low enough that a common type code hid most matches.
+    return Array.from(options).slice(0, 50)
   }, [activeFilterType, debouncedSearchQuery, flights, aircraft, airports, personnel])
 
   const filteredFlights = useMemo(() => {
     let result = flights
+
+    // FREE TEXT — always applied, whether or not a category is active. The
+    // category buttons narrow WHERE it looks; they are not a switch that has
+    // to be on for typing to do anything (it previously did nothing at all
+    // until you picked one).
+    const q = debouncedSearchQuery.trim().toLowerCase()
+    if (q) {
+      const fieldsFor = (f: FlightLog): string[] => {
+        switch (activeFilterType) {
+          case "flight":
+            return [f.flightNumber ?? ""]
+          case "aircraft":
+            return [f.aircraftReg ?? "", f.aircraftType ?? ""]
+          case "airport":
+            return [f.departureIcao ?? "", f.arrivalIcao ?? "", f.departureIata ?? "", f.arrivalIata ?? ""]
+          case "crew":
+            return [f.picName ?? "", f.sicName ?? "", ...(f.additionalCrew?.map((c) => c.name ?? "") ?? [])]
+          default:
+            return [
+              f.flightNumber ?? "",
+              f.aircraftReg ?? "",
+              f.aircraftType ?? "",
+              f.departureIcao ?? "",
+              f.arrivalIcao ?? "",
+              f.departureIata ?? "",
+              f.arrivalIata ?? "",
+              f.picName ?? "",
+              f.sicName ?? "",
+              ...(f.additionalCrew?.map((c) => c.name ?? "") ?? []),
+              f.date ?? "",
+            ]
+        }
+      }
+      result = result.filter((f) => fieldsFor(f).some((v) => v.toLowerCase().includes(q)))
+    }
 
     if (selectedFilters.length > 0 && activeFilterType !== "none") {
       result = result.filter((flight) => {
@@ -331,7 +401,7 @@ export default function LogbookPage() {
     }
 
     return result
-  }, [flights, selectedFilters, activeFilterType])
+  }, [flights, selectedFilters, activeFilterType, debouncedSearchQuery])
 
   const clearAllFilters = () => {
     setSelectedDate(null)
@@ -424,56 +494,178 @@ export default function LogbookPage() {
 
   return (
     <div className="h-full relative flex flex-col">
-      {/* Calendar collapse section — absolute so flight list scrolls behind it
-          (required for glass see-through effect via backdrop-filter) */}
+      {/* FLOATING PANEL STACK — search, then the calendar. Absolute so the
+          flight list scrolls behind it (needed for the glass see-through),
+          with the list reserving the stack's height in its top spacer. Both
+          the calendar's collapse and the list's spacer run on PANEL_MOTION,
+          the same duration and curve, so they are one movement rather than a
+          panel opening and a list catching up after it. */}
       <div
         ref={calendarContainerRef}
         className="z-40 absolute left-0 right-0"
         style={{ top: "var(--chrome-top)", contain: "layout style paint" }}
       >
-        <AnimatePresence initial={false}>
-          {showCalendar && (
-            <motion.div
-              initial={{ height: 0 }}
-              animate={{ height: "auto" }}
-              exit={{ height: 0 }}
-              transition={{ type: "spring", stiffness: 400, damping: 35 }}
-              className="overflow-hidden"
-              style={{ willChange: "height, transform" }}
-            >
-              {/* Calendar grid — morphs between day grid and month/year picker */}
-              <div className="px-2 pb-2">
-                <LogbookCalendar
-                  ref={calendarRef}
-                  className="bg-transparent shadow-none border-none"
-                  flights={flights}
-                  selectedMonth={selectedMonth}
-                  onMonthChange={handleCalendarMonthChange}
-                  onDateSelect={handleDateSelect}
-                  selectedDate={selectedDate || topFlightDate}
-                  onScrollStart={handleCalendarScrollStart}
-                  glass
-                  cornerRadius={20}
-                  dualMonth={dualMonth}
-                  view={showMonthPicker ? "monthYear" : "calendar"}
-                  onMonthSelect={(year, month) => {
-                    setSelectedMonth({ year, month })
-                    selectedMonthRef.current = { year, month }
-                    syncSourceRef.current = "calendar"
-                    handleCalendarMonthChange(year, month)
-                    setShowMonthPicker(false)
+        {/* SEARCH — floats with the chrome instead of scrolling away with the
+            list, so it is reachable without scrolling back to the top. */}
+        <div ref={searchBlockRef} className="px-2 py-1">
+          <div className="relative">
+            <Input
+              placeholder="Search flights..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              className="pl-10 h-10 bg-background/30 backdrop-blur-xl border-border"
+            />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+            {(searchFocused || searchQuery || hasActiveFilters) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchFocused(false)
+                  setSearchQuery("")
+                  setActiveFilterType("none")
+                  setSelectedFilters([])
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-sm text-primary font-medium"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+
+          {/* Category buttons — narrow the free-text search to one field.
+              They are a REFINEMENT, not a switch: with none active the query
+              still searches every field. */}
+          {searchFocused && (
+            <div className="flex items-center gap-1.5 mt-3 animate-in fade-in slide-in-from-top-2 duration-200">
+              {[
+                { id: "flight", label: "Flight" },
+                { id: "aircraft", label: "Aircraft" },
+                { id: "airport", label: "Airport" },
+                { id: "crew", label: "Crew" },
+              ].map((filter) => (
+                <Button
+                  key={filter.id}
+                  variant={activeFilterType === filter.id ? "secondary" : "ghost"}
+                  size="sm"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    const turningOff = activeFilterType === filter.id
+                    setActiveFilterType(turningOff ? "none" : (filter.id as typeof activeFilterType))
+                    // Only the chips belong to the category — the typed query
+                    // survives, because it still searches everything.
+                    if (turningOff) setSelectedFilters([])
                   }}
-                  onYearChange={(newYear) => {
-                    setSelectedMonth({ year: newYear, month: selectedMonth.month })
-                    selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
-                    syncSourceRef.current = "calendar"
-                    handleCalendarMonthChange(newYear, selectedMonth.month)
-                  }}
-                />
-              </div>
-            </motion.div>
+                  className="flex-1 text-xs h-8 font-medium"
+                >
+                  {filter.label}
+                </Button>
+              ))}
+            </div>
           )}
-        </AnimatePresence>
+
+          {/* Selected filter chips */}
+          {selectedFilters.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-3 animate-in fade-in duration-200">
+              {selectedFilters.map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  onClick={() => toggleFilterOption(filter)}
+                  className="px-2.5 py-1 bg-primary/20 text-primary text-xs rounded-full flex items-center gap-1 font-medium hover:bg-primary/30 transition-colors"
+                >
+                  {filter}
+                  <X className="h-3 w-3" />
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Result count — shown whenever anything is narrowing the list */}
+          {(hasActiveFilters || debouncedSearchQuery.trim()) && !searchFocused && (
+            <div className="flex items-center justify-between mt-2 animate-in fade-in duration-200">
+              <span className="text-xs text-muted-foreground">
+                {filteredFlights.length} flight
+                {filteredFlights.length !== 1 ? "s" : ""}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearAllFilters}
+                className="text-xs h-7 hover:bg-destructive/10"
+              >
+                <X className="h-3 w-3 mr-1" />
+                Clear filters
+              </Button>
+            </div>
+          )}
+
+          {/* Suggestions for the active category */}
+          {searchFocused && activeFilterType !== "none" && filterOptions.length > 0 && (
+            <div className="mt-2 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto overscroll-contain animate-in fade-in slide-in-from-top-2 duration-200">
+              {filterOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    toggleFilterOption(option)
+                  }}
+                  className={cn(
+                    "w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors",
+                    selectedFilters.includes(option) && "bg-primary/10 text-primary",
+                  )}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* CALENDAR — always mounted, collapsed to 0. Mounted rather than
+            conditionally rendered so its natural height is always measurable
+            and the collapse is a plain height transition the spacer can
+            match exactly. */}
+        <div
+          className="overflow-hidden"
+          style={{
+            height: showCalendar ? calendarNaturalHeight : 0,
+            transition: PANEL_MOTION,
+            willChange: "height",
+          }}
+          aria-hidden={!showCalendar}
+        >
+          <div ref={calendarContentRef} className="px-2 pb-2">
+            <LogbookCalendar
+              ref={calendarRef}
+              className="bg-transparent shadow-none border-none"
+              flights={flights}
+              selectedMonth={selectedMonth}
+              onMonthChange={handleCalendarMonthChange}
+              onDateSelect={handleDateSelect}
+              selectedDate={selectedDate || topFlightDate}
+              onScrollStart={handleCalendarScrollStart}
+              glass
+              cornerRadius={20}
+              dualMonth={dualMonth}
+              view={showMonthPicker ? "monthYear" : "calendar"}
+              onMonthSelect={(year, month) => {
+                setSelectedMonth({ year, month })
+                selectedMonthRef.current = { year, month }
+                syncSourceRef.current = "calendar"
+                handleCalendarMonthChange(year, month)
+                setShowMonthPicker(false)
+              }}
+              onYearChange={(newYear) => {
+                setSelectedMonth({ year: newYear, month: selectedMonth.month })
+                selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
+                syncSourceRef.current = "calendar"
+                handleCalendarMonthChange(newYear, selectedMonth.month)
+              }}
+            />
+          </div>
+        </div>
       </div>
 
       {/* FLIGHT LIST */}
@@ -487,125 +679,9 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={`calc(var(--chrome-top) + ${showCalendar ? calendarNaturalHeight : 0}px)`}
+          topSpacerHeight={`calc(var(--chrome-top) + ${searchBlockHeight + (showCalendar ? calendarNaturalHeight : 0)}px)`}
+          topSpacerTransition={PANEL_MOTION}
           selectedFlightId={selectedFlightId}
-          headerContent={
-            <div className="flex-shrink-0 top-0 z-40 px-2 py-1">
-              <div className="relative">
-                <Input
-                  placeholder="Search flights..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onFocus={() => setSearchFocused(true)}
-                  className="pl-10 h-10 bg-background/30 backdrop-blur-xl border-border"
-                />
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
-                {searchFocused && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchFocused(false)
-                      setSearchQuery("")
-                      setActiveFilterType("none")
-                      setSelectedFilters([])
-                    }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-sm text-primary font-medium"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-
-              {/* Filter type buttons */}
-              {searchFocused && (
-                <div className="flex items-center gap-1.5 mt-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                  {[
-                    { id: "flight", label: "Flight" },
-                    { id: "aircraft", label: "Aircraft" },
-                    { id: "airport", label: "Airport" },
-                    { id: "crew", label: "Crew" },
-                  ].map((filter) => (
-                    <Button
-                      key={filter.id}
-                      variant={activeFilterType === filter.id ? "secondary" : "ghost"}
-                      size="sm"
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        setActiveFilterType(
-                          activeFilterType === filter.id ? "none" : (filter.id as typeof activeFilterType),
-                        )
-                        if (activeFilterType === filter.id) {
-                          setSearchQuery("")
-                          setSelectedFilters([])
-                        }
-                      }}
-                      className="flex-1 text-xs h-8 font-medium"
-                    >
-                      {filter.label}
-                    </Button>
-                  ))}
-                </div>
-              )}
-
-              {/* Selected filter chips */}
-              {selectedFilters.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-3 animate-in fade-in duration-200">
-                  {selectedFilters.map((filter) => (
-                    <button
-                      key={filter}
-                      type="button"
-                      onClick={() => toggleFilterOption(filter)}
-                      className="px-2.5 py-1 bg-primary/20 text-primary text-xs rounded-full flex items-center gap-1 font-medium hover:bg-primary/30 transition-colors"
-                    >
-                      {filter}
-                      <X className="h-3 w-3" />
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Filter results count */}
-              {hasActiveFilters && !searchFocused && (
-                <div className="flex items-center justify-between mt-2 animate-in fade-in duration-200">
-                  <span className="text-xs text-muted-foreground">
-                    {filteredFlights.length} flight
-                    {filteredFlights.length !== 1 ? "s" : ""}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={clearAllFilters}
-                    className="text-xs h-7 hover:bg-destructive/10"
-                  >
-                    <X className="h-3 w-3 mr-1" />
-                    Clear filters
-                  </Button>
-                </div>
-              )}
-
-              {/* Search suggestions dropdown */}
-              {searchFocused && activeFilterType !== "none" && filterOptions.length > 0 && (
-                <div className="mt-2 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
-                  {filterOptions.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        toggleFilterOption(option)
-                      }}
-                      className={cn(
-                        "w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors",
-                        selectedFilters.includes(option) && "bg-primary/10 text-primary",
-                      )}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          }
         />
       </main>
     </div>

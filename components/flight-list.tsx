@@ -54,8 +54,11 @@ interface FlightListProps {
   onTopFlightChange?: (flight: FlightLog | null) => void;
   onScrollStart?: () => void;
   onScroll?: (e: React.UIEvent<HTMLElement>) => void;
-  /** CSS length: the header offset plus the calendar, when open. */
+  /** CSS length: the header offset plus whatever floats above the list. */
   topSpacerHeight?: string;
+  /** CSS transition for the spacer, so it moves in lock-step with whatever is
+   *  growing above it (the calendar) instead of on its own separate curve. */
+  topSpacerTransition?: string;
   headerContent?: React.ReactNode; // Height of the top bar (48px)
   selectedFlightId?: string | null; // Currently selected flight for visual highlighting
 }
@@ -205,6 +208,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       onScrollStart,
       onScroll,
       topSpacerHeight = "0px",
+      topSpacerTransition,
       headerContent,
       selectedFlightId,
     },
@@ -552,13 +556,14 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           <div
             ref={scrollContainerRef}
             className="h-full overflow-y-auto overscroll-contain"
+            style={{ overflowAnchor: "none" }}
             onTouchStart={handleTouchStart}
             onMouseDown={handleTouchStart}
             onWheel={handleWheelStart}
           >
             <div
-              style={{ height: topSpacerHeight }}
-              className="transition-[height] duration-300 ease-in-out"
+              style={{ height: topSpacerHeight, transition: topSpacerTransition }}
+              className={topSpacerTransition ? undefined : "transition-[height] duration-300 ease-in-out"}
             />
             {headerContent}
             <div className="px-panel pt-2">
@@ -583,16 +588,23 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             // spans from the screen edge over the status bar; the inset
             // replacement starts below the action buttons, like native.
             className="h-full overflow-y-auto flex-1 overscroll-contain scrollbar-hide"
-            style={{ contain: "strict" }}
+            // `overflow-anchor: none` is load-bearing. When the spacer above
+            // the viewport grows (the calendar opening), the browser's scroll
+            // ANCHORING compensates by bumping scrollTop the same amount, so
+            // the list appears not to move at all — and the adjustment it
+            // makes is reported as a downward scroll, which is what hid the
+            // nav pill. Anchoring off, the added height simply pushes the
+            // content down, at any scroll position.
+            style={{ contain: "strict", overflowAnchor: "none" }}
             onTouchStart={handleTouchStart}
             onMouseDown={handleTouchStart}
             onWheel={handleWheelStart}
           >
             <ScrollIndicator />
-            {/* Top spacer for calendar */}
+            {/* Top spacer: the floating chrome, plus the calendar when open */}
             <div
-              style={{ height: topSpacerHeight }}
-              className="transition-[height] duration-300 ease-in-out"
+              style={{ height: topSpacerHeight, transition: topSpacerTransition }}
+              className={topSpacerTransition ? undefined : "transition-[height] duration-300 ease-in-out"}
             />
 
             {headerContent}
