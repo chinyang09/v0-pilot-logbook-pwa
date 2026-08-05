@@ -8,6 +8,7 @@ import { useIsDesktop, useDesktopPill, useHydrated } from "@/hooks/use-is-deskto
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import { SINGLE_MONTH_PX, DUAL_MONTH_PX, DETAIL_MIN_PX } from "@/lib/layout/panel-widths"
+import { setPanelDualMonth } from "@/lib/layout/panel-mode"
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -217,7 +218,12 @@ function AppShellContent({ children }: AppShellProps) {
       const fitsDual = availableWidth >= DUAL_MONTH_PX + DETAIL_MIN_PX
       setCanFitDualMonth(fitsDual)
 
-      const targetPx = fitsDual && wantDualMonth ? DUAL_MONTH_PX : SINGLE_MONTH_PX
+      const isDual = fitsDual && wantDualMonth
+      // Published in the SAME callback that resizes the panel, so the calendar
+      // switches mode in the same commit rather than a frame later off its own
+      // ResizeObserver — that lag is what flashed the wrong-width calendar.
+      setPanelDualMonth(isDual)
+      const targetPx = isDual ? DUAL_MONTH_PX : SINGLE_MONTH_PX
       const targetPercent = (targetPx / availableWidth) * 100
       if (targetPercent >= 20 && targetPercent <= 80) {
         handle.resize(targetPercent)

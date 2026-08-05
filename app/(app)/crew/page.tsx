@@ -23,7 +23,7 @@ import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll";
-import { scrollToIndexSettled } from "@/lib/utils/virtual-scroll";
+import { scrollToIndexSettled, scrollToTop } from "@/lib/utils/virtual-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { CrewDetailPanel } from "@/components/crew-detail-panel";
@@ -242,8 +242,12 @@ export default function CrewPage() {
   // Generate FastScroll items from crew names (all personnel for full alphabet coverage)
   const fastScrollItems = useMemo(() => {
     const allCrew = sortedPersonnel.filter((p) => !p.isMe && !p.favorite);
+    // ★ only when something is actually pinned above the alphabet (see the
+    // airports page) — otherwise it is a control that goes nowhere.
+    const hasPinned = allCrew.length < sortedPersonnel.length;
     return generateAlphabetItemsFromList(allCrew.map((p) => p.name || ""), {
-      numberPosition: "end", withTop: true,
+      numberPosition: "end",
+      withTop: hasPinned,
     });
   }, [sortedPersonnel]);
 
@@ -399,7 +403,7 @@ export default function CrewPage() {
     // ★ is the pinned favourites/recent block at the very top, which has no
     // letter of its own.
     if (letter === FAST_SCROLL_TOP_KEY) {
-      scrollContainerRef.current?.scrollTo({ top: 0, behavior: "auto" });
+      scrollToTop(rowVirtualizer);
       setTimeout(() => { isFastScrollingRef.current = false; }, 150);
       return;
     }

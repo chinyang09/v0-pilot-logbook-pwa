@@ -126,7 +126,7 @@ interface SwipeableFlightCardProps {
   onEdit: (flight: FlightLog) => void;
   onDelete: (flight: FlightLog) => void;
   onToggleLock: (flight: FlightLog) => void;
-  onHold: (flight: FlightLog, at: { x: number; y: number }) => void;
+  onHold: (flight: FlightLog, at: QuickActionAnchor) => void;
   isSelected?: boolean;
   displayPrefs?: DisplayPreferences;
 }
@@ -162,11 +162,20 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
       id={`flight-${flight.id}`}
       onPointerDown={(e) => {
         cancelHold();
-        const at = { x: e.clientX, y: e.clientY };
-        holdFromRef.current = at;
+        holdFromRef.current = { x: e.clientX, y: e.clientY };
+        // The CARD's box, captured now — by the time the hold fires the
+        // element is still there, but reading it up front keeps the menu's
+        // position independent of where the finger drifted.
+        const card = e.currentTarget.getBoundingClientRect();
+        const box = {
+          left: card.left,
+          top: card.top,
+          width: card.width,
+          height: card.height,
+        };
         holdRef.current = setTimeout(() => {
           holdRef.current = null;
-          onHold(flight, at);
+          onHold(flight, box);
         }, HOLD_MS);
       }}
       onPointerMove={(e) => {

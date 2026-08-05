@@ -219,16 +219,19 @@ function SyncIconButton({ className }: { className?: string }) {
  * much as a five-tab sweep — a short move that deforms proportionally less
  * just looks limp.
  */
-const GRAVITY_SPRING_MS = 480
+/* Longer and softer than it was (480 / ζ 0.32 on the shape). The owner's read
+   of the tighter numbers was "snappy and aggressive" — the deformation is meant
+   to be a hint that the thing has weight, not the event itself. */
+const GRAVITY_SPRING_MS = 560
 const TRAVEL_ZETA = 0.78
 const TRAVEL_OMEGA = 9.2
-const SHAPE_ZETA = 0.32
-const SHAPE_OMEGA = 9.5
+const SHAPE_ZETA = 0.48
+const SHAPE_OMEGA = 8.2
 /** Peak deformation along the direction of travel. */
 /** How far the blob deforms when the drag lens hands it back — more than a
  *  travel wobble, because the lens it replaces was visibly larger. */
-const HANDOFF_STRETCH = 0.34
-const STRETCH = 0.2
+const HANDOFF_STRETCH = 0.14
+const STRETCH = 0.12
 /** How much of it the cross axis gives back — near 1 reads as volume held. */
 const CROSS = 0.85
 const SPRING_SAMPLES = 40

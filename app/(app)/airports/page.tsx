@@ -21,7 +21,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll";
-import { scrollToIndexSettled } from "@/lib/utils/virtual-scroll";
+import { scrollToIndexSettled, scrollToTop } from "@/lib/utils/virtual-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { AirportDetailPanel } from "@/components/airport-detail-panel";
@@ -251,10 +251,15 @@ export default function AirportsPage() {
 
   // Generate FastScroll alphabet items from the browse list
   const fastScrollItems = useMemo(() => {
+    // ★ only when something is actually pinned above the alphabet. A rail
+    // entry that scrolls to a section that isn't there is worse than no entry
+    // — it reads as the control not working.
+    const hasPinned = browseAirports.length < allSortedAirports.length;
     return generateAlphabetItemsFromList(browseAirports.map((a) => a.icao), {
-      numberPosition: "start", withTop: true,
+      numberPosition: "start",
+      withTop: hasPinned,
     });
-  }, [browseAirports]);
+  }, [browseAirports, allSortedAirports.length]);
 
   // Pre-compute letter -> virtual list index mapping for fast scroll
   const letterIndexMap = useMemo(() => {
@@ -412,7 +417,7 @@ export default function AirportsPage() {
     // ★ is the pinned favourites/recent block at the very top, which has no
     // letter of its own.
     if (letter === FAST_SCROLL_TOP_KEY) {
-      scrollContainerRef.current?.scrollTo({ top: 0, behavior: "auto" });
+      scrollToTop(rowVirtualizer);
       setTimeout(() => { isFastScrollingRef.current = false; }, 150);
       return;
     }

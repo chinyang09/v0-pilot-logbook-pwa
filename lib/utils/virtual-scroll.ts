@@ -1,39 +1,30 @@
 /**
- * Scroll a dynamically-measured virtual list to an index and STAY there —
- * clear of the floating header.
+ * Scroll a dynamically-measured virtual list so a given row sits at the top of
+ * the visible area — below the floating header, not behind it.
  *
- * Two things were wrong with a bare `scrollToIndex`:
+ * Two earlier attempts at this were both indirect, and both were unreliable
+ * for the same underlying reason: on a list with `measureElement`, most rows
+ * have never been measured, so every offset the virtualizer can compute is
+ * built from `estimateSize` and is wrong by however much the estimate is off,
+ * multiplied by the number of unmeasured rows in between. Asking it to scroll
+ * again (`scrollToIndex` in a loop) only converges if its numbers improve, and
+ * asking it where the row is (`getOffsetForIndex`) returns the same estimate.
  *
- * 1. It computes the offset from what the virtualizer currently believes each
- *    row measures. On a list with `measureElement` most rows have never been
- *    measured, so the offset is built from `estimateSize` and lands short —
- *    the further down the list, the further off. Re-issuing the scroll once
- *    the arriving rows HAVE been measured converges in a couple of frames.
- *    Bounded, because on a list whose rows genuinely differ every pass shifts
- *    the target slightly and it would otherwise never settle.
+ * So this does not ask. It scrolls roughly into place, then MEASURES the row in
+ * the DOM and corrects by the difference — which is exact the moment the row is
+ * rendered, regardless of what the virtualizer believes. A few frames of that
+ * converge on the real position even when the estimate was far out, because
+ * each correction brings the true row into the viewport where it can be
+ * measured.
  *
- * 2. `align: "start"` means the top of the SCROLLER, and content scrolls UNDER
- *    the action buttons in this app — so the row you asked for was parked
- *    behind them. Backing off by `--chrome-top` puts it where a reader would
- *    say the top of the list is.
- *
- * The logbook needs neither: its rows are a fixed height, it deliberately does
- * not measure, and it reserves the chrome with an in-flow spacer.
+ * The logbook needs none of this: its rows are a fixed height, it deliberately
+ * does not measure, and it reserves the chrome with an in-flow spacer.
  */
 interface ScrollableVirtualizer {
   scrollToIndex: (
     index: number,
     options?: { align?: "start" | "center" | "end" | "auto"; behavior?: "auto" | "smooth" }
   ) => void
-  scrollToOffset: (
-    offset: number,
-    options?: { align?: "start" | "center" | "end" | "auto"; behavior?: "auto" | "smooth" }
-  ) => void
-  getOffsetForIndex: (
-    index: number,
-    align?: "start" | "center" | "end" | "auto"
-  ) => readonly [number, string] | undefined
-  scrollOffset: number | null
   scrollElement: HTMLElement | Window | null
 }
 
@@ -48,47 +39,48 @@ function chromeTopPx(): number {
   return h
 }
 
+/** How close is close enough to stop correcting. */
+const TOLERANCE_PX = 1
+const MAX_FRAMES = 12
+
 export function scrollToIndexSettled(
   virtualizer: ScrollableVirtualizer,
   index: number,
-  align: "start" | "center" | "end" = "start",
-  passes = 6
+  align: "start" | "center" | "end" = "start"
 ): void {
   const el = virtualizer.scrollElement
+  if (!(el instanceof HTMLElement)) {
+    virtualizer.scrollToIndex(index, { align, behavior: "auto" })
+    return
+  }
   const inset = align === "start" ? chromeTopPx() : 0
 
-  // The inset is applied LAST, on its own frame. `scrollToIndex` finishes
-  // asynchronously — the virtualizer corrects the offset again once the rows
-  // it scrolled to have measured — so subtracting in the same tick just got
-  // overwritten by that correction.
-  // Asked of the VIRTUALIZER rather than written onto the element: it owns the
-  // scroll position and will correct it again on the next measurement pass, so
-  // a raw `scrollTop -=` was simply undone a frame later.
-  const insetOnce = () => {
-    if (!inset) return
-    requestAnimationFrame(() => {
-      const at = virtualizer.getOffsetForIndex(index, "start")
-      if (!at) return
-      virtualizer.scrollToOffset(Math.max(0, at[0] - inset), { align: "start", behavior: "auto" })
-    })
-  }
-
-  // Convergence is measured on the ELEMENT's scrollTop, not on
-  // `virtualizer.scrollOffset`: that one is written by the scroll listener, so
-  // reading it in the same tick as `scrollToIndex` always reports "unchanged"
-  // and the loop gave up after a single pass — which is why the rail still
-  // overshot by about a section.
-  const offset = () => (el instanceof HTMLElement ? el.scrollTop : (virtualizer.scrollOffset ?? 0))
-
+  // The rough move: gets the target row rendered so it can be measured.
   virtualizer.scrollToIndex(index, { align, behavior: "auto" })
-  let left = passes
-  const again = () => {
-    if (left-- <= 0) return insetOnce()
-    const before = offset()
-    virtualizer.scrollToIndex(index, { align, behavior: "auto" })
-    // Settled — the measurements the last pass produced didn't move it.
-    if (Math.abs(offset() - before) < 1) return insetOnce()
-    requestAnimationFrame(again)
+
+  let frames = MAX_FRAMES
+  const correct = () => {
+    if (frames-- <= 0) return
+    // `data-index` is on every row already — the virtualizer's own
+    // `measureElement` keys off it.
+    const row = el.querySelector<HTMLElement>(`[data-index="${index}"]`)
+    if (!row) {
+      // Not rendered yet (or the rough move landed far away): nudge the
+      // virtualizer again and look on the next frame.
+      virtualizer.scrollToIndex(index, { align, behavior: "auto" })
+      requestAnimationFrame(correct)
+      return
+    }
+    const delta = row.getBoundingClientRect().top - (el.getBoundingClientRect().top + inset)
+    if (Math.abs(delta) <= TOLERANCE_PX) return
+    el.scrollTop += delta
+    requestAnimationFrame(correct)
   }
-  requestAnimationFrame(again)
+  requestAnimationFrame(correct)
+}
+
+/** Scroll a list back to the very top (the pinned favourites/recent block). */
+export function scrollToTop(virtualizer: ScrollableVirtualizer): void {
+  const el = virtualizer.scrollElement
+  if (el instanceof HTMLElement) el.scrollTo({ top: 0, behavior: "auto" })
 }

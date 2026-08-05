@@ -488,10 +488,17 @@ list every time. Capped, both modes measure **272px** and the list does not
 move at all (measured: `scrollTop` 900 before, during and after a round trip).
 The single month is therefore centred in its 360px panel rather than filling it.
 
-Two things had to match, not one. The pane width is the obvious half; the other
-is that a dual pane carries a **month caption** above its grid, so the single
-month renders one too (`renderPane`) even though the header also names it —
-without it a single month came out 12px shorter.
+The pane width is only half of it: the calendar also carries exactly ONE header
+row (the date selector) in both modes. When the caption lived on each pane
+instead, a single month came out 12px shorter than a pair.
+
+**The mode itself comes from the LAYOUT, not from a measurement**
+(`lib/layout/panel-mode.ts`). The page used to derive `dualMonth` from its own
+ResizeObserver, which necessarily lands a frame or two after the panel resized —
+and in those frames the calendar rendered the OUTGOING mode at the INCOMING
+width. That is the flash on the collapse. The layout publishes the answer in the
+same callback that resizes the panel, so the switch happens in one commit
+(measured across the whole collapse: the calendar samples a constant 290px).
 
 A phone has no dual mode to match, so `paneMaxWidth` is left at the wider
 default there and the calendar uses the width it has. Without ANY cap a single
@@ -507,11 +514,12 @@ arbitrary. A swipe or wheel step therefore moves **two** months in dual mode
 (`stepMonths`); stepping by one would swap which side each month lands on and
 put the pairing out of phase.
 
-**Each pane's month caption IS the month picker.** The action bar used to carry
-an expanding month label as well, which said the same thing twice and was the
-thing that grew the left action group into the centred nav pill. The caption is
-rendered in single mode too — it is also what keeps the two modes the same
-height (see above).
+**ONE date selector for the whole calendar**, above the grid(s), and it is what
+opens the month/year picker. The action bar used to carry an expanding month
+label as well, which said the same thing twice and was the thing that grew the
+left action group into the centred nav pill; per-PANE captions were the same
+mistake at a smaller scale — with two panes that is two captions saying half a
+thing each. One header row also keeps single and dual the same HEIGHT for free.
 
 **The header names BOTH months in dual mode** — `Jul – Aug 26`, and both years
 when the pair straddles a new year (`Dec 26 – Jan 27`), since "Dec – Jan 27"
@@ -1884,6 +1892,9 @@ When making changes, be aware of these high-impact files:
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
 - Do not let a single calendar month be wider than a DUAL pane in the split layout — the cells are square, so its width is its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
+- Do not derive the calendar's dual/single mode from a ResizeObserver on the page — read `usePanelDualMonth()`. A measurement lands a frame behind the resize, and in that frame the calendar renders the outgoing mode at the incoming width (the "flash" on the collapse)
+- Do not scroll a dynamically-measured virtual list by asking the virtualizer where a row is — every offset it can give you is built from `estimateSize` for the rows it has never measured, so `scrollToIndex`/`getOffsetForIndex` are wrong by however far the estimate is off. `scrollToIndexSettled` scrolls roughly, then MEASURES the row in the DOM and corrects by the difference, which is exact
+- Do not anchor the flight card's hold menu to the finger — it lands somewhere different every time for the same row, which reads as accidental. Anchor it to the CARD's box (measured on pointerdown) and fade it in; a zoom read as flying in from somewhere else
 - Do not animate the gravity blob in the SIDEBAR — it is placed instantly there. The list's metrics re-measure as a route settles and as the panel morphs, and each re-measure was a chance for the spring to re-fire (the "flashes twice" report)
 - Do not carry a flight's OOOI times, takeoffs/landings, signature, lock or import/sync stamps into a derived flight (`deriveFlight`) — those are the record of a specific flight having happened, and copying them forward fabricates a logbook entry
 - Do not judge a virtual list's scroll convergence by `virtualizer.scrollOffset` — it is written by the scroll listener, so reading it in the same tick as `scrollToIndex` always says "unchanged" and the retry loop gives up after one pass

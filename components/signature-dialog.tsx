@@ -51,8 +51,11 @@ export function SignatureDialog({
 
   if (!open || typeof document === "undefined") return null;
 
+  // z-[65]: above the nav pill (60) and BELOW Radix's popper layer (70). At
+  // z-[200] the crew `Select` opened *behind* the dialog, which is why picking
+  // a signer looked broken and intermittent.
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex flex-col bg-background">
+    <div className="fixed inset-0 z-[65] flex flex-col bg-background">
       <div className="flex items-center justify-between px-4 pt-safe h-14 flex-shrink-0 border-b border-border">
         <h2 className="text-base font-semibold">Signature</h2>
         <button

@@ -544,33 +544,21 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
      * the flight list still had to absorb it — the whole point of capping the
      * pane width was to make those two heights equal.
      */
+    /**
+     * ONE month pane: just its grid.
+     *
+     * The month name used to sit above each pane. With two panes that is two
+     * captions saying half a thing each; one combined selector above the whole
+     * calendar names the range and is a single, obvious control. It also keeps
+     * the two modes the same HEIGHT for free — one header row either way,
+     * which is what the per-pane caption was doing before.
+     */
     const renderPane = (
-      m: { year: number; month: number },
+      _m: { year: number; month: number },
       days: { date: Date; dateStr: string; isCurrentMonth: boolean }[],
       keyPrefix = ""
     ) => (
       <>
-        {onHeaderPress ? (
-          <button
-            type="button"
-            onClick={onHeaderPress}
-            aria-label="Select month"
-            aria-expanded={headerActive}
-            className="mx-auto mb-0.5 flex items-center gap-1 rounded-full px-2 py-0.5 text-sm font-semibold text-foreground transition-colors hover:bg-[var(--on-glass-fill-soft)]"
-          >
-            {MONTHS[m.month]} {m.year}
-            <ChevronDown
-              className={cn(
-                "h-3.5 w-3.5 text-[var(--on-glass-muted)] transition-transform",
-                headerActive && "rotate-180"
-              )}
-            />
-          </button>
-        ) : (
-          <div className="text-sm font-semibold text-foreground text-center pb-0.5">
-            {MONTHS[m.month]} {m.year}
-          </div>
-        )}
         {renderDayGrid(days, keyPrefix)}
       </>
     );
@@ -594,6 +582,46 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         </div>
       );
     };
+
+    /**
+     * THE date selector — one control for the whole calendar.
+     *
+     * In dual mode it names the pair ("Jul – Aug 26"), spelling out both years
+     * when they straddle a boundary, because "Dec – Jan 27" would put December
+     * in the wrong year. Tapping it opens the month/year picker.
+     */
+    const rangeLabel = (() => {
+      const yy = (y: number) => String(y % 100).padStart(2, "0");
+      if (!dualMonth) return `${MONTHS[selectedMonth.month]} ${yy(selectedMonth.year)}`;
+      const next = addMonths(selectedMonth.year, selectedMonth.month, 1);
+      return next.year === selectedMonth.year
+        ? `${MONTHS[selectedMonth.month]} – ${MONTHS[next.month]} ${yy(selectedMonth.year)}`
+        : `${MONTHS[selectedMonth.month]} ${yy(selectedMonth.year)} – ${MONTHS[next.month]} ${yy(next.year)}`;
+    })();
+
+    const dateSelector = (
+      <div className="flex items-center justify-center px-2 pt-1 pb-0.5">
+        {onHeaderPress ? (
+          <button
+            type="button"
+            onClick={onHeaderPress}
+            aria-label="Select month"
+            aria-expanded={headerActive}
+            className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[15px] font-semibold text-foreground transition-colors hover:bg-[var(--on-glass-fill-soft)]"
+          >
+            {rangeLabel}
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 text-[var(--on-glass-muted)] transition-transform",
+                headerActive && "rotate-180"
+              )}
+            />
+          </button>
+        ) : (
+          <span className="px-3 py-1 text-[15px] font-semibold text-foreground">{rangeLabel}</span>
+        )}
+      </div>
+    );
 
     // ─── Calendar day grid view ───────────────────────────────
     const calendarContent = (
@@ -715,6 +743,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     // ─── View switcher with crossfade ─────────────────────────
     const activeContent = (
       <div className="relative">
+        {/* The one date selector, above whichever view is showing. It is
+            OUTSIDE the crossfade so it does not blink when the picker opens —
+            it is the control that opened it. */}
+        {view === "calendar" && dateSelector}
         {/* Calendar view */}
         <div
           style={{

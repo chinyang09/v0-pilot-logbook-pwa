@@ -26,14 +26,25 @@ const ACTIONS: { id: FlightQuickAction; label: string; icon: React.ReactNode }[]
   { id: "share", label: "Share", icon: <Share className="h-5 w-5" /> },
 ];
 
-/** Where the menu should appear, in viewport coordinates. */
+/**
+ * The CARD's box, in viewport coordinates — not the finger's position.
+ *
+ * Anchoring to the finger meant the menu landed somewhere different every time
+ * for the same row, which makes it feel like it appeared by accident. Anchored
+ * to the card it is always in the same place relative to the thing it acts on,
+ * so the eye knows where to go before it opens.
+ */
 export interface QuickActionAnchor {
-  x: number;
-  y: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 const MENU_WIDTH = 244;
 const MARGIN = 12;
+/** Space between the card and the menu. */
+const GAP = 8;
 
 export function FlightQuickActions({
   flight,
@@ -55,11 +66,19 @@ export function FlightQuickActions({
     const el = menuRef.current;
     if (!el) return;
     const h = el.offsetHeight;
-    const left = Math.min(Math.max(MARGIN, anchor.x - MENU_WIDTH / 2), window.innerWidth - MENU_WIDTH - MARGIN);
-    const below = anchor.y + 12;
-    const top = below + h > window.innerHeight - MARGIN ? Math.max(MARGIN, anchor.y - h - 12) : below;
+    // Centred on the card, just below it — and flipped above when the card is
+    // near the bottom, so the menu never hangs off the screen.
+    const left = Math.min(
+      Math.max(MARGIN, anchor.left + anchor.width / 2 - MENU_WIDTH / 2),
+      window.innerWidth - MENU_WIDTH - MARGIN
+    );
+    const below = anchor.top + anchor.height + GAP;
+    const top =
+      below + h > window.innerHeight - MARGIN
+        ? Math.max(MARGIN, anchor.top - h - GAP)
+        : below;
     setPlaced({ left, top });
-  }, [anchor.x, anchor.y]);
+  }, [anchor.left, anchor.top, anchor.width, anchor.height]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -85,7 +104,9 @@ export function FlightQuickActions({
         aria-label="Flight actions"
         className={cn(
           "absolute overflow-hidden rounded-2xl border border-border bg-popover shadow-xl",
-          "origin-top animate-in fade-in zoom-in-95 duration-150"
+          // A plain FADE. The menu is already where it belongs by the time it
+          // is visible, so a zoom read as it flying in from somewhere else.
+          "animate-in fade-in duration-150"
         )}
         style={{
           width: MENU_WIDTH,

@@ -19,7 +19,8 @@ import { Calendar, Plus, Search, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { MORPH_EASE } from "@/lib/motion"
-import { DUAL_MONTH_PX, MONTH_PANE_PX } from "@/lib/layout/panel-widths"
+import { MONTH_PANE_PX } from "@/lib/layout/panel-widths"
+import { usePanelDualMonth } from "@/lib/layout/panel-mode"
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date"
 import { insertFlightSorted } from "@/lib/utils/flight-sort"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
@@ -128,7 +129,6 @@ export default function LogbookPage() {
   /** False for the one commit that applies a resize-driven spacer change. */
   const [spacerAnimated, setSpacerAnimated] = useState(true)
   const [searchBlockHeight, setSearchBlockHeight] = useState(0)
-  const [mainPanelWidth, setMainPanelWidth] = useState(0)
 
   // The search block floats above the list, so the list has to reserve its
   // height. It only changes on focus/blur (the filter row and suggestions
@@ -177,8 +177,6 @@ export default function LogbookPage() {
         }
         setCalendarNaturalHeight(h)
       }
-      const w = el.offsetWidth
-      if (w > 0) setMainPanelWidth(w)
     }
     measure()
     const observer = new ResizeObserver(() => {
@@ -204,10 +202,11 @@ export default function LogbookPage() {
     return () => clearTimeout(t)
   }, [calendarNaturalHeight])
 
-  // The panel is sized by PERCENT, so it lands a fraction under its pixel
-  // target; testing the exact width would leave the wide panel rendering one
-  // month. The tolerance is smaller than the gap between the two widths.
-  const dualMonth = mainPanelWidth >= DUAL_MONTH_PX - 8
+  // Read from the LAYOUT, which knows the moment it resizes the panel. Deriving
+  // it from this page's own ResizeObserver put the switch a frame or two behind
+  // the resize, and in those frames the calendar rendered the outgoing mode at
+  // the incoming width — the flash on the collapse.
+  const dualMonth = usePanelDualMonth()
   const isSplitLayout = useIsDesktop()
 
   // Track the topmost visible flight for calendar sync + date highlighting
