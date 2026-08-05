@@ -257,16 +257,24 @@
      3.25rem = the controls' 4px top margin + their 44px height + a 4px gap.
      It was 4rem when they were 56px tall. */
   --chrome-top: calc(3.25rem + env(safe-area-inset-top, 0px));
+  /* Where content is genuinely CLEAR of the header treatment — the bar plus
+     the tail of its blur (`FADE_TAIL` in chrome-overlays). Anything that
+     positions a row against the header — the quick-scroll rail's target, for
+     one — uses this rather than `--chrome-top`: a row parked at `--chrome-top`
+     sits in the blur's tail, where it looks sharp enough to tap and isn't. */
+  --chrome-clear: calc(var(--chrome-top) + 1.5rem);
   --chrome-top-sm: calc(2.75rem + env(safe-area-inset-top, 0px));
   /* How far above the physical bottom edge the floating nav rests — the ONE
      number the bottom pill, the sidebar's lower end, and the content
      clearance all derive from, so the pill↔sidebar morph endpoints and the
-     scroll rest position always agree. On iOS the nav hugs the home
-     indicator (the inset minus 10px puts the nav's bottom edge just above
-     the indicator's white bar rather than a full band above it); where
-     there is no bottom inset (Android — its window already excludes the
-     gesture bar — and desktop) it is the plain 4px margin, unchanged. */
-  --nav-bottom-offset: max(4px, env(safe-area-inset-bottom, 0px) - 10px);
+     scroll rest position always agree.
+
+     Raised (`inset − 10` → `inset − 4`, floor 4 → 10) on the owner's read that
+     the bar sat too close to the bottom edge. It still hugs the iOS home
+     indicator rather than floating a full band above it; where there is no
+     bottom inset (Android — its window already excludes the gesture bar — and
+     desktop) the floor is what applies. */
+  --nav-bottom-offset: max(10px, env(safe-area-inset-bottom, 0px) - 4px);
   /* What CONTENT owes the home indicator: the FULL inset, the platform
      convention — a scrolled-to-rest last row clears the indicator rather than
      tucking under it. Deliberately larger than `--nav-bottom-offset`: the nav
@@ -636,15 +644,15 @@ textarea:focus-within {
   --glass-rim:
     conic-gradient(
       from var(--glass-specular-angle, 315deg),
-      rgba(255, 255, 255, 0.96) 0deg,
-      rgba(255, 255, 255, 0.30) 55deg,
-      rgba(255, 255, 255, 0) 100deg,
-      rgba(255, 255, 255, 0.12) 150deg,
-      rgba(255, 255, 255, 0.48) 180deg,
-      rgba(255, 255, 255, 0.12) 210deg,
-      rgba(255, 255, 255, 0) 260deg,
-      rgba(255, 255, 255, 0.30) 305deg,
-      rgba(255, 255, 255, 0.96) 360deg
+      rgba(255, 255, 255, 1) 0deg,
+      rgba(255, 255, 255, 0.36) 26deg,
+      rgba(255, 255, 255, 0) 70deg,
+      rgba(255, 255, 255, 0.06) 150deg,
+      rgba(255, 255, 255, 0.58) 180deg,
+      rgba(255, 255, 255, 0.06) 210deg,
+      rgba(255, 255, 255, 0) 290deg,
+      rgba(255, 255, 255, 0.36) 334deg,
+      rgba(255, 255, 255, 1) 360deg
     ),
     linear-gradient(rgba(60, 50, 40, 0.07), rgba(60, 50, 40, 0.07));
   /* Eased back with the dark veil (0.62 → 0.55) — the raised face blur carries
@@ -657,6 +665,8 @@ textarea:focus-within {
   /* The solid colour the finished face reads as, for anything painted ON the
      glass. See `--on-glass-*` below. */
   --on-glass: oklch(0.965 0.005 75);
+  /* See the dark theme: a flat opaque blob colour, not a mix. */
+  --on-glass-blob: oklch(0.885 0.004 75);
   --glass-shadow:
     0 1px 2px rgba(45, 38, 30, 0.05),
     0 8px 28px rgba(45, 38, 30, 0.10);
@@ -670,17 +680,24 @@ textarea:focus-within {
      glass, where a thick ring at the same brightness reads as a painted
      border. The dim flanks stay dim — that contrast is what makes it a glint
      rather than an outline. */
+  /* TIGHTER lobes and a brighter peak on a thinner ring. The glint used to be
+     spread over ~60° either side of the anchor, which on a small control is
+     most of the perimeter — so the edge read as a soft painted outline rather
+     than as light catching one part of a curved surface. Concentrated, the
+     same total light reads as sharper AND as softer at once, which is the look
+     of Apple's own controls. It still travels: `--glass-specular-angle`
+     animates, so which part of the rim is lit drifts. */
   --glass-rim: conic-gradient(
     from var(--glass-specular-angle, 315deg),
-    rgba(255, 255, 255, 0.80) 0deg,
-    rgba(255, 255, 255, 0.26) 60deg,
-    rgba(255, 255, 255, 0.04) 105deg,
-    rgba(255, 255, 255, 0.13) 150deg,
-    rgba(255, 255, 255, 0.40) 180deg,
-    rgba(255, 255, 255, 0.13) 210deg,
-    rgba(255, 255, 255, 0.04) 255deg,
-    rgba(255, 255, 255, 0.26) 300deg,
-    rgba(255, 255, 255, 0.80) 360deg
+    rgba(255, 255, 255, 0.98) 0deg,
+    rgba(255, 255, 255, 0.34) 26deg,
+    rgba(255, 255, 255, 0.06) 70deg,
+    rgba(255, 255, 255, 0.05) 150deg,
+    rgba(255, 255, 255, 0.52) 180deg,
+    rgba(255, 255, 255, 0.05) 210deg,
+    rgba(255, 255, 255, 0.06) 290deg,
+    rgba(255, 255, 255, 0.34) 334deg,
+    rgba(255, 255, 255, 0.98) 360deg
   );
   /* A backdrop-filter can do NOTHING over pure black: blurring black gives
      black, saturating it gives black, and brightness is multiplicative — 1.25
@@ -727,6 +744,11 @@ textarea:focus-within {
      indistinguishable from it on a dark theme, which is exactly what the
      owner saw. */
   --on-glass: oklch(0.235 0.008 60);
+  /* The nav's gravity blob, as a FLAT opaque colour rather than a mix against
+     an estimate of the face. Mixed, it still read as slightly see-through —
+     any error in `--on-glass` shows up as the blob seeming to let the page
+     through, which is the one thing it must not do. */
+  --on-glass-blob: oklch(0.335 0.006 60);
   --glass-shadow:
     inset 0 -1px 1px rgba(0, 0, 0, 0.10),
     0 2px 6px rgba(0, 0, 0, 0.10),
@@ -775,8 +797,11 @@ textarea:focus-within {
   --extra-blur: 2px;
   /* Drives the rim band widths below. Lower = a finer edge; the material's
      presence comes from the veil and the face, not from a thick ring — and the
-     specular glint carries the edge, so the ring under it can stay fine. */
-  --softness: 5.6px;
+     specular glint carries the edge, so the ring under it can stay fine.
+     Taken down again (5.6 → 3.4) against Apple's own controls: theirs is a
+     visibly THINNER line that nonetheless reads more clearly, because the
+     brightness is in the glint rather than spread along the whole perimeter. */
+  --softness: 3.4px;
   --tint-amount: 0;
   --tint-saturation: 2;
   --tint-hue: 180deg;

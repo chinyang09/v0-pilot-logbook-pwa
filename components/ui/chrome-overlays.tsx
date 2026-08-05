@@ -53,17 +53,31 @@ function fadeFor(side: Side): string {
  * then only ADD blur and the ramp stays monotonic on both engines (see
  * SIDEBAR_BACKDROP_BLUR in nav-pill for the same rule).
  *
- * Deliberately SLIGHT — the band is a **darken with a hint of blur**, not a
- * frosted panel. Text passing under the status bar has to stay legible
- * enough to make out roughly what it says; at the earlier 12px peak it was
- * an unreadable smear, so the whole ramp is ~a fifth of that and the veil
- * above carries the treatment.
+ * Weighted so the band reads as chrome you cannot reach through, which is the
+ * job it was failing: at a 2.4px peak a card scrolling under the action
+ * buttons still looked sharp and tappable, and the owner's read was that it
+ * "blurs a little later" than a native bar and is misleading. It peaks at 9px
+ * now and the ramp starts earlier (58% of the first layer), while the veil
+ * above stays at 50% so text passing beneath is still a legible ghost rather
+ * than an unreadable smear.
  */
 const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
-  { blur: 0.6, coverage: "100%", ramp: "45%" },
-  { blur: 1.4, coverage: "72%", ramp: "42%" },
-  { blur: 2.4, coverage: "48%", ramp: "42%" },
+  { blur: 1.5, coverage: "100%", ramp: "58%" },
+  { blur: 4, coverage: "78%", ramp: "46%" },
+  { blur: 9, coverage: "52%", ramp: "40%" },
 ];
+
+/**
+ * How far the treatment extends BEYOND the bar it sits on.
+ *
+ * The band used to be exactly the bar's height, so the blur only really
+ * arrived in the last few pixels above the buttons and a card sitting just
+ * under them looked sharp, reachable and tappable — it was neither. Native
+ * bars start softening well before their own edge, which is the cue that
+ * says "this is behind the chrome". Anything that positions content against
+ * the header should clear `--chrome-clear`, which is the bar PLUS this.
+ */
+const FADE_TAIL = 24;
 
 export function ChromeFade({
   side,
@@ -77,7 +91,8 @@ export function ChromeFade({
     <div
       aria-hidden
       className={cn("pointer-events-none absolute inset-x-0 z-0", className)}
-      style={{ ...anchor, height: "100%" }}
+      // Taller than the bar by FADE_TAIL — see the note there.
+      style={{ ...anchor, height: `calc(100% + ${FADE_TAIL}px)` }}
     >
       {BLUR_LAYERS.map(({ blur, coverage, ramp }) => {
         const mask = `linear-gradient(to ${side}, transparent 0, black ${ramp})`;

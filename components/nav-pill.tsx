@@ -108,6 +108,15 @@ const SIDEBAR_WIDTH = 199
 const SIDEBAR_MARGIN = 4 // distance from viewport edge when expanded
 const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_MARGIN * 2 // 191
 const PILL_HEIGHT = 44 // h-11
+/**
+ * The MOBILE bottom pill is bigger than the desktop one.
+ *
+ * They are not the same control at the same size: the desktop pill is a row of
+ * text tabs in a dense header, the phone's is the app's primary navigation and
+ * the only one, with an icon over a label and a thumb rather than a cursor
+ * aiming at it. Matched to the platform's own bottom bars (and to Claude's).
+ */
+const MOBILE_PILL_HEIGHT = 56
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
 // ─── Morph timing ────────────────────────────────────────────
@@ -219,19 +228,23 @@ function SyncIconButton({ className }: { className?: string }) {
  * much as a five-tab sweep — a short move that deforms proportionally less
  * just looks limp.
  */
-/* Longer and softer than it was (480 / ζ 0.32 on the shape). The owner's read
-   of the tighter numbers was "snappy and aggressive" — the deformation is meant
-   to be a hint that the thing has weight, not the event itself. */
-const GRAVITY_SPRING_MS = 560
-const TRAVEL_ZETA = 0.78
-const TRAVEL_OMEGA = 9.2
-const SHAPE_ZETA = 0.48
-const SHAPE_OMEGA = 8.2
+/* Softened twice, on the owner's read that it was still "aggressive" and should
+   be "like Apple's lens to blob": longer (480 → 620ms), the shape oscillator
+   nearly critically damped (ζ 0.32 → 0.72) so it does not ring, and both
+   deformations cut to a quarter of where they started (travel 0.20 → 0.06,
+   handoff 0.34 → 0.07). At this size the wobble is felt rather than watched,
+   which is the whole intent — the blob should look like it has weight, not
+   like it is made of jelly. */
+const GRAVITY_SPRING_MS = 620
+const TRAVEL_ZETA = 0.86
+const TRAVEL_OMEGA = 8.4
+const SHAPE_ZETA = 0.72
+const SHAPE_OMEGA = 7.0
 /** Peak deformation along the direction of travel. */
 /** How far the blob deforms when the drag lens hands it back — more than a
  *  travel wobble, because the lens it replaces was visibly larger. */
-const HANDOFF_STRETCH = 0.14
-const STRETCH = 0.12
+const HANDOFF_STRETCH = 0.07
+const STRETCH = 0.06
 /** How much of it the cross axis gives back — near 1 reads as volume held. */
 const CROSS = 0.85
 const SPRING_SAMPLES = 40
@@ -454,10 +467,12 @@ function GravityIndicator({
     >
       <div
         ref={blobRef}
-        // SOLID, not `bg-foreground/10`. The blob sits on a translucent slab,
+        // SOLID and opaque, from its own token. It sits on a translucent slab,
         // so a translucent fill let the page show through twice and the
-        // highlight changed tone as the list scrolled underneath it.
-        className={cn("h-full w-full rounded-full bg-[var(--on-glass-fill)]", className)}
+        // highlight changed tone as the list scrolled underneath it — and a
+        // fill mixed against an ESTIMATE of the face still read as slightly
+        // see-through, which is what `--on-glass-blob` is for.
+        className={cn("h-full w-full rounded-full bg-[var(--on-glass-blob)]", className)}
       />
     </div>
   )
@@ -889,7 +904,14 @@ function PillBarContent({
   const lensActive = lensPhase !== "idle"
 
   return (
-    <div data-pill-row className="flex items-center h-11 px-1.5">
+    <div
+      data-pill-row
+      className={cn(
+        "flex items-center px-1.5",
+        // The bottom bar is the taller of the two — see MOBILE_PILL_HEIGHT.
+        mode === "desktop" ? "h-11" : "h-14"
+      )}
+    >
       {/* Sidebar toggle — fixed width bookend */}
       <button
         onClick={onToggleSidebar}
@@ -964,12 +986,12 @@ function PillBarContent({
                 <span
                   data-grav-item
                   className={cn(
-                    "inline-flex flex-col items-center justify-center gap-0.5 h-9 px-2.5 rounded-full transition-colors",
+                    "inline-flex flex-col items-center justify-center gap-0.5 h-12 px-3 rounded-full transition-colors",
                     highlighted ? "text-primary" : "text-[var(--on-glass-icon)] active:text-foreground"
                   )}
                 >
-                  <Icon className="h-5 w-5" />
-                  <span className="text-[9px] leading-none">{tab.label}</span>
+                  <Icon className="h-[22px] w-[22px]" />
+                  <span className="text-[10px] leading-none">{tab.label}</span>
                 </span>
               )}
             </Link>
@@ -1641,9 +1663,13 @@ function MobilePillMorph({
     left: isSidebarShape ? SIDEBAR_MARGIN : "50%",
     transform: isSidebarShape
       ? "translateX(0)"
-      : `translateX(-50%) translateY(${hideNavbar ? "calc(100% + 24px)" : "0%"})`,
+      // NEVER hidden. It used to slide away on scroll, which meant the primary
+      // navigation of the app was missing exactly when you had been reading for
+      // a while and wanted to go somewhere else — and it came back on a scroll
+      // UP, so getting it required a gesture that also moved the content.
+      : "translateX(-50%)",
     width: isSidebarShape ? SIDEBAR_INNER_WIDTH : (pillWidth ?? "auto"),
-    height: isSidebarShape ? EXPANDED_HEIGHT : PILL_HEIGHT,
+    height: isSidebarShape ? EXPANDED_HEIGHT : MOBILE_PILL_HEIGHT,
     transition,
   }
 
@@ -1707,7 +1733,7 @@ function MobilePillMorph({
               opacity: phase === "pill" ? 1 : 0,
               visibility: phase === "pill" ? "visible" : "hidden",
               pointerEvents: phase === "pill" ? "auto" : "none",
-              height: phase === "pill" ? PILL_HEIGHT : 0,
+              height: phase === "pill" ? MOBILE_PILL_HEIGHT : 0,
               transition: "opacity 0.2s ease",
             }}
           >

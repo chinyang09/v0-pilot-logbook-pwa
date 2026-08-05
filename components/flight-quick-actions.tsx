@@ -89,12 +89,39 @@ export function FlightQuickActions({
   // Only ever rendered in response to a press, so `document` is there.
   if (typeof document === "undefined") return null;
 
+  const dismiss = () => {
+    // Eat the click this gesture is about to synthesise, so the card the menu
+    // was covering does not receive it.
+    const swallow = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener("click", swallow, { capture: true, once: true });
+    // …and drop it again if no click ever comes (a long press that ends on the
+    // scrim produces none), or the next legitimate click anywhere is eaten.
+    window.setTimeout(() => window.removeEventListener("click", swallow, true), 400);
+    onClose();
+  };
+
   const locked = !!flight.isLocked;
 
   return createPortal(
     <div
       className="fixed inset-0 z-[200]"
-      onPointerDown={onClose}
+      // The scrim SWALLOWS the whole gesture rather than closing on the way
+      // down. Closing on pointerdown unmounted the overlay mid-gesture, so the
+      // click that followed landed on the card underneath — dismissing the
+      // menu also opened the flight. It closes on the LIFT, and a one-shot
+      // capture-phase listener eats the synthesised click behind it.
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onPointerUp={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dismiss();
+      }}
       onContextMenu={(e) => e.preventDefault()}
     >
       <div className={cn("absolute inset-0", MODAL_SCRIM)} />
@@ -124,7 +151,7 @@ export function FlightQuickActions({
             role="menuitem"
             onClick={() => {
               onSelect(a.id);
-              onClose();
+              dismiss();
             }}
             className="row-divider flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-base text-foreground transition-colors active:bg-secondary"
           >
@@ -137,7 +164,7 @@ export function FlightQuickActions({
           role="menuitem"
           onClick={() => {
             onSelect("lock");
-            onClose();
+            dismiss();
           }}
           className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-base text-foreground transition-colors active:bg-secondary"
         >

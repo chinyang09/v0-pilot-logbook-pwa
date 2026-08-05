@@ -688,7 +688,13 @@ report watermarks). Do not go back to an allowlist.
 - **`ChromeFade`** — THE floating-header treatment, rendered directly by the
   main shell header and the mobile detail overlay header in
   `desktop-layout.tsx` (no more inline copies): a native-style bar of
-  progressive **blur + darken** — three masked backdrop-blur layers (smallest
+  progressive **blur + darken**. It extends `FADE_TAIL` (24px) BEYOND the bar
+  it sits on, and peaks at 9px of blur: at the old 2.4px, confined to the bar's
+  own height, a card scrolling under the action buttons still looked sharp and
+  tappable, which is misleading — the softening has to start before the edge
+  for the band to read as chrome. `--chrome-clear` is the bar plus that tail,
+  and anything positioning a row against the header (the quick-scroll rail's
+  target) uses it rather than `--chrome-top` — three masked backdrop-blur layers (smallest
   radius first, widest coverage, so the stack only ever adds blur toward the
   edge) under the background gradient (solid → 60% → transparent). The
   gradient is anchored to a fixed 64px tail so taller chrome keeps the same
@@ -1709,7 +1715,7 @@ When making changes, be aware of these high-impact files:
     the root-sum-square, so ONE blur is identical optics for a third of the
     work. It carries more of the material's presence now that the veil is
     thinner (4.4px).
-  - **A fine ring under a bright glint.** `--softness` (5.6px) drives the
+  - **A fine ring under a bright glint.** `--softness` (3.4px) drives the
     edge/emboss/refraction band widths and the specular conic (`--glass-rim`)
     peaks at 0.80 dark / 0.96 light. Those two move together and in opposite
     directions on purpose: a thin edge with a strong catch reads as a sharp
@@ -1892,6 +1898,11 @@ When making changes, be aware of these high-impact files:
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
 - Do not let a single calendar month be wider than a DUAL pane in the split layout — the cells are square, so its width is its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
+- Do not confine the header's blur to the bar's own height, and do not scroll a row to `--chrome-top` — content has to clear `--chrome-clear` (the bar PLUS the fade's tail). A row parked at the bar's edge sits in the blur and looks sharp enough to tap when it isn't
+- Do not let the bottom nav hide on scroll — it is the app's primary navigation on a phone, and it disappeared exactly when a long read made you want it, with a scroll UP as the only way back
+- Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (56 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
+- Do not mix the gravity blob's colour against `--on-glass` — it is `--on-glass-blob`, a flat opaque value per theme. Any error in the estimated face shows up as the blob appearing to let the page through, which is the one thing it must not do
+- Do not close the flight card's hold menu on POINTERDOWN — the overlay unmounts mid-gesture and the click that follows lands on the card underneath, so dismissing the menu also opened the flight. Close on the lift and swallow the synthesised click with a one-shot capture listener
 - Do not derive the calendar's dual/single mode from a ResizeObserver on the page — read `usePanelDualMonth()`. A measurement lands a frame behind the resize, and in that frame the calendar renders the outgoing mode at the incoming width (the "flash" on the collapse)
 - Do not scroll a dynamically-measured virtual list by asking the virtualizer where a row is — every offset it can give you is built from `estimateSize` for the rows it has never measured, so `scrollToIndex`/`getOffsetForIndex` are wrong by however far the estimate is off. `scrollToIndexSettled` scrolls roughly, then MEASURES the row in the DOM and corrects by the difference, which is exact
 - Do not anchor the flight card's hold menu to the finger — it lands somewhere different every time for the same row, which reads as accidental. Anchor it to the CARD's box (measured on pointerdown) and fade it in; a zoom read as flying in from somewhere else

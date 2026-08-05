@@ -28,11 +28,15 @@ interface ScrollableVirtualizer {
   scrollElement: HTMLElement | Window | null
 }
 
-/** The floating header's height in px, read from the one CSS definition. */
-function chromeTopPx(): number {
+/**
+ * How far down the scroller content is CLEAR of the header treatment, in px,
+ * read from the one CSS definition. Not just the bar: a row parked at the
+ * bar's edge sits in the blur's tail and reads as reachable when it is not.
+ */
+function chromeClearPx(): number {
   if (typeof window === "undefined") return 0
   const probe = document.createElement("div")
-  probe.style.cssText = "position:absolute;visibility:hidden;height:var(--chrome-top)"
+  probe.style.cssText = "position:absolute;visibility:hidden;height:var(--chrome-clear)"
   document.body.appendChild(probe)
   const h = probe.offsetHeight
   probe.remove()
@@ -53,7 +57,7 @@ export function scrollToIndexSettled(
     virtualizer.scrollToIndex(index, { align, behavior: "auto" })
     return
   }
-  const inset = align === "start" ? chromeTopPx() : 0
+  const inset = align === "start" ? chromeClearPx() : 0
 
   // The rough move: gets the target row rendered so it can be measured.
   virtualizer.scrollToIndex(index, { align, behavior: "auto" })
