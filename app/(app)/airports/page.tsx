@@ -20,7 +20,8 @@ import { Star, Plus, MapPin, Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll";
+import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll";
+import { scrollToIndexSettled } from "@/lib/utils/virtual-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { AirportDetailPanel } from "@/components/airport-detail-panel";
@@ -251,7 +252,7 @@ export default function AirportsPage() {
   // Generate FastScroll alphabet items from the browse list
   const fastScrollItems = useMemo(() => {
     return generateAlphabetItemsFromList(browseAirports.map((a) => a.icao), {
-      numberPosition: "start",
+      numberPosition: "start", withTop: true,
     });
   }, [browseAirports]);
 
@@ -406,18 +407,24 @@ export default function AirportsPage() {
 
   // Handle FastScroll selection - uses scrollToIndex instead of loadAll + scrollIntoView
   const handleFastScrollSelect = useCallback((letter: string) => {
+    isFastScrollingRef.current = true;
+    setActiveLetterKey(letter);
+    // ★ is the pinned favourites/recent block at the very top, which has no
+    // letter of its own.
+    if (letter === FAST_SCROLL_TOP_KEY) {
+      scrollContainerRef.current?.scrollTo({ top: 0, behavior: "auto" });
+      setTimeout(() => { isFastScrollingRef.current = false; }, 150);
+      return;
+    }
     const index = letterIndexMap.get(letter);
     if (index !== undefined) {
-      isFastScrollingRef.current = true;
-      setActiveLetterKey(letter);
-      rowVirtualizer.scrollToIndex(index, {
-        align: "start",
-        behavior: "auto",
-      });
-      setTimeout(() => {
-        isFastScrollingRef.current = false;
-      }, 150);
+      // Settled, not a single call: the rows are dynamically measured, so one
+      // scrollToIndex lands short of the letter (see lib/utils/virtual-scroll).
+      scrollToIndexSettled(rowVirtualizer, index);
     }
+    setTimeout(() => {
+      isFastScrollingRef.current = false;
+    }, 250);
   }, [letterIndexMap, rowVirtualizer]);
 
 

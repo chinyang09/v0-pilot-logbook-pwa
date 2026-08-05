@@ -557,11 +557,17 @@ textarea:focus-within {
   to   { transform: translateX(0); opacity: 0; }
 }
 
-/* Stepping to another month: the outgoing copy leaves the way you came from
-   while the arriving one rides `cal-pane-settle` in from the other side. */
+/* Stepping to another month is VERTICAL, because the gesture that steps it is
+   a vertical swipe (and a wheel): the months should travel the way the finger
+   does. The single ↔ dual width slide above stays horizontal — that one is the
+   pair opening sideways, which is a different motion entirely. */
+@keyframes cal-step-in {
+  from { transform: translateY(var(--cal-step-y, 0)); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
 @keyframes cal-step-out {
-  from { transform: translateX(0); opacity: 1; }
-  to   { transform: translateX(var(--cal-pane-x, 0)); opacity: 0; }
+  from { transform: translateY(0); opacity: 1; }
+  to   { transform: translateY(var(--cal-step-y, 0)); opacity: 0; }
 }
 
 /* Sidebar width variable */

@@ -22,7 +22,8 @@ import { normalizeRegistration } from "@/lib/utils/string"
 import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
-import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll"
+import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll"
+import { scrollToIndexSettled } from "@/lib/utils/virtual-scroll"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { AircraftDetailPanel } from "@/components/aircraft-detail-panel"
@@ -304,7 +305,7 @@ export default function AircraftPage() {
     if (allSortedAircraft.length === 0) return []
     return generateAlphabetItemsFromList(
       allSortedAircraft.map((a) => a.registration),
-      { numberPosition: "start" }
+      { numberPosition: "start", withTop: true }
     )
   }, [allSortedAircraft])
 
@@ -473,18 +474,24 @@ export default function AircraftPage() {
 
   // Handle FastScroll selection - uses scrollToIndex
   const handleFastScrollSelect = useCallback((letter: string) => {
+    isFastScrollingRef.current = true
+    setActiveLetterKey(letter)
+    // ★ is the pinned favourites/recent block at the very top, which has no
+    // letter of its own.
+    if (letter === FAST_SCROLL_TOP_KEY) {
+      scrollContainerRef.current?.scrollTo({ top: 0, behavior: "auto" })
+      setTimeout(() => { isFastScrollingRef.current = false }, 150)
+      return
+    }
     const index = letterIndexMap.get(letter)
     if (index !== undefined) {
-      isFastScrollingRef.current = true
-      setActiveLetterKey(letter)
-      rowVirtualizer.scrollToIndex(index, {
-        align: "start",
-        behavior: "auto",
-      })
-      setTimeout(() => {
-        isFastScrollingRef.current = false
-      }, 150)
+      // Settled, not a single call: the rows are dynamically measured, so one
+      // scrollToIndex lands short of the letter (see lib/utils/virtual-scroll).
+      scrollToIndexSettled(rowVirtualizer, index)
     }
+    setTimeout(() => {
+      isFastScrollingRef.current = false
+    }, 250)
   }, [letterIndexMap, rowVirtualizer])
 
 

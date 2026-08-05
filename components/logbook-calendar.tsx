@@ -10,7 +10,7 @@ import {
   useState,
   useEffect,
 } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import type { FlightLog } from "@/lib/db";
 import { cn } from "@/lib/utils";
 
@@ -52,6 +52,15 @@ interface LogbookCalendarProps {
   /** Optional content rendered above the calendar grid, inside the glass
    *  material when glass mode is active. Use for a date range label etc. */
   header?: React.ReactNode;
+  /**
+   * Makes each pane's month caption the control that opens the month/year
+   * picker. The caption is already there naming the month, so a second
+   * expanding label in the header's action bar was saying the same thing
+   * twice — and it was the thing that grew the action group into the nav pill.
+   */
+  onHeaderPress?: () => void;
+  /** True while the picker is open, so the caption's chevron can flip. */
+  headerActive?: boolean;
 }
 
 export interface CalendarHandle {
@@ -128,6 +137,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       rangeStart = null,
       rangeEnd = null,
       header,
+      onHeaderPress,
+      headerActive = false,
     },
     ref
   ) {
@@ -539,9 +550,27 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       keyPrefix = ""
     ) => (
       <>
-        <div className="text-xs font-medium text-[var(--on-glass-muted)] text-center pb-0.5">
-          {MONTHS[m.month]} {m.year}
-        </div>
+        {onHeaderPress ? (
+          <button
+            type="button"
+            onClick={onHeaderPress}
+            aria-label="Select month"
+            aria-expanded={headerActive}
+            className="mx-auto mb-0.5 flex items-center gap-1 rounded-full px-2 py-0.5 text-sm font-semibold text-foreground transition-colors hover:bg-[var(--on-glass-fill-soft)]"
+          >
+            {MONTHS[m.month]} {m.year}
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 text-[var(--on-glass-muted)] transition-transform",
+                headerActive && "rotate-180"
+              )}
+            />
+          </button>
+        ) : (
+          <div className="text-sm font-semibold text-foreground text-center pb-0.5">
+            {MONTHS[m.month]} {m.year}
+          </div>
+        )}
         {renderDayGrid(days, keyPrefix)}
       </>
     );
@@ -588,9 +617,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         style={
           step
             ? ({
-                "--cal-pane-x": step.dir > 0 ? "100%" : "-100%",
-                "--cal-pane-o": 0,
-                animation: `cal-pane-settle ${PANE_SLIDE_MS}ms ${PANE_SLIDE_EASE} both`,
+                // Stepping FORWARD, the new month arrives from BELOW — the
+                // same direction the swipe that asked for it travels.
+                "--cal-step-y": step.dir > 0 ? "100%" : "-100%",
+                animation: `cal-step-in ${PANE_SLIDE_MS}ms ${PANE_SLIDE_EASE} both`,
               } as React.CSSProperties)
             : undefined
         }
@@ -670,7 +700,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
           className="absolute inset-x-0 top-0"
           style={
             {
-              "--cal-pane-x": step.dir > 0 ? "-100%" : "100%",
+              "--cal-step-y": step.dir > 0 ? "-100%" : "100%",
               animation: `cal-step-out ${PANE_SLIDE_MS}ms ${PANE_SLIDE_EASE} both`,
             } as React.CSSProperties
           }

@@ -87,6 +87,16 @@ interface SwipeableCardProps {
    * into a card on swipe. Use for grouped list/detail rows.
    */
   separated?: boolean
+  /**
+   * Pointer hooks on the OUTER container, for a consumer that wants a gesture
+   * of its own on top of the swipe — the flight card's press-and-hold menu.
+   * They are listeners, not handlers: the swipe still owns the drag, and the
+   * consumer is expected to give up on any movement (see the flight list).
+   */
+  onPointerDown?: (e: React.PointerEvent) => void
+  onPointerMove?: (e: React.PointerEvent) => void
+  onPointerUp?: (e: React.PointerEvent) => void
+  onPointerCancel?: (e: React.PointerEvent) => void
 }
 
 function variantClasses(variant?: SwipeAction["variant"]): string {
@@ -171,6 +181,10 @@ export function SwipeableCard({
   onClick,
   className,
   containerClassName,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
   disabled = false,
   id,
   variant = "card",
@@ -359,6 +373,10 @@ export function SwipeableCard({
         separated && "row-divider",
         containerClassName
       )}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
     >
       {/* Separated, rounded action buttons that pop in and fill the row height */}
       {hasActions && (

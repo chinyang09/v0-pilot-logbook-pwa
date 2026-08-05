@@ -225,6 +225,9 @@ const TRAVEL_OMEGA = 9.2
 const SHAPE_ZETA = 0.32
 const SHAPE_OMEGA = 9.5
 /** Peak deformation along the direction of travel. */
+/** How far the blob deforms when the drag lens hands it back — more than a
+ *  travel wobble, because the lens it replaces was visibly larger. */
+const HANDOFF_STRETCH = 0.34
 const STRETCH = 0.2
 /** How much of it the cross axis gives back — near 1 reads as volume held. */
 const CROSS = 0.85
@@ -251,6 +254,7 @@ function GravityIndicator({
   revision = "",
   hidden = false,
   instant = false,
+  settleKey = 0,
 }: {
   containerRef: React.RefObject<HTMLElement | null>
   activeIndex: number
@@ -267,6 +271,15 @@ function GravityIndicator({
    * lands, or it springs across the bar the moment the route catches up).
    */
   instant?: boolean
+  /**
+   * Bump to make the blob SETTLE IN where it already stands — the jelly
+   * wobble, with no travel. The drag lens lands on the blob's exact rect and
+   * then crossfades to it, so without this the blob simply appeared: the lens
+   * eased out and the thing underneath was just suddenly there. Running the
+   * shape oscillator on the handoff gives it the give of a soft body coming
+   * to rest, which is what the lens's own splat was doing a frame earlier.
+   */
+  settleKey?: number
 }) {
   const reduce = useReducedMotion()
   const [rects, setRects] = useState<{ left: number; top: number; width: number; height: number }[]>([])
@@ -383,6 +396,29 @@ function GravityIndicator({
       { duration: GRAVITY_SPRING_MS, easing: "linear" },
     )
   }, [activeIndex, rects, reduce, instant])
+
+  // The handoff wobble. Deliberately a SEPARATE effect keyed on `settleKey`:
+  // it must not re-fire when the blob merely re-measures, and it has no travel
+  // component at all — the blob is already exactly where it belongs.
+  const settledOnceRef = useRef(settleKey)
+  useEffect(() => {
+    if (settleKey === settledOnceRef.current) return
+    settledOnceRef.current = settleKey
+    const shape = blobRef.current
+    if (!shape || reduce) return
+    shapeRef.current?.cancel()
+    const { ss } = springTrack()
+    shapeRef.current = shape.animate(
+      // Wider than the travel wobble (the lens was bigger than the blob, so
+      // the takeover reads as the shape relaxing back into itself) and along
+      // the bar, which is the axis the lens was travelling on.
+      ss.map((v) => {
+        const s = v * HANDOFF_STRETCH
+        return { transform: `scale(${1 + s}, ${1 - s * CROSS})` }
+      }),
+      { duration: GRAVITY_SPRING_MS, easing: "linear" },
+    )
+  }, [settleKey, reduce])
 
   return (
     <div
@@ -530,6 +566,8 @@ function PillBarContent({
   /** Holds the cloned tab strip, positioned to sit exactly over the real one. */
   const refractCopyRef = useRef<HTMLDivElement | null>(null)
   const [lensPhase, setLensPhase] = useState<"idle" | "drag" | "settle">("idle")
+  /** Bumped when the drag lens hands the blob back — see GravityIndicator. */
+  const [blobSettleKey, setBlobSettleKey] = useState(0)
   const [lensIndex, setLensIndex] = useState(-1)
   // Chromium-only real refraction map — the backdrop (the pill) genuinely
   // MINIFIES through the lens's bezel, like Apple's glass. Generated once when
@@ -833,6 +871,11 @@ function PillBarContent({
     settleTimerRef.current = setTimeout(() => {
       setLensPhase("idle")
       setLensIndex(-1)
+      // The lens has finished easing out and the blob is taking over. Give it
+      // the wobble of a soft body arriving rather than letting it just be
+      // there: the lens's own splat is over by now, so without this the whole
+      // landing ended on a hard cut.
+      setBlobSettleKey((k) => k + 1)
     }, 470)
   }, [tabs, router, squishX, squishY, nudgeX])
 
@@ -884,6 +927,7 @@ function PillBarContent({
           revision={tabs.join(",")}
           hidden={lensActive}
           instant={lensActive}
+          settleKey={blobSettleKey}
         />
         {tabs.map((tabKey, i) => {
           const tab = TAB_CONFIG[tabKey]
@@ -977,7 +1021,10 @@ function PillBarContent({
 // ─── Shared sidebar nav content ──────────────────────────────
 
 /** Height of the floating toggle/sync strip the nav scrolls beneath. */
-const SIDEBAR_HEADER_HEIGHT = 56
+/* The band the drawer + sync icons float in. It is the PILL's height, so the
+   two sets of icons land on the same line when the nav is a sidebar and when
+   it is a pill — at 56 against a 44px pill the sidebar's sat visibly lower. */
+const SIDEBAR_HEADER_HEIGHT = PILL_HEIGHT
 
 /**
  * The sidebar's floating top strip: the drawer toggle and the sync icon, over
@@ -1030,19 +1077,11 @@ function SidebarNav({
   pathname,
   className,
   topInset = 0,
-  settled = true,
 }: {
   pathname: string
   className?: string
   /** Space reserved at the top for chrome floating over the list. */
   topInset?: number
-  /**
-   * False while the panel is still morphing. The blob is placed without
-   * animation then: its metrics are re-measured as the panel grows, so a spring
-   * started mid-morph only gets going as the panel lands and the blob visibly
-   * arrives a beat after the sidebar has finished opening.
-   */
-  settled?: boolean
 }) {
   const navRef = useRef<HTMLElement>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
@@ -1105,12 +1144,18 @@ function SidebarNav({
           trailing the items by a frame. Being inside means the nav's own mask
           covers it too, so it dissolves under the top strip along with its own
           row (which is why it no longer needs a separate masked layer). */}
+      {/* ALWAYS instant in the sidebar. The spring is a pill-bar effect: the
+          list is a scroller whose metrics re-measure as a route settles and as
+          the panel finishes morphing, and every re-measure was another chance
+          for the blob to re-fire and read as a double flash. A vertical list
+          also gives the travel nothing to say — the blob just moves down a row.
+          Do not put the animation back here to match the pill. */}
       <GravityIndicator
         containerRef={navRef}
         activeIndex={activeIndex}
         className="rounded-full"
         revision={orderedHrefs.join(",")}
-        instant={!settled}
+        instant
       />
 
       {/* One pixel taller than the scroller so the list always has somewhere to
@@ -1520,7 +1565,6 @@ function DesktopPillMorph({
                 pathname={pathname}
                 className="h-full"
                 topInset={SIDEBAR_HEADER_HEIGHT}
-                settled={phase === "sidebar"}
               />
               <SidebarTopStrip onToggle={onToggleSidebar} />
             </div>
@@ -1698,7 +1742,6 @@ function MobilePillMorph({
                 pathname={pathname}
                 className="h-full"
                 topInset={SIDEBAR_HEADER_HEIGHT}
-                settled={phase === "sidebar"}
               />
               <SidebarTopStrip onToggle={() => setSidebarOpen(false)} />
             </div>

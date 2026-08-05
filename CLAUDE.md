@@ -507,6 +507,12 @@ arbitrary. A swipe or wheel step therefore moves **two** months in dual mode
 (`stepMonths`); stepping by one would swap which side each month lands on and
 put the pairing out of phase.
 
+**Each pane's month caption IS the month picker.** The action bar used to carry
+an expanding month label as well, which said the same thing twice and was the
+thing that grew the left action group into the centred nav pill. The caption is
+rendered in single mode too — it is also what keeps the two modes the same
+height (see above).
+
 **The header names BOTH months in dual mode** — `Jul – Aug 26`, and both years
 when the pair straddles a new year (`Dec 26 – Jan 27`), since "Dec – Jan 27"
 would put December in the wrong year. The year is two digits because at four
@@ -548,8 +554,10 @@ moves the pair by TWO months, so there was never a single month sliding across
 another to animate in the first place.
 
 What replaced it is simpler and covers **both** modes: stepping slides the whole
-view horizontally. The arriving month(s) come in from the side you are heading
-toward (`cal-pane-settle`) while a copy of the outgoing one leaves the other way
+view VERTICALLY, because the gesture that steps it is a vertical swipe (and a
+wheel) — the months should travel the way the finger does. The single ↔ dual
+width slide stays horizontal; that one is the pair opening sideways. The arriving month(s) come in from the side you are heading
+toward (`cal-step-in`) while a copy of the outgoing one leaves the other way
 (`cal-step-out`). The arriving content is in FLOW and only the outgoing copy is
 absolute, so the container keeps its height for the whole slide — which is
 exactly what the carousel got wrong. Measured on a single-month step: the
@@ -838,6 +846,14 @@ re-renders).
     the stretch — the ratio e^(−ζπ/√(1−ζ²)) between consecutive extremes) and
     rings down. Measured on a real move: 1.20/0.83 at the stretch, 0.94/1.05
     on the landing squash, then neutral.
+
+  In the SIDEBAR the blob is placed **instantly** — no spring at all. The list
+  is a scroller whose metrics re-measure as a route settles and as the panel
+  finishes morphing, and every re-measure was another chance for the spring to
+  re-fire and read as a double flash; a vertical list also gives the travel
+  nothing to say. The pill keeps the physics, and when the drag lens hands the
+  blob back it plays the SHAPE oscillator in place (`settleKey`) so the takeover
+  lands with the give of a soft body instead of the blob simply being there.
 
   The effect **re-fires only for a new destination** (`animatedToRef`) and, if
   it interrupts a move in flight, resumes from the blob's CURRENT transform
@@ -1747,6 +1763,12 @@ When making changes, be aware of these high-impact files:
 - `lib/utils/flight-sort.ts` — the one list order (date, out time, departure, id)
 - `lib/db/stores/user/flights.store.ts` — soft delete / restore / purge + `isLiveFlight`
 
+**Flight card gestures:**
+- `components/flight-quick-actions.tsx` — the press-and-hold menu (Next Leg / Return Trip / Duplicate / Share / Lock). A hold is the one gesture the card had spare: tap opens the flight, a horizontal drag opens the swipe panel. Any movement past a few px cancels it, so it never fires on a scroll.
+- `lib/utils/derive-flight.ts` — what a derived flight carries. Everything that does not change between two legs (aircraft, crew, role) and NOTHING that is a record of a specific flight having happened (OOOI, takeoffs/landings, signature, lock, import + sync stamps) — copying those forward would fabricate a logbook entry.
+- `components/signature-dialog.tsx` — signing, full screen. Orientation-agnostic by construction: the surface fills what is left after the chrome, and the strokes are normalised to their own bounding box, so a signature drawn in landscape renders identically in portrait.
+- `lib/utils/virtual-scroll.ts` — `scrollToIndexSettled`. A dynamically-measured list needs the scroll re-issued until the arriving rows have measured, and convergence has to be read off the ELEMENT's `scrollTop` (`virtualizer.scrollOffset` is written by the scroll listener, so it always looks unchanged in the same tick).
+
 **Swipe & Forms:**
 - `components/swipeable-card.tsx` — The single swipe-to-reveal primitive (framer-motion). Used by all lists, the flight form rows, and the crew/aircraft detail rows.
 - `lib/utils/pending-actions.ts` — armed destructive actions; outlives the row that armed them.
@@ -1862,6 +1884,9 @@ When making changes, be aware of these high-impact files:
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
 - Do not let a single calendar month be wider than a DUAL pane in the split layout — the cells are square, so its width is its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
+- Do not animate the gravity blob in the SIDEBAR — it is placed instantly there. The list's metrics re-measure as a route settles and as the panel morphs, and each re-measure was a chance for the spring to re-fire (the "flashes twice" report)
+- Do not carry a flight's OOOI times, takeoffs/landings, signature, lock or import/sync stamps into a derived flight (`deriveFlight`) — those are the record of a specific flight having happened, and copying them forward fabricates a logbook entry
+- Do not judge a virtual list's scroll convergence by `virtualizer.scrollOffset` — it is written by the scroll listener, so reading it in the same tick as `scrollToIndex` always says "unchanged" and the retry loop gives up after one pass
 - Do not size the floating controls or the nav pill independently — they are one 44px family (`CONTROL_RADIUS` 22 = half the height, so a pill stays a stadium), the header row is `h-13` to match, and `--chrome-top` is derived from them. They were 56px, which read as oversized next to the platform's own chrome on the same iPad
 - Do not print a four-digit year in the logbook's month label — in dual mode ("Jul – Aug 2026") the left action group grew far enough to reach the centred nav pill
 - Do not bring back the three-panel month carousel. It measured its container height from a ref taken "at rest" that had never been taken on the first entry into dual mode, so the calendar collapsed to 8px, and its end-of-animation handler tested `dataset.animAnchor` against `data-anim-anchor=""` — the empty string, which is falsy — so it never recovered. A dual step moves the pair by TWO months, so there is nothing sliding across to animate

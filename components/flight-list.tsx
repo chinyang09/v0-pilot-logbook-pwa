@@ -41,6 +41,13 @@ import { SwipeableCard } from "@/components/swipeable-card";
 import { primeFlightCache } from "@/components/flight-form";
 import { FastScroll, type FastScrollItem } from "@/components/ui/fast-scroll";
 import { ScrollIndicator } from "@/components/ui/scroll-indicator";
+import {
+  FlightQuickActions,
+  type FlightQuickAction,
+  type QuickActionAnchor,
+} from "@/components/flight-quick-actions";
+import { deriveFlight, type DeriveKind } from "@/lib/utils/derive-flight";
+import { insertFlightSorted } from "@/lib/utils/flight-sort";
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, instant?: boolean) => void;
@@ -105,6 +112,12 @@ function formatScheduledDuration(scheduledOut: string, scheduledIn: string): str
   return `${h}:${m.toString().padStart(2, "0")}`;
 }
 
+/** Press-and-hold before the quick-actions menu opens. Long enough that it
+ *  cannot be mistaken for a tap, short enough to feel deliberate. */
+const HOLD_MS = 480
+/** Movement that cancels the hold — a scroll or the start of a swipe. */
+const HOLD_SLOP = 8
+
 // Callbacks receive the flight so the parent can pass stable (useCallback)
 // handlers — inline `() => …` closures would give every card new props each
 // render and defeat the memo below.
@@ -113,6 +126,7 @@ interface SwipeableFlightCardProps {
   onEdit: (flight: FlightLog) => void;
   onDelete: (flight: FlightLog) => void;
   onToggleLock: (flight: FlightLog) => void;
+  onHold: (flight: FlightLog, at: { x: number; y: number }) => void;
   isSelected?: boolean;
   displayPrefs?: DisplayPreferences;
 }
@@ -122,17 +136,48 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   onEdit,
   onDelete,
   onToggleLock,
+  onHold,
   isSelected = false,
   displayPrefs,
 }: SwipeableFlightCardProps) {
   const isLocked = flight.isLocked || false;
   const isScheduled = !flight.outTime || !flight.inTime;
 
+  // Press-and-hold opens the quick-actions menu. The timer is cancelled by any
+  // movement past a few pixels, so it never fires on a scroll or on the start
+  // of a swipe — those two own the card's other gestures.
+  const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdFromRef = useRef<{ x: number; y: number } | null>(null);
+  const cancelHold = useCallback(() => {
+    if (holdRef.current) clearTimeout(holdRef.current);
+    holdRef.current = null;
+    holdFromRef.current = null;
+  }, []);
+  useEffect(() => cancelHold, [cancelHold]);
+
   return (
     <SwipeableCard
       // Stable across the virtualiser recycling this row, so an armed delete
       // keeps its overlay while the list scrolls.
       id={`flight-${flight.id}`}
+      onPointerDown={(e) => {
+        cancelHold();
+        const at = { x: e.clientX, y: e.clientY };
+        holdFromRef.current = at;
+        holdRef.current = setTimeout(() => {
+          holdRef.current = null;
+          onHold(flight, at);
+        }, HOLD_MS);
+      }}
+      onPointerMove={(e) => {
+        const from = holdFromRef.current;
+        if (!from) return;
+        if (Math.abs(e.clientX - from.x) > HOLD_SLOP || Math.abs(e.clientY - from.y) > HOLD_SLOP) {
+          cancelHold();
+        }
+      }}
+      onPointerUp={cancelHold}
+      onPointerCancel={cancelHold}
       onClick={() => {
         if (isLocked) return;
         // Hand the panel its data before it mounts — see primeFlightCache.
@@ -508,6 +553,43 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       onDeleted?.();
     }, [onDeleted]);
 
+    // ─── Press-and-hold quick actions ───
+    const [held, setHeld] = useState<{ flight: FlightLog; at: QuickActionAnchor } | null>(null);
+    const handleHold = useCallback((flight: FlightLog, at: QuickActionAnchor) => {
+      // Any open swipe panel would sit under the menu; close it first.
+      window.dispatchEvent(new CustomEvent("swipe-card-close-others", { detail: null }));
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(8);
+      setHeld({ flight, at });
+    }, []);
+
+    const handleQuickAction = useCallback(
+      async (action: FlightQuickAction) => {
+        const source = held?.flight;
+        if (!source) return;
+        if (action === "lock") {
+          await handleToggleLock(source);
+          return;
+        }
+        if (action === "share") {
+          // TODO: sharing a flight (a rendered card / an ICS / a CSV row) is
+          // not designed yet. Left as an explicit no-op rather than a menu
+          // item that silently does nothing under a different name.
+          return;
+        }
+        const { addFlight } = await import("@/lib/db");
+        const created = await addFlight(deriveFlight(source, action as DeriveKind));
+        // Placed by the shared comparator, never prepended — see flight-sort.
+        mutate(
+          CACHE_KEYS.flights,
+          (prev: FlightLog[] | undefined) => insertFlightSorted(prev ?? [], created),
+          { revalidate: false }
+        );
+        primeFlightCache(created);
+        onEdit?.(created);
+      },
+      [held, handleToggleLock, onEdit]
+    );
+
     // FastScroll selection handler (year-based) with instant scrolling
     const handleFastScrollSelect = useCallback(
       (year: string) => {
@@ -698,6 +780,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                             onEdit={handleEdit}
                             onDelete={performDelete}
                             onToggleLock={handleToggleLock}
+                            onHold={handleHold}
                             isSelected={selectedFlightId === flight.id}
                             displayPrefs={preferences.display}
                           />
@@ -736,6 +819,15 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             </div>
           )}
         </div>
+
+        {held && (
+          <FlightQuickActions
+            flight={held.flight}
+            anchor={held.at}
+            onSelect={handleQuickAction}
+            onClose={() => setHeld(null)}
+          />
+        )}
       </>
     );
   }
