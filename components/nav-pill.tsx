@@ -415,7 +415,10 @@ function GravityIndicator({
     >
       <div
         ref={blobRef}
-        className={cn("h-full w-full rounded-full bg-foreground/10", className)}
+        // SOLID, not `bg-foreground/10`. The blob sits on a translucent slab,
+        // so a translucent fill let the page show through twice and the
+        // highlight changed tone as the list scrolled underneath it.
+        className={cn("h-full w-full rounded-full bg-[var(--on-glass-fill)]", className)}
       />
     </div>
   )
@@ -844,7 +847,7 @@ function PillBarContent({
       {/* Sidebar toggle — fixed width bookend */}
       <button
         onClick={onToggleSidebar}
-        className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
+        className="flex items-center justify-center h-10 w-10 rounded-full text-[var(--on-glass-label)] active:text-foreground flex-shrink-0"
       >
         <PanelLeft className="h-6 w-6" />
       </button>
@@ -905,7 +908,7 @@ function PillBarContent({
                   data-grav-item
                   className={cn(
                     "inline-flex items-center justify-center h-9 px-4 rounded-full text-sm font-medium transition-colors",
-                    highlighted ? "text-primary" : "text-foreground/60 active:text-foreground"
+                    highlighted ? "text-primary" : "text-[var(--on-glass-icon)] active:text-foreground"
                   )}
                 >
                   {tab.label}
@@ -915,7 +918,7 @@ function PillBarContent({
                   data-grav-item
                   className={cn(
                     "inline-flex flex-col items-center justify-center gap-0.5 h-11 px-3 rounded-full transition-colors",
-                    highlighted ? "text-primary" : "text-foreground/60 active:text-foreground"
+                    highlighted ? "text-primary" : "text-[var(--on-glass-icon)] active:text-foreground"
                   )}
                 >
                   <Icon className="h-6 w-6" />
@@ -1014,7 +1017,7 @@ function SidebarTopStrip({ onToggle }: { onToggle: () => void }) {
       <div aria-hidden className="SidebarTopBlur" />
       <button
         onClick={onToggle}
-        className="relative flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
+        className="relative flex items-center justify-center h-10 w-10 rounded-full text-[var(--on-glass-label)] active:text-foreground flex-shrink-0"
       >
         <PanelLeft className="h-6 w-6" />
       </button>
@@ -1128,12 +1131,12 @@ function SidebarNav({
               onClick={() => toggleSection(section.label)}
               className="flex items-center justify-between w-full px-3 mb-1 group cursor-pointer"
             >
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--on-glass-muted)]">
                 {section.label}
               </span>
               <ChevronDown
                 className={cn(
-                  "h-4 w-4 text-muted-foreground/50 transition-transform duration-200",
+                  "h-4 w-4 text-[var(--on-glass-muted)] transition-transform duration-200",
                   isCollapsed && "-rotate-90"
                 )}
               />
@@ -1180,10 +1183,10 @@ function SidebarNavItem({
         "active:scale-[0.98]",
         isActive
           ? "text-primary font-medium"
-          : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+          : "text-[var(--on-glass-label)] hover:bg-[var(--on-glass-fill-soft)] hover:text-foreground"
       )}
     >
-      <span className={cn("flex-shrink-0 [&_svg]:!size-6", isActive ? "text-primary" : "text-foreground/50")}>
+      <span className={cn("flex-shrink-0 [&_svg]:!size-6", isActive ? "text-primary" : "text-[var(--on-glass-icon)]")}>
         {icon}
       </span>
       {label}

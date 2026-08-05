@@ -539,22 +539,19 @@ textarea:focus-within {
   animation: accordion-up 0.2s ease-out;
 }
 
-/* Calendar dual-month carousel animations */
-@keyframes cal-exit-up {
-  from { transform: translateY(0); opacity: 1; }
-  to   { transform: translateY(-100%); opacity: 0; }
+/* Single ↔ dual month: a HORIZONTAL slide, the two months treated as a stacked
+   pair. Both directions are the same pair of keyframes parameterised by
+   `--cal-pane-x` (how far the pane starts from its resting place) and
+   `--cal-pane-o` (whether it arrives or was already there) — the pane you were
+   already looking at holds full opacity while the other one appears, so it
+   reads as one emerging from under the other rather than as a crossfade. */
+@keyframes cal-pane-settle {
+  from { transform: translateX(var(--cal-pane-x, 0)); opacity: var(--cal-pane-o, 1); }
+  to   { transform: translateX(0); opacity: 1; }
 }
-@keyframes cal-enter-top {
-  from { transform: translateY(-100%); opacity: 0; }
-  to   { transform: translateY(0); opacity: 1; }
-}
-@keyframes cal-shift-left {
-  from { transform: translateX(0); }
-  to   { transform: translateX(-100%); }
-}
-@keyframes cal-shift-right {
-  from { transform: translateX(0); }
-  to   { transform: translateX(100%); }
+@keyframes cal-pane-leave {
+  from { transform: translateX(var(--cal-pane-x, 0)); opacity: 1; }
+  to   { transform: translateX(0); opacity: 0; }
 }
 
 /* Sidebar width variable */
@@ -638,6 +635,12 @@ textarea:focus-within {
      the difference, so the surface is a touch more see-through without losing
      its separation from cream. */
   --glass-veil: rgba(255, 255, 255, 0.68);
+  /* Surface undercoat — see the note on `--glass-base` in `.dark`. Light: with
+     the white veil over it the face lands at ~86% opaque. */
+  --glass-base: color-mix(in oklab, var(--card) 55%, transparent);
+  /* The solid colour the finished face reads as, for anything painted ON the
+     glass. See `--on-glass-*` below. */
+  --on-glass: oklch(0.965 0.005 75);
   --glass-shadow:
     0 1px 2px rgba(45, 38, 30, 0.05),
     0 8px 28px rgba(45, 38, 30, 0.10);
@@ -682,11 +685,56 @@ textarea:focus-within {
      between a tinted panel and glass. Do not take it much below this — the
      lift off pure black is the whole reason it exists. */
   --glass-veil: rgba(255, 244, 232, 0.11);
+  /* Surface undercoat, painted UNDER the veil.
+
+     The veil is a LIGHTENING paint — warm off-white — so it cannot be the lever
+     for "make the glass more opaque": pushing its alpha turns a dark surface
+     white long before it turns it solid. Opacity that keeps the material's
+     COLOUR has to come from a coat of the surface colour itself, which is what
+     this is. Card-coloured so a glass panel reads as the same family of
+     surface as a card.
+
+     Dark: 0.82 base under the 0.11 veil leaves the face ~84% opaque (was 11%)
+     — between the old action buttons and the calendar's near-solid 85%, and
+     closer to the calendar, per the owner. The blur, the brightness lift and
+     the saturate still act on the remaining fifth, so it is still glass rather
+     than a card with a rim. */
+  --glass-base: color-mix(in oklab, var(--card) 82%, transparent);
+  --on-glass: oklch(0.205 0.01 60);
   --glass-shadow:
     inset 0 -1px 1px rgba(0, 0, 0, 0.10),
     0 2px 6px rgba(0, 0, 0, 0.10),
     0 14px 36px -14px rgba(0, 0, 0, 0.28);
   --glass-edge-filter: blur(var(--total-strength)) brightness(1.2) saturate(1.2);
+}
+
+/* ─── Contents ON a glass surface are painted SOLID ───
+   Only the SLAB is translucent. Anything sitting on it — the nav's gravity
+   blob, an action button's active highlight, an icon, a label — is opaque, the
+   way the controls inside an iOS Control Center tile are. A translucent blob
+   over a translucent slab lets the page show through TWICE, so the highlight
+   drifted in tone as the list scrolled underneath and the icons washed out.
+
+   Each token is the colour that translucency USED to resolve to, mixed once
+   against `--on-glass` (the solid colour the finished face reads as) and then
+   painted flat. Same look over an empty screen, and now the same look over
+   anything else. Use these instead of `bg-foreground/10` / `text-foreground/50`
+   on any glass surface. */
+:root,
+.dark {
+  --on-glass-fill: color-mix(in oklab, var(--foreground) 12%, var(--on-glass));
+  --on-glass-fill-soft: color-mix(in oklab, var(--foreground) 6%, var(--on-glass));
+  /* Three weights of the accent fill, because on the calendar they STACK: a
+     range pill, a flight-day chip on top of it, a today chip on top of that.
+     Translucent they layered into a darker tone at each level; solid they need
+     the levels spelled out, or the upper chip vanishes into the pill. */
+  --on-glass-accent-soft: color-mix(in oklab, var(--primary) 12%, var(--on-glass));
+  --on-glass-accent: color-mix(in oklab, var(--primary) 18%, var(--on-glass));
+  --on-glass-accent-strong: color-mix(in oklab, var(--primary) 28%, var(--on-glass));
+  --on-glass-faint: color-mix(in oklab, var(--foreground) 22%, var(--on-glass));
+  --on-glass-icon: color-mix(in oklab, var(--foreground) 55%, var(--on-glass));
+  --on-glass-label: color-mix(in oklab, var(--foreground) 72%, var(--on-glass));
+  --on-glass-muted: color-mix(in oklab, var(--muted-foreground) 70%, var(--on-glass));
 }
 
 .GlassContainer {
@@ -852,8 +900,15 @@ textarea:focus-within {
   /* The material's PAINTED component — the part that does not come from the
      backdrop. Both themes need it, for opposite reasons: light so the slab
      separates from cream, dark so it has a face at all over black (a
-     backdrop-filter has nothing to work with there). See `--glass-veil`. */
-  background-color: var(--glass-veil, transparent);
+     backdrop-filter has nothing to work with there).
+
+     TWO coats, and they do different jobs: `--glass-base` is the surface-
+     coloured undercoat that carries the material's OPACITY, `--glass-veil` the
+     warm lift over it that carries its optical presence. Keep them separate —
+     driving opacity from the veil alone whitens a dark surface instead of
+     solidifying it. */
+  background-color: var(--glass-base, transparent);
+  background-image: linear-gradient(var(--glass-veil, transparent), var(--glass-veil, transparent));
   transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 

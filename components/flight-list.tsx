@@ -44,6 +44,19 @@ import { ScrollIndicator } from "@/components/ui/scroll-indicator";
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, instant?: boolean) => void;
+  /**
+   * Absorb a change in the top spacer's height without the rows appearing to
+   * move.
+   *
+   * The list deliberately has `overflow-anchor: none` — growing the spacer is
+   * how the floating panels PUSH the list, and scroll anchoring exists to
+   * cancel exactly that. But the spacer also changes for reasons that are not
+   * a push: switching the calendar between one month and two makes its grid a
+   * different height while it is already open, and with anchoring off that
+   * silently slid the whole list under the reader's eye. So the push stays
+   * uncompensated and this is called for the resize.
+   */
+  absorbSpacerDelta: (delta: number) => void;
 }
 
 interface FlightListProps {
@@ -348,6 +361,15 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             requestAnimationFrame(animate);
           }
         },
+        absorbSpacerDelta: (delta: number) => {
+          const container = scrollContainerRef.current;
+          if (!container || !delta) return;
+          // At the very top there is nothing to absorb — the rows are already
+          // against the spacer, so shifting scrollTop would scroll the list
+          // away from the top instead of holding it still.
+          if (container.scrollTop <= 0) return;
+          container.scrollTop += delta;
+        },
       }),
       [flights, rowVirtualizer]
     );
@@ -555,6 +577,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
         <>
           <div
             ref={scrollContainerRef}
+            data-flight-scroller
             className="h-full overflow-y-auto overscroll-contain"
             style={{ overflowAnchor: "none" }}
             onTouchStart={handleTouchStart}
@@ -584,6 +607,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           {/* Main scrollable container */}
           <div
             ref={scrollContainerRef}
+            data-flight-scroller
             // scrollbar-hide + ScrollIndicator: the native overlay indicator
             // spans from the screen edge over the status bar; the inset
             // replacement starts below the action buttons, like native.

@@ -7,6 +7,7 @@ import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useIsDesktop, useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import type { ImperativePanelHandle } from "react-resizable-panels"
+import { SINGLE_MONTH_PX, DUAL_MONTH_PX, DETAIL_MIN_PX } from "@/lib/layout/panel-widths"
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -201,10 +202,6 @@ function AppShellContent({ children }: AppShellProps) {
   // Size the main panel to whichever of the two widths is selected. Runs on
   // toggle, on sidebar open/close and on container resize, so the panel is
   // always exactly one of them and never an in-between width.
-  const SINGLE_MONTH_PX = 360
-  const DUAL_MONTH_PX = 620
-  const DETAIL_MIN_PX = 360
-
   const [canFitDualMonth, setCanFitDualMonth] = useState(false)
 
   useEffect(() => {
@@ -328,8 +325,11 @@ function AppShellContent({ children }: AppShellProps) {
           <ResizablePanelGroup
             direction="horizontal"
             autoSaveId="desktop-panel-layout"
+            // 720 = SPLIT_MIN_PX (two phone-width panels); see lib/layout/panel-widths.
             className="h-full md:min-w-[720px]"
           >
+            {/* 360 = SINGLE_MONTH_PX. `minSize` is a PERCENT, so it has to stay low
+                enough that 360px is reachable — the real floor is this min-width. */}
             <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={20} className="md:min-w-[360px]">
               <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative">
                 {children}
@@ -350,6 +350,7 @@ function AppShellContent({ children }: AppShellProps) {
                 already visible — without the placeholder the panel painted as
                 a bare void until hydration. The placeholder is display:none'd
                 by the same md: rule on phones, so it costs nothing there. */}
+            {/* 360 = DETAIL_MIN_PX — the detail pane stays at least a phone wide. */}
             <ResizablePanel defaultSize={65} minSize={20} className="hidden md:block md:min-w-[360px]">
               <div ref={detailPanelRef} className="h-full">
                 {isDesktop ? (

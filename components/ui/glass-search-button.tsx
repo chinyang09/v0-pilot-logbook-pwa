@@ -111,7 +111,7 @@ export function GlassSearchButton({
               onChange={(e) => onChange(e.target.value)}
               placeholder={placeholder}
               tabIndex={isOpen ? 0 : -1}
-              className="flex-1 bg-transparent text-sm outline-none min-w-0 placeholder:text-muted-foreground/60"
+              className="flex-1 bg-transparent text-sm outline-none min-w-0 placeholder:text-[var(--on-glass-muted)]"
             />
             <button
               type="button"

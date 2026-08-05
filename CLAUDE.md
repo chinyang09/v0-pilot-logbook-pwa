@@ -442,14 +442,49 @@ terms expresses everything the categories did without the mode.
 
 ### The Logbook Calendar's Two Widths
 
-The main panel has exactly **two** widths — `360px` (one month) and `620px`
-(two) — and the divider between the panels is a **toggle**, not a drag handle
-(`ResizableHandle`'s `toggle` prop). A free drag always ended snapped to one of
-the two anyway, and on the way there the calendar grew continuously and flipped
-its layout mid-gesture, which read as the panel breaking rather than resizing.
-`minSize` is a PERCENT, so it has to stay low enough that 360px is reachable —
-at 30 it floored the panel at 420px on a 1400px container and single-month was
-never actually hit; the real floor is the CSS `min-width`.
+The main panel has exactly **two** widths and the divider between the panels is
+a **toggle**, not a drag handle (`ResizableHandle`'s `toggle` prop). A free drag
+always ended snapped to one of the two anyway, and on the way there the calendar
+grew continuously and flipped its layout mid-gesture, which read as the panel
+breaking rather than resizing. `minSize` is a PERCENT, so it has to stay low
+enough that 360px is reachable — at 30 it floored the panel at 420px on a
+1400px container and single-month was never actually hit; the real floor is the
+CSS `min-width`.
+
+**The widths live in `lib/layout/panel-widths.ts`, not in the components.**
+They cannot be picked independently:
+
+| | | Why |
+|---|---|---|
+| `SINGLE_MONTH_PX` | 360 | **A panel is a phone.** One calendar month, and the common Android/iPhone logical width — so a panel is always laying out the same tree the mobile view does. |
+| `DETAIL_MIN_PX` | 360 | Same rule for the detail pane. |
+| `DUAL_MONTH_PX` | 600 | Two months at 300px each — 7 columns of ~42px, about where iOS's own two-up month view sits. |
+| `SPLIT_MIN_PX` | 720 | Below this there is no split; it is also the `md:` breakpoint. |
+
+600 rather than 620 because of **iPad Air 5 landscape with the sidebar open**,
+which is the tightest case the owner actually uses:
+
+```
+1180 − 199 (sidebar + margins) − 1 (divider) = 980 available
+600 (two months) + 360 (detail)              = 960   → 20px spare
+```
+
+At 620 that sum was *exactly* 980 — it fit with zero slack, so any rounding took
+the dual-month toggle away on that device. The 20px is the whole point.
+
+The nav pill is **not** part of this budget. The header's action groups are
+anchored to the VIEWPORT edges (main actions left, detail actions right, with
+the centred pill between them), not to the panels, so the panel split cannot
+move the pill onto a button. Measured at 1180: main actions 16→240, pill
+367→814. What *can* collide is a page whose action bar EXPANDS — the dashboard's
+period pills — and that is a per-page question, not a sizing one.
+
+**A single month is capped at one phone width** (`max-w-[360px] mx-auto` on the
+day grid). Without the cap it stretched to fill the wide panel — 7 columns of
+84px, and since the cells are square the grid went from 313px tall to 519px.
+That happened for the frames between the panel resizing and the dual-month
+switch catching up, so widening the panel flashed a giant calendar and shoved
+the list down and back.
 
 In **dual-month** mode the two panes are a FIXED pair: odd month on the left,
 even on the right (Jan|Feb, Mar|Apr, …), anchored by `pairStart()`. The pair
@@ -462,6 +497,47 @@ put the pairing out of phase.
 Going **dual → single** keeps whichever pane the top flight is actually in — if
 that is the right-hand month, the LEFT one stows. Going single → dual snaps the
 anchor to its pair boundary.
+
+**Single ↔ dual is a horizontal slide, and the pair is treated as two months
+stacked on top of each other.** The one that belongs on the right slides out
+from under the other; closing, it slides back under. Which pane travels never
+changes — it is always the right-hand month — what changes is which one you were
+already looking at, and that one holds full opacity while the other arrives:
+
+| Looking at | Opening to dual |
+|---|---|
+| Jul (the left month) | Jul stays put, Aug emerges from under it and moves right |
+| Aug (the right month) | Aug moves right, revealing Jul underneath on the left |
+
+Both directions are the same pair of keyframes (`cal-pane-settle` /
+`cal-pane-leave`) parameterised by `--cal-pane-x` and `--cal-pane-o`. The month
+you were looking at CANNOT be read off `selectedMonth` when the slide starts —
+the page re-anchors the selection to the pair's first month in the same commit
+that flips `dualMonth` — hence `lastSingleMonthRef`.
+
+The three-panel month **carousel is gone**, and it was broken as well as being
+the wrong motion. It rendered the stepped-to month as an extra absolutely
+positioned panel inside a container whose height came from a ref measured "at
+rest"; on the FIRST entry into dual mode that measurement had never happened, so
+the container fell to `height: undefined` over absolutely positioned children
+and the whole calendar collapsed to its padding (**measured: 8px, where two
+months are 280**). It never recovered either — the handler that ended the
+animation tested `dataset.animAnchor`, and `data-anim-anchor=""` reads back as
+the empty string, which is falsy, so it returned on every event. A dual step
+moves the pair by TWO months anyway, so there is no single month sliding across
+to animate, and the single-month view has never animated a step. The pair now
+just re-renders.
+
+**A resize is not a push** (`FlightListRef.absorbSpacerDelta`). The list has
+`overflow-anchor: none` because growing the spacer is how the panels push it —
+but the spacer also changes when the calendar switches between one month and
+two while already open, and with anchoring off that slid the whole logbook under
+the reader's eye. So the push stays uncompensated and the RESIZE is absorbed by
+a single `scrollTop` write, with the spacer's transition dropped to `none` for
+that one commit (an eased spacer would drift against a one-shot correction for
+300ms). Measured: toggling the width with the list at scrollTop 900 now lands at
+867, exactly the calendar's 313→280 height change, and returns to 900 on the way
+back.
 
 ### The Flight Card (`components/flight-card-body.tsx`)
 
@@ -1471,6 +1547,7 @@ When making changes, be aware of these high-impact files:
 - `hooks/use-detail-panel.tsx` — Detail panel provider (keep-alive route awareness)
 - `components/desktop-layout.tsx` — Responsive app shell (sidebar + detail panel)
 - `components/nav-pill.tsx` — The pill↔sidebar morph, the gravity blob's two springs, and the drag lens
+- `lib/layout/panel-widths.ts` — the one panel-width budget (single/dual month, detail minimum, split minimum)
 
 **Edge-to-edge shell & chrome** (one number each — changing one moves every panel):
 - `app/globals.css` — `--chrome-top` / `--chrome-bottom` (scroller offsets),
@@ -1524,6 +1601,32 @@ When making changes, be aware of these high-impact files:
     collapsed they were no longer cancelled by anything, so the face is now
     blur + a themed brightness lift + `saturate(1.5)` (the vibrancy term —
     without it the material reads as frosted film rather than glass).
+  - **Opacity comes from `--glass-base`, presence from `--glass-veil`.** They
+    are two coats on `.GlassMaterial::after` doing different jobs, and the
+    split is load-bearing: the veil is a LIGHTENING paint (warm off-white), so
+    pushing ITS alpha to make the material more opaque turns a dark surface
+    white long before it turns it solid. Opacity that keeps the material's
+    colour has to be a coat of the surface colour itself — hence a
+    card-coloured base under the veil. Currently 0.82 dark / 0.55 light, which
+    with the veil over it lands the face at ~84% / ~86% opaque. The blur, the
+    brightness lift and the saturate still act on the remaining fifth, so it is
+    glass rather than a card with a rim.
+  - **The calendar is the same slab as everything else.** It used to paint
+    `--background` at 0.85 over its own glass, which is why it read as a
+    different, near-solid material from the action buttons and the nav. That
+    overlay is gone; the shared material carries the opacity now.
+  - **Contents ON the glass are SOLID** — `--on-glass-*` in `globals.css`. Only
+    the slab is translucent; the nav's gravity blob, an action button's active
+    highlight, an icon, a label are opaque, the way the controls inside an iOS
+    Control Center tile are. A translucent blob over a translucent slab lets the
+    page through TWICE, so the highlight drifted in tone as the list scrolled
+    underneath it and the icons washed out. Each token is the colour the
+    translucency used to resolve to, mixed once against `--on-glass` (the solid
+    colour the finished face reads as) and then painted flat: `-fill`,
+    `-fill-soft`, `-icon`, `-label`, `-muted`, and three weights of accent
+    (`-accent-soft` / `-accent` / `-accent-strong`) because on the calendar they
+    STACK — a range pill, a flight-day chip on it, a today chip on that. Use
+    these on a glass surface, never `bg-foreground/10` or `text-foreground/50`.
   - **`--glass-veil` is the PAINTED half of the material, and both themes need
     it.** A backdrop-filter can do nothing over pure black — blurring black is
     black, saturating it is black, and brightness is multiplicative, so
@@ -1712,4 +1815,11 @@ When making changes, be aware of these high-impact files:
 - Do not pick a `px-*` by hand for a panel's content wrapper — use `.px-panel` (`--panel-gutter`). The logbook and flight form were at 8px, the sidebar at 12px and the reference/settings pages at 16px, so the three panels visibly disagreed at their edges
 - Do not conflate the two bottom numbers: **content** clears the home indicator by the FULL inset (`--content-bottom-inset`, which `--chrome-bottom` is built from — the platform convention), while the **nav pill and the sidebar** hug it with the tighter `--nav-bottom-offset`. The pill is a floating control that is meant to sit close, and the sidebar runs down the side where the indicator never reaches it; giving content the nav's offset tucks the last row under the indicator
 - Do not add an inline copy of the header gradient — render `ChromeFade` (it now carries the progressive blur + fade as one treatment; an inline gradient silently loses the blur). Do not swap the top/bottom edge treatments: blur belongs to the TOP band only (the bottom band is too short — blur there read as smearing and the owner rejected it; the bottom gets the darkening fade in `bottom-edge-blur.tsx`). And do not paint a `--background` scrim over a translucent glass surface (the sidebar) — mask the content out instead
+- Do not drive the glass's opacity from `--glass-veil` — that coat is a warm LIGHTENING paint and raising its alpha whitens a dark surface instead of solidifying it. Opacity belongs to `--glass-base`, the card-coloured undercoat; the two are separate on purpose
+- Do not paint an extra background over a glass surface to make one instance more opaque (the calendar did, at `--background` 0.85, and read as a different material from every other glass surface). Change the shared material instead
+- Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
+- Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
+- Do not let a single calendar month stretch to fill the wide panel — the day grid is capped at one phone width. Uncapped it grew from 313px to 519px tall for the frames between the panel resizing and the dual-month switch catching up, which flashed a giant calendar and shoved the flight list down and back
+- Do not bring back the three-panel month carousel. It measured its container height from a ref taken "at rest" that had never been taken on the first entry into dual mode, so the calendar collapsed to 8px, and its end-of-animation handler tested `dataset.animAnchor` against `data-anim-anchor=""` — the empty string, which is falsy — so it never recovered. A dual step moves the pair by TWO months, so there is nothing sliding across to animate
+- Do not compensate the list's scroll when a floating panel OPENS or CLOSES — that push is the whole point of `overflow-anchor: none`. `absorbSpacerDelta` is only for the calendar changing SHAPE while already open, and that commit must also drop the spacer's transition, or an eased spacer drifts against the one-shot correction
 - Do not inset `.GlassBlur` from the face or feather it outward — the fill must be even corner to corner, and `--glass-press` must stay imperative so a scroll's `pointercancel` doesn't kill the spotlight

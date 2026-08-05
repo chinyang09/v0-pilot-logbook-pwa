@@ -71,7 +71,7 @@ export function DashboardActions() {
                 animate={{ width: "auto", opacity: 1 }}
                 exit={{ width: 0, opacity: 0, transition: COLLAPSE }}
                 transition={SPRING}
-                className="flex items-center gap-1 overflow-hidden whitespace-nowrap rounded-full px-2 py-1 text-sm font-medium text-foreground/80 transition-colors hover:bg-foreground/5"
+                className="flex items-center gap-1 overflow-hidden whitespace-nowrap rounded-full px-2 py-1 text-sm font-medium text-[var(--on-glass-label)] transition-colors hover:bg-foreground/5"
               >
                 {MONTHS[selectedMonth.month]} {selectedMonth.year}
                 <ChevronDown
@@ -93,8 +93,8 @@ export function DashboardActions() {
               "flex h-12 min-w-[3rem] flex-col items-center justify-center rounded-full px-2 transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               showFilter
-                ? "bg-primary/15 text-primary"
-                : "text-foreground hover:bg-foreground/5",
+                ? "bg-[var(--on-glass-accent)] text-primary"
+                : "text-foreground hover:bg-[var(--on-glass-fill-soft)]",
             )}
           >
             <SlidersHorizontal className="h-4 w-4" />
@@ -129,7 +129,7 @@ export function DashboardActions() {
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         isActive
                           ? "bg-primary text-primary-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground hover:bg-foreground/5",
+                          : "text-muted-foreground hover:text-foreground hover:bg-[var(--on-glass-fill-soft)]",
                       )}
                     >
                       {p.label}

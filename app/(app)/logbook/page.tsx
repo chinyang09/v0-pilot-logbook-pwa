@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react"
 import { FlightList, type FlightListRef } from "@/components/flight-list"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useDebounce } from "@/hooks/use-debounce"
@@ -20,6 +20,7 @@ import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { MORPH_EASE } from "@/lib/motion"
+import { DUAL_MONTH_PX } from "@/lib/layout/panel-widths"
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date"
 import { insertFlightSorted } from "@/lib/utils/flight-sort"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
@@ -114,8 +115,20 @@ export default function LogbookPage() {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const calendarContentRef = useRef<HTMLDivElement>(null)
 
+  // Declared (and kept in step) ahead of the measuring effects below, which
+  // read it from their ResizeObserver callback.
+  const showCalendarRef = useRef(showCalendar)
+  useEffect(() => {
+    showCalendarRef.current = showCalendar
+  }, [showCalendar])
+
   // Measure calendar's natural height + container width for dual-month detection
   const [calendarNaturalHeight, setCalendarNaturalHeight] = useState(0)
+  /** Last measured calendar height, to spot a resize-while-open (see below). */
+  const calendarHeightRef = useRef(0)
+  const pendingAbsorbRef = useRef(0)
+  /** False for the one commit that applies a resize-driven spacer change. */
+  const [spacerAnimated, setSpacerAnimated] = useState(true)
   const [searchBlockHeight, setSearchBlockHeight] = useState(0)
   const [mainPanelWidth, setMainPanelWidth] = useState(0)
 
@@ -148,7 +161,24 @@ export default function LogbookPage() {
     // whatever the transition is passing through.
     const measure = () => {
       const h = calendarContentRef.current?.offsetHeight ?? 0
-      if (h > 0) setCalendarNaturalHeight(h)
+      if (h > 0) {
+        // A calendar that is already OPEN and merely changes shape (one month
+        // → two, when the panel widens) moves the spacer under a list that is
+        // not being pushed. Anchoring is off on that scroller by design, so
+        // absorb the delta here — otherwise switching the panel width slid the
+        // whole logbook a couple of rows, which is what the owner saw.
+        //
+        // The spacer also has to make this change INSTANTLY rather than over
+        // PANEL_MOTION: the compensation is a single scrollTop write, so an
+        // eased spacer would drift against it for 300ms.
+        const prev = calendarHeightRef.current
+        calendarHeightRef.current = h
+        if (prev > 0 && prev !== h && showCalendarRef.current) {
+          pendingAbsorbRef.current += h - prev
+          setSpacerAnimated(false)
+        }
+        setCalendarNaturalHeight(h)
+      }
       const w = el.offsetWidth
       if (w > 0) setMainPanelWidth(w)
     }
@@ -165,7 +195,21 @@ export default function LogbookPage() {
     }
   }, [])
 
-  const dualMonth = mainPanelWidth >= 620
+  // Apply a queued resize compensation in the same paint as the spacer's new
+  // height — a layout effect, so the reader never sees the intermediate frame.
+  useLayoutEffect(() => {
+    const delta = pendingAbsorbRef.current
+    if (!delta) return
+    pendingAbsorbRef.current = 0
+    flightListRef.current?.absorbSpacerDelta(delta)
+    const t = setTimeout(() => setSpacerAnimated(true), 0)
+    return () => clearTimeout(t)
+  }, [calendarNaturalHeight])
+
+  // The panel is sized by PERCENT, so it lands a fraction under its pixel
+  // target; testing the exact width would leave the wide panel rendering one
+  // month. The tolerance is smaller than the gap between the two widths.
+  const dualMonth = mainPanelWidth >= DUAL_MONTH_PX - 8
 
   // Track the topmost visible flight for calendar sync + date highlighting
   const topFlightIdRef = useRef<string | null>(null)
@@ -174,7 +218,6 @@ export default function LogbookPage() {
 
   const syncSourceRef = useRef<"calendar" | "flights" | null>(null)
   const selectedMonthRef = useRef(selectedMonth)
-  const showCalendarRef = useRef(showCalendar)
   const dualMonthRef = useRef(false)
 
   useEffect(() => {
@@ -187,10 +230,6 @@ export default function LogbookPage() {
   useEffect(() => {
     selectedMonthRef.current = selectedMonth
   }, [selectedMonth])
-
-  useEffect(() => {
-    showCalendarRef.current = showCalendar
-  }, [showCalendar])
 
   // Entering dual mode snaps the anchor to its pair boundary. LEAVING it keeps
   // whichever pane the top flight is actually in — if that is the right-hand
@@ -454,7 +493,7 @@ export default function LogbookPage() {
           <button
             onClick={() => setShowMonthPicker(prev => !prev)}
             aria-label="Select month"
-            className="flex items-center gap-1 px-2 py-1 rounded-full text-sm font-medium text-foreground/80 hover:bg-foreground/5 transition-colors min-w-[5.5rem] justify-center"
+            className="flex items-center gap-1 px-2 py-1 rounded-full text-sm font-medium text-[var(--on-glass-label)] hover:bg-[var(--on-glass-fill-soft)] transition-colors min-w-[5.5rem] justify-center"
           >
             {MONTHS[selectedMonth.month]} {selectedMonth.year}
             <ChevronDown className={cn("h-3 w-3 opacity-50 transition-transform", showMonthPicker && "rotate-180")} />
@@ -536,7 +575,7 @@ export default function LogbookPage() {
                     key={term}
                     type="button"
                     onClick={() => removeSearchTerm(term)}
-                    className="flex items-center gap-1 rounded-full bg-primary/20 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/30"
+                    className="flex items-center gap-1 rounded-full bg-[var(--on-glass-accent)] px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-[var(--on-glass-accent-strong)]"
                   >
                     {term}
                     <X className="h-3 w-3" />
@@ -635,7 +674,7 @@ export default function LogbookPage() {
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
           topSpacerHeight={`calc(var(--chrome-top) + ${(showSearch ? searchBlockHeight : 0) + (showCalendar ? calendarNaturalHeight : 0)}px)`}
-          topSpacerTransition={PANEL_MOTION}
+          topSpacerTransition={spacerAnimated ? PANEL_MOTION : "none"}
           selectedFlightId={selectedFlightId}
         />
       </main>

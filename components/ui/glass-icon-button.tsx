@@ -111,7 +111,7 @@ export function GlassGroupButton({
       aria-pressed={ariaPressed}
       onClick={onClick}
       disabled={disabled}
-      className={cn("h-12 w-12 rounded-full [&_svg]:!size-[22px]", active && "text-primary bg-primary/15", className)}
+      className={cn("h-12 w-12 rounded-full [&_svg]:!size-[22px]", active && "text-primary bg-[var(--on-glass-accent)]", className)}
     >
       {children}
     </Button>
