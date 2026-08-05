@@ -189,6 +189,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         return;
       }
 
+      // The width change also re-anchors `selectedMonth`, which would
+      // otherwise read as a month STEP and fire that slide on top of this one.
+      suppressStepRef.current = true;
+
       if (dualMonth) {
         setLeavingMonth(null);
         setPaneAnim("toDual");
@@ -206,6 +210,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       const t = setTimeout(() => {
         setPaneAnim(null);
         setLeavingMonth(null);
+        suppressStepRef.current = false;
       }, PANE_SLIDE_MS);
       return () => clearTimeout(t);
       // selectedMonth is read for the month we KEPT, but a month change of its
@@ -233,6 +238,32 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       () => computeMonthDays(selectedMonth.year, selectedMonth.month),
       [selectedMonth]
     );
+
+    // ─── Stepping months: a horizontal slide, single AND dual ───
+    //
+    // The pair moves TWO months at a time in dual mode, so what slides is the
+    // whole view rather than one pane crossing the other — the same motion the
+    // single month gets, which never used to animate at all.
+    const [step, setStep] = useState<{ dir: 1 | -1; from: { year: number; month: number } } | null>(
+      null
+    );
+    const prevMonthRef = useRef(selectedMonth);
+    const suppressStepRef = useRef(false);
+
+    useEffect(() => {
+      const prev = prevMonthRef.current;
+      prevMonthRef.current = selectedMonth;
+      const delta =
+        selectedMonth.year * 12 + selectedMonth.month - (prev.year * 12 + prev.month);
+      if (delta === 0) return;
+      if (suppressStepRef.current) return;
+      if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        return;
+      }
+      setStep({ dir: delta > 0 ? 1 : -1, from: prev });
+      const t = setTimeout(() => setStep(null), PANE_SLIDE_MS);
+      return () => clearTimeout(t);
+    }, [selectedMonth]);
 
     /** The two panes shown side by side: the anchor month and the next one. */
     const carouselMonths = useMemo(() => {
@@ -372,7 +403,12 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         {/* Month grid — 4×3 */}
         <div className="grid grid-cols-4 gap-1.5 px-1">
           {MONTHS.map((month, i) => {
-            const isSelected = i === selectedMonth.month;
+            // In dual mode BOTH panes are on screen, so both are selected —
+            // marking only the anchor left the right-hand month unaccounted
+            // for in the picker as well as in the header.
+            const isSelected =
+              i === selectedMonth.month ||
+              (dualMonth && i === (selectedMonth.month + 1) % 12 && selectedMonth.month !== 11);
             const isCurrent = i === nowMonth && selectedMonth.year === nowYear;
             return (
               <button
@@ -481,6 +517,29 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       </div>
     );
 
+    /**
+     * The month(s) for an arbitrary anchor, with no animation state on them —
+     * this is what the OUTGOING copy is drawn from while a step slides.
+     */
+    const renderStaticMonths = (anchor: { year: number; month: number }) => {
+      if (!dualMonth) {
+        return renderDayGrid(computeMonthDays(anchor.year, anchor.month), "out-");
+      }
+      const next = addMonths(anchor.year, anchor.month, 1);
+      return (
+        <div className="flex">
+          {[anchor, next].map((m, i) => (
+            <div key={`out-${m.year}-${m.month}`} className="min-w-0 px-1" style={{ flex: "0 0 50%" }}>
+              <div className="text-xs font-medium text-[var(--on-glass-muted)] text-center pb-0.5">
+                {MONTHS[m.month]} {m.year}
+              </div>
+              {renderDayGrid(computeMonthDays(m.year, m.month), `out${i}-`)}
+            </div>
+          ))}
+        </div>
+      );
+    };
+
     // ─── Calendar day grid view ───────────────────────────────
     const calendarContent = (
       <div
@@ -491,6 +550,24 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onWheel={handleWheel}
+      >
+        {/* Stepping to another month slides horizontally: the arriving
+            month(s) come in from the side you are heading toward and the
+            outgoing copy leaves the other way. The outgoing copy is ABSOLUTE
+            and the arriving one is in FLOW, so the container keeps its height
+            for the whole slide — the old carousel put every panel out of flow
+            and measured the height from a ref, which is how it collapsed. */}
+      <div className="relative" data-cal-step={step ? "1" : undefined}>
+      <div
+        style={
+          step
+            ? ({
+                "--cal-pane-x": step.dir > 0 ? "100%" : "-100%",
+                "--cal-pane-o": 0,
+                animation: `cal-pane-settle ${PANE_SLIDE_MS}ms ${PANE_SLIDE_EASE} both`,
+              } as React.CSSProperties)
+            : undefined
+        }
       >
         {dualMonth && carouselMonths ? (
           // ─── Two panes, side by side ───
@@ -562,6 +639,22 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             )}
           </div>
         )}
+      </div>
+      {step && (
+        <div
+          aria-hidden
+          className="absolute inset-x-0 top-0"
+          style={
+            {
+              "--cal-pane-x": step.dir > 0 ? "-100%" : "100%",
+              animation: `cal-step-out ${PANE_SLIDE_MS}ms ${PANE_SLIDE_EASE} both`,
+            } as React.CSSProperties
+          }
+        >
+          {renderStaticMonths(step.from)}
+        </div>
+      )}
+      </div>
       </div>
     );
 

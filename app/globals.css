@@ -554,6 +554,13 @@ textarea:focus-within {
   to   { transform: translateX(0); opacity: 0; }
 }
 
+/* Stepping to another month: the outgoing copy leaves the way you came from
+   while the arriving one rides `cal-pane-settle` in from the other side. */
+@keyframes cal-step-out {
+  from { transform: translateX(0); opacity: 1; }
+  to   { transform: translateX(var(--cal-pane-x, 0)); opacity: 0; }
+}
+
 /* Sidebar width variable */
 :root {
   --sidebar-width: 16rem;
@@ -680,11 +687,15 @@ textarea:focus-within {
      presence (12%) drops that to 34 and the material starts reading grey
      again — the exact thing the single-filter fix was for.
 
-     Eased back from 0.10 to 0.075 with the face blur raised to compensate:
-     less PAINT and more OPTICS for the same presence, which is the difference
-     between a tinted panel and glass. Do not take it much below this — the
-     lift off pure black is the whole reason it exists. */
-  --glass-veil: rgba(255, 244, 232, 0.11);
+     Thinned to 0.05 once `--glass-base` arrived. The veil exists to give the
+     slab a face over pure black — with an 82% card-coloured undercoat doing
+     that job, keeping the veil at 0.11 was pure lightening on top of an
+     already-solid surface, and the material came out too pale and too warm
+     against an iOS-dark app. At 0.05 the face lands around oklch 0.23, which
+     is the tone of iOS's own dark chrome (systemGray6 #1C1C1E → systemGray5
+     #2C2C2E). Do not take it to zero — over pure black the base alone still
+     needs the lift, and that is what this coat is for. */
+  --glass-veil: rgba(255, 244, 232, 0.05);
   /* Surface undercoat, painted UNDER the veil.
 
      The veil is a LIGHTENING paint — warm off-white — so it cannot be the lever
@@ -700,7 +711,13 @@ textarea:focus-within {
      the saturate still act on the remaining fifth, so it is still glass rather
      than a card with a rim. */
   --glass-base: color-mix(in oklab, var(--card) 82%, transparent);
-  --on-glass: oklch(0.205 0.01 60);
+  /* The colour the FINISHED face reads as — base + veil + the brightened
+     backdrop showing through the remaining fifth. It is NOT `--card`: get it
+     wrong and everything painted on the glass lands on the wrong side of it.
+     With the veil at 0.11 the face was ~0.276 and the blob (0.292) was
+     indistinguishable from it on a dark theme, which is exactly what the
+     owner saw. */
+  --on-glass: oklch(0.235 0.008 60);
   --glass-shadow:
     inset 0 -1px 1px rgba(0, 0, 0, 0.10),
     0 2px 6px rgba(0, 0, 0, 0.10),
@@ -722,8 +739,12 @@ textarea:focus-within {
    on any glass surface. */
 :root,
 .dark {
-  --on-glass-fill: color-mix(in oklab, var(--foreground) 12%, var(--on-glass));
-  --on-glass-fill-soft: color-mix(in oklab, var(--foreground) 6%, var(--on-glass));
+  /* 16% rather than the 10% the old `bg-foreground/10` resolved to: that alpha
+     was measured against a nearly transparent slab, so the blob picked up
+     whatever was behind the glass and separated by accident. Painted flat on a
+     solid face it has to carry the separation itself. */
+  --on-glass-fill: color-mix(in oklab, var(--foreground) 16%, var(--on-glass));
+  --on-glass-fill-soft: color-mix(in oklab, var(--foreground) 7%, var(--on-glass));
   /* Three weights of the accent fill, because on the calendar they STACK: a
      range pill, a flight-day chip on top of it, a today chip on top of that.
      Translucent they layered into a darker tone at each level; solid they need

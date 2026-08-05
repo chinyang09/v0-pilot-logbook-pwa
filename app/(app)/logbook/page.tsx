@@ -55,6 +55,24 @@ const PANEL_MOTION = `height ${PANEL_MS}ms ${MORPH_EASE}`
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
+/**
+ * What the header says the calendar is showing.
+ *
+ * In dual-month mode it is showing TWO months, so naming only the anchor (the
+ * odd one) is simply wrong — the right-hand pane was unaccounted for. Across a
+ * year boundary both years are spelled out, since "Dec – Jan 2027" would put
+ * December in the wrong year.
+ */
+function formatMonthLabel(year: number, month: number, dual: boolean): string {
+  if (!dual) return `${MONTHS[month]} ${year}`
+  const total = year * 12 + month + 1
+  const y2 = Math.floor(total / 12)
+  const m2 = ((total % 12) + 12) % 12
+  return y2 === year
+    ? `${MONTHS[month]} – ${MONTHS[m2]} ${year}`
+    : `${MONTHS[month]} ${year} – ${MONTHS[m2]} ${y2}`
+}
+
 export default function LogbookPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -210,6 +228,7 @@ export default function LogbookPage() {
   // target; testing the exact width would leave the wide panel rendering one
   // month. The tolerance is smaller than the gap between the two widths.
   const dualMonth = mainPanelWidth >= DUAL_MONTH_PX - 8
+  const monthLabel = formatMonthLabel(selectedMonth.year, selectedMonth.month, dualMonth)
 
   // Track the topmost visible flight for calendar sync + date highlighting
   const topFlightIdRef = useRef<string | null>(null)
@@ -493,9 +512,9 @@ export default function LogbookPage() {
           <button
             onClick={() => setShowMonthPicker(prev => !prev)}
             aria-label="Select month"
-            className="flex items-center gap-1 px-2 py-1 rounded-full text-sm font-medium text-[var(--on-glass-label)] hover:bg-[var(--on-glass-fill-soft)] transition-colors min-w-[5.5rem] justify-center"
+            className="flex items-center gap-1 px-2 py-1 rounded-full text-sm font-medium whitespace-nowrap text-[var(--on-glass-label)] hover:bg-[var(--on-glass-fill-soft)] transition-colors min-w-[5.5rem] justify-center"
           >
-            {MONTHS[selectedMonth.month]} {selectedMonth.year}
+            {monthLabel}
             <ChevronDown className={cn("h-3 w-3 opacity-50 transition-transform", showMonthPicker && "rotate-180")} />
           </button>
         )}
@@ -533,7 +552,7 @@ export default function LogbookPage() {
         <Plus className="h-5 w-5" />
       </GlassIconButton>
     </>
-  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId, selectedMonth, showMonthPicker, showSearch, toggleSearch])
+  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId, monthLabel, showMonthPicker, showSearch, toggleSearch])
 
   // Register actions for the desktop floating bar
   useRegisterMainActions(logbookActions, isActive)

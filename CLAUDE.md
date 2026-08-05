@@ -494,6 +494,12 @@ arbitrary. A swipe or wheel step therefore moves **two** months in dual mode
 (`stepMonths`); stepping by one would swap which side each month lands on and
 put the pairing out of phase.
 
+**The header names BOTH months in dual mode** — `Jul – Aug 2026`, and both
+years when the pair straddles a new year (`Dec 2026 – Jan 2027`), since
+"Dec – Jan 2027" would put December in the wrong year. The month/year picker
+marks both too. Naming only the anchor left the right-hand pane unaccounted for
+in a view that is plainly showing two months.
+
 Going **dual → single** keeps whichever pane the top flight is actually in — if
 that is the right-hand month, the LEFT one stows. Going single → dual snaps the
 anchor to its pair boundary.
@@ -524,9 +530,19 @@ and the whole calendar collapsed to its padding (**measured: 8px, where two
 months are 280**). It never recovered either — the handler that ended the
 animation tested `dataset.animAnchor`, and `data-anim-anchor=""` reads back as
 the empty string, which is falsy, so it returned on every event. A dual step
-moves the pair by TWO months anyway, so there is no single month sliding across
-to animate, and the single-month view has never animated a step. The pair now
-just re-renders.
+moves the pair by TWO months, so there was never a single month sliding across
+another to animate in the first place.
+
+What replaced it is simpler and covers **both** modes: stepping slides the whole
+view horizontally. The arriving month(s) come in from the side you are heading
+toward (`cal-pane-settle`) while a copy of the outgoing one leaves the other way
+(`cal-step-out`). The arriving content is in FLOW and only the outgoing copy is
+absolute, so the container keeps its height for the whole slide — which is
+exactly what the carousel got wrong. Measured on a single-month step: the
+arriving grid starts at `translateX(344px)`, one grid width, and eases to 0.
+The width slide sets `suppressStepRef` for its duration, because widening the
+panel also re-anchors `selectedMonth` and that would otherwise fire a step slide
+on top of the width slide.
 
 **A resize is not a push** (`FlightListRef.absorbSpacerDelta`). The list has
 `overflow-anchor: none` because growing the spacer is how the panels push it —
@@ -1622,7 +1638,13 @@ When making changes, be aware of these high-impact files:
     page through TWICE, so the highlight drifted in tone as the list scrolled
     underneath it and the icons washed out. Each token is the colour the
     translucency used to resolve to, mixed once against `--on-glass` (the solid
-    colour the finished face reads as) and then painted flat: `-fill`,
+    colour the finished face reads as) and then painted flat. **`--on-glass`
+    has to track the real face, not `--card`** — with the veil at 0.11 the face
+    was ~0.276 and the blob landed at 0.292, i.e. invisible on a dark theme.
+    And `--on-glass-fill` is 16%, not the 10% the old `bg-foreground/10`
+    resolved to: that alpha was measured against a nearly transparent slab, so
+    the blob separated by picking up whatever was behind the glass. Painted
+    flat it has to carry the separation itself. The tokens are: `-fill`,
     `-fill-soft`, `-icon`, `-label`, `-muted`, and three weights of accent
     (`-accent-soft` / `-accent` / `-accent-strong`) because on the calendar they
     STACK — a range pill, a flight-day chip on it, a today chip on that. Use
@@ -1636,10 +1658,14 @@ When making changes, be aware of these high-impact files:
     essentially none of the colour it picks up over content (measured at 10%:
     warmth 37 vs 38). Plain white at matching presence drops that to 34 and the
     material starts reading grey again — do not "simplify" the tint back to
-    white. Currently 0.075 dark / 0.55 light, eased back from 0.10 / 0.62 with
-    the face blur raised to compensate: **less paint and more optics for the
-    same presence**, which is the difference between a tinted panel and glass.
-    Do not take it much lower — the lift off pure black is why it exists.
+    white. Currently **0.05 dark / 0.68 light**. The dark veil was thinned from
+    0.11 once `--glass-base` arrived: with an 82% card-coloured undercoat
+    already giving the slab a face, the veil was pure lightening on top of an
+    almost-solid surface and the material came out too pale and too warm for an
+    iOS-dark app. At 0.05 the face lands around oklch **0.23**, which is where
+    iOS's own dark chrome sits (systemGray6 `#1C1C1E` → systemGray5 `#2C2C2E`).
+    Do not take it to zero — over pure black the base alone still needs the
+    lift, and that is the whole reason this coat exists.
   - **`--glass-face-blur` is one blur, not three.** The old stack blurred
     2px + 2.4px + 0.52px on three elements; sequential Gaussians compose as
     the root-sum-square, so ONE blur is identical optics for a third of the
@@ -1815,6 +1841,8 @@ When making changes, be aware of these high-impact files:
 - Do not pick a `px-*` by hand for a panel's content wrapper — use `.px-panel` (`--panel-gutter`). The logbook and flight form were at 8px, the sidebar at 12px and the reference/settings pages at 16px, so the three panels visibly disagreed at their edges
 - Do not conflate the two bottom numbers: **content** clears the home indicator by the FULL inset (`--content-bottom-inset`, which `--chrome-bottom` is built from — the platform convention), while the **nav pill and the sidebar** hug it with the tighter `--nav-bottom-offset`. The pill is a floating control that is meant to sit close, and the sidebar runs down the side where the indicator never reaches it; giving content the nav's offset tucks the last row under the indicator
 - Do not add an inline copy of the header gradient — render `ChromeFade` (it now carries the progressive blur + fade as one treatment; an inline gradient silently loses the blur). Do not swap the top/bottom edge treatments: blur belongs to the TOP band only (the bottom band is too short — blur there read as smearing and the owner rejected it; the bottom gets the darkening fade in `bottom-edge-blur.tsx`). And do not paint a `--background` scrim over a translucent glass surface (the sidebar) — mask the content out instead
+- Do not leave `--on-glass` at a guessed value when the material changes — it must equal the colour the FINISHED face reads as (base + veil + the brightened backdrop through the remainder). Get it wrong and everything painted on the glass lands on the wrong side of it: at the old value the nav's gravity blob (0.292) was indistinguishable from the face (0.276) in dark mode
+- Do not name only the anchor month while the calendar is showing two — the header and the month picker both cover the pair
 - Do not drive the glass's opacity from `--glass-veil` — that coat is a warm LIGHTENING paint and raising its alpha whitens a dark surface instead of solidifying it. Opacity belongs to `--glass-base`, the card-coloured undercoat; the two are separate on purpose
 - Do not paint an extra background over a glass surface to make one instance more opaque (the calendar did, at `--background` 0.85, and read as a different material from every other glass surface). Change the shared material instead
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
