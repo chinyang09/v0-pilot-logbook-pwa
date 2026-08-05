@@ -34,3 +34,23 @@ export const DUAL_MONTH_PX = 600
 export const DETAIL_MIN_PX = 360
 /** Below this the split makes no sense — one panel, mobile layout. */
 export const SPLIT_MIN_PX = SINGLE_MONTH_PX + DETAIL_MIN_PX
+
+/**
+ * How wide ONE month pane is inside the split layout.
+ *
+ * A month's day cells are square, so its width sets its HEIGHT. If the single
+ * month were wider than a dual pane the calendar would be taller with one
+ * month than with two, and toggling the panel width would resize the panel
+ * that the flight list has to absorb — the owner's word for it was
+ * "disruptive". So in the split layout the calendar is ALWAYS one pane wide,
+ * and the single month is centred in its 360px panel rather than filling it.
+ *
+ * The number is the dual panel minus the page's `px-2` calendar gutter, halved,
+ * minus the pane's own `px-1` — the grid box a dual pane actually gets:
+ *
+ *     (600 − 16) / 2 − 8 = 284      → 7 columns of ~39px, identical either way
+ *
+ * It does NOT apply on a phone, where there is no dual mode to match and the
+ * calendar should use the width it has (see `paneMaxWidth` on LogbookCalendar).
+ */
+export const MONTH_PANE_PX = (DUAL_MONTH_PX - 16) / 2 - 8

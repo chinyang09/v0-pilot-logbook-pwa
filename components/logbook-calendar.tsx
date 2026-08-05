@@ -38,6 +38,13 @@ interface LogbookCalendarProps {
   onYearChange?: (year: number) => void;
   /** Show two consecutive months side by side (for wide panels ~750px) */
   dualMonth?: boolean;
+  /**
+   * Max width of ONE month's day grid. In the split layout this is the dual
+   * pane's width (`MONTH_PANE_PX`), so a single month is exactly as wide — and
+   * therefore exactly as TALL — as one of two. On a phone there is no dual
+   * mode to match, so it keeps the wider phone default.
+   */
+  paneMaxWidth?: number;
   /** Inclusive start of a date range (YYYY-MM-DD). When set together with
    *  rangeEnd, cells in the range are tinted. Independent of selectedDate. */
   rangeStart?: string | null;
@@ -117,6 +124,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       onMonthSelect,
       onYearChange,
       dualMonth = false,
+      paneMaxWidth = 360,
       rangeStart = null,
       rangeEnd = null,
       header,
@@ -436,14 +444,13 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       days: { date: Date; dateStr: string; isCurrentMonth: boolean }[],
       keyPrefix = ""
     ) => (
-      // Capped at one phone width and centred. Without the cap a SINGLE month
-      // stretched to fill the wide panel — 7 columns of 84px, and since the
-      // cells are square the grid grew from 313px tall to 519px. That happened
-      // for the frame between the panel resizing and the dual-month switch
-      // catching up, so widening the panel flashed a giant calendar and
-      // shoved the flight list down and back. Two months are ~300px each, so
-      // the cap only ever binds on the single month.
-      <div className="mx-auto w-full max-w-[360px]">
+      // Capped and centred. The cap is what keeps a month the same size — and
+      // so the same HEIGHT, the cells being square — whether one or two are on
+      // screen; see MONTH_PANE_PX. Without any cap a single month stretched to
+      // fill the wide panel (7 columns of 84px, the grid going from 313px tall
+      // to 519px) for the frames between the panel resizing and the
+      // dual-month switch catching up, which flashed a giant calendar.
+      <div className="mx-auto w-full" style={{ maxWidth: paneMaxWidth }}>
         <div className="grid grid-cols-7 gap-0 px-1 pt-0.5 pb-0">
           {DAYS.map((day) => (
             <div
@@ -518,22 +525,41 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     );
 
     /**
+     * ONE month pane: its caption and its grid.
+     *
+     * The caption is rendered in SINGLE mode too, even though the header names
+     * the month as well. Without it a single month was 12px shorter than a
+     * dual pair, so toggling the panel width still resized the calendar and
+     * the flight list still had to absorb it — the whole point of capping the
+     * pane width was to make those two heights equal.
+     */
+    const renderPane = (
+      m: { year: number; month: number },
+      days: { date: Date; dateStr: string; isCurrentMonth: boolean }[],
+      keyPrefix = ""
+    ) => (
+      <>
+        <div className="text-xs font-medium text-[var(--on-glass-muted)] text-center pb-0.5">
+          {MONTHS[m.month]} {m.year}
+        </div>
+        {renderDayGrid(days, keyPrefix)}
+      </>
+    );
+
+    /**
      * The month(s) for an arbitrary anchor, with no animation state on them —
      * this is what the OUTGOING copy is drawn from while a step slides.
      */
     const renderStaticMonths = (anchor: { year: number; month: number }) => {
       if (!dualMonth) {
-        return renderDayGrid(computeMonthDays(anchor.year, anchor.month), "out-");
+        return renderPane(anchor, computeMonthDays(anchor.year, anchor.month), "out-");
       }
       const next = addMonths(anchor.year, anchor.month, 1);
       return (
         <div className="flex">
           {[anchor, next].map((m, i) => (
             <div key={`out-${m.year}-${m.month}`} className="min-w-0 px-1" style={{ flex: "0 0 50%" }}>
-              <div className="text-xs font-medium text-[var(--on-glass-muted)] text-center pb-0.5">
-                {MONTHS[m.month]} {m.year}
-              </div>
-              {renderDayGrid(computeMonthDays(m.year, m.month), `out${i}-`)}
+              {renderPane(m, computeMonthDays(m.year, m.month), `out${i}-`)}
             </div>
           ))}
         </div>
@@ -602,10 +628,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                       } as React.CSSProperties
                     }
                   >
-                    <div className="text-xs font-medium text-[var(--on-glass-muted)] text-center pb-0.5">
-                      {MONTHS[m.month]} {m.year}
-                    </div>
-                    {renderDayGrid(m.days, `m${i}-`)}
+                    {renderPane(m, m.days, `m${i}-`)}
                   </div>
                 );
               })}
@@ -613,7 +636,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         ) : (
           // ─── Single month, with the closing slide over it ───
           <div className="relative">
-            <div className="relative z-[1]">{renderDayGrid(calendarDays)}</div>
+            <div className="relative z-[1]">{renderPane(selectedMonth, calendarDays)}</div>
             {paneAnim === "toSingle" && leavingMonth && (
               <div
                 aria-hidden
@@ -631,7 +654,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                   } as React.CSSProperties
                 }
               >
-                {renderDayGrid(
+                {renderPane(
+                  leavingMonth,
                   computeMonthDays(leavingMonth.year, leavingMonth.month),
                   "leaving-"
                 )}

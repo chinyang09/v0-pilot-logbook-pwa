@@ -248,13 +248,16 @@
    insets are 0. */
 :root {
   /* The offset content needs at the TOP of a panel to clear the floating
-     header: its 64px bar plus whatever the status bar overlays. ONE definition
-     — anything that positions itself against the header (a page's padding, the
+     header: the bar plus whatever the status bar overlays. ONE definition —
+     anything that positions itself against the header (a page's padding, the
      logbook's list spacer, its calendar overlay) reads this, because a
-     hardcoded 4rem somewhere is exactly how the search field ended up sliding
-     under the action buttons. */
-  --chrome-top: calc(4rem + env(safe-area-inset-top, 0px));
-  --chrome-top-sm: calc(3rem + env(safe-area-inset-top, 0px));
+     hardcoded rem value somewhere is exactly how the search field ended up
+     sliding under the action buttons.
+
+     3.25rem = the controls' 4px top margin + their 44px height + a 4px gap.
+     It was 4rem when they were 56px tall. */
+  --chrome-top: calc(3.25rem + env(safe-area-inset-top, 0px));
+  --chrome-top-sm: calc(2.75rem + env(safe-area-inset-top, 0px));
   /* How far above the physical bottom edge the floating nav rests — the ONE
      number the bottom pill, the sidebar's lower end, and the content
      clearance all derive from, so the pill↔sidebar morph endpoints and the

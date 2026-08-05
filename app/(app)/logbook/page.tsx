@@ -20,11 +20,12 @@ import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { MORPH_EASE } from "@/lib/motion"
-import { DUAL_MONTH_PX } from "@/lib/layout/panel-widths"
+import { DUAL_MONTH_PX, MONTH_PANE_PX } from "@/lib/layout/panel-widths"
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date"
 import { insertFlightSorted } from "@/lib/utils/flight-sort"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useSearchParams } from "next/navigation"
 import { usePageActive } from "@/hooks/use-page-active"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
@@ -64,13 +65,16 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
  * December in the wrong year.
  */
 function formatMonthLabel(year: number, month: number, dual: boolean): string {
-  if (!dual) return `${MONTHS[month]} ${year}`
+  // Two-digit year: at four digits the dual form ("Jul – Aug 2026") grew the
+  // left action group far enough to reach the centred nav pill.
+  const yy = (y: number) => String(y % 100).padStart(2, "0")
+  if (!dual) return `${MONTHS[month]} ${yy(year)}`
   const total = year * 12 + month + 1
   const y2 = Math.floor(total / 12)
   const m2 = ((total % 12) + 12) % 12
   return y2 === year
-    ? `${MONTHS[month]} – ${MONTHS[m2]} ${year}`
-    : `${MONTHS[month]} ${year} – ${MONTHS[m2]} ${y2}`
+    ? `${MONTHS[month]} – ${MONTHS[m2]} ${yy(year)}`
+    : `${MONTHS[month]} ${yy(year)} – ${MONTHS[m2]} ${yy(y2)}`
 }
 
 export default function LogbookPage() {
@@ -229,6 +233,7 @@ export default function LogbookPage() {
   // month. The tolerance is smaller than the gap between the two widths.
   const dualMonth = mainPanelWidth >= DUAL_MONTH_PX - 8
   const monthLabel = formatMonthLabel(selectedMonth.year, selectedMonth.month, dualMonth)
+  const isSplitLayout = useIsDesktop()
 
   // Track the topmost visible flight for calendar sync + date highlighting
   const topFlightIdRef = useRef<string | null>(null)
@@ -662,6 +667,11 @@ export default function LogbookPage() {
               glass
               cornerRadius={20}
               dualMonth={dualMonth}
+              // In the split layout a month is always ONE PANE wide, so the
+              // calendar is the same height with one month as with two and the
+              // width toggle stops resizing the list. A phone has no dual mode
+              // to match, so it keeps the full-width default.
+              paneMaxWidth={isSplitLayout ? MONTH_PANE_PX : undefined}
               view={showMonthPicker ? "monthYear" : "calendar"}
               onMonthSelect={(year, month) => {
                 setSelectedMonth({ year, month })

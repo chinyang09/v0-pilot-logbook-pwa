@@ -282,7 +282,7 @@ function AppShellContent({ children }: AppShellProps) {
         >
           {/* The one floating-header treatment: progressive blur + fade */}
           <ChromeFade side="top" />
-          <div className="relative z-[1] flex items-center px-4 w-full h-16">
+          <div className="relative z-[1] flex items-center px-4 w-full h-13">
             {/* Main panel actions — flush left on desktop, fills width on mobile (for
                 search expansion). Tapping its bare area scrolls the main panel to top
                 (the e.target===currentTarget guard excludes the action buttons). */}
@@ -383,7 +383,7 @@ function AppShellContent({ children }: AppShellProps) {
           <div className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none pt-chrome-bar">
             {/* Same header treatment as the main shell */}
             <ChromeFade side="top" />
-            <div className="relative z-[1] flex items-center justify-between px-4 w-full pointer-events-auto h-16">
+            <div className="relative z-[1] flex items-center justify-between px-4 w-full pointer-events-auto h-13">
               {/* Back button — flush left */}
               <GlassIconButton
                 ariaLabel="Back"

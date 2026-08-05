@@ -1302,12 +1302,12 @@ export function FlightForm({
   // Register detail panel actions for the desktop floating glass bar
   const detailActions = useMemo(() => {
     return (
-      <GlassContainer cornerRadius={28}>
+      <GlassContainer cornerRadius={22}>
         <ImageImportButton
           onDataExtracted={handleOCRDataExtracted}
           variant="ghost"
           size="icon"
-          className="h-14 w-14"
+          className="h-11 w-11 [&_svg]:!size-5"
         />
       </GlassContainer>
     );

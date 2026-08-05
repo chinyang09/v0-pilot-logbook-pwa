@@ -479,12 +479,25 @@ move the pill onto a button. Measured at 1180: main actions 16→240, pill
 367→814. What *can* collide is a page whose action bar EXPANDS — the dashboard's
 period pills — and that is a per-page question, not a sizing one.
 
-**A single month is capped at one phone width** (`max-w-[360px] mx-auto` on the
-day grid). Without the cap it stretched to fill the wide panel — 7 columns of
-84px, and since the cells are square the grid went from 313px tall to 519px.
-That happened for the frames between the panel resizing and the dual-month
-switch catching up, so widening the panel flashed a giant calendar and shoved
-the list down and back.
+**A month is ALWAYS ONE PANE WIDE in the split layout** — `MONTH_PANE_PX`, 284,
+which is the dual panel minus the page's calendar gutter, halved, minus the
+pane's own padding. Day cells are square, so a month's width IS its height: a
+single month wider than a dual pane made the calendar taller with one month
+than with two, and the width toggle then resized the panel under the flight
+list every time. Capped, both modes measure **272px** and the list does not
+move at all (measured: `scrollTop` 900 before, during and after a round trip).
+The single month is therefore centred in its 360px panel rather than filling it.
+
+Two things had to match, not one. The pane width is the obvious half; the other
+is that a dual pane carries a **month caption** above its grid, so the single
+month renders one too (`renderPane`) even though the header also names it —
+without it a single month came out 12px shorter.
+
+A phone has no dual mode to match, so `paneMaxWidth` is left at the wider
+default there and the calendar uses the width it has. Without ANY cap a single
+month stretched to fill the wide panel — 7 columns of 84px, the grid going from
+313px tall to 519px — for the frames between the panel resizing and the
+dual-month switch catching up, which flashed a giant calendar.
 
 In **dual-month** mode the two panes are a FIXED pair: odd month on the left,
 even on the right (Jan|Feb, Mar|Apr, …), anchored by `pairStart()`. The pair
@@ -494,9 +507,10 @@ arbitrary. A swipe or wheel step therefore moves **two** months in dual mode
 (`stepMonths`); stepping by one would swap which side each month lands on and
 put the pairing out of phase.
 
-**The header names BOTH months in dual mode** — `Jul – Aug 2026`, and both
-years when the pair straddles a new year (`Dec 2026 – Jan 2027`), since
-"Dec – Jan 2027" would put December in the wrong year. The month/year picker
+**The header names BOTH months in dual mode** — `Jul – Aug 26`, and both years
+when the pair straddles a new year (`Dec 26 – Jan 27`), since "Dec – Jan 27"
+would put December in the wrong year. The year is two digits because at four
+the dual form pushed the left action group into the centred nav pill. The month/year picker
 marks both too. Naming only the anchor left the right-hand pane unaccounted for
 in a view that is plainly showing two months.
 
@@ -1808,7 +1822,7 @@ When making changes, be aware of these high-impact files:
 - Do not derive the sidebar's open height from `window.innerHeight` — use `calc(100% - …)`, which for a fixed element resolves against `body` (its containing block, via the transform above), the compensated shell. The measured version came out taller than the visible page on iPad Safari in portrait and overshot both ends. Subtract BOTH safe-area insets: one morph is top-anchored and the other bottom-anchored, and each still has to clear the other end
 - Do not put the chrome offsets on a SCROLL CONTAINER as padding — use the in-flow `h-chrome-top` / `h-chrome-bottom` spacers. WebKit has long dropped a scroll container's `padding-bottom` from its scrollable area, which strands the last row under the nav pill; an in-flow element is always counted. Padding is fine on a content wrapper that is itself inside a scroller
 - Do not add `pb-safe` to page content — a scroller gets its bottom clearance ONCE, from `--chrome-bottom` (via `.pb-chrome` / `.h-chrome-bottom`), and that value already carries the inset. Page wrappers used to add `pb-safe` inside a container that had it too, which on iOS meant a dead strip of ~96px plus TWO home-indicator insets at the end of every list — the "the bottom is padded" bug. One clearance per scroller, declared in one place
-- Do not hardcode `4rem`/`64` as the header offset anywhere — use `--chrome-top` (or `.pt-chrome` / `.h-chrome-top`). It is the 64px bar PLUS the status bar, and a bare 4rem is exactly how the logbook's search field ended up sliding under the action buttons once the shell stopped insetting itself. `--chrome-bottom` is the matching bottom clearance (nav pill + gesture bar)
+- Do not hardcode the header offset anywhere — use `--chrome-top` (or `.pt-chrome` / `.h-chrome-top`). It is the bar (3.25rem: a 4px margin, the 44px controls, a 4px gap) PLUS the status bar, and a bare rem value is exactly how the logbook's search field ended up sliding under the action buttons once the shell stopped insetting itself. `--chrome-bottom` is the matching bottom clearance (nav pill + gesture bar)
 - Do not give the bottom pill, the sidebar's lower end, or a scroller's bottom clearance their own safe-area math — they all derive from `--nav-bottom-offset` (`max(4px, env(safe-area-inset-bottom) - 10px)`: hugs the iOS home indicator, plain 4px on Android/desktop). One number keeps the pill↔sidebar morph endpoints aligned and the scrolled-to-rest last row on the same line; `components/bottom-edge-blur.tsx` adds the progressive blur under that line on iOS standalone only (below the nav in z-order so the sidebar and pill stay sharp)
 - Do not leave the cloned pill's `backdrop-filter`s (or `mix-blend-mode` anywhere in the lens subtree) in place during a drag or landing — they re-sample every frame and block layerisation, which is what made the release jank
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
@@ -1847,7 +1861,9 @@ When making changes, be aware of these high-impact files:
 - Do not paint an extra background over a glass surface to make one instance more opaque (the calendar did, at `--background` 0.85, and read as a different material from every other glass surface). Change the shared material instead
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
-- Do not let a single calendar month stretch to fill the wide panel — the day grid is capped at one phone width. Uncapped it grew from 313px to 519px tall for the frames between the panel resizing and the dual-month switch catching up, which flashed a giant calendar and shoved the flight list down and back
+- Do not let a single calendar month be wider than a DUAL pane in the split layout — the cells are square, so its width is its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
+- Do not size the floating controls or the nav pill independently — they are one 44px family (`CONTROL_RADIUS` 22 = half the height, so a pill stays a stadium), the header row is `h-13` to match, and `--chrome-top` is derived from them. They were 56px, which read as oversized next to the platform's own chrome on the same iPad
+- Do not print a four-digit year in the logbook's month label — in dual mode ("Jul – Aug 2026") the left action group grew far enough to reach the centred nav pill
 - Do not bring back the three-panel month carousel. It measured its container height from a ref taken "at rest" that had never been taken on the first entry into dual mode, so the calendar collapsed to 8px, and its end-of-animation handler tested `dataset.animAnchor` against `data-anim-anchor=""` — the empty string, which is falsy — so it never recovered. A dual step moves the pair by TWO months, so there is nothing sliding across to animate
 - Do not compensate the list's scroll when a floating panel OPENS or CLOSES — that push is the whole point of `overflow-anchor: none`. `absorbSpacerDelta` is only for the calendar changing SHAPE while already open, and that commit must also drop the spacer's transition, or an eased spacer drifts against the one-shot correction
 - Do not inset `.GlassBlur` from the face or feather it outward — the fill must be even corner to corner, and `--glass-press` must stay imperative so a scroll's `pointercancel` doesn't kill the spotlight

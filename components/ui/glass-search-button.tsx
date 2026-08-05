@@ -84,13 +84,13 @@ export function GlassSearchButton({
         willChange: isOpen ? "max-width" : undefined,
       }}
     >
-      <GlassContainer cornerRadius={28}>
-        <div className="flex items-center h-14 relative">
+      <GlassContainer cornerRadius={22}>
+        <div className="flex items-center h-11 relative">
           {/* Search icon — always visible, acts as button when collapsed */}
           <button
             type="button"
             onClick={isOpen ? undefined : onToggle}
-            className="absolute left-0 top-0 h-14 w-14 flex items-center justify-center flex-shrink-0"
+            className="absolute left-0 top-0 h-11 w-11 flex items-center justify-center flex-shrink-0"
             style={{ pointerEvents: isOpen ? "none" : "auto" }}
           >
             <Search className="h-6 w-6" />

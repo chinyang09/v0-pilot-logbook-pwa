@@ -107,7 +107,7 @@ const TAB_CONFIG: Record<
 const SIDEBAR_WIDTH = 199
 const SIDEBAR_MARGIN = 4 // distance from viewport edge when expanded
 const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_MARGIN * 2 // 191
-const PILL_HEIGHT = 56 // h-14
+const PILL_HEIGHT = 44 // h-11
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
 // ─── Morph timing ────────────────────────────────────────────
@@ -843,13 +843,13 @@ function PillBarContent({
   const lensActive = lensPhase !== "idle"
 
   return (
-    <div data-pill-row className="flex items-center h-14 px-2">
+    <div data-pill-row className="flex items-center h-11 px-1.5">
       {/* Sidebar toggle — fixed width bookend */}
       <button
         onClick={onToggleSidebar}
-        className="flex items-center justify-center h-10 w-10 rounded-full text-[var(--on-glass-label)] active:text-foreground flex-shrink-0"
+        className="flex items-center justify-center h-8 w-8 rounded-full text-[var(--on-glass-label)] active:text-foreground flex-shrink-0"
       >
-        <PanelLeft className="h-6 w-6" />
+        <PanelLeft className="h-5 w-5" />
       </button>
 
       {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
@@ -907,7 +907,7 @@ function PillBarContent({
                 <span
                   data-grav-item
                   className={cn(
-                    "inline-flex items-center justify-center h-9 px-4 rounded-full text-sm font-medium transition-colors",
+                    "inline-flex items-center justify-center h-8 px-3.5 rounded-full text-sm font-medium transition-colors",
                     highlighted ? "text-primary" : "text-[var(--on-glass-icon)] active:text-foreground"
                   )}
                 >
@@ -917,11 +917,11 @@ function PillBarContent({
                 <span
                   data-grav-item
                   className={cn(
-                    "inline-flex flex-col items-center justify-center gap-0.5 h-11 px-3 rounded-full transition-colors",
+                    "inline-flex flex-col items-center justify-center gap-0.5 h-9 px-2.5 rounded-full transition-colors",
                     highlighted ? "text-primary" : "text-[var(--on-glass-icon)] active:text-foreground"
                   )}
                 >
-                  <Icon className="h-6 w-6" />
+                  <Icon className="h-5 w-5" />
                   <span className="text-[9px] leading-none">{tab.label}</span>
                 </span>
               )}
@@ -1017,9 +1017,9 @@ function SidebarTopStrip({ onToggle }: { onToggle: () => void }) {
       <div aria-hidden className="SidebarTopBlur" />
       <button
         onClick={onToggle}
-        className="relative flex items-center justify-center h-10 w-10 rounded-full text-[var(--on-glass-label)] active:text-foreground flex-shrink-0"
+        className="relative flex items-center justify-center h-8 w-8 rounded-full text-[var(--on-glass-label)] active:text-foreground flex-shrink-0"
       >
-        <PanelLeft className="h-6 w-6" />
+        <PanelLeft className="h-5 w-5" />
       </button>
       <SyncIconButton className="relative" />
     </div>
@@ -1179,14 +1179,14 @@ function SidebarNavItem({
       draggable={false}
       onContextMenu={suppressLinkMenu}
       className={cn(
-        "relative z-[1] flex items-center gap-3 px-3.5 py-2.5 rounded-full text-sm transition-all duration-150",
+        "relative z-[1] flex items-center gap-3 px-3 py-2 rounded-full text-sm transition-all duration-150",
         "active:scale-[0.98]",
         isActive
           ? "text-primary font-medium"
           : "text-[var(--on-glass-label)] hover:bg-[var(--on-glass-fill-soft)] hover:text-foreground"
       )}
     >
-      <span className={cn("flex-shrink-0 [&_svg]:!size-6", isActive ? "text-primary" : "text-[var(--on-glass-icon)]")}>
+      <span className={cn("flex-shrink-0 [&_svg]:!size-5", isActive ? "text-primary" : "text-[var(--on-glass-icon)]")}>
         {icon}
       </span>
       {label}
@@ -1462,7 +1462,7 @@ function DesktopPillMorph({
       onTransitionEnd={handleTransitionEnd}
     >
         <GlassContainer
-          cornerRadius={isSidebarShape ? 20 : 28}
+          cornerRadius={isSidebarShape ? 20 : 22}
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           // In PILL shape the nav is a control and behaves like one: it blooms
@@ -1639,7 +1639,7 @@ function MobilePillMorph({
         onTransitionEnd={handleTransitionEnd}
       >
         <GlassContainer
-          cornerRadius={isSidebarShape ? 20 : 28}
+          cornerRadius={isSidebarShape ? 20 : 22}
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           // In PILL shape the nav is a control and behaves like one: it blooms
