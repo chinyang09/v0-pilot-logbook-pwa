@@ -707,10 +707,18 @@ report watermarks). Do not go back to an allowlist.
   headers by eye in a browser therefore overshoots badly once installed: at
   veil **88%** / blur **22px** — which looked right in a tab — the owner's
   verdict on device was that you could no longer tell *what* was under the bar,
-  only that something was. **66% at the anchored edge and an 11px blur peak is
-  that reference MINUS what iOS contributes**: the shapes survive (you can see
-  it is a flight card, a title, a row) while nothing in it looks touchable. Do
-  not re-tune these from a desktop screenshot alone.
+  only that something was. **66% at the anchored edge is that reference MINUS
+  what iOS contributes.** Do not re-tune these from a desktop screenshot alone.
+
+  **Judge the blur at the TOP of the band, not the bottom.** The three layers
+  overlap there and nowhere else, and sequential blurs compose as the
+  root-sum-square — so the peak is not the largest radius but √(Σr²). That is
+  what made `2/5/11` still wrong after `2/9/22` was corrected: the row level
+  with the action buttons was only "a little too much" while everything above
+  it, where the stack reaches **12.2px** *and* iOS is already applying its own,
+  was unreadable. At **2 / 3.2 / 4.6** the peak is **6.0px** and the bottom of
+  the band is untouched at 2px — the part the owner signed off on. You can read
+  what is passing under the status bar; it is simply not crisp.
 
   The owner chose blur at the TOP and darken-only at the BOTTOM
   (`components/bottom-edge-blur.tsx` — a short home-indicator fade, iOS
@@ -723,9 +731,19 @@ report watermarks). Do not go back to an allowlist.
   `scrollIndicatorInsets`. Mounted as a scroller's FIRST CHILD, but only the
   zero-height sticky MARKER lives there; the thumb itself is a
   `position: fixed` element appended to `document.body`, placed against the
-  scroller's cached box and inset to `--chrome-top` … `--nav-bottom-offset`.
+  scroller's box and inset to `--chrome-top` … `--nav-bottom-offset`.
   At either end it compresses against the track instead of riding the
   rubber-band.
+
+  **That box is re-read on every update, not cached.** A cached copy plus a
+  ResizeObserver looks sufficient and is not: opening the sidebar SLIDES the
+  main panel across without changing its width (measured: `0..360` →
+  `199..559`), so nothing resizes and no observer fires. The thumb stayed at
+  the closed layout's right edge — 199px inside the list, drawing a grey rule
+  down the middle of the flight cards, and still tracking the scroll, which is
+  what made it read as a stray line rather than a misplaced scrollbar. One rect
+  read per scroll frame, in a rAF that is already reading `scrollTop`, and it
+  is only ever needed while the thumb is visible.
 - **`MODAL_SCRIM`** — `bg-black/15 dark:bg-black/50`. A flat `bg-black/50` is
   invisible over a dark app and turns the light theme (white panels, glass
   sidebar) into grey mush. Used by every dialog overlay, the nav sidebar
@@ -1726,13 +1744,24 @@ When making changes, be aware of these high-impact files:
     the root-sum-square, so ONE blur is identical optics for a third of the
     work. It carries more of the material's presence now that the veil is
     thinner (4.4px).
-  - **A visible ring under a bright glint.** `--softness` (5px) drives the
-    edge/emboss/refraction band widths and the specular conic (`--glass-rim`)
-    peaks at 0.80 dark / 0.96 light. Those two move together and in opposite
-    directions on purpose: a thin edge with a strong catch reads as a sharp
-    piece of glass, where a thick ring at the same brightness reads as a
-    painted border. The dim flanks between the lobes stay dim — that contrast
-    is what makes it a glint rather than an outline.
+  - **A visible ring under a bright glint.** `--softness` (**3.6px**) drives
+    the edge/emboss/refraction band widths and the specular conic
+    (`--glass-rim`) peaks at 0.80 dark / 0.96 light. A thin edge with a strong
+    catch reads as a sharp piece of glass; a thick ring at the same brightness
+    reads as a painted border. The dim flanks between the lobes stay dim —
+    that contrast is what makes it a glint rather than an outline.
+
+    **WIDTH and CONTINUITY are separate knobs, and conflating them sent this
+    up to 5px and back.** At 3.4 the ring was thin *and* the conic's flanks
+    were at ~0.05, so three-quarters of the perimeter had no hairline at all;
+    that was read as "too thin" and the width went up alongside the flanks.
+    The flanks were the part actually missing. With them at 0.22 the ring is
+    continuous everywhere, which frees the geometry to come back down: 3.6px
+    draws a finer line than 5px did while still drawing it the whole way
+    round. `.Highlight`'s padding is thinned with it (1.25 → 0.9px) — it is
+    the widest of the edge layers, so leaving it would have kept the rim's
+    apparent thickness where it was. Measured: edge 0.95 → 0.768px, emboss
+    1.5 → 1.08px. Do not take the flanks down with the width.
   - **Even face:** `.GlassBlur` spans the WHOLE face, corner to corner. It used
     to be inset by the ring widths, leaving the perimeter a shade darker than
     the middle — the material read as a grey slab inside a darker frame instead
@@ -1807,6 +1836,24 @@ When making changes, be aware of these high-impact files:
   scroll too. `mousedown` additionally takes `preventDefault`, which is what
   stops a text field taking focus on a desktop click. `click`/`pointerup` are
   swallowed and close the menu; `scroll`/`wheel`/`touchmove` only close it.
+
+  **Opening the menu must END the held card's pointer session** — the hold
+  timeout dispatches a synthetic `pointercancel` on `window` before calling
+  `onHold`. framer-motion registers its window `pointermove`/`pointerup`
+  listeners on *pointerdown*, and the swallow above then eats the lift, so
+  framer never saw the gesture finish and the session stayed live. The next
+  swipe's moves — which pass through, because movement is exactly what the menu
+  allows — were delivered to that orphaned session and dragged the card that
+  had been held: the swipe dismissed the menu and left a ghost swipe open
+  behind it. `pointercancel` is what this genuinely is (the press stopped being
+  a drag and became a menu) and framer ends on it.
+
+  Chromium cannot demonstrate this end-to-end — it fires its own
+  `pointercancel` when a touch turns into a scroll, so it self-heals — which is
+  why the regression test feeds `window` **bare `pointermove`s with no
+  `pointerdown` of their own**. Nothing legitimate can respond to those; only a
+  session that was never closed. Measured: the held card moves **−140px**
+  without the dispatch and **0** with it.
 - `lib/utils/derive-flight.ts` — what a derived flight carries. Everything that does not change between two legs (aircraft, crew, role) and NOTHING that is a record of a specific flight having happened (OOOI, takeoffs/landings, signature, lock, import + sync stamps) — copying those forward would fabricate a logbook entry.
 - `components/signature-dialog.tsx` — signing, full screen. Orientation-agnostic by construction: the surface fills what is left after the chrome, and the strokes are normalised to their own bounding box, so a signature drawn in landscape renders identically in portrait.
 - `lib/utils/virtual-scroll.ts` — `scrollToIndexSettled`. A dynamically-measured list needs the scroll re-issued until the arriving rows have measured, and convergence has to be read off the ELEMENT's `scrollTop` (`virtualizer.scrollOffset` is written by the scroll listener, so it always looks unchanged in the same tick).
@@ -1912,6 +1959,8 @@ When making changes, be aware of these high-impact files:
 - Do not add the sidebar's floating-strip treatment to only one morph — `DesktopPillMorph` and `MobilePillMorph` must both float the toggle/sync strip over the nav with `topInset`, or the scroll-under silently works on desktop and not on a phone. And keep the dissolve mask on the blob overlay as well as the nav (on the OUTER, untranslated element), or the blob stays solid in a band where its own row has faded out
 - Do not let the header veil go solid or lean on blur for the treatment — `ChromeFade` is a **darken with a hint of blur**: the gradient tops out at 50% `--background` and the blur ramp peaks at 2.4px. A solid veil hides the content passing under the status bar (reads as the app stopping there — the web-page-in-a-frame look the edge-to-edge work removed), and a heavy blur smears it into an unreadable band. Text sliding under the bar must stay legible enough to make out roughly what it says
 - Do not re-enable the native scrollbar on an app scroller — iOS draws its indicator across the scroller's whole box, i.e. from the screen edge over the status bar. Scrollers carry `scrollbar-hide` + `components/ui/scroll-indicator.tsx` as the FIRST CHILD; it draws the same affordance inset to `--chrome-top` / `--nav-bottom-offset`, so it starts below the action buttons like a native scroll view's `scrollIndicatorInsets` while content still scrolls under the chrome. At either end it must **compress against the end of its track**, not ride the rubber-band: progress is clamped so the thumb is already parked, and the overscroll distance squashes it (asymptotically, so a hard fling never collapses it to nothing)
+- Do not cache the scroll indicator's scroller box behind a ResizeObserver alone — opening the sidebar SLIDES the main panel across without resizing it (`0..360` → `199..559`), so no observer fires and the thumb stays at the closed layout's right edge, drawing a grey rule down the middle of the flight cards. Re-read the box in the update
+- Do not open the flight card's hold menu without ending the held card's pointer session first — the menu swallows the lift at the capture phase, so framer-motion never sees the gesture finish and its window listeners stay live; the next swipe's moves then drag the card that was held (the ghost swipe left behind when the swipe dismisses the menu). Dispatch a synthetic `pointercancel` on `window` from the hold timeout
 - Do not move the scroll indicator's thumb back INSIDE the scroller — it is a `position: fixed` element in `document.body`, placed against the scroller's cached box. It lived on a sticky anchor inside the scroller once, with its drift measured and cancelled per frame: that pinned correctly while a finger dragged, but the rubber-band RELEASE is compositor-animated and the correction runs on the main thread from coalesced scroll events, so the track visibly snapped back with the bounce. Nothing inside the scroller can win that race. The zero-height sticky marker that remains is only a rubber-band **sensor** (its drift is the bounce distance for engines that clamp `scrollTop`) and is read at the TOP only — at the bottom it stays pinned, so measuring there returns the whole scrolled distance and collapses the thumb
 - Do not give a page's content its own bottom padding on top of the shared clearance — one clearance per scroller, from `--chrome-bottom` (`.pb-chrome` / `.h-chrome-bottom`), and a card list's per-row gap belongs on the row's TOP (`pt-1`), never its bottom. A trailing per-row gap stacks on the spacer and lands that panel's last row lower than every other panel's (the logbook, aircraft, airports and crew lists each had one; the logbook's 8px is subtracted from its spacer because its wrapper padding can't move)
 - Do not let ANY scroller chain its overscroll to the document — every app scroller carries `overscroll-contain`, so a flick that reaches the end of a list can never reach the page. Together with the clipped shell above that is what removed the "free play" where a page with nothing to scroll still moved and carried the fixed action buttons off screen. Verified by sampling `scrollHeight − clientHeight` on the document continuously through load: 0 on every route, in both axes
@@ -1926,7 +1975,7 @@ When making changes, be aware of these high-impact files:
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
 - Do not let a single calendar month be wider than a DUAL pane in the split layout — the cells are square, so its width is its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
-- Do not thin the rim until only the glint is visible — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22
+- Do not thin the rim by dropping the conic's FLANKS — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22; the ring's WIDTH (`--softness`, and `.Highlight`'s padding with it) is the separate knob, and it is only free to be fine BECAUSE the flanks hold the continuity
 - Do not open the flight card's hold menu behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow only AFTER the opening gesture ends, or the lift that finished the hold closes the menu instantly
 - Do not let the hold menu leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
 - Do not build the hold menu from glass — glass is chrome floating over content, and a menu has to be read; as a glass slab the flight cards showed straight through the labels. It uses the grouped-row vocabulary (`bg-card` + inset `.row-divider`)

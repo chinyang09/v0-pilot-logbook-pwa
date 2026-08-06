@@ -63,16 +63,23 @@ function fadeFor(side: Side): string {
  *
  * The band has to read as chrome you cannot reach through — at the original
  * 2.4px peak a card scrolling under the action buttons still looked sharp and
- * tappable. But 22px went past the reference in the other direction: on device
- * you could not tell what the content WAS, only that something was there.
- * 11px is where the shapes survive — you can see it is a flight card, a title,
- * a row — while nothing in it looks touchable. The veil above carries the rest
- * (and see the note there about iOS adding its own).
+ * tappable. Going the other way is the easier mistake to make, though, and it
+ * was made twice: 22px, then 11px. Both were judged from the BOTTOM of the
+ * band, which is the part these layers barely touch.
+ *
+ * The number that matters is the one at the TOP — the status-bar strip, where
+ * all three layers overlap AND iOS is already applying its own. Sequential
+ * blurs compose as the root-sum-square, so the peak here is not the largest
+ * radius but √(Σr²): 12.2px at 2/5/11, which on device made everything above
+ * the action buttons unreadable while the row level with them was only "a
+ * little too much". At 2/3.2/4.6 the stack peaks at 6.0px and the bottom of
+ * the band is unchanged at 2px — the part the owner signed off on. You can
+ * read what is passing under the status bar; it is simply not crisp.
  */
 const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
   { blur: 2, coverage: "100%", ramp: "60%" },
-  { blur: 5, coverage: "80%", ramp: "48%" },
-  { blur: 11, coverage: "54%", ramp: "40%" },
+  { blur: 3.2, coverage: "76%", ramp: "46%" },
+  { blur: 4.6, coverage: "46%", ramp: "36%" },
 ];
 
 /**

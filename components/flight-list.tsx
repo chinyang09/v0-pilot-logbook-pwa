@@ -173,8 +173,25 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           width: card.width,
           height: card.height,
         };
+        const { pointerId, pointerType } = e;
         holdRef.current = setTimeout(() => {
           holdRef.current = null;
+          // END THIS CARD'S POINTER SESSION before the menu opens.
+          //
+          // framer-motion registers its window pointermove/pointerup listeners
+          // on pointerdown, and the menu then swallows the lift at the capture
+          // phase — so framer never saw the gesture finish and the session
+          // stayed live. The NEXT swipe's moves (which pass through, because
+          // movement is the one thing the menu deliberately allows) were
+          // delivered to that stale session and dragged the card that had been
+          // held: the swipe closed the menu and left a ghost swipe behind it.
+          //
+          // A synthetic `pointercancel` is what this actually is — the press
+          // stopped being a drag and became a menu — and framer ends the
+          // session on it. Dispatched on `window`, where its listeners are.
+          window.dispatchEvent(
+            new PointerEvent("pointercancel", { pointerId, pointerType, bubbles: true })
+          );
           onHold(flight, box);
         }, HOLD_MS);
       }}

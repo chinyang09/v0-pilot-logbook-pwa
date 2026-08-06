@@ -814,11 +814,16 @@ textarea:focus-within {
   /* Drives the rim band widths below. Lower = a finer edge; the material's
      presence comes from the veil and the face, not from a thick ring — and the
      specular glint carries the edge, so the ring under it can stay fine.
-     Back UP to 5.0 after comparing side by side with iOS's own controls: at
-     3.4 ours was the thinner of the two, and the reference has a rim you can
-     see all the way round, not only where the glint falls. The width and the
-     flanks moved together — see `--glass-rim`. */
-  --softness: 5px;
+
+     WIDTH and CONTINUITY are separate problems, and conflating them is what
+     sent this up to 5.0 and back. At 3.4 the rim was thin AND the conic's
+     flanks were at ~0.05, so three-quarters of the perimeter had no hairline
+     at all — the fix was read as "too thin" and the width went up with the
+     flanks. The flanks are the part that was actually missing: at 0.22 the
+     ring is continuous, which frees the GEOMETRY to come back down. 3.6px
+     draws a finer line than 5.0 did while still drawing it all the way
+     round. Do not take the flanks down with it. */
+  --softness: 3.6px;
   --tint-amount: 0;
   --tint-saturation: 2;
   --tint-hue: 180deg;
@@ -1112,8 +1117,10 @@ textarea:focus-within {
   border-radius: var(--corner-radius);
   /* A narrow band with a slight blur: the rim visibly BENDS the backdrop
      under the specular glint (Apple's edge is refracted light, not a painted
-     line). The angular white conic (--glass-rim) sits above this. */
-  padding: 1.25px;
+     line). The angular white conic (--glass-rim) sits above this. Thinned
+     with `--softness` — it is the widest of the edge layers, so leaving it
+     at 1.25px would have kept the rim's apparent thickness where it was. */
+  padding: 0.9px;
   border: 0 solid transparent;
   backdrop-filter: blur(1px) brightness(1.25) contrast(1.5) saturate(1.35);
   mask:

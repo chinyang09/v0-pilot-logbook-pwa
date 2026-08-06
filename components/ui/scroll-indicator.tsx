@@ -58,8 +58,19 @@ export function ScrollIndicator() {
     ].join(";")
     document.body.appendChild(thumb)
 
-    // The scroller's own box — unaffected by its contents scrolling, so this
-    // only needs refreshing when the layout actually changes.
+    // The scroller's own box. Unaffected by its contents scrolling — but NOT
+    // by the layout around it, and a cached copy was wrong in the one case
+    // that matters: opening the sidebar SLIDES the main panel across without
+    // changing its width, so a ResizeObserver never fires and the thumb stayed
+    // at the closed layout's right edge, drawing a grey line down the middle of
+    // the flight cards. It still tracked the scroll, which is what made it look
+    // like a stray rule rather than a misplaced scrollbar.
+    //
+    // So it is re-read at the top of every update instead. That is one rect
+    // read per scroll frame, in a rAF that is already reading `scrollTop` —
+    // and it is only ever needed while the thumb is visible, which is only
+    // while scrolling. The observers below keep it right for a resize that
+    // happens with the thumb already on screen.
     let box = { top: 0, right: 0, height: 0 }
     const measureBox = () => {
       const r = scroller.getBoundingClientRect()
@@ -93,6 +104,7 @@ export function ScrollIndicator() {
         thumb.style.opacity = "0"
         return
       }
+      measureBox()
       const topInset = topProbe.offsetHeight
       const bottomInset = bottomProbe.offsetHeight + 6
       const track = box.height - topInset - bottomInset
