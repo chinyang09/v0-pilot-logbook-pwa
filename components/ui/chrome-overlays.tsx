@@ -30,14 +30,15 @@ const FADE = 64;
 /**
  * The main panel header's gradient, anchored to the fading edge.
  *
- * Weighted to the reference the owner supplied (iOS's own layered headers, as
- * in the GitHub app): heavy at the anchored edge — 88% of the background — so
- * the bar clearly reads as chrome rather than as a slightly tinted strip, then
- * falling away over the tail. It is still NEVER fully solid: content passing
- * beneath has to survive as a legible ghost, or the band reads as the app
- * stopping at the status bar, which is the web-page-in-a-frame look the
- * edge-to-edge work removed. In the reference you can still make out the title
- * under the bar, and you can here.
+ * Weighted against the reference (iOS's own layered headers, as in the GitHub
+ * app) with ONE correction that is easy to miss: an installed iOS PWA already
+ * gets Apple's own `black-translucent` treatment over the status-bar strip, so
+ * whatever this paints STACKS on top of it. Matching the reference's apparent
+ * darkness by eye in a browser therefore overshoots badly once installed —
+ * which is exactly what happened at 88%: on device the content under the bar
+ * was unreadable, where in the reference you can still make out the title.
+ *
+ * 66% at the anchored edge is that reference MINUS what iOS contributes.
  *
  * The direction is handled for free — `--background` IS the theme, so this
  * darkens on the dark theme and lightens on the light one with no branch.
@@ -46,9 +47,9 @@ function fadeFor(side: Side): string {
   const to = side === "top" ? "bottom" : "top";
   return [
     `linear-gradient(to ${to}`,
-    `color-mix(in srgb, var(--background) 88%, transparent) 0`,
-    `color-mix(in srgb, var(--background) 74%, transparent) calc(100% - ${FADE}px)`,
-    `color-mix(in srgb, var(--background) 34%, transparent) calc(100% - ${FADE / 2}px)`,
+    `color-mix(in srgb, var(--background) 66%, transparent) 0`,
+    `color-mix(in srgb, var(--background) 56%, transparent) calc(100% - ${FADE}px)`,
+    `color-mix(in srgb, var(--background) 26%, transparent) calc(100% - ${FADE / 2}px)`,
     `transparent 100%)`,
   ].join(", ");
 }
@@ -60,18 +61,18 @@ function fadeFor(side: Side): string {
  * then only ADD blur and the ramp stays monotonic on both engines (see
  * SIDEBAR_BACKDROP_BLUR in nav-pill for the same rule).
  *
- * Weighted so the band reads as chrome you cannot reach through, which is the
- * job it was failing: at a 2.4px peak a card scrolling under the action
- * buttons still looked sharp and tappable, and the owner's read was that it
- * "blurs a little later" than a native bar and is misleading. Raised twice —
- * it peaks at 22px now, matched against the reference headers the owner
- * supplied, where the content under the bar is a soft wash with its shapes
- * still readable but nothing in it looking touchable.
+ * The band has to read as chrome you cannot reach through — at the original
+ * 2.4px peak a card scrolling under the action buttons still looked sharp and
+ * tappable. But 22px went past the reference in the other direction: on device
+ * you could not tell what the content WAS, only that something was there.
+ * 11px is where the shapes survive — you can see it is a flight card, a title,
+ * a row — while nothing in it looks touchable. The veil above carries the rest
+ * (and see the note there about iOS adding its own).
  */
 const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
-  { blur: 3, coverage: "100%", ramp: "62%" },
-  { blur: 9, coverage: "80%", ramp: "48%" },
-  { blur: 22, coverage: "54%", ramp: "40%" },
+  { blur: 2, coverage: "100%", ramp: "60%" },
+  { blur: 5, coverage: "80%", ramp: "48%" },
+  { blur: 11, coverage: "54%", ramp: "40%" },
 ];
 
 /**

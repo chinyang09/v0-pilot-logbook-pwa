@@ -88,22 +88,30 @@ export function FlightQuickActions({
   }, [anchor.left, anchor.top, anchor.width, anchor.height]);
 
   /**
-   * Open the menu WITHOUT freezing the app.
+   * Open the menu without freezing the app, and without letting anything
+   * behind it be OPERATED.
    *
-   * A full-screen blocking scrim was wrong in both directions: it stopped the
-   * list scrolling under the menu (so dismissing meant an extra deliberate tap
-   * first), and closing on pointerdown handed the click that followed to the
-   * card underneath. What is actually wanted is narrower — you should be able
-   * to keep moving around, you just must not ACTIVATE anything:
+   * The distinction that matters is between *moving* and *acting*. Scrolling
+   * is moving: the list should still slide under the menu and the menu goes
+   * away with it, because a menu that pins the whole app reads as a modal, and
+   * this is not one. Everything else is acting — opening a card, revealing its
+   * swipe panel, focusing a field, hitting a button — and none of it should be
+   * possible while the menu is up.
    *
-   * - a scroll, a wheel, a swipe → the page moves as normal and the menu
-   *   closes on the way;
-   * - a tap outside → swallowed at the capture phase, so no card opens, no
-   *   button fires, no field takes focus. The menu closes and nothing else
-   *   happened.
+   * That line is drawn at POINTERDOWN, in the capture phase, with
+   * `stopPropagation` and NOT `preventDefault`:
    *
-   * Hence no interactive scrim at all: the listeners live on `document` in the
-   * capture phase, and only `click`/`pointerup` are cancelled.
+   * - `stopPropagation` means the event never reaches any React or
+   *   framer-motion handler, so `SwipeableCard`'s drag never starts. A
+   *   full-screen scrim was the obvious alternative and it is worse: it kills
+   *   the scroll too.
+   * - NOT calling `preventDefault` leaves the browser's own default — the
+   *   compositor-driven touch scroll — untouched. That is the whole trick;
+   *   scrolling is not delivered through the listeners we are cutting.
+   *
+   * `mousedown` additionally gets `preventDefault`, which is what stops a text
+   * field taking focus on a desktop click (touch focus follows the click,
+   * which is swallowed below anyway).
    */
   useEffect(() => {
     const inMenu = (t: EventTarget | null) => !!menuRef.current?.contains(t as Node);
@@ -113,6 +121,16 @@ export function FlightQuickActions({
     // receive them) but neither closes: arming waits for that gesture to end.
     let armed = false;
 
+    /** Stop the app seeing it, but leave the browser's scroll alone. */
+    const block = (e: Event) => {
+      if (inMenu(e.target)) return;
+      e.stopPropagation();
+    };
+    const blockAndFocusGuard = (e: Event) => {
+      if (inMenu(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
     const swallow = (e: Event) => {
       if (inMenu(e.target)) return;
       e.preventDefault();
@@ -136,6 +154,9 @@ export function FlightQuickActions({
       }, 0);
     };
 
+    document.addEventListener("pointerdown", block, true);
+    document.addEventListener("touchstart", block, true);
+    document.addEventListener("mousedown", blockAndFocusGuard, true);
     document.addEventListener("click", swallow, true);
     document.addEventListener("pointerup", swallow, true);
     document.addEventListener("pointerup", armAfterOpeningGesture, { capture: true, once: true });
@@ -150,6 +171,9 @@ export function FlightQuickActions({
     window.addEventListener("keydown", onKey);
     return () => {
       window.clearTimeout(armFallback);
+      document.removeEventListener("pointerdown", block, true);
+      document.removeEventListener("touchstart", block, true);
+      document.removeEventListener("mousedown", blockAndFocusGuard, true);
       document.removeEventListener("click", swallow, true);
       document.removeEventListener("pointerup", swallow, true);
       document.removeEventListener("pointerup", armAfterOpeningGesture, true);

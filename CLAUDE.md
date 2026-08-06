@@ -688,29 +688,35 @@ report watermarks). Do not go back to an allowlist.
 - **`ChromeFade`** — THE floating-header treatment, rendered directly by the
   main shell header and the mobile detail overlay header in
   `desktop-layout.tsx` (no more inline copies): a native-style bar of
-  progressive **blur + darken**. It extends `FADE_TAIL` (24px) BEYOND the bar
-  it sits on, and peaks at 9px of blur: at the old 2.4px, confined to the bar's
-  own height, a card scrolling under the action buttons still looked sharp and
-  tappable, which is misleading — the softening has to start before the edge
-  for the band to read as chrome. `--chrome-clear` is the bar plus that tail,
-  and anything positioning a row against the header (the quick-scroll rail's
-  target) uses it rather than `--chrome-top` — three masked backdrop-blur layers (smallest
+  progressive **blur + darken**. Three masked backdrop-blur layers (smallest
   radius first, widest coverage, so the stack only ever adds blur toward the
-  edge) under the background gradient (solid → 60% → transparent). The
-  gradient is anchored to a fixed 64px tail so taller chrome keeps the same
-  boundary instead of stretching the ramp until content shows through the
-  title. The band is weighted to the iOS headers the owner
-  referenced: the veil reaches **88%** of `--background` at the anchored edge
-  and the blur peaks at **22px**, so content beneath is a soft wash whose
-  shapes you can still read but nothing in it looks touchable. Because the
-  veil is `--background`, it darkens on the dark theme and lightens on the
-  light one with no branch. The owner chose blur at the TOP and darken-only at the BOTTOM
+  edge) under a background gradient. It extends `FADE_TAIL` (34px) BEYOND the
+  bar it sits on, because native bars start softening well before their own
+  edge — confined to the bar's height, a card sitting just under the action
+  buttons still looked sharp and tappable, which is a lie about what you can
+  reach. `--chrome-clear` is the bar PLUS that tail, and anything positioning a
+  row against the header (the quick-scroll rail's target) uses it rather than
+  `--chrome-top`. The gradient is anchored to a fixed 64px ramp so taller chrome
+  keeps the same boundary instead of stretching until content shows through the
+  title. Because the veil is `--background` it darkens on the dark theme and
+  lightens on the light one with no branch.
+
+  **The weights are set for an INSTALLED iOS PWA, not for a browser.** Apple
+  already applies its own `black-translucent` treatment over the status-bar
+  strip, so whatever this paints STACKS on top of it. Matching the reference
+  headers by eye in a browser therefore overshoots badly once installed: at
+  veil **88%** / blur **22px** — which looked right in a tab — the owner's
+  verdict on device was that you could no longer tell *what* was under the bar,
+  only that something was. **66% at the anchored edge and an 11px blur peak is
+  that reference MINUS what iOS contributes**: the shapes survive (you can see
+  it is a flight card, a title, a row) while nothing in it looks touchable. Do
+  not re-tune these from a desktop screenshot alone.
+
+  The owner chose blur at the TOP and darken-only at the BOTTOM
   (`components/bottom-edge-blur.tsx` — a short home-indicator fade, iOS
   standalone only): at the bottom band's height a blur reads as smearing.
   The anchored top band also makes an iOS rubber-band read as bouncing from
-  under the action buttons rather than the screen edge. The mix is
-  deliberately **darken-led** — veil to 50% `--background`, blur peaking at
-  2.4px — so text passing under the status bar stays roughly readable.
+  under the action buttons rather than the screen edge.
 - **`ScrollIndicator`** (`components/ui/scroll-indicator.tsx`) — the app's own
   scroll indicator, because iOS draws its own across the scroller's whole box
   (from the screen edge, over the status bar) and CSS has no
@@ -1784,6 +1790,23 @@ When making changes, be aware of these high-impact files:
 
 **Flight card gestures:**
 - `components/flight-quick-actions.tsx` — the press-and-hold menu (Next Leg / Return Trip / Duplicate / Share / Lock). A hold is the one gesture the card had spare: tap opens the flight, a horizontal drag opens the swipe panel. Any movement past a few px cancels it, so it never fires on a scroll.
+
+  **While it is open the app can still be MOVED but not OPERATED**, and the line
+  between those is drawn at **`pointerdown`/`touchstart` in the CAPTURE phase
+  with `stopPropagation` and NOT `preventDefault`**:
+  - `stopPropagation` means the event never reaches any React or framer-motion
+    handler, so `SwipeableCard`'s drag never starts. Without it, swiping left
+    somewhere else revealed that row's swipe panel with the menu still up.
+  - withholding `preventDefault` leaves the browser's own default — the
+    compositor-driven touch scroll — completely untouched. Scrolling is not
+    delivered through the listeners being cut, which is the whole trick.
+    (Measured: an identical touch drag scrolls the logbook 0→285px with the
+    menu open and 0→285px without it.)
+
+  A full-screen scrim is the obvious alternative and it is worse — it kills the
+  scroll too. `mousedown` additionally takes `preventDefault`, which is what
+  stops a text field taking focus on a desktop click. `click`/`pointerup` are
+  swallowed and close the menu; `scroll`/`wheel`/`touchmove` only close it.
 - `lib/utils/derive-flight.ts` — what a derived flight carries. Everything that does not change between two legs (aircraft, crew, role) and NOTHING that is a record of a specific flight having happened (OOOI, takeoffs/landings, signature, lock, import + sync stamps) — copying those forward would fabricate a logbook entry.
 - `components/signature-dialog.tsx` — signing, full screen. Orientation-agnostic by construction: the surface fills what is left after the chrome, and the strokes are normalised to their own bounding box, so a signature drawn in landscape renders identically in portrait.
 - `lib/utils/virtual-scroll.ts` — `scrollToIndexSettled`. A dynamically-measured list needs the scroll re-issued until the arriving rows have measured, and convergence has to be read off the ELEMENT's `scrollTop` (`virtualizer.scrollOffset` is written by the scroll listener, so it always looks unchanged in the same tick).
@@ -1905,6 +1928,7 @@ When making changes, be aware of these high-impact files:
 - Do not let a single calendar month be wider than a DUAL pane in the split layout — the cells are square, so its width is its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
 - Do not thin the rim until only the glint is visible — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22
 - Do not open the flight card's hold menu behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow only AFTER the opening gesture ends, or the lift that finished the hold closes the menu instantly
+- Do not let the hold menu leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
 - Do not build the hold menu from glass — glass is chrome floating over content, and a menu has to be read; as a glass slab the flight cards showed straight through the labels. It uses the grouped-row vocabulary (`bg-card` + inset `.row-divider`)
 - Do not animate the hold menu with `animate-in` — its enter defaults still carry a translate, which is the "flying in". `quick-menu-in` is a pure opacity keyframe
 - Do not confine the header's blur to the bar's own height, and do not scroll a row to `--chrome-top` — content has to clear `--chrome-clear` (the bar PLUS the fade's tail). A row parked at the bar's edge sits in the blur and looks sharp enough to tap when it isn't
