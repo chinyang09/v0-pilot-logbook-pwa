@@ -235,16 +235,16 @@ function SyncIconButton({ className }: { className?: string }) {
    handoff 0.34 → 0.07). At this size the wobble is felt rather than watched,
    which is the whole intent — the blob should look like it has weight, not
    like it is made of jelly. */
-const GRAVITY_SPRING_MS = 620
+const GRAVITY_SPRING_MS = 680
 const TRAVEL_ZETA = 0.86
 const TRAVEL_OMEGA = 8.4
-const SHAPE_ZETA = 0.72
+const SHAPE_ZETA = 0.85
 const SHAPE_OMEGA = 7.0
 /** Peak deformation along the direction of travel. */
 /** How far the blob deforms when the drag lens hands it back — more than a
  *  travel wobble, because the lens it replaces was visibly larger. */
-const HANDOFF_STRETCH = 0.07
-const STRETCH = 0.06
+const HANDOFF_STRETCH = 0.035
+const STRETCH = 0.03
 /** How much of it the cross axis gives back — near 1 reads as volume held. */
 const CROSS = 0.85
 const SPRING_SAMPLES = 40
@@ -263,6 +263,22 @@ function springTrack(): { xs: number[]; ss: number[] } {
   const peak = Math.max(...raw.map(Math.abs)) || 1
   return { xs, ss: raw.map((s) => s / peak) }
 }
+type GravRect = { left: number; top: number; width: number; height: number }
+
+/** Sub-pixel-tolerant equality, so a reflow that moves nothing is not news. */
+function sameRects(a: GravRect[], b: GravRect[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((r, i) => {
+    const o = b[i]
+    return (
+      Math.abs(r.left - o.left) < 0.5 &&
+      Math.abs(r.top - o.top) < 0.5 &&
+      Math.abs(r.width - o.width) < 0.5 &&
+      Math.abs(r.height - o.height) < 0.5
+    )
+  })
+}
+
 function GravityIndicator({
   containerRef,
   activeIndex,
@@ -298,7 +314,7 @@ function GravityIndicator({
   settleKey?: number
 }) {
   const reduce = useReducedMotion()
-  const [rects, setRects] = useState<{ left: number; top: number; width: number; height: number }[]>([])
+  const [rects, setRects] = useState<GravRect[]>([])
 
   useEffect(() => {
     const el = containerRef.current
@@ -306,17 +322,22 @@ function GravityIndicator({
     const measure = () => {
       const base = el.getBoundingClientRect()
       const items = Array.from(el.querySelectorAll<HTMLElement>("[data-grav-item]"))
-      setRects(
-        items.map((it) => {
-          const r = it.getBoundingClientRect()
-          return {
-            left: r.left - base.left + el.scrollLeft,
-            top: r.top - base.top + el.scrollTop,
-            width: r.width,
-            height: r.height,
-          }
-        }),
-      )
+      const next = items.map((it) => {
+        const r = it.getBoundingClientRect()
+        return {
+          left: r.left - base.left + el.scrollLeft,
+          top: r.top - base.top + el.scrollTop,
+          width: r.width,
+          height: r.height,
+        }
+      })
+      // Only publish a CHANGE. A ResizeObserver fires for plenty of things
+      // that move nothing — a route settling, a font landing, a sub-pixel
+      // reflow — and each `setRects` with an equal-but-new array re-ran the
+      // animation effect. That is the mid-flight flash: the guard below
+      // catches a re-fire to the same destination, but only after the
+      // measurement has already been taken as news.
+      setRects((prev) => (sameRects(prev, next) ? prev : next))
     }
     const ro = new ResizeObserver(measure)
     ro.observe(el)

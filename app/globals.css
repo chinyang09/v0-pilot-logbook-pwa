@@ -262,7 +262,7 @@
      positions a row against the header — the quick-scroll rail's target, for
      one — uses this rather than `--chrome-top`: a row parked at `--chrome-top`
      sits in the blur's tail, where it looks sharp enough to tap and isn't. */
-  --chrome-clear: calc(var(--chrome-top) + 1.5rem);
+  --chrome-clear: calc(var(--chrome-top) + 2.125rem);
   --chrome-top-sm: calc(2.75rem + env(safe-area-inset-top, 0px));
   /* How far above the physical bottom edge the floating nav rests — the ONE
      number the bottom pill, the sidebar's lower end, and the content
@@ -550,6 +550,18 @@ textarea:focus-within {
   animation: accordion-up 0.2s ease-out;
 }
 
+/* The flight card's hold menu: a pure OPACITY fade.
+   `animate-in fade-in` still carried a translate from its enter defaults, so
+   the menu visibly flew in from a few pixels away — it is already exactly
+   where it belongs by the time it is visible, so it should only appear. */
+@keyframes quick-menu-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.quick-menu-in {
+  animation: quick-menu-in 150ms ease-out both;
+}
+
 /* Single ↔ dual month: a HORIZONTAL slide, the two months treated as a stacked
    pair. Both directions are the same pair of keyframes parameterised by
    `--cal-pane-x` (how far the pane starts from its resting place) and
@@ -645,13 +657,13 @@ textarea:focus-within {
     conic-gradient(
       from var(--glass-specular-angle, 315deg),
       rgba(255, 255, 255, 1) 0deg,
-      rgba(255, 255, 255, 0.36) 26deg,
-      rgba(255, 255, 255, 0) 70deg,
-      rgba(255, 255, 255, 0.06) 150deg,
-      rgba(255, 255, 255, 0.58) 180deg,
-      rgba(255, 255, 255, 0.06) 210deg,
-      rgba(255, 255, 255, 0) 290deg,
-      rgba(255, 255, 255, 0.36) 334deg,
+      rgba(255, 255, 255, 0.55) 30deg,
+      rgba(255, 255, 255, 0.24) 76deg,
+      rgba(255, 255, 255, 0.22) 150deg,
+      rgba(255, 255, 255, 0.72) 180deg,
+      rgba(255, 255, 255, 0.22) 210deg,
+      rgba(255, 255, 255, 0.24) 284deg,
+      rgba(255, 255, 255, 0.55) 330deg,
       rgba(255, 255, 255, 1) 360deg
     ),
     linear-gradient(rgba(60, 50, 40, 0.07), rgba(60, 50, 40, 0.07));
@@ -680,24 +692,28 @@ textarea:focus-within {
      glass, where a thick ring at the same brightness reads as a painted
      border. The dim flanks stay dim — that contrast is what makes it a glint
      rather than an outline. */
-  /* TIGHTER lobes and a brighter peak on a thinner ring. The glint used to be
-     spread over ~60° either side of the anchor, which on a small control is
-     most of the perimeter — so the edge read as a soft painted outline rather
-     than as light catching one part of a curved surface. Concentrated, the
-     same total light reads as sharper AND as softer at once, which is the look
-     of Apple's own controls. It still travels: `--glass-specular-angle`
-     animates, so which part of the rim is lit drifts. */
+  /* A rim you can see ALL THE WAY ROUND, with the glint on top of it.
+     
+     Two rounds got here. First the lobes were spread over ~60° either side of
+     the anchor, which on a small control is most of the perimeter, so the edge
+     read as a painted outline. Then they were pulled in tight — sharper, but
+     the flanks went to ~0.05 and three-quarters of the perimeter had no
+     hairline at all, which is what left it "a way off" from iOS's controls:
+     theirs is visible the whole way round. The lobes stay concentrated (that
+     is what makes it read as light on a curve) and the FLANKS came up to 0.22,
+     so the ring is continuous and the glint sits above it. It still travels —
+     `--glass-specular-angle` animates, so which part is lit drifts. */
   --glass-rim: conic-gradient(
     from var(--glass-specular-angle, 315deg),
-    rgba(255, 255, 255, 0.98) 0deg,
-    rgba(255, 255, 255, 0.34) 26deg,
-    rgba(255, 255, 255, 0.06) 70deg,
-    rgba(255, 255, 255, 0.05) 150deg,
-    rgba(255, 255, 255, 0.52) 180deg,
-    rgba(255, 255, 255, 0.05) 210deg,
-    rgba(255, 255, 255, 0.06) 290deg,
-    rgba(255, 255, 255, 0.34) 334deg,
-    rgba(255, 255, 255, 0.98) 360deg
+    rgba(255, 255, 255, 1) 0deg,
+    rgba(255, 255, 255, 0.52) 30deg,
+    rgba(255, 255, 255, 0.24) 76deg,
+    rgba(255, 255, 255, 0.22) 150deg,
+    rgba(255, 255, 255, 0.70) 180deg,
+    rgba(255, 255, 255, 0.22) 210deg,
+    rgba(255, 255, 255, 0.24) 284deg,
+    rgba(255, 255, 255, 0.52) 330deg,
+    rgba(255, 255, 255, 1) 360deg
   );
   /* A backdrop-filter can do NOTHING over pure black: blurring black gives
      black, saturating it gives black, and brightness is multiplicative — 1.25
@@ -798,10 +814,11 @@ textarea:focus-within {
   /* Drives the rim band widths below. Lower = a finer edge; the material's
      presence comes from the veil and the face, not from a thick ring — and the
      specular glint carries the edge, so the ring under it can stay fine.
-     Taken down again (5.6 → 3.4) against Apple's own controls: theirs is a
-     visibly THINNER line that nonetheless reads more clearly, because the
-     brightness is in the glint rather than spread along the whole perimeter. */
-  --softness: 3.4px;
+     Back UP to 5.0 after comparing side by side with iOS's own controls: at
+     3.4 ours was the thinner of the two, and the reference has a rim you can
+     see all the way round, not only where the glint falls. The width and the
+     flanks moved together — see `--glass-rim`. */
+  --softness: 5px;
   --tint-amount: 0;
   --tint-saturation: 2;
   --tint-hue: 180deg;
@@ -812,7 +829,10 @@ textarea:focus-within {
      presence, which is the more glass-like of the two ways to get it. */
   --glass-face-blur: 4.4px;
   --total-strength: calc(var(--base-strength) + var(--extra-blur));
-  --edge-width: calc(0.2px + (var(--softness) * 0.08));
+  /* The reflective edge band. Widened relative to `--softness` (0.08 → 0.13)
+     so the rim itself has body — the previous ratio drew a hairline so fine
+     that only the specular glint was really visible on it. */
+  --edge-width: calc(0.3px + (var(--softness) * 0.13));
   --emboss-width: calc(var(--softness) * 0.30);
   --refraction-width: calc(var(--softness) * 0.24);
   position: relative;
@@ -1066,7 +1086,7 @@ textarea:focus-within {
   z-index: 11;
   display: block;
   border-radius: var(--corner-radius);
-  padding: 0.75px;
+  padding: 1.1px;
   border: 0 solid transparent;
   /* Angular specular rim — a CSS approximation of the physically computed
      specular map (liquid-web/kube: rim brightness ∝ |edge normal · light|²,

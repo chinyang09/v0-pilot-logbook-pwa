@@ -699,7 +699,12 @@ report watermarks). Do not go back to an allowlist.
   edge) under the background gradient (solid → 60% → transparent). The
   gradient is anchored to a fixed 64px tail so taller chrome keeps the same
   boundary instead of stretching the ramp until content shows through the
-  title. The owner chose blur at the TOP and darken-only at the BOTTOM
+  title. The band is weighted to the iOS headers the owner
+  referenced: the veil reaches **88%** of `--background` at the anchored edge
+  and the blur peaks at **22px**, so content beneath is a soft wash whose
+  shapes you can still read but nothing in it looks touchable. Because the
+  veil is `--background`, it darkens on the dark theme and lightens on the
+  light one with no branch. The owner chose blur at the TOP and darken-only at the BOTTOM
   (`components/bottom-edge-blur.tsx` — a short home-indicator fade, iOS
   standalone only): at the bottom band's height a blur reads as smearing.
   The anchored top band also makes an iOS rubber-band read as bouncing from
@@ -1715,7 +1720,7 @@ When making changes, be aware of these high-impact files:
     the root-sum-square, so ONE blur is identical optics for a third of the
     work. It carries more of the material's presence now that the veil is
     thinner (4.4px).
-  - **A fine ring under a bright glint.** `--softness` (3.4px) drives the
+  - **A visible ring under a bright glint.** `--softness` (5px) drives the
     edge/emboss/refraction band widths and the specular conic (`--glass-rim`)
     peaks at 0.80 dark / 0.96 light. Those two move together and in opposite
     directions on purpose: a thin edge with a strong catch reads as a sharp
@@ -1898,6 +1903,10 @@ When making changes, be aware of these high-impact files:
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
 - Do not let a single calendar month be wider than a DUAL pane in the split layout — the cells are square, so its width is its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
+- Do not thin the rim until only the glint is visible — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22
+- Do not open the flight card's hold menu behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow only AFTER the opening gesture ends, or the lift that finished the hold closes the menu instantly
+- Do not build the hold menu from glass — glass is chrome floating over content, and a menu has to be read; as a glass slab the flight cards showed straight through the labels. It uses the grouped-row vocabulary (`bg-card` + inset `.row-divider`)
+- Do not animate the hold menu with `animate-in` — its enter defaults still carry a translate, which is the "flying in". `quick-menu-in` is a pure opacity keyframe
 - Do not confine the header's blur to the bar's own height, and do not scroll a row to `--chrome-top` — content has to clear `--chrome-clear` (the bar PLUS the fade's tail). A row parked at the bar's edge sits in the blur and looks sharp enough to tap when it isn't
 - Do not let the bottom nav hide on scroll — it is the app's primary navigation on a phone, and it disappeared exactly when a long read made you want it, with a scroll UP as the only way back
 - Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (56 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb

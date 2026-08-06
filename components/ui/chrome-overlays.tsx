@@ -28,20 +28,27 @@ type Side = "top" | "bottom";
 const FADE = 64;
 
 /**
- * The main panel header's gradient, anchored to the fading edge. Deliberately
- * NEVER fully solid: the band is a translucent veil over the blur, so content
- * scrolling under the status bar stays visible as a frosted ghost — a solid
- * run here read as the app stopping at the status bar, which is exactly the
- * web-page-in-a-frame look the edge-to-edge work removed. The blur carries
- * the legibility; the veil only dims.
+ * The main panel header's gradient, anchored to the fading edge.
+ *
+ * Weighted to the reference the owner supplied (iOS's own layered headers, as
+ * in the GitHub app): heavy at the anchored edge — 88% of the background — so
+ * the bar clearly reads as chrome rather than as a slightly tinted strip, then
+ * falling away over the tail. It is still NEVER fully solid: content passing
+ * beneath has to survive as a legible ghost, or the band reads as the app
+ * stopping at the status bar, which is the web-page-in-a-frame look the
+ * edge-to-edge work removed. In the reference you can still make out the title
+ * under the bar, and you can here.
+ *
+ * The direction is handled for free — `--background` IS the theme, so this
+ * darkens on the dark theme and lightens on the light one with no branch.
  */
 function fadeFor(side: Side): string {
   const to = side === "top" ? "bottom" : "top";
   return [
     `linear-gradient(to ${to}`,
-    `color-mix(in srgb, var(--background) 50%, transparent) 0`,
-    `color-mix(in srgb, var(--background) 50%, transparent) calc(100% - ${FADE}px)`,
-    `color-mix(in srgb, var(--background) 30%, transparent) calc(100% - ${FADE / 2}px)`,
+    `color-mix(in srgb, var(--background) 88%, transparent) 0`,
+    `color-mix(in srgb, var(--background) 74%, transparent) calc(100% - ${FADE}px)`,
+    `color-mix(in srgb, var(--background) 34%, transparent) calc(100% - ${FADE / 2}px)`,
     `transparent 100%)`,
   ].join(", ");
 }
@@ -56,15 +63,15 @@ function fadeFor(side: Side): string {
  * Weighted so the band reads as chrome you cannot reach through, which is the
  * job it was failing: at a 2.4px peak a card scrolling under the action
  * buttons still looked sharp and tappable, and the owner's read was that it
- * "blurs a little later" than a native bar and is misleading. It peaks at 9px
- * now and the ramp starts earlier (58% of the first layer), while the veil
- * above stays at 50% so text passing beneath is still a legible ghost rather
- * than an unreadable smear.
+ * "blurs a little later" than a native bar and is misleading. Raised twice —
+ * it peaks at 22px now, matched against the reference headers the owner
+ * supplied, where the content under the bar is a soft wash with its shapes
+ * still readable but nothing in it looking touchable.
  */
 const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
-  { blur: 1.5, coverage: "100%", ramp: "58%" },
-  { blur: 4, coverage: "78%", ramp: "46%" },
-  { blur: 9, coverage: "52%", ramp: "40%" },
+  { blur: 3, coverage: "100%", ramp: "62%" },
+  { blur: 9, coverage: "80%", ramp: "48%" },
+  { blur: 22, coverage: "54%", ramp: "40%" },
 ];
 
 /**
@@ -77,7 +84,7 @@ const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
  * says "this is behind the chrome". Anything that positions content against
  * the header should clear `--chrome-clear`, which is the bar PLUS this.
  */
-const FADE_TAIL = 24;
+const FADE_TAIL = 34;
 
 export function ChromeFade({
   side,
