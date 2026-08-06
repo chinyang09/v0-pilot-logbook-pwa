@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Lock, Plane, PlaneLanding, PlaneTakeoff, Share, Unlock } from "lucide-react";
 import type { FlightLog } from "@/lib/db";
 import { cn } from "@/lib/utils";
+import { setMenuOpen } from "@/lib/utils/menu-lock";
 
 export type FlightQuickAction = "next-leg" | "return-trip" | "duplicate" | "share" | "lock";
 
@@ -113,6 +114,16 @@ export function FlightQuickActions({
    * field taking focus on a desktop click (touch focus follows the click,
    * which is swallowed below anyway).
    */
+  // Tell every SwipeableCard to drop its drag for as long as this is up. The
+  // capture-phase block below should already make a drag impossible, and on
+  // Chromium it demonstrably does — but a card still moved slightly on iOS,
+  // and unbinding beats starving: with `drag={false}` there is no gesture for
+  // any engine to feed. See lib/utils/menu-lock.
+  useEffect(() => {
+    setMenuOpen(true);
+    return () => setMenuOpen(false);
+  }, []);
+
   useEffect(() => {
     const inMenu = (t: EventTarget | null) => !!menuRef.current?.contains(t as Node);
     // The menu opens WHILE the finger is still down, so the lift that ends the

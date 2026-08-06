@@ -173,7 +173,10 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           width: card.width,
           height: card.height,
         };
-        const { pointerId, pointerType } = e;
+        // Carried onto the synthetic cancel below. A PointerEvent built
+        // without them reports (0, 0), and framer reads the point off the
+        // event it ends on.
+        const { pointerId, pointerType, clientX, clientY } = e;
         holdRef.current = setTimeout(() => {
           holdRef.current = null;
           // END THIS CARD'S POINTER SESSION before the menu opens.
@@ -190,7 +193,13 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           // stopped being a drag and became a menu — and framer ends the
           // session on it. Dispatched on `window`, where its listeners are.
           window.dispatchEvent(
-            new PointerEvent("pointercancel", { pointerId, pointerType, bubbles: true })
+            new PointerEvent("pointercancel", {
+              pointerId,
+              pointerType,
+              clientX,
+              clientY,
+              bubbles: true,
+            })
           );
           onHold(flight, box);
         }, HOLD_MS);

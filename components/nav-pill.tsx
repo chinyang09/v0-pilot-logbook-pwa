@@ -117,6 +117,22 @@ const PILL_HEIGHT = 44 // h-11
  * aiming at it. Matched to the platform's own bottom bars (and to Claude's).
  */
 const MOBILE_PILL_HEIGHT = 56
+/**
+ * The bottom bar's corner radius — NOT half its height.
+ *
+ * The desktop pill and the action buttons are stadiums on purpose: at 44px a
+ * radius of 22 IS half, so the ends are semicircular and the control reads as
+ * one continuous capsule. The bottom bar is 56 tall and much wider, and at the
+ * same 22 it read as a long lozenge — "not a proper squircle", against the
+ * reference (GitHub's iOS tab bar), whose corners turn at roughly a THIRD of
+ * the bar's height and leave a long flat run along the top and bottom edges.
+ *
+ * 18 is that ratio (0.32 x 56). It is a circular arc, not a true continuous-
+ * curvature squircle: the only CSS that draws one is `corner-shape`, and a
+ * corner shape only one engine understands is exactly what the one-look rule
+ * forbids — the fallback would leave iOS and Android with different bars.
+ */
+const MOBILE_PILL_RADIUS = 18
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
 // ─── Morph timing ────────────────────────────────────────────
@@ -488,12 +504,15 @@ function GravityIndicator({
     >
       <div
         ref={blobRef}
-        // SOLID and opaque, from its own token. It sits on a translucent slab,
-        // so a translucent fill let the page show through twice and the
-        // highlight changed tone as the list scrolled underneath it — and a
-        // fill mixed against an ESTIMATE of the face still read as slightly
-        // see-through, which is what `--on-glass-blob` is for.
-        className={cn("h-full w-full rounded-full bg-[var(--on-glass-blob)]", className)}
+        // `--on-glass-active` — the SAME fill an action button gets when it is
+        // the active option. The blob and that chip say the same thing ("this
+        // is the one you are on"), so a grey blob here and a tinted chip in
+        // the header read as two different systems.
+        //
+        // Opaque, like everything painted on glass: it sits on a translucent
+        // slab, so a translucent fill lets the page through twice and the
+        // highlight changes tone as the list scrolls underneath it.
+        className={cn("h-full w-full rounded-full bg-[var(--on-glass-active)]", className)}
       />
     </div>
   )
@@ -936,7 +955,7 @@ function PillBarContent({
       {/* Sidebar toggle — fixed width bookend */}
       <button
         onClick={onToggleSidebar}
-        className="flex items-center justify-center h-8 w-8 rounded-full text-[var(--on-glass-label)] active:text-foreground flex-shrink-0"
+        className="flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0"
       >
         <PanelLeft className="h-5 w-5" />
       </button>
@@ -998,7 +1017,9 @@ function PillBarContent({
                   data-grav-item
                   className={cn(
                     "inline-flex items-center justify-center h-8 px-3.5 rounded-full text-sm font-medium transition-colors",
-                    highlighted ? "text-primary" : "text-[var(--on-glass-icon)] active:text-foreground"
+                    highlighted
+                      ? "text-[var(--on-glass-active-fg)]"
+                      : "text-foreground"
                   )}
                 >
                   {tab.label}
@@ -1008,7 +1029,9 @@ function PillBarContent({
                   data-grav-item
                   className={cn(
                     "inline-flex flex-col items-center justify-center gap-0.5 h-12 px-3 rounded-full transition-colors",
-                    highlighted ? "text-primary" : "text-[var(--on-glass-icon)] active:text-foreground"
+                    highlighted
+                      ? "text-[var(--on-glass-active-fg)]"
+                      : "text-foreground"
                   )}
                 >
                   <Icon className="h-[22px] w-[22px]" />
@@ -1110,7 +1133,7 @@ function SidebarTopStrip({ onToggle }: { onToggle: () => void }) {
       <div aria-hidden className="SidebarTopBlur" />
       <button
         onClick={onToggle}
-        className="relative flex items-center justify-center h-8 w-8 rounded-full text-[var(--on-glass-label)] active:text-foreground flex-shrink-0"
+        className="relative flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0"
       >
         <PanelLeft className="h-5 w-5" />
       </button>
@@ -1273,11 +1296,11 @@ function SidebarNavItem({
         "relative z-[1] flex items-center gap-3 px-3 py-2 rounded-full text-sm transition-all duration-150",
         "active:scale-[0.98]",
         isActive
-          ? "text-primary font-medium"
-          : "text-[var(--on-glass-label)] hover:bg-[var(--on-glass-fill-soft)] hover:text-foreground"
+          ? "text-[var(--on-glass-active-fg)] font-medium"
+          : "text-foreground hover:bg-[var(--on-glass-fill-soft)]"
       )}
     >
-      <span className={cn("flex-shrink-0 [&_svg]:!size-5", isActive ? "text-primary" : "text-[var(--on-glass-icon)]")}>
+      <span className={cn("flex-shrink-0 [&_svg]:!size-5", isActive ? "text-[var(--on-glass-active-fg)]" : "text-foreground")}>
         {icon}
       </span>
       {label}
@@ -1733,7 +1756,7 @@ function MobilePillMorph({
         onTransitionEnd={handleTransitionEnd}
       >
         <GlassContainer
-          cornerRadius={isSidebarShape ? 20 : 22}
+          cornerRadius={isSidebarShape ? 20 : MOBILE_PILL_RADIUS}
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           // In PILL shape the nav is a control and behaves like one: it blooms

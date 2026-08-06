@@ -70,16 +70,19 @@ function fadeFor(side: Side): string {
  * The number that matters is the one at the TOP — the status-bar strip, where
  * all three layers overlap AND iOS is already applying its own. Sequential
  * blurs compose as the root-sum-square, so the peak here is not the largest
- * radius but √(Σr²): 12.2px at 2/5/11, which on device made everything above
- * the action buttons unreadable while the row level with them was only "a
- * little too much". At 2/3.2/4.6 the stack peaks at 6.0px and the bottom of
- * the band is unchanged at 2px — the part the owner signed off on. You can
- * read what is passing under the status bar; it is simply not crisp.
+ * radius but √(Σr²), and reading the largest radius instead is what kept this
+ * being set too high: 12.2px at 2/5/11, then still 6.0px at 2/3.2/4.6.
+ *
+ * At **1.2 / 2 / 2.8** the peak is **3.7px** — a third of where it started.
+ * The bottom of the band is 1.2px, which is barely a softening at all, and
+ * that is deliberate: this is a DARKEN-led treatment (see the veil above) and
+ * the blur is only there to stop the content reading as touchable. Text
+ * passing under the status bar stays legible; it just is not crisp.
  */
 const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
-  { blur: 2, coverage: "100%", ramp: "60%" },
-  { blur: 3.2, coverage: "76%", ramp: "46%" },
-  { blur: 4.6, coverage: "46%", ramp: "36%" },
+  { blur: 1.2, coverage: "100%", ramp: "60%" },
+  { blur: 2, coverage: "76%", ramp: "46%" },
+  { blur: 2.8, coverage: "46%", ramp: "36%" },
 ];
 
 /**

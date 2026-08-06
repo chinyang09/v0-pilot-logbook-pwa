@@ -118,7 +118,15 @@ export function GlassGroupButton({
       aria-pressed={ariaPressed}
       onClick={onClick}
       disabled={disabled}
-      className={cn("h-9 w-9 rounded-full [&_svg]:!size-[19px]", active && "text-primary bg-[var(--on-glass-accent)]", className)}
+      className={cn(
+        "h-9 w-9 rounded-full [&_svg]:!size-[19px]",
+        // `--on-glass-active` is THE selected-thing fill, shared with the nav's
+        // gravity blob — see the token. Its foreground is a separate token
+        // because `--primary` on a 32% tint of itself is the same hue at a
+        // similar lightness, which is what made this read as barely selected.
+        active && "text-[var(--on-glass-active-fg)] bg-[var(--on-glass-active)]",
+        className
+      )}
     >
       {children}
     </Button>

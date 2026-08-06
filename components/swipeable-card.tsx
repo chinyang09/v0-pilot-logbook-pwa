@@ -22,6 +22,7 @@ import {
   subscribePendingActions,
 } from "@/lib/utils/pending-actions"
 import { HoldProgressBorder } from "@/components/ui/hold-progress-border"
+import { useMenuOpen } from "@/lib/utils/menu-lock"
 
 const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
 
@@ -201,6 +202,7 @@ export function SwipeableCard({
   const isCard = variant === "card"
 
   const hasActions = actions.length > 0 && !disabled
+  const menuOpen = useMenuOpen()
   const count = actions.length
   const trailingIndex = count - 1
   const openWidth =
@@ -408,7 +410,10 @@ export function SwipeableCard({
           inadvertently swiped while holding. */}
       <motion.div
         ref={contentRef}
-        drag={hasActions && !confirmingAction ? "x" : false}
+        // `menuOpen` is the load-bearing one: while a press-and-hold menu is
+        // up, drag is torn down entirely rather than merely starved of events
+        // (see lib/utils/menu-lock).
+        drag={hasActions && !confirmingAction && !menuOpen ? "x" : false}
         dragDirectionLock
         dragConstraints={{ left: -openWidth, right: 0 }}
         dragElastic={DRAG_ELASTIC}
