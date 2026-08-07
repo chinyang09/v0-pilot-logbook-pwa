@@ -257,11 +257,15 @@
      3.25rem = the controls' 4px top margin + their 44px height + a 4px gap.
      It was 4rem when they were 56px tall. */
   --chrome-top: calc(3.25rem + env(safe-area-inset-top, 0px));
-  /* Where content is genuinely CLEAR of the header treatment — the bar plus
-     the tail of its blur (`FADE_TAIL` in chrome-overlays). Anything that
-     positions a row against the header — the quick-scroll rail's target, for
-     one — uses this rather than `--chrome-top`: a row parked at `--chrome-top`
-     sits in the blur's tail, where it looks sharp enough to tap and isn't. */
+  /* Where the QUICK-SCROLL rail parks a row. Deliberately more than the
+     header treatment's own band (`FADE_TAIL`, 41px in chrome-overlays): a row
+     that lands exactly on the band's lower edge is sitting against it, and the
+     whole point of this target is that the row reads as clear of the chrome.
+     3.5rem leaves ~15px of air below the band.
+
+     Do NOT collapse the two to one number. Tying the band to this pushed the
+     darkening far too far down the screen; tying this to the band puts the
+     scrolled-to row back inside the treatment. */
   --chrome-clear: calc(var(--chrome-top) + 3.5rem);
   --chrome-top-sm: calc(2.75rem + env(safe-area-inset-top, 0px));
   /* How far above the physical bottom edge the floating nav rests — the ONE
@@ -1235,8 +1239,7 @@ textarea:focus-within {
   scale: 1;
 }
 .PillDragLens-glass,
-.PillDragLens-rim,
-.PillDragLens-blob {
+.PillDragLens-rim {
   position: absolute;
   inset: 0;
   border-radius: inherit;
@@ -1335,19 +1338,6 @@ textarea:focus-within {
   opacity: 0.7;
   transition: opacity 0.34s ease;
 }
-/* The layer the lens becomes: `--on-glass-active`, i.e. EXACTLY what the real
-   gravity blob is painted with, so the handoff at the end is invisible.
-
-   It used to be `foreground/10` — the alpha the blob resolved to several
-   rounds ago, left behind when the blob became the app's one selected-thing
-   fill. The lens therefore landed as a grey pill and only turned into the
-   highlight colour when the real blob took over, which read as two arrivals.
-   If the blob's fill changes again, this changes with it. */
-.PillDragLens-blob {
-  background: var(--on-glass-active);
-  opacity: 0;
-  transition: opacity 0.34s ease;
-}
 /* The landing. `translate` and `scale` are separate CSS properties, so each
    gets its OWN easing: position eases in with NO overshoot (the lens must never
    spring left/right) while the shape overshoots and rebounds — that is the
@@ -1390,7 +1380,18 @@ textarea:focus-within {
     scale: var(--lens-to-x, 1) var(--lens-to-y, 1);
   }
 }
-.PillDragLens--settle .PillDragLens-glass,
+/* The dissolve. The lens does NOT paint the highlight itself — it used to,
+   and that opaque fill sat ON TOP of the tab's icon and label, so the landing
+   flashed a solid pill with nothing in it before the real blob took over
+   underneath. The real blob (which lives BEHIND the row, where a highlight
+   belongs) fades up instead, and the glass goes off it.
+
+   Delayed so the bead is still glass for the whole travel and only leaves as
+   it comes to rest. */
+.PillDragLens--settle .PillDragLens-glass {
+  opacity: 0;
+  transition: opacity 0.34s ease 0.22s;
+}
 .PillDragLens--settle .PillDragLens-refract {
   opacity: 0;
 }
@@ -1412,10 +1413,7 @@ textarea:focus-within {
   -webkit-backdrop-filter: none;
 }
 .PillDragLens--settle .PillDragLens-refract {
-  transition: opacity 0.16s ease;
-}
-.PillDragLens--settle .PillDragLens-blob {
-  opacity: 1;
+  transition: opacity 0.3s ease 0.2s;
 }
 @media (prefers-reduced-motion: reduce) {
   .PillDragLens {

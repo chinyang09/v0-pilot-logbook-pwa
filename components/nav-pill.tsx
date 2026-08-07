@@ -257,9 +257,6 @@ const TRAVEL_OMEGA = 8.4
 const SHAPE_ZETA = 0.85
 const SHAPE_OMEGA = 7.0
 /** Peak deformation along the direction of travel. */
-/** How far the blob deforms when the drag lens hands it back — more than a
- *  travel wobble, because the lens it replaces was visibly larger. */
-const HANDOFF_STRETCH = 0.02
 const STRETCH = 0.03
 /** How much of it the cross axis gives back — near 1 reads as volume held. */
 const CROSS = 0.85
@@ -302,7 +299,6 @@ function GravityIndicator({
   revision = "",
   hidden = false,
   instant = false,
-  settleKey = 0,
 }: {
   containerRef: React.RefObject<HTMLElement | null>
   activeIndex: number
@@ -319,15 +315,6 @@ function GravityIndicator({
    * lands, or it springs across the bar the moment the route catches up).
    */
   instant?: boolean
-  /**
-   * Bump to make the blob SETTLE IN where it already stands — the jelly
-   * wobble, with no travel. The drag lens lands on the blob's exact rect and
-   * then crossfades to it, so without this the blob simply appeared: the lens
-   * eased out and the thing underneath was just suddenly there. Running the
-   * shape oscillator on the handoff gives it the give of a soft body coming
-   * to rest, which is what the lens's own splat was doing a frame earlier.
-   */
-  settleKey?: number
 }) {
   const reduce = useReducedMotion()
   const [rects, setRects] = useState<GravRect[]>([])
@@ -450,29 +437,6 @@ function GravityIndicator({
     )
   }, [activeIndex, rects, reduce, instant])
 
-  // The handoff wobble. Deliberately a SEPARATE effect keyed on `settleKey`:
-  // it must not re-fire when the blob merely re-measures, and it has no travel
-  // component at all — the blob is already exactly where it belongs.
-  const settledOnceRef = useRef(settleKey)
-  useEffect(() => {
-    if (settleKey === settledOnceRef.current) return
-    settledOnceRef.current = settleKey
-    const shape = blobRef.current
-    if (!shape || reduce) return
-    shapeRef.current?.cancel()
-    const { ss } = springTrack()
-    shapeRef.current = shape.animate(
-      // Wider than the travel wobble (the lens was bigger than the blob, so
-      // the takeover reads as the shape relaxing back into itself) and along
-      // the bar, which is the axis the lens was travelling on.
-      ss.map((v) => {
-        const s = v * HANDOFF_STRETCH
-        return { transform: `scale(${1 + s}, ${1 - s * CROSS})` }
-      }),
-      { duration: GRAVITY_SPRING_MS, easing: "linear" },
-    )
-  }, [settleKey, reduce])
-
   return (
     <div
       aria-hidden
@@ -496,10 +460,17 @@ function GravityIndicator({
         // target, so the animation simply falls back onto it when it
         // finishes). Only the box's SIZE eases, a touch quicker than the
         // spring so a widening tab has settled before the blob stops moving.
-        transition:
-          reduce || instant
-            ? "none"
-            : [`width 0.34s ${SETTLE_BEZIER}`, `height 0.34s ${SETTLE_BEZIER}`].join(", "),
+        // Opacity eases even when `instant` is set, because `instant` is about
+        // PLACEMENT. The drag lens's release un-hides the blob at the
+        // destination and then dissolves the glass off it, so a hard 0→1 here
+        // would pop the highlight in under a bead that is still flying; over
+        // 0.34s it comes up as the lens arrives.
+        transition: [
+          ...(reduce || instant
+            ? []
+            : [`width 0.34s ${SETTLE_BEZIER}`, `height 0.34s ${SETTLE_BEZIER}`]),
+          ...(reduce ? [] : ["opacity 0.34s ease"]),
+        ].join(", ") || "none",
       }}
     >
       <div
@@ -625,7 +596,6 @@ function PillBarContent({
   const refractCopyRef = useRef<HTMLDivElement | null>(null)
   const [lensPhase, setLensPhase] = useState<"idle" | "drag" | "settle">("idle")
   /** Bumped when the drag lens hands the blob back — see GravityIndicator. */
-  const [blobSettleKey, setBlobSettleKey] = useState(0)
   const [lensIndex, setLensIndex] = useState(-1)
   // Chromium-only real refraction map — the backdrop (the pill) genuinely
   // MINIFIES through the lens's bezel, like Apple's glass. Generated once when
@@ -929,11 +899,10 @@ function PillBarContent({
     settleTimerRef.current = setTimeout(() => {
       setLensPhase("idle")
       setLensIndex(-1)
-      // The lens has finished easing out and the blob is taking over. Give it
-      // the wobble of a soft body arriving rather than letting it just be
-      // there: the lens's own splat is over by now, so without this the whole
-      // landing ended on a hard cut.
-      setBlobSettleKey((k) => k + 1)
+      // No arrival wobble here any more. It existed to cover the hard cut
+      // when the lens's opaque copy was swapped for the real blob; the blob is
+      // now already in place and lit, and a wobble after everything has come
+      // to rest reads as a second arrival.
     }, 620)
   }, [tabs, router, squishX, squishY, nudgeX])
 
@@ -990,9 +959,12 @@ function PillBarContent({
           // left-and-right springing that made the landing look mechanical.
           activeIndex={lensActive && lensIndex >= 0 ? lensIndex : activeIndex}
           revision={tabs.join(",")}
-          hidden={lensActive}
+          // Hidden only while the finger is DRAGGING. On release it fades up
+          // at the destination, behind the row, so the glass dissolves onto a
+          // highlight that already has the icon and label on it. The lens used
+          // to paint its own opaque copy instead, which sat OVER the content.
+          hidden={lensPhase === "drag"}
           instant={lensActive}
-          settleKey={blobSettleKey}
         />
         {tabs.map((tabKey, i) => {
           const tab = TAB_CONFIG[tabKey]
@@ -1076,7 +1048,6 @@ function PillBarContent({
               </div>
             </div>
             <div className="PillDragLens-rim" />
-            <div className="PillDragLens-blob" />
           </div>,
           document.body
         )}

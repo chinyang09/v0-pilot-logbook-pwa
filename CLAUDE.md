@@ -690,17 +690,22 @@ report watermarks). Do not go back to an allowlist.
   `desktop-layout.tsx` (no more inline copies): a native-style bar of
   progressive **blur + darken**. Three masked backdrop-blur layers (smallest
   radius first, widest coverage, so the stack only ever adds blur toward the
-  edge) under a background gradient. It extends `FADE_TAIL` (**56px**) BEYOND
+  edge) under a background gradient. It extends `FADE_TAIL` (**41px**) BEYOND
   the bar it sits on, because native bars start softening well before their own
   edge — confined to the bar's height, a card sitting just under the action
   buttons still looked sharp and tappable, which is a lie about what you can
-  reach. The band should be well CLEAR of the buttons before it starts climbing
-  toward the top of the screen, so the darkening reads as one continuous field
-  rather than as something that begins at the buttons' edge (34px was still
-  short of that; at 56 the band ends 60px below them). `--chrome-clear` is the
-  bar PLUS that tail and **must be kept in step with it** (3.5rem) — anything
-  positioning a row against the header (the quick-scroll rail's target) uses it
-  rather than `--chrome-top`. The gradient is anchored to a fixed 64px ramp so taller chrome
+  reach. 41 puts the band's bottom **45px** below the buttons. Apple publishes
+  no figure for the scroll-edge effect's falloff, so that is the owner's read
+  on device, not a spec number.
+
+  **`--chrome-clear` is a DIFFERENT number and is deliberately larger** (3.5rem
+  → 60px below the buttons, ~15px of air under the band). It is where the
+  quick-scroll rail parks a row, and a row landing exactly on the band's lower
+  edge is sitting against it — the whole point of the target is that the row
+  reads as clear of the chrome. Holding the two equal was tried in both
+  directions and is wrong both ways: tying the band to the target pushed the
+  darkening far down the screen, and tying the target to the band puts the
+  scrolled-to row back inside the treatment. The gradient is anchored to a fixed 64px ramp so taller chrome
   keeps the same boundary instead of stretching until content shows through the
   title. Because the veil is `--background` it darkens on the dark theme and
   lightens on the light one with no branch.
@@ -909,9 +914,10 @@ re-renders).
   is a scroller whose metrics re-measure as a route settles and as the panel
   finishes morphing, and every re-measure was another chance for the spring to
   re-fire and read as a double flash; a vertical list also gives the travel
-  nothing to say. The pill keeps the physics, and when the drag lens hands the
-  blob back it plays the SHAPE oscillator in place (`settleKey`) so the takeover
-  lands with the give of a soft body instead of the blob simply being there.
+  nothing to say. The pill keeps the physics. (The drag-lens handoff used to
+  play the SHAPE oscillator in place as well; that is gone — the lens now
+  dissolves onto the blob rather than being swapped for it, so there is no cut
+  to cover and a wobble afterwards read as a second arrival.)
 
   The effect **re-fires only for a new destination** (`animatedToRef`) and, if
   it interrupts a move in flight, resumes from the blob's CURRENT transform
@@ -1146,17 +1152,31 @@ re-renders).
     still go opposite ways and the rebound stays a third of the squash so it
     comes to rest rather than oscillating.
 
-    A CSS `--settle` crossfade swaps the glass material for
-    **`.PillDragLens-blob`, which is painted `--on-glass-active`** — exactly
-    what the real gravity blob is painted with, so the handoff is invisible. It
-    used to be `foreground/10`, the alpha the blob resolved to several rounds
-    earlier, left behind when the blob became the app's one selected-thing
-    fill: the lens then landed as a GREY pill and only became the highlight
-    colour when the real blob took over, which read as two arrivals. If the
-    blob's fill changes again, this changes with it. A timer (must outlast the
-    scale's rebound — 620ms against the 560ms animation) hands off to the real
-    blob, and the lens lands on the blob's rect exactly, so the swap is
-    invisible.
+    **The lens DISSOLVES onto the real blob; it does not become one.** It used
+    to paint its own copy of the highlight (`.PillDragLens-blob`) and crossfade
+    the glass to it — and that fill sat ON TOP of the tab, so the landing
+    flashed a solid pill with no icon and no label in it before the real blob
+    appeared underneath. (It was also the wrong colour for a while: a stale
+    `foreground/10` left over from before the blob became
+    `--on-glass-active`, so the lens landed grey and then turned orange — two
+    arrivals.) That layer is gone.
+
+    Instead the REAL blob is revealed on release — `hidden` is now only true
+    while the finger is DRAGGING — and it fades up over 0.34s at the
+    destination, *behind* the row, where a highlight belongs. The glass then
+    fades off it (delayed ~0.22s so the bead stays glass for the whole travel).
+    Because the lens is translucent throughout, the icon and label are never
+    covered. Measured through a landing: blob 0.00 → 0.96 by 250ms while the
+    glass is still 0.92, glass down to 0.03 by 485ms, lens unmounted at 647ms.
+
+    A timer (must outlast the scale's rebound — 620ms against the 560ms
+    animation) unmounts the lens.
+
+    There is no arrival wobble on the handoff any more, and the `settleKey`
+    prop that drove it is gone. It existed to cover the hard cut when the
+    opaque copy was swapped for the real blob; with the crossfade there is no
+    cut, and a wobble after everything has come to rest reads as a second
+    arrival.
     This used to be framer `animate()` on `left`/`top`/`width`/`height` and it
     **janked**, for two independent reasons. JS springs tick on the MAIN
     thread, and the release also fires `router.push` — so the landing competed
@@ -2014,8 +2034,8 @@ When making changes, be aware of these high-impact files:
 - Do not hardcode the header offset anywhere — use `--chrome-top` (or `.pt-chrome` / `.h-chrome-top`). It is the bar (3.25rem: a 4px margin, the 44px controls, a 4px gap) PLUS the status bar, and a bare rem value is exactly how the logbook's search field ended up sliding under the action buttons once the shell stopped insetting itself. `--chrome-bottom` is the matching bottom clearance (nav pill + gesture bar)
 - Do not give the bottom pill, the sidebar's lower end, or a scroller's bottom clearance their own safe-area math — they all derive from `--nav-bottom-offset` (`max(4px, env(safe-area-inset-bottom) - 10px)`: hugs the iOS home indicator, plain 4px on Android/desktop). One number keeps the pill↔sidebar morph endpoints aligned and the scrolled-to-rest last row on the same line; `components/bottom-edge-blur.tsx` adds the progressive blur under that line on iOS standalone only (below the nav in z-order so the sidebar and pill stay sharp)
 - Do not leave the cloned pill's `backdrop-filter`s (or `mix-blend-mode` anywhere in the lens subtree) in place during a drag or landing — they re-sample every frame and block layerisation, which is what made the release jank
-- Do not paint the drag lens's landing layer (`.PillDragLens-blob`) anything but `--on-glass-active` — it is the colour the real gravity blob is painted with, and the handoff is only invisible because the two match. When it was a stale `foreground/10` the lens landed grey and then turned into the highlight colour, which reads as two arrivals rather than one settle
-- Do not change `FADE_TAIL` without changing `--chrome-clear` to match (bar + tail) — the tail is what anything positioning a row against the header measures against, so they drift apart silently and rows end up parked inside the blur
+- Do not give the drag lens its own copy of the highlight to land on — it is portalled to `<body>`, so an opaque fill there covers the tab's icon and label and the landing flashes a solid pill with nothing in it. The REAL blob is revealed instead (it lives behind the row) and the glass dissolves off it; the lens stays translucent the whole way, so the content is never covered
+- Do not collapse `FADE_TAIL` and `--chrome-clear` into one number — the first is how far the DARKENING reaches (41px, i.e. 45 below the buttons), the second is where the quick-scroll rail PARKS a row (60 below, ~15px clear of the band). Equalising them is wrong in both directions: the band ends up far down the screen, or the scrolled-to row ends up inside the treatment
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
 - Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`

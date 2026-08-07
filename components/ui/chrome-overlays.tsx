@@ -98,12 +98,17 @@ const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
  * darkening reads as one continuous field rather than as something that
  * begins at the buttons' edge.
  *
- * MUST stay in step with `--chrome-clear` in globals.css (the bar PLUS this),
- * which is what anything positioning a row against the header uses — a row
- * parked at `--chrome-top` sits inside the tail, where it looks sharp enough
- * to tap and is not. 56px = 3.5rem there.
+ * This is the VISUAL band only. `--chrome-clear` — where the quick-scroll rail
+ * parks a row — is deliberately LARGER: a row landing exactly on the band's
+ * lower edge sits against it, and the point of the target is that the row is
+ * clear of the treatment, not level with the end of it. The two were briefly
+ * held equal and that pushed the darkening much too far down the screen.
+ *
+ * 41px puts the band's bottom 45px below the action buttons (34 gave 38).
+ * Apple does not publish a figure for the scroll-edge effect's falloff, so
+ * this is the owner's read on device rather than a spec number.
  */
-const FADE_TAIL = 56;
+const FADE_TAIL = 41;
 
 export function ChromeFade({
   side,
