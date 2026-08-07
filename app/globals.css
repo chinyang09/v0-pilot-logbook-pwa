@@ -262,7 +262,7 @@
      positions a row against the header — the quick-scroll rail's target, for
      one — uses this rather than `--chrome-top`: a row parked at `--chrome-top`
      sits in the blur's tail, where it looks sharp enough to tap and isn't. */
-  --chrome-clear: calc(var(--chrome-top) + 2.125rem);
+  --chrome-clear: calc(var(--chrome-top) + 3.5rem);
   --chrome-top-sm: calc(2.75rem + env(safe-area-inset-top, 0px));
   /* How far above the physical bottom edge the floating nav rests — the ONE
      number the bottom pill, the sidebar's lower end, and the content
@@ -1236,7 +1236,7 @@ textarea:focus-within {
 }
 .PillDragLens-glass,
 .PillDragLens-rim,
-.PillDragLens-grey {
+.PillDragLens-blob {
   position: absolute;
   inset: 0;
   border-radius: inherit;
@@ -1333,13 +1333,20 @@ textarea:focus-within {
   mask-composite: exclude;
   mix-blend-mode: screen;
   opacity: 0.7;
-  transition: opacity 0.26s ease;
+  transition: opacity 0.34s ease;
 }
-/* Matches the gravity blob's bg-foreground/10 so the handoff is invisible. */
-.PillDragLens-grey {
-  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+/* The layer the lens becomes: `--on-glass-active`, i.e. EXACTLY what the real
+   gravity blob is painted with, so the handoff at the end is invisible.
+
+   It used to be `foreground/10` — the alpha the blob resolved to several
+   rounds ago, left behind when the blob became the app's one selected-thing
+   fill. The lens therefore landed as a grey pill and only turned into the
+   highlight colour when the real blob took over, which read as two arrivals.
+   If the blob's fill changes again, this changes with it. */
+.PillDragLens-blob {
+  background: var(--on-glass-active);
   opacity: 0;
-  transition: opacity 0.26s ease;
+  transition: opacity 0.34s ease;
 }
 /* The landing. `translate` and `scale` are separate CSS properties, so each
    gets its OWN easing: position eases in with NO overshoot (the lens must never
@@ -1349,8 +1356,8 @@ textarea:focus-within {
    thread is busy mounting the next page. */
 .PillDragLens--settle {
   transition:
-    translate 0.26s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.26s ease;
+    translate 0.36s cubic-bezier(0.36, 0.12, 0.22, 1),
+    opacity 0.34s ease;
   /* The shape is KEYFRAMED, not transitioned. A transition can only overshoot
      both axes together, which reads as "grew past its size and came back" —
      the blob getting bigger and smaller, not a body landing. Squash-and-
@@ -1358,20 +1365,26 @@ textarea:focus-within {
      narrow+tall on the rebound, then neutral. `scale` is a composited
      property, so the keyframes run on the compositor exactly like the
      transition did. */
-  animation: pill-lens-splat 0.42s cubic-bezier(0.33, 0, 0.2, 1) forwards;
+  animation: pill-lens-splat 0.56s cubic-bezier(0.36, 0.12, 0.22, 1) forwards;
 }
+/* The deformation is deliberately SMALL — 5%, where it used to be 14/16%.
+   At that amplitude the landing was an impact: the blob visibly splatted and
+   bounced, which is a different event from the one that came before it (a
+   bead of glass sliding along the bar). A settle is the same motion ending,
+   so the shape only has to acknowledge the arrival, not announce it. The axes
+   still go OPPOSITE ways — that is what separates a squash from "grew and
+   shrank" — and the rebound is a third of the squash so it comes to rest
+   rather than oscillating. */
 @keyframes pill-lens-splat {
   0% {
     scale: 1 1;
   }
-  /* Impact — timed to land with the translate (0.26s of 0.42s ≈ 62%). */
-  62% {
-    scale: calc(var(--lens-to-x, 1) * 1.14) calc(var(--lens-to-y, 1) * 0.84);
+  /* Impact — timed to land with the translate (0.36s of 0.56s ≈ 64%). */
+  64% {
+    scale: calc(var(--lens-to-x, 1) * 1.05) calc(var(--lens-to-y, 1) * 0.955);
   }
-  /* Rebound the other way, smaller than the squash so it settles rather than
-     oscillates. */
-  82% {
-    scale: calc(var(--lens-to-x, 1) * 0.95) calc(var(--lens-to-y, 1) * 1.07);
+  84% {
+    scale: calc(var(--lens-to-x, 1) * 0.983) calc(var(--lens-to-y, 1) * 1.018);
   }
   100% {
     scale: var(--lens-to-x, 1) var(--lens-to-y, 1);
@@ -1399,9 +1412,9 @@ textarea:focus-within {
   -webkit-backdrop-filter: none;
 }
 .PillDragLens--settle .PillDragLens-refract {
-  transition: opacity 0.12s ease;
+  transition: opacity 0.16s ease;
 }
-.PillDragLens--settle .PillDragLens-grey {
+.PillDragLens--settle .PillDragLens-blob {
   opacity: 1;
 }
 @media (prefers-reduced-motion: reduce) {

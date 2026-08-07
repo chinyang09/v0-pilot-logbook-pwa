@@ -93,10 +93,17 @@ const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
  * arrived in the last few pixels above the buttons and a card sitting just
  * under them looked sharp, reachable and tappable — it was neither. Native
  * bars start softening well before their own edge, which is the cue that
- * says "this is behind the chrome". Anything that positions content against
- * the header should clear `--chrome-clear`, which is the bar PLUS this.
+ * says "this is behind the chrome": the band should be well clear of the
+ * buttons before it starts climbing toward the top of the screen, so the
+ * darkening reads as one continuous field rather than as something that
+ * begins at the buttons' edge.
+ *
+ * MUST stay in step with `--chrome-clear` in globals.css (the bar PLUS this),
+ * which is what anything positioning a row against the header uses — a row
+ * parked at `--chrome-top` sits inside the tail, where it looks sharp enough
+ * to tap and is not. 56px = 3.5rem there.
  */
-const FADE_TAIL = 34;
+const FADE_TAIL = 56;
 
 export function ChromeFade({
   side,

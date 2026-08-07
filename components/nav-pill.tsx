@@ -259,7 +259,7 @@ const SHAPE_OMEGA = 7.0
 /** Peak deformation along the direction of travel. */
 /** How far the blob deforms when the drag lens hands it back — more than a
  *  travel wobble, because the lens it replaces was visibly larger. */
-const HANDOFF_STRETCH = 0.035
+const HANDOFF_STRETCH = 0.02
 const STRETCH = 0.03
 /** How much of it the cross axis gives back — near 1 reads as volume held. */
 const CROSS = 0.85
@@ -934,7 +934,7 @@ function PillBarContent({
       // there: the lens's own splat is over by now, so without this the whole
       // landing ended on a hard cut.
       setBlobSettleKey((k) => k + 1)
-    }, 470)
+    }, 620)
   }, [tabs, router, squishX, squishY, nudgeX])
 
   useEffect(() => () => {
@@ -1076,7 +1076,7 @@ function PillBarContent({
               </div>
             </div>
             <div className="PillDragLens-rim" />
-            <div className="PillDragLens-grey" />
+            <div className="PillDragLens-blob" />
           </div>,
           document.body
         )}

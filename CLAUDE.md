@@ -690,13 +690,17 @@ report watermarks). Do not go back to an allowlist.
   `desktop-layout.tsx` (no more inline copies): a native-style bar of
   progressive **blur + darken**. Three masked backdrop-blur layers (smallest
   radius first, widest coverage, so the stack only ever adds blur toward the
-  edge) under a background gradient. It extends `FADE_TAIL` (34px) BEYOND the
-  bar it sits on, because native bars start softening well before their own
+  edge) under a background gradient. It extends `FADE_TAIL` (**56px**) BEYOND
+  the bar it sits on, because native bars start softening well before their own
   edge — confined to the bar's height, a card sitting just under the action
   buttons still looked sharp and tappable, which is a lie about what you can
-  reach. `--chrome-clear` is the bar PLUS that tail, and anything positioning a
-  row against the header (the quick-scroll rail's target) uses it rather than
-  `--chrome-top`. The gradient is anchored to a fixed 64px ramp so taller chrome
+  reach. The band should be well CLEAR of the buttons before it starts climbing
+  toward the top of the screen, so the darkening reads as one continuous field
+  rather than as something that begins at the buttons' edge (34px was still
+  short of that; at 56 the band ends 60px below them). `--chrome-clear` is the
+  bar PLUS that tail and **must be kept in step with it** (3.5rem) — anything
+  positioning a row against the header (the quick-scroll rail's target) uses it
+  rather than `--chrome-top`. The gradient is anchored to a fixed 64px ramp so taller chrome
   keeps the same boundary instead of stretching until content shows through the
   title. Because the veil is `--background` it darkens on the dark theme and
   lightens on the light one with no branch.
@@ -1131,10 +1135,28 @@ re-renders).
     and coming back. Squash-and-stretch needs the axes to go OPPOSITE ways —
     wide+flat on impact (timed to land with the translate), then narrow+tall on
     the rebound, then neutral. `scale` is a composited property, so the
-    keyframes run on the compositor exactly as the transition did. A CSS `--settle` crossfade swaps
-    the glass material for the grey blob; a timer (must outlast the scale's
-    rebound) hands off to the real blob invisibly, and the lens lands on the
-    blob's rect exactly, so the swap is invisible.
+    keyframes run on the compositor exactly as the transition did.
+
+    **It is a SETTLE, not an impact.** The deformation is ±5% (measured about
+    the landing target: x 0.992–1.053, y 0.958–1.009) over 560ms, where it was
+    ±14/16% over 420ms. At that amplitude the landing announced itself — the
+    blob visibly splatted and bounced, which is a different EVENT from the one
+    before it (a bead of glass sliding along the bar). A settle is the same
+    motion ending, so the shape only has to acknowledge the arrival. The axes
+    still go opposite ways and the rebound stays a third of the squash so it
+    comes to rest rather than oscillating.
+
+    A CSS `--settle` crossfade swaps the glass material for
+    **`.PillDragLens-blob`, which is painted `--on-glass-active`** — exactly
+    what the real gravity blob is painted with, so the handoff is invisible. It
+    used to be `foreground/10`, the alpha the blob resolved to several rounds
+    earlier, left behind when the blob became the app's one selected-thing
+    fill: the lens then landed as a GREY pill and only became the highlight
+    colour when the real blob took over, which read as two arrivals. If the
+    blob's fill changes again, this changes with it. A timer (must outlast the
+    scale's rebound — 620ms against the 560ms animation) hands off to the real
+    blob, and the lens lands on the blob's rect exactly, so the swap is
+    invisible.
     This used to be framer `animate()` on `left`/`top`/`width`/`height` and it
     **janked**, for two independent reasons. JS springs tick on the MAIN
     thread, and the release also fires `router.push` — so the landing competed
@@ -1992,6 +2014,8 @@ When making changes, be aware of these high-impact files:
 - Do not hardcode the header offset anywhere — use `--chrome-top` (or `.pt-chrome` / `.h-chrome-top`). It is the bar (3.25rem: a 4px margin, the 44px controls, a 4px gap) PLUS the status bar, and a bare rem value is exactly how the logbook's search field ended up sliding under the action buttons once the shell stopped insetting itself. `--chrome-bottom` is the matching bottom clearance (nav pill + gesture bar)
 - Do not give the bottom pill, the sidebar's lower end, or a scroller's bottom clearance their own safe-area math — they all derive from `--nav-bottom-offset` (`max(4px, env(safe-area-inset-bottom) - 10px)`: hugs the iOS home indicator, plain 4px on Android/desktop). One number keeps the pill↔sidebar morph endpoints aligned and the scrolled-to-rest last row on the same line; `components/bottom-edge-blur.tsx` adds the progressive blur under that line on iOS standalone only (below the nav in z-order so the sidebar and pill stay sharp)
 - Do not leave the cloned pill's `backdrop-filter`s (or `mix-blend-mode` anywhere in the lens subtree) in place during a drag or landing — they re-sample every frame and block layerisation, which is what made the release jank
+- Do not paint the drag lens's landing layer (`.PillDragLens-blob`) anything but `--on-glass-active` — it is the colour the real gravity blob is painted with, and the handoff is only invisible because the two match. When it was a stale `foreground/10` the lens landed grey and then turned into the highlight colour, which reads as two arrivals rather than one settle
+- Do not change `FADE_TAIL` without changing `--chrome-clear` to match (bar + tail) — the tail is what anything positioning a row against the header measures against, so they drift apart silently and rows end up parked inside the blur
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
 - Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`
