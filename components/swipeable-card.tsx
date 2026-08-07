@@ -245,6 +245,18 @@ export function SwipeableCard({
 
   const close = useCallback(() => settle(0), [settle])
 
+  // A hold that opens a menu is not a drag — but the finger always drifts a
+  // few px over 480ms, and framer starts panning at ~3px, well under the 8px
+  // that cancels the hold. So by the time the menu appears the card has
+  // usually already moved a little, and the pointercancel that ends the
+  // session springs it back: the "jiggle". This puts it back at rest with no
+  // animation instead, in the same commit the menu opens.
+  useEffect(() => {
+    if (!menuOpen) return
+    x.stop()
+    x.set(0)
+  }, [menuOpen, x])
+
   // Close this card's SWIPE PANEL when another card opens or is tapped.
   //
   // It must not touch a pending confirm: this event fires on any interaction
@@ -375,6 +387,20 @@ export function SwipeableCard({
         separated && "row-divider",
         containerClassName
       )}
+      // THE answer to "a menu is open, so this row is not operable".
+      //
+      // Blocking events at the capture phase says the same thing, but only for
+      // the events you thought to block, in the order the engine happens to
+      // deliver them — which is why this took three passes and still moved a
+      // little on iOS. `pointer-events: none` is not an interception: the row
+      // simply stops being a hit-test target, so nothing can drag it, focus
+      // it, activate it or even give it `:active`, whatever any engine sends.
+      //
+      // And it costs nothing that matters, because a touch that misses the row
+      // lands on the SCROLLER behind it — which still scrolls, natively, on
+      // the compositor. Untouchable and still scrollable is exactly the state
+      // the menu wants everything behind it to be in.
+      style={menuOpen ? { pointerEvents: "none" } : undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

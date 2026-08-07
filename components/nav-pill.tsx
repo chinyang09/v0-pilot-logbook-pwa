@@ -118,21 +118,21 @@ const PILL_HEIGHT = 44 // h-11
  */
 const MOBILE_PILL_HEIGHT = 56
 /**
- * The bottom bar's corner radius — NOT half its height.
+ * The bottom bar is a STADIUM — half its own height, so its ends are
+ * semicircular and it reads as one continuous capsule, the same rule the 44px
+ * controls follow (`CONTROL_RADIUS`). It is only a separate constant because
+ * the bar is a different height.
  *
- * The desktop pill and the action buttons are stadiums on purpose: at 44px a
- * radius of 22 IS half, so the ends are semicircular and the control reads as
- * one continuous capsule. The bottom bar is 56 tall and much wider, and at the
- * same 22 it read as a long lozenge — "not a proper squircle", against the
- * reference (GitHub's iOS tab bar), whose corners turn at roughly a THIRD of
- * the bar's height and leave a long flat run along the top and bottom edges.
- *
- * 18 is that ratio (0.32 x 56). It is a circular arc, not a true continuous-
- * curvature squircle: the only CSS that draws one is `corner-shape`, and a
- * corner shape only one engine understands is exactly what the one-look rule
- * forbids — the fallback would leave iOS and Android with different bars.
+ * A squarer corner was tried at 18 (about a third of the height, the
+ * proportion the reference tab bars use) and rejected on the look: what makes
+ * those read as squircles is CONTINUOUS CURVATURE, not a smaller radius, and
+ * a circular arc at that radius just looks like a rounded rectangle. Drawing
+ * the real thing needs `corner-shape`, and a corner shape one engine falls
+ * back from would leave iOS and Android with different bars — the one thing
+ * the one-look rule forbids. Between a rounded rect and a capsule, the
+ * capsule.
  */
-const MOBILE_PILL_RADIUS = 18
+const MOBILE_PILL_RADIUS = MOBILE_PILL_HEIGHT / 2
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
 // ─── Morph timing ────────────────────────────────────────────

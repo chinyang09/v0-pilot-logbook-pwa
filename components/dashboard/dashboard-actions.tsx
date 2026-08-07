@@ -90,14 +90,17 @@ export function DashboardActions() {
             aria-expanded={showFilter}
             onClick={() => setShowFilter(!showFilter)}
             className={cn(
-              "flex h-12 min-w-[3rem] flex-col items-center justify-center rounded-full px-2 transition-colors",
+              // h-9, like every other control in a GlassButtonGroup: the group
+              // is h-11 with px-1, so a 48px child overflows a 44px box and the
+              // glass — which clips — cut the icon off top and bottom.
+              "flex h-9 min-w-9 flex-col items-center justify-center rounded-full px-2 transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               showFilter
-                ? "bg-[var(--on-glass-accent)] text-primary"
+                ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
                 : "text-foreground hover:bg-[var(--on-glass-fill-soft)]",
             )}
           >
-            <SlidersHorizontal className="h-4 w-4" />
+            <SlidersHorizontal className="h-[15px] w-[15px]" />
             <span className="mt-0.5 text-[10px] font-semibold leading-none tabular-nums">
               {filterLabel}
             </span>

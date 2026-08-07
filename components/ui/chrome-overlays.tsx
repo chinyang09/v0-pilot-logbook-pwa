@@ -73,16 +73,17 @@ function fadeFor(side: Side): string {
  * radius but √(Σr²), and reading the largest radius instead is what kept this
  * being set too high: 12.2px at 2/5/11, then still 6.0px at 2/3.2/4.6.
  *
- * At **1.2 / 2 / 2.8** the peak is **3.7px** — a third of where it started.
- * The bottom of the band is 1.2px, which is barely a softening at all, and
- * that is deliberate: this is a DARKEN-led treatment (see the veil above) and
- * the blur is only there to stop the content reading as touchable. Text
- * passing under the status bar stays legible; it just is not crisp.
+ * At **0.6 / 1 / 1.4** the stack peaks at **1.8px** and the bottom of the band
+ * is 0.6px — a tenth of where this started, and deliberately almost nothing.
+ * This is a DARKEN-led treatment (see the veil above): the veil is what makes
+ * the band read as chrome, and the blur's only job is to take the crispness
+ * off an edge so it does not look touchable. Every round that judged the blur
+ * by how much it HID was tuning the wrong layer.
  */
 const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
-  { blur: 1.2, coverage: "100%", ramp: "60%" },
-  { blur: 2, coverage: "76%", ramp: "46%" },
-  { blur: 2.8, coverage: "46%", ramp: "36%" },
+  { blur: 0.6, coverage: "100%", ramp: "60%" },
+  { blur: 1, coverage: "76%", ramp: "46%" },
+  { blur: 1.4, coverage: "46%", ramp: "36%" },
 ];
 
 /**

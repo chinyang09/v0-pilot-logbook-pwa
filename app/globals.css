@@ -656,15 +656,15 @@ textarea:focus-within {
   --glass-rim:
     conic-gradient(
       from var(--glass-specular-angle, 315deg),
-      rgba(255, 255, 255, 0.70) 0deg,
-      rgba(255, 255, 255, 0.38) 30deg,
+      rgba(255, 255, 255, 0.60) 0deg,
+      rgba(255, 255, 255, 0.33) 30deg,
       rgba(255, 255, 255, 0.20) 76deg,
       rgba(255, 255, 255, 0.17) 150deg,
-      rgba(255, 255, 255, 0.48) 180deg,
+      rgba(255, 255, 255, 0.42) 180deg,
       rgba(255, 255, 255, 0.17) 210deg,
       rgba(255, 255, 255, 0.20) 284deg,
-      rgba(255, 255, 255, 0.38) 330deg,
-      rgba(255, 255, 255, 0.70) 360deg
+      rgba(255, 255, 255, 0.33) 330deg,
+      rgba(255, 255, 255, 0.60) 360deg
     ),
     linear-gradient(rgba(60, 50, 40, 0.07), rgba(60, 50, 40, 0.07));
   /* Eased back with the dark veil (0.62 → 0.55) — the raised face blur carries
@@ -709,15 +709,15 @@ textarea:focus-within {
      `--glass-specular-angle` animates, so which part is lit drifts. */
   --glass-rim: conic-gradient(
     from var(--glass-specular-angle, 315deg),
-    rgba(255, 255, 255, 0.62) 0deg,
-    rgba(255, 255, 255, 0.34) 30deg,
+    rgba(255, 255, 255, 0.52) 0deg,
+    rgba(255, 255, 255, 0.29) 30deg,
     rgba(255, 255, 255, 0.18) 76deg,
     rgba(255, 255, 255, 0.16) 150deg,
-    rgba(255, 255, 255, 0.44) 180deg,
+    rgba(255, 255, 255, 0.38) 180deg,
     rgba(255, 255, 255, 0.16) 210deg,
     rgba(255, 255, 255, 0.18) 284deg,
-    rgba(255, 255, 255, 0.34) 330deg,
-    rgba(255, 255, 255, 0.62) 360deg
+    rgba(255, 255, 255, 0.29) 330deg,
+    rgba(255, 255, 255, 0.52) 360deg
   );
   /* A backdrop-filter can do NOTHING over pure black: blurring black gives
      black, saturating it gives black, and brightness is multiplicative — 1.25
@@ -832,7 +832,7 @@ textarea:focus-within {
      ring is continuous, which frees the GEOMETRY to come back down. 3.6px
      draws a finer line than 5.0 did while still drawing it all the way
      round. Do not take the flanks down with it. */
-  --softness: 2.6px;
+  --softness: 2.2px;
   --tint-amount: 0;
   --tint-saturation: 2;
   --tint-hue: 180deg;
@@ -1129,7 +1129,7 @@ textarea:focus-within {
      line). The angular white conic (--glass-rim) sits above this. Thinned
      with `--softness` — it is the widest of the edge layers, so leaving it
      at 1.25px would have kept the rim's apparent thickness where it was. */
-  padding: 0.6px;
+  padding: 0.5px;
   border: 0 solid transparent;
   backdrop-filter: blur(1px) brightness(1.25) contrast(1.5) saturate(1.35);
   mask:
