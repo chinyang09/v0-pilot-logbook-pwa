@@ -165,6 +165,15 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
     <SwipeableCard
       onPointerDown={(e) => {
         cancelHold();
+        // A press on one of the row's CONTROLS is not a press on the row.
+        //
+        // These hooks are on the outer container, so the swipe panel's buttons
+        // are inside them — and a thumb resting on the `…` for the 450ms this
+        // hold takes is an ordinary tap, not a long press. Without this, tapping
+        // `…` opened the PREVIEW instead of the cascade on a phone, where a tap
+        // is comfortably slower than on a trackpad.
+        const target = e.target as Element | null;
+        if (target?.closest?.("button, a, input, textarea, [data-swipe-actions]")) return;
         holdFromRef.current = { x: e.clientX, y: e.clientY };
         const card = e.currentTarget.getBoundingClientRect();
         const box = { left: card.left, top: card.top, width: card.width, height: card.height };
