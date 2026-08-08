@@ -54,6 +54,10 @@ function inSamePair(anchorMonth: number, anchorYear: number, month: number, year
 const PANEL_MS = 300
 const PANEL_MOTION = `height ${PANEL_MS}ms ${MORPH_EASE}`
 
+/** Gap between the chrome (or the floating panels) and the first flight card.
+ *  Matches what crew / aircraft / airports get from their content wrapper. */
+const LIST_TOP_GAP = 20
+
 export default function LogbookPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -672,7 +676,17 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          topSpacerHeight={`calc(var(--chrome-top) + ${(showSearch ? searchBlockHeight : 0) + (showCalendar ? calendarNaturalHeight : 0)}px)`}
+          // `LIST_TOP_GAP` on top of the chrome, so the first flight card
+          // starts where the first row on crew / aircraft / airports does —
+          // those pages get the same gap from their content wrapper, and the
+          // logbook was alone in butting its first card straight against the
+          // header.
+          //
+          // It is added to the BASE, not to the panel term, so the amount the
+          // floating panels push the list is unchanged and the calendar stays
+          // in sync: open or closed, the first card is this far below whatever
+          // is above it.
+          topSpacerHeight={`calc(var(--chrome-top) + ${LIST_TOP_GAP + (showSearch ? searchBlockHeight : 0) + (showCalendar ? calendarNaturalHeight : 0)}px)`}
           topSpacerTransition={spacerAnimated ? PANEL_MOTION : "none"}
           selectedFlightId={selectedFlightId}
         />

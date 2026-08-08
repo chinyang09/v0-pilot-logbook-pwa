@@ -45,6 +45,10 @@ import {
   type FlightQuickAction,
   type QuickActionAnchor,
 } from "@/components/flight-quick-actions";
+import {
+  FlightContextPreview,
+  type PreviewAnchor,
+} from "@/components/flight-context-preview";
 import { deriveFlight, type DeriveKind } from "@/lib/utils/derive-flight";
 import { insertFlightSorted } from "@/lib/utils/flight-sort";
 
@@ -98,6 +102,15 @@ const MONTHS = [
   "DEC",
 ];
 
+/** How long after a dismissal an open request is treated as the same tap. */
+const CASCADE_REOPEN_GUARD_MS = 350;
+
+/** Press-and-hold before the context preview opens. Long enough not to be
+ *  mistaken for a tap, short enough to feel deliberate. */
+const HOLD_MS = 450;
+/** Movement that cancels the hold — a scroll, or the start of a swipe. */
+const HOLD_SLOP = 8;
+
 function timeToMinutes(hhmm: string): number {
   const parts = hhmm.split(":").map(Number);
   return (parts[0] || 0) * 60 + (parts[1] || 0);
@@ -119,6 +132,7 @@ interface SwipeableFlightCardProps {
   onEdit: (flight: FlightLog) => void;
   onDelete: (flight: FlightLog) => void;
   onMore: (flight: FlightLog, at: QuickActionAnchor) => void;
+  onHold: (flight: FlightLog, at: PreviewAnchor) => void;
   isSelected?: boolean;
   displayPrefs?: DisplayPreferences;
 }
@@ -128,14 +142,65 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   onEdit,
   onDelete,
   onMore,
+  onHold,
   isSelected = false,
   displayPrefs,
 }: SwipeableFlightCardProps) {
   const isLocked = flight.isLocked || false;
   const isScheduled = !flight.outTime || !flight.inTime;
 
+  // Press-and-hold opens the context preview. Cancelled by any movement past a
+  // few px, so it never fires on a scroll or on the start of a swipe — those
+  // own the card's other gestures.
+  const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdFromRef = useRef<{ x: number; y: number } | null>(null);
+  const cancelHold = useCallback(() => {
+    if (holdRef.current) clearTimeout(holdRef.current);
+    holdRef.current = null;
+    holdFromRef.current = null;
+  }, []);
+  useEffect(() => cancelHold, [cancelHold]);
+
   return (
     <SwipeableCard
+      onPointerDown={(e) => {
+        cancelHold();
+        holdFromRef.current = { x: e.clientX, y: e.clientY };
+        const card = e.currentTarget.getBoundingClientRect();
+        const box = { left: card.left, top: card.top, width: card.width, height: card.height };
+        // Carried onto the synthetic cancel below — a PointerEvent built
+        // without them reports (0, 0), and framer reads the point off the
+        // event it ends on.
+        const { pointerId, pointerType, clientX, clientY } = e;
+        holdRef.current = setTimeout(() => {
+          holdRef.current = null;
+          // END THIS CARD'S POINTER SESSION before the preview opens. framer
+          // registers its window pointermove/pointerup listeners on
+          // pointerdown; the overlay then takes the lift, so framer would
+          // never see the gesture finish and the session would stay live —
+          // that is the ghost swipe this cost us last time. `pointercancel` is
+          // what this genuinely is: the press stopped being a drag.
+          window.dispatchEvent(
+            new PointerEvent("pointercancel", {
+              pointerId,
+              pointerType,
+              clientX,
+              clientY,
+              bubbles: true,
+            })
+          );
+          onHold(flight, box);
+        }, HOLD_MS);
+      }}
+      onPointerMove={(e) => {
+        const from = holdFromRef.current;
+        if (!from) return;
+        if (Math.abs(e.clientX - from.x) > HOLD_SLOP || Math.abs(e.clientY - from.y) > HOLD_SLOP) {
+          cancelHold();
+        }
+      }}
+      onPointerUp={cancelHold}
+      onPointerCancel={cancelHold}
       // Stable across the virtualiser recycling this row, so an armed delete
       // keeps its overlay while the list scrolls.
       id={`flight-${flight.id}`}
@@ -532,14 +597,41 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     // run of extra actions comes out of the control that asked for them. The
     // swipe panel deliberately stays OPEN underneath (`keepOpen`).
     const [held, setHeld] = useState<{ flight: FlightLog; at: QuickActionAnchor } | null>(null);
+    // When the cascade is dismissed by a tap on the `…` itself, the two halves
+    // of that tap can land on either side of the unmount: the capture-phase
+    // swallow closes it on `pointerup`, React tears the listeners down, and the
+    // `click` that follows is no longer swallowed — so it reaches the button
+    // and reopens. Chromium/Android orders it that way; WebKit did not, which
+    // is why it looked like a platform bug. A close STAMP settles it either
+    // way: an open request arriving in the wake of a close is that same tap.
+    const closedAtRef = useRef(0);
+    const closeCascade = useCallback(() => {
+      closedAtRef.current = Date.now();
+      setHeld(null);
+    }, []);
+    // ─── The press-and-hold context preview ───
+    // A different thing from the `…` cascade: that is a menu you go to, this is
+    // a LOOK at one row without leaving your place in the list.
+    const [preview, setPreview] = useState<{ flight: FlightLog; at: PreviewAnchor } | null>(null);
+    const handleHold = useCallback((flight: FlightLog, at: PreviewAnchor) => {
+      // Any open swipe panel would sit under the overlay; close it first.
+      window.dispatchEvent(new CustomEvent("swipe-card-close-others", { detail: null }));
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(8);
+      setPreview({ flight, at });
+    }, []);
+
     const handleMore = useCallback((flight: FlightLog, at: QuickActionAnchor) => {
+      if (Date.now() - closedAtRef.current < CASCADE_REOPEN_GUARD_MS) return;
       if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(6);
       setHeld({ flight, at });
     }, []);
 
+    // Shared by the `…` cascade and the context preview — one action set, one
+    // implementation. The caller passes its own flight because the two hold it
+    // in different state.
     const handleQuickAction = useCallback(
-      async (action: FlightQuickAction) => {
-        const source = held?.flight;
+      async (action: FlightQuickAction, from?: FlightLog) => {
+        const source = from ?? held?.flight;
         if (!source) return;
         if (action === "lock") {
           await handleToggleLock(source);
@@ -755,6 +847,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                             onEdit={handleEdit}
                             onDelete={performDelete}
                             onMore={handleMore}
+                            onHold={handleHold}
                             isSelected={selectedFlightId === flight.id}
                             displayPrefs={preferences.display}
                           />
@@ -799,7 +892,16 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             flight={held.flight}
             anchor={held.at}
             onSelect={handleQuickAction}
-            onClose={() => setHeld(null)}
+            onClose={closeCascade}
+          />
+        )}
+        {preview && (
+          <FlightContextPreview
+            flight={preview.flight}
+            anchor={preview.at}
+            displayPrefs={preferences.display}
+            onSelect={(a) => handleQuickAction(a, preview.flight)}
+            onClose={() => setPreview(null)}
           />
         )}
       </>

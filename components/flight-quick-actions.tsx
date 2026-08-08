@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
-import { Lock, Plane, PlaneLanding, PlaneTakeoff, Share, Unlock } from "lucide-react";
+import { ArrowLeftRight, ArrowRight, Copy, Lock, Share, Unlock } from "lucide-react";
 import type { FlightLog } from "@/lib/db";
 import { cn } from "@/lib/utils";
 import { POP_SPRING } from "@/lib/motion";
@@ -29,11 +29,20 @@ export type FlightQuickAction = "next-leg" | "return-trip" | "duplicate" | "shar
  * through a PORTAL so the card's own size never changes: a menu that pushed
  * the list around would move every row below it.
  */
+const ICON = "h-[19px] w-[19px]";
+/**
+ * ONE WORD each, under a circular button.
+ *
+ * The icons say what the words cannot fit: an aeroplane meant "next leg",
+ * "return trip" AND "duplicate" at various points, which told you nothing —
+ * they are all flights. What differs is the RELATION to the flight you are
+ * standing on, so the icons are relational: onward, there-and-back, a copy.
+ */
 const ACTIONS: { id: FlightQuickAction; label: string; icon: React.ReactNode }[] = [
-  { id: "next-leg", label: "Next Leg", icon: <PlaneTakeoff className="h-[18px] w-[18px]" /> },
-  { id: "return-trip", label: "Return Trip", icon: <PlaneLanding className="h-[18px] w-[18px]" /> },
-  { id: "duplicate", label: "Duplicate", icon: <Plane className="h-[18px] w-[18px]" /> },
-  { id: "share", label: "Share", icon: <Share className="h-[18px] w-[18px]" /> },
+  { id: "next-leg", label: "Next", icon: <ArrowRight className={ICON} /> },
+  { id: "return-trip", label: "Return", icon: <ArrowLeftRight className={ICON} /> },
+  { id: "duplicate", label: "Copy", icon: <Copy className={ICON} /> },
+  { id: "share", label: "Share", icon: <Share className={ICON} /> },
 ];
 
 /** The `…` button's box, in viewport coordinates. */
@@ -44,13 +53,33 @@ export interface QuickActionAnchor {
   height: number;
 }
 
-/** Wider than a swipe button (64) so "Return Trip" fits on one line. */
-const ITEM_WIDTH = 78;
-const ITEM_HEIGHT = 48;
-const GAP = 8;
+/** The circle itself. The label sits BELOW it, outside the button's shape. */
+const CIRCLE = 46;
+/** Circle + the caption under it. */
+const ITEM_HEIGHT = 46 + 16;
+/** Wide enough for the longest one-word caption ("Return") to stay on a line. */
+const ITEM_WIDTH = 62;
+const GAP = 10;
 const MARGIN = 12;
 /** Each button leaves the `…` a beat after the one before it. */
 const STAGGER_MS = 38;
+
+/**
+ * The one action set, shared with the context preview
+ * (`flight-context-preview.tsx`) so the two surfaces can never drift apart.
+ */
+export function QUICK_ACTION_ITEMS(
+  locked: boolean
+): { id: FlightQuickAction; label: string; icon: React.ReactNode }[] {
+  return [
+    ...ACTIONS,
+    {
+      id: "lock",
+      label: locked ? "Unlock" : "Lock",
+      icon: locked ? <Unlock className={ICON} /> : <Lock className={ICON} />,
+    },
+  ];
+}
 
 export function FlightQuickActions({
   flight,
@@ -69,15 +98,7 @@ export function FlightQuickActions({
     closeRef.current = onClose;
   }, [onClose]);
 
-  const locked = !!flight.isLocked;
-  const items = [
-    ...ACTIONS,
-    {
-      id: "lock" as const,
-      label: locked ? "Unlock" : "Lock",
-      icon: locked ? <Unlock className="h-[18px] w-[18px]" /> : <Lock className="h-[18px] w-[18px]" />,
-    },
-  ];
+  const items = QUICK_ACTION_ITEMS(!!flight.isLocked);
 
   // DOWN by default; UP only when the run would not fit below. DERIVED, not
   // state: the anchor is fixed for this cascade's whole life, so there is one
@@ -165,13 +186,15 @@ export function FlightQuickActions({
 
   if (typeof document === "undefined") return null;
 
-  // Right-aligned with the `…` it comes from, and clamped so a card near the
-  // panel edge still puts the run fully on screen.
-  const right = Math.min(
-    Math.max(anchor.left + anchor.width, ITEM_WIDTH + MARGIN),
-    window.innerWidth - MARGIN
+  // CENTRED on the `…` it comes from — the run should read as growing out of
+  // that button, and a column offset to one side of its own trigger reads as
+  // belonging to something else. Clamped so a card near the panel edge still
+  // puts the run fully on screen.
+  const centre = anchor.left + anchor.width / 2;
+  const left = Math.min(
+    Math.max(centre - ITEM_WIDTH / 2, MARGIN),
+    window.innerWidth - ITEM_WIDTH - MARGIN
   );
-  const left = right - ITEM_WIDTH;
 
   return createPortal(
     <div className="pointer-events-none fixed inset-0 z-[200]">
@@ -196,6 +219,8 @@ export function FlightQuickActions({
               type="button"
               role="menuitem"
               aria-label={a.label}
+              // `group` so the circle can carry the pressed state for the whole
+              // item (the tap target is the circle PLUS its caption).
               onClick={() => {
                 onSelect(a.id);
                 onClose();
@@ -209,18 +234,30 @@ export function FlightQuickActions({
               }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               transition={{ ...POP_SPRING, delay: (i * STAGGER_MS) / 1000 }}
-              style={{ height: ITEM_HEIGHT, touchAction: "manipulation" }}
-              className={cn(
-                // The same rounded chip as a swipe action button, in the
-                // grouped-row vocabulary (a bordered card, not glass — these
-                // have to be READ, and glass over a list of cards is not).
-                "flex w-full flex-col items-center justify-center gap-0.5 rounded-lg",
-                "border border-border bg-card text-foreground shadow-xl select-none",
-                "active:bg-secondary transition-colors"
-              )}
+              style={{ touchAction: "manipulation" }}
+              className="group flex w-full flex-col items-center gap-1 select-none"
             >
-              {a.icon}
-              <span className="text-[11px] font-medium leading-none">{a.label}</span>
+              <span
+                style={{ width: CIRCLE, height: CIRCLE }}
+                className={cn(
+                  // A CIRCLE, in the grouped-row vocabulary (a bordered card,
+                  // not glass — these have to be READ, and glass over a list of
+                  // cards is not).
+                  "flex items-center justify-center rounded-full",
+                  "border border-border bg-card text-foreground shadow-xl",
+                  "transition-colors group-active:bg-secondary"
+                )}
+              >
+                {a.icon}
+              </span>
+              {/* Outside the circle: a caption cannot be legible inside 46px
+                  next to a 19px glyph, and shrinking the type to fit is how you
+                  get a label nobody reads. It carries its own small backing
+                  because it floats over a DENSE list — a bare word landed on
+                  top of a flight's route and became unreadable. */}
+              <span className="rounded-full border border-border/60 bg-card px-1.5 py-[3px] text-[10px] font-medium leading-none text-foreground shadow-md">
+                {a.label}
+              </span>
             </motion.button>
           ))}
         </div>

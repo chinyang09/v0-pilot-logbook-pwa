@@ -262,7 +262,7 @@
      used to land on a flight card and open it. A real element, so a drag that
      starts here does not scroll the list — hence thin: 24px is enough to
      forgive a low tap without taking a meaningful strip of the list away. */
-  --chrome-tap: 1.5rem;
+  --chrome-tap: 1.25rem;
   /* Where the QUICK-SCROLL rail parks a row. Deliberately more than the
      header treatment's own band (`FADE_TAIL`, 41px in chrome-overlays): a row
      that lands exactly on the band's lower edge is sitting against it, and the
@@ -283,7 +283,7 @@
      Kept modest on purpose. It is a real element, so a drag STARTING inside
      it does not scroll the list — 24px is enough to catch an aimed tap and
      small enough that it is not where a flick begins. */
-  --chrome-tap: 1.5rem;
+  --chrome-tap: 1.25rem;
   --chrome-top-sm: calc(2.75rem + env(safe-area-inset-top, 0px));
   /* How far above the physical bottom edge the floating nav rests — the ONE
      number the bottom pill, the sidebar's lower end, and the content

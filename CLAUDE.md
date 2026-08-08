@@ -1916,12 +1916,21 @@ When making changes, be aware of these high-impact files:
   "what can I do to this" surface and it is already discoverable, so the extra
   actions belong in it.
 
-  **They are not a popover.** Each option is its own button, the same rounded
-  chip as the swipe buttons it comes out of, and they travel out from the `…`
-  one after another (`STAGGER_MS`) — the panel extending rather than a dialog
-  appearing over it. In the grouped-row vocabulary (`bg-card` + a border), NOT
-  glass: glass is chrome floating over content and these have to be read; over
-  a list of cards a glass slab showed the cards straight through the labels.
+  **They are not a popover.** Each option is a CIRCLE with one word under it,
+  CENTRED on the `…`, and they travel out from it one after another
+  (`STAGGER_MS`) — the panel extending rather than a dialog appearing over it.
+  In the grouped-row vocabulary (`bg-card` + a border), NOT glass: glass is
+  chrome floating over content and these have to be read; over a list of cards
+  a glass slab showed the cards straight through the labels. The caption sits
+  OUTSIDE the circle (46px next to a 19px glyph leaves no room for legible
+  type) and carries its own small backing, because a bare word floating over a
+  dense list landed on a flight's route and became unreadable.
+
+  One word each, and the icons are RELATIONAL rather than aeronautical: an
+  aeroplane meant "next leg", "return trip" AND "duplicate" at various points,
+  which distinguishes nothing — they are all flights. What differs is the
+  relation to the flight you are standing on, so: onward, there-and-back, a
+  copy.
 
   Rendered through a PORTAL, so the card's own size never changes — a menu that
   grew the row would move every row below it (measured: card height 110 before
@@ -1933,6 +1942,14 @@ When making changes, be aware of these high-impact files:
   default, up when the run would not fit below (measured: a card whose `…` sits
   at y 712 puts its last item at 432, i.e. above the anchor). One answer, known
   on the first render, so the column can never paint downward and then flip.
+
+  **A dismissing tap on the `…` itself needs a guard** (`CASCADE_REOPEN_GUARD_MS`).
+  The two halves of that tap can land on either side of the unmount: the
+  capture-phase swallow closes the cascade on `pointerup`, React tears the
+  listeners down, and the `click` that follows is no longer swallowed — so it
+  reaches the button and reopens. Chromium orders it that way and WebKit did
+  not, which is why it looked like a platform bug; a close STAMP settles it on
+  both. An open request arriving within 350ms of a close IS that same tap.
 
   **While it is open the app can still be MOVED but not OPERATED**, and that
   rule is inherited wholesale from the hold menu — it was hard-won and none of
@@ -1965,6 +1982,27 @@ When making changes, be aware of these high-impact files:
   row lands on the SCROLLER behind it, which still scrolls natively. A
   `useSyncExternalStore` module store carries the flag, so the cards get it in
   the same commit the menu opens rather than a frame later.
+- `components/flight-context-preview.tsx` — the PRESS-AND-HOLD context
+  preview. A hold lifts one row out of the list, shows the detail the compact
+  card has no room for (the four OOOI times, block, flight, night, reg, and
+  remarks if there are any) and puts the same action set in a row beneath it.
+
+  It is deliberately NOT the `…` cascade, and the split is the point of having
+  both. The cascade is a MENU: you know what you want to do, and you go to a
+  control that advertises itself in the swipe panel. This is a LOOK: you are
+  scanning the list, you want to know more about one row without leaving your
+  place, and a hold is the gesture that has always meant "tell me about this".
+  The actions come along because once you are looking at it, acting on it is
+  the obvious next thing.
+
+  The hold that drives it is the one that was removed from the ACTIONS menu,
+  and it keeps every hard-won guard: it cancels on any movement past
+  `HOLD_SLOP` so it never fires on a scroll or the start of a swipe, and when
+  it fires it dispatches a synthetic `pointercancel` on `window` so framer
+  cannot carry a half-started drag into the overlay (that was the ghost swipe).
+  The same `menu-lock` applies, so nothing behind the scrim is a hit-test
+  target. `QUICK_ACTION_ITEMS` is shared with the cascade — one action set, so
+  the two surfaces cannot drift apart.
 - `lib/utils/derive-flight.ts` — what a derived flight carries. Everything that does not change between two legs (aircraft, crew, role) and NOTHING that is a record of a specific flight having happened (OOOI, takeoffs/landings, signature, lock, import + sync stamps) — copying those forward would fabricate a logbook entry.
 - `components/signature-dialog.tsx` — signing, full screen. Orientation-agnostic by construction: the surface fills what is left after the chrome, and the strokes are normalised to their own bounding box, so a signature drawn in landscape renders identically in portrait.
 - `lib/utils/virtual-scroll.ts` — `scrollToIndexSettled`. A dynamically-measured list needs the scroll re-issued until the arriving rows have measured, and convergence has to be read off the ELEMENT's `scrollTop` (`virtualizer.scrollOffset` is written by the scroll listener, so it always looks unchanged in the same tick).
@@ -2075,6 +2113,7 @@ When making changes, be aware of these high-impact files:
 - Do not cache the scroll indicator's scroller box behind a ResizeObserver alone — opening the sidebar SLIDES the main panel across without resizing it (`0..360` → `199..559`), so no observer fires and the thumb stays at the closed layout's right edge, drawing a grey rule down the middle of the flight cards. Re-read the box in the update
 - Do not rely on the cascade's event blocking alone to keep cards still — while a menu is open `SwipeableCard` sets `pointer-events: none` on its root and drops `drag` (`lib/utils/menu-lock.ts`). Intercepting events only covers the events you thought of, in the order an engine happens to send them; removing the row as a hit-test target covers all of them, and the touch still reaches the scroller behind it so the list keeps scrolling
 - Do not move the scroll indicator's thumb back INSIDE the scroller — it is a `position: fixed` element in `document.body`, placed against the scroller's cached box. It lived on a sticky anchor inside the scroller once, with its drift measured and cancelled per frame: that pinned correctly while a finger dragged, but the rubber-band RELEASE is compositor-animated and the correction runs on the main thread from coalesced scroll events, so the track visibly snapped back with the bounce. Nothing inside the scroller can win that race. The zero-height sticky marker that remains is only a rubber-band **sensor** (its drift is the bounce distance for engines that clamp `scrollTop`) and is read at the TOP only — at the bottom it stays pinned, so measuring there returns the whole scrolled distance and collapses the thumb
+- Do not let the logbook's first card butt against the chrome — `LIST_TOP_GAP` (20px) is added to the spacer's BASE so the first row starts where crew / aircraft / airports start theirs (measured: first card at 72 against `--chrome-top` 52 on both). It goes on the base, never on the panel term, or the amount the search and calendar push the list changes and the calendar falls out of sync
 - Do not give a page's content its own bottom padding on top of the shared clearance — one clearance per scroller, from `--chrome-bottom` (`.pb-chrome` / `.h-chrome-bottom`), and a card list's per-row gap belongs on the row's TOP (`pt-1`), never its bottom. A trailing per-row gap stacks on the spacer and lands that panel's last row lower than every other panel's (the logbook, aircraft, airports and crew lists each had one; the logbook's 8px is subtracted from its spacer because its wrapper padding can't move)
 - Do not let ANY scroller chain its overscroll to the document — every app scroller carries `overscroll-contain`, so a flick that reaches the end of a list can never reach the page. Together with the clipped shell above that is what removed the "free play" where a page with nothing to scroll still moved and carried the fixed action buttons off screen. Verified by sampling `scrollHeight − clientHeight` on the document continuously through load: 0 on every route, in both axes
 - Do not bleed a row past the panel edge with a hardcoded `-mx-*` — use `.-mx-panel`, the negative of `--panel-gutter`. A `-mx-4` against the 12px gutter pushed the chip strip 4px past both edges, which is horizontal overflow the root no longer clips (that was the left/right jiggle on currencies and discrepancies)
@@ -2092,7 +2131,8 @@ When making changes, be aware of these high-impact files:
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
 - Do not build the flight card's extra actions from glass — glass is chrome floating over content, and these have to be read; as a glass slab the flight cards showed straight through the labels. They use the grouped-row vocabulary (`bg-card` + a border)
-- Do not bring back a press-and-hold for the flight card's extra actions — they live in the swipe panel behind `…`. A hold is an invisible gesture that nothing advertises, and it competed with the swipe and the scroll for the same pointer; every bug it caused (an orphaned framer session dragging the held card, finger drift before the menu appeared) came from that competition, not from the menu's looks
+- Do not put the flight card's ACTIONS back behind a press-and-hold — they live in the swipe panel behind `…`. A hold is an invisible gesture that nothing advertises, and as the actions menu it competed with the swipe and the scroll for the same pointer. The hold now drives the CONTEXT PREVIEW instead, which is a different job (a look, not a menu) and the one thing a hold has always meant; it still needs the movement cancel and the synthetic `pointercancel`
+- Do not let a dismissing tap on the `…` reopen the cascade — the swallow closes it on `pointerup` and the follow-up `click` then arrives with the listeners already gone. Keep `CASCADE_REOPEN_GUARD_MS`: an open request within 350ms of a close is the same tap, whichever order an engine delivers it in
 - Do not confine the header's blur to the bar's own height, and do not scroll a row to `--chrome-top` — content has to clear `--chrome-clear` (the bar PLUS the fade's tail). A row parked at the bar's edge sits in the blur and looks sharp enough to tap when it isn't
 - Do not let the bottom nav hide on scroll — it is the app's primary navigation on a phone, and it disappeared exactly when a long read made you want it, with a scroll UP as the only way back
 - Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (56 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
