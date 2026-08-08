@@ -54,3 +54,13 @@ export const SPLIT_MIN_PX = SINGLE_MONTH_PX + DETAIL_MIN_PX
  * calendar should use the width it has (see `paneMaxWidth` on LogbookCalendar).
  */
 export const MONTH_PANE_PX = (DUAL_MONTH_PX - 16) / 2 - 8
+
+/**
+ * The desktop sidebar's outer width — what it PUSHES the content across by.
+ *
+ * It is part of the budget above (1180 − 199 − 1 = 980 on iPad Air 5
+ * landscape), so it lives here with the rest of them rather than being
+ * re-declared per component. Anything that has to sit beside the sidebar —
+ * the push spacer, the full-surface signature panel — measures from this.
+ */
+export const SIDEBAR_WIDTH_PX = 199

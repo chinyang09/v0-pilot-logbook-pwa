@@ -25,6 +25,7 @@ import { OVERSHOOT_BEZIER, SETTLE_BEZIER, MORPH_EASE } from "@/lib/motion"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
+import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths"
 import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { navSections, dashboardNavItem } from "@/components/nav-sections"
@@ -104,7 +105,7 @@ const TAB_CONFIG: Record<
 
 // ─── Constants ───────────────────────────────────────────────
 
-const SIDEBAR_WIDTH = 199
+const SIDEBAR_WIDTH = SIDEBAR_WIDTH_PX
 const SIDEBAR_MARGIN = 4 // distance from viewport edge when expanded
 const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_MARGIN * 2 // 191
 const PILL_HEIGHT = 44 // h-11

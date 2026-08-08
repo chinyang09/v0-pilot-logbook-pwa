@@ -3,8 +3,7 @@
 import { useReducedMotion } from "framer-motion"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { useDesktopPill } from "@/hooks/use-is-desktop"
-
-const SIDEBAR_WIDTH = 199
+import { SIDEBAR_WIDTH_PX as SIDEBAR_WIDTH } from "@/lib/layout/panel-widths"
 
 /**
  * Push sidebar spacer — invisible flex child that animates width
