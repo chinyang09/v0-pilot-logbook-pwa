@@ -12,9 +12,9 @@ import { setMenuOpen } from "@/lib/utils/menu-lock";
 import { POP_SPRING } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import {
-  ACTION_CIRCLE_PX,
   ACTION_LABEL_CLASS,
-  actionCircleClass,
+  ACTION_TILE_PX,
+  actionTileClass,
   QUICK_ACTION_ITEMS,
   type FlightQuickAction,
 } from "@/components/flight-quick-actions";
@@ -42,6 +42,13 @@ import {
  * as an exact copy of that card, sitting exactly where it sits in the list
  * (same `px-3 py-1` body, same `rounded-xl border bg-card`), then travels to
  * the centre while the detail and the action row unfurl beneath it.
+ *
+ * It comes to rest centred on the VIEWPORT at `MAX_WIDTH`, not in the column
+ * the row lives in. That is what makes the transformation visible on anything
+ * bigger than a phone: a dialog held to the width of the panel it came out of
+ * barely moves. On a phone the row already fills the screen, so the width
+ * clamps to what it had and the growth is all height — there is nowhere else
+ * for it to go.
  *
  * It is NOT framer's shared-layout (`layoutId`) morph, and that is deliberate.
  * The source card lives inside a VIRTUALISED list: a `layout`/`layoutId` prop
@@ -72,6 +79,14 @@ export interface PreviewAnchor {
 }
 
 const MARGIN = 16;
+/** How wide the lifted card is allowed to GROW (Tailwind's `max-w-2xl`).
+ *
+ *  The morph has to be visible, and on anything wider than a phone the row is
+ *  the width of one panel — expanding to a screen-centred card that is plainly
+ *  bigger than the row is the transformation. On a phone the row already fills
+ *  the viewport, so this clamps to the same width it had and the growth is all
+ *  height; there is nowhere else for it to go. */
+const MAX_WIDTH = 672;
 /** The gap between the card and its action row — inside the collapsing box, so
  *  it disappears with the row rather than holding the card off its mark. */
 const GAP = 14;
@@ -146,11 +161,13 @@ export function FlightContextPreview({
   const items = QUICK_ACTION_ITEMS(locked);
   const open = !closing;
 
-  // The lifted card comes to rest inset from the screen edges, but it OPENS at
-  // the row's own width, wherever that is — on a phone the list runs edge to
-  // edge, so anything else is a visible width jump at the first frame.
-  const width = Math.min(anchor.width, window.innerWidth - MARGIN * 2);
-  const left = Math.max(MARGIN, Math.min(anchor.left, window.innerWidth - width - MARGIN));
+  // It comes to rest CENTRED ON THE VIEWPORT and as wide as it is allowed to
+  // grow — not in the row's own column. A dialog that stayed the width of the
+  // panel it came from barely moved on a desktop, which is what made the morph
+  // invisible there. It still OPENS at the row's own width and place, wherever
+  // that is, so the first frame is the row to the pixel.
+  const width = Math.min(MAX_WIDTH, window.innerWidth - MARGIN * 2);
+  const left = (window.innerWidth - width) / 2;
   const fromX = anchor.left - left;
   // Where the COLLAPSED card comes to rest in the centred wrapper — and so how
   // far it has to start above or below that to be sitting on its row.
@@ -212,7 +229,21 @@ export function FlightContextPreview({
             transition={MORPH}
           >
             <div className="mx-4 border-t border-border/70" />
-            <div className="px-4 py-2">
+            {/* The detail arrives a beat AFTER the box that holds it, out of a
+                slight blur. The box growing is the card changing shape; this is
+                the content settling into the room that just appeared, and
+                separating the two is most of what makes the expansion legible
+                rather than a jump. */}
+            <motion.div
+              className="px-4 py-2"
+              initial={{ opacity: 0, y: 16, filter: "blur(4px)" }}
+              animate={{
+                opacity: open ? 1 : 0,
+                y: open ? 0 : 10,
+                filter: open ? "blur(0px)" : "blur(4px)",
+              }}
+              transition={{ duration: 0.26, ease: [0.32, 0.72, 0, 1], delay: open ? 0.1 : 0 }}
+            >
               <div className="grid grid-cols-2 gap-x-6">
                 <Row label="Out" value={clock(flight.outTime)} />
                 <Row label="Off" value={clock(flight.offTime)} />
@@ -228,12 +259,12 @@ export function FlightContextPreview({
                   {flight.remarks}
                 </p>
               ) : null}
-            </div>
+            </motion.div>
           </motion.div>
         </motion.div>
 
         {/* The actions, as a row beneath the card — the same set and the same
-            circles as the `…` cascade, laid out horizontally because here there
+            tiles as the `…` cascade, laid out horizontally because here there
             is a whole screen's width and no button to cascade out of.
             Its gap lives INSIDE the collapsing box (as padding), or a closed
             row would still hold the card 14px off its own mark. */}
@@ -260,11 +291,11 @@ export function FlightContextPreview({
                 animate={{ scale: open ? 1 : 0.4, opacity: open ? 1 : 0 }}
                 transition={{ ...POP_SPRING, delay: open ? 0.08 + i * 0.03 : 0 }}
                 style={{
-                  width: ACTION_CIRCLE_PX,
-                  height: ACTION_CIRCLE_PX,
+                  width: ACTION_TILE_PX,
+                  height: ACTION_TILE_PX,
                   touchAction: "manipulation",
                 }}
-                className={actionCircleClass}
+                className={actionTileClass}
               >
                 {a.icon}
                 <span className={ACTION_LABEL_CLASS}>{a.label}</span>

@@ -29,9 +29,9 @@ export type FlightQuickAction = "next-leg" | "return-trip" | "duplicate" | "shar
  * through a PORTAL so the card's own size never changes: a menu that pushed
  * the list around would move every row below it.
  */
-const ICON = "h-[17px] w-[17px]";
+const ICON = "h-5 w-5";
 /**
- * ONE WORD each, INSIDE the circle with its icon.
+ * ONE WORD each, INSIDE the tile with its icon.
  *
  * The icons are AEROPLANES, distinguished by ATTITUDE — the reference set the
  * owner asked these to match. A plain plane repeated three times was tried and
@@ -57,16 +57,25 @@ const ACTIONS: { id: FlightQuickAction; label: string; icon: React.ReactNode }[]
 
 /**
  * ONE definition of an action button, shared by the cascade and the context
- * preview — a circle carrying its icon over its word. The two surfaces should
- * be recognisably the same control in different arrangements.
+ * preview — and it is the SWIPE PANEL's button, not a shape of its own.
+ *
+ * The cascade comes out of the `…` in that panel, so anything else made the run
+ * read as a different family of control appearing next to it: `rounded-lg` at
+ * `BUTTON_WIDTH` (64) in `bg-secondary`, with the icon over a `text-xs` label,
+ * is what a swipe action already looks like (`swipeable-card.tsx`). The one
+ * addition is a shadow, because unlike a swipe button these FLOAT over the
+ * list rather than sitting inside a row.
+ *
+ * Square rather than the swipe button's full row height: the cascade is a
+ * COLUMN, and five row-height tiles is most of a screen.
  */
-export const ACTION_CIRCLE_PX = 56;
-export const actionCircleClass = cn(
-  "flex flex-col items-center justify-center gap-[3px] rounded-full",
-  "border border-border bg-card text-foreground shadow-xl select-none",
-  "transition-colors active:bg-secondary"
+export const ACTION_TILE_PX = 64;
+export const actionTileClass = cn(
+  "flex flex-col items-center justify-center gap-0.5 rounded-lg overflow-hidden",
+  "bg-secondary text-foreground shadow-lg select-none",
+  "transition-colors active:bg-muted"
 );
-export const ACTION_LABEL_CLASS = "text-[9px] font-medium leading-none";
+export const ACTION_LABEL_CLASS = "text-xs font-medium leading-none";
 
 /** The `…` button's box, in viewport coordinates. */
 export interface QuickActionAnchor {
@@ -76,9 +85,10 @@ export interface QuickActionAnchor {
   height: number;
 }
 
-const ITEM_HEIGHT = ACTION_CIRCLE_PX;
-const ITEM_WIDTH = ACTION_CIRCLE_PX;
-const GAP = 10;
+const ITEM_HEIGHT = ACTION_TILE_PX;
+const ITEM_WIDTH = ACTION_TILE_PX;
+/** The swipe panel's own gap, so the run is spaced like the buttons it leaves. */
+const GAP = 8;
 const MARGIN = 12;
 /** Each button leaves the `…` a beat after the one before it. */
 const STAGGER_MS = 38;
@@ -254,11 +264,11 @@ export function FlightQuickActions({
               animate={{ opacity: 1, scale: 1, y: 0 }}
               transition={{ ...POP_SPRING, delay: (i * STAGGER_MS) / 1000 }}
               style={{
-                width: ACTION_CIRCLE_PX,
-                height: ACTION_CIRCLE_PX,
+                width: ACTION_TILE_PX,
+                height: ACTION_TILE_PX,
                 touchAction: "manipulation",
               }}
-              className={actionCircleClass}
+              className={actionTileClass}
             >
               {a.icon}
               <span className={ACTION_LABEL_CLASS}>{a.label}</span>

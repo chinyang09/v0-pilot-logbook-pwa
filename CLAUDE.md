@@ -1916,17 +1916,26 @@ When making changes, be aware of these high-impact files:
   "what can I do to this" surface and it is already discoverable, so the extra
   actions belong in it.
 
-  **They are not a popover.** Each option is a 56px CIRCLE carrying its icon
-  over its word, CENTRED on the `…`, and they travel out from it one after
-  another (`STAGGER_MS`) — the panel extending rather than a dialog appearing
-  over it. In the grouped-row vocabulary (`bg-card` + a border), NOT glass:
-  glass is chrome floating over content and these have to be read; over a list
-  of cards a glass slab showed the cards straight through the labels. The word
-  goes INSIDE the circle: outside it, floating over a dense list, it landed on
-  a flight's route and needed a backing plate of its own to stay legible —
-  which is a lot of furniture for one word.
+  **They are not a popover — they are the SWIPE PANEL'S OWN BUTTON, repeated.**
+  Each option is a 64px `rounded-lg` tile in `bg-secondary` carrying its icon
+  over a `text-xs` word, CENTRED on the `…`, and they travel out from it one
+  after another (`STAGGER_MS`) — the panel extending rather than a dialog
+  appearing over it. That is literally `swipeable-card.tsx`'s `BUTTON_WIDTH`,
+  radius, fill, gap and label size: the run comes out of a control in that
+  panel, so anything else read as a different family of control turning up next
+  to it. They were 56px circles in `bg-card` for a while, which was closer to
+  the grouped-row vocabulary than to the panel they belong to.
 
-  `ACTION_CIRCLE_PX` / `actionCircleClass` / `ACTION_LABEL_CLASS` are exported
+  Square rather than the swipe button's full row height — the cascade is a
+  COLUMN, and five row-height tiles is most of a screen. The one thing added to
+  the swipe button is a shadow, because unlike a swipe button these float over
+  the list instead of sitting inside a row. Deliberately NOT glass: glass is
+  chrome floating over content and these have to be read; over a list of cards
+  a glass slab showed the cards straight through the labels. The word goes
+  INSIDE the tile — outside it, floating over a dense list, it landed on a
+  flight's route and needed a backing plate of its own to stay legible.
+
+  `ACTION_TILE_PX` / `actionTileClass` / `ACTION_LABEL_CLASS` are exported
   and the context preview uses them, so the two surfaces are the same control
   in different arrangements rather than two that resemble each other.
 
@@ -2058,6 +2067,21 @@ When making changes, be aware of these high-impact files:
   preview is up: the copy opens on top of it, so leaving it would show the same
   flight twice through the scrim. It comes back at the unmount, into the box
   the preview has just collapsed onto, so there is nothing to see.
+
+  **It comes to rest centred on the VIEWPORT at `MAX_WIDTH` (672 — `max-w-2xl`),
+  not in the column the row lives in.** That is what makes the transformation
+  visible at all on anything bigger than a phone: held to the width of the panel
+  it came out of, the card barely moved and the morph read as nothing happening.
+  Measured on a 1180-wide tablet: the row is 336 wide and the preview settles at
+  672, centred at x 254. On a phone the row already fills the screen, so the
+  width clamps to what it had and the growth is all height (measured: +143px);
+  there is nowhere else for it to go.
+
+  The DETAIL arrives a beat after the box that holds it — `opacity`/`y`/`blur`
+  on a 260ms curve delayed 100ms inside the 340ms box growth. The box growing is
+  the card changing shape; this is the content settling into the room that just
+  appeared, and separating the two is most of what makes the expansion legible
+  rather than a jump.
 
   The hold that drives it is the one that was removed from the ACTIONS menu,
   and it keeps every hard-won guard: it cancels on any movement past
@@ -2202,7 +2226,8 @@ When making changes, be aware of these high-impact files:
 - Do not thin the rim by dropping the conic's FLANKS — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22; the ring's WIDTH (`--softness`, and `.Highlight`'s padding with it) is the separate knob, and it is only free to be fine BECAUSE the flanks hold the continuity
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
-- Do not build the flight card's extra actions from glass — glass is chrome floating over content, and these have to be read; as a glass slab the flight cards showed straight through the labels. They use the grouped-row vocabulary (`bg-card` + a border)
+- Do not build the flight card's extra actions from glass — glass is chrome floating over content, and these have to be read; as a glass slab the flight cards showed straight through the labels. They are the SWIPE PANEL's button repeated (64px `rounded-lg`, `bg-secondary`, icon over a `text-xs` word, the panel's own 8px gap), because the run comes out of a control in that panel; 56px circles in `bg-card` read as a different family of control turning up beside it
+- Do not let the context preview come to rest in the row's own column — it settles CENTRED ON THE VIEWPORT at `MAX_WIDTH`, or on anything wider than a phone it is the same width it started and the morph reads as nothing happening (measured on a 1180 tablet: 336 → 672). And keep the detail's own delayed reveal (opacity/y/blur, 100ms in): the box growing and the content arriving are two things, and running them together reads as a jump
 - Do not put a `layout`/`layoutId` prop on a flight card to morph the context preview out of it — the rows are VIRTUALISED, and that hands framer every rendered row to measure on every layout change (the per-row measuring the list was rebuilt to remove), while FLIP animates the box by SCALE and this growth is nearly all height, so the card's text stretches on the way up. The morph's geometry is derived instead: a centred flex column, a collapsed rest position of `(innerHeight − cardHeight) / 2`, and the detail/actions animating their REAL height. Anchor it to the card (`[data-slot="card"]`), not the row wrapper — the wrapper carries the per-row top gap and 4px out is a visible jump on the first frame
 - Do not tear the context preview down on the dismissing tap — the morph runs BOTH ways, so closing collapses it back onto the row first and `onClose` fires on a timer. And keep the source row `invisible` while it is up, or the copy opening on top of it shows the same flight twice through the scrim
 - Do not let the flight card's hold arm from a press on the row's own CONTROLS — the pointer hooks sit on `SwipeableCard`'s outer container, so the swipe buttons are inside them, and a thumb tap on `…` outlasts `HOLD_MS` on a phone. That opened the context preview instead of the cascade. Bail when the press starts on a `button`/`a`/`input`/`textarea` or inside `[data-swipe-actions]`
