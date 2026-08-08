@@ -1930,13 +1930,22 @@ When making changes, be aware of these high-impact files:
   and the context preview uses them, so the two surfaces are the same control
   in different arrangements rather than two that resemble each other.
 
-  One word each, and the icons are RELATIONAL rather than aeronautical: an
-  aeroplane meant "next leg", "return trip" AND "duplicate" at various points,
-  which distinguishes nothing — they are all flights. What differs is the
-  relation to the flight you are standing on, so: onward, there-and-back,
-  another one like it. That last one is **"Repeat", never "Copy"** — copy reads
-  as putting something on the clipboard, and what actually happens is that a
-  whole new flight is created.
+  One word each, and the icons are **aeroplanes distinguished by ATTITUDE**.
+  A plain plane repeated three times was tried and rejected for the obvious
+  reason — "next leg", "return trip" and "duplicate" are all flights, so three
+  identical planes distinguish nothing — and a relational set (an arrow, a
+  two-way arrow, a stack) was tried in its place. The attitude answers both at
+  once: they are unmistakably flights AND they differ.
+
+  | | Icon | Reads as |
+  |---|---|---|
+  | Next | `PlaneTakeoff` — nose up, leaving | the onward departure |
+  | Return | `PlaneLanding` — nose down, coming back | the reverse leg |
+  | Repeat | `Plane` — level, unqualified | another one like this |
+
+  That last one is **"Repeat", never "Copy"** — copy reads as putting something
+  on the clipboard, and what actually happens is that a whole new flight is
+  created.
 
   Rendered through a PORTAL, so the card's own size never changes — a menu that
   grew the row would move every row below it (measured: card height 110 before
@@ -2014,6 +2023,41 @@ When making changes, be aware of these high-impact files:
   card can be centred, and with pointers on it swallowed almost every tap meant
   for the scrim — on a phone, where hardly any scrim is left uncovered, that
   meant the preview could not be dismissed at all.
+
+  **It GROWS OUT OF the row you held, and goes back into it.** The preview
+  opens as an exact copy of that card, on that card — same `px-3 py-1` body,
+  same `rounded-xl border bg-card` — and then travels to the centre while the
+  detail and the action row unfurl beneath it. Closing plays the same thing
+  backwards and only then unmounts, which is why `onClose` is called on a timer
+  rather than the overlay being torn down on the tap. Measured at the first
+  frame against the row's own box: **dTop 0.0, dLeft 0.0, dWidth 0.0,
+  dHeight 0.0**.
+
+  It is **NOT** framer's shared-layout (`layoutId`) morph, and the reference
+  implementation that asked for one was deliberately not followed:
+
+  - The source card lives inside the **virtualised** list. A `layout`/`layoutId`
+    prop there puts every rendered row into framer's measurement pass on every
+    layout change — exactly the per-row measuring the logbook list was rebuilt
+    to remove (see the virtualised-list note above).
+  - A FLIP morph animates the box by **scale**, and this growth is nearly all
+    height, so the card's text would visibly stretch on the way up.
+
+  Instead the geometry is DERIVED, not measured, and nothing scales: the
+  wrapper is a centred flex column, so with the detail and the actions
+  collapsed to `height: 0` the card rests at `(innerHeight − cardHeight) / 2`;
+  the card's opening `y`/`x`/`width` are the difference between that and the
+  row's own box; and the detail and actions animate their real `height`
+  (0 → auto) while the flex centring re-centres the group frame by frame. One
+  clock (`MORPH`, 340ms) drives all of it, so the travel and the unfurl are one
+  motion.
+
+  The anchor is the **card's** box (`[data-slot="card"]`), not the row
+  wrapper's — the wrapper carries the list's per-row top gap, and 4px out is a
+  visible jump on the first frame. And the source row is `invisible` while the
+  preview is up: the copy opens on top of it, so leaving it would show the same
+  flight twice through the scrim. It comes back at the unmount, into the box
+  the preview has just collapsed onto, so there is nothing to see.
 
   The hold that drives it is the one that was removed from the ACTIONS menu,
   and it keeps every hard-won guard: it cancels on any movement past
@@ -2159,6 +2203,8 @@ When making changes, be aware of these high-impact files:
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
 - Do not build the flight card's extra actions from glass — glass is chrome floating over content, and these have to be read; as a glass slab the flight cards showed straight through the labels. They use the grouped-row vocabulary (`bg-card` + a border)
+- Do not put a `layout`/`layoutId` prop on a flight card to morph the context preview out of it — the rows are VIRTUALISED, and that hands framer every rendered row to measure on every layout change (the per-row measuring the list was rebuilt to remove), while FLIP animates the box by SCALE and this growth is nearly all height, so the card's text stretches on the way up. The morph's geometry is derived instead: a centred flex column, a collapsed rest position of `(innerHeight − cardHeight) / 2`, and the detail/actions animating their REAL height. Anchor it to the card (`[data-slot="card"]`), not the row wrapper — the wrapper carries the per-row top gap and 4px out is a visible jump on the first frame
+- Do not tear the context preview down on the dismissing tap — the morph runs BOTH ways, so closing collapses it back onto the row first and `onClose` fires on a timer. And keep the source row `invisible` while it is up, or the copy opening on top of it shows the same flight twice through the scrim
 - Do not let the flight card's hold arm from a press on the row's own CONTROLS — the pointer hooks sit on `SwipeableCard`'s outer container, so the swipe buttons are inside them, and a thumb tap on `…` outlasts `HOLD_MS` on a phone. That opened the context preview instead of the cascade. Bail when the press starts on a `button`/`a`/`input`/`textarea` or inside `[data-swipe-actions]`
 - Do not put the flight card's ACTIONS back behind a press-and-hold — they live in the swipe panel behind `…`. A hold is an invisible gesture that nothing advertises, and as the actions menu it competed with the swipe and the scroll for the same pointer. The hold now drives the CONTEXT PREVIEW instead, which is a different job (a look, not a menu) and the one thing a hold has always meant; it still needs the movement cancel and the synthetic `pointercancel`
 - Do not let a dismissing tap on the `…` reopen the cascade — the swallow closes it on `pointerup` and the follow-up `click` then arrives with the listeners already gone. Keep `CASCADE_REOPEN_GUARD_MS`: an open request within 350ms of a close is the same tap, whichever order an engine delivers it in

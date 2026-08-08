@@ -134,6 +134,8 @@ interface SwipeableFlightCardProps {
   onMore: (flight: FlightLog, at: QuickActionAnchor) => void;
   onHold: (flight: FlightLog, at: PreviewAnchor) => void;
   isSelected?: boolean;
+  /** This row is the one the context preview lifted — see below. */
+  isPreviewing?: boolean;
   displayPrefs?: DisplayPreferences;
 }
 
@@ -144,6 +146,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   onMore,
   onHold,
   isSelected = false,
+  isPreviewing = false,
   displayPrefs,
 }: SwipeableFlightCardProps) {
   const isLocked = flight.isLocked || false;
@@ -175,7 +178,11 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
         const target = e.target as Element | null;
         if (target?.closest?.("button, a, input, textarea, [data-swipe-actions]")) return;
         holdFromRef.current = { x: e.clientX, y: e.clientY };
-        const card = e.currentTarget.getBoundingClientRect();
+        // The CARD's own box, not the row's. The row wrapper carries the
+        // list's per-row top gap, and the preview opens as an exact copy of
+        // the card sitting on it — 4px out and the morph starts with a jump.
+        const surface = e.currentTarget.querySelector('[data-slot="card"]');
+        const card = (surface ?? e.currentTarget).getBoundingClientRect();
         const box = { left: card.left, top: card.top, width: card.width, height: card.height };
         // Carried onto the synthetic cancel below — a PointerEvent built
         // without them reports (0, 0), and framer reads the point off the
@@ -257,7 +264,13 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           isLocked && "opacity-75",
           isScheduled && "border-l-2 border-l-orange-600/70 dark:border-l-orange-400/70",
           isSelected && "bg-primary/20 border-primary",
-          !isSelected && "hover:bg-muted/50"
+          !isSelected && "hover:bg-muted/50",
+          // The preview opens as an exact copy of this card, ON this card, so
+          // while it is up the original would show through the scrim as a
+          // second copy of the same flight. It comes back the moment the
+          // preview has collapsed back onto it — which is the same box, so
+          // there is nothing to see.
+          isPreviewing && "invisible"
         )}
       >
         <CardContent className="px-3 py-1">
@@ -861,6 +874,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                             onMore={handleMore}
                             onHold={handleHold}
                             isSelected={selectedFlightId === flight.id}
+                            isPreviewing={preview?.flight.id === flight.id}
                             displayPrefs={preferences.display}
                           />
                         </div>

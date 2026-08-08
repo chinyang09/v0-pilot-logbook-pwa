@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import type { FlightLog } from "@/lib/db";
@@ -9,6 +9,7 @@ import { MODAL_SCRIM, RadialBlurBackdrop } from "@/components/ui/chrome-overlays
 import { formatClockDisplay, formatHHMMDisplay } from "@/lib/utils/time";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import { setMenuOpen } from "@/lib/utils/menu-lock";
+import { POP_SPRING } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import {
   ACTION_CIRCLE_PX,
@@ -35,6 +36,33 @@ import {
  * drove the actions menu, and the lessons are kept (see `flight-list`): the
  * hold cancels on any real movement, and firing it ENDS the card's pointer
  * session so framer cannot carry a half-started drag into the overlay.
+ *
+ * ── THE MORPH ──────────────────────────────────────────────────────────────
+ * The preview GROWS OUT OF the row you held, and goes back into it. It opens
+ * as an exact copy of that card, sitting exactly where it sits in the list
+ * (same `px-3 py-1` body, same `rounded-xl border bg-card`), then travels to
+ * the centre while the detail and the action row unfurl beneath it.
+ *
+ * It is NOT framer's shared-layout (`layoutId`) morph, and that is deliberate.
+ * The source card lives inside a VIRTUALISED list: a `layout`/`layoutId` prop
+ * there puts every rendered row into framer's measurement pass on every layout
+ * change, which is exactly the per-row measuring the logbook list was rebuilt
+ * to avoid (see the virtualised-list note in CLAUDE.md). A FLIP morph also
+ * animates the box by SCALE, so the card's text would visibly stretch on the
+ * way up — the growth here is nearly all height.
+ *
+ * Instead the geometry is derived, not measured, and nothing scales:
+ *
+ *   • the wrapper is a centred flex column, so with the detail and the actions
+ *     collapsed to `height: 0` the card comes to rest at `(innerHeight −
+ *     cardHeight) / 2`;
+ *   • the card's opening `y` is the difference between that and the row's own
+ *     top — so at the first frame it is over the row, to the pixel, with no
+ *     measurement;
+ *   • the detail and the actions animate their real `height` (0 → auto), and
+ *     the flex centring re-centres the group frame by frame as they grow.
+ *
+ * Closing plays the same thing backwards and only then unmounts.
  */
 export interface PreviewAnchor {
   left: number;
@@ -44,7 +72,13 @@ export interface PreviewAnchor {
 }
 
 const MARGIN = 16;
+/** The gap between the card and its action row — inside the collapsing box, so
+ *  it disappears with the row rather than holding the card off its mark. */
 const GAP = 14;
+/** One clock for the whole morph, so the travel and the unfurl are one motion.
+ *  Ease-out with no overshoot: the card is arriving, not landing. */
+const MORPH_MS = 340;
+const MORPH = { duration: MORPH_MS / 1000, ease: [0.32, 0.72, 0, 1] as const };
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -73,6 +107,17 @@ export function FlightContextPreview({
     closeRef.current = onClose;
   }, [onClose]);
 
+  // The morph runs BOTH ways, so closing is a state the component passes
+  // through rather than an unmount: collapse back onto the row, then go.
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    window.setTimeout(() => closeRef.current(), MORPH_MS);
+  }, []);
+
   // Same lock as the cascade: while the preview is up nothing behind it is a
   // hit-test target, so the list cannot be swiped or tapped through the scrim.
   useEffect(() => {
@@ -82,11 +127,11 @@ export function FlightContextPreview({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeRef.current();
+      if (e.key === "Escape") requestClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [requestClose]);
 
   if (typeof document === "undefined") return null;
 
@@ -99,11 +144,18 @@ export function FlightContextPreview({
 
   const locked = !!flight.isLocked;
   const items = QUICK_ACTION_ITEMS(locked);
+  const open = !closing;
 
-  // The lifted card keeps the row's own width so it reads as THAT row rather
-  // than a new panel; only its height and the detail below it are new.
+  // The lifted card comes to rest inset from the screen edges, but it OPENS at
+  // the row's own width, wherever that is — on a phone the list runs edge to
+  // edge, so anything else is a visible width jump at the first frame.
   const width = Math.min(anchor.width, window.innerWidth - MARGIN * 2);
   const left = Math.max(MARGIN, Math.min(anchor.left, window.innerWidth - width - MARGIN));
+  const fromX = anchor.left - left;
+  // Where the COLLAPSED card comes to rest in the centred wrapper — and so how
+  // far it has to start above or below that to be sitting on its row.
+  const collapsedTop = (window.innerHeight - anchor.height) / 2;
+  const fromY = anchor.top - collapsedTop;
 
   return createPortal(
     <div className="fixed inset-0 z-[210]">
@@ -112,10 +164,9 @@ export function FlightContextPreview({
       <motion.div
         className={cn("absolute inset-0", MODAL_SCRIM)}
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.18 }}
-        onClick={() => closeRef.current()}
+        animate={{ opacity: open ? 1 : 0 }}
+        transition={MORPH}
+        onClick={requestClose}
       >
         <RadialBlurBackdrop />
       </motion.div>
@@ -127,72 +178,101 @@ export function FlightContextPreview({
           box swallowed almost every tap meant for the scrim. On a phone, where
           there is barely any scrim left uncovered, that meant the preview could
           not be dismissed at all. */}
-      <motion.div
+      <div
         role="dialog"
         aria-label="Flight preview"
         className="pointer-events-none absolute flex flex-col items-stretch"
         style={{ left, width, top: MARGIN, bottom: MARGIN, justifyContent: "center" }}
-        initial={{ opacity: 0, scale: 0.96 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ type: "spring", stiffness: 320, damping: 30, mass: 0.9 }}
       >
-        {/* THE CARD, lifted. The same body the list draws, so the thing you
-            held is recognisably the thing you are now looking at. */}
-        {/* No inner scale on the body: it overflowed the card's own padding at
-            the route's widest, and the lift is already carried by the scrim,
-            the shadow and the detail that appears underneath. */}
-        <div className="pointer-events-auto rounded-xl border border-border bg-card shadow-2xl">
-          <div className="px-3 py-2">
+        {/* THE CARD, lifted — and at the first frame it is still the row: same
+            surface, same `px-3 py-1` body, sitting on the row's own box. */}
+        <motion.div
+          className="pointer-events-auto overflow-hidden rounded-xl border border-border bg-card"
+          initial={{ y: fromY, x: fromX, width: anchor.width, boxShadow: "0px 0px 0px 0px rgba(0,0,0,0)" }}
+          animate={{
+            y: open ? 0 : fromY,
+            x: open ? 0 : fromX,
+            width: open ? width : anchor.width,
+            boxShadow: open
+              ? "0px 25px 50px -12px rgba(0,0,0,0.45)"
+              : "0px 0px 0px 0px rgba(0,0,0,0)",
+          }}
+          transition={MORPH}
+        >
+          <div className="px-3 py-1">
             <FlightCardBody flight={flight} displayPrefs={displayPrefs} />
           </div>
 
-          <div className="mx-4 border-t border-border/70" />
-
-          {/* What the compact card has no room for. */}
-          <div className="px-4 py-2">
-            <div className="grid grid-cols-2 gap-x-6">
-              <Row label="Out" value={clock(flight.outTime)} />
-              <Row label="Off" value={clock(flight.offTime)} />
-              <Row label="On" value={clock(flight.onTime)} />
-              <Row label="In" value={clock(flight.inTime)} />
-              <Row label="Block" value={dur(flight.blockTime)} />
-              <Row label="Flight" value={dur(flight.flightTime)} />
-              <Row label="Night" value={dur(flight.nightTime)} />
-              <Row label="Reg" value={flight.aircraftReg || "—"} />
+          {/* What the compact card has no room for — the part that UNFURLS.
+              Real height, not a scale: the card's text must not stretch. */}
+          <motion.div
+            className="overflow-hidden"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }}
+            transition={MORPH}
+          >
+            <div className="mx-4 border-t border-border/70" />
+            <div className="px-4 py-2">
+              <div className="grid grid-cols-2 gap-x-6">
+                <Row label="Out" value={clock(flight.outTime)} />
+                <Row label="Off" value={clock(flight.offTime)} />
+                <Row label="On" value={clock(flight.onTime)} />
+                <Row label="In" value={clock(flight.inTime)} />
+                <Row label="Block" value={dur(flight.blockTime)} />
+                <Row label="Flight" value={dur(flight.flightTime)} />
+                <Row label="Night" value={dur(flight.nightTime)} />
+                <Row label="Reg" value={flight.aircraftReg || "—"} />
+              </div>
+              {flight.remarks ? (
+                <p className="mt-2 border-t border-border/70 pt-2 text-[13px] leading-snug text-muted-foreground">
+                  {flight.remarks}
+                </p>
+              ) : null}
             </div>
-            {flight.remarks ? (
-              <p className="mt-2 border-t border-border/70 pt-2 text-[13px] leading-snug text-muted-foreground">
-                {flight.remarks}
-              </p>
-            ) : null}
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
 
         {/* The actions, as a row beneath the card — the same set and the same
             circles as the `…` cascade, laid out horizontally because here there
-            is a whole screen's width and no button to cascade out of. */}
-        <div
-          className="pointer-events-auto flex items-start justify-center gap-2 self-center"
-          style={{ marginTop: GAP }}
+            is a whole screen's width and no button to cascade out of.
+            Its gap lives INSIDE the collapsing box (as padding), or a closed
+            row would still hold the card 14px off its own mark. */}
+        <motion.div
+          className="pointer-events-auto overflow-hidden"
+          initial={{ height: 0, opacity: 0, y: fromY }}
+          animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0, y: open ? 0 : fromY }}
+          transition={MORPH}
         >
-          {items.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              onClick={() => {
-                onSelect(a.id);
-                closeRef.current();
-              }}
-              aria-label={a.label}
-              style={{ width: ACTION_CIRCLE_PX, height: ACTION_CIRCLE_PX }}
-              className={actionCircleClass}
-            >
-              {a.icon}
-              <span className={ACTION_LABEL_CLASS}>{a.label}</span>
-            </button>
-          ))}
-        </div>
-      </motion.div>
+          <div
+            className="flex items-start justify-center gap-2"
+            style={{ paddingTop: GAP }}
+          >
+            {items.map((a, i) => (
+              <motion.button
+                key={a.id}
+                type="button"
+                onClick={() => {
+                  onSelect(a.id);
+                  requestClose();
+                }}
+                aria-label={a.label}
+                initial={{ scale: 0.4, opacity: 0 }}
+                animate={{ scale: open ? 1 : 0.4, opacity: open ? 1 : 0 }}
+                transition={{ ...POP_SPRING, delay: open ? 0.08 + i * 0.03 : 0 }}
+                style={{
+                  width: ACTION_CIRCLE_PX,
+                  height: ACTION_CIRCLE_PX,
+                  touchAction: "manipulation",
+                }}
+                className={actionCircleClass}
+              >
+                {a.icon}
+                <span className={ACTION_LABEL_CLASS}>{a.label}</span>
+              </motion.button>
+            ))}
+          </div>
+        </motion.div>
+      </div>
     </div>,
     document.body
   );

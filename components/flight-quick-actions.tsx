@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
-import { ArrowLeftRight, ArrowRight, Layers, Lock, Share, Unlock } from "lucide-react";
+import { Lock, Plane, PlaneLanding, PlaneTakeoff, Share, Unlock } from "lucide-react";
 import type { FlightLog } from "@/lib/db";
 import { cn } from "@/lib/utils";
 import { POP_SPRING } from "@/lib/motion";
@@ -33,19 +33,25 @@ const ICON = "h-[17px] w-[17px]";
 /**
  * ONE WORD each, INSIDE the circle with its icon.
  *
- * The icons are RELATIONAL rather than aeronautical: an aeroplane meant "next
- * leg", "return trip" AND "duplicate" at various points, which distinguishes
- * nothing — they are all flights. What differs is the relation to the flight
- * you are standing on, so: onward, there-and-back, another one like it.
+ * The icons are AEROPLANES, distinguished by ATTITUDE — the reference set the
+ * owner asked these to match. A plain plane repeated three times was tried and
+ * rejected for exactly the obvious reason ("next leg", "return trip" and
+ * "duplicate" are all flights, so three identical planes distinguish nothing),
+ * and a relational set (an arrow, a two-way arrow, a stack) was tried instead.
+ * The attitude answers both: they are unmistakably flights AND they differ.
+ *
+ *   next leg   nose UP, leaving      — the onward departure
+ *   return     nose DOWN, coming back — the reverse leg
+ *   repeat     LEVEL, unqualified     — another one like this
  *
  * "Copy" is deliberately not the word for that last one. It reads as putting
  * something on the clipboard, which is not what happens — a whole new flight
- * is created. `Layers` and "Repeat" both say another INSTANCE.
+ * is created. "Repeat" says another INSTANCE.
  */
 const ACTIONS: { id: FlightQuickAction; label: string; icon: React.ReactNode }[] = [
-  { id: "next-leg", label: "Next", icon: <ArrowRight className={ICON} /> },
-  { id: "return-trip", label: "Return", icon: <ArrowLeftRight className={ICON} /> },
-  { id: "duplicate", label: "Repeat", icon: <Layers className={ICON} /> },
+  { id: "next-leg", label: "Next", icon: <PlaneTakeoff className={ICON} /> },
+  { id: "return-trip", label: "Return", icon: <PlaneLanding className={ICON} /> },
+  { id: "duplicate", label: "Repeat", icon: <Plane className={ICON} /> },
   { id: "share", label: "Share", icon: <Share className={ICON} /> },
 ];
 
