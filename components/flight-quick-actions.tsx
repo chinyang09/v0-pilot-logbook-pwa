@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
-import { ArrowLeftRight, ArrowRight, Copy, Lock, Share, Unlock } from "lucide-react";
+import { ArrowLeftRight, ArrowRight, Layers, Lock, Share, Unlock } from "lucide-react";
 import type { FlightLog } from "@/lib/db";
 import { cn } from "@/lib/utils";
 import { POP_SPRING } from "@/lib/motion";
@@ -29,21 +29,38 @@ export type FlightQuickAction = "next-leg" | "return-trip" | "duplicate" | "shar
  * through a PORTAL so the card's own size never changes: a menu that pushed
  * the list around would move every row below it.
  */
-const ICON = "h-[19px] w-[19px]";
+const ICON = "h-[17px] w-[17px]";
 /**
- * ONE WORD each, under a circular button.
+ * ONE WORD each, INSIDE the circle with its icon.
  *
- * The icons say what the words cannot fit: an aeroplane meant "next leg",
- * "return trip" AND "duplicate" at various points, which told you nothing —
- * they are all flights. What differs is the RELATION to the flight you are
- * standing on, so the icons are relational: onward, there-and-back, a copy.
+ * The icons are RELATIONAL rather than aeronautical: an aeroplane meant "next
+ * leg", "return trip" AND "duplicate" at various points, which distinguishes
+ * nothing — they are all flights. What differs is the relation to the flight
+ * you are standing on, so: onward, there-and-back, another one like it.
+ *
+ * "Copy" is deliberately not the word for that last one. It reads as putting
+ * something on the clipboard, which is not what happens — a whole new flight
+ * is created. `Layers` and "Repeat" both say another INSTANCE.
  */
 const ACTIONS: { id: FlightQuickAction; label: string; icon: React.ReactNode }[] = [
   { id: "next-leg", label: "Next", icon: <ArrowRight className={ICON} /> },
   { id: "return-trip", label: "Return", icon: <ArrowLeftRight className={ICON} /> },
-  { id: "duplicate", label: "Copy", icon: <Copy className={ICON} /> },
+  { id: "duplicate", label: "Repeat", icon: <Layers className={ICON} /> },
   { id: "share", label: "Share", icon: <Share className={ICON} /> },
 ];
+
+/**
+ * ONE definition of an action button, shared by the cascade and the context
+ * preview — a circle carrying its icon over its word. The two surfaces should
+ * be recognisably the same control in different arrangements.
+ */
+export const ACTION_CIRCLE_PX = 56;
+export const actionCircleClass = cn(
+  "flex flex-col items-center justify-center gap-[3px] rounded-full",
+  "border border-border bg-card text-foreground shadow-xl select-none",
+  "transition-colors active:bg-secondary"
+);
+export const ACTION_LABEL_CLASS = "text-[9px] font-medium leading-none";
 
 /** The `…` button's box, in viewport coordinates. */
 export interface QuickActionAnchor {
@@ -53,12 +70,8 @@ export interface QuickActionAnchor {
   height: number;
 }
 
-/** The circle itself. The label sits BELOW it, outside the button's shape. */
-const CIRCLE = 46;
-/** Circle + the caption under it. */
-const ITEM_HEIGHT = 46 + 16;
-/** Wide enough for the longest one-word caption ("Return") to stay on a line. */
-const ITEM_WIDTH = 62;
+const ITEM_HEIGHT = ACTION_CIRCLE_PX;
+const ITEM_WIDTH = ACTION_CIRCLE_PX;
 const GAP = 10;
 const MARGIN = 12;
 /** Each button leaves the `…` a beat after the one before it. */
@@ -234,30 +247,15 @@ export function FlightQuickActions({
               }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               transition={{ ...POP_SPRING, delay: (i * STAGGER_MS) / 1000 }}
-              style={{ touchAction: "manipulation" }}
-              className="group flex w-full flex-col items-center gap-1 select-none"
+              style={{
+                width: ACTION_CIRCLE_PX,
+                height: ACTION_CIRCLE_PX,
+                touchAction: "manipulation",
+              }}
+              className={actionCircleClass}
             >
-              <span
-                style={{ width: CIRCLE, height: CIRCLE }}
-                className={cn(
-                  // A CIRCLE, in the grouped-row vocabulary (a bordered card,
-                  // not glass — these have to be READ, and glass over a list of
-                  // cards is not).
-                  "flex items-center justify-center rounded-full",
-                  "border border-border bg-card text-foreground shadow-xl",
-                  "transition-colors group-active:bg-secondary"
-                )}
-              >
-                {a.icon}
-              </span>
-              {/* Outside the circle: a caption cannot be legible inside 46px
-                  next to a 19px glyph, and shrinking the type to fit is how you
-                  get a label nobody reads. It carries its own small backing
-                  because it floats over a DENSE list — a bare word landed on
-                  top of a flight's route and became unreadable. */}
-              <span className="rounded-full border border-border/60 bg-card px-1.5 py-[3px] text-[10px] font-medium leading-none text-foreground shadow-md">
-                {a.label}
-              </span>
+              {a.icon}
+              <span className={ACTION_LABEL_CLASS}>{a.label}</span>
             </motion.button>
           ))}
         </div>

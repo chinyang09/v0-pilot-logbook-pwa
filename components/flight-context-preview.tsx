@@ -11,6 +11,9 @@ import type { DisplayPreferences } from "@/types/db/stores.types";
 import { setMenuOpen } from "@/lib/utils/menu-lock";
 import { cn } from "@/lib/utils";
 import {
+  ACTION_CIRCLE_PX,
+  ACTION_LABEL_CLASS,
+  actionCircleClass,
   QUICK_ACTION_ITEMS,
   type FlightQuickAction,
 } from "@/components/flight-quick-actions";
@@ -117,22 +120,28 @@ export function FlightContextPreview({
         <RadialBlurBackdrop />
       </motion.div>
 
+      {/* The positioning wrapper is `pointer-events-none` and only the card and
+          the action row take pointers back.
+          It spans nearly the whole screen (top/bottom margins, the row's own
+          width) so that the card can be centred — and with pointers on, that
+          box swallowed almost every tap meant for the scrim. On a phone, where
+          there is barely any scrim left uncovered, that meant the preview could
+          not be dismissed at all. */}
       <motion.div
         role="dialog"
         aria-label="Flight preview"
-        className="absolute flex flex-col items-stretch"
+        className="pointer-events-none absolute flex flex-col items-stretch"
         style={{ left, width, top: MARGIN, bottom: MARGIN, justifyContent: "center" }}
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ type: "spring", stiffness: 320, damping: 30, mass: 0.9 }}
-        onClick={(e) => e.stopPropagation()}
       >
         {/* THE CARD, lifted. The same body the list draws, so the thing you
             held is recognisably the thing you are now looking at. */}
         {/* No inner scale on the body: it overflowed the card's own padding at
             the route's widest, and the lift is already carried by the scrim,
             the shadow and the detail that appears underneath. */}
-        <div className="rounded-xl border border-border bg-card shadow-2xl">
+        <div className="pointer-events-auto rounded-xl border border-border bg-card shadow-2xl">
           <div className="px-3 py-2">
             <FlightCardBody flight={flight} displayPrefs={displayPrefs} />
           </div>
@@ -162,7 +171,10 @@ export function FlightContextPreview({
         {/* The actions, as a row beneath the card — the same set and the same
             circles as the `…` cascade, laid out horizontally because here there
             is a whole screen's width and no button to cascade out of. */}
-        <div className="mt-[14px] flex items-start justify-between gap-1" style={{ marginTop: GAP }}>
+        <div
+          className="pointer-events-auto flex items-start justify-center gap-2 self-center"
+          style={{ marginTop: GAP }}
+        >
           {items.map((a) => (
             <button
               key={a.id}
@@ -172,20 +184,11 @@ export function FlightContextPreview({
                 closeRef.current();
               }}
               aria-label={a.label}
-              className="group flex flex-1 flex-col items-center gap-1 select-none"
+              style={{ width: ACTION_CIRCLE_PX, height: ACTION_CIRCLE_PX }}
+              className={actionCircleClass}
             >
-              <span
-                className={cn(
-                  "flex h-[46px] w-[46px] items-center justify-center rounded-full",
-                  "border border-border bg-card text-foreground shadow-xl",
-                  "transition-colors group-active:bg-secondary"
-                )}
-              >
-                {a.icon}
-              </span>
-              <span className="rounded-full border border-border/60 bg-card px-1.5 py-[3px] text-[10px] font-medium leading-none text-foreground shadow-md">
-                {a.label}
-              </span>
+              {a.icon}
+              <span className={ACTION_LABEL_CLASS}>{a.label}</span>
             </button>
           ))}
         </div>

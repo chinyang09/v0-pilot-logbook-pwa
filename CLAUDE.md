@@ -1916,21 +1916,27 @@ When making changes, be aware of these high-impact files:
   "what can I do to this" surface and it is already discoverable, so the extra
   actions belong in it.
 
-  **They are not a popover.** Each option is a CIRCLE with one word under it,
-  CENTRED on the `…`, and they travel out from it one after another
-  (`STAGGER_MS`) — the panel extending rather than a dialog appearing over it.
-  In the grouped-row vocabulary (`bg-card` + a border), NOT glass: glass is
-  chrome floating over content and these have to be read; over a list of cards
-  a glass slab showed the cards straight through the labels. The caption sits
-  OUTSIDE the circle (46px next to a 19px glyph leaves no room for legible
-  type) and carries its own small backing, because a bare word floating over a
-  dense list landed on a flight's route and became unreadable.
+  **They are not a popover.** Each option is a 56px CIRCLE carrying its icon
+  over its word, CENTRED on the `…`, and they travel out from it one after
+  another (`STAGGER_MS`) — the panel extending rather than a dialog appearing
+  over it. In the grouped-row vocabulary (`bg-card` + a border), NOT glass:
+  glass is chrome floating over content and these have to be read; over a list
+  of cards a glass slab showed the cards straight through the labels. The word
+  goes INSIDE the circle: outside it, floating over a dense list, it landed on
+  a flight's route and needed a backing plate of its own to stay legible —
+  which is a lot of furniture for one word.
+
+  `ACTION_CIRCLE_PX` / `actionCircleClass` / `ACTION_LABEL_CLASS` are exported
+  and the context preview uses them, so the two surfaces are the same control
+  in different arrangements rather than two that resemble each other.
 
   One word each, and the icons are RELATIONAL rather than aeronautical: an
   aeroplane meant "next leg", "return trip" AND "duplicate" at various points,
   which distinguishes nothing — they are all flights. What differs is the
-  relation to the flight you are standing on, so: onward, there-and-back, a
-  copy.
+  relation to the flight you are standing on, so: onward, there-and-back,
+  another one like it. That last one is **"Repeat", never "Copy"** — copy reads
+  as putting something on the clipboard, and what actually happens is that a
+  whole new flight is created.
 
   Rendered through a PORTAL, so the card's own size never changes — a menu that
   grew the row would move every row below it (measured: card height 110 before
@@ -1942,6 +1948,14 @@ When making changes, be aware of these high-impact files:
   default, up when the run would not fit below (measured: a card whose `…` sits
   at y 712 puts its last item at 432, i.e. above the anchor). One answer, known
   on the first render, so the column can never paint downward and then flip.
+
+  **The `…` fires on the LIFT, not on the click** (`fireOnPointerUp`). A click
+  is the fragile half of a tap: an engine can suppress it after a drag, a
+  capture-phase guard can swallow it, and it arrives last. On device the first
+  tap on `…` after a swipe did nothing at all — the second worked — which is
+  the shape a lost click makes. Chromium does not reproduce it, so this is a
+  mitigation by construction rather than a measured before/after: `pointerup`
+  is the same gesture one step earlier, with none of that ordering.
 
   **A dismissing tap on the `…` itself needs a guard** (`CASCADE_REOPEN_GUARD_MS`).
   The two halves of that tap can land on either side of the unmount: the
@@ -1994,6 +2008,12 @@ When making changes, be aware of these high-impact files:
   place, and a hold is the gesture that has always meant "tell me about this".
   The actions come along because once you are looking at it, acting on it is
   the obvious next thing.
+
+  Its positioning wrapper is `pointer-events-none` with the card and the action
+  row taking pointers back. The wrapper spans nearly the whole screen so the
+  card can be centred, and with pointers on it swallowed almost every tap meant
+  for the scrim — on a phone, where hardly any scrim is left uncovered, that
+  meant the preview could not be dismissed at all.
 
   The hold that drives it is the one that was removed from the ACTIONS menu,
   and it keeps every hard-won guard: it cancels on any movement past
@@ -2113,7 +2133,7 @@ When making changes, be aware of these high-impact files:
 - Do not cache the scroll indicator's scroller box behind a ResizeObserver alone — opening the sidebar SLIDES the main panel across without resizing it (`0..360` → `199..559`), so no observer fires and the thumb stays at the closed layout's right edge, drawing a grey rule down the middle of the flight cards. Re-read the box in the update
 - Do not rely on the cascade's event blocking alone to keep cards still — while a menu is open `SwipeableCard` sets `pointer-events: none` on its root and drops `drag` (`lib/utils/menu-lock.ts`). Intercepting events only covers the events you thought of, in the order an engine happens to send them; removing the row as a hit-test target covers all of them, and the touch still reaches the scroller behind it so the list keeps scrolling
 - Do not move the scroll indicator's thumb back INSIDE the scroller — it is a `position: fixed` element in `document.body`, placed against the scroller's cached box. It lived on a sticky anchor inside the scroller once, with its drift measured and cancelled per frame: that pinned correctly while a finger dragged, but the rubber-band RELEASE is compositor-animated and the correction runs on the main thread from coalesced scroll events, so the track visibly snapped back with the bounce. Nothing inside the scroller can win that race. The zero-height sticky marker that remains is only a rubber-band **sensor** (its drift is the bounce distance for engines that clamp `scrollTop`) and is read at the TOP only — at the bottom it stays pinned, so measuring there returns the whole scrolled distance and collapses the thumb
-- Do not let the logbook's first card butt against the chrome — `LIST_TOP_GAP` (20px) is added to the spacer's BASE so the first row starts where crew / aircraft / airports start theirs (measured: first card at 72 against `--chrome-top` 52 on both). It goes on the base, never on the panel term, or the amount the search and calendar push the list changes and the calendar falls out of sync
+- Do not let the logbook's first card butt against the chrome — `LIST_TOP_GAP` (20px) starts it where crew / aircraft / airports start theirs (measured: first card at 72 against `--chrome-top` 52 on both). It is DROPPED while the search or the calendar is open: that panel's own bottom edge is the separation there, and the gap read as slack hanging off the calendar (measured: first card at 415, exactly the calendar's bottom)
 - Do not give a page's content its own bottom padding on top of the shared clearance — one clearance per scroller, from `--chrome-bottom` (`.pb-chrome` / `.h-chrome-bottom`), and a card list's per-row gap belongs on the row's TOP (`pt-1`), never its bottom. A trailing per-row gap stacks on the spacer and lands that panel's last row lower than every other panel's (the logbook, aircraft, airports and crew lists each had one; the logbook's 8px is subtracted from its spacer because its wrapper padding can't move)
 - Do not let ANY scroller chain its overscroll to the document — every app scroller carries `overscroll-contain`, so a flick that reaches the end of a list can never reach the page. Together with the clipped shell above that is what removed the "free play" where a page with nothing to scroll still moved and carried the fixed action buttons off screen. Verified by sampling `scrollHeight − clientHeight` on the document continuously through load: 0 on every route, in both axes
 - Do not bleed a row past the panel edge with a hardcoded `-mx-*` — use `.-mx-panel`, the negative of `--panel-gutter`. A `-mx-4` against the 12px gutter pushed the chip strip 4px past both edges, which is horizontal overflow the root no longer clips (that was the left/right jiggle on currencies and discrepancies)

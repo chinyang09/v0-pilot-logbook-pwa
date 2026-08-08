@@ -57,6 +57,18 @@ export interface SwipeAction {
    * rather than snapping shut as they appear.
    */
   keepOpen?: boolean
+  /**
+   * Fire on the LIFT rather than on the synthesised click.
+   *
+   * A click is the fragile half of a tap: it can be suppressed by the engine
+   * after a drag, swallowed by a capture-phase guard, or arrive after the
+   * element that wanted it has re-rendered. For an action that OPENS something
+   * (the `…`), that showed up as the first tap after a swipe doing nothing at
+   * all — on device only, which is exactly the kind of bug a click's ordering
+   * produces. `pointerup` is the same gesture, one step earlier and with none
+   * of that.
+   */
+  fireOnPointerUp?: boolean
   variant?: "default" | "destructive" | "secondary"
   className?: string
   disabled?: boolean
@@ -148,9 +160,15 @@ function SwipeActionButton({
     <motion.button
       type="button"
       aria-label={action.ariaLabel ?? action.label}
+      onPointerUp={(e: React.PointerEvent) => {
+        if (!action.fireOnPointerUp || action.disabled || action.holdToConfirm) return
+        e.stopPropagation()
+        action.onClick(e.currentTarget.getBoundingClientRect())
+        if (!action.keepOpen) onClose()
+      }}
       onClick={(e: React.MouseEvent) => {
         e.stopPropagation()
-        if (action.disabled) return
+        if (action.disabled || action.fireOnPointerUp) return
         // Confirm actions don't fire on tap — they hand off to an overlay
         // where the action counts down and the button cancels it.
         if (action.holdToConfirm) {

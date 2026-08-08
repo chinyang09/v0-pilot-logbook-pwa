@@ -227,6 +227,9 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
             });
           },
           keepOpen: true,
+          // See `fireOnPointerUp` — the click after a swipe was being eaten on
+          // device, which cost the first tap every time.
+          fireOnPointerUp: true,
           variant: "secondary",
         },
         {

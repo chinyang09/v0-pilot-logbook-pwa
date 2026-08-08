@@ -54,8 +54,9 @@ function inSamePair(anchorMonth: number, anchorYear: number, month: number, year
 const PANEL_MS = 300
 const PANEL_MOTION = `height ${PANEL_MS}ms ${MORPH_EASE}`
 
-/** Gap between the chrome (or the floating panels) and the first flight card.
- *  Matches what crew / aircraft / airports get from their content wrapper. */
+/** Gap between the CHROME and the first flight card, matching what crew /
+ *  aircraft / airports get from their content wrapper. Not applied under an
+ *  open panel — that panel's own edge is the separation there. */
 const LIST_TOP_GAP = 20
 
 export default function LogbookPage() {
@@ -676,17 +677,15 @@ export default function LogbookPage() {
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
           onScroll={handleScroll}
-          // `LIST_TOP_GAP` on top of the chrome, so the first flight card
-          // starts where the first row on crew / aircraft / airports does —
-          // those pages get the same gap from their content wrapper, and the
-          // logbook was alone in butting its first card straight against the
-          // header.
+          // `LIST_TOP_GAP` separates the first card from the CHROME, which is
+          // where crew / aircraft / airports get theirs — the logbook was alone
+          // in butting its first card straight against the header.
           //
-          // It is added to the BASE, not to the panel term, so the amount the
-          // floating panels push the list is unchanged and the calendar stays
-          // in sync: open or closed, the first card is this far below whatever
-          // is above it.
-          topSpacerHeight={`calc(var(--chrome-top) + ${LIST_TOP_GAP + (showSearch ? searchBlockHeight : 0) + (showCalendar ? calendarNaturalHeight : 0)}px)`}
+          // It is dropped while a panel is open: the calendar and the search
+          // block carry their own bottom edge, so the gap would read as slack
+          // hanging off the panel rather than as breathing room under the
+          // chrome. Only one of the two is ever the thing above the list.
+          topSpacerHeight={`calc(var(--chrome-top) + ${(showSearch || showCalendar ? 0 : LIST_TOP_GAP) + (showSearch ? searchBlockHeight : 0) + (showCalendar ? calendarNaturalHeight : 0)}px)`}
           topSpacerTransition={spacerAnimated ? PANEL_MOTION : "none"}
           selectedFlightId={selectedFlightId}
         />
