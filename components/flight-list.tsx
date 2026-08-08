@@ -30,8 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Plane,
   Trash2,
-  Lock,
-  Unlock,
+  MoreHorizontal,
   Sun,
   Moon,
   Pen,
@@ -112,12 +111,6 @@ function formatScheduledDuration(scheduledOut: string, scheduledIn: string): str
   return `${h}:${m.toString().padStart(2, "0")}`;
 }
 
-/** Press-and-hold before the quick-actions menu opens. Long enough that it
- *  cannot be mistaken for a tap, short enough to feel deliberate. */
-const HOLD_MS = 480
-/** Movement that cancels the hold — a scroll or the start of a swipe. */
-const HOLD_SLOP = 8
-
 // Callbacks receive the flight so the parent can pass stable (useCallback)
 // handlers — inline `() => …` closures would give every card new props each
 // render and defeat the memo below.
@@ -125,8 +118,7 @@ interface SwipeableFlightCardProps {
   flight: FlightLog;
   onEdit: (flight: FlightLog) => void;
   onDelete: (flight: FlightLog) => void;
-  onToggleLock: (flight: FlightLog) => void;
-  onHold: (flight: FlightLog, at: QuickActionAnchor) => void;
+  onMore: (flight: FlightLog, at: QuickActionAnchor) => void;
   isSelected?: boolean;
   displayPrefs?: DisplayPreferences;
 }
@@ -135,84 +127,18 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   flight,
   onEdit,
   onDelete,
-  onToggleLock,
-  onHold,
+  onMore,
   isSelected = false,
   displayPrefs,
 }: SwipeableFlightCardProps) {
   const isLocked = flight.isLocked || false;
   const isScheduled = !flight.outTime || !flight.inTime;
 
-  // Press-and-hold opens the quick-actions menu. The timer is cancelled by any
-  // movement past a few pixels, so it never fires on a scroll or on the start
-  // of a swipe — those two own the card's other gestures.
-  const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const holdFromRef = useRef<{ x: number; y: number } | null>(null);
-  const cancelHold = useCallback(() => {
-    if (holdRef.current) clearTimeout(holdRef.current);
-    holdRef.current = null;
-    holdFromRef.current = null;
-  }, []);
-  useEffect(() => cancelHold, [cancelHold]);
-
   return (
     <SwipeableCard
       // Stable across the virtualiser recycling this row, so an armed delete
       // keeps its overlay while the list scrolls.
       id={`flight-${flight.id}`}
-      onPointerDown={(e) => {
-        cancelHold();
-        holdFromRef.current = { x: e.clientX, y: e.clientY };
-        // The CARD's box, captured now — by the time the hold fires the
-        // element is still there, but reading it up front keeps the menu's
-        // position independent of where the finger drifted.
-        const card = e.currentTarget.getBoundingClientRect();
-        const box = {
-          left: card.left,
-          top: card.top,
-          width: card.width,
-          height: card.height,
-        };
-        // Carried onto the synthetic cancel below. A PointerEvent built
-        // without them reports (0, 0), and framer reads the point off the
-        // event it ends on.
-        const { pointerId, pointerType, clientX, clientY } = e;
-        holdRef.current = setTimeout(() => {
-          holdRef.current = null;
-          // END THIS CARD'S POINTER SESSION before the menu opens.
-          //
-          // framer-motion registers its window pointermove/pointerup listeners
-          // on pointerdown, and the menu then swallows the lift at the capture
-          // phase — so framer never saw the gesture finish and the session
-          // stayed live. The NEXT swipe's moves (which pass through, because
-          // movement is the one thing the menu deliberately allows) were
-          // delivered to that stale session and dragged the card that had been
-          // held: the swipe closed the menu and left a ghost swipe behind it.
-          //
-          // A synthetic `pointercancel` is what this actually is — the press
-          // stopped being a drag and became a menu — and framer ends the
-          // session on it. Dispatched on `window`, where its listeners are.
-          window.dispatchEvent(
-            new PointerEvent("pointercancel", {
-              pointerId,
-              pointerType,
-              clientX,
-              clientY,
-              bubbles: true,
-            })
-          );
-          onHold(flight, box);
-        }, HOLD_MS);
-      }}
-      onPointerMove={(e) => {
-        const from = holdFromRef.current;
-        if (!from) return;
-        if (Math.abs(e.clientX - from.x) > HOLD_SLOP || Math.abs(e.clientY - from.y) > HOLD_SLOP) {
-          cancelHold();
-        }
-      }}
-      onPointerUp={cancelHold}
-      onPointerCancel={cancelHold}
       onClick={() => {
         if (isLocked) return;
         // Hand the panel its data before it mounts — see primeFlightCache.
@@ -221,8 +147,21 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
       }}
       actions={[
         {
-          icon: isLocked ? <Unlock className="h-5 w-5" /> : <Lock className="h-5 w-5" />,
-          onClick: () => onToggleLock(flight),
+          // `…` opens the rest of the card's actions as their own buttons,
+          // cascading out of this one — see FlightQuickActions. `keepOpen`
+          // because the row they belong to should stay put beneath them.
+          icon: <MoreHorizontal className="h-5 w-5" />,
+          ariaLabel: "More actions",
+          onClick: (rect) => {
+            if (!rect) return;
+            onMore(flight, {
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              height: rect.height,
+            });
+          },
+          keepOpen: true,
           variant: "secondary",
         },
         {
@@ -588,12 +527,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       onDeleted?.();
     }, [onDeleted]);
 
-    // ─── Press-and-hold quick actions ───
+    // ─── The `…` cascade ───
+    // Opened from the swipe panel's own `…` button, and anchored to it, so the
+    // run of extra actions comes out of the control that asked for them. The
+    // swipe panel deliberately stays OPEN underneath (`keepOpen`).
     const [held, setHeld] = useState<{ flight: FlightLog; at: QuickActionAnchor } | null>(null);
-    const handleHold = useCallback((flight: FlightLog, at: QuickActionAnchor) => {
-      // Any open swipe panel would sit under the menu; close it first.
-      window.dispatchEvent(new CustomEvent("swipe-card-close-others", { detail: null }));
-      if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(8);
+    const handleMore = useCallback((flight: FlightLog, at: QuickActionAnchor) => {
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(6);
       setHeld({ flight, at });
     }, []);
 
@@ -814,8 +754,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                             flight={flight}
                             onEdit={handleEdit}
                             onDelete={performDelete}
-                            onToggleLock={handleToggleLock}
-                            onHold={handleHold}
+                            onMore={handleMore}
                             isSelected={selectedFlightId === flight.id}
                             displayPrefs={preferences.display}
                           />

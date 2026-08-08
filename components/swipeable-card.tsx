@@ -46,7 +46,17 @@ export interface SwipeAction {
   ariaLabel?: string
   /** Optional — actions may be label-only (e.g. "Clear") */
   icon?: React.ReactNode
-  onClick: () => void
+  /**
+   * Receives the BUTTON's own box, so an action that opens something can
+   * anchor it to itself (the flight card's `…` cascade). Ignore it otherwise.
+   */
+  onClick: (rect?: DOMRect) => void
+  /**
+   * Leave the action panel open after the tap. For an action that reveals more
+   * actions: the row is the thing they belong to, so it stays put beneath them
+   * rather than snapping shut as they appear.
+   */
+  keepOpen?: boolean
   variant?: "default" | "destructive" | "secondary"
   className?: string
   disabled?: boolean
@@ -147,8 +157,8 @@ function SwipeActionButton({
           onRequestConfirm(action)
           return
         }
-        action.onClick()
-        onClose()
+        action.onClick(e.currentTarget.getBoundingClientRect())
+        if (!action.keepOpen) onClose()
       }}
       disabled={action.disabled}
       style={{ scale, opacity, width: BUTTON_WIDTH, touchAction: "manipulation" }}
@@ -245,17 +255,6 @@ export function SwipeableCard({
 
   const close = useCallback(() => settle(0), [settle])
 
-  // A hold that opens a menu is not a drag — but the finger always drifts a
-  // few px over 480ms, and framer starts panning at ~3px, well under the 8px
-  // that cancels the hold. So by the time the menu appears the card has
-  // usually already moved a little, and the pointercancel that ends the
-  // session springs it back: the "jiggle". This puts it back at rest with no
-  // animation instead, in the same commit the menu opens.
-  useEffect(() => {
-    if (!menuOpen) return
-    x.stop()
-    x.set(0)
-  }, [menuOpen, x])
 
   // Close this card's SWIPE PANEL when another card opens or is tapped.
   //

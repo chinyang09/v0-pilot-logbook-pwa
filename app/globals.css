@@ -257,6 +257,12 @@
      3.25rem = the controls' 4px top margin + their 44px height + a 4px gap.
      It was 4rem when they were 56px tall. */
   --chrome-top: calc(3.25rem + env(safe-area-inset-top, 0px));
+  /* How far BELOW the action buttons a tap still means "scroll to the top".
+     The header row itself is only `--chrome-top` tall, so aiming a little low
+     used to land on a flight card and open it. A real element, so a drag that
+     starts here does not scroll the list — hence thin: 24px is enough to
+     forgive a low tap without taking a meaningful strip of the list away. */
+  --chrome-tap: 1.5rem;
   /* Where the QUICK-SCROLL rail parks a row. Deliberately more than the
      header treatment's own band (`FADE_TAIL`, 41px in chrome-overlays): a row
      that lands exactly on the band's lower edge is sitting against it, and the
@@ -267,6 +273,17 @@
      darkening far too far down the screen; tying this to the band puts the
      scrolled-to row back inside the treatment. */
   --chrome-clear: calc(var(--chrome-top) + 3.5rem);
+  /* How far BELOW the action buttons a tap still counts as "the header", and
+     so scrolls that panel to the top. The header row itself ends level with
+     the buttons, which put the target's lower edge exactly where the
+     darkening begins — aim a little low and you hit a flight card and open it
+     instead. This band is the same idea as iOS's status-bar tap: a strip of
+     genuine chrome that the list does not own.
+
+     Kept modest on purpose. It is a real element, so a drag STARTING inside
+     it does not scroll the list — 24px is enough to catch an aimed tap and
+     small enough that it is not where a flick begins. */
+  --chrome-tap: 1.5rem;
   --chrome-top-sm: calc(2.75rem + env(safe-area-inset-top, 0px));
   /* How far above the physical bottom edge the floating nav rests — the ONE
      number the bottom pill, the sidebar's lower end, and the content
@@ -552,18 +569,6 @@ textarea:focus-within {
 
 .animate-accordion-up {
   animation: accordion-up 0.2s ease-out;
-}
-
-/* The flight card's hold menu: a pure OPACITY fade.
-   `animate-in fade-in` still carried a translate from its enter defaults, so
-   the menu visibly flew in from a few pixels away — it is already exactly
-   where it belongs by the time it is visible, so it should only appear. */
-@keyframes quick-menu-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-.quick-menu-in {
-  animation: quick-menu-in 150ms ease-out both;
 }
 
 /* Single ↔ dual month: a HORIZONTAL slide, the two months treated as a stacked

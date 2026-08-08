@@ -288,6 +288,25 @@ function AppShellContent({ children }: AppShellProps) {
         >
           {/* The one floating-header treatment: progressive blur + fade */}
           <ChromeFade side="top" />
+
+          {/* FAST-SCROLL BAND — the strip just BELOW the action buttons.
+              iOS's own "tap the status bar to go to the top" target is the
+              status bar, which is genuinely not part of the scroll view; ours
+              was only the `h-13` row, so aiming a little low landed on a
+              flight card and opened it instead. This claims the band under
+              the buttons, where the treatment is already darkening and the
+              content is already chrome-ward.
+
+              It is a REAL element, so a drag started inside it does not
+              scroll the list — that is the trade, and why it stays thin
+              (`--chrome-tap`, 24px) rather than covering the whole fade tail.
+              Below the buttons only: the buttons themselves sit above it. */}
+          <div
+            aria-hidden
+            className="absolute inset-x-0 z-0 cursor-pointer"
+            style={{ top: "var(--chrome-top)", height: "var(--chrome-tap)" }}
+            onClick={scrollMainToTop}
+          />
           <div className="relative z-[1] flex items-center px-4 w-full h-13">
             {/* Main panel actions — flush left on desktop, fills width on mobile (for
                 search expansion). Tapping its bare area scrolls the main panel to top
