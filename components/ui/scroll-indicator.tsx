@@ -58,8 +58,19 @@ export function ScrollIndicator() {
     ].join(";")
     document.body.appendChild(thumb)
 
-    // The scroller's own box — unaffected by its contents scrolling, so this
-    // only needs refreshing when the layout actually changes.
+    // The scroller's own box. Unaffected by its contents scrolling — but NOT
+    // by the layout around it, and a cached copy was wrong in the one case
+    // that matters: opening the sidebar SLIDES the main panel across without
+    // changing its width, so a ResizeObserver never fires and the thumb stayed
+    // at the closed layout's right edge, drawing a grey line down the middle of
+    // the flight cards. It still tracked the scroll, which is what made it look
+    // like a stray rule rather than a misplaced scrollbar.
+    //
+    // So it is re-read at the top of every update instead. That is one rect
+    // read per scroll frame, in a rAF that is already reading `scrollTop` —
+    // and it is only ever needed while the thumb is visible, which is only
+    // while scrolling. The observers below keep it right for a resize that
+    // happens with the thumb already on screen.
     let box = { top: 0, right: 0, height: 0 }
     const measureBox = () => {
       const r = scroller.getBoundingClientRect()
@@ -79,6 +90,32 @@ export function ScrollIndicator() {
       restDrift = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top
     })
 
+
+    // While the thumb is VISIBLE the layout can move under it without any
+    // scroll happening at all: the sidebar morph slides the panel across over
+    // ~300ms, and re-measuring only on scroll frames leaves the thumb sitting
+    // at the old edge for that whole span — a grey line briefly crossing the
+    // cards, which is the flash the owner saw. A ResizeObserver does not help;
+    // the panel's SIZE never changes.
+    //
+    // So the box is followed frame by frame, but only for the ~800ms the thumb
+    // is up and only while something is actually moving: `follow` stops as
+    // soon as the thumb hides. It writes nothing unless the box has changed.
+    let visible = false
+    let last = ""
+    const follow = () => {
+      if (!visible) return
+      const r = scroller.getBoundingClientRect()
+      const key = `${r.right}|${r.top}|${r.height}`
+      if (key !== last) {
+        last = key
+        box = { top: r.top, right: r.right, height: r.height }
+        thumb.style.left = `${box.right - 6}px`
+        thumb.style.top = `${box.top}px`
+      }
+      requestAnimationFrame(follow)
+    }
+
     const update = () => {
       raf = 0
       // A keep-alive page that isn't the active route is `visibility: hidden`;
@@ -93,6 +130,7 @@ export function ScrollIndicator() {
         thumb.style.opacity = "0"
         return
       }
+      measureBox()
       const topInset = topProbe.offsetHeight
       const bottomInset = bottomProbe.offsetHeight + 6
       const track = box.height - topInset - bottomInset
@@ -137,8 +175,16 @@ export function ScrollIndicator() {
       window.clearTimeout(hideTimer)
       hideTimer = window.setTimeout(() => {
         thumb.style.opacity = "0"
+        visible = false
       }, 800)
+      // The thumb is now on screen, so the box has to be tracked rather than
+      // sampled — see `follow`.
+      if (!visible) {
+        visible = true
+        requestAnimationFrame(follow)
+      }
     }
+
 
     const onScroll = () => {
       if (!raf) raf = requestAnimationFrame(update)
@@ -151,6 +197,7 @@ export function ScrollIndicator() {
     window.addEventListener("orientationchange", measureBox)
 
     return () => {
+      visible = false
       scroller.removeEventListener("scroll", onScroll)
       window.removeEventListener("resize", measureBox)
       window.removeEventListener("orientationchange", measureBox)

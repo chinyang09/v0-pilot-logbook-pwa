@@ -33,8 +33,16 @@ interface GlassContainerProps {
   morphing?: boolean
 }
 
-/** Spring for press bloom / drag-follow — snappy with a soft settle. */
-const PRESS_SPRING = { stiffness: 420, damping: 26, mass: 0.6 }
+/**
+ * Spring for press bloom / drag-follow.
+ *
+ * Softened from { 420, 26, 0.6 }: on a small icon button that was crisp, but on
+ * the NAV PILL — a wide surface, and the one the drag lens hands back to — the
+ * return read as the control snapping to size rather than easing to it. Lower
+ * stiffness with more damping and mass makes the settle gradual at any width,
+ * which is what the owner was comparing the pill against in the first place.
+ */
+const PRESS_SPRING = { stiffness: 260, damping: 30, mass: 0.9 }
 /** Bloom scale while pressed (Apple controls grow, they don't compress). */
 const BLOOM = 1.045
 /**

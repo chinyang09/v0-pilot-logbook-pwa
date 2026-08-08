@@ -22,6 +22,7 @@ import {
   subscribePendingActions,
 } from "@/lib/utils/pending-actions"
 import { HoldProgressBorder } from "@/components/ui/hold-progress-border"
+import { useMenuOpen } from "@/lib/utils/menu-lock"
 
 const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
 
@@ -45,7 +46,29 @@ export interface SwipeAction {
   ariaLabel?: string
   /** Optional — actions may be label-only (e.g. "Clear") */
   icon?: React.ReactNode
-  onClick: () => void
+  /**
+   * Receives the BUTTON's own box, so an action that opens something can
+   * anchor it to itself (the flight card's `…` cascade). Ignore it otherwise.
+   */
+  onClick: (rect?: DOMRect) => void
+  /**
+   * Leave the action panel open after the tap. For an action that reveals more
+   * actions: the row is the thing they belong to, so it stays put beneath them
+   * rather than snapping shut as they appear.
+   */
+  keepOpen?: boolean
+  /**
+   * Fire on the LIFT rather than on the synthesised click.
+   *
+   * A click is the fragile half of a tap: it can be suppressed by the engine
+   * after a drag, swallowed by a capture-phase guard, or arrive after the
+   * element that wanted it has re-rendered. For an action that OPENS something
+   * (the `…`), that showed up as the first tap after a swipe doing nothing at
+   * all — on device only, which is exactly the kind of bug a click's ordering
+   * produces. `pointerup` is the same gesture, one step earlier and with none
+   * of that.
+   */
+  fireOnPointerUp?: boolean
   variant?: "default" | "destructive" | "secondary"
   className?: string
   disabled?: boolean
@@ -87,6 +110,16 @@ interface SwipeableCardProps {
    * into a card on swipe. Use for grouped list/detail rows.
    */
   separated?: boolean
+  /**
+   * Pointer hooks on the OUTER container, for a consumer that wants a gesture
+   * of its own on top of the swipe — the flight card's press-and-hold menu.
+   * They are listeners, not handlers: the swipe still owns the drag, and the
+   * consumer is expected to give up on any movement (see the flight list).
+   */
+  onPointerDown?: (e: React.PointerEvent) => void
+  onPointerMove?: (e: React.PointerEvent) => void
+  onPointerUp?: (e: React.PointerEvent) => void
+  onPointerCancel?: (e: React.PointerEvent) => void
 }
 
 function variantClasses(variant?: SwipeAction["variant"]): string {
@@ -127,17 +160,23 @@ function SwipeActionButton({
     <motion.button
       type="button"
       aria-label={action.ariaLabel ?? action.label}
+      onPointerUp={(e: React.PointerEvent) => {
+        if (!action.fireOnPointerUp || action.disabled || action.holdToConfirm) return
+        e.stopPropagation()
+        action.onClick(e.currentTarget.getBoundingClientRect())
+        if (!action.keepOpen) onClose()
+      }}
       onClick={(e: React.MouseEvent) => {
         e.stopPropagation()
-        if (action.disabled) return
+        if (action.disabled || action.fireOnPointerUp) return
         // Confirm actions don't fire on tap — they hand off to an overlay
         // where the action counts down and the button cancels it.
         if (action.holdToConfirm) {
           onRequestConfirm(action)
           return
         }
-        action.onClick()
-        onClose()
+        action.onClick(e.currentTarget.getBoundingClientRect())
+        if (!action.keepOpen) onClose()
       }}
       disabled={action.disabled}
       style={{ scale, opacity, width: BUTTON_WIDTH, touchAction: "manipulation" }}
@@ -171,6 +210,10 @@ export function SwipeableCard({
   onClick,
   className,
   containerClassName,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
   disabled = false,
   id,
   variant = "card",
@@ -187,6 +230,7 @@ export function SwipeableCard({
   const isCard = variant === "card"
 
   const hasActions = actions.length > 0 && !disabled
+  const menuOpen = useMenuOpen()
   const count = actions.length
   const trailingIndex = count - 1
   const openWidth =
@@ -228,6 +272,7 @@ export function SwipeableCard({
   )
 
   const close = useCallback(() => settle(0), [settle])
+
 
   // Close this card's SWIPE PANEL when another card opens or is tapped.
   //
@@ -359,10 +404,31 @@ export function SwipeableCard({
         separated && "row-divider",
         containerClassName
       )}
+      // THE answer to "a menu is open, so this row is not operable".
+      //
+      // Blocking events at the capture phase says the same thing, but only for
+      // the events you thought to block, in the order the engine happens to
+      // deliver them — which is why this took three passes and still moved a
+      // little on iOS. `pointer-events: none` is not an interception: the row
+      // simply stops being a hit-test target, so nothing can drag it, focus
+      // it, activate it or even give it `:active`, whatever any engine sends.
+      //
+      // And it costs nothing that matters, because a touch that misses the row
+      // lands on the SCROLLER behind it — which still scrolls, natively, on
+      // the compositor. Untouchable and still scrollable is exactly the state
+      // the menu wants everything behind it to be in.
+      style={menuOpen ? { pointerEvents: "none" } : undefined}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
     >
       {/* Separated, rounded action buttons that pop in and fill the row height */}
       {hasActions && (
         <motion.div
+          // Marked so a consumer's own gesture can tell "the row" from "the
+          // row's controls" — see the flight card's hold.
+          data-swipe-actions
           className="absolute inset-y-0 right-0 flex items-stretch justify-end gap-2 overflow-hidden"
           style={{ width: panelWidth }}
         >
@@ -390,7 +456,10 @@ export function SwipeableCard({
           inadvertently swiped while holding. */}
       <motion.div
         ref={contentRef}
-        drag={hasActions && !confirmingAction ? "x" : false}
+        // `menuOpen` is the load-bearing one: while a press-and-hold menu is
+        // up, drag is torn down entirely rather than merely starved of events
+        // (see lib/utils/menu-lock).
+        drag={hasActions && !confirmingAction && !menuOpen ? "x" : false}
         dragDirectionLock
         dragConstraints={{ left: -openWidth, right: 0 }}
         dragElastic={DRAG_ELASTIC}

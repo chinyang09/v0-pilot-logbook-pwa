@@ -97,7 +97,7 @@ export function AlertsDropdown() {
           variant="ghost"
           size="icon"
           aria-label={`Alerts${count > 0 ? `, ${count}` : ""}`}
-          className="relative h-12 w-12 rounded-full"
+          className="relative h-9 w-9 rounded-full"
         >
           <Bell className="h-5 w-5" />
           {count > 0 && (

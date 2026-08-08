@@ -22,7 +22,8 @@ import { cn } from "@/lib/utils";
 import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
 import { SwipeableCard } from "@/components/swipeable-card";
-import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll";
+import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll";
+import { scrollToIndexSettled, scrollToTop } from "@/lib/utils/virtual-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { CrewDetailPanel } from "@/components/crew-detail-panel";
@@ -241,8 +242,12 @@ export default function CrewPage() {
   // Generate FastScroll items from crew names (all personnel for full alphabet coverage)
   const fastScrollItems = useMemo(() => {
     const allCrew = sortedPersonnel.filter((p) => !p.isMe && !p.favorite);
+    // ★ only when something is actually pinned above the alphabet (see the
+    // airports page) — otherwise it is a control that goes nowhere.
+    const hasPinned = allCrew.length < sortedPersonnel.length;
     return generateAlphabetItemsFromList(allCrew.map((p) => p.name || ""), {
       numberPosition: "end",
+      withTop: hasPinned,
     });
   }, [sortedPersonnel]);
 
@@ -393,18 +398,24 @@ export default function CrewPage() {
 
   // Handle FastScroll selection - uses scrollToIndex
   const handleFastScrollSelect = useCallback((letter: string) => {
+    isFastScrollingRef.current = true;
+    setActiveLetterKey(letter);
+    // ★ is the pinned favourites/recent block at the very top, which has no
+    // letter of its own.
+    if (letter === FAST_SCROLL_TOP_KEY) {
+      scrollToTop(rowVirtualizer);
+      setTimeout(() => { isFastScrollingRef.current = false; }, 150);
+      return;
+    }
     const index = letterIndexMap.get(letter);
     if (index !== undefined) {
-      isFastScrollingRef.current = true;
-      setActiveLetterKey(letter);
-      rowVirtualizer.scrollToIndex(index, {
-        align: "start",
-        behavior: "auto",
-      });
-      setTimeout(() => {
-        isFastScrollingRef.current = false;
-      }, 150);
+      // Settled, not a single call: the rows are dynamically measured, so one
+      // scrollToIndex lands short of the letter (see lib/utils/virtual-scroll).
+      scrollToIndexSettled(rowVirtualizer, index);
     }
+    setTimeout(() => {
+      isFastScrollingRef.current = false;
+    }, 250);
   }, [letterIndexMap, rowVirtualizer]);
 
   const handleCrewSelect = useCallback(async (crew: (typeof personnel)[0]) => {

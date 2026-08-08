@@ -71,7 +71,7 @@ export function DashboardActions() {
                 animate={{ width: "auto", opacity: 1 }}
                 exit={{ width: 0, opacity: 0, transition: COLLAPSE }}
                 transition={SPRING}
-                className="flex items-center gap-1 overflow-hidden whitespace-nowrap rounded-full px-2 py-1 text-sm font-medium text-foreground/80 transition-colors hover:bg-foreground/5"
+                className="flex items-center gap-1 overflow-hidden whitespace-nowrap rounded-full px-2 py-1 text-sm font-medium text-[var(--on-glass-label)] transition-colors hover:bg-foreground/5"
               >
                 {MONTHS[selectedMonth.month]} {selectedMonth.year}
                 <ChevronDown
@@ -90,14 +90,17 @@ export function DashboardActions() {
             aria-expanded={showFilter}
             onClick={() => setShowFilter(!showFilter)}
             className={cn(
-              "flex h-12 min-w-[3rem] flex-col items-center justify-center rounded-full px-2 transition-colors",
+              // h-9, like every other control in a GlassButtonGroup: the group
+              // is h-11 with px-1, so a 48px child overflows a 44px box and the
+              // glass — which clips — cut the icon off top and bottom.
+              "flex h-9 min-w-9 flex-col items-center justify-center rounded-full px-2 transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               showFilter
-                ? "bg-primary/15 text-primary"
-                : "text-foreground hover:bg-foreground/5",
+                ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
+                : "text-foreground hover:bg-[var(--on-glass-fill-soft)]",
             )}
           >
-            <SlidersHorizontal className="h-4 w-4" />
+            <SlidersHorizontal className="h-[15px] w-[15px]" />
             <span className="mt-0.5 text-[10px] font-semibold leading-none tabular-nums">
               {filterLabel}
             </span>
@@ -129,7 +132,7 @@ export function DashboardActions() {
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         isActive
                           ? "bg-primary text-primary-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground hover:bg-foreground/5",
+                          : "text-muted-foreground hover:text-foreground hover:bg-[var(--on-glass-fill-soft)]",
                       )}
                     >
                       {p.label}

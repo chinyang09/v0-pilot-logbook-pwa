@@ -20,6 +20,13 @@ import { cn } from "@/lib/utils"
  * - `GlassSearchButton` (components/ui/glass-search-button.tsx) — the
  *   expanding search control; collapsed it matches `GlassIconButton`.
  */
+/**
+ * The shared corner radius. It has to be half the control height or the pill
+ * stops being a stadium — 22 for the 44px controls (they were 56/28, sized to
+ * match another app's chrome on the same iPad, which read as oversized).
+ */
+const CONTROL_RADIUS = 22
+
 export function GlassIconButton({
   onClick,
   disabled,
@@ -34,14 +41,14 @@ export function GlassIconButton({
   children: React.ReactNode
 }) {
   return (
-    <GlassContainer cornerRadius={28}>
+    <GlassContainer cornerRadius={CONTROL_RADIUS}>
       <Button
         variant="ghost"
         size="icon"
         aria-label={ariaLabel}
         onClick={onClick}
         disabled={disabled}
-        className={cn("h-14 w-14 rounded-full [&_svg]:!size-6", className)}
+        className={cn("h-11 w-11 rounded-full [&_svg]:!size-5", className)}
       >
         {children}
       </Button>
@@ -64,12 +71,12 @@ export function GlassTextButton({
   children: React.ReactNode
 }) {
   return (
-    <GlassContainer cornerRadius={28}>
+    <GlassContainer cornerRadius={CONTROL_RADIUS}>
       <Button
         variant="ghost"
         onClick={onClick}
         disabled={disabled}
-        className={cn("h-14 px-4 rounded-full", primary && "text-primary font-semibold", className)}
+        className={cn("h-11 px-3.5 rounded-full text-sm", primary && "text-primary font-semibold", className)}
       >
         {children}
       </Button>
@@ -79,8 +86,8 @@ export function GlassTextButton({
 
 export function GlassButtonGroup({ children }: { children: React.ReactNode }) {
   return (
-    <GlassContainer cornerRadius={28}>
-      <div className="flex items-center gap-1 px-1 h-14">{children}</div>
+    <GlassContainer cornerRadius={CONTROL_RADIUS}>
+      <div className="flex items-center gap-0.5 px-1 h-11">{children}</div>
     </GlassContainer>
   )
 }
@@ -111,7 +118,15 @@ export function GlassGroupButton({
       aria-pressed={ariaPressed}
       onClick={onClick}
       disabled={disabled}
-      className={cn("h-12 w-12 rounded-full [&_svg]:!size-[22px]", active && "text-primary bg-primary/15", className)}
+      className={cn(
+        "h-9 w-9 rounded-full [&_svg]:!size-[19px]",
+        // `--on-glass-active` is THE selected-thing fill, shared with the nav's
+        // gravity blob — see the token. Its foreground is a separate token
+        // because `--primary` on a 32% tint of itself is the same hue at a
+        // similar lightness, which is what made this read as barely selected.
+        active && "text-[var(--on-glass-active-fg)] bg-[var(--on-glass-active)]",
+        className
+      )}
     >
       {children}
     </Button>

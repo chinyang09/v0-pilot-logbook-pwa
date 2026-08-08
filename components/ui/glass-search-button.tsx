@@ -74,31 +74,33 @@ export function GlassSearchButton({
       // drew a hard rectangle around the collapsed circle). The inner search
       // row is clipped by GlassContent's own rounded overflow instead.
       style={{
-        maxWidth: isOpen ? (isDesktop ? 240 : "100vw") : 56,
+        maxWidth: isOpen ? (isDesktop ? 240 : "100vw") : 44,
         // Liquid/bounce: an overshoot easing makes the bar spring open/closed.
         // Kept as a CSS max-width transition (GPU-friendly) to avoid the iOS
         // reflow jank that a JS width spring causes.
         transition: "max-width 0.4s cubic-bezier(0.34, 1.3, 0.64, 1)",
         flex: !isDesktop && isOpen ? 1 : undefined,
-        minWidth: !isDesktop && isOpen ? 0 : 56,
+        // Collapsed it must be exactly as wide as it is tall or it is a stadium,
+        // not a circle, and it stops matching the other action buttons.
+        minWidth: !isDesktop && isOpen ? 0 : 44,
         willChange: isOpen ? "max-width" : undefined,
       }}
     >
-      <GlassContainer cornerRadius={28}>
-        <div className="flex items-center h-14 relative">
+      <GlassContainer cornerRadius={22}>
+        <div className="flex items-center h-11 relative">
           {/* Search icon — always visible, acts as button when collapsed */}
           <button
             type="button"
             onClick={isOpen ? undefined : onToggle}
-            className="absolute left-0 top-0 h-14 w-14 flex items-center justify-center flex-shrink-0"
+            className="absolute left-0 top-0 h-11 w-11 flex items-center justify-center flex-shrink-0"
             style={{ pointerEvents: isOpen ? "none" : "auto" }}
           >
-            <Search className="h-6 w-6" />
+            <Search className="h-5 w-5" />
           </button>
 
           {/* Expanded content — always rendered, fades in/out */}
           <div
-            className="flex items-center gap-2 pl-12 pr-4 w-full transition-opacity duration-150"
+            className="flex items-center gap-2 pl-11 pr-3.5 w-full transition-opacity duration-150"
             style={{
               opacity: isOpen ? 1 : 0,
               pointerEvents: isOpen ? "auto" : "none",
@@ -111,7 +113,7 @@ export function GlassSearchButton({
               onChange={(e) => onChange(e.target.value)}
               placeholder={placeholder}
               tabIndex={isOpen ? 0 : -1}
-              className="flex-1 bg-transparent text-sm outline-none min-w-0 placeholder:text-muted-foreground/60"
+              className="flex-1 bg-transparent text-sm outline-none min-w-0 placeholder:text-[var(--on-glass-muted)]"
             />
             <button
               type="button"

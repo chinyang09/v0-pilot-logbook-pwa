@@ -31,7 +31,9 @@ export function FilterChips<T extends string>({
       role="tablist"
       className={cn(
         // Bleed to the page edge so the row scrolls under the page padding.
-        "flex items-center gap-1.5 overflow-x-auto scrollbar-hide -mx-4 px-4",
+        // The bleed has to be the panel gutter itself, and the strip contains
+        // its own overscroll so a horizontal flick can never reach the page.
+        "flex items-center gap-1.5 overflow-x-auto overscroll-x-contain scrollbar-hide -mx-panel px-panel",
         className
       )}
     >

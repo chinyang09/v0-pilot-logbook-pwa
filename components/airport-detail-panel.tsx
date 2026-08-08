@@ -75,7 +75,7 @@ export function AirportDetailPanel({ icao, onBack, onToggleFavorite }: AirportDe
   return (
     <div className="h-full relative flex flex-col">
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto scrollbar-hide">
+      <div className="flex-1 overflow-auto overscroll-contain scrollbar-hide">
         <ScrollIndicator />
         <div className="h-chrome-top" />
         <div className="px-panel pt-4">

@@ -6,7 +6,6 @@ import { AuthProvider } from "@/components/providers/auth-provider"
 import { ThemeProvider } from "@/components/providers/theme-provider"
 
 import { OCRModelsPreloader } from "@/components/ocr-models-preloader"
-import { ViewportShellCompensator } from "@/components/viewport-shell-compensator"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -64,8 +63,6 @@ export default function RootLayout({
       </head>
       <body className="bg-background font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
-          {/* Measures the iOS standalone viewport shortfall into --shell-bottom-gap */}
-          <ViewportShellCompensator />
           <ServiceWorkerRegister />
           <OCRModelsPreloader />
           <AuthProvider>

@@ -374,14 +374,24 @@ export function generateYearItems(dates: string[]): FastScrollItem[] {
  * @param options.getKey - Function to extract the key from each item (default: identity)
  * @param options.numberPosition - Where to place # (numeric items): "start" or "end" (default: "start")
  */
+/**
+ * The rail's entry for the pinned sections at the very top of a list
+ * (favourites, then recently used). Those rows are not alphabetical, so
+ * without it the rail could reach every letter but not the one place a user
+ * most often wants to get back to.
+ */
+export const FAST_SCROLL_TOP_KEY = "\u2605"
+
 export function generateAlphabetItemsFromList(
   items: string[],
   options: {
     getKey?: (item: string) => string
     numberPosition?: "start" | "end"
+    /** Prepend the ★ favourites/top entry. */
+    withTop?: boolean
   } = {}
 ): FastScrollItem[] {
-  const { getKey = (item) => item, numberPosition = "start" } = options
+  const { getKey = (item) => item, numberPosition = "start", withTop = false } = options
   const letters = new Set<string>()
 
   items.forEach((item) => {
@@ -402,8 +412,8 @@ export function generateAlphabetItemsFromList(
     return a.localeCompare(b)
   })
 
-  return sorted.map((letter) => ({
-    key: letter,
-    label: letter,
-  }))
+  const rail = sorted.map((letter) => ({ key: letter, label: letter }))
+  return withTop
+    ? [{ key: FAST_SCROLL_TOP_KEY, label: FAST_SCROLL_TOP_KEY }, ...rail]
+    : rail
 }

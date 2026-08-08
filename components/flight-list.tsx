@@ -30,8 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Plane,
   Trash2,
-  Lock,
-  Unlock,
+  MoreHorizontal,
   Sun,
   Moon,
   Pen,
@@ -41,9 +40,33 @@ import { SwipeableCard } from "@/components/swipeable-card";
 import { primeFlightCache } from "@/components/flight-form";
 import { FastScroll, type FastScrollItem } from "@/components/ui/fast-scroll";
 import { ScrollIndicator } from "@/components/ui/scroll-indicator";
+import {
+  FlightQuickActions,
+  type FlightQuickAction,
+  type QuickActionAnchor,
+} from "@/components/flight-quick-actions";
+import {
+  FlightContextPreview,
+  type PreviewAnchor,
+} from "@/components/flight-context-preview";
+import { deriveFlight, type DeriveKind } from "@/lib/utils/derive-flight";
+import { insertFlightSorted } from "@/lib/utils/flight-sort";
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, instant?: boolean) => void;
+  /**
+   * Absorb a change in the top spacer's height without the rows appearing to
+   * move.
+   *
+   * The list deliberately has `overflow-anchor: none` — growing the spacer is
+   * how the floating panels PUSH the list, and scroll anchoring exists to
+   * cancel exactly that. But the spacer also changes for reasons that are not
+   * a push: switching the calendar between one month and two makes its grid a
+   * different height while it is already open, and with anchoring off that
+   * silently slid the whole list under the reader's eye. So the push stays
+   * uncompensated and this is called for the resize.
+   */
+  absorbSpacerDelta: (delta: number) => void;
 }
 
 interface FlightListProps {
@@ -54,8 +77,11 @@ interface FlightListProps {
   onTopFlightChange?: (flight: FlightLog | null) => void;
   onScrollStart?: () => void;
   onScroll?: (e: React.UIEvent<HTMLElement>) => void;
-  /** CSS length: the header offset plus the calendar, when open. */
+  /** CSS length: the header offset plus whatever floats above the list. */
   topSpacerHeight?: string;
+  /** CSS transition for the spacer, so it moves in lock-step with whatever is
+   *  growing above it (the calendar) instead of on its own separate curve. */
+  topSpacerTransition?: string;
   headerContent?: React.ReactNode; // Height of the top bar (48px)
   selectedFlightId?: string | null; // Currently selected flight for visual highlighting
 }
@@ -75,6 +101,15 @@ const MONTHS = [
   "NOV",
   "DEC",
 ];
+
+/** How long after a dismissal an open request is treated as the same tap. */
+const CASCADE_REOPEN_GUARD_MS = 350;
+
+/** Press-and-hold before the context preview opens. Long enough not to be
+ *  mistaken for a tap, short enough to feel deliberate. */
+const HOLD_MS = 450;
+/** Movement that cancels the hold — a scroll, or the start of a swipe. */
+const HOLD_SLOP = 8;
 
 function timeToMinutes(hhmm: string): number {
   const parts = hhmm.split(":").map(Number);
@@ -96,8 +131,11 @@ interface SwipeableFlightCardProps {
   flight: FlightLog;
   onEdit: (flight: FlightLog) => void;
   onDelete: (flight: FlightLog) => void;
-  onToggleLock: (flight: FlightLog) => void;
+  onMore: (flight: FlightLog, at: QuickActionAnchor) => void;
+  onHold: (flight: FlightLog, at: PreviewAnchor) => void;
   isSelected?: boolean;
+  /** This row is the one the context preview lifted — see below. */
+  isPreviewing?: boolean;
   displayPrefs?: DisplayPreferences;
 }
 
@@ -105,15 +143,80 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   flight,
   onEdit,
   onDelete,
-  onToggleLock,
+  onMore,
+  onHold,
   isSelected = false,
+  isPreviewing = false,
   displayPrefs,
 }: SwipeableFlightCardProps) {
   const isLocked = flight.isLocked || false;
   const isScheduled = !flight.outTime || !flight.inTime;
 
+  // Press-and-hold opens the context preview. Cancelled by any movement past a
+  // few px, so it never fires on a scroll or on the start of a swipe — those
+  // own the card's other gestures.
+  const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdFromRef = useRef<{ x: number; y: number } | null>(null);
+  const cancelHold = useCallback(() => {
+    if (holdRef.current) clearTimeout(holdRef.current);
+    holdRef.current = null;
+    holdFromRef.current = null;
+  }, []);
+  useEffect(() => cancelHold, [cancelHold]);
+
   return (
     <SwipeableCard
+      onPointerDown={(e) => {
+        cancelHold();
+        // A press on one of the row's CONTROLS is not a press on the row.
+        //
+        // These hooks are on the outer container, so the swipe panel's buttons
+        // are inside them — and a thumb resting on the `…` for the 450ms this
+        // hold takes is an ordinary tap, not a long press. Without this, tapping
+        // `…` opened the PREVIEW instead of the cascade on a phone, where a tap
+        // is comfortably slower than on a trackpad.
+        const target = e.target as Element | null;
+        if (target?.closest?.("button, a, input, textarea, [data-swipe-actions]")) return;
+        holdFromRef.current = { x: e.clientX, y: e.clientY };
+        // The CARD's own box, not the row's. The row wrapper carries the
+        // list's per-row top gap, and the preview opens as an exact copy of
+        // the card sitting on it — 4px out and the morph starts with a jump.
+        const surface = e.currentTarget.querySelector('[data-slot="card"]');
+        const card = (surface ?? e.currentTarget).getBoundingClientRect();
+        const box = { left: card.left, top: card.top, width: card.width, height: card.height };
+        // Carried onto the synthetic cancel below — a PointerEvent built
+        // without them reports (0, 0), and framer reads the point off the
+        // event it ends on.
+        const { pointerId, pointerType, clientX, clientY } = e;
+        holdRef.current = setTimeout(() => {
+          holdRef.current = null;
+          // END THIS CARD'S POINTER SESSION before the preview opens. framer
+          // registers its window pointermove/pointerup listeners on
+          // pointerdown; the overlay then takes the lift, so framer would
+          // never see the gesture finish and the session would stay live —
+          // that is the ghost swipe this cost us last time. `pointercancel` is
+          // what this genuinely is: the press stopped being a drag.
+          window.dispatchEvent(
+            new PointerEvent("pointercancel", {
+              pointerId,
+              pointerType,
+              clientX,
+              clientY,
+              bubbles: true,
+            })
+          );
+          onHold(flight, box);
+        }, HOLD_MS);
+      }}
+      onPointerMove={(e) => {
+        const from = holdFromRef.current;
+        if (!from) return;
+        if (Math.abs(e.clientX - from.x) > HOLD_SLOP || Math.abs(e.clientY - from.y) > HOLD_SLOP) {
+          cancelHold();
+        }
+      }}
+      onPointerUp={cancelHold}
+      onPointerCancel={cancelHold}
       // Stable across the virtualiser recycling this row, so an armed delete
       // keeps its overlay while the list scrolls.
       id={`flight-${flight.id}`}
@@ -125,8 +228,24 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
       }}
       actions={[
         {
-          icon: isLocked ? <Unlock className="h-5 w-5" /> : <Lock className="h-5 w-5" />,
-          onClick: () => onToggleLock(flight),
+          // `…` opens the rest of the card's actions as their own buttons,
+          // cascading out of this one — see FlightQuickActions. `keepOpen`
+          // because the row they belong to should stay put beneath them.
+          icon: <MoreHorizontal className="h-5 w-5" />,
+          ariaLabel: "More actions",
+          onClick: (rect) => {
+            if (!rect) return;
+            onMore(flight, {
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              height: rect.height,
+            });
+          },
+          keepOpen: true,
+          // See `fireOnPointerUp` — the click after a swipe was being eaten on
+          // device, which cost the first tap every time.
+          fireOnPointerUp: true,
           variant: "secondary",
         },
         {
@@ -145,7 +264,13 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           isLocked && "opacity-75",
           isScheduled && "border-l-2 border-l-orange-600/70 dark:border-l-orange-400/70",
           isSelected && "bg-primary/20 border-primary",
-          !isSelected && "hover:bg-muted/50"
+          !isSelected && "hover:bg-muted/50",
+          // The preview opens as an exact copy of this card, ON this card, so
+          // while it is up the original would show through the scrim as a
+          // second copy of the same flight. It comes back the moment the
+          // preview has collapsed back onto it — which is the same box, so
+          // there is nothing to see.
+          isPreviewing && "invisible"
         )}
       >
         <CardContent className="px-3 py-1">
@@ -205,6 +330,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       onScrollStart,
       onScroll,
       topSpacerHeight = "0px",
+      topSpacerTransition,
       headerContent,
       selectedFlightId,
     },
@@ -344,6 +470,15 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             requestAnimationFrame(animate);
           }
         },
+        absorbSpacerDelta: (delta: number) => {
+          const container = scrollContainerRef.current;
+          if (!container || !delta) return;
+          // At the very top there is nothing to absorb — the rows are already
+          // against the spacer, so shifting scrollTop would scroll the list
+          // away from the top instead of holding it still.
+          if (container.scrollTop <= 0) return;
+          container.scrollTop += delta;
+        },
       }),
       [flights, rowVirtualizer]
     );
@@ -482,6 +617,71 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       onDeleted?.();
     }, [onDeleted]);
 
+    // ─── The `…` cascade ───
+    // Opened from the swipe panel's own `…` button, and anchored to it, so the
+    // run of extra actions comes out of the control that asked for them. The
+    // swipe panel deliberately stays OPEN underneath (`keepOpen`).
+    const [held, setHeld] = useState<{ flight: FlightLog; at: QuickActionAnchor } | null>(null);
+    // When the cascade is dismissed by a tap on the `…` itself, the two halves
+    // of that tap can land on either side of the unmount: the capture-phase
+    // swallow closes it on `pointerup`, React tears the listeners down, and the
+    // `click` that follows is no longer swallowed — so it reaches the button
+    // and reopens. Chromium/Android orders it that way; WebKit did not, which
+    // is why it looked like a platform bug. A close STAMP settles it either
+    // way: an open request arriving in the wake of a close is that same tap.
+    const closedAtRef = useRef(0);
+    const closeCascade = useCallback(() => {
+      closedAtRef.current = Date.now();
+      setHeld(null);
+    }, []);
+    // ─── The press-and-hold context preview ───
+    // A different thing from the `…` cascade: that is a menu you go to, this is
+    // a LOOK at one row without leaving your place in the list.
+    const [preview, setPreview] = useState<{ flight: FlightLog; at: PreviewAnchor } | null>(null);
+    const handleHold = useCallback((flight: FlightLog, at: PreviewAnchor) => {
+      // Any open swipe panel would sit under the overlay; close it first.
+      window.dispatchEvent(new CustomEvent("swipe-card-close-others", { detail: null }));
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(8);
+      setPreview({ flight, at });
+    }, []);
+
+    const handleMore = useCallback((flight: FlightLog, at: QuickActionAnchor) => {
+      if (Date.now() - closedAtRef.current < CASCADE_REOPEN_GUARD_MS) return;
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(6);
+      setHeld({ flight, at });
+    }, []);
+
+    // Shared by the `…` cascade and the context preview — one action set, one
+    // implementation. The caller passes its own flight because the two hold it
+    // in different state.
+    const handleQuickAction = useCallback(
+      async (action: FlightQuickAction, from?: FlightLog) => {
+        const source = from ?? held?.flight;
+        if (!source) return;
+        if (action === "lock") {
+          await handleToggleLock(source);
+          return;
+        }
+        if (action === "share") {
+          // TODO: sharing a flight (a rendered card / an ICS / a CSV row) is
+          // not designed yet. Left as an explicit no-op rather than a menu
+          // item that silently does nothing under a different name.
+          return;
+        }
+        const { addFlight } = await import("@/lib/db");
+        const created = await addFlight(deriveFlight(source, action as DeriveKind));
+        // Placed by the shared comparator, never prepended — see flight-sort.
+        mutate(
+          CACHE_KEYS.flights,
+          (prev: FlightLog[] | undefined) => insertFlightSorted(prev ?? [], created),
+          { revalidate: false }
+        );
+        primeFlightCache(created);
+        onEdit?.(created);
+      },
+      [held, handleToggleLock, onEdit]
+    );
+
     // FastScroll selection handler (year-based) with instant scrolling
     const handleFastScrollSelect = useCallback(
       (year: string) => {
@@ -551,14 +751,16 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
         <>
           <div
             ref={scrollContainerRef}
+            data-flight-scroller
             className="h-full overflow-y-auto overscroll-contain"
+            style={{ overflowAnchor: "none" }}
             onTouchStart={handleTouchStart}
             onMouseDown={handleTouchStart}
             onWheel={handleWheelStart}
           >
             <div
-              style={{ height: topSpacerHeight }}
-              className="transition-[height] duration-300 ease-in-out"
+              style={{ height: topSpacerHeight, transition: topSpacerTransition }}
+              className={topSpacerTransition ? undefined : "transition-[height] duration-300 ease-in-out"}
             />
             {headerContent}
             <div className="px-panel pt-2">
@@ -579,20 +781,28 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           {/* Main scrollable container */}
           <div
             ref={scrollContainerRef}
+            data-flight-scroller
             // scrollbar-hide + ScrollIndicator: the native overlay indicator
             // spans from the screen edge over the status bar; the inset
             // replacement starts below the action buttons, like native.
             className="h-full overflow-y-auto flex-1 overscroll-contain scrollbar-hide"
-            style={{ contain: "strict" }}
+            // `overflow-anchor: none` is load-bearing. When the spacer above
+            // the viewport grows (the calendar opening), the browser's scroll
+            // ANCHORING compensates by bumping scrollTop the same amount, so
+            // the list appears not to move at all — and the adjustment it
+            // makes is reported as a downward scroll, which is what hid the
+            // nav pill. Anchoring off, the added height simply pushes the
+            // content down, at any scroll position.
+            style={{ contain: "strict", overflowAnchor: "none" }}
             onTouchStart={handleTouchStart}
             onMouseDown={handleTouchStart}
             onWheel={handleWheelStart}
           >
             <ScrollIndicator />
-            {/* Top spacer for calendar */}
+            {/* Top spacer: the floating chrome, plus the calendar when open */}
             <div
-              style={{ height: topSpacerHeight }}
-              className="transition-[height] duration-300 ease-in-out"
+              style={{ height: topSpacerHeight, transition: topSpacerTransition }}
+              className={topSpacerTransition ? undefined : "transition-[height] duration-300 ease-in-out"}
             />
 
             {headerContent}
@@ -661,8 +871,10 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                             flight={flight}
                             onEdit={handleEdit}
                             onDelete={performDelete}
-                            onToggleLock={handleToggleLock}
+                            onMore={handleMore}
+                            onHold={handleHold}
                             isSelected={selectedFlightId === flight.id}
+                            isPreviewing={preview?.flight.id === flight.id}
                             displayPrefs={preferences.display}
                           />
                         </div>
@@ -700,6 +912,24 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             </div>
           )}
         </div>
+
+        {held && (
+          <FlightQuickActions
+            flight={held.flight}
+            anchor={held.at}
+            onSelect={handleQuickAction}
+            onClose={closeCascade}
+          />
+        )}
+        {preview && (
+          <FlightContextPreview
+            flight={preview.flight}
+            anchor={preview.at}
+            displayPrefs={preferences.display}
+            onSelect={(a) => handleQuickAction(a, preview.flight)}
+            onClose={() => setPreview(null)}
+          />
+        )}
       </>
     );
   }

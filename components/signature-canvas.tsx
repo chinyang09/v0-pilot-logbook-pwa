@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Trash2, Check, PenLine, UserCheck } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type {
   SignaturePoint,
   SignatureStroke,
@@ -40,6 +41,18 @@ interface SignatureCanvasProps {
   initialSignature?: FlightSignature | null;
   flightCrew?: SignatureCrewMember[];
   disabled?: boolean;
+  /**
+   * Height of the drawing surface. 120 inline; the full-screen signing dialog
+   * hands it the room it actually has, because a signature drawn in a 120px
+   * strip is a scribble — the stored strokes are normalised to their bounding
+   * box, so a bigger surface is a more faithful signature, not just a bigger
+   * one.
+   */
+  canvasHeight?: number;
+  /** Hide the crew/licence header (the dialog puts it in its own chrome). */
+  hideSignerFields?: boolean;
+  /** Fill the parent instead of sitting in a bordered card. */
+  fill?: boolean;
 }
 
 export function SignatureCanvas({
@@ -49,6 +62,9 @@ export function SignatureCanvas({
   initialSignature,
   flightCrew = [],
   disabled = false,
+  canvasHeight = 120,
+  hideSignerFields = false,
+  fill = false,
 }: SignatureCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -76,7 +92,10 @@ export function SignatureCanvas({
     const updateSize = () => {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        setCanvasSize({ width: rect.width, height: 120 });
+        setCanvasSize({
+          width: rect.width,
+          height: fill ? Math.max(120, Math.round(rect.height)) : canvasHeight,
+        });
       }
     };
 
@@ -88,7 +107,7 @@ export function SignatureCanvas({
       clearTimeout(timer);
       window.removeEventListener("resize", updateSize);
     };
-  }, [selectedCrewId, isLocked]);
+  }, [selectedCrewId, isLocked, canvasHeight, fill]);
 
   // Draw all strokes on canvas
   // For locked/saved signatures: use vector rendering with aspect ratio preservation
@@ -423,9 +442,21 @@ export function SignatureCanvas({
 
   // Editable state
   return (
-    <div className="rounded-lg border border-border bg-card overflow-hidden">
+    <div
+      className={cn(
+        "overflow-hidden",
+        fill
+          ? "flex h-full flex-col bg-background"
+          : "rounded-lg border border-border bg-card"
+      )}
+    >
       {/* Crew Selection Header */}
-      <div className="px-4 py-3 bg-muted/50 border-b border-border space-y-3">
+      <div
+        className={cn(
+          "px-4 py-3 bg-muted/50 border-b border-border space-y-3",
+          hideSignerFields && "hidden"
+        )}
+      >
         <div className="space-y-1.5">
           <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Signing Crew Member
@@ -478,7 +509,10 @@ export function SignatureCanvas({
       {/* Signature Canvas - only show when crew is selected */}
       {canSign ? (
         <>
-          <div ref={containerRef} className="relative bg-background">
+          <div
+            ref={containerRef}
+            className={cn("relative bg-background", fill && "flex-1 min-h-0")}
+          >
             <canvas
               ref={canvasRef}
               width={canvasSize.width}
@@ -505,7 +539,7 @@ export function SignatureCanvas({
           </div>
 
           {/* Action Buttons */}
-          <div className="px-4 py-3 bg-muted/30 border-t border-border">
+          <div className={cn("px-4 py-3 bg-muted/30 border-t border-border", fill && "pb-chrome")}>
             <div className="flex items-center justify-between gap-3">
               <Button
                 variant="outline"

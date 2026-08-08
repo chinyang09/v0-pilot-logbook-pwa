@@ -107,7 +107,32 @@ const TAB_CONFIG: Record<
 const SIDEBAR_WIDTH = 199
 const SIDEBAR_MARGIN = 4 // distance from viewport edge when expanded
 const SIDEBAR_INNER_WIDTH = SIDEBAR_WIDTH - SIDEBAR_MARGIN * 2 // 191
-const PILL_HEIGHT = 56 // h-14
+const PILL_HEIGHT = 44 // h-11
+/**
+ * The MOBILE bottom pill is bigger than the desktop one.
+ *
+ * They are not the same control at the same size: the desktop pill is a row of
+ * text tabs in a dense header, the phone's is the app's primary navigation and
+ * the only one, with an icon over a label and a thumb rather than a cursor
+ * aiming at it. Matched to the platform's own bottom bars (and to Claude's).
+ */
+const MOBILE_PILL_HEIGHT = 56
+/**
+ * The bottom bar is a STADIUM — half its own height, so its ends are
+ * semicircular and it reads as one continuous capsule, the same rule the 44px
+ * controls follow (`CONTROL_RADIUS`). It is only a separate constant because
+ * the bar is a different height.
+ *
+ * A squarer corner was tried at 18 (about a third of the height, the
+ * proportion the reference tab bars use) and rejected on the look: what makes
+ * those read as squircles is CONTINUOUS CURVATURE, not a smaller radius, and
+ * a circular arc at that radius just looks like a rounded rectangle. Drawing
+ * the real thing needs `corner-shape`, and a corner shape one engine falls
+ * back from would leave iOS and Android with different bars — the one thing
+ * the one-look rule forbids. Between a rounded rect and a capsule, the
+ * capsule.
+ */
+const MOBILE_PILL_RADIUS = MOBILE_PILL_HEIGHT / 2
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
 // ─── Morph timing ────────────────────────────────────────────
@@ -219,13 +244,20 @@ function SyncIconButton({ className }: { className?: string }) {
  * much as a five-tab sweep — a short move that deforms proportionally less
  * just looks limp.
  */
-const GRAVITY_SPRING_MS = 480
-const TRAVEL_ZETA = 0.78
-const TRAVEL_OMEGA = 9.2
-const SHAPE_ZETA = 0.32
-const SHAPE_OMEGA = 9.5
+/* Softened twice, on the owner's read that it was still "aggressive" and should
+   be "like Apple's lens to blob": longer (480 → 620ms), the shape oscillator
+   nearly critically damped (ζ 0.32 → 0.72) so it does not ring, and both
+   deformations cut to a quarter of where they started (travel 0.20 → 0.06,
+   handoff 0.34 → 0.07). At this size the wobble is felt rather than watched,
+   which is the whole intent — the blob should look like it has weight, not
+   like it is made of jelly. */
+const GRAVITY_SPRING_MS = 680
+const TRAVEL_ZETA = 0.86
+const TRAVEL_OMEGA = 8.4
+const SHAPE_ZETA = 0.85
+const SHAPE_OMEGA = 7.0
 /** Peak deformation along the direction of travel. */
-const STRETCH = 0.2
+const STRETCH = 0.03
 /** How much of it the cross axis gives back — near 1 reads as volume held. */
 const CROSS = 0.85
 const SPRING_SAMPLES = 40
@@ -244,6 +276,22 @@ function springTrack(): { xs: number[]; ss: number[] } {
   const peak = Math.max(...raw.map(Math.abs)) || 1
   return { xs, ss: raw.map((s) => s / peak) }
 }
+type GravRect = { left: number; top: number; width: number; height: number }
+
+/** Sub-pixel-tolerant equality, so a reflow that moves nothing is not news. */
+function sameRects(a: GravRect[], b: GravRect[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((r, i) => {
+    const o = b[i]
+    return (
+      Math.abs(r.left - o.left) < 0.5 &&
+      Math.abs(r.top - o.top) < 0.5 &&
+      Math.abs(r.width - o.width) < 0.5 &&
+      Math.abs(r.height - o.height) < 0.5
+    )
+  })
+}
+
 function GravityIndicator({
   containerRef,
   activeIndex,
@@ -269,7 +317,7 @@ function GravityIndicator({
   instant?: boolean
 }) {
   const reduce = useReducedMotion()
-  const [rects, setRects] = useState<{ left: number; top: number; width: number; height: number }[]>([])
+  const [rects, setRects] = useState<GravRect[]>([])
 
   useEffect(() => {
     const el = containerRef.current
@@ -277,17 +325,22 @@ function GravityIndicator({
     const measure = () => {
       const base = el.getBoundingClientRect()
       const items = Array.from(el.querySelectorAll<HTMLElement>("[data-grav-item]"))
-      setRects(
-        items.map((it) => {
-          const r = it.getBoundingClientRect()
-          return {
-            left: r.left - base.left + el.scrollLeft,
-            top: r.top - base.top + el.scrollTop,
-            width: r.width,
-            height: r.height,
-          }
-        }),
-      )
+      const next = items.map((it) => {
+        const r = it.getBoundingClientRect()
+        return {
+          left: r.left - base.left + el.scrollLeft,
+          top: r.top - base.top + el.scrollTop,
+          width: r.width,
+          height: r.height,
+        }
+      })
+      // Only publish a CHANGE. A ResizeObserver fires for plenty of things
+      // that move nothing — a route settling, a font landing, a sub-pixel
+      // reflow — and each `setRects` with an equal-but-new array re-ran the
+      // animation effect. That is the mid-flight flash: the guard below
+      // catches a re-fire to the same destination, but only after the
+      // measurement has already been taken as news.
+      setRects((prev) => (sameRects(prev, next) ? prev : next))
     }
     const ro = new ResizeObserver(measure)
     ro.observe(el)
@@ -407,15 +460,30 @@ function GravityIndicator({
         // target, so the animation simply falls back onto it when it
         // finishes). Only the box's SIZE eases, a touch quicker than the
         // spring so a widening tab has settled before the blob stops moving.
-        transition:
-          reduce || instant
-            ? "none"
-            : [`width 0.34s ${SETTLE_BEZIER}`, `height 0.34s ${SETTLE_BEZIER}`].join(", "),
+        // Opacity eases even when `instant` is set, because `instant` is about
+        // PLACEMENT. The drag lens's release un-hides the blob at the
+        // destination and then dissolves the glass off it, so a hard 0→1 here
+        // would pop the highlight in under a bead that is still flying; over
+        // 0.34s it comes up as the lens arrives.
+        transition: [
+          ...(reduce || instant
+            ? []
+            : [`width 0.34s ${SETTLE_BEZIER}`, `height 0.34s ${SETTLE_BEZIER}`]),
+          ...(reduce ? [] : ["opacity 0.34s ease"]),
+        ].join(", ") || "none",
       }}
     >
       <div
         ref={blobRef}
-        className={cn("h-full w-full rounded-full bg-foreground/10", className)}
+        // `--on-glass-active` — the SAME fill an action button gets when it is
+        // the active option. The blob and that chip say the same thing ("this
+        // is the one you are on"), so a grey blob here and a tinted chip in
+        // the header read as two different systems.
+        //
+        // Opaque, like everything painted on glass: it sits on a translucent
+        // slab, so a translucent fill lets the page through twice and the
+        // highlight changes tone as the list scrolls underneath it.
+        className={cn("h-full w-full rounded-full bg-[var(--on-glass-active)]", className)}
       />
     </div>
   )
@@ -527,6 +595,7 @@ function PillBarContent({
   /** Holds the cloned tab strip, positioned to sit exactly over the real one. */
   const refractCopyRef = useRef<HTMLDivElement | null>(null)
   const [lensPhase, setLensPhase] = useState<"idle" | "drag" | "settle">("idle")
+  /** Bumped when the drag lens hands the blob back — see GravityIndicator. */
   const [lensIndex, setLensIndex] = useState(-1)
   // Chromium-only real refraction map — the backdrop (the pill) genuinely
   // MINIFIES through the lens's bezel, like Apple's glass. Generated once when
@@ -830,7 +899,11 @@ function PillBarContent({
     settleTimerRef.current = setTimeout(() => {
       setLensPhase("idle")
       setLensIndex(-1)
-    }, 470)
+      // No arrival wobble here any more. It existed to cover the hard cut
+      // when the lens's opaque copy was swapped for the real blob; the blob is
+      // now already in place and lit, and a wobble after everything has come
+      // to rest reads as a second arrival.
+    }, 620)
   }, [tabs, router, squishX, squishY, nudgeX])
 
   useEffect(() => () => {
@@ -840,13 +913,20 @@ function PillBarContent({
   const lensActive = lensPhase !== "idle"
 
   return (
-    <div data-pill-row className="flex items-center h-14 px-2">
+    <div
+      data-pill-row
+      className={cn(
+        "flex items-center px-1.5",
+        // The bottom bar is the taller of the two — see MOBILE_PILL_HEIGHT.
+        mode === "desktop" ? "h-11" : "h-14"
+      )}
+    >
       {/* Sidebar toggle — fixed width bookend */}
       <button
         onClick={onToggleSidebar}
-        className="flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
+        className="flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0"
       >
-        <PanelLeft className="h-6 w-6" />
+        <PanelLeft className="h-5 w-5" />
       </button>
 
       {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
@@ -879,7 +959,11 @@ function PillBarContent({
           // left-and-right springing that made the landing look mechanical.
           activeIndex={lensActive && lensIndex >= 0 ? lensIndex : activeIndex}
           revision={tabs.join(",")}
-          hidden={lensActive}
+          // Hidden only while the finger is DRAGGING. On release it fades up
+          // at the destination, behind the row, so the glass dissolves onto a
+          // highlight that already has the icon and label on it. The lens used
+          // to paint its own opaque copy instead, which sat OVER the content.
+          hidden={lensPhase === "drag"}
           instant={lensActive}
         />
         {tabs.map((tabKey, i) => {
@@ -904,8 +988,10 @@ function PillBarContent({
                 <span
                   data-grav-item
                   className={cn(
-                    "inline-flex items-center justify-center h-9 px-4 rounded-full text-sm font-medium transition-colors",
-                    highlighted ? "text-primary" : "text-foreground/60 active:text-foreground"
+                    "inline-flex items-center justify-center h-8 px-3.5 rounded-full text-sm font-medium transition-colors",
+                    highlighted
+                      ? "text-[var(--on-glass-active-fg)]"
+                      : "text-foreground"
                   )}
                 >
                   {tab.label}
@@ -914,12 +1000,14 @@ function PillBarContent({
                 <span
                   data-grav-item
                   className={cn(
-                    "inline-flex flex-col items-center justify-center gap-0.5 h-11 px-3 rounded-full transition-colors",
-                    highlighted ? "text-primary" : "text-foreground/60 active:text-foreground"
+                    "inline-flex flex-col items-center justify-center gap-0.5 h-12 px-3 rounded-full transition-colors",
+                    highlighted
+                      ? "text-[var(--on-glass-active-fg)]"
+                      : "text-foreground"
                   )}
                 >
-                  <Icon className="h-6 w-6" />
-                  <span className="text-[9px] leading-none">{tab.label}</span>
+                  <Icon className="h-[22px] w-[22px]" />
+                  <span className="text-[10px] leading-none">{tab.label}</span>
                 </span>
               )}
             </Link>
@@ -960,7 +1048,6 @@ function PillBarContent({
               </div>
             </div>
             <div className="PillDragLens-rim" />
-            <div className="PillDragLens-grey" />
           </div>,
           document.body
         )}
@@ -974,7 +1061,10 @@ function PillBarContent({
 // ─── Shared sidebar nav content ──────────────────────────────
 
 /** Height of the floating toggle/sync strip the nav scrolls beneath. */
-const SIDEBAR_HEADER_HEIGHT = 56
+/* The band the drawer + sync icons float in. It is the PILL's height, so the
+   two sets of icons land on the same line when the nav is a sidebar and when
+   it is a pill — at 56 against a 44px pill the sidebar's sat visibly lower. */
+const SIDEBAR_HEADER_HEIGHT = PILL_HEIGHT
 
 /**
  * The sidebar's floating top strip: the drawer toggle and the sync icon, over
@@ -1014,9 +1104,9 @@ function SidebarTopStrip({ onToggle }: { onToggle: () => void }) {
       <div aria-hidden className="SidebarTopBlur" />
       <button
         onClick={onToggle}
-        className="relative flex items-center justify-center h-10 w-10 rounded-full text-foreground/70 active:text-foreground flex-shrink-0"
+        className="relative flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0"
       >
-        <PanelLeft className="h-6 w-6" />
+        <PanelLeft className="h-5 w-5" />
       </button>
       <SyncIconButton className="relative" />
     </div>
@@ -1027,19 +1117,11 @@ function SidebarNav({
   pathname,
   className,
   topInset = 0,
-  settled = true,
 }: {
   pathname: string
   className?: string
   /** Space reserved at the top for chrome floating over the list. */
   topInset?: number
-  /**
-   * False while the panel is still morphing. The blob is placed without
-   * animation then: its metrics are re-measured as the panel grows, so a spring
-   * started mid-morph only gets going as the panel lands and the blob visibly
-   * arrives a beat after the sidebar has finished opening.
-   */
-  settled?: boolean
 }) {
   const navRef = useRef<HTMLElement>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
@@ -1102,12 +1184,18 @@ function SidebarNav({
           trailing the items by a frame. Being inside means the nav's own mask
           covers it too, so it dissolves under the top strip along with its own
           row (which is why it no longer needs a separate masked layer). */}
+      {/* ALWAYS instant in the sidebar. The spring is a pill-bar effect: the
+          list is a scroller whose metrics re-measure as a route settles and as
+          the panel finishes morphing, and every re-measure was another chance
+          for the blob to re-fire and read as a double flash. A vertical list
+          also gives the travel nothing to say — the blob just moves down a row.
+          Do not put the animation back here to match the pill. */}
       <GravityIndicator
         containerRef={navRef}
         activeIndex={activeIndex}
         className="rounded-full"
         revision={orderedHrefs.join(",")}
-        instant={!settled}
+        instant
       />
 
       {/* One pixel taller than the scroller so the list always has somewhere to
@@ -1128,12 +1216,12 @@ function SidebarNav({
               onClick={() => toggleSection(section.label)}
               className="flex items-center justify-between w-full px-3 mb-1 group cursor-pointer"
             >
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--on-glass-muted)]">
                 {section.label}
               </span>
               <ChevronDown
                 className={cn(
-                  "h-4 w-4 text-muted-foreground/50 transition-transform duration-200",
+                  "h-4 w-4 text-[var(--on-glass-muted)] transition-transform duration-200",
                   isCollapsed && "-rotate-90"
                 )}
               />
@@ -1176,14 +1264,14 @@ function SidebarNavItem({
       draggable={false}
       onContextMenu={suppressLinkMenu}
       className={cn(
-        "relative z-[1] flex items-center gap-3 px-3.5 py-2.5 rounded-full text-sm transition-all duration-150",
+        "relative z-[1] flex items-center gap-3 px-3 py-2 rounded-full text-sm transition-all duration-150",
         "active:scale-[0.98]",
         isActive
-          ? "text-primary font-medium"
-          : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+          ? "text-[var(--on-glass-active-fg)] font-medium"
+          : "text-foreground hover:bg-[var(--on-glass-fill-soft)]"
       )}
     >
-      <span className={cn("flex-shrink-0 [&_svg]:!size-6", isActive ? "text-primary" : "text-foreground/50")}>
+      <span className={cn("flex-shrink-0 [&_svg]:!size-5", isActive ? "text-[var(--on-glass-active-fg)]" : "text-foreground")}>
         {icon}
       </span>
       {label}
@@ -1200,13 +1288,13 @@ function SidebarNavItem({
  * That is not the box a `position: fixed` element is laid out in once a
  * browser has chrome of its own: on iPad Safari in PORTRAIT the sidebar came
  * out taller than the visible page and overshot both ends, its top strip
- * clipped away. `100%` here resolves against the fixed element's containing
- * block, which is BODY — body carries a `transform` precisely so that every
- * fixed element anchors to the application shell rather than to the initial
- * containing block, the box the WebKit installed-PWA bug shrinks by the bottom
- * inset (see the body rule in globals.css). The panel is therefore exactly as
- * tall as the app shell on every surface, with no listener and nothing to
- * fall out of sync.
+ * clipped away. `100%` here resolves against the fixed element's own
+ * containing block — the viewport, which is precisely the box a fixed element
+ * is allowed to occupy (a browser keeps fixed content clear of its toolbars,
+ * and an installed app has none). The panel is therefore exactly as tall as
+ * the visible app on every surface, with no listener and nothing to fall out
+ * of sync. Do not swap it for a viewport UNIT: `vh` is the large viewport in a
+ * browser tab and would overshoot again, which is the bug this replaced.
  *
  * BOTH ends come off, not just the top. The desktop panel is top-anchored and
  * the mobile one bottom-anchored, and each has to end clear of the OTHER end
@@ -1459,7 +1547,7 @@ function DesktopPillMorph({
       onTransitionEnd={handleTransitionEnd}
     >
         <GlassContainer
-          cornerRadius={isSidebarShape ? 20 : 28}
+          cornerRadius={isSidebarShape ? 20 : 22}
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           // In PILL shape the nav is a control and behaves like one: it blooms
@@ -1517,7 +1605,6 @@ function DesktopPillMorph({
                 pathname={pathname}
                 className="h-full"
                 topInset={SIDEBAR_HEADER_HEIGHT}
-                settled={phase === "sidebar"}
               />
               <SidebarTopStrip onToggle={onToggleSidebar} />
             </div>
@@ -1591,9 +1678,13 @@ function MobilePillMorph({
     left: isSidebarShape ? SIDEBAR_MARGIN : "50%",
     transform: isSidebarShape
       ? "translateX(0)"
-      : `translateX(-50%) translateY(${hideNavbar ? "calc(100% + 24px)" : "0%"})`,
+      // NEVER hidden. It used to slide away on scroll, which meant the primary
+      // navigation of the app was missing exactly when you had been reading for
+      // a while and wanted to go somewhere else — and it came back on a scroll
+      // UP, so getting it required a gesture that also moved the content.
+      : "translateX(-50%)",
     width: isSidebarShape ? SIDEBAR_INNER_WIDTH : (pillWidth ?? "auto"),
-    height: isSidebarShape ? EXPANDED_HEIGHT : PILL_HEIGHT,
+    height: isSidebarShape ? EXPANDED_HEIGHT : MOBILE_PILL_HEIGHT,
     transition,
   }
 
@@ -1636,7 +1727,7 @@ function MobilePillMorph({
         onTransitionEnd={handleTransitionEnd}
       >
         <GlassContainer
-          cornerRadius={isSidebarShape ? 20 : 28}
+          cornerRadius={isSidebarShape ? 20 : MOBILE_PILL_RADIUS}
           className="h-full"
           contentClassName="h-full !overflow-hidden !flex !flex-col"
           // In PILL shape the nav is a control and behaves like one: it blooms
@@ -1657,7 +1748,7 @@ function MobilePillMorph({
               opacity: phase === "pill" ? 1 : 0,
               visibility: phase === "pill" ? "visible" : "hidden",
               pointerEvents: phase === "pill" ? "auto" : "none",
-              height: phase === "pill" ? PILL_HEIGHT : 0,
+              height: phase === "pill" ? MOBILE_PILL_HEIGHT : 0,
               transition: "opacity 0.2s ease",
             }}
           >
@@ -1695,7 +1786,6 @@ function MobilePillMorph({
                 pathname={pathname}
                 className="h-full"
                 topInset={SIDEBAR_HEADER_HEIGHT}
-                settled={phase === "sidebar"}
               />
               <SidebarTopStrip onToggle={() => setSidebarOpen(false)} />
             </div>

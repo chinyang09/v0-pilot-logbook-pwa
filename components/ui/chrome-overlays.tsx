@@ -28,20 +28,28 @@ type Side = "top" | "bottom";
 const FADE = 64;
 
 /**
- * The main panel header's gradient, anchored to the fading edge. Deliberately
- * NEVER fully solid: the band is a translucent veil over the blur, so content
- * scrolling under the status bar stays visible as a frosted ghost — a solid
- * run here read as the app stopping at the status bar, which is exactly the
- * web-page-in-a-frame look the edge-to-edge work removed. The blur carries
- * the legibility; the veil only dims.
+ * The main panel header's gradient, anchored to the fading edge.
+ *
+ * Weighted against the reference (iOS's own layered headers, as in the GitHub
+ * app) with ONE correction that is easy to miss: an installed iOS PWA already
+ * gets Apple's own `black-translucent` treatment over the status-bar strip, so
+ * whatever this paints STACKS on top of it. Matching the reference's apparent
+ * darkness by eye in a browser therefore overshoots badly once installed —
+ * which is exactly what happened at 88%: on device the content under the bar
+ * was unreadable, where in the reference you can still make out the title.
+ *
+ * 66% at the anchored edge is that reference MINUS what iOS contributes.
+ *
+ * The direction is handled for free — `--background` IS the theme, so this
+ * darkens on the dark theme and lightens on the light one with no branch.
  */
 function fadeFor(side: Side): string {
   const to = side === "top" ? "bottom" : "top";
   return [
     `linear-gradient(to ${to}`,
-    `color-mix(in srgb, var(--background) 50%, transparent) 0`,
-    `color-mix(in srgb, var(--background) 50%, transparent) calc(100% - ${FADE}px)`,
-    `color-mix(in srgb, var(--background) 30%, transparent) calc(100% - ${FADE / 2}px)`,
+    `color-mix(in srgb, var(--background) 66%, transparent) 0`,
+    `color-mix(in srgb, var(--background) 56%, transparent) calc(100% - ${FADE}px)`,
+    `color-mix(in srgb, var(--background) 26%, transparent) calc(100% - ${FADE / 2}px)`,
     `transparent 100%)`,
   ].join(", ");
 }
@@ -53,17 +61,54 @@ function fadeFor(side: Side): string {
  * then only ADD blur and the ramp stays monotonic on both engines (see
  * SIDEBAR_BACKDROP_BLUR in nav-pill for the same rule).
  *
- * Deliberately SLIGHT — the band is a **darken with a hint of blur**, not a
- * frosted panel. Text passing under the status bar has to stay legible
- * enough to make out roughly what it says; at the earlier 12px peak it was
- * an unreadable smear, so the whole ramp is ~a fifth of that and the veil
- * above carries the treatment.
+ * The band has to read as chrome you cannot reach through — at the original
+ * 2.4px peak a card scrolling under the action buttons still looked sharp and
+ * tappable. Going the other way is the easier mistake to make, though, and it
+ * was made twice: 22px, then 11px. Both were judged from the BOTTOM of the
+ * band, which is the part these layers barely touch.
+ *
+ * The number that matters is the one at the TOP — the status-bar strip, where
+ * all three layers overlap AND iOS is already applying its own. Sequential
+ * blurs compose as the root-sum-square, so the peak here is not the largest
+ * radius but √(Σr²), and reading the largest radius instead is what kept this
+ * being set too high: 12.2px at 2/5/11, then still 6.0px at 2/3.2/4.6.
+ *
+ * At **0.6 / 1 / 1.4** the stack peaks at **1.8px** and the bottom of the band
+ * is 0.6px — a tenth of where this started, and deliberately almost nothing.
+ * This is a DARKEN-led treatment (see the veil above): the veil is what makes
+ * the band read as chrome, and the blur's only job is to take the crispness
+ * off an edge so it does not look touchable. Every round that judged the blur
+ * by how much it HID was tuning the wrong layer.
  */
 const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
-  { blur: 0.6, coverage: "100%", ramp: "45%" },
-  { blur: 1.4, coverage: "72%", ramp: "42%" },
-  { blur: 2.4, coverage: "48%", ramp: "42%" },
+  { blur: 0.6, coverage: "100%", ramp: "60%" },
+  { blur: 1, coverage: "76%", ramp: "46%" },
+  { blur: 1.4, coverage: "46%", ramp: "36%" },
 ];
+
+/**
+ * How far the treatment extends BEYOND the bar it sits on.
+ *
+ * The band used to be exactly the bar's height, so the blur only really
+ * arrived in the last few pixels above the buttons and a card sitting just
+ * under them looked sharp, reachable and tappable — it was neither. Native
+ * bars start softening well before their own edge, which is the cue that
+ * says "this is behind the chrome": the band should be well clear of the
+ * buttons before it starts climbing toward the top of the screen, so the
+ * darkening reads as one continuous field rather than as something that
+ * begins at the buttons' edge.
+ *
+ * This is the VISUAL band only. `--chrome-clear` — where the quick-scroll rail
+ * parks a row — is deliberately LARGER: a row landing exactly on the band's
+ * lower edge sits against it, and the point of the target is that the row is
+ * clear of the treatment, not level with the end of it. The two were briefly
+ * held equal and that pushed the darkening much too far down the screen.
+ *
+ * 41px puts the band's bottom 45px below the action buttons (34 gave 38).
+ * Apple does not publish a figure for the scroll-edge effect's falloff, so
+ * this is the owner's read on device rather than a spec number.
+ */
+const FADE_TAIL = 41;
 
 export function ChromeFade({
   side,
@@ -77,7 +122,8 @@ export function ChromeFade({
     <div
       aria-hidden
       className={cn("pointer-events-none absolute inset-x-0 z-0", className)}
-      style={{ ...anchor, height: "100%" }}
+      // Taller than the bar by FADE_TAIL — see the note there.
+      style={{ ...anchor, height: `calc(100% + ${FADE_TAIL}px)` }}
     >
       {BLUR_LAYERS.map(({ blur, coverage, ramp }) => {
         const mask = `linear-gradient(to ${side}, transparent 0, black ${ramp})`;

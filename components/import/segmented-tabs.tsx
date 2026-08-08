@@ -77,7 +77,7 @@ export function SegmentedTabs<T extends string>({
         {indicator && (
           <span
             aria-hidden
-            className="absolute inset-y-1 left-0 rounded-full bg-primary/15 transition-transform duration-300 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-reduce:transition-none"
+            className="absolute inset-y-1 left-0 rounded-full bg-[var(--on-glass-accent)] transition-transform duration-300 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-reduce:transition-none"
             style={{
               width: indicator.w,
               transform: `translateX(${indicator.x}px)`,
@@ -105,7 +105,7 @@ export function SegmentedTabs<T extends string>({
                 <span
                   className={cn(
                     "ml-1 tabular-nums",
-                    active ? "text-primary/70" : "text-muted-foreground/60"
+                    active ? "text-primary" : "text-[var(--on-glass-muted)]"
                   )}
                 >
                   {tab.count}

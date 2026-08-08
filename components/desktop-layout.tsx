@@ -7,6 +7,8 @@ import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useIsDesktop, useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import type { ImperativePanelHandle } from "react-resizable-panels"
+import { SINGLE_MONTH_PX, DUAL_MONTH_PX, DETAIL_MIN_PX } from "@/lib/layout/panel-widths"
+import { setPanelDualMonth } from "@/lib/layout/panel-mode"
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -86,9 +88,9 @@ function DetailPanelContent() {
   // Logbook uses the Smart Switcher pattern and never sets detailContent, so skip the
   // fallback for logbook to prevent stale aircraft/airport/crew panels from bleeding in.
   return (
-    <div className="h-full overflow-auto bg-background">
+    <div className="h-full overflow-auto overscroll-contain bg-background">
       {!isLogbook && detailContent ? (
-        <div className="h-full overflow-auto">
+        <div className="h-full overflow-auto overscroll-contain">
           {detailContent}
         </div>
       ) : (
@@ -120,9 +122,12 @@ function AppShellContent({ children }: AppShellProps) {
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
 
-  // Panel snap state — snaps main panel to 360px or 620px on drag end or sidebar toggle
-  const [isDragging, setIsDragging] = useState(false)
+  // The main panel has exactly TWO widths — one calendar month or two. The
+  // divider is a toggle rather than a drag handle: dragging it only ever
+  // ended at one of these anyway, and on the way there the calendar grew
+  // continuously and flipped layout mid-gesture, which looked broken.
   const [snapTrigger, setSnapTrigger] = useState(0)
+  const [wantDualMonth, setWantDualMonth] = useState(false)
 
   // Refs for scroll-to-top tap zones
   const mainPanelRef = useRef<HTMLDivElement>(null)
@@ -195,40 +200,41 @@ function AppShellContent({ children }: AppShellProps) {
     }
   }, [sidebarOpen, isDesktop, canPushSidebar])
 
-  // Snap main panel to 360px (single month) or 620px (dual month) on drag end
+  // Size the main panel to whichever of the two widths is selected. Runs on
+  // toggle, on sidebar open/close and on container resize, so the panel is
+  // always exactly one of them and never an in-between width.
+  const [canFitDualMonth, setCanFitDualMonth] = useState(false)
+
   useEffect(() => {
-    if (isDragging || !isDesktop) return
+    if (!isDesktop) return
     const container = panelGroupContainerRef.current
     const handle = mainPanelHandleRef.current
     if (!container || !handle) return
 
-    const containerWidth = container.offsetWidth
-    if (containerWidth <= 0) return
+    const apply = () => {
+      const containerWidth = container.offsetWidth
+      if (containerWidth <= 0) return
+      const availableWidth = containerWidth - HANDLE_WIDTH_PX
+      const fitsDual = availableWidth >= DUAL_MONTH_PX + DETAIL_MIN_PX
+      setCanFitDualMonth(fitsDual)
 
-    const SINGLE_MONTH = 360
-    const DUAL_MONTH = 620
-    const DETAIL_MIN = 360
-
-    // Available width for panels (container minus handle)
-    const availableWidth = containerWidth - HANDLE_WIDTH_PX
-
-    // Only offer dual-month snap if container can fit both panels
-    const canFitDualMonth = availableWidth >= DUAL_MONTH + DETAIL_MIN
-    const snapPoints = canFitDualMonth
-      ? [SINGLE_MONTH, DUAL_MONTH]
-      : [SINGLE_MONTH]
-
-    const currentPx = (availableWidth * handle.getSize()) / 100
-    const closest = snapPoints.reduce((prev, curr) =>
-      Math.abs(curr - currentPx) < Math.abs(prev - currentPx) ? curr : prev
-    )
-    const targetPercent = (closest / availableWidth) * 100
-
-    // Only snap if within a reasonable range (20%-80%)
-    if (targetPercent >= 20 && targetPercent <= 80) {
-      handle.resize(targetPercent)
+      const isDual = fitsDual && wantDualMonth
+      // Published in the SAME callback that resizes the panel, so the calendar
+      // switches mode in the same commit rather than a frame later off its own
+      // ResizeObserver — that lag is what flashed the wrong-width calendar.
+      setPanelDualMonth(isDual)
+      const targetPx = isDual ? DUAL_MONTH_PX : SINGLE_MONTH_PX
+      const targetPercent = (targetPx / availableWidth) * 100
+      if (targetPercent >= 20 && targetPercent <= 80) {
+        handle.resize(targetPercent)
+      }
     }
-  }, [isDragging, isDesktop, snapTrigger])
+
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(container)
+    return () => ro.disconnect()
+  }, [isDesktop, wantDualMonth, snapTrigger])
 
   const smoothScrollToTop = useCallback((container: React.RefObject<HTMLDivElement | null>) => {
     // Scope to the given panel and skip mounted-but-hidden keep-alive pages so we
@@ -282,7 +288,26 @@ function AppShellContent({ children }: AppShellProps) {
         >
           {/* The one floating-header treatment: progressive blur + fade */}
           <ChromeFade side="top" />
-          <div className="relative z-[1] flex items-center px-4 w-full h-16">
+
+          {/* FAST-SCROLL BAND — the strip just BELOW the action buttons.
+              iOS's own "tap the status bar to go to the top" target is the
+              status bar, which is genuinely not part of the scroll view; ours
+              was only the `h-13` row, so aiming a little low landed on a
+              flight card and opened it instead. This claims the band under
+              the buttons, where the treatment is already darkening and the
+              content is already chrome-ward.
+
+              It is a REAL element, so a drag started inside it does not
+              scroll the list — that is the trade, and why it stays thin
+              (`--chrome-tap`, 24px) rather than covering the whole fade tail.
+              Below the buttons only: the buttons themselves sit above it. */}
+          <div
+            aria-hidden
+            className="absolute inset-x-0 z-0 cursor-pointer"
+            style={{ top: "var(--chrome-top)", height: "var(--chrome-tap)" }}
+            onClick={scrollMainToTop}
+          />
+          <div className="relative z-[1] flex items-center px-4 w-full h-13">
             {/* Main panel actions — flush left on desktop, fills width on mobile (for
                 search expansion). Tapping its bare area scrolls the main panel to top
                 (the e.target===currentTarget guard excludes the action buttons). */}
@@ -325,22 +350,32 @@ function AppShellContent({ children }: AppShellProps) {
           <ResizablePanelGroup
             direction="horizontal"
             autoSaveId="desktop-panel-layout"
+            // 720 = SPLIT_MIN_PX (two phone-width panels); see lib/layout/panel-widths.
             className="h-full md:min-w-[720px]"
           >
-            <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={30} className="md:min-w-[360px]">
+            {/* 360 = SINGLE_MONTH_PX. `minSize` is a PERCENT, so it has to stay low
+                enough that 360px is reachable — the real floor is this min-width. */}
+            <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={20} className="md:min-w-[360px]">
               <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative">
                 {children}
               </div>
             </ResizablePanel>
 
             {/* Resize handle — desktop only, snaps to mobile-width multiples */}
-            <ResizableHandle withHandle className="hidden md:flex" onDragging={setIsDragging} />
+            <ResizableHandle
+              disabled
+              className="hidden md:flex"
+              toggle={canFitDualMonth ? () => setWantDualMonth((v) => !v) : undefined}
+              toggleLabel={wantDualMonth ? "Narrow the list panel" : "Widen the list panel"}
+              toggleActive={wantDualMonth}
+            />
 
             {/* Detail panel — desktop only. Pre-hydration, `isDesktop` is
                 forced false (server snapshot) while the CSS `md:` panel is
                 already visible — without the placeholder the panel painted as
                 a bare void until hydration. The placeholder is display:none'd
                 by the same md: rule on phones, so it costs nothing there. */}
+            {/* 360 = DETAIL_MIN_PX — the detail pane stays at least a phone wide. */}
             <ResizablePanel defaultSize={65} minSize={20} className="hidden md:block md:min-w-[360px]">
               <div ref={detailPanelRef} className="h-full">
                 {isDesktop ? (
@@ -373,7 +408,7 @@ function AppShellContent({ children }: AppShellProps) {
           <div className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none pt-chrome-bar">
             {/* Same header treatment as the main shell */}
             <ChromeFade side="top" />
-            <div className="relative z-[1] flex items-center justify-between px-4 w-full pointer-events-auto h-16">
+            <div className="relative z-[1] flex items-center justify-between px-4 w-full pointer-events-auto h-13">
               {/* Back button — flush left */}
               <GlassIconButton
                 ariaLabel="Back"

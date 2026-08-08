@@ -109,7 +109,6 @@ components/                       # React components
 ├── aircraft-detail-panel.tsx     # Aircraft detail view (desktop panel)
 ├── airport-detail-panel.tsx      # Airport detail view (desktop panel)
 ├── nav-pill.tsx                  # Nav pill ↔ sidebar morph, gravity blob, drag lens
-├── viewport-shell-compensator.tsx # Measures the iOS standalone viewport shortfall
 ├── bottom-edge-blur.tsx          # Home-indicator darkening fade (iOS standalone)
 ├── service-worker-register.tsx   # SW registration
 └── pwa-install-prompt.tsx        # PWA install prompts
@@ -403,6 +402,189 @@ Three things keep the delta at zero:
 Measured after the fix: jumping to the middle and scrolling up 40 steps
 produces **zero** scroll corrections.
 
+### The Logbook's Floating Panels (search + calendar)
+
+The search block and the calendar both live in ONE absolutely-positioned stack
+at `--chrome-top`, and the list reserves their combined height in its
+`topSpacerHeight`. Two things make that work:
+
+- **`overflow-anchor: none` on the list scroller.** Growing the spacer is how
+  the panels push the list down. Browsers' scroll ANCHORING exists to stop
+  exactly that: when content above the viewport grows it bumps `scrollTop` by
+  the same amount so the view doesn't move. The result was that opening the
+  calendar pushed the list only when it happened to be scrolled to the very
+  top, and the compensating adjustment was reported as a downward scroll —
+  which is what hid the nav pill. With anchoring off the push is identical at
+  every scroll position (measured: 358px at scrollTop 0, 600 and 1500, with
+  `scrollTop` unchanged).
+- **`PANEL_MOTION` — one clock.** The calendar's collapse and the list
+  spacer use the same `height 300ms MORPH_EASE` string. They used to be a
+  framer spring and a CSS transition of a different duration, which read as
+  two stages: the panel opening, then the list catching up. The calendar is
+  therefore always MOUNTED and collapsed to `height: 0` (rather than
+  conditionally rendered), so its natural height is always measurable and the
+  collapse is a plain px transition the spacer can match exactly.
+
+**Search is a token field, stowed by default.** A header button opens it
+between the action buttons and the calendar, and it collapses on the same
+`PANEL_MOTION`, so whichever panel is opening the list is pushed by one
+movement. Typing filters live; pressing Enter pins the text as a CHIP so the
+next term stacks on it, and every chip must match (AND) — `TR647` then `WSSS`
+is that flight number *and* that airport. Backspace on an empty field takes
+the last chip back, and stowing clears the terms, because a hidden filter
+quietly narrowing the logbook is the kind of thing you don't notice for ten
+minutes.
+
+The category tabs (Flight / Aircraft / Airport / Crew) are **gone**. They were
+a precondition rather than a refinement — with none active `filteredFlights`
+ignored the query completely — and once a term matches any field, stacking
+terms expresses everything the categories did without the mode.
+
+### The Logbook Calendar's Two Widths
+
+The main panel has exactly **two** widths and the divider between the panels is
+a **toggle**, not a drag handle (`ResizableHandle`'s `toggle` prop). A free drag
+always ended snapped to one of the two anyway, and on the way there the calendar
+grew continuously and flipped its layout mid-gesture, which read as the panel
+breaking rather than resizing. `minSize` is a PERCENT, so it has to stay low
+enough that 360px is reachable — at 30 it floored the panel at 420px on a
+1400px container and single-month was never actually hit; the real floor is the
+CSS `min-width`.
+
+**The widths live in `lib/layout/panel-widths.ts`, not in the components.**
+They cannot be picked independently:
+
+| | | Why |
+|---|---|---|
+| `SINGLE_MONTH_PX` | 360 | **A panel is a phone.** One calendar month, and the common Android/iPhone logical width — so a panel is always laying out the same tree the mobile view does. |
+| `DETAIL_MIN_PX` | 360 | Same rule for the detail pane. |
+| `DUAL_MONTH_PX` | 600 | Two months at 300px each — 7 columns of ~42px, about where iOS's own two-up month view sits. |
+| `SPLIT_MIN_PX` | 720 | Below this there is no split; it is also the `md:` breakpoint. |
+
+600 rather than 620 because of **iPad Air 5 landscape with the sidebar open**,
+which is the tightest case the owner actually uses:
+
+```
+1180 − 199 (sidebar + margins) − 1 (divider) = 980 available
+600 (two months) + 360 (detail)              = 960   → 20px spare
+```
+
+At 620 that sum was *exactly* 980 — it fit with zero slack, so any rounding took
+the dual-month toggle away on that device. The 20px is the whole point.
+
+The nav pill is **not** part of this budget. The header's action groups are
+anchored to the VIEWPORT edges (main actions left, detail actions right, with
+the centred pill between them), not to the panels, so the panel split cannot
+move the pill onto a button. Measured at 1180: main actions 16→240, pill
+367→814. What *can* collide is a page whose action bar EXPANDS — the dashboard's
+period pills — and that is a per-page question, not a sizing one.
+
+**A month is ALWAYS ONE PANE WIDE in the split layout** — `MONTH_PANE_PX`, 284,
+which is the dual panel minus the page's calendar gutter, halved, minus the
+pane's own padding. Day cells are square, so a month's width IS its height: a
+single month wider than a dual pane made the calendar taller with one month
+than with two, and the width toggle then resized the panel under the flight
+list every time. Capped, both modes measure **272px** and the list does not
+move at all (measured: `scrollTop` 900 before, during and after a round trip).
+The single month is therefore centred in its 360px panel rather than filling it.
+
+The pane width is only half of it: the calendar also carries exactly ONE header
+row (the date selector) in both modes. When the caption lived on each pane
+instead, a single month came out 12px shorter than a pair.
+
+**The mode itself comes from the LAYOUT, not from a measurement**
+(`lib/layout/panel-mode.ts`). The page used to derive `dualMonth` from its own
+ResizeObserver, which necessarily lands a frame or two after the panel resized —
+and in those frames the calendar rendered the OUTGOING mode at the INCOMING
+width. That is the flash on the collapse. The layout publishes the answer in the
+same callback that resizes the panel, so the switch happens in one commit
+(measured across the whole collapse: the calendar samples a constant 290px).
+
+A phone has no dual mode to match, so `paneMaxWidth` is left at the wider
+default there and the calendar uses the width it has. Without ANY cap a single
+month stretched to fill the wide panel — 7 columns of 84px, the grid going from
+313px tall to 519px — for the frames between the panel resizing and the
+dual-month switch catching up, which flashed a giant calendar.
+
+In **dual-month** mode the two panes are a FIXED pair: odd month on the left,
+even on the right (Jan|Feb, Mar|Apr, …), anchored by `pairStart()`. The pair
+holds while the top flight card is in either pane and jumps a WHOLE pair when
+it leaves — never one month at a time, which is what made the old carousel feel
+arbitrary. A swipe or wheel step therefore moves **two** months in dual mode
+(`stepMonths`); stepping by one would swap which side each month lands on and
+put the pairing out of phase.
+
+**ONE date selector for the whole calendar**, above the grid(s), and it is what
+opens the month/year picker. The action bar used to carry an expanding month
+label as well, which said the same thing twice and was the thing that grew the
+left action group into the centred nav pill; per-PANE captions were the same
+mistake at a smaller scale — with two panes that is two captions saying half a
+thing each. One header row also keeps single and dual the same HEIGHT for free.
+
+**The header names BOTH months in dual mode** — `Jul – Aug 26`, and both years
+when the pair straddles a new year (`Dec 26 – Jan 27`), since "Dec – Jan 27"
+would put December in the wrong year. The year is two digits because at four
+the dual form pushed the left action group into the centred nav pill. The month/year picker
+marks both too. Naming only the anchor left the right-hand pane unaccounted for
+in a view that is plainly showing two months.
+
+Going **dual → single** keeps whichever pane the top flight is actually in — if
+that is the right-hand month, the LEFT one stows. Going single → dual snaps the
+anchor to its pair boundary.
+
+**Single ↔ dual is a horizontal slide, and the pair is treated as two months
+stacked on top of each other.** The one that belongs on the right slides out
+from under the other; closing, it slides back under. Which pane travels never
+changes — it is always the right-hand month — what changes is which one you were
+already looking at, and that one holds full opacity while the other arrives:
+
+| Looking at | Opening to dual |
+|---|---|
+| Jul (the left month) | Jul stays put, Aug emerges from under it and moves right |
+| Aug (the right month) | Aug moves right, revealing Jul underneath on the left |
+
+Both directions are the same pair of keyframes (`cal-pane-settle` /
+`cal-pane-leave`) parameterised by `--cal-pane-x` and `--cal-pane-o`. The month
+you were looking at CANNOT be read off `selectedMonth` when the slide starts —
+the page re-anchors the selection to the pair's first month in the same commit
+that flips `dualMonth` — hence `lastSingleMonthRef`.
+
+The three-panel month **carousel is gone**, and it was broken as well as being
+the wrong motion. It rendered the stepped-to month as an extra absolutely
+positioned panel inside a container whose height came from a ref measured "at
+rest"; on the FIRST entry into dual mode that measurement had never happened, so
+the container fell to `height: undefined` over absolutely positioned children
+and the whole calendar collapsed to its padding (**measured: 8px, where two
+months are 280**). It never recovered either — the handler that ended the
+animation tested `dataset.animAnchor`, and `data-anim-anchor=""` reads back as
+the empty string, which is falsy, so it returned on every event. A dual step
+moves the pair by TWO months, so there was never a single month sliding across
+another to animate in the first place.
+
+What replaced it is simpler and covers **both** modes: stepping slides the whole
+view VERTICALLY, because the gesture that steps it is a vertical swipe (and a
+wheel) — the months should travel the way the finger does. The single ↔ dual
+width slide stays horizontal; that one is the pair opening sideways. The arriving month(s) come in from the side you are heading
+toward (`cal-step-in`) while a copy of the outgoing one leaves the other way
+(`cal-step-out`). The arriving content is in FLOW and only the outgoing copy is
+absolute, so the container keeps its height for the whole slide — which is
+exactly what the carousel got wrong. Measured on a single-month step: the
+arriving grid starts at `translateX(344px)`, one grid width, and eases to 0.
+The width slide sets `suppressStepRef` for its duration, because widening the
+panel also re-anchors `selectedMonth` and that would otherwise fire a step slide
+on top of the width slide.
+
+**A resize is not a push** (`FlightListRef.absorbSpacerDelta`). The list has
+`overflow-anchor: none` because growing the spacer is how the panels push it —
+but the spacer also changes when the calendar switches between one month and
+two while already open, and with anchoring off that slid the whole logbook under
+the reader's eye. So the push stays uncompensated and the RESIZE is absorbed by
+a single `scrollTop` write, with the spacer's transition dropped to `none` for
+that one commit (an eased spacer would drift against a one-shot correction for
+300ms). Measured: toggling the width with the list at scrollTop 900 now lands at
+867, exactly the calendar's 313→280 height change, and returns to 900 on the way
+back.
+
 ### The Flight Card (`components/flight-card-body.tsx`)
 
 One visual definition of "a flight card", shared by the logbook list, the
@@ -506,27 +688,91 @@ report watermarks). Do not go back to an allowlist.
 - **`ChromeFade`** — THE floating-header treatment, rendered directly by the
   main shell header and the mobile detail overlay header in
   `desktop-layout.tsx` (no more inline copies): a native-style bar of
-  progressive **blur + darken** — three masked backdrop-blur layers (smallest
+  progressive **blur + darken**. Three masked backdrop-blur layers (smallest
   radius first, widest coverage, so the stack only ever adds blur toward the
-  edge) under the background gradient (solid → 60% → transparent). The
-  gradient is anchored to a fixed 64px tail so taller chrome keeps the same
-  boundary instead of stretching the ramp until content shows through the
-  title. The owner chose blur at the TOP and darken-only at the BOTTOM
+  edge) under a background gradient. It extends `FADE_TAIL` (**41px**) BEYOND
+  the bar it sits on, because native bars start softening well before their own
+  edge — confined to the bar's height, a card sitting just under the action
+  buttons still looked sharp and tappable, which is a lie about what you can
+  reach. 41 puts the band's bottom **45px** below the buttons. Apple publishes
+  no figure for the scroll-edge effect's falloff, so that is the owner's read
+  on device, not a spec number.
+
+  **`--chrome-tap` is a THIRD number**: how far below the action buttons a tap
+  still counts as "the header" and scrolls that panel to the top. The header
+  row ends level with the buttons, which put the fast-scroll target's lower
+  edge exactly where the darkening begins — aim a little low and you hit a
+  flight card and open it. 1.5rem claims the strip under the buttons, the same
+  idea as iOS's status-bar tap: genuine chrome that the list does not own. It
+  is a REAL element, so a drag STARTING in it does not scroll — which is why it
+  stays thin rather than covering the whole fade tail.
+
+  **`--chrome-clear` is a DIFFERENT number again and is deliberately larger** (3.5rem
+  → 60px below the buttons, ~15px of air under the band). It is where the
+  quick-scroll rail parks a row, and a row landing exactly on the band's lower
+  edge is sitting against it — the whole point of the target is that the row
+  reads as clear of the chrome. Holding the two equal was tried in both
+  directions and is wrong both ways: tying the band to the target pushed the
+  darkening far down the screen, and tying the target to the band puts the
+  scrolled-to row back inside the treatment. The gradient is anchored to a fixed 64px ramp so taller chrome
+  keeps the same boundary instead of stretching until content shows through the
+  title. Because the veil is `--background` it darkens on the dark theme and
+  lightens on the light one with no branch.
+
+  **The weights are set for an INSTALLED iOS PWA, not for a browser.** Apple
+  already applies its own `black-translucent` treatment over the status-bar
+  strip, so whatever this paints STACKS on top of it. Matching the reference
+  headers by eye in a browser therefore overshoots badly once installed: at
+  veil **88%** / blur **22px** — which looked right in a tab — the owner's
+  verdict on device was that you could no longer tell *what* was under the bar,
+  only that something was. **66% at the anchored edge is that reference MINUS
+  what iOS contributes.** Do not re-tune these from a desktop screenshot alone.
+
+  **Judge the blur at the TOP of the band, not the bottom.** The three layers
+  overlap there and nowhere else, and sequential blurs compose as the
+  root-sum-square — so the peak is not the largest radius but √(Σr²), and
+  reading the largest radius instead is what kept this being set too high
+  through three rounds: **12.2px** at 2/5/11, then still **6.0px** at
+  2/3.2/4.6, each time with the row level with the action buttons judged "a
+  little too much" while everything above it — where the stack peaks AND iOS
+  applies its own — was unreadable.
+
+  At **0.6 / 1 / 1.4** the peak is **1.8px** and the bottom of the band is
+  0.6px — a tenth of where this started, and deliberately almost nothing. The
+  VEIL is what makes the band read as chrome; the blur's only job is to take
+  the crispness off an edge so it does not look touchable. Every round that
+  judged the blur by how much it HID was tuning the wrong layer.
+
+  The owner chose blur at the TOP and darken-only at the BOTTOM
   (`components/bottom-edge-blur.tsx` — a short home-indicator fade, iOS
   standalone only): at the bottom band's height a blur reads as smearing.
   The anchored top band also makes an iOS rubber-band read as bouncing from
-  under the action buttons rather than the screen edge. The mix is
-  deliberately **darken-led** — veil to 50% `--background`, blur peaking at
-  2.4px — so text passing under the status bar stays roughly readable.
+  under the action buttons rather than the screen edge.
 - **`ScrollIndicator`** (`components/ui/scroll-indicator.tsx`) — the app's own
   scroll indicator, because iOS draws its own across the scroller's whole box
   (from the screen edge, over the status bar) and CSS has no
   `scrollIndicatorInsets`. Mounted as a scroller's FIRST CHILD, but only the
   zero-height sticky MARKER lives there; the thumb itself is a
   `position: fixed` element appended to `document.body`, placed against the
-  scroller's cached box and inset to `--chrome-top` … `--nav-bottom-offset`.
+  scroller's box and inset to `--chrome-top` … `--nav-bottom-offset`.
   At either end it compresses against the track instead of riding the
   rubber-band.
+
+  **That box is re-read per update AND followed per frame while the thumb is
+  up.** A cached copy plus a ResizeObserver looks sufficient and is not:
+  opening the sidebar SLIDES the main panel across without changing its width
+  (measured: `0..360` → `199..559`), so nothing resizes and no observer fires.
+  The thumb stayed at the closed layout's right edge — 199px inside the list,
+  drawing a grey rule down the middle of the flight cards, and still tracking
+  the scroll, which is what made it read as a stray line rather than a
+  misplaced scrollbar.
+
+  Re-reading on scroll frames alone still leaves a visible flash, because the
+  morph takes ~300ms during which there is no scroll at all — so `follow()` is
+  a rAF that tracks the box while the thumb is visible and stops the moment it
+  hides (~800ms after the last scroll). It writes nothing unless the box
+  actually moved. Measured across the whole morph, sampled every 40ms: the
+  thumb is at the scroller's right edge in every frame.
 - **`MODAL_SCRIM`** — `bg-black/15 dark:bg-black/50`. A flat `bg-black/50` is
   invisible over a dark app and turns the light theme (white panels, glass
   sidebar) into grey mush. Used by every dialog overlay, the nav sidebar
@@ -600,7 +846,11 @@ re-renders).
   vertical gesture scrolls the list natively and never fights the horizontal
   swipe. Release settles to open/closed with a spring (`SPRING`); a fast flick
   opens via velocity.
-- **Actions** (`SwipeAction[]`): rendered as **separate, rounded buttons** that
+- **Actions** (`SwipeAction[]`): `onClick` receives the BUTTON's own box, so an
+  action that opens something can anchor it to itself (the flight card's `…`),
+  and `keepOpen` leaves the panel up afterwards — for an action that reveals
+  more actions, the row they belong to has to stay put beneath them. Rendered
+  as **separate, rounded buttons** that
   **scale/pop in** (spring, staggered, trailing first) and fill the row height.
   Buttons rest at `opacity 0` when closed so nothing peeks at the edge. The
   trailing button sits **flush** with the card's right edge; the left gap comes
@@ -672,6 +922,15 @@ re-renders).
     the stretch — the ratio e^(−ζπ/√(1−ζ²)) between consecutive extremes) and
     rings down. Measured on a real move: 1.20/0.83 at the stretch, 0.94/1.05
     on the landing squash, then neutral.
+
+  In the SIDEBAR the blob is placed **instantly** — no spring at all. The list
+  is a scroller whose metrics re-measure as a route settles and as the panel
+  finishes morphing, and every re-measure was another chance for the spring to
+  re-fire and read as a double flash; a vertical list also gives the travel
+  nothing to say. The pill keeps the physics. (The drag-lens handoff used to
+  play the SHAPE oscillator in place as well; that is gone — the lens now
+  dissolves onto the blob rather than being swapped for it, so there is no cut
+  to cover and a wobble afterwards read as a second arrival.)
 
   The effect **re-fires only for a new destination** (`animatedToRef`) and, if
   it interrupts a move in flight, resumes from the blob's CURRENT transform
@@ -895,10 +1154,42 @@ re-renders).
     and coming back. Squash-and-stretch needs the axes to go OPPOSITE ways —
     wide+flat on impact (timed to land with the translate), then narrow+tall on
     the rebound, then neutral. `scale` is a composited property, so the
-    keyframes run on the compositor exactly as the transition did. A CSS `--settle` crossfade swaps
-    the glass material for the grey blob; a timer (must outlast the scale's
-    rebound) hands off to the real blob invisibly, and the lens lands on the
-    blob's rect exactly, so the swap is invisible.
+    keyframes run on the compositor exactly as the transition did.
+
+    **It is a SETTLE, not an impact.** The deformation is ±5% (measured about
+    the landing target: x 0.992–1.053, y 0.958–1.009) over 560ms, where it was
+    ±14/16% over 420ms. At that amplitude the landing announced itself — the
+    blob visibly splatted and bounced, which is a different EVENT from the one
+    before it (a bead of glass sliding along the bar). A settle is the same
+    motion ending, so the shape only has to acknowledge the arrival. The axes
+    still go opposite ways and the rebound stays a third of the squash so it
+    comes to rest rather than oscillating.
+
+    **The lens DISSOLVES onto the real blob; it does not become one.** It used
+    to paint its own copy of the highlight (`.PillDragLens-blob`) and crossfade
+    the glass to it — and that fill sat ON TOP of the tab, so the landing
+    flashed a solid pill with no icon and no label in it before the real blob
+    appeared underneath. (It was also the wrong colour for a while: a stale
+    `foreground/10` left over from before the blob became
+    `--on-glass-active`, so the lens landed grey and then turned orange — two
+    arrivals.) That layer is gone.
+
+    Instead the REAL blob is revealed on release — `hidden` is now only true
+    while the finger is DRAGGING — and it fades up over 0.34s at the
+    destination, *behind* the row, where a highlight belongs. The glass then
+    fades off it (delayed ~0.22s so the bead stays glass for the whole travel).
+    Because the lens is translucent throughout, the icon and label are never
+    covered. Measured through a landing: blob 0.00 → 0.96 by 250ms while the
+    glass is still 0.92, glass down to 0.03 by 485ms, lens unmounted at 647ms.
+
+    A timer (must outlast the scale's rebound — 620ms against the 560ms
+    animation) unmounts the lens.
+
+    There is no arrival wobble on the handoff any more, and the `settleKey`
+    prop that drove it is gone. It existed to cover the hard cut when the
+    opaque copy was swapped for the real blob; with the crossfade there is no
+    cut, and a wobble after everything has come to rest reads as a second
+    arrival.
     This used to be framer `animate()` on `left`/`top`/`width`/`height` and it
     **janked**, for two independent reasons. JS springs tick on the MAIN
     thread, and the release also fires `router.push` — so the landing competed
@@ -1341,12 +1632,6 @@ app's look:
   browser menu → Install app, via `beforeinstallprompt`), so it detects the
   platform to show the right instructions. Do not "unify" it, or iOS users lose
   the only path to installing.
-- `components/viewport-shell-compensator.tsx` — cancels a WebKit
-  installed-PWA bug (the reported viewport is shorter than the screen). The
-  RESULT is the same full-bleed shell everywhere; only the bug being cancelled
-  belongs to one engine. It must stay iOS-scoped: Android's standalone window
-  legitimately excludes the system bars, so compensating there would push the
-  shell below the visible window.
 - `components/bottom-edge-blur.tsx` — keys off a real bottom safe-area inset,
   which only an installed iOS app has. Android's window already excludes its
   gesture bar, so there is no band to fade toward and nothing renders. Same
@@ -1417,14 +1702,14 @@ When making changes, be aware of these high-impact files:
 - `hooks/use-detail-panel.tsx` — Detail panel provider (keep-alive route awareness)
 - `components/desktop-layout.tsx` — Responsive app shell (sidebar + detail panel)
 - `components/nav-pill.tsx` — The pill↔sidebar morph, the gravity blob's two springs, and the drag lens
+- `lib/layout/panel-widths.ts` — the one panel-width budget (single/dual month, detail minimum, split minimum)
 
 **Edge-to-edge shell & chrome** (one number each — changing one moves every panel):
 - `app/globals.css` — `--chrome-top` / `--chrome-bottom` (scroller offsets),
   `--nav-bottom-offset` (where the nav rests), `--content-bottom-inset` (what
   content owes the home indicator), `--panel-gutter` (the shared horizontal
-  gutter), and the compensated `body` shell
-- `components/viewport-shell-compensator.tsx` — measures WebKit's installed-PWA
-  viewport shortfall into `--shell-bottom-gap`
+  gutter), and the `html, body` shell itself (clipped, `100dvh` in a tab /
+  `100vh` installed)
 - `components/ui/chrome-overlays.tsx` — `ChromeFade`, the one floating-header
   treatment (progressive blur under a darkening veil)
 - `components/ui/scroll-indicator.tsx` — the inset scroll indicator (fixed thumb
@@ -1471,6 +1756,52 @@ When making changes, be aware of these high-impact files:
     collapsed they were no longer cancelled by anything, so the face is now
     blur + a themed brightness lift + `saturate(1.5)` (the vibrancy term —
     without it the material reads as frosted film rather than glass).
+  - **Opacity comes from `--glass-base`, presence from `--glass-veil`.** They
+    are two coats on `.GlassMaterial::after` doing different jobs, and the
+    split is load-bearing: the veil is a LIGHTENING paint (warm off-white), so
+    pushing ITS alpha to make the material more opaque turns a dark surface
+    white long before it turns it solid. Opacity that keeps the material's
+    colour has to be a coat of the surface colour itself — hence a
+    card-coloured base under the veil. Currently 0.82 dark / 0.55 light, which
+    with the veil over it lands the face at ~84% / ~86% opaque. The blur, the
+    brightness lift and the saturate still act on the remaining fifth, so it is
+    glass rather than a card with a rim.
+  - **The calendar is the same slab as everything else.** It used to paint
+    `--background` at 0.85 over its own glass, which is why it read as a
+    different, near-solid material from the action buttons and the nav. That
+    overlay is gone; the shared material carries the opacity now.
+  - **Contents ON the glass are SOLID** — `--on-glass-*` in `globals.css`. Only
+    the slab is translucent; the nav's gravity blob, an action button's active
+    highlight, an icon, a label are opaque, the way the controls inside an iOS
+    Control Center tile are. A translucent blob over a translucent slab lets the
+    page through TWICE, so the highlight drifted in tone as the list scrolled
+    underneath it and the icons washed out. Each token is the colour the
+    translucency used to resolve to, mixed once against `--on-glass` (the solid
+    colour the finished face reads as) and then painted flat. **`--on-glass`
+    has to track the real face, not `--card`** — with the veil at 0.11 the face
+    was ~0.276 and the blob landed at 0.292, i.e. invisible on a dark theme.
+    And `--on-glass-fill` is 16%, not the 10% the old `bg-foreground/10`
+    resolved to: that alpha was measured against a nearly transparent slab, so
+    the blob separated by picking up whatever was behind the glass. Painted
+    flat it has to carry the separation itself. The tokens are: `-fill`,
+    `-fill-soft`, `-icon`, `-label`, `-muted`, three weights of accent
+    (`-accent-soft` / `-accent` / `-accent-strong`) because on the calendar they
+    STACK — a range pill, a flight-day chip on it, a today chip on that — and
+    the `-active` pair below. Use these on a glass surface, never
+    `bg-foreground/10` or `text-foreground/50`.
+  - **ONE selected-thing colour: `--on-glass-active` + `--on-glass-active-fg`.**
+    An action button's active state and the nav's gravity blob mean the same
+    thing, so they are one fill, not a grey blob in the nav and a tinted chip
+    in the header. At `--on-glass-accent`'s 18% the chip barely separated from
+    the face; **32%** is a fill you can see is a fill. Its label is a SEPARATE
+    token because `--primary` on a 32% tint of itself is the same hue at a
+    similar lightness — which is precisely why the active button read as barely
+    selected. Measured on the dark theme, ΔL against the fill: **0.25 → 0.46**.
+  - **Nav labels are `--foreground`, the same as an action button's icon.** The
+    action buttons are ghost `Button`s with no colour of their own, so they
+    render at the full foreground; the nav sat two steps down at
+    `--on-glass-icon` (55%) / `--on-glass-label` (72%) and read as a dimmer
+    class of control on the same glass.
   - **`--glass-veil` is the PAINTED half of the material, and both themes need
     it.** A backdrop-filter can do nothing over pure black — blurring black is
     black, saturating it is black, and brightness is multiplicative, so
@@ -1480,22 +1811,41 @@ When making changes, be aware of these high-impact files:
     essentially none of the colour it picks up over content (measured at 10%:
     warmth 37 vs 38). Plain white at matching presence drops that to 34 and the
     material starts reading grey again — do not "simplify" the tint back to
-    white. Currently 0.075 dark / 0.55 light, eased back from 0.10 / 0.62 with
-    the face blur raised to compensate: **less paint and more optics for the
-    same presence**, which is the difference between a tinted panel and glass.
-    Do not take it much lower — the lift off pure black is why it exists.
+    white. Currently **0.05 dark / 0.68 light**. The dark veil was thinned from
+    0.11 once `--glass-base` arrived: with an 82% card-coloured undercoat
+    already giving the slab a face, the veil was pure lightening on top of an
+    almost-solid surface and the material came out too pale and too warm for an
+    iOS-dark app. At 0.05 the face lands around oklch **0.23**, which is where
+    iOS's own dark chrome sits (systemGray6 `#1C1C1E` → systemGray5 `#2C2C2E`).
+    Do not take it to zero — over pure black the base alone still needs the
+    lift, and that is the whole reason this coat exists.
   - **`--glass-face-blur` is one blur, not three.** The old stack blurred
     2px + 2.4px + 0.52px on three elements; sequential Gaussians compose as
     the root-sum-square, so ONE blur is identical optics for a third of the
     work. It carries more of the material's presence now that the veil is
     thinner (4.4px).
-  - **A fine ring under a bright glint.** `--softness` (5.6px) drives the
+  - **A fine ring under a soft glint.** `--softness` (**2.2px**) drives the
     edge/emboss/refraction band widths and the specular conic (`--glass-rim`)
-    peaks at 0.80 dark / 0.96 light. Those two move together and in opposite
-    directions on purpose: a thin edge with a strong catch reads as a sharp
-    piece of glass, where a thick ring at the same brightness reads as a
-    painted border. The dim flanks between the lobes stay dim — that contrast
-    is what makes it a glint rather than an outline.
+    peaks at **0.52** dark / **0.60** light. Measured: edge **0.586px**,
+    emboss 0.66px, `.Highlight` 0.5px. The dim flanks between the lobes stay
+    dim — that contrast is what makes it a glint rather than an outline.
+
+    **WIDTH and CONTINUITY are separate knobs, and conflating them sent this
+    up to 5px and back.** At 3.4 the ring was thin *and* the conic's flanks
+    were at ~0.05, so three-quarters of the perimeter had no hairline at all;
+    that was read as "too thin" and the width went up alongside the flanks.
+    The flanks were the part actually missing. With them at 0.22 the ring is
+    continuous everywhere, which freed the geometry to come back down — 5 →
+    3.6 → 2.6 → **2.2px**, a finer line than any of them while still drawn the
+    whole way round. `.Highlight`'s padding comes with it (1.25 → **0.6px**): it is
+    the widest of the edge layers, so leaving it would keep the rim's apparent
+    thickness where it was whatever `--softness` says.
+
+    The conic's PEAK is the separate third knob, and it is what "harsh" means:
+    at 1.0 the glint was a hard white catch on a ring this fine, which reads
+    as a chrome bezel rather than as light on glass. **0.52 / 0.60** keeps the
+    lobes visible against flanks of 0.16. Do not take the flanks down with
+    either the width or the peak — they are what hold the continuity.
   - **Even face:** `.GlassBlur` spans the WHOLE face, corner to corner. It used
     to be inset by the ring widths, leaving the perimeter a shade darker than
     the middle — the material read as a grey slab inside a darker frame instead
@@ -1550,6 +1900,208 @@ When making changes, be aware of these high-impact files:
 - `lib/utils/retention.ts` — the single 90-day undo window (decisions, accepted comparisons, recycle bin)
 - `lib/utils/flight-sort.ts` — the one list order (date, out time, departure, id)
 - `lib/db/stores/user/flights.store.ts` — soft delete / restore / purge + `isLiveFlight`
+
+**Flight card gestures:**
+- `components/flight-quick-actions.tsx` — the flight card's extra actions (Next
+  Leg / Return Trip / Duplicate / Share / Lock), cascading out of a `…` button
+  in the row's SWIPE PANEL. The panel is `[…] [delete]`.
+
+  **The press-and-hold menu it replaced is gone, and the reason is the gesture,
+  not the presentation.** A hold is invisible: nothing on the card advertised
+  it, it competed with the swipe and the scroll for the same pointer, and
+  holding a row inside a virtualised scroller turned into a long fight with
+  whichever engine was delivering the events (an orphaned framer session
+  dragging the held card, a few px of finger drift before the menu appeared,
+  each needing its own counter-measure). The swipe panel is already the card's
+  "what can I do to this" surface and it is already discoverable, so the extra
+  actions belong in it.
+
+  **They are not a popover — they are the SWIPE PANEL'S OWN BUTTON, repeated.**
+  Each option is a 64px `rounded-lg` tile in `bg-secondary` carrying its icon
+  over a `text-xs` word, CENTRED on the `…`, and they travel out from it one
+  after another (`STAGGER_MS`) — the panel extending rather than a dialog
+  appearing over it. That is literally `swipeable-card.tsx`'s `BUTTON_WIDTH`,
+  radius, fill, gap and label size: the run comes out of a control in that
+  panel, so anything else read as a different family of control turning up next
+  to it. They were 56px circles in `bg-card` for a while, which was closer to
+  the grouped-row vocabulary than to the panel they belong to.
+
+  Square rather than the swipe button's full row height — the cascade is a
+  COLUMN, and five row-height tiles is most of a screen. The one thing added to
+  the swipe button is a shadow, because unlike a swipe button these float over
+  the list instead of sitting inside a row. Deliberately NOT glass: glass is
+  chrome floating over content and these have to be read; over a list of cards
+  a glass slab showed the cards straight through the labels. The word goes
+  INSIDE the tile — outside it, floating over a dense list, it landed on a
+  flight's route and needed a backing plate of its own to stay legible.
+
+  `ACTION_TILE_PX` / `actionTileClass` / `ACTION_LABEL_CLASS` are exported
+  and the context preview uses them, so the two surfaces are the same control
+  in different arrangements rather than two that resemble each other.
+
+  One word each, and the icons are **aeroplanes distinguished by ATTITUDE**.
+  A plain plane repeated three times was tried and rejected for the obvious
+  reason — "next leg", "return trip" and "duplicate" are all flights, so three
+  identical planes distinguish nothing — and a relational set (an arrow, a
+  two-way arrow, a stack) was tried in its place. The attitude answers both at
+  once: they are unmistakably flights AND they differ.
+
+  | | Icon | Reads as |
+  |---|---|---|
+  | Next | `PlaneTakeoff` — nose up, leaving | the onward departure |
+  | Return | `PlaneLanding` — nose down, coming back | the reverse leg |
+  | Repeat | `Plane` — level, unqualified | another one like this |
+
+  That last one is **"Repeat", never "Copy"** — copy reads as putting something
+  on the clipboard, and what actually happens is that a whole new flight is
+  created.
+
+  Rendered through a PORTAL, so the card's own size never changes — a menu that
+  grew the row would move every row below it (measured: card height 110 before
+  and 110 with the cascade open). The `…` action passes `keepOpen`, so the
+  swipe panel stays put underneath (measured: row x = −144 with the cascade up)
+  — the run has to look like it came out of a control that is still there.
+
+  Direction is DERIVED at render from the anchor, not held in state: down by
+  default, up when the run would not fit below (measured: a card whose `…` sits
+  at y 712 puts its last item at 432, i.e. above the anchor). One answer, known
+  on the first render, so the column can never paint downward and then flip.
+
+  **The `…` fires on the LIFT, not on the click** (`fireOnPointerUp`). A click
+  is the fragile half of a tap: an engine can suppress it after a drag, a
+  capture-phase guard can swallow it, and it arrives last. On device the first
+  tap on `…` after a swipe did nothing at all — the second worked — which is
+  the shape a lost click makes. Chromium does not reproduce it, so this is a
+  mitigation by construction rather than a measured before/after: `pointerup`
+  is the same gesture one step earlier, with none of that ordering.
+
+  **A dismissing tap on the `…` itself needs a guard** (`CASCADE_REOPEN_GUARD_MS`).
+  The two halves of that tap can land on either side of the unmount: the
+  capture-phase swallow closes the cascade on `pointerup`, React tears the
+  listeners down, and the `click` that follows is no longer swallowed — so it
+  reaches the button and reopens. Chromium orders it that way and WebKit did
+  not, which is why it looked like a platform bug; a close STAMP settles it on
+  both. An open request arriving within 350ms of a close IS that same tap.
+
+  **While it is open the app can still be MOVED but not OPERATED**, and that
+  rule is inherited wholesale from the hold menu — it was hard-won and none of
+  it was about the hold. The line is drawn at **`pointerdown`/`touchstart` in
+  the CAPTURE phase with `stopPropagation` and NOT `preventDefault`**:
+  - `stopPropagation` means the event never reaches any React or framer-motion
+    handler, so no other row's drag can start.
+  - withholding `preventDefault` leaves the browser's own default — the
+    compositor-driven touch scroll — completely untouched. Scrolling is not
+    delivered through the listeners being cut, which is the whole trick.
+    (Measured: an identical touch drag scrolls the logbook 0→285px with a menu
+    open and 0→285px without it.)
+
+  A full-screen scrim is the obvious alternative and it is worse — it kills the
+  scroll too. `mousedown` additionally takes `preventDefault`, which is what
+  stops a text field taking focus on a desktop click. `click`/`pointerup` are
+  swallowed and close it; `scroll`/`wheel`/`touchmove` only close it. The
+  swallow ARMS on a timer, because the tap that opened the cascade has not
+  dispatched its click yet and would otherwise close it on the same gesture.
+
+  **And the rows are made UNTOUCHABLE, not merely un-listened-to**
+  (`lib/utils/menu-lock.ts`). Blocking events at the capture phase says the
+  same thing, but only for the events you thought to block, in the order the
+  engine happens to deliver them — which is why that took three passes and a
+  card still moved slightly on iOS each time. While a menu is open
+  `SwipeableCard` sets **`pointer-events: none`** on its root (and passes
+  `drag={false}`), so the row stops being a hit-test target altogether:
+  nothing can drag it, focus it, activate it or even give it `:active`,
+  whatever any engine sends. It costs nothing, because a touch that misses the
+  row lands on the SCROLLER behind it, which still scrolls natively. A
+  `useSyncExternalStore` module store carries the flag, so the cards get it in
+  the same commit the menu opens rather than a frame later.
+- `components/flight-context-preview.tsx` — the PRESS-AND-HOLD context
+  preview. A hold lifts one row out of the list, shows the detail the compact
+  card has no room for (the four OOOI times, block, flight, night, reg, and
+  remarks if there are any) and puts the same action set in a row beneath it.
+
+  It is deliberately NOT the `…` cascade, and the split is the point of having
+  both. The cascade is a MENU: you know what you want to do, and you go to a
+  control that advertises itself in the swipe panel. This is a LOOK: you are
+  scanning the list, you want to know more about one row without leaving your
+  place, and a hold is the gesture that has always meant "tell me about this".
+  The actions come along because once you are looking at it, acting on it is
+  the obvious next thing.
+
+  Its positioning wrapper is `pointer-events-none` with the card and the action
+  row taking pointers back. The wrapper spans nearly the whole screen so the
+  card can be centred, and with pointers on it swallowed almost every tap meant
+  for the scrim — on a phone, where hardly any scrim is left uncovered, that
+  meant the preview could not be dismissed at all.
+
+  **It GROWS OUT OF the row you held, and goes back into it.** The preview
+  opens as an exact copy of that card, on that card — same `px-3 py-1` body,
+  same `rounded-xl border bg-card` — and then travels to the centre while the
+  detail and the action row unfurl beneath it. Closing plays the same thing
+  backwards and only then unmounts, which is why `onClose` is called on a timer
+  rather than the overlay being torn down on the tap. Measured at the first
+  frame against the row's own box: **dTop 0.0, dLeft 0.0, dWidth 0.0,
+  dHeight 0.0**.
+
+  It is **NOT** framer's shared-layout (`layoutId`) morph, and the reference
+  implementation that asked for one was deliberately not followed:
+
+  - The source card lives inside the **virtualised** list. A `layout`/`layoutId`
+    prop there puts every rendered row into framer's measurement pass on every
+    layout change — exactly the per-row measuring the logbook list was rebuilt
+    to remove (see the virtualised-list note above).
+  - A FLIP morph animates the box by **scale**, and this growth is nearly all
+    height, so the card's text would visibly stretch on the way up.
+
+  Instead the geometry is DERIVED, not measured, and nothing scales: the
+  wrapper is a centred flex column, so with the detail and the actions
+  collapsed to `height: 0` the card rests at `(innerHeight − cardHeight) / 2`;
+  the card's opening `y`/`x`/`width` are the difference between that and the
+  row's own box; and the detail and actions animate their real `height`
+  (0 → auto) while the flex centring re-centres the group frame by frame. One
+  clock (`MORPH`, 340ms) drives all of it, so the travel and the unfurl are one
+  motion.
+
+  The anchor is the **card's** box (`[data-slot="card"]`), not the row
+  wrapper's — the wrapper carries the list's per-row top gap, and 4px out is a
+  visible jump on the first frame. And the source row is `invisible` while the
+  preview is up: the copy opens on top of it, so leaving it would show the same
+  flight twice through the scrim. It comes back at the unmount, into the box
+  the preview has just collapsed onto, so there is nothing to see.
+
+  **It comes to rest centred on the VIEWPORT at `MAX_WIDTH` (672 — `max-w-2xl`),
+  not in the column the row lives in.** That is what makes the transformation
+  visible at all on anything bigger than a phone: held to the width of the panel
+  it came out of, the card barely moved and the morph read as nothing happening.
+  Measured on a 1180-wide tablet: the row is 336 wide and the preview settles at
+  672, centred at x 254. On a phone the row already fills the screen, so the
+  width clamps to what it had and the growth is all height (measured: +143px);
+  there is nowhere else for it to go.
+
+  The DETAIL arrives a beat after the box that holds it — `opacity`/`y`/`blur`
+  on a 260ms curve delayed 100ms inside the 340ms box growth. The box growing is
+  the card changing shape; this is the content settling into the room that just
+  appeared, and separating the two is most of what makes the expansion legible
+  rather than a jump.
+
+  The hold that drives it is the one that was removed from the ACTIONS menu,
+  and it keeps every hard-won guard: it cancels on any movement past
+  `HOLD_SLOP` so it never fires on a scroll or the start of a swipe, and when
+  it fires it dispatches a synthetic `pointercancel` on `window` so framer
+  cannot carry a half-started drag into the overlay (that was the ghost swipe).
+  The same `menu-lock` applies, so nothing behind the scrim is a hit-test
+  target. `QUICK_ACTION_ITEMS` is shared with the cascade — one action set, so
+  the two surfaces cannot drift apart.
+
+  **A press on one of the row's CONTROLS is not a press on the row.** The
+  pointer hooks are on `SwipeableCard`'s OUTER container, so the swipe panel's
+  buttons are inside them — and a thumb resting on the `…` for the 450ms this
+  hold takes is an ordinary tap, not a long press. Without the guard, tapping
+  `…` opened the PREVIEW instead of the cascade on a phone, where a tap is
+  comfortably slower than on a trackpad. The hold bails when the press begins
+  on a `button`/`a`/`input`/`textarea` or inside `[data-swipe-actions]`.
+- `lib/utils/derive-flight.ts` — what a derived flight carries. Everything that does not change between two legs (aircraft, crew, role) and NOTHING that is a record of a specific flight having happened (OOOI, takeoffs/landings, signature, lock, import + sync stamps) — copying those forward would fabricate a logbook entry.
+- `components/signature-dialog.tsx` — signing, full screen. Orientation-agnostic by construction: the surface fills what is left after the chrome, and the strokes are normalised to their own bounding box, so a signature drawn in landscape renders identically in portrait.
+- `lib/utils/virtual-scroll.ts` — `scrollToIndexSettled`. A dynamically-measured list needs the scroll re-issued until the arriving rows have measured, and convergence has to be read off the ELEMENT's `scrollTop` (`virtualizer.scrollOffset` is written by the scroll listener, so it always looks unchanged in the same tick).
 
 **Swipe & Forms:**
 - `components/swipeable-card.tsx` — The single swipe-to-reveal primitive (framer-motion). Used by all lists, the flight form rows, and the crew/aircraft detail rows.
@@ -1615,15 +2167,22 @@ When making changes, be aware of these high-impact files:
 - Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
 - Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
 - Do not open a detail with `router.replace` — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
+- Do not remove `overflow-anchor: none` from the logbook scroller — growing the top spacer is how the floating panels push the list, and scroll anchoring exists to cancel exactly that (it bumps `scrollTop` to keep the view still). With it on, the calendar only pushed the list when it was already scrolled to the top, and the compensating adjustment read as a downward scroll that hid the nav pill
+- Do not give the calendar's collapse and the list spacer separate animations — they share `PANEL_MOTION`, or the panel opens and the list catches up afterwards as a visible second stage. The calendar stays MOUNTED at `height: 0` so its natural height is measurable and the collapse is a px transition the spacer can match
+- Do not make the panel divider draggable again, and do not raise the main panel's `minSize` percent above what 360px needs — the two widths are a toggle, and a free drag flips the calendar's layout mid-gesture
+- Do not step the dual-month calendar by one month — the panes are a fixed odd|even pair, so a step moves two; stepping by one swaps which side each month is on. The pair only re-anchors when the top flight card leaves it entirely
+- Do not reintroduce search CATEGORIES on the logbook — search is a token field: the typed text filters live, Enter pins it as a chip, and chips AND together. The old category tabs were a precondition (typing did nothing until one was picked), and stacking terms covers what they did without the mode
 - Do not let flight cards vary in height, and do not put per-row `measureElement` back on the logbook list — the virtualizer corrects the scroll offset when a measured row differs from the estimate, and a programmatic scroll cancels a momentum scroll on touch (that is the "scrolling up stops every row" bug). Keep the optional rows' `min-h`, keep the calibration ONE-SHOT (feeding every row back in is a setState loop that crashes the page), and keep `getItemKey` on the flight id
 - Do not inset the app shell by the safe area — the PWA runs edge to edge and content scrolls UNDER the status bar and Android's gesture pill. The insets belong inside each scroller
-- Do not resize or un-transform the `body` shell, and do not replace the measured `--shell-bottom-gap` with a static `env()` term. WebKit's installed-PWA bug reports a viewport (units AND the initial containing block) SHORTER than the physical screen under `viewport-fit=cover` — and the shortfall is **not** `env(safe-area-inset-bottom)` as the community recipe claims (measured on a real iPad in landscape: shortfall 32 = the TOP inset, bottom inset 25). `ViewportShellCompensator` measures `screen height − innerHeight` (portrait-major `screen.*`, orientation-aware), accepts it only when positive and within the insets' sum (a bigger value is Slide Over / Stage Manager / keyboard, not this bug), scopes it to iOS standalone (`"standalone" in navigator` — Android's window legitimately excludes its system bars), and writes it to `--shell-bottom-gap`; `body` is `100dvh + var(--shell-bottom-gap, env(safe-area-inset-bottom, 0px))` in standalone, plain `100dvh` in a browser tab (compensating there re-creates the iPad-portrait overshoot). The `transform: translateZ(0)` on `body` is load-bearing: it makes body the containing block for every `position: fixed` element (nav pill, sidebar morph, drag lens, overlays), so they anchor to the compensated shell instead of the buggy viewport — remove it and the pill floats a full inset above the home indicator. Safe-area padding stays inside the bottom nav (`bottom: 4px + env(...)`), never on `body`
+- Do not size the app shell with `100%` or with a measured/compensated height, and do not put a `transform` on `body`. The shell is ONE box — `html, body { margin:0; padding:0; overflow:hidden; height:100dvh }`, switched to `100vh` under `@media (display-mode: standalone)`. Each unit is wrong somewhere and the split is the point: `100%` resolves against the initial containing block, which under `viewport-fit=cover` + `black-translucent` EXCLUDES the area behind the status bar, so the shell lands short of the screen; `100dvh` is wrong at COLD START in an installed iOS app and does not reliably settle (it corrects after a portrait→landscape→portrait rotation), so sizing from it — and far worse, MEASURING the shortfall and compensating — is a feedback loop that made the app visibly vibrate; `100vh` is correct from cold start in standalone (no toolbar, so `vh`/`dvh`/`innerHeight`/`screen.height` converge) but is the LARGE viewport in a browser tab, where it would hide the bottom nav behind the URL bar. This is a display-mode split, not a platform one — it reads the same on iOS and Android. `overflow: hidden` propagates to the viewport and is what keeps the document unscrollable. A `transform` on `body` would make it the containing block for every `position: fixed` element, changing what "fixed" means app-wide (and what `100%` resolves against on those elements) for no gain once the shell is sized right. Safe-area padding stays inside the bottom nav (`bottom: 4px + env(...)`), never on `body`
 - Do not derive the sidebar's open height from `window.innerHeight` — use `calc(100% - …)`, which for a fixed element resolves against `body` (its containing block, via the transform above), the compensated shell. The measured version came out taller than the visible page on iPad Safari in portrait and overshot both ends. Subtract BOTH safe-area insets: one morph is top-anchored and the other bottom-anchored, and each still has to clear the other end
 - Do not put the chrome offsets on a SCROLL CONTAINER as padding — use the in-flow `h-chrome-top` / `h-chrome-bottom` spacers. WebKit has long dropped a scroll container's `padding-bottom` from its scrollable area, which strands the last row under the nav pill; an in-flow element is always counted. Padding is fine on a content wrapper that is itself inside a scroller
 - Do not add `pb-safe` to page content — a scroller gets its bottom clearance ONCE, from `--chrome-bottom` (via `.pb-chrome` / `.h-chrome-bottom`), and that value already carries the inset. Page wrappers used to add `pb-safe` inside a container that had it too, which on iOS meant a dead strip of ~96px plus TWO home-indicator insets at the end of every list — the "the bottom is padded" bug. One clearance per scroller, declared in one place
-- Do not hardcode `4rem`/`64` as the header offset anywhere — use `--chrome-top` (or `.pt-chrome` / `.h-chrome-top`). It is the 64px bar PLUS the status bar, and a bare 4rem is exactly how the logbook's search field ended up sliding under the action buttons once the shell stopped insetting itself. `--chrome-bottom` is the matching bottom clearance (nav pill + gesture bar)
+- Do not hardcode the header offset anywhere — use `--chrome-top` (or `.pt-chrome` / `.h-chrome-top`). It is the bar (3.25rem: a 4px margin, the 44px controls, a 4px gap) PLUS the status bar, and a bare rem value is exactly how the logbook's search field ended up sliding under the action buttons once the shell stopped insetting itself. `--chrome-bottom` is the matching bottom clearance (nav pill + gesture bar)
 - Do not give the bottom pill, the sidebar's lower end, or a scroller's bottom clearance their own safe-area math — they all derive from `--nav-bottom-offset` (`max(4px, env(safe-area-inset-bottom) - 10px)`: hugs the iOS home indicator, plain 4px on Android/desktop). One number keeps the pill↔sidebar morph endpoints aligned and the scrolled-to-rest last row on the same line; `components/bottom-edge-blur.tsx` adds the progressive blur under that line on iOS standalone only (below the nav in z-order so the sidebar and pill stay sharp)
 - Do not leave the cloned pill's `backdrop-filter`s (or `mix-blend-mode` anywhere in the lens subtree) in place during a drag or landing — they re-sample every frame and block layerisation, which is what made the release jank
+- Do not give the drag lens its own copy of the highlight to land on — it is portalled to `<body>`, so an opaque fill there covers the tab's icon and label and the landing flashes a solid pill with nothing in it. The REAL blob is revealed instead (it lives behind the row) and the glass dissolves off it; the lens stays translucent the whole way, so the content is never covered
+- Do not collapse `FADE_TAIL` and `--chrome-clear` into one number — the first is how far the DARKENING reaches (41px, i.e. 45 below the buttons), the second is where the quick-scroll rail PARKS a row (60 below, ~15px clear of the band). Equalising them is wrong in both directions: the band ends up far down the screen, or the scrolled-to row ends up inside the treatment
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
 - Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`
@@ -1647,9 +2206,49 @@ When making changes, be aware of these high-impact files:
 - Do not add the sidebar's floating-strip treatment to only one morph — `DesktopPillMorph` and `MobilePillMorph` must both float the toggle/sync strip over the nav with `topInset`, or the scroll-under silently works on desktop and not on a phone. And keep the dissolve mask on the blob overlay as well as the nav (on the OUTER, untranslated element), or the blob stays solid in a band where its own row has faded out
 - Do not let the header veil go solid or lean on blur for the treatment — `ChromeFade` is a **darken with a hint of blur**: the gradient tops out at 50% `--background` and the blur ramp peaks at 2.4px. A solid veil hides the content passing under the status bar (reads as the app stopping there — the web-page-in-a-frame look the edge-to-edge work removed), and a heavy blur smears it into an unreadable band. Text sliding under the bar must stay legible enough to make out roughly what it says
 - Do not re-enable the native scrollbar on an app scroller — iOS draws its indicator across the scroller's whole box, i.e. from the screen edge over the status bar. Scrollers carry `scrollbar-hide` + `components/ui/scroll-indicator.tsx` as the FIRST CHILD; it draws the same affordance inset to `--chrome-top` / `--nav-bottom-offset`, so it starts below the action buttons like a native scroll view's `scrollIndicatorInsets` while content still scrolls under the chrome. At either end it must **compress against the end of its track**, not ride the rubber-band: progress is clamped so the thumb is already parked, and the overscroll distance squashes it (asymptotically, so a hard fling never collapses it to nothing)
+- Do not cache the scroll indicator's scroller box behind a ResizeObserver alone — opening the sidebar SLIDES the main panel across without resizing it (`0..360` → `199..559`), so no observer fires and the thumb stays at the closed layout's right edge, drawing a grey rule down the middle of the flight cards. Re-read the box in the update
+- Do not rely on the cascade's event blocking alone to keep cards still — while a menu is open `SwipeableCard` sets `pointer-events: none` on its root and drops `drag` (`lib/utils/menu-lock.ts`). Intercepting events only covers the events you thought of, in the order an engine happens to send them; removing the row as a hit-test target covers all of them, and the touch still reaches the scroller behind it so the list keeps scrolling
 - Do not move the scroll indicator's thumb back INSIDE the scroller — it is a `position: fixed` element in `document.body`, placed against the scroller's cached box. It lived on a sticky anchor inside the scroller once, with its drift measured and cancelled per frame: that pinned correctly while a finger dragged, but the rubber-band RELEASE is compositor-animated and the correction runs on the main thread from coalesced scroll events, so the track visibly snapped back with the bounce. Nothing inside the scroller can win that race. The zero-height sticky marker that remains is only a rubber-band **sensor** (its drift is the bounce distance for engines that clamp `scrollTop`) and is read at the TOP only — at the bottom it stays pinned, so measuring there returns the whole scrolled distance and collapses the thumb
+- Do not let the logbook's first card butt against the chrome — `LIST_TOP_GAP` (20px) starts it where crew / aircraft / airports start theirs (measured: first card at 72 against `--chrome-top` 52 on both). It is DROPPED while the search or the calendar is open: that panel's own bottom edge is the separation there, and the gap read as slack hanging off the calendar (measured: first card at 415, exactly the calendar's bottom)
 - Do not give a page's content its own bottom padding on top of the shared clearance — one clearance per scroller, from `--chrome-bottom` (`.pb-chrome` / `.h-chrome-bottom`), and a card list's per-row gap belongs on the row's TOP (`pt-1`), never its bottom. A trailing per-row gap stacks on the spacer and lands that panel's last row lower than every other panel's (the logbook, aircraft, airports and crew lists each had one; the logbook's 8px is subtracted from its spacer because its wrapper padding can't move)
+- Do not let ANY scroller chain its overscroll to the document — every app scroller carries `overscroll-contain`, so a flick that reaches the end of a list can never reach the page. Together with the clipped shell above that is what removed the "free play" where a page with nothing to scroll still moved and carried the fixed action buttons off screen. Verified by sampling `scrollHeight − clientHeight` on the document continuously through load: 0 on every route, in both axes
+- Do not bleed a row past the panel edge with a hardcoded `-mx-*` — use `.-mx-panel`, the negative of `--panel-gutter`. A `-mx-4` against the 12px gutter pushed the chip strip 4px past both edges, which is horizontal overflow the root no longer clips (that was the left/right jiggle on currencies and discrepancies)
 - Do not pick a `px-*` by hand for a panel's content wrapper — use `.px-panel` (`--panel-gutter`). The logbook and flight form were at 8px, the sidebar at 12px and the reference/settings pages at 16px, so the three panels visibly disagreed at their edges
 - Do not conflate the two bottom numbers: **content** clears the home indicator by the FULL inset (`--content-bottom-inset`, which `--chrome-bottom` is built from — the platform convention), while the **nav pill and the sidebar** hug it with the tighter `--nav-bottom-offset`. The pill is a floating control that is meant to sit close, and the sidebar runs down the side where the indicator never reaches it; giving content the nav's offset tucks the last row under the indicator
 - Do not add an inline copy of the header gradient — render `ChromeFade` (it now carries the progressive blur + fade as one treatment; an inline gradient silently loses the blur). Do not swap the top/bottom edge treatments: blur belongs to the TOP band only (the bottom band is too short — blur there read as smearing and the owner rejected it; the bottom gets the darkening fade in `bottom-edge-blur.tsx`). And do not paint a `--background` scrim over a translucent glass surface (the sidebar) — mask the content out instead
+- Do not leave `--on-glass` at a guessed value when the material changes — it must equal the colour the FINISHED face reads as (base + veil + the brightened backdrop through the remainder). Get it wrong and everything painted on the glass lands on the wrong side of it: at the old value the nav's gravity blob (0.292) was indistinguishable from the face (0.276) in dark mode
+- Do not name only the anchor month while the calendar is showing two — the header and the month picker both cover the pair
+- Do not drive the glass's opacity from `--glass-veil` — that coat is a warm LIGHTENING paint and raising its alpha whitens a dark surface instead of solidifying it. Opacity belongs to `--glass-base`, the card-coloured undercoat; the two are separate on purpose
+- Do not paint an extra background over a glass surface to make one instance more opaque (the calendar did, at `--background` 0.85, and read as a different material from every other glass surface). Change the shared material instead
+- Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
+- Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
+- Do not let a single calendar month be wider than a DUAL pane in the split layout — the cells are square, so its width is its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
+- Do not thin the rim by dropping the conic's FLANKS — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22; the ring's WIDTH (`--softness`, and `.Highlight`'s padding with it) is the separate knob, and it is only free to be fine BECAUSE the flanks hold the continuity
+- Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
+- Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
+- Do not build the flight card's extra actions from glass — glass is chrome floating over content, and these have to be read; as a glass slab the flight cards showed straight through the labels. They are the SWIPE PANEL's button repeated (64px `rounded-lg`, `bg-secondary`, icon over a `text-xs` word, the panel's own 8px gap), because the run comes out of a control in that panel; 56px circles in `bg-card` read as a different family of control turning up beside it
+- Do not let the context preview come to rest in the row's own column — it settles CENTRED ON THE VIEWPORT at `MAX_WIDTH`, or on anything wider than a phone it is the same width it started and the morph reads as nothing happening (measured on a 1180 tablet: 336 → 672). And keep the detail's own delayed reveal (opacity/y/blur, 100ms in): the box growing and the content arriving are two things, and running them together reads as a jump
+- Do not put a `layout`/`layoutId` prop on a flight card to morph the context preview out of it — the rows are VIRTUALISED, and that hands framer every rendered row to measure on every layout change (the per-row measuring the list was rebuilt to remove), while FLIP animates the box by SCALE and this growth is nearly all height, so the card's text stretches on the way up. The morph's geometry is derived instead: a centred flex column, a collapsed rest position of `(innerHeight − cardHeight) / 2`, and the detail/actions animating their REAL height. Anchor it to the card (`[data-slot="card"]`), not the row wrapper — the wrapper carries the per-row top gap and 4px out is a visible jump on the first frame
+- Do not tear the context preview down on the dismissing tap — the morph runs BOTH ways, so closing collapses it back onto the row first and `onClose` fires on a timer. And keep the source row `invisible` while it is up, or the copy opening on top of it shows the same flight twice through the scrim
+- Do not let the flight card's hold arm from a press on the row's own CONTROLS — the pointer hooks sit on `SwipeableCard`'s outer container, so the swipe buttons are inside them, and a thumb tap on `…` outlasts `HOLD_MS` on a phone. That opened the context preview instead of the cascade. Bail when the press starts on a `button`/`a`/`input`/`textarea` or inside `[data-swipe-actions]`
+- Do not put the flight card's ACTIONS back behind a press-and-hold — they live in the swipe panel behind `…`. A hold is an invisible gesture that nothing advertises, and as the actions menu it competed with the swipe and the scroll for the same pointer. The hold now drives the CONTEXT PREVIEW instead, which is a different job (a look, not a menu) and the one thing a hold has always meant; it still needs the movement cancel and the synthetic `pointercancel`
+- Do not let a dismissing tap on the `…` reopen the cascade — the swallow closes it on `pointerup` and the follow-up `click` then arrives with the listeners already gone. Keep `CASCADE_REOPEN_GUARD_MS`: an open request within 350ms of a close is the same tap, whichever order an engine delivers it in
+- Do not confine the header's blur to the bar's own height, and do not scroll a row to `--chrome-top` — content has to clear `--chrome-clear` (the bar PLUS the fade's tail). A row parked at the bar's edge sits in the blur and looks sharp enough to tap when it isn't
+- Do not let the bottom nav hide on scroll — it is the app's primary navigation on a phone, and it disappeared exactly when a long read made you want it, with a scroll UP as the only way back
+- Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (56 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
+- Do not give the bottom bar a squarer corner than a stadium — `MOBILE_PILL_RADIUS` is half its own height, the same rule the 44px controls follow; it is a separate constant only because the bar is a different height. A third-of-the-height radius was tried (the proportion the reference tab bars use) and rejected on the look: what reads as a squircle there is CONTINUOUS CURVATURE, not a smaller radius, and a circular arc at that radius is just a rounded rectangle. Drawing the real thing needs `corner-shape`, and a corner shape one engine falls back from would leave iOS and Android with different bars
+- Do not give the gravity blob a colour of its own — it is `--on-glass-active`, THE selected-thing fill, shared with an action button's active state so the nav and the header say "this is the one you are on" the same way. It must stay a mix of two OPAQUE colours: any translucency shows up as the blob letting the page through, which is the one thing it must not do
+- Do not put `--primary` on `--on-glass-active` — a 32% tint of a colour is the same hue at a similar lightness, which is exactly why the active action button read as barely selected. The label is `--on-glass-active-fg`, the primary pushed AWAY from the fill (lighter on dark, darker on light) so it still reads as the accent
+- Do not close the flight card's `…` cascade on POINTERDOWN — the overlay unmounts mid-gesture and the click that follows lands on the card underneath, so dismissing it also opened the flight. Close on the lift and swallow the synthesised click at the capture phase
+- Do not derive the calendar's dual/single mode from a ResizeObserver on the page — read `usePanelDualMonth()`. A measurement lands a frame behind the resize, and in that frame the calendar renders the outgoing mode at the incoming width (the "flash" on the collapse)
+- Do not scroll a dynamically-measured virtual list by asking the virtualizer where a row is — every offset it can give you is built from `estimateSize` for the rows it has never measured, so `scrollToIndex`/`getOffsetForIndex` are wrong by however far the estimate is off. `scrollToIndexSettled` scrolls roughly, then MEASURES the row in the DOM and corrects by the difference, which is exact
+- Do not let the `…` cascade change the flight card's size, and do not drop `keepOpen` from the `…` action — the run is a PORTALLED overlay anchored to the `…` button's own box, and the swipe panel has to stay open beneath it or the buttons appear to come from nothing. A menu that grew the row would move every row below it
+- Do not animate the gravity blob in the SIDEBAR — it is placed instantly there. The list's metrics re-measure as a route settles and as the panel morphs, and each re-measure was a chance for the spring to re-fire (the "flashes twice" report)
+- Do not carry a flight's OOOI times, takeoffs/landings, signature, lock or import/sync stamps into a derived flight (`deriveFlight`) — those are the record of a specific flight having happened, and copying them forward fabricates a logbook entry
+- Do not judge a virtual list's scroll convergence by `virtualizer.scrollOffset` — it is written by the scroll listener, so reading it in the same tick as `scrollToIndex` always says "unchanged" and the retry loop gives up after one pass
+- Do not put a control taller than `h-9` inside a `GlassButtonGroup` — the group is `h-11` with `px-1`, and the glass CLIPS, so a 48px child had its icon cut off top and bottom (the dashboard's period filter) and made the group wider than it was tall, turning a single-button group into an oval (the alerts bell). `GlassGroupButton` is `h-9 w-9`; anything hand-rolled into a group has to match
+- Do not size the floating controls or the desktop nav pill independently — they are one 44px family (`CONTROL_RADIUS` 22 = half the height, so a pill stays a stadium — the bottom bar follows the same rule at its own height, see `MOBILE_PILL_RADIUS`), the header row is `h-13` to match, and `--chrome-top` is derived from them. They were 56px, which read as oversized next to the platform's own chrome on the same iPad
+- Do not print a four-digit year in the logbook's month label — in dual mode ("Jul – Aug 2026") the left action group grew far enough to reach the centred nav pill
+- Do not bring back the three-panel month carousel. It measured its container height from a ref taken "at rest" that had never been taken on the first entry into dual mode, so the calendar collapsed to 8px, and its end-of-animation handler tested `dataset.animAnchor` against `data-anim-anchor=""` — the empty string, which is falsy — so it never recovered. A dual step moves the pair by TWO months, so there is nothing sliding across to animate
+- Do not compensate the list's scroll when a floating panel OPENS or CLOSES — that push is the whole point of `overflow-anchor: none`. `absorbSpacerDelta` is only for the calendar changing SHAPE while already open, and that commit must also drop the spacer's transition, or an eased spacer drifts against the one-shot correction
 - Do not inset `.GlassBlur` from the face or feather it outward — the fill must be even corner to corner, and `--glass-press` must stay imperative so a scroll's `pointercancel` doesn't kill the spotlight

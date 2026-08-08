@@ -22,7 +22,8 @@ import { normalizeRegistration } from "@/lib/utils/string"
 import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
-import { FastScroll, generateAlphabetItemsFromList } from "@/components/ui/fast-scroll"
+import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll"
+import { scrollToIndexSettled, scrollToTop } from "@/lib/utils/virtual-scroll"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { AircraftDetailPanel } from "@/components/aircraft-detail-panel"
@@ -302,11 +303,14 @@ export default function AircraftPage() {
   // Generate FastScroll alphabet items from the full sorted list (including favorites/recently used)
   const fastScrollItems = useMemo(() => {
     if (allSortedAircraft.length === 0) return []
+    // ★ only when something is actually pinned above the alphabet (see the
+    // airports page) — otherwise it is a control that goes nowhere.
+    const hasPinned = browseAircraft.length < allSortedAircraft.length
     return generateAlphabetItemsFromList(
       allSortedAircraft.map((a) => a.registration),
-      { numberPosition: "start" }
+      { numberPosition: "start", withTop: hasPinned }
     )
-  }, [allSortedAircraft])
+  }, [allSortedAircraft, browseAircraft.length])
 
   // Pre-compute letter -> virtual list index mapping for fast scroll
   const letterIndexMap = useMemo(() => {
@@ -473,18 +477,24 @@ export default function AircraftPage() {
 
   // Handle FastScroll selection - uses scrollToIndex
   const handleFastScrollSelect = useCallback((letter: string) => {
+    isFastScrollingRef.current = true
+    setActiveLetterKey(letter)
+    // ★ is the pinned favourites/recent block at the very top, which has no
+    // letter of its own.
+    if (letter === FAST_SCROLL_TOP_KEY) {
+      scrollToTop(rowVirtualizer)
+      setTimeout(() => { isFastScrollingRef.current = false }, 150)
+      return
+    }
     const index = letterIndexMap.get(letter)
     if (index !== undefined) {
-      isFastScrollingRef.current = true
-      setActiveLetterKey(letter)
-      rowVirtualizer.scrollToIndex(index, {
-        align: "start",
-        behavior: "auto",
-      })
-      setTimeout(() => {
-        isFastScrollingRef.current = false
-      }, 150)
+      // Settled, not a single call: the rows are dynamically measured, so one
+      // scrollToIndex lands short of the letter (see lib/utils/virtual-scroll).
+      scrollToIndexSettled(rowVirtualizer, index)
     }
+    setTimeout(() => {
+      isFastScrollingRef.current = false
+    }, 250)
   }, [letterIndexMap, rowVirtualizer])
 
 

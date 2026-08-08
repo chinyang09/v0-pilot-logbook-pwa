@@ -158,61 +158,59 @@
   * {
     @apply border-border outline-ring/50;
   }
-  /* Force background color on html for Android PWA.
+  /* ─── THE APPLICATION SHELL ───
+     One box, sized by a VIEWPORT unit, clipped, and in normal flow. Which
+     unit is the whole question, and all three candidates are wrong somewhere:
 
-     NO `overflow` on html OR body — deliberately. Any overflow value set on
-     the root (or, failing that, on body) is PROPAGATED TO THE VIEWPORT, and a
-     hidden viewport clips document painting at the viewport's edge. In an iOS
-     standalone PWA the reported viewport is SHORTER than the physical screen
-     (the WebKit bug below), so that clip was exactly the dead band above the
-     home indicator: body laid out to the full 820px but nothing below the
-     788px viewport line ever painted. With the default overflow the engine
-     paints the document onto the whole surface — the same machinery that
-     paints a page under Safari's translucent toolbars. The document still
-     cannot scroll: body is position:fixed (out of flow), so html has no
-     in-flow content and the scroll range is zero; overscroll-behavior pins
-     the rubber-band. App content is clipped by the shell's own
-     overflow-hidden containers, not by the root. */
+     - `100%` resolves against the initial containing block, which under
+       `viewport-fit=cover` + `black-translucent` does NOT include the area
+       behind the status bar / notch. The shell comes out short of the screen.
+     - `100dvh` is wrong in an installed iOS app at COLD START and does not
+       reliably settle (it corrects after a portrait→landscape→portrait
+       rotation). Sizing the shell from it, and worse measuring the difference
+       and compensating, is a feedback loop: the correction changes the layout,
+       the layout changes the reading, and the app visibly vibrates.
+     - `100vh` is correct from cold start in standalone — with no toolbar,
+       `100vh`, `100dvh`, `innerHeight` and `screen.height` all converge — but
+       in a BROWSER tab it is the LARGE viewport, so it hides the bottom nav
+       behind the URL bar.
+
+     So: `dvh` in a browser tab (it tracks the toolbars, which is exactly what
+     it is for) and `vh` once installed (no toolbars to track, and it is the
+     only unit right at cold start). That is a display-mode split, not a
+     platform one — it reads the same on iOS and Android.
+
+     `overflow: hidden` propagates to the viewport and is what makes the
+     document unscrollable: without it the shell could exceed the document's
+     scrollable box and the whole page gained a scroll range, which on a page
+     with nothing to scroll read as "free play".
+
+     Body is IN FLOW and carries NO `transform`. A transform on body would make
+     it the containing block for every `position: fixed` descendant, which
+     changes what "fixed" means app-wide (and what `100%` resolves against on
+     those elements) — a large, subtle blast radius for no gain now that the
+     shell is sized correctly. */
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
   html {
     background-color: var(--background);
-    height: 100%;
-    overscroll-behavior: none;
   }
   body {
     @apply bg-background text-foreground;
     background-color: var(--background);
-    overscroll-behavior: none;
-    /* THE application shell. WebKit has an open installed-PWA bug: in a Home
-       Screen web app with `viewport-fit=cover`, the reported viewport (units
-       AND the initial containing block) is SHORTER than the physical screen,
-       so a shell clamped to `100dvh` ends above the home indicator and leaves
-       a dead band. How much shorter is NOT `env(safe-area-inset-bottom)` as
-       the community recipe claims — measured on a real iPad in landscape the
-       shortfall was 32px (the TOP inset) against a bottom inset of 25px — so
-       no static env() term can close it. `--shell-bottom-gap` is the MEASURED
-       shortfall (screen height − innerHeight), written by
-       ViewportShellCompensator on iOS standalone only and 0 everywhere else;
-       the env() fallback below only covers the pre-hydration frames. The
-       safe-area padding lives in the bottom nav, never on body.
-
-       Body is IN FLOW — deliberately NOT position:fixed. WebKit renders in
-       two regimes here: the DOCUMENT layer paints onto the whole physical
-       surface (that is how a page paints under Safari's collapsed toolbar,
-       and how the canvas background reaches the screen bottom), but
-       VIEWPORT-ANCHORED layers are hard-clipped at the buggy viewport edge —
-       measured: a fixed probe never painted below the line no matter what.
-       A fixed body put the entire app into the clipped regime. In flow, the
-       app lives in the document layer and paints to the physical bottom. */
     width: 100%;
-    height: 100dvh;
-    /* The transform makes BODY the containing block for every
-       `position: fixed` descendant (nav pill, sidebar morph, drag lens,
-       overlays, portalled dialogs). Two jobs: they position and size against
-       the one compensated shell instead of the buggy viewport, AND — because
-       their containing block is a transformed in-flow element — they render
-       in the DOCUMENT layer, the one WebKit paints below the viewport line,
-       rather than as viewport-anchored layers that get clipped there. */
-    transform: translateZ(0);
+  }
+  @media (display-mode: standalone) {
+    html,
+    body {
+      height: 100vh;
+    }
   }
 }
 
@@ -221,17 +219,6 @@
   html,
   body {
     background-color: var(--background) !important;
-  }
-  /* The WebKit installed-PWA compensation (see the body comment above).
-     `--shell-bottom-gap` is the measured shortfall, set by
-     ViewportShellCompensator (0 outside iOS standalone). The fallback is 0,
-     NOT an env() term: overshooting makes the shell taller than the viewport,
-     which is a scrollable document that iOS can shift upward — strictly worse
-     than a brief bottom band while hydration runs. In the in-flow regime
-     WebKit also corrects innerHeight (and dvh) to the full screen shortly
-     after launch, so the steady-state gap is usually 0 anyway. */
-  body {
-    height: calc(100dvh + var(--shell-bottom-gap, 0px));
   }
 }
 
@@ -261,22 +248,54 @@
    insets are 0. */
 :root {
   /* The offset content needs at the TOP of a panel to clear the floating
-     header: its 64px bar plus whatever the status bar overlays. ONE definition
-     — anything that positions itself against the header (a page's padding, the
+     header: the bar plus whatever the status bar overlays. ONE definition —
+     anything that positions itself against the header (a page's padding, the
      logbook's list spacer, its calendar overlay) reads this, because a
-     hardcoded 4rem somewhere is exactly how the search field ended up sliding
-     under the action buttons. */
-  --chrome-top: calc(4rem + env(safe-area-inset-top, 0px));
-  --chrome-top-sm: calc(3rem + env(safe-area-inset-top, 0px));
+     hardcoded rem value somewhere is exactly how the search field ended up
+     sliding under the action buttons.
+
+     3.25rem = the controls' 4px top margin + their 44px height + a 4px gap.
+     It was 4rem when they were 56px tall. */
+  --chrome-top: calc(3.25rem + env(safe-area-inset-top, 0px));
+  /* How far BELOW the action buttons a tap still means "scroll to the top".
+     The header row itself is only `--chrome-top` tall, so aiming a little low
+     used to land on a flight card and open it. A real element, so a drag that
+     starts here does not scroll the list — hence thin: 24px is enough to
+     forgive a low tap without taking a meaningful strip of the list away. */
+  --chrome-tap: 1.25rem;
+  /* Where the QUICK-SCROLL rail parks a row. Deliberately more than the
+     header treatment's own band (`FADE_TAIL`, 41px in chrome-overlays): a row
+     that lands exactly on the band's lower edge is sitting against it, and the
+     whole point of this target is that the row reads as clear of the chrome.
+     3.5rem leaves ~15px of air below the band.
+
+     Do NOT collapse the two to one number. Tying the band to this pushed the
+     darkening far too far down the screen; tying this to the band puts the
+     scrolled-to row back inside the treatment. */
+  --chrome-clear: calc(var(--chrome-top) + 3.5rem);
+  /* How far BELOW the action buttons a tap still counts as "the header", and
+     so scrolls that panel to the top. The header row itself ends level with
+     the buttons, which put the target's lower edge exactly where the
+     darkening begins — aim a little low and you hit a flight card and open it
+     instead. This band is the same idea as iOS's status-bar tap: a strip of
+     genuine chrome that the list does not own.
+
+     Kept modest on purpose. It is a real element, so a drag STARTING inside
+     it does not scroll the list — 24px is enough to catch an aimed tap and
+     small enough that it is not where a flick begins. */
+  --chrome-tap: 1.25rem;
+  --chrome-top-sm: calc(2.75rem + env(safe-area-inset-top, 0px));
   /* How far above the physical bottom edge the floating nav rests — the ONE
      number the bottom pill, the sidebar's lower end, and the content
      clearance all derive from, so the pill↔sidebar morph endpoints and the
-     scroll rest position always agree. On iOS the nav hugs the home
-     indicator (the inset minus 10px puts the nav's bottom edge just above
-     the indicator's white bar rather than a full band above it); where
-     there is no bottom inset (Android — its window already excludes the
-     gesture bar — and desktop) it is the plain 4px margin, unchanged. */
-  --nav-bottom-offset: max(4px, env(safe-area-inset-bottom, 0px) - 10px);
+     scroll rest position always agree.
+
+     Raised (`inset − 10` → `inset − 4`, floor 4 → 10) on the owner's read that
+     the bar sat too close to the bottom edge. It still hugs the iOS home
+     indicator rather than floating a full band above it; where there is no
+     bottom inset (Android — its window already excludes the gesture bar — and
+     desktop) the floor is what applies. */
+  --nav-bottom-offset: max(10px, env(safe-area-inset-bottom, 0px) - 4px);
   /* What CONTENT owes the home indicator: the FULL inset, the platform
      convention — a scrolled-to-rest last row clears the indicator rather than
      tucking under it. Deliberately larger than `--nav-bottom-offset`: the nav
@@ -351,6 +370,16 @@
 .px-panel {
   padding-left: var(--panel-gutter);
   padding-right: var(--panel-gutter);
+}
+
+/* Cancel the gutter, for a row that bleeds to the panel edge and re-applies
+   the padding itself (a horizontally scrolling chip strip). It MUST be the
+   negative of `--panel-gutter`: a hardcoded `-mx-4` against a 12px gutter
+   pushed the strip 4px past both edges, which is horizontal overflow the
+   root no longer clips. */
+.-mx-panel {
+  margin-left: calc(-1 * var(--panel-gutter));
+  margin-right: calc(-1 * var(--panel-gutter));
 }
 
 /* ─── Native touch feel ─── */
@@ -542,22 +571,32 @@ textarea:focus-within {
   animation: accordion-up 0.2s ease-out;
 }
 
-/* Calendar dual-month carousel animations */
-@keyframes cal-exit-up {
-  from { transform: translateY(0); opacity: 1; }
-  to   { transform: translateY(-100%); opacity: 0; }
+/* Single ↔ dual month: a HORIZONTAL slide, the two months treated as a stacked
+   pair. Both directions are the same pair of keyframes parameterised by
+   `--cal-pane-x` (how far the pane starts from its resting place) and
+   `--cal-pane-o` (whether it arrives or was already there) — the pane you were
+   already looking at holds full opacity while the other one appears, so it
+   reads as one emerging from under the other rather than as a crossfade. */
+@keyframes cal-pane-settle {
+  from { transform: translateX(var(--cal-pane-x, 0)); opacity: var(--cal-pane-o, 1); }
+  to   { transform: translateX(0); opacity: 1; }
 }
-@keyframes cal-enter-top {
-  from { transform: translateY(-100%); opacity: 0; }
+@keyframes cal-pane-leave {
+  from { transform: translateX(var(--cal-pane-x, 0)); opacity: 1; }
+  to   { transform: translateX(0); opacity: 0; }
+}
+
+/* Stepping to another month is VERTICAL, because the gesture that steps it is
+   a vertical swipe (and a wheel): the months should travel the way the finger
+   does. The single ↔ dual width slide above stays horizontal — that one is the
+   pair opening sideways, which is a different motion entirely. */
+@keyframes cal-step-in {
+  from { transform: translateY(var(--cal-step-y, 0)); opacity: 0; }
   to   { transform: translateY(0); opacity: 1; }
 }
-@keyframes cal-shift-left {
-  from { transform: translateX(0); }
-  to   { transform: translateX(-100%); }
-}
-@keyframes cal-shift-right {
-  from { transform: translateX(0); }
-  to   { transform: translateX(100%); }
+@keyframes cal-step-out {
+  from { transform: translateY(0); opacity: 1; }
+  to   { transform: translateY(var(--cal-step-y, 0)); opacity: 0; }
 }
 
 /* Sidebar width variable */
@@ -626,21 +665,33 @@ textarea:focus-within {
   --glass-rim:
     conic-gradient(
       from var(--glass-specular-angle, 315deg),
-      rgba(255, 255, 255, 0.96) 0deg,
-      rgba(255, 255, 255, 0.30) 55deg,
-      rgba(255, 255, 255, 0) 100deg,
-      rgba(255, 255, 255, 0.12) 150deg,
-      rgba(255, 255, 255, 0.48) 180deg,
-      rgba(255, 255, 255, 0.12) 210deg,
-      rgba(255, 255, 255, 0) 260deg,
-      rgba(255, 255, 255, 0.30) 305deg,
-      rgba(255, 255, 255, 0.96) 360deg
+      rgba(255, 255, 255, 0.60) 0deg,
+      rgba(255, 255, 255, 0.33) 30deg,
+      rgba(255, 255, 255, 0.20) 76deg,
+      rgba(255, 255, 255, 0.17) 150deg,
+      rgba(255, 255, 255, 0.42) 180deg,
+      rgba(255, 255, 255, 0.17) 210deg,
+      rgba(255, 255, 255, 0.20) 284deg,
+      rgba(255, 255, 255, 0.33) 330deg,
+      rgba(255, 255, 255, 0.60) 360deg
     ),
     linear-gradient(rgba(60, 50, 40, 0.07), rgba(60, 50, 40, 0.07));
   /* Eased back with the dark veil (0.62 → 0.55) — the raised face blur carries
      the difference, so the surface is a touch more see-through without losing
      its separation from cream. */
-  --glass-veil: rgba(255, 255, 255, 0.55);
+  --glass-veil: rgba(255, 255, 255, 0.68);
+  /* Surface undercoat — see the note on `--glass-base` in `.dark`. Light: with
+     the white veil over it the face lands at ~86% opaque. */
+  --glass-base: color-mix(in oklab, var(--card) 55%, transparent);
+  /* The solid colour the finished face reads as, for anything painted ON the
+     glass. See `--on-glass-*` below. */
+  --on-glass: oklch(0.965 0.005 75);
+  /* The label ON `--on-glass-active`. `--primary` itself is the same hue at a
+     similar lightness to its own 32% tint, which is exactly why the active
+     action button read as low-contrast — so this is the primary pushed away
+     from the fill (darker on the light theme, lighter on the dark one) and
+     stays recognisably the accent rather than going neutral. */
+  --on-glass-active-fg: oklch(0.44 0.12 55);
   --glass-shadow:
     0 1px 2px rgba(45, 38, 30, 0.05),
     0 8px 28px rgba(45, 38, 30, 0.10);
@@ -654,17 +705,28 @@ textarea:focus-within {
      glass, where a thick ring at the same brightness reads as a painted
      border. The dim flanks stay dim — that contrast is what makes it a glint
      rather than an outline. */
+  /* A rim you can see ALL THE WAY ROUND, with the glint on top of it.
+     
+     Two rounds got here. First the lobes were spread over ~60° either side of
+     the anchor, which on a small control is most of the perimeter, so the edge
+     read as a painted outline. Then they were pulled in tight — sharper, but
+     the flanks went to ~0.05 and three-quarters of the perimeter had no
+     hairline at all, which is what left it "a way off" from iOS's controls:
+     theirs is visible the whole way round. The lobes stay concentrated (that
+     is what makes it read as light on a curve) and the FLANKS came up to 0.22,
+     so the ring is continuous and the glint sits above it. It still travels —
+     `--glass-specular-angle` animates, so which part is lit drifts. */
   --glass-rim: conic-gradient(
     from var(--glass-specular-angle, 315deg),
-    rgba(255, 255, 255, 0.80) 0deg,
-    rgba(255, 255, 255, 0.26) 60deg,
-    rgba(255, 255, 255, 0.04) 105deg,
-    rgba(255, 255, 255, 0.13) 150deg,
-    rgba(255, 255, 255, 0.40) 180deg,
-    rgba(255, 255, 255, 0.13) 210deg,
-    rgba(255, 255, 255, 0.04) 255deg,
-    rgba(255, 255, 255, 0.26) 300deg,
-    rgba(255, 255, 255, 0.80) 360deg
+    rgba(255, 255, 255, 0.52) 0deg,
+    rgba(255, 255, 255, 0.29) 30deg,
+    rgba(255, 255, 255, 0.18) 76deg,
+    rgba(255, 255, 255, 0.16) 150deg,
+    rgba(255, 255, 255, 0.38) 180deg,
+    rgba(255, 255, 255, 0.16) 210deg,
+    rgba(255, 255, 255, 0.18) 284deg,
+    rgba(255, 255, 255, 0.29) 330deg,
+    rgba(255, 255, 255, 0.52) 360deg
   );
   /* A backdrop-filter can do NOTHING over pure black: blurring black gives
      black, saturating it gives black, and brightness is multiplicative — 1.25
@@ -680,16 +742,85 @@ textarea:focus-within {
      presence (12%) drops that to 34 and the material starts reading grey
      again — the exact thing the single-filter fix was for.
 
-     Eased back from 0.10 to 0.075 with the face blur raised to compensate:
-     less PAINT and more OPTICS for the same presence, which is the difference
-     between a tinted panel and glass. Do not take it much below this — the
-     lift off pure black is the whole reason it exists. */
-  --glass-veil: rgba(255, 244, 232, 0.075);
+     Thinned to 0.05 once `--glass-base` arrived. The veil exists to give the
+     slab a face over pure black — with an 82% card-coloured undercoat doing
+     that job, keeping the veil at 0.11 was pure lightening on top of an
+     already-solid surface, and the material came out too pale and too warm
+     against an iOS-dark app. At 0.05 the face lands around oklch 0.23, which
+     is the tone of iOS's own dark chrome (systemGray6 #1C1C1E → systemGray5
+     #2C2C2E). Do not take it to zero — over pure black the base alone still
+     needs the lift, and that is what this coat is for. */
+  --glass-veil: rgba(255, 244, 232, 0.05);
+  /* Surface undercoat, painted UNDER the veil.
+
+     The veil is a LIGHTENING paint — warm off-white — so it cannot be the lever
+     for "make the glass more opaque": pushing its alpha turns a dark surface
+     white long before it turns it solid. Opacity that keeps the material's
+     COLOUR has to come from a coat of the surface colour itself, which is what
+     this is. Card-coloured so a glass panel reads as the same family of
+     surface as a card.
+
+     Dark: 0.82 base under the 0.11 veil leaves the face ~84% opaque (was 11%)
+     — between the old action buttons and the calendar's near-solid 85%, and
+     closer to the calendar, per the owner. The blur, the brightness lift and
+     the saturate still act on the remaining fifth, so it is still glass rather
+     than a card with a rim. */
+  --glass-base: color-mix(in oklab, var(--card) 82%, transparent);
+  /* The colour the FINISHED face reads as — base + veil + the brightened
+     backdrop showing through the remaining fifth. It is NOT `--card`: get it
+     wrong and everything painted on the glass lands on the wrong side of it.
+     With the veil at 0.11 the face was ~0.276 and the blob (0.292) was
+     indistinguishable from it on a dark theme, which is exactly what the
+     owner saw. */
+  --on-glass: oklch(0.235 0.008 60);
+  /* See the light theme: the label on `--on-glass-active`, pushed clear of the
+     fill it sits on. */
+  --on-glass-active-fg: oklch(0.80 0.13 55);
   --glass-shadow:
     inset 0 -1px 1px rgba(0, 0, 0, 0.10),
     0 2px 6px rgba(0, 0, 0, 0.10),
     0 14px 36px -14px rgba(0, 0, 0, 0.28);
   --glass-edge-filter: blur(var(--total-strength)) brightness(1.2) saturate(1.2);
+}
+
+/* ─── Contents ON a glass surface are painted SOLID ───
+   Only the SLAB is translucent. Anything sitting on it — the nav's gravity
+   blob, an action button's active highlight, an icon, a label — is opaque, the
+   way the controls inside an iOS Control Center tile are. A translucent blob
+   over a translucent slab lets the page show through TWICE, so the highlight
+   drifted in tone as the list scrolled underneath and the icons washed out.
+
+   Each token is the colour that translucency USED to resolve to, mixed once
+   against `--on-glass` (the solid colour the finished face reads as) and then
+   painted flat. Same look over an empty screen, and now the same look over
+   anything else. Use these instead of `bg-foreground/10` / `text-foreground/50`
+   on any glass surface. */
+:root,
+.dark {
+  /* 16% rather than the 10% the old `bg-foreground/10` resolved to: that alpha
+     was measured against a nearly transparent slab, so the blob picked up
+     whatever was behind the glass and separated by accident. Painted flat on a
+     solid face it has to carry the separation itself. */
+  --on-glass-fill: color-mix(in oklab, var(--foreground) 16%, var(--on-glass));
+  --on-glass-fill-soft: color-mix(in oklab, var(--foreground) 7%, var(--on-glass));
+  /* Three weights of the accent fill, because on the calendar they STACK: a
+     range pill, a flight-day chip on top of it, a today chip on top of that.
+     Translucent they layered into a darker tone at each level; solid they need
+     the levels spelled out, or the upper chip vanishes into the pill. */
+  --on-glass-accent-soft: color-mix(in oklab, var(--primary) 12%, var(--on-glass));
+  --on-glass-accent: color-mix(in oklab, var(--primary) 18%, var(--on-glass));
+  --on-glass-accent-strong: color-mix(in oklab, var(--primary) 28%, var(--on-glass));
+  --on-glass-faint: color-mix(in oklab, var(--foreground) 22%, var(--on-glass));
+  --on-glass-icon: color-mix(in oklab, var(--foreground) 55%, var(--on-glass));
+  --on-glass-label: color-mix(in oklab, var(--foreground) 72%, var(--on-glass));
+  --on-glass-muted: color-mix(in oklab, var(--muted-foreground) 70%, var(--on-glass));
+  /* THE selected-thing fill on glass. An action button's active state and the
+     nav's gravity blob are the same idea — "this is the one you are on" — so
+     they are one colour, not a grey blob in the nav and a tinted chip in the
+     header. At `--on-glass-accent`'s 18% the chip barely separated from the
+     face; 32% is a fill you can see is a fill. It is a mix of two OPAQUE
+     colours, so it stays opaque — the blob must never let the page through. */
+  --on-glass-active: color-mix(in oklab, var(--primary) 32%, var(--on-glass));
 }
 
 .GlassContainer {
@@ -700,8 +831,17 @@ textarea:focus-within {
   --extra-blur: 2px;
   /* Drives the rim band widths below. Lower = a finer edge; the material's
      presence comes from the veil and the face, not from a thick ring — and the
-     specular glint carries the edge, so the ring under it can stay fine. */
-  --softness: 5.6px;
+     specular glint carries the edge, so the ring under it can stay fine.
+
+     WIDTH and CONTINUITY are separate problems, and conflating them is what
+     sent this up to 5.0 and back. At 3.4 the rim was thin AND the conic's
+     flanks were at ~0.05, so three-quarters of the perimeter had no hairline
+     at all — the fix was read as "too thin" and the width went up with the
+     flanks. The flanks are the part that was actually missing: at 0.22 the
+     ring is continuous, which frees the GEOMETRY to come back down. 3.6px
+     draws a finer line than 5.0 did while still drawing it all the way
+     round. Do not take the flanks down with it. */
+  --softness: 2.2px;
   --tint-amount: 0;
   --tint-saturation: 2;
   --tint-hue: 180deg;
@@ -712,7 +852,10 @@ textarea:focus-within {
      presence, which is the more glass-like of the two ways to get it. */
   --glass-face-blur: 4.4px;
   --total-strength: calc(var(--base-strength) + var(--extra-blur));
-  --edge-width: calc(0.2px + (var(--softness) * 0.08));
+  /* The reflective edge band. Widened relative to `--softness` (0.08 → 0.13)
+     so the rim itself has body — the previous ratio drew a hairline so fine
+     that only the specular glint was really visible on it. */
+  --edge-width: calc(0.3px + (var(--softness) * 0.13));
   --emboss-width: calc(var(--softness) * 0.30);
   --refraction-width: calc(var(--softness) * 0.24);
   position: relative;
@@ -855,8 +998,15 @@ textarea:focus-within {
   /* The material's PAINTED component — the part that does not come from the
      backdrop. Both themes need it, for opposite reasons: light so the slab
      separates from cream, dark so it has a face at all over black (a
-     backdrop-filter has nothing to work with there). See `--glass-veil`. */
-  background-color: var(--glass-veil, transparent);
+     backdrop-filter has nothing to work with there).
+
+     TWO coats, and they do different jobs: `--glass-base` is the surface-
+     coloured undercoat that carries the material's OPACITY, `--glass-veil` the
+     warm lift over it that carries its optical presence. Keep them separate —
+     driving opacity from the veil alone whitens a dark surface instead of
+     solidifying it. */
+  background-color: var(--glass-base, transparent);
+  background-image: linear-gradient(var(--glass-veil, transparent), var(--glass-veil, transparent));
   transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -959,7 +1109,7 @@ textarea:focus-within {
   z-index: 11;
   display: block;
   border-radius: var(--corner-radius);
-  padding: 0.75px;
+  padding: 1.1px;
   border: 0 solid transparent;
   /* Angular specular rim — a CSS approximation of the physically computed
      specular map (liquid-web/kube: rim brightness ∝ |edge normal · light|²,
@@ -985,8 +1135,10 @@ textarea:focus-within {
   border-radius: var(--corner-radius);
   /* A narrow band with a slight blur: the rim visibly BENDS the backdrop
      under the specular glint (Apple's edge is refracted light, not a painted
-     line). The angular white conic (--glass-rim) sits above this. */
-  padding: 1.25px;
+     line). The angular white conic (--glass-rim) sits above this. Thinned
+     with `--softness` — it is the widest of the edge layers, so leaving it
+     at 1.25px would have kept the rim's apparent thickness where it was. */
+  padding: 0.5px;
   border: 0 solid transparent;
   backdrop-filter: blur(1px) brightness(1.25) contrast(1.5) saturate(1.35);
   mask:
@@ -1092,8 +1244,7 @@ textarea:focus-within {
   scale: 1;
 }
 .PillDragLens-glass,
-.PillDragLens-rim,
-.PillDragLens-grey {
+.PillDragLens-rim {
   position: absolute;
   inset: 0;
   border-radius: inherit;
@@ -1190,13 +1341,7 @@ textarea:focus-within {
   mask-composite: exclude;
   mix-blend-mode: screen;
   opacity: 0.7;
-  transition: opacity 0.26s ease;
-}
-/* Matches the gravity blob's bg-foreground/10 so the handoff is invisible. */
-.PillDragLens-grey {
-  background: color-mix(in oklab, var(--foreground) 10%, transparent);
-  opacity: 0;
-  transition: opacity 0.26s ease;
+  transition: opacity 0.34s ease;
 }
 /* The landing. `translate` and `scale` are separate CSS properties, so each
    gets its OWN easing: position eases in with NO overshoot (the lens must never
@@ -1206,8 +1351,8 @@ textarea:focus-within {
    thread is busy mounting the next page. */
 .PillDragLens--settle {
   transition:
-    translate 0.26s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.26s ease;
+    translate 0.36s cubic-bezier(0.36, 0.12, 0.22, 1),
+    opacity 0.34s ease;
   /* The shape is KEYFRAMED, not transitioned. A transition can only overshoot
      both axes together, which reads as "grew past its size and came back" —
      the blob getting bigger and smaller, not a body landing. Squash-and-
@@ -1215,26 +1360,43 @@ textarea:focus-within {
      narrow+tall on the rebound, then neutral. `scale` is a composited
      property, so the keyframes run on the compositor exactly like the
      transition did. */
-  animation: pill-lens-splat 0.42s cubic-bezier(0.33, 0, 0.2, 1) forwards;
+  animation: pill-lens-splat 0.56s cubic-bezier(0.36, 0.12, 0.22, 1) forwards;
 }
+/* The deformation is deliberately SMALL — 5%, where it used to be 14/16%.
+   At that amplitude the landing was an impact: the blob visibly splatted and
+   bounced, which is a different event from the one that came before it (a
+   bead of glass sliding along the bar). A settle is the same motion ending,
+   so the shape only has to acknowledge the arrival, not announce it. The axes
+   still go OPPOSITE ways — that is what separates a squash from "grew and
+   shrank" — and the rebound is a third of the squash so it comes to rest
+   rather than oscillating. */
 @keyframes pill-lens-splat {
   0% {
     scale: 1 1;
   }
-  /* Impact — timed to land with the translate (0.26s of 0.42s ≈ 62%). */
-  62% {
-    scale: calc(var(--lens-to-x, 1) * 1.14) calc(var(--lens-to-y, 1) * 0.84);
+  /* Impact — timed to land with the translate (0.36s of 0.56s ≈ 64%). */
+  64% {
+    scale: calc(var(--lens-to-x, 1) * 1.05) calc(var(--lens-to-y, 1) * 0.955);
   }
-  /* Rebound the other way, smaller than the squash so it settles rather than
-     oscillates. */
-  82% {
-    scale: calc(var(--lens-to-x, 1) * 0.95) calc(var(--lens-to-y, 1) * 1.07);
+  84% {
+    scale: calc(var(--lens-to-x, 1) * 0.983) calc(var(--lens-to-y, 1) * 1.018);
   }
   100% {
     scale: var(--lens-to-x, 1) var(--lens-to-y, 1);
   }
 }
-.PillDragLens--settle .PillDragLens-glass,
+/* The dissolve. The lens does NOT paint the highlight itself — it used to,
+   and that opaque fill sat ON TOP of the tab's icon and label, so the landing
+   flashed a solid pill with nothing in it before the real blob took over
+   underneath. The real blob (which lives BEHIND the row, where a highlight
+   belongs) fades up instead, and the glass goes off it.
+
+   Delayed so the bead is still glass for the whole travel and only leaves as
+   it comes to rest. */
+.PillDragLens--settle .PillDragLens-glass {
+  opacity: 0;
+  transition: opacity 0.34s ease 0.22s;
+}
 .PillDragLens--settle .PillDragLens-refract {
   opacity: 0;
 }
@@ -1256,10 +1418,7 @@ textarea:focus-within {
   -webkit-backdrop-filter: none;
 }
 .PillDragLens--settle .PillDragLens-refract {
-  transition: opacity 0.12s ease;
-}
-.PillDragLens--settle .PillDragLens-grey {
-  opacity: 1;
+  transition: opacity 0.3s ease 0.2s;
 }
 @media (prefers-reduced-motion: reduce) {
   .PillDragLens {

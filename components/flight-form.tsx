@@ -32,7 +32,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { SignatureCanvas, type SignatureCrewMember } from "@/components/signature-canvas";
+import { type SignatureCrewMember } from "@/components/signature-canvas";
+import { SignatureDialog } from "@/components/signature-dialog";
 import {
   updateFlight,
   updatePersonnel,
@@ -358,6 +359,7 @@ export function FlightForm({
   const clockSeparator = preferences.display.clockSeparator;
   const [, setIsSubmitting] = useState(false);
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
+  const [signatureOpen, setSignatureOpen] = useState(false);
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
 
@@ -1302,12 +1304,12 @@ export function FlightForm({
   // Register detail panel actions for the desktop floating glass bar
   const detailActions = useMemo(() => {
     return (
-      <GlassContainer cornerRadius={28}>
+      <GlassContainer cornerRadius={22}>
         <ImageImportButton
           onDataExtracted={handleOCRDataExtracted}
           variant="ghost"
           size="icon"
-          className="h-14 w-14"
+          className="h-11 w-11 [&_svg]:!size-5"
         />
       </GlassContainer>
     );
@@ -1323,7 +1325,7 @@ export function FlightForm({
 
   return (
     <div className="h-full relative">
-    <div ref={scrollContainerRef} onScroll={handleScrollSave} className="h-full overflow-y-auto bg-background scrollbar-hide">
+    <div ref={scrollContainerRef} onScroll={handleScrollSave} className="h-full overflow-y-auto overscroll-contain bg-background scrollbar-hide">
       <ScrollIndicator />
       <div className="min-h-full pt-chrome pb-chrome">
 
@@ -1935,18 +1937,57 @@ export function FlightForm({
                 </AccordionTrigger>
               </div>
               <AccordionContent className="px-4 pb-4">
-                <SignatureCanvas
-                  onSave={handleSignatureSave}
-                  onClear={handleSignatureClear}
-                  onLicenseUpdate={handleLicenseUpdate}
-                  initialSignature={formData.signature}
-                  flightCrew={flightCrew}
-                />
+                {/* Signing happens FULL SCREEN. A signature is a drawing, and
+                    it was being collected in a 120px strip at the bottom of a
+                    long form; the summary stays here, the act moves out. */}
+                <button
+                  type="button"
+                  onClick={() => setSignatureOpen(true)}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:bg-secondary"
+                >
+                  {formData.signature ? (
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">
+                        {formData.signature.signerName}
+                        {formData.signature.signerRole && (
+                          <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                            ({formData.signature.signerRole.toUpperCase()})
+                          </span>
+                        )}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        Signed{" "}
+                        {new Date(formData.signature.capturedAt).toLocaleDateString(undefined, {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      {flightCrew.length === 0
+                        ? "Assign crew to enable signing"
+                        : "Tap to sign"}
+                    </span>
+                  )}
+                  <PenLine className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                </button>
               </AccordionContent>
             </AccordionItem>
           </Accordion>
         </div>
       </div>
+
+      <SignatureDialog
+        open={signatureOpen}
+        onClose={() => setSignatureOpen(false)}
+        onSave={handleSignatureSave}
+        onClear={handleSignatureClear}
+        onLicenseUpdate={handleLicenseUpdate}
+        initialSignature={formData.signature}
+        flightCrew={flightCrew}
+      />
 
       {/* Time Picker Modal */}
       {activeTimePicker && (

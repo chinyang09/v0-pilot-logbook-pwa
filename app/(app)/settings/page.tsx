@@ -82,7 +82,7 @@ const SECTIONS: SectionDef[] = [
 function SettingsDetailPanel({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-full relative">
-      <div className="h-full overflow-auto scrollbar-hide">
+      <div className="h-full overflow-auto overscroll-contain scrollbar-hide">
         <ScrollIndicator />
         <div className="h-chrome-top" />
         {children}
