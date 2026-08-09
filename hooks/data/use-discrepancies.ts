@@ -53,7 +53,6 @@ export function useDiscrepancies() {
     data,
     error,
     isLoading,
-    isValidating,
     mutate: mutateDiscrepancies,
   } = useSWR(isReady ? CACHE_KEYS.discrepancies : null, fetchDiscrepancies, {
     revalidateOnFocus: false,
@@ -63,12 +62,17 @@ export function useDiscrepancies() {
 
   const refresh = useCallback(() => {
     console.log("[Discrepancies] Refreshing...")
-    return mutateDiscrepancies(undefined, { revalidate: true })
+    // Revalidate WITHOUT clearing the cache. Passing `undefined` as data wipes it
+    // first, which flips `isLoading` true and flashes this list's skeleton on every
+    // background refresh — and hands out a NEW array reference even when nothing
+    // changed, so SWR's deep `compare` can't hold the old one and every downstream
+    // memo recomputes. `use-flights` has always done it this way; the rest had not.
+    return mutateDiscrepancies()
   }, [mutateDiscrepancies])
 
   return {
     discrepancies: data ?? [],
-    isLoading: isLoading || isValidating,
+    isLoading,
     error,
     refresh,
   }
@@ -84,7 +88,6 @@ export function useUnresolvedDiscrepancies() {
     data,
     error,
     isLoading,
-    isValidating,
     mutate: mutateDiscrepancies,
   } = useSWR(
     isReady ? `${CACHE_KEYS.discrepancies}:unresolved` : null,
@@ -97,12 +100,17 @@ export function useUnresolvedDiscrepancies() {
   )
 
   const refresh = useCallback(() => {
-    return mutateDiscrepancies(undefined, { revalidate: true })
+    // Revalidate WITHOUT clearing the cache. Passing `undefined` as data wipes it
+    // first, which flips `isLoading` true and flashes this list's skeleton on every
+    // background refresh — and hands out a NEW array reference even when nothing
+    // changed, so SWR's deep `compare` can't hold the old one and every downstream
+    // memo recomputes. `use-flights` has always done it this way; the rest had not.
+    return mutateDiscrepancies()
   }, [mutateDiscrepancies])
 
   return {
     unresolvedDiscrepancies: data ?? [],
-    isLoading: isLoading || isValidating,
+    isLoading,
     error,
     refresh,
   }
@@ -118,7 +126,6 @@ export function useDiscrepancyCounts() {
     data,
     error,
     isLoading,
-    isValidating,
     mutate: mutateCounts,
   } = useSWR(
     isReady ? `${CACHE_KEYS.discrepancies}:counts` : null,
@@ -131,12 +138,17 @@ export function useDiscrepancyCounts() {
   )
 
   const refresh = useCallback(() => {
-    return mutateCounts(undefined, { revalidate: true })
+    // Revalidate WITHOUT clearing the cache. Passing `undefined` as data wipes it
+    // first, which flips `isLoading` true and flashes this list's skeleton on every
+    // background refresh — and hands out a NEW array reference even when nothing
+    // changed, so SWR's deep `compare` can't hold the old one and every downstream
+    // memo recomputes. `use-flights` has always done it this way; the rest had not.
+    return mutateCounts()
   }, [mutateCounts])
 
   return {
     counts: data ?? { total: 0, unresolved: 0, resolved: 0 },
-    isLoading: isLoading || isValidating,
+    isLoading,
     error,
     refresh,
   }

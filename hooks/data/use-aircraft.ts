@@ -35,7 +35,12 @@ export function useAircraft() {
 
   const refresh = useCallback(() => {
     console.log("[Aircraft] Refreshing...")
-    return mutateAircraft(undefined, { revalidate: true })
+    // Revalidate WITHOUT clearing the cache. Passing `undefined` as data wipes it
+    // first, which flips `isLoading` true and flashes this list's skeleton on every
+    // background refresh — and hands out a NEW array reference even when nothing
+    // changed, so SWR's deep `compare` can't hold the old one and every downstream
+    // memo recomputes. `use-flights` has always done it this way; the rest had not.
+    return mutateAircraft()
   }, [mutateAircraft])
 
   return {

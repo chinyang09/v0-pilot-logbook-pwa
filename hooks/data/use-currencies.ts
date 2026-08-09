@@ -39,7 +39,6 @@ export function useCurrencies() {
     data,
     error,
     isLoading,
-    isValidating,
     mutate: mutateCurrencies,
   } = useSWR(isReady ? CACHE_KEYS.currencies : null, fetchCurrencies, {
     revalidateOnFocus: false,
@@ -49,12 +48,17 @@ export function useCurrencies() {
 
   const refresh = useCallback(() => {
     console.log("[Currencies] Refreshing...")
-    return mutateCurrencies(undefined, { revalidate: true })
+    // Revalidate WITHOUT clearing the cache. Passing `undefined` as data wipes it
+    // first, which flips `isLoading` true and flashes this list's skeleton on every
+    // background refresh — and hands out a NEW array reference even when nothing
+    // changed, so SWR's deep `compare` can't hold the old one and every downstream
+    // memo recomputes. `use-flights` has always done it this way; the rest had not.
+    return mutateCurrencies()
   }, [mutateCurrencies])
 
   return {
     currencies: data ?? [],
-    isLoading: isLoading || isValidating,
+    isLoading,
     error,
     refresh,
   }
@@ -70,7 +74,6 @@ export function useExpiringCurrencies() {
     data,
     error,
     isLoading,
-    isValidating,
     mutate: mutateCurrencies,
   } = useSWR(
     isReady ? `${CACHE_KEYS.currencies}:expiring` : null,
@@ -83,12 +86,17 @@ export function useExpiringCurrencies() {
   )
 
   const refresh = useCallback(() => {
-    return mutateCurrencies(undefined, { revalidate: true })
+    // Revalidate WITHOUT clearing the cache. Passing `undefined` as data wipes it
+    // first, which flips `isLoading` true and flashes this list's skeleton on every
+    // background refresh — and hands out a NEW array reference even when nothing
+    // changed, so SWR's deep `compare` can't hold the old one and every downstream
+    // memo recomputes. `use-flights` has always done it this way; the rest had not.
+    return mutateCurrencies()
   }, [mutateCurrencies])
 
   return {
     expiringCurrencies: data ?? [],
-    isLoading: isLoading || isValidating,
+    isLoading,
     error,
     refresh,
   }

@@ -60,7 +60,6 @@ export function useFlights() {
     data,
     error,
     isLoading,
-    isValidating,
     mutate: mutateFlights,
   } = useSWR(isReady ? CACHE_KEYS.flights : null, fetchFlights, {
     revalidateOnFocus: false,
@@ -95,7 +94,6 @@ export function useFlightStats() {
     data,
     error,
     isLoading,
-    isValidating,
     mutate: mutateStats,
   } = useSWR(isReady ? CACHE_KEYS.stats : null, fetchStats, {
     revalidateOnFocus: false,
