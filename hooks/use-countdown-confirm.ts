@@ -54,6 +54,18 @@ export function useCountdownConfirm({
   const [running, setRunning] = useState(false)
   const rafRef = useRef<number | null>(null)
   const startedAtRef = useRef(0)
+  /**
+   * The last whole-second value handed to React.
+   *
+   * The loop runs at frame rate and `remaining` changes once a SECOND, so
+   * calling `setRemaining` unconditionally meant ~60 state dispatches a second
+   * for ~59 non-changes. React bails out on an equal value, but the bail-out is
+   * reached by entering the scheduler — and this runs for the whole 10s a
+   * delete is armed, which is precisely when the user is likely to be scrolling
+   * the list it was armed from. Comparing here keeps the render rate at the 1Hz
+   * the label actually needs.
+   */
+  const lastSecondRef = useRef(-1)
 
   // Keep the latest callback without re-creating start/cancel.
   const onConfirmRef = useRef(onConfirm)
@@ -79,7 +91,8 @@ export function useCountdownConfirm({
     stopRaf()
     startedAtRef.current = performance.now()
     setRunning(true)
-    setRemaining(Math.ceil(duration / 1000))
+    lastSecondRef.current = Math.ceil(duration / 1000)
+    setRemaining(lastSecondRef.current)
     if (typeof navigator !== "undefined") navigator.vibrate?.(10)
 
     // Self-referential rAF closure so the loop stays lint-clean.
@@ -89,8 +102,13 @@ export function useCountdownConfirm({
           ? deadlineRef.current - Date.now()
           : duration - (performance.now() - startedAtRef.current)
       const p = Math.min(1, Math.max(0, (duration - left) / duration))
+      // A MotionValue — no re-render, so this one is free to run per frame.
       progress.set(p)
-      setRemaining(Math.max(0, Math.ceil(left / 1000)))
+      const seconds = Math.max(0, Math.ceil(left / 1000))
+      if (seconds !== lastSecondRef.current) {
+        lastSecondRef.current = seconds
+        setRemaining(seconds)
+      }
       if (left <= 0) {
         rafRef.current = null
         setRunning(false)
@@ -106,7 +124,8 @@ export function useCountdownConfirm({
   const cancel = useCallback(() => {
     stopRaf()
     setRunning(false)
-    setRemaining(Math.ceil(duration / 1000))
+    lastSecondRef.current = Math.ceil(duration / 1000)
+    setRemaining(lastSecondRef.current)
     progress.set(0)
     if (typeof navigator !== "undefined") navigator.vibrate?.(10)
   }, [duration, progress, stopRaf])

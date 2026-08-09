@@ -123,6 +123,18 @@ export async function getSyncQueue(): Promise<SyncQueueItem[]> {
 }
 
 /**
+ * How many items are waiting, without materialising any of them.
+ *
+ * The trigger manager polls "is there anything to sync?" every 10 seconds for
+ * the whole session, and it was answering that by reading the entire queue
+ * table and taking `.length` — deserialising every pending row, on the main
+ * thread, to compare a number against zero. `count()` answers it off the index.
+ */
+export async function getSyncQueueCount(): Promise<number> {
+  return userDb.syncQueue.count();
+}
+
+/**
  * Get sync queue items by collection
  */
 export async function getSyncQueueByCollection(

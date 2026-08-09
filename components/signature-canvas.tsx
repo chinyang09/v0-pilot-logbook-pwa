@@ -72,7 +72,32 @@ export function SignatureCanvas({
   const [strokes, setStrokes] = useState<SignatureStroke[]>(
     initialSignature?.strokes || []
   );
-  const [currentStroke, setCurrentStroke] = useState<SignaturePoint[]>([]);
+  /**
+   * The stroke being drawn right now — a REF, not state.
+   *
+   * Drawing is the most latency-sensitive thing in the app, and this was the
+   * one place paying for every pointer event: each move copied the whole
+   * point array into new state, re-rendered the component, and redrew the
+   * canvas — so the cost per point grew with the length of the stroke and the
+   * line visibly fell behind the finger on a long signature.
+   *
+   * Points now accumulate here and the canvas is repainted once per FRAME
+   * (see `scheduleDraw`). React sees one state update at the END of the
+   * stroke instead of one per point. The painting itself is unchanged — a
+   * few hundred line segments is nothing for a canvas; it was the render and
+   * the forced layout/style reads around it that cost.
+   */
+  const currentStrokeRef = useRef<SignaturePoint[]>([]);
+  const drawRafRef = useRef(0);
+  /**
+   * The canvas box and its resolved colour, taken once per stroke.
+   *
+   * `getBoundingClientRect` is a layout read and `getComputedStyle` forces a
+   * style flush; both were happening on every single pointer move. Neither
+   * can change while a finger is down on the canvas.
+   */
+  const strokeRectRef = useRef<DOMRect | null>(null);
+  const strokeColorRef = useRef<string | null>(null);
   const strokeStartTime = useRef<number>(0);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -119,8 +144,10 @@ export function SignatureCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const computedStyle = getComputedStyle(canvas);
-    const foregroundColor = computedStyle.color || "#ffffff";
+    // Cached for the duration of a stroke — `getComputedStyle` forces a style
+    // flush, and the colour cannot change mid-signature.
+    const foregroundColor =
+      strokeColorRef.current ?? (getComputedStyle(canvas).color || "#ffffff");
 
     // If locked and we have a saved signature, use aspect-preserving render
     if (isLocked && initialSignature && initialSignature.strokes.length > 0) {
@@ -146,11 +173,9 @@ export function SignatureCanvas({
     ctx.lineJoin = "round";
 
     const allStrokes = [...strokes];
-    if (currentStroke.length > 0) {
-      allStrokes.push({
-        points: currentStroke,
-        startTime: strokeStartTime.current,
-      });
+    const live = currentStrokeRef.current;
+    if (live.length > 0) {
+      allStrokes.push({ points: live, startTime: strokeStartTime.current });
     }
 
     for (const stroke of allStrokes) {
@@ -169,11 +194,29 @@ export function SignatureCanvas({
       }
       ctx.stroke();
     }
-  }, [strokes, currentStroke, isLocked, initialSignature]);
+    // The live stroke comes from a ref, so this deliberately does NOT re-run
+    // when it changes — `scheduleDraw` drives those repaints explicitly.
+  }, [strokes, isLocked, initialSignature]);
 
   useEffect(() => {
     redrawCanvas();
   }, [redrawCanvas, canvasSize]);
+
+  /** Repaint at most once per frame, however fast the pointer reports. */
+  const scheduleDraw = useCallback(() => {
+    if (drawRafRef.current) return;
+    drawRafRef.current = requestAnimationFrame(() => {
+      drawRafRef.current = 0;
+      redrawCanvas();
+    });
+  }, [redrawCanvas]);
+
+  useEffect(
+    () => () => {
+      if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
+    },
+    []
+  );
 
   useEffect(() => {
     if (initialSignature?.strokes && initialSignature.strokes.length > 0) {
@@ -198,7 +241,9 @@ export function SignatureCanvas({
       const canvas = canvasRef.current;
       if (!canvas) return { x: 0, y: 0, timestamp: 0 };
 
-      const rect = canvas.getBoundingClientRect();
+      // Cached at stroke start — a layout read per pointer move is exactly the
+      // kind of work that makes a line trail the finger.
+      const rect = strokeRectRef.current ?? canvas.getBoundingClientRect();
       let clientX: number;
       let clientY: number;
       let pressure: number | undefined;
@@ -236,10 +281,16 @@ export function SignatureCanvas({
     ) => {
       if (disabled || isLocked || !selectedCrewId) return;
       e.preventDefault();
+      const canvas = canvasRef.current;
+      // Take the box and the colour ONCE, here, and reuse them for the whole
+      // stroke (see the refs' note).
+      if (canvas) {
+        strokeRectRef.current = canvas.getBoundingClientRect();
+        strokeColorRef.current = getComputedStyle(canvas).color || "#ffffff";
+      }
       setIsDrawing(true);
       strokeStartTime.current = Date.now();
-      const point = getPoint(e);
-      setCurrentStroke([point]);
+      currentStrokeRef.current = [getPoint(e)];
     },
     [disabled, isLocked, selectedCrewId, getPoint]
   );
@@ -252,10 +303,12 @@ export function SignatureCanvas({
     ) => {
       if (!isDrawing || disabled || isLocked) return;
       e.preventDefault();
-      const point = getPoint(e);
-      setCurrentStroke((prev) => [...prev, point]);
+      // Push and repaint on the next frame — no state, no re-render, no copy
+      // of every point drawn so far.
+      currentStrokeRef.current.push(getPoint(e));
+      scheduleDraw();
     },
-    [isDrawing, disabled, isLocked, getPoint]
+    [isDrawing, disabled, isLocked, getPoint, scheduleDraw]
   );
 
   const handleEnd = useCallback(
@@ -268,22 +321,38 @@ export function SignatureCanvas({
       e.preventDefault();
       setIsDrawing(false);
 
-      if (currentStroke.length > 1) {
-        const newStroke: SignatureStroke = {
-          points: currentStroke,
-          startTime: strokeStartTime.current,
-        };
-        setStrokes((prev) => [...prev, newStroke]);
-        setHasUnsavedChanges(true);
+      // Any queued frame is about to be superseded by the redraw that the
+      // `strokes` update below triggers.
+      if (drawRafRef.current) {
+        cancelAnimationFrame(drawRafRef.current);
+        drawRafRef.current = 0;
       }
-      setCurrentStroke([]);
+
+      const live = currentStrokeRef.current;
+      currentStrokeRef.current = [];
+      strokeRectRef.current = null;
+      strokeColorRef.current = null;
+
+      // The stroke reaches React exactly once, here — not once per point.
+      if (live.length > 1) {
+        setStrokes((prev) => [
+          ...prev,
+          { points: live, startTime: strokeStartTime.current },
+        ]);
+        setHasUnsavedChanges(true);
+      } else {
+        // A tap that drew nothing still leaves the canvas showing the live
+        // stroke from the last frame; `strokes` did not change, so nothing
+        // else would repaint it.
+        redrawCanvas();
+      }
     },
-    [isDrawing, currentStroke]
+    [isDrawing, redrawCanvas]
   );
 
   const handleClear = useCallback(() => {
     setStrokes([]);
-    setCurrentStroke([]);
+    currentStrokeRef.current = [];
     setHasUnsavedChanges(false);
     onClear();
   }, [onClear]);
@@ -338,7 +407,7 @@ export function SignatureCanvas({
 
   const handleResign = useCallback(() => {
     setStrokes([]);
-    setCurrentStroke([]);
+    currentStrokeRef.current = [];
     setHasUnsavedChanges(false);
     setIsLocked(false);
     setSelectedCrewId("");

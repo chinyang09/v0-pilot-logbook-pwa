@@ -119,6 +119,7 @@ export {
 export {
   addToSyncQueue,
   getSyncQueue,
+  getSyncQueueCount,
   getSyncQueueByCollection,
   clearSyncQueueItem,
   clearSyncQueueByCollection,

@@ -602,6 +602,8 @@ function PillBarContent({
   // the drag starts (Safari keeps null → the CSS convex material fallback).
   const suppressClickRef = useRef(false)
   const lastPtRef = useRef({ x: 0, y: 0 })
+  /** Pending lens frame — see applyLens. 0 when nothing is queued. */
+  const lensRafRef = useRef(0)
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // The pill's GlassContainer — its finger-tracking spotlight is driven
   // imperatively while the lens has pointer capture (its own move handler
@@ -690,19 +692,36 @@ function PillBarContent({
     host.appendChild(clone)
   }, [lensPhase, lensIndex])
 
-  const paintSpotlight = useCallback((clientX: number, clientY: number) => {
-    const gr = glassRootRef.current
-    if (!gr) return
-    const rect = gr.getBoundingClientRect()
-    gr.style.setProperty("--press-x", `${clientX - rect.left}px`)
-    gr.style.setProperty("--press-y", `${clientY - rect.top}px`)
-  }, [])
-
-  const positionLens = useCallback((clientX: number, clientY: number) => {
-    lastPtRef.current = { x: clientX, y: clientY }
+  /**
+   * Place the lens from `lastPtRef`, ONCE PER FRAME.
+   *
+   * This used to run straight off `pointermove`, and it read the glass root's
+   * rect (for the spotlight) at the END — after nine writes to `left`/`top`/
+   * `width`/`height` on the lens and its refraction copy. A layout READ after
+   * layout WRITES forces the browser to flush and recompute layout
+   * synchronously, and it did so on every pointer event of the one gesture in
+   * the app that has to feel like it is stuck to the finger. On a 120Hz panel
+   * that is twice a frame, and pointer events arrive coalesced besides.
+   *
+   * So: one pass per frame, and inside it every READ happens before any WRITE.
+   * Same values, same 1:1 follow — the finger cannot outrun a frame.
+   */
+  const applyLens = useCallback(() => {
+    lensRafRef.current = 0
+    const { x: clientX, y: clientY } = lastPtRef.current
     const lens = lensRef.current
     const drag = dragRef.current
     if (!lens || !drag || drag.rects.length === 0) return
+
+    // ── READS, all of them, before a single write ──
+    // The glass root's live box (for the spotlight) and the transform framer
+    // wrote this frame (for the refraction copy). `style.transform` is an
+    // inline read, so it forces nothing; the rect is the only real layout read
+    // in the pass, and taking it here means it never flushes our own writes.
+    const gr = glassRootRef.current
+    const grRect = gr?.getBoundingClientRect()
+    const grTransform = gr?.style.transform ?? ""
+
     const rects = drag.rects
     const localX = Math.max(0, Math.min(drag.base.width, clientX - drag.base.left))
     let nearest = 0
@@ -764,7 +783,7 @@ function PillBarContent({
       copy.style.top = `${drag.pill.top - lensTop}px`
       copy.style.width = `${drag.pill.width}px`
       copy.style.height = `${drag.pill.height}px`
-      copy.style.transform = glassRootRef.current?.style.transform ?? ""
+      copy.style.transform = grTransform
     }
 
     // Liquid wall: compress into the edge + strain toward the finger. The
@@ -773,8 +792,31 @@ function PillBarContent({
     squishX.set(1 - t * 0.16)
     squishY.set(1 + t * 0.12)
     nudgeX.set(Math.sign(overshoot) * t * 12)
-    paintSpotlight(clientX, clientY)
-  }, [paintSpotlight, squishX, squishY, nudgeX])
+
+    // The pill's spotlight follows the finger too — written here rather than in
+    // its own helper so it shares this pass's single rect read.
+    if (gr && grRect) {
+      gr.style.setProperty("--press-x", `${clientX - grRect.left}px`)
+      gr.style.setProperty("--press-y", `${clientY - grRect.top}px`)
+    }
+  }, [squishX, squishY, nudgeX])
+
+  /** Move handler: record the point, let the frame do the work. */
+  const positionLens = useCallback((clientX: number, clientY: number) => {
+    lastPtRef.current = { x: clientX, y: clientY }
+    if (lensRafRef.current) return
+    lensRafRef.current = requestAnimationFrame(applyLens)
+  }, [applyLens])
+
+  /** Apply immediately — for the portal mount, which must be placed before the
+   *  reveal on the next frame rather than a frame after it. */
+  const positionLensNow = useCallback(() => {
+    if (lensRafRef.current) {
+      cancelAnimationFrame(lensRafRef.current)
+      lensRafRef.current = 0
+    }
+    applyLens()
+  }, [applyLens])
 
   // Portal mount: position immediately from the live drag state, then reveal
   // on the next frame so the pop-in transition fires from the base styles.
@@ -782,9 +824,9 @@ function PillBarContent({
     lensRef.current = node
     const drag = dragRef.current
     if (!node || !drag) return
-    positionLens(lastPtRef.current.x, lastPtRef.current.y)
+    positionLensNow()
     requestAnimationFrame(() => node.classList.add("PillDragLens--on"))
-  }, [positionLens])
+  }, [positionLensNow])
 
   const handleLensDown = useCallback((e: React.PointerEvent) => {
     if (reduce || lensPhase === "settle") return
@@ -833,6 +875,13 @@ function PillBarContent({
   const handleLensEnd = useCallback((e: React.PointerEvent) => {
     const drag = dragRef.current
     dragRef.current = null
+    // A queued frame would re-place the lens from the last drag point, on top
+    // of the release settle. (`applyLens` bails on a null `dragRef` anyway —
+    // this just avoids the wasted frame.)
+    if (lensRafRef.current) {
+      cancelAnimationFrame(lensRafRef.current)
+      lensRafRef.current = 0
+    }
     // Fade the pill spotlight back out. Kill the horizontal strain INSTANTLY
     // (jump, not set) so releasing never springs the lens left/right.
     glassRootRef.current?.style.setProperty("--glass-press", "0")
