@@ -326,13 +326,53 @@ export function formatAirport(airport: Airport): string {
 // ============================================
 
 /**
+ * Code → airport indexes, built once per ARRAY and cached against it.
+ *
+ * Both lookups below used to be `airports.find(a => a.code.toUpperCase() === …)`
+ * over the whole reference table — roughly ten thousand rows, each one
+ * allocating an uppercased string, for a single hit. The flight form does FOUR
+ * of these every time it opens (two memos for the departure/arrival airport and
+ * two more in the timezone effect), and again whenever either ICAO changes, so
+ * opening one flight burned about forty thousand string allocations.
+ *
+ * A `WeakMap` keyed on the array itself means no call site changes and no
+ * invalidation to get wrong: a new array (a reload, or `mutate` adding a custom
+ * airport) is simply a different key, and the old index is collected with the
+ * old array.
+ *
+ * `find` returns the FIRST match, so a duplicate code must not overwrite the
+ * entry already in the map.
+ */
+const icaoIndexes = new WeakMap<Airport[], Map<string, Airport>>()
+const iataIndexes = new WeakMap<Airport[], Map<string, Airport>>()
+
+function codeIndex(
+  cache: WeakMap<Airport[], Map<string, Airport>>,
+  airports: Airport[],
+  code: (a: Airport) => string | undefined,
+): Map<string, Airport> {
+  let index = cache.get(airports)
+  if (!index) {
+    index = new Map()
+    for (const airport of airports) {
+      const value = code(airport)
+      if (!value) continue
+      const key = value.toUpperCase()
+      if (!index.has(key)) index.set(key, airport)
+    }
+    cache.set(airports, index)
+  }
+  return index
+}
+
+/**
  * @deprecated Use getAirportByIcao instead
  */
 export const getAirportByICAO = (airports: Airport[], icao: string) =>
-  airports.find((a) => a.icao.toUpperCase() === icao.toUpperCase())
+  codeIndex(icaoIndexes, airports, (a) => a.icao).get(icao.toUpperCase())
 
 /**
  * @deprecated Use getAirportByIata instead
  */
 export const getAirportByIATA = (airports: Airport[], iata: string) =>
-  airports.find((a) => a.iata && a.iata.toUpperCase() === iata.toUpperCase())
+  codeIndex(iataIndexes, airports, (a) => a.iata).get(iata.toUpperCase())

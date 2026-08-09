@@ -203,9 +203,18 @@ export default function AircraftPage() {
         if (recentRegs.length >= 10) break
       }
     }
+    // ONE pass to index, then O(1) per lookup. This was a `find` per recent
+    // registration — up to ten scans of the whole aircraft table, each
+    // uppercasing every row, in a memo that re-runs whenever `flights` changes.
+    // First match wins, exactly as `find` did.
+    const byReg = new Map<string, NormalizedAircraft>()
+    for (const ac of allAircraft) {
+      const key = ac.registration?.toUpperCase()
+      if (key && !byReg.has(key)) byReg.set(key, ac)
+    }
     const recent: NormalizedAircraft[] = []
     for (const reg of recentRegs) {
-      const found = allAircraft.find((ac) => ac.registration?.toUpperCase() === reg)
+      const found = byReg.get(reg)
       if (found) recent.push(found)
     }
     return recent
