@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from "react"
 
 const SIDEBAR_STORAGE_KEY = "sidebar-open"
 
@@ -53,8 +53,12 @@ export function SidebarProvider({
     setIsOpen(false)
   }, [])
 
+  // Memoized so the value only changes when `isOpen` actually does — a fresh
+  // object per render re-renders every consumer for nothing.
+  const value = useMemo(() => ({ isOpen, toggle, open, close }), [isOpen, toggle, open, close])
+
   return (
-    <SidebarContext.Provider value={{ isOpen, toggle, open, close }}>
+    <SidebarContext.Provider value={value}>
       {children}
     </SidebarContext.Provider>
   )

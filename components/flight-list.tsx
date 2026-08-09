@@ -76,7 +76,6 @@ interface FlightListProps {
   onDeleted?: () => void;
   onTopFlightChange?: (flight: FlightLog | null) => void;
   onScrollStart?: () => void;
-  onScroll?: (e: React.UIEvent<HTMLElement>) => void;
   /** CSS length: the header offset plus whatever floats above the list. */
   topSpacerHeight?: string;
   /** CSS transition for the spacer, so it moves in lock-step with whatever is
@@ -328,7 +327,6 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       onDeleted,
       onTopFlightChange,
       onScrollStart,
-      onScroll,
       topSpacerHeight = "0px",
       topSpacerTransition,
       headerContent,
@@ -542,21 +540,16 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       const container = scrollContainerRef.current;
       if (!container) return;
 
+      // One rAF-throttled listener, and nothing runs per raw scroll event: the
+      // calendar sync is the only work the list owes a scroll.
       let ticking = false;
-      const scrollHandler = (e: Event) => {
-        // Call external onScroll for navbar hiding (on every scroll event)
-        if (onScroll) {
-          onScroll(e as unknown as React.UIEvent<HTMLElement>);
-        }
-
-        // Throttle bidirectional sync logic with RAF
-        if (!ticking) {
-          requestAnimationFrame(() => {
-            handleScroll();
-            ticking = false;
-          });
-          ticking = true;
-        }
+      const scrollHandler = () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+          handleScroll();
+          ticking = false;
+        });
       };
 
       container.addEventListener("scroll", scrollHandler, { passive: true });
@@ -564,7 +557,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       return () => {
         container.removeEventListener("scroll", scrollHandler);
       };
-    }, [handleScroll, onScroll]);
+    }, [handleScroll]);
 
     const handleEdit = useCallback(
       (flight: FlightLog) => onEdit?.(flight),

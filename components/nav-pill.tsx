@@ -26,7 +26,6 @@ import { GlassContainer } from "@/components/ui/glass-container"
 import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths"
-import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { navSections, dashboardNavItem } from "@/components/nav-sections"
 import { SyncStatus } from "@/components/sync-status"
@@ -1318,7 +1317,6 @@ export function NavPill() {
   const canPush = useDesktopPill()
   const hydrated = useHydrated()
   const { isOpen: sidebarOpen, toggle: toggleSidebar } = useSidebar()
-  const { hideNavbar } = useScrollNavbarContext()
   const pathname = usePathname()
   const { preferences } = usePreferences()
   const prefersReducedMotion = useReducedMotion()
@@ -1338,7 +1336,6 @@ export function NavPill() {
     <MobilePillMorph
       tabs={tabs}
       pathname={pathname}
-      hideNavbar={hideNavbar}
       prefersReducedMotion={!!prefersReducedMotion}
     />
   )
@@ -1620,12 +1617,10 @@ function DesktopPillMorph({
 function MobilePillMorph({
   tabs,
   pathname,
-  hideNavbar,
   prefersReducedMotion,
 }: {
   tabs: readonly BottomNavTab[]
   pathname: string
-  hideNavbar: boolean
   prefersReducedMotion: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)

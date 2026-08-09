@@ -120,7 +120,13 @@ export function ScrollIndicator() {
       raf = 0
       // A keep-alive page that isn't the active route is `visibility: hidden`;
       // the thumb is in the body, so it would otherwise still be painted.
-      if (getComputedStyle(scroller).visibility === "hidden") {
+      //
+      // Read off the attribute KeepAlivePages already sets, not
+      // `getComputedStyle().visibility`. The computed style is the same answer
+      // but it flushes pending style recalculation to give it — once per scroll
+      // frame, on the main thread, in the middle of a fling. A `closest()` walk
+      // touches no style at all.
+      if (scroller.closest('[data-keepalive-hidden="true"]')) {
         thumb.style.opacity = "0"
         return
       }
@@ -130,7 +136,10 @@ export function ScrollIndicator() {
         thumb.style.opacity = "0"
         return
       }
-      measureBox()
+      // While the thumb is up, `follow` is already tracking the box every
+      // frame — measuring again here is a second forced layout for the same
+      // rect. Only measure when nothing else is watching.
+      if (!visible) measureBox()
       const topInset = topProbe.offsetHeight
       const bottomInset = bottomProbe.offsetHeight + 6
       const track = box.height - topInset - bottomInset

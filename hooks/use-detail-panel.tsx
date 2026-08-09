@@ -265,16 +265,21 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     setDetailContent(null)
   }, [pathname])
 
+  // Memoized: this provider wraps the whole shell, so a fresh value object per
+  // render re-rendered every keep-alive page on any state change here.
+  const value = useMemo(
+    () => ({
+      detailContent,
+      setDetailContent,
+      selectedId,
+      setSelectedId,
+      selectionExplicit,
+    }),
+    [detailContent, selectedId, setSelectedId, selectionExplicit],
+  )
+
   return (
-    <DetailPanelContext.Provider
-      value={{
-        detailContent,
-        setDetailContent,
-        selectedId,
-        setSelectedId,
-        selectionExplicit,
-      }}
-    >
+    <DetailPanelContext.Provider value={value}>
       {children}
     </DetailPanelContext.Provider>
   )

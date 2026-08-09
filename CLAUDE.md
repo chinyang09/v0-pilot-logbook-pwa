@@ -212,6 +212,24 @@ single `COLLECTION_HANDLERS` registry in `sync-service.ts`, keyed by the closed
 `SyncCollection` union — add a collection in one compile-checked place, not in
 parallel switch/if-else chains.
 
+**`SyncProvider` is the ONE `onDataChanged` → `refreshAllData` subscriber.**
+The dashboard and the logbook each had their own as well, and both of those
+pages are keep-alive — permanently mounted once visited — so a single sync
+cycle ran the entire cache refresh three times over, which is three full reads
+of every table plus the re-renders each one triggers. A page that needs its own
+data back after a background pull gets it from the shared refresh; a page that
+needs it on RE-ACTIVATION uses `usePageActive`'s callback, which is a different
+trigger.
+
+`refreshAllData` (`hooks/data/use-db.ts`) also **coalesces**: concurrent callers
+share one in-flight pass, so a provider refresh landing on the same tick as a
+page's re-activation refresh is still one pass. And it revalidates by **key
+filter** (`key.startsWith("idb:")`), not a hardcoded list — the old four-key
+version never touched the schedule, currency or discrepancy caches, so those
+pages showed pre-sync numbers until they remounted. Every SWR key in
+`hooks/data/` carries the `idb:` prefix, including derived ones
+(`idb:discrepancies:counts`, `idb:schedule:<from>:<to>`); keep it that way.
+
 
 ### Authentication Flow
 
@@ -1243,8 +1261,8 @@ identical:
 Four heavy pages are kept mounted across navigations for instant tab-switching and scroll preservation:
 
 **Persistent pages** (`components/keep-alive-pages.tsx`):
-- `/logbook`, `/aircraft`, `/airports`, `/crew` — lazy-imported via `React.lazy()`, mounted on first visit, never unmounted
-- All other pages (currencies, roster, etc.) unmount normally via Next.js `children`
+- `/` (dashboard), `/logbook`, `/aircraft`, `/airports`, `/crew`, `/roster` — the primary tabs, lazy-imported via `React.lazy()`, mounted on first visit, never unmounted. The one list lives in `components/keep-alive-routes.ts`; `PERSISTENT_PAGES` is typed against it
+- All other pages (currencies, discrepancies, settings, account, …) unmount normally via Next.js `children`
 
 **How it works:**
 - `KeepAlivePages` wraps `children` in `app/(app)/layout.tsx`
@@ -1307,11 +1325,19 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
 
 **Provider hierarchy:**
 ```
-AppLayout → ScrollNavbarProvider → SidebarProvider → DetailPanelProvider
-  → AppShell → KeepAlivePages
-    ├── /logbook, /aircraft, /airports, /crew (lazy, persistent)
+AppLayout → PreferencesProvider → SidebarProvider → DetailPanelProvider
+  → PageActionsProvider → DashboardPeriodProvider → AppShell → KeepAlivePages
+    ├── /, /logbook, /aircraft, /airports, /crew, /roster (lazy, persistent)
     └── children (other routes, normal unmount)
 ```
+
+**Every provider above `KeepAlivePages` must give a MEMOIZED value**, because
+its subtree is all six keep-alive pages at once — a fresh `{...}` per render
+re-renders every one of them. `PageActionsProvider` goes further and is **two**
+contexts: the registered action nodes (which change on every tab switch, and
+are read only by the shell's header) and the SETTERS (which never change, and
+are all the register hooks need). Held together, one page registering its
+buttons re-rendered the other five.
 
 ### Display Preferences
 
@@ -1381,6 +1407,17 @@ Data hooks in `hooks/data/` use SWR backed by Dexie:
 // Pattern: hook reads from Dexie, mutations write to Dexie + enqueue sync
 const { flights, isLoading } = useFlights();
 ```
+
+**`useDBReady` is a MODULE STORE**, read through `useSyncExternalStore` — the
+same shape as `useIsDesktop`, and for the same reason. It used to be a
+`useState(false)` plus an effect in every consumer, so every page that reads
+data rendered once as "not ready" and again as ready, *even when the database
+had been open since the first page*. That first render is what put a skeleton
+on screen for a frame on every mount of every list, and five of them mount at
+once. With one process-wide answer a page mounting after init has it on its
+FIRST render and paints its data straight away. Its snapshot object is cached
+and rebuilt only on a real transition (`useSyncExternalStore` compares by
+identity and will loop forever on a fresh object).
 
 ### Forms
 
@@ -2251,7 +2288,9 @@ When making changes, be aware of these high-impact files:
 - Do not put the flight card's ACTIONS back behind a press-and-hold — they live in the swipe panel behind `…`. A hold is an invisible gesture that nothing advertises, and as the actions menu it competed with the swipe and the scroll for the same pointer. The hold now drives the CONTEXT PREVIEW instead, which is a different job (a look, not a menu) and the one thing a hold has always meant; it still needs the movement cancel and the synthetic `pointercancel`
 - Do not let a dismissing tap on the `…` reopen the cascade — the swallow closes it on `pointerup` and the follow-up `click` then arrives with the listeners already gone. Keep `CASCADE_REOPEN_GUARD_MS`: an open request within 350ms of a close is the same tap, whichever order an engine delivers it in
 - Do not confine the header's blur to the bar's own height, and do not scroll a row to `--chrome-top` — content has to clear `--chrome-clear` (the bar PLUS the fade's tail). A row parked at the bar's edge sits in the blur and looks sharp enough to tap when it isn't
-- Do not let the bottom nav hide on scroll — it is the app's primary navigation on a phone, and it disappeared exactly when a long read made you want it, with a scroll UP as the only way back
+- Do not let the bottom nav hide on scroll — it is the app's primary navigation on a phone, and it disappeared exactly when a long read made you want it, with a scroll UP as the only way back. The machinery for it is GONE, not merely switched off, and that is the point: `ScrollNavbarProvider` sat at the very top of the app tree and flipped a `hideNavbar` state on every scroll direction change past a 10px threshold, so a single flick re-rendered the whole tree — six mounted keep-alive pages, the shell, the virtualised logbook — to compute a value the nav had already stopped reading. Do not reintroduce a scroll handler that writes state anywhere above a page
+- Do not give a scroll handler ANY work that isn't per-frame cheap, and never let one write React state above the component that needs it. The logbook's list runs one rAF-throttled listener whose only job is the calendar sync; `topFlightDate` is pushed into state only while the calendar is actually OPEN, because the calendar is collapsed to `height: 0` rather than unmounted and updating it while stowed re-rendered a whole month grid per card scrolled past, for something nobody can see
+- Do not hand-roll a spinner — waiting is one thing and should look like one thing. `PageLoading` is the route-level state (every `loading.tsx`, the keep-alive Suspense fallback) and `PanelLoading` is the detail-panel one, both in `components/ui/page-loading.tsx`. The aircraft, airports and crew pages each carried an identical copy of a `border-2 border-primary border-t-transparent` ring, so waiting for a pane looked like a different kind of waiting depending on which tab you were on
 - Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (56 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
 - Do not give the bottom bar a squarer corner than a stadium — `MOBILE_PILL_RADIUS` is half its own height, the same rule the 44px controls follow; it is a separate constant only because the bar is a different height. A third-of-the-height radius was tried (the proportion the reference tab bars use) and rejected on the look: what reads as a squircle there is CONTINUOUS CURVATURE, not a smaller radius, and a circular arc at that radius is just a rounded rectangle. Drawing the real thing needs `corner-shape`, and a corner shape one engine falls back from would leave iOS and Android with different bars
 - Do not give the gravity blob a colour of its own — it is `--on-glass-active`, THE selected-thing fill, shared with an action button's active state so the nav and the header say "this is the one you are on" the same way. It must stay a mix of two OPAQUE colours: any translucency shows up as the blob letting the page through, which is the one thing it must not do

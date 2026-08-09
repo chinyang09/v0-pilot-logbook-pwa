@@ -35,6 +35,7 @@ import { usePageActive } from "@/hooks/use-page-active"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassSearchButton } from "@/components/ui/glass-search-button"
 import { GlassIconButton } from "@/components/ui/glass-icon-button"
+import { PanelLoading } from "@/components/ui/page-loading"
 
 // Memoized swipeable aircraft card (matches crew card pattern)
 interface AircraftCardProps {
@@ -396,9 +397,7 @@ export default function AircraftPage() {
 
     if (isLoading) {
       setDetailContent(
-        <div className="flex items-center justify-center h-full">
-          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
-        </div>
+        <PanelLoading />
       )
       return
     }
