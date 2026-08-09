@@ -68,6 +68,28 @@ function mapRawAirports(rawData: Record<string, any>, favoriteIcaos: Set<string>
  * .equals(1)` index query that never matched the boolean values actually
  * stored, silently dropping favorites on every dataset version bump).
  */
+/**
+ * Bumped by every write to the airports table, so a cached in-memory copy can
+ * tell whether it is still current.
+ *
+ * `useAirportDatabase` used to re-read the WHOLE table from IndexedDB on every
+ * mount — ten thousand records deserialised each time the flight form opened,
+ * i.e. on every flight tap — because a blind reload was the only way it could
+ * notice an airport added by the import enricher (which writes to Dexie
+ * directly, not through the hook). A counter says the same thing precisely:
+ * the hook reloads when something actually changed and skips otherwise.
+ *
+ * Every write to `referenceDb.airports` lives in THIS FILE — the three
+ * functions below are the complete set — so this stays trustworthy as long as
+ * new writers bump it too.
+ */
+let airportsRevision = 0
+
+/** The current airports-table revision. See `airportsRevision`. */
+export function getAirportsRevision(): number {
+  return airportsRevision
+}
+
 async function rebuildAirportsTable(rawData: Record<string, any>): Promise<Airport[]> {
   const existing = await referenceDb.airports.toArray()
   const favoriteIcaos = new Set(existing.filter((a) => a.isFavorite).map((a) => a.icao))
@@ -85,6 +107,7 @@ async function rebuildAirportsTable(rawData: Record<string, any>): Promise<Airpo
     }
     await referenceDb.setMetadata("airport_version", DATA_VERSION)
   })
+  airportsRevision++
 
   return airports
 }
@@ -221,6 +244,7 @@ export async function addCustomAirport(airport: Omit<Airport, "id"> & { icao: st
     submissionId,
   }
   await referenceDb.airports.put(newAirport)
+  airportsRevision++
   return newAirport
 }
 
@@ -237,6 +261,7 @@ export async function toggleAirportFavorite(icao: string): Promise<boolean> {
 
   const newStatus = !airport.isFavorite
   await referenceDb.airports.update(icao.toUpperCase(), { isFavorite: newStatus })
+  airportsRevision++
   return newStatus
 }
 

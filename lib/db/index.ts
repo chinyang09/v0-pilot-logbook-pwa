@@ -220,6 +220,7 @@ export {
   hasExactAirportCodeMatch,
   getAirportTimeInfo,
   formatAirport,
+  getAirportsRevision,
   getAirportByICAO,
   getAirportByIATA,
   type AirportData,
