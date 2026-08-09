@@ -9,6 +9,7 @@ import { MODAL_SCRIM, RadialBlurBackdrop } from "@/components/ui/chrome-overlays
 import { formatClockDisplay, formatHHMMDisplay } from "@/lib/utils/time";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import { setMenuOpen } from "@/lib/utils/menu-lock";
+import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { POP_SPRING } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import {
@@ -126,12 +127,22 @@ export function FlightContextPreview({
   // through rather than an unmount: collapse back onto the row, then go.
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
-  const requestClose = useCallback(() => {
+  const startClose = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
     setClosing(true);
     window.setTimeout(() => closeRef.current(), MORPH_MS);
   }, []);
+
+  // The system BACK gesture closes the preview instead of navigating out from
+  // under it. On Android that swipe is a history back, and with nothing of ours
+  // on the stack it took the router to the previous page while this — portalled
+  // to `document.body` — stayed up over it.
+  //
+  // Everything else dismisses through the returned `requestClose` so there is
+  // exactly one close path; see the hook for why an action's `router.push` has
+  // to wait for the marker entry to be released.
+  const requestClose = useBackDismiss(true, startClose);
 
   // Same lock as the cascade: while the preview is up nothing behind it is a
   // hit-test target, so the list cannot be swiped or tapped through the scrim.
@@ -183,7 +194,9 @@ export function FlightContextPreview({
         initial={{ opacity: 0 }}
         animate={{ opacity: open ? 1 : 0 }}
         transition={MORPH}
-        onClick={requestClose}
+        // Wrapped, not passed directly — the handler's MouseEvent would
+        // otherwise arrive as `requestClose`'s follow-up action.
+        onClick={() => requestClose()}
       >
         <RadialBlurBackdrop />
       </motion.div>
@@ -282,10 +295,11 @@ export function FlightContextPreview({
               <motion.button
                 key={a.id}
                 type="button"
-                onClick={() => {
-                  onSelect(a.id);
-                  requestClose();
-                }}
+                // The action runs as the CLOSE's follow-up, not before it.
+                // Most of these end in a `router.push` (Next Leg opens the
+                // flight it just created), and the marker history entry has to
+                // be released first or our own `back()` would undo that push.
+                onClick={() => requestClose(() => onSelect(a.id))}
                 aria-label={a.label}
                 initial={{ scale: 0.4, opacity: 0 }}
                 animate={{ scale: open ? 1 : 0.4, opacity: open ? 1 : 0 }}

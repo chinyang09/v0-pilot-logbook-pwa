@@ -10,6 +10,7 @@ import {
 import type { FlightSignature } from "@/types/entities/flight.types";
 import { useDesktopPill, useIsDesktop } from "@/hooks/use-is-desktop";
 import { useSidebar } from "@/hooks/use-sidebar-context";
+import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths";
 import { cn } from "@/lib/utils";
 
@@ -74,12 +75,17 @@ export function SignatureDialog({
   const canPushSidebar = useDesktopPill();
   const { isOpen: sidebarOpen } = useSidebar();
 
+  // Escape is the desktop half of "get me out of here"; the system back gesture
+  // is the other half, and this is full-screen — it must not be possible to
+  // navigate the page out from under it.
+  const dismiss = useBackDismiss(open, onClose);
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && dismiss();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, dismiss]);
 
   if (!open || typeof document === "undefined") return null;
 
@@ -116,7 +122,7 @@ export function SignatureDialog({
         <h2 className="text-base font-semibold">Signature</h2>
         <button
           type="button"
-          onClick={onClose}
+          onClick={() => dismiss()}
           aria-label="Close"
           className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
         >
@@ -127,10 +133,9 @@ export function SignatureDialog({
       <div className="flex-1 min-h-0">
         <SignatureCanvas
           fill
-          onSave={(sig) => {
-            onSave(sig);
-            onClose();
-          }}
+          // Save is the CLOSE's follow-up so the marker history entry is
+          // released before anything the save triggers can navigate.
+          onSave={(sig) => dismiss(() => onSave(sig))}
           onClear={onClear}
           onLicenseUpdate={onLicenseUpdate}
           initialSignature={initialSignature}

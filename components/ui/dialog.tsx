@@ -6,11 +6,55 @@ import { XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils/index"
 import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
+import { useBackDismiss } from "@/hooks/use-back-dismiss"
 
+/**
+ * Every dialog in the app closes on the SYSTEM BACK gesture.
+ *
+ * Radix handles Escape, which is the desktop half of "get me out of here" — on
+ * Android the other half is the edge swipe, and that is a history `back()` no
+ * dialog was listening for. The router navigated and the dialog, portalled to
+ * `document.body`, stayed up over whatever page arrived. Wiring it here rather
+ * than at each call site is what keeps every modal answering the gesture the
+ * same way; all of this app's dialogs are controlled, so intercepting the close
+ * half of `onOpenChange` reaches all of them.
+ *
+ * An UNCONTROLLED dialog (no `open` prop) keeps Radix's own behaviour — there
+ * is no open state here to drive the marker entry from.
+ */
 function Dialog({
+  open,
+  onOpenChange,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />
+  const onOpenChangeRef = React.useRef(onOpenChange)
+  React.useEffect(() => {
+    onOpenChangeRef.current = onOpenChange
+  })
+
+  const dismiss = useBackDismiss(open === true, () => onOpenChangeRef.current?.(false))
+
+  const handleOpenChange = React.useCallback(
+    (next: boolean) => {
+      if (next) {
+        onOpenChangeRef.current?.(true)
+        return
+      }
+      // Closing goes through the history entry, so an action that navigates on
+      // the way out isn't undone by our own `back()`. See useBackDismiss.
+      dismiss()
+    },
+    [dismiss],
+  )
+
+  return (
+    <DialogPrimitive.Root
+      data-slot="dialog"
+      open={open}
+      onOpenChange={open === undefined ? onOpenChange : handleOpenChange}
+      {...props}
+    />
+  )
 }
 
 function DialogTrigger({
