@@ -45,7 +45,12 @@ interface AircraftCardProps {
   isFavorite?: boolean
   onSelect: (aircraft: NormalizedAircraft) => void
   onToggleFavorite?: (e: React.MouseEvent, registration: string) => void
-  onDelete: () => void
+  /**
+   * Given the aircraft, like `onSelect` — an inline `() => performDelete(a)`
+   * per row hands every card a new prop on each render of this page and
+   * defeats the `memo` below.
+   */
+  onDelete: (aircraft: NormalizedAircraft) => void
 }
 
 const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
@@ -64,7 +69,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
       actions={[
         {
           icon: <Trash2 className="h-5 w-5" />,
-          onClick: onDelete,
+          onClick: () => onDelete(aircraft),
           variant: "destructive",
           holdToConfirm: true,
           cancelLabel: "Cancel delete",
@@ -514,12 +519,13 @@ export default function AircraftPage() {
     })
   }, [])
 
-  const performDelete = async (aircraft: NormalizedAircraft) => {
+  // Stable, so the memoized cards actually hold — see AircraftCardProps.onDelete.
+  const performDelete = useCallback(async (aircraft: NormalizedAircraft) => {
     if (aircraft.registration) {
       await deleteAircraftFromDatabase(aircraft.registration)
       await refreshAircraft()
     }
-  }
+  }, [refreshAircraft])
 
   const handleSelectAircraft = useCallback(
     async (aircraft: NormalizedAircraft) => {
@@ -712,7 +718,7 @@ export default function AircraftPage() {
                             key={`fav-${aircraft.registration}`}
                             aircraft={aircraft}
                             onSelect={handleSelectAircraft}
-                            onDelete={() => performDelete(aircraft)}
+                            onDelete={performDelete}
                             isFavorite
                             onToggleFavorite={handleToggleFavorite}
                             isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
@@ -733,7 +739,7 @@ export default function AircraftPage() {
                             key={`recent-${aircraft.registration || aircraft.icao24}`}
                             aircraft={aircraft}
                             onSelect={handleSelectAircraft}
-                            onDelete={() => performDelete(aircraft)}
+                            onDelete={performDelete}
                             isRecent
                             isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
                             onToggleFavorite={handleToggleFavorite}
@@ -832,7 +838,7 @@ export default function AircraftPage() {
                         <SwipeableAircraftCard
                           aircraft={aircraft}
                           onSelect={handleSelectAircraft}
-                          onDelete={() => performDelete(aircraft)}
+                          onDelete={performDelete}
                           isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
                           onToggleFavorite={handleToggleFavorite}
                           isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
