@@ -169,9 +169,17 @@ export default function AccountPage() {
       e.preventDefault()
       setDeferredInstallPrompt(e)
     }
+    // `appinstalled` used to be an inline arrow with no matching removal. This
+    // page is NOT keep-alive, so it unmounts on every navigation away and each
+    // visit left another listener behind, holding this component's scope alive
+    // through the `setPwaInstalled` closure.
+    const onInstalled = () => setPwaInstalled(true)
     window.addEventListener("beforeinstallprompt", handler)
-    window.addEventListener("appinstalled", () => setPwaInstalled(true))
-    return () => window.removeEventListener("beforeinstallprompt", handler)
+    window.addEventListener("appinstalled", onInstalled)
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handler)
+      window.removeEventListener("appinstalled", onInstalled)
+    }
   }, [])
 
   const handlePwaInstall = useCallback(async () => {
