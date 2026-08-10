@@ -117,7 +117,7 @@ export function FDPLimitsStack({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex h-full flex-col rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm backdrop-blur-sm",
+        "flex h-full flex-col rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm",
         className,
       )}
     >
