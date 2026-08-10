@@ -76,9 +76,10 @@ function useRegisterActions(
     // Clears on unmount (non-keepalive) AND on inactive→active transition cleanup (keepalive).
     // This prevents stale actions persisting when lazy-loaded pages race during navigation.
     return () => set(null)
-    // Deliberately excluding `actions` — the ref tracks the latest value without
-    // triggering cleanup→re-register cycles that flash buttons off momentarily.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `actions` is deliberately absent: this effect reads it only through the
+    // ref, so re-running on a new node would cleanup→re-register and flash the
+    // buttons off. Nothing to silence here — the effect body references no
+    // reactive value that isn't listed.
   }, [isActive, set])
 
   // Sync ref-held actions to context when the ReactNode identity changes
