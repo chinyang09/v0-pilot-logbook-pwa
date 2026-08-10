@@ -228,10 +228,12 @@
   padding-top: env(safe-area-inset-top, 0px);
 }
 
-/* Utility class for safe area bottom padding */
-.pb-safe {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-}
+/* No `.pb-safe`. A scroller gets its bottom clearance ONCE, from
+   `--chrome-bottom` (`.pb-chrome` / `.h-chrome-bottom`), and that value
+   already carries the inset — page wrappers adding their own on top is what
+   produced a dead strip of ~96px plus TWO home-indicator insets at the end of
+   every list. Nothing used this class; leaving it defined only invited the
+   bug back. */
 
 /* ─── Edge to edge ───
    The app fills the whole display: content runs UNDER the status bar and under
@@ -331,9 +333,6 @@
    are themselves inside a scroller, where padding is just padding. */
 .pt-chrome {
   padding-top: var(--chrome-top);
-}
-.pt-chrome-sm {
-  padding-top: var(--chrome-top-sm);
 }
 .h-chrome-top {
   height: var(--chrome-top);
