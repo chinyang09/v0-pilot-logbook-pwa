@@ -1591,6 +1591,60 @@ Assessment on record:
   designed together with the owner in a future session — do not implement
   piecemeal.
 
+### Performance work surveyed but NOT actioned (audit trail)
+
+Each of these was measured or read closely during a performance pass and left
+alone on purpose. The reason is recorded so the next pass doesn't re-derive it
+— and so that anyone who *does* action one knows what they are trading.
+
+- **`.GlassContainer`'s 60s specular drift is the largest continuous cost in
+  the app.** `--glass-specular-angle` is a registered `@property` feeding a
+  conic gradient, so it REPAINTS every frame rather than compositing, on every
+  glass surface, forever — to move 36° over a minute, i.e. ~0.01° per frame.
+  Every way to make it cheaper changes the material: stepping it introduces
+  visible micro-jumps in a specular highlight, and hoisting it to `:root` so
+  all surfaces share one animation puts them in phase (they currently drift
+  independently, which is the look). Only touch this with the owner.
+- **The glass rim adds three more `backdrop-filter`s per surface** on top of
+  `.GlassBlur`'s one (`.GlassEdgeReflection`, `.GlassEmbossReflection`,
+  `.GlassRefraction`). They are masked to a ~2px band but the filter still
+  processes the whole element box. Same rule as above — this IS the material.
+- **`dedupingInterval: 0` on every data hook** means the five keep-alive pages
+  reading `useFlights()` each fire their own full IndexedDB read on first
+  mount. Raising it is safe *in principle* — SWR only consults the interval for
+  `revalidateOnMount`/focus/polling, and an explicit `mutate()` always sets
+  `shouldStartNewRequest`, so a post-write refresh is never swallowed (verified
+  against the SWR source). What it does open is a window where a page mounting
+  shortly after another reuses the earlier request's result. Needs testing
+  against the running app before changing.
+- **`useFDPData`'s airport-timezone effect runs once per consumer** — three on
+  the dashboard — each resolving the same IATA set from IndexedDB. A module
+  cache would collapse them, but a cached offset would pin a PLACEHOLDER
+  timezone if a custom airport were enriched later, and that feeds the FDP
+  legality math. Do not cache it without invalidation tied to enrichment.
+- **`SwipeableCard` renders its action buttons for every row**, at `opacity: 0`
+  when closed — in the logbook that is ~48 hidden buttons carrying ~144 framer
+  motion values, torn down and rebuilt as the virtualiser recycles rows.
+  Deferring them to the first drag would cut that, but moves the cost into the
+  start of every swipe, which is an experience trade rather than a free win.
+- **The OCR preloader fires on a fixed 3s timer** (`ocr-models-preloader.tsx`),
+  which lands while the user is making their first interactions. The ~16MB
+  fetch itself is done by the service worker, so it is off the main thread and
+  this is network contention only — but `requestIdleCallback` (with the 3s as a
+  floor and a timeout so it always runs) would be strictly better timed.
+- **The Google Fonts stylesheet is render-blocking** — a third-party
+  `<link rel="stylesheet">` in `<head>`, so first paint waits on a
+  `fonts.googleapis.com` round trip on a cold start. See the `next/font` note
+  under Linting for why the migration was deferred.
+- **Root-level setup docs are stale** — `BUILD_FIX_SUMMARY.md`,
+  `OCR_INTEGRATION.md`, `OCR_IMPLEMENTATION_SUMMARY.md`,
+  `OCR_SETUP_CHECKLIST.md`, `ROSTER_FEATURE.md` (~1,100 lines) describe
+  finished work whose live rules are already in this file.
+  `OCR_SETUP_CHECKLIST.md` is actively misleading: its "Required Actions" tell
+  the reader to fix **npm install** issues, which contradicts the pnpm-only
+  rule and would desync `pnpm-lock.yaml` and break the Vercel build. Delete or
+  correct — owner's call.
+
 ### Lower-priority items (not yet actioned)
 
 - **`discrepancies.resolved` boolean secondary index** (`lib/db/user-db.ts`) —
