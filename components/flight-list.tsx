@@ -15,9 +15,7 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { FlightLog } from "@/lib/db";
 import { deleteFlight } from "@/lib/db";
-import { formatHHMMDisplay } from "@/lib/utils/time";
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date";
-import { getDepartureDisplay, getArrivalDisplay } from "@/lib/utils/airport-display";
 import { usePreferences } from "@/components/providers/preferences-provider";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import { syncService } from "@/lib/sync";
@@ -27,14 +25,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { FlightCardBody } from "@/components/flight-card-body";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Plane,
-  Trash2,
-  MoreHorizontal,
-  Sun,
-  Moon,
-  Pen,
-} from "lucide-react";
+import { Plane, Trash2, MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { primeFlightCache } from "@/components/flight-form";
@@ -86,20 +77,6 @@ interface FlightListProps {
 }
 
 
-const MONTHS = [
-  "JAN",
-  "FEB",
-  "MAR",
-  "APR",
-  "MAY",
-  "JUN",
-  "JUL",
-  "AUG",
-  "SEP",
-  "OCT",
-  "NOV",
-  "DEC",
-];
 
 /** How long after a dismissal an open request is treated as the same tap. */
 const CASCADE_REOPEN_GUARD_MS = 350;
@@ -109,19 +86,6 @@ const CASCADE_REOPEN_GUARD_MS = 350;
 const HOLD_MS = 450;
 /** Movement that cancels the hold — a scroll, or the start of a swipe. */
 const HOLD_SLOP = 8;
-
-function timeToMinutes(hhmm: string): number {
-  const parts = hhmm.split(":").map(Number);
-  return (parts[0] || 0) * 60 + (parts[1] || 0);
-}
-
-function formatScheduledDuration(scheduledOut: string, scheduledIn: string): string {
-  let diff = timeToMinutes(scheduledIn) - timeToMinutes(scheduledOut);
-  if (diff < 0) diff += 1440;
-  const h = Math.floor(diff / 60);
-  const m = diff % 60;
-  return `${h}:${m.toString().padStart(2, "0")}`;
-}
 
 // Callbacks receive the flight so the parent can pass stable (useCallback)
 // handlers — inline `() => …` closures would give every card new props each

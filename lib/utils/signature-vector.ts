@@ -79,20 +79,6 @@ export function normalizeStrokesToBounds(
 }
 
 /**
- * Compute aspect ratio from bounds
- * This is used during rendering to preserve the signature's original proportions
- */
-export function computeAspectRatio(bounds: SignatureBounds): number {
-  const width = bounds.maxX - bounds.minX;
-  const height = bounds.maxY - bounds.minY;
-
-  // Avoid division by zero, default to 1:1 aspect ratio
-  if (height === 0) return 1;
-
-  return width / height;
-}
-
-/**
  * Prepare a signature for storage
  * Computes bounds, normalizes strokes, and calculates aspect ratio
  *

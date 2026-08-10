@@ -39,30 +39,6 @@ function base32Decode(encoded: string): Uint8Array<ArrayBuffer> {
   return output.slice(0, index)
 }
 
-// Generate TOTP code
-export async function generateTOTP(secret: string, timeStep = 30): Promise<string> {
-  const counter = Math.floor(Date.now() / 1000 / timeStep)
-  const counterBuffer = new ArrayBuffer(8)
-  const counterView = new DataView(counterBuffer)
-  counterView.setBigUint64(0, BigInt(counter), false)
-
-  const keyData = base32Decode(secret)
-  const key = await crypto.subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-1" }, false, ["sign"])
-
-  const signature = await crypto.subtle.sign("HMAC", key, counterBuffer)
-  const signatureArray = new Uint8Array(signature)
-
-  const offset = signatureArray[signatureArray.length - 1] & 0x0f
-  const binary =
-    ((signatureArray[offset] & 0x7f) << 24) |
-    ((signatureArray[offset + 1] & 0xff) << 16) |
-    ((signatureArray[offset + 2] & 0xff) << 8) |
-    (signatureArray[offset + 3] & 0xff)
-
-  const otp = binary % 1000000
-  return otp.toString().padStart(6, "0")
-}
-
 // Length-independent constant-time string comparison for short codes.
 // Avoids leaking how many leading digits matched via early-exit timing.
 function timingSafeEqual(a: string, b: string): boolean {
@@ -122,12 +98,6 @@ export async function verifyTOTPWithCounter(
   }
 
   return { valid: false, counter: -1 }
-}
-
-// Verify TOTP code (checks current and adjacent windows for clock drift).
-// Prefer verifyTOTPWithCounter where replay protection is needed.
-export async function verifyTOTP(secret: string, token: string, window = 1, timeStep = 30): Promise<boolean> {
-  return (await verifyTOTPWithCounter(secret, token, window, timeStep)).valid
 }
 
 // Generate otpauth:// URI for QR codes

@@ -177,21 +177,3 @@ export async function upsertFromServer<T extends SyncableEntity>(
     await table.put(normalized)
   }
 }
-
-/**
- * Create timestamps for a new entity
- */
-export function createTimestamps(includeUpdatedAt = true): { createdAt: number; updatedAt?: number } {
-  const now = Date.now()
-  return {
-    createdAt: now,
-    ...(includeUpdatedAt && { updatedAt: now }),
-  }
-}
-
-/**
- * Create update timestamp
- */
-export function updateTimestamp(): { updatedAt: number } {
-  return { updatedAt: Date.now() }
-}

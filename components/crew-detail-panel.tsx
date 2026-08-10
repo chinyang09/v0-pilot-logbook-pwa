@@ -2,7 +2,6 @@
 
 import { useMemo, useRef } from "react"
 import { ScrollIndicator } from "@/components/ui/scroll-indicator"
-import { Button } from "@/components/ui/button"
 import { GlassTextButton } from "@/components/ui/glass-icon-button"
 import { useRegisterDetailActions } from "@/hooks/use-page-actions"
 import { useCrewForm } from "@/hooks/use-crew-form"

@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { ScrollIndicator } from "@/components/ui/scroll-indicator"
-import { useCallback, useEffect, useMemo } from "react"
+import { useCallback, useEffect } from "react"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"

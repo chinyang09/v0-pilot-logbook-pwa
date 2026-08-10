@@ -8,7 +8,6 @@ import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
 import {
-  ChevronLeft,
   ChevronRight,
   Plane,
   PlaneTakeoff,

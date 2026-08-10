@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { ScrollIndicator } from "@/components/ui/scroll-indicator"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { GlassTextButton } from "@/components/ui/glass-icon-button"
 import { SettingsRow } from "@/components/ui/settings-row"
