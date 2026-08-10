@@ -819,8 +819,10 @@ the border tracing the time remaining. Left alone it fires; the pill cancels it.
   fires on any interaction with any other row, so clearing the pending confirm
   there made it impossible to arm a delete and move on.
 - Tapping outside deliberately does NOT disarm.
-- `HoldToConfirmButton` / `useHoldToConfirm` still exist but nothing
-  destructive uses them.
+- The press-and-hold control and its hook are **gone**, not merely unused.
+  `CountdownConfirmButton` replaced them at both call sites (the swipe confirm
+  overlay and the account page's "Log out of all devices"), so what remained
+  were two orphaned modules the docs still described as live.
 
 ### Camera OCR (`lib/ocr/oooi-extractor.ts`)
 
@@ -907,15 +909,14 @@ re-renders).
 
 ### Motion Primitives & Navigation Animation
 
-- **`components/ui/hold-to-confirm-button.tsx`** (`HoldToConfirmButton`) — the
-  shared press-and-hold confirm control (used by the swipe confirm overlay and
-  the account "Log out of all devices" button). Built on
-  `hooks/use-hold-to-confirm.ts` (a `MotionValue` progress 0→1 via rAF). The fill
-  is a soft red left→right gradient revealed by a CSS mask; an optional
-  `HoldProgressBorder` draws the perimeter. Accepts an external `progress`
-  MotionValue so a surrounding surface can advance in lock-step. `showBorder={false}`
-  when the surrounding element owns the border (the swipe overlay puts the border
-  on the card, not the pill).
+- **`components/ui/countdown-confirm-button.tsx`** (`CountdownConfirmButton`) —
+  the shared confirm control, used by the swipe confirm overlay and the account
+  page's "Log out of all devices". Built on `hooks/use-countdown-confirm.ts` (a
+  `MotionValue` progress 0→1 via rAF, with the whole-second label guarded so it
+  re-renders at 1Hz rather than per frame). Accepts an external `progress`
+  MotionValue so a surrounding surface can advance in lock-step, and
+  `showBorder={false}` when that surface owns the border (the swipe overlay puts
+  the border on the card, not the pill).
 - **`components/ui/hold-progress-border.tsx`** (`HoldProgressBorder` +
   `topCenterRoundedRectPath`) — an SVG rounded-rect stroke that draws from **12
   o'clock clockwise** (custom path; a `<rect>` starts at a corner), thickening,
