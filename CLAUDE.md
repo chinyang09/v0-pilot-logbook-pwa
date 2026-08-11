@@ -2144,6 +2144,30 @@ When making changes, be aware of these high-impact files:
   - A FLIP morph animates the box by **scale**, and this growth is nearly all
     height, so the card's text would visibly stretch on the way up.
 
+  **Re-evaluated against Shadix UI's `expandable-card`** (2026-08), which is
+  the same idea done the FLIP way: `layoutId` on the list card and on the
+  expanded one, `layout="position"` on the title/description, `AnimatePresence`
+  around a portal. Everything it animates is composited (transform + opacity),
+  so **per frame it is genuinely cheaper than ours**, which animates `width`,
+  two `height: auto`s, a `boxShadow` and a `blur()` — layout and paint. It was
+  still rejected, and the reasons are contextual rather than about the
+  technique:
+
+  - Its `layoutId` has to sit on the card **in the list**. Ours is virtualised
+    and re-renders every scroll frame, so that is ~24 projection nodes measured
+    per frame, permanently — trading a 340ms one-shot cost for a continuous one.
+  - Its demo is ONE card whose dominant content is an **image**, which scales
+    without complaint. Our card is four OOOI clock times, three durations and a
+    registration — `tabular-nums` text, where a scale-based morph shows.
+  - Its backdrop is a flat `bg-black/40` with **no blur** (the `backdrop-blur-xs`
+    variant is commented out in its source). Ours fades in `RadialBlurBackdrop`
+    — four full-viewport `backdrop-filter` layers. That difference, not the
+    morph technique, is the largest single cost gap between the two, and it is
+    a look decision rather than an implementation one.
+
+  So: if this preview ever needs to feel cheaper, the backdrop is the lever,
+  not the geometry.
+
   Instead the geometry is DERIVED, not measured, and nothing scales: the
   wrapper is a centred flex column, so with the detail and the actions
   collapsed to `height: 0` the card rests at `(innerHeight − cardHeight) / 2`;
