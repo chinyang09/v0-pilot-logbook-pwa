@@ -306,7 +306,7 @@ function tzFormatter(
   options: Omit<Intl.DateTimeFormatOptions, "timeZone">,
   cacheKey: string,
 ): Intl.DateTimeFormat {
-  const key = `${tz} ${cacheKey}`
+  const key = `${tz}|${cacheKey}`
   const cached = tzFormatters.get(key)
   if (cached) return cached
   const made = new Intl.DateTimeFormat("en-US", { timeZone: tz, ...options })
