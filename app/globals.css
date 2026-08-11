@@ -1079,7 +1079,26 @@ textarea:focus-within {
      it, and without it the material reads as frosted film. Brightness is
      themed — dark pushes 1.25 so the surface lifts off near-black; light
      stays near 1.03 (a strong push on cream whites the glass out entirely).
-     The filter transitions so the morph surge below swells and settles. */
+
+     The VALUE IS CONSTANT — nothing here transitions, and there is no longer a
+     `data-morphing` surge raising the blur to +6px and the brightness to 1.4
+     for the length of the pill↔sidebar morph.
+
+     A `backdrop-filter` is a readback of everything behind the element plus a
+     separable blur, and it is re-rasterised whenever either the geometry or
+     the filter changes. The morph already changes the geometry every frame —
+     `left`, `width` and `height` all interpolate — so the readback is
+     unavoidable there. Animating the RADIUS on top of that meant the blur's
+     kernel changed every frame as well, so no part of the pass could be
+     reused, on the busiest 300ms in the app and on the surface a phone user
+     touches most. That was the mobile sidebar's jank.
+
+     What was lost is a 300ms garnish on a panel that is simultaneously
+     growing from a 56px pill to the full height of the screen. What was
+     gained is a constant kernel for the whole morph. The swell cannot be
+     rebuilt compositor-side: a second element carrying the surged filter and
+     fading in is exactly the stacked-backdrop-filter construct that made this
+     material render differently on iOS and Android (see above). */
   backdrop-filter: blur(var(--glass-face-blur)) brightness(var(--glass-blur-brightness, 1.25)) saturate(1.5);
   /* Spans the WHOLE face, corner to corner. It used to be inset by the ring
      widths, which left the perimeter a shade darker than the middle — the
@@ -1087,14 +1106,6 @@ textarea:focus-within {
      even fill (iOS Control Center controls are uniform edge to edge). */
   border-radius: var(--corner-radius);
   margin: 0;
-  transition: backdrop-filter 240ms ease;
-}
-
-/* Morph surge — while the pill↔sidebar morph is in flight the material swells
-   like a merging droplet (more blur, brighter, more vibrant), then settles as
-   it lands. Driven by data-morphing on the GlassContainer. */
-.GlassContainer[data-morphing="true"] .GlassBlur {
-  backdrop-filter: blur(calc(var(--glass-face-blur) + 6px)) brightness(1.4) saturate(1.7);
 }
 
 /* GlassContainer::before removed — invert effect moved to .GlassContent

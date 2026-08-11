@@ -1620,7 +1620,6 @@ function DesktopPillMorph({
           // scrolling list reads as the layout wobbling, not as a press.
           disableTapFeedback={isSidebarShape}
           spotlight
-          morphing={phase === "opening" || phase === "closing"}
         >
           {/* Pill bar — always visible */}
           <div
@@ -1838,7 +1837,6 @@ function MobilePillMorph({
           // scrolling list reads as the layout wobbling, not as a press.
           disableTapFeedback={isSidebarShape}
           spotlight
-          morphing={phase === "opening" || phase === "closing"}
         >
           {/* Pill bar — visible when collapsed */}
           <div

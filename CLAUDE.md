@@ -1944,10 +1944,25 @@ When making changes, be aware of these high-impact files:
     of one even fill (iOS Control Center controls are uniform edge to edge). Do
     not reintroduce the inset, and do not feather the face outward either —
     that pulls the tone DOWN at the edges, which is the opposite problem.
-  - **Morph surge:** `data-morphing` on the container drives a heavier
-    `.GlassBlur` backdrop-filter in CSS, so the material swells as the pill and
-    sidebar merge and settles when it lands. Compositor-friendly — it is one
-    filter value changing, not a filter graph being rebuilt.
+  - **`.GlassBlur`'s filter value is CONSTANT — it is never animated.** There
+    used to be a "morph surge": `data-morphing` on the container raised the
+    blur by 6px and the brightness to 1.4 over a 240ms transition, so the
+    material swelled like a merging droplet as the pill and the sidebar
+    merged. It was described as compositor-friendly (one filter value, not a
+    filter graph) and it is not. A `backdrop-filter` is a readback of
+    everything behind the element plus a separable blur, re-rasterised
+    whenever the geometry OR the filter changes — and the morph already
+    interpolates `left`, `width` and `height`, so the readback happens every
+    frame regardless. Animating the radius on top meant the kernel changed
+    every frame too, so nothing in the pass could be reused, for the busiest
+    300ms in the app on the surface a phone user touches most. That was the
+    mobile sidebar's jank.
+
+    The swell cannot be rebuilt compositor-side. A second element carrying the
+    surged filter and fading in is precisely the stacked-backdrop-filter
+    construct that made this material render differently on iOS and Android.
+    The `morphing` prop and the `data-morphing` attribute are GONE with it,
+    rather than left as a hook with nothing behind it.
   - **The press is tracked on the WINDOW, not the element.** Only
     `pointerdown` is bound to the glass; everything after it listens on
     `window` until release. The element stops receiving pointer moves once the
@@ -2295,6 +2310,7 @@ When making changes, be aware of these high-impact files:
 - Do not add a rule, material or layout that only one engine gets — iOS and Android must render the app identically. In particular do not reintroduce `@supports (-webkit-touch-callout: none)`, the WebKit-only sniff: it silently made Android's date fields shorter and its focused fields slower to take a tap. A vendor-prefixed property paired with the standard one, or inert elsewhere, is fine. The sole exception is the PWA install prompt, where the OS flow itself differs
 - Do not end the glass press on `touchcancel`/`pointercancel` — Chrome fires those the moment a move looks like a scroll, which is what made the Android spotlight die as soon as the finger moved. Track on the window, treat a cancel as bloom-only, and let the grace timer close it out
 - Do not set the dark theme's `--glass-veil` back to `transparent` — a backdrop-filter has nothing to work with over pure black (blur/saturate of black is black; brightness is multiplicative), so the veil is the only thing giving the slab a face on an empty screen. Keep it warm rather than plain white, or the material reads grey over content again
+- Do not animate `.GlassBlur`'s filter VALUE — no transition on it, and no `data-morphing` surge. The nav morph already interpolates `left`/`width`/`height`, so the backdrop readback runs every frame; changing the blur RADIUS on top of that means the kernel changes too and nothing in the pass can be reused, for the busiest 300ms in the app. That was the mobile sidebar's jank. The swell it produced cannot be rebuilt compositor-side — a second element carrying the surged filter is the stacked-backdrop-filter construct below
 - Do not add a second full-face `backdrop-filter` to the glass — `.GlassBlur` carries the only one, as a single filter *list*. Six of them stacked on separate elements is what made the nav pill warm-and-dark on iOS and flat grey on Android: Blink composes the chain, WebKit doesn't, and neither is wrong. Anything the material needs goes into that one list (and the rim layers stay masked to the edge band)
 - Do not give the drag lens's `-refract` layer a `backdrop-filter` instead of its background — the lens is portalled to `<body>` and carries its own `scale`, so it forms a backdrop root and a backdrop-filter there does not sample the pill at all (measured — `blur(10px)` leaves the label underneath perfectly sharp). The layer must paint over the pill it duplicates, or the copy and the original show at once. Cutting the pill out with a mask instead was tried and rejected on the look
 - Do not minify the drag lens's copy uniformly — the squeeze is `scaleY` ONLY, with the row counter-scaled so the labels keep their size and only the control gets shorter. And do not push `LENS_SQUASH` much below 0.84: the counter-scaled row has to fit the copy's box, and the mobile pill's 44px tab item in a 56px bar is what sets that floor (at 0.72 the icons and labels were clipped away entirely)

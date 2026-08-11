@@ -25,12 +25,6 @@ interface GlassContainerProps {
    * their own affordances).
    */
   spotlight?: boolean
-  /**
-   * True while this glass surface is mid-morph (pill ↔ sidebar). The material
-   * surges — extra blur/brightness/vibrancy, like a droplet swelling — then
-   * settles when the morph lands.
-   */
-  morphing?: boolean
 }
 
 /**
@@ -99,7 +93,6 @@ export function GlassContainer({
   style,
   disableTapFeedback,
   spotlight,
-  morphing,
 }: GlassContainerProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const reduceMotion = useReducedMotion()
@@ -327,7 +320,6 @@ export function GlassContainer({
     <motion.div
       ref={rootRef}
       className={cn("GlassContainer", className)}
-      data-morphing={morphing ? "true" : undefined}
       style={{
         "--corner-radius": `${cornerRadius}px`,
         "--glass-press": 0,
