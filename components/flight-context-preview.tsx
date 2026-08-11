@@ -6,7 +6,6 @@ import { motion } from "framer-motion";
 import type { FlightLog } from "@/lib/db";
 import { FlightCardBody } from "@/components/flight-card-body";
 import { SignatureMark } from "@/components/signature-mark";
-import { MODAL_SCRIM, RadialBlurBackdrop } from "@/components/ui/chrome-overlays";
 import { formatClockDisplay, formatHHMMDisplay } from "@/lib/utils/time";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import { setMenuOpen } from "@/lib/utils/menu-lock";
@@ -79,7 +78,11 @@ import {
  * an interpolated `boxShadow` string. What is left on the main thread is the
  * two unfurling heights, which is what the nav morph animates too.
  *
- * Closing plays the same thing backwards and only then unmounts.
+ * Closing plays the same thing backwards, and the UNMOUNT is driven by the
+ * card's own animation finishing rather than by a timer running beside it —
+ * see `finishClose`.
+ *
+ * The backdrop is a plain darken with NO blur (`SCRIM`).
  */
 export interface PreviewAnchor {
   left: number;
@@ -151,25 +154,26 @@ const MORPH = { duration: MORPH_MS / 1000, ease: [0.32, 0.72, 0, 1] as const };
 const DETAIL_DELAY = MORPH_MS * 0.3;
 const DETAIL_MS = MORPH_MS * 0.76;
 /**
- * The backdrop blur fades on its OWN short clock, not the morph's.
+ * The backdrop is a PLAIN DARKEN — no blur.
  *
- * Those are three full-viewport `backdrop-filter` layers, and each one samples
- * the output of the one below it — so while their opacity is changing, the
- * whole stack is recomputed every frame. Running that for the morph's full
- * length is the most expensive thing in this overlay by a wide margin, and it
- * lands on exactly the frames where the card is travelling.
+ * It used to fade in `RadialBlurBackdrop`: three full-viewport
+ * `backdrop-filter` layers, each sampling the output of the one below, so
+ * while their opacity moved the whole stack was recomputed every frame — and
+ * that landed on exactly the frames the card is travelling. It was already the
+ * most expensive thing in this overlay by a wide margin (which is why it had
+ * its own short clock rather than the morph's), and on a phone it is the one
+ * cost here big enough to be felt on its own.
  *
- * At 160ms the blur has settled well before the morph is half done, and the
- * remaining ~300ms composites a texture that no longer changes (nothing behind
- * the preview moves — the list can't scroll under it). Short enough to be
- * cheap, long enough that neither end is a visible cut.
+ * Shadix's expandable card — the reference this morph was measured against —
+ * uses a flat `bg-black/40` with no blur at all, and its `backdrop-blur-xs`
+ * variant is commented out in its own source. That difference, not the morph
+ * technique, was always the largest cost gap between the two.
  *
- * Not zero: with no fade at all the CLOSE pops, because the blur would still be
- * at full strength once the scrim has faded to transparent — an un-darkened but
- * fully blurred background for the last stretch of the collapse.
+ * Deeper than the shared `MODAL_SCRIM` in both themes, because the blur was
+ * carrying part of the separation and now nothing else is: a dialog keeps its
+ * blur, this does not. ONE constant, so it is a single number to retune.
  */
-const BACKDROP_FADE_MS = 160;
-const BACKDROP_FADE_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
+const SCRIM = "bg-black/35 dark:bg-black/60";
 
 /**
  * Day/night counts, written the way the card's chips write them (`1D`, `2N`)
@@ -214,12 +218,24 @@ export function FlightContextPreview({
   // through rather than an unmount: collapse back onto the row, then go.
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
+  /** Fires once, whichever of the two paths below gets there first. */
+  const finishClose = useCallback(() => {
+    if (!closingRef.current) return;
+    closingRef.current = false;
+    closeRef.current();
+  }, []);
   const startClose = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
     setClosing(true);
-    window.setTimeout(() => closeRef.current(), MORPH_MS);
-  }, []);
+    // A SAFETY NET, not the trigger — see onAnimationComplete on the card.
+    // The animation only starts on the commit after this state change, so a
+    // timer of exactly MORPH_MS is systematically a frame or two EARLY: the
+    // overlay unmounted while the card was still a few pixels off the row and
+    // the row un-hid underneath it, which is the flash on collapse. The extra
+    // frames here mean this only ever fires if the animation never reports.
+    window.setTimeout(finishClose, MORPH_MS + 120);
+  }, [finishClose]);
 
   // The system BACK gesture closes the preview instead of navigating out from
   // under it. On Android that swipe is a history back, and with nothing of ours
@@ -236,18 +252,6 @@ export function FlightContextPreview({
   useEffect(() => {
     setMenuOpen(true);
     return () => setMenuOpen(false);
-  }, []);
-
-  // The backdrop layers fade on a CSS transition, which needs a PREVIOUS value
-  // to run from — rendering them at their target on the first commit is just a
-  // jump. framer's `initial`/`animate` handles this for us elsewhere; here the
-  // opacity lives on the layers themselves, so the entry tick is explicit.
-  // Set from a rAF callback rather than the effect body (see the lint note in
-  // CLAUDE.md).
-  const [entered, setEntered] = useState(false);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setEntered(true));
-    return () => cancelAnimationFrame(id);
   }, []);
 
   useEffect(() => {
@@ -295,30 +299,13 @@ export function FlightContextPreview({
       {/* Tapping anywhere off the card closes it — the preview is a look, so
           getting out of it should cost nothing. */}
       <motion.div
-        className={cn("absolute inset-0", MODAL_SCRIM)}
+        className={cn("absolute inset-0", SCRIM)}
         initial={{ opacity: 0 }}
         animate={{ opacity: open ? 1 : 0 }}
         transition={MORPH}
         // Wrapped, not passed directly — the handler's MouseEvent would
         // otherwise arrive as `requestClose`'s follow-up action.
         onClick={() => requestClose()}
-      />
-
-      {/* A SIBLING of the scrim, not a child of it, fading per LAYER, and on a
-          SHORTER clock than the morph (see BACKDROP_FADE_MS).
-
-          It used to live inside the scrim above — which fades — and an element
-          with opacity below 1 is a `backdrop-filter` BACKDROP ROOT, so for the
-          whole morph these layers sampled an empty backdrop and blurred
-          nothing, then the full blur stack snapped on the instant the
-          scrim reached exactly 1. That was a hitch at the end of the animation
-          rather than a fade, and the part of this overlay most likely to be
-          felt on a phone.
-
-          `pointer-events-none`, so the scrim underneath still takes the tap. */}
-      <RadialBlurBackdrop
-        opacity={open && entered ? 1 : 0}
-        transition={`opacity ${BACKDROP_FADE_MS}ms ${BACKDROP_FADE_EASE}`}
       />
 
       {/* The positioning wrapper is `pointer-events-none` and only the card and
@@ -349,6 +336,15 @@ export function FlightContextPreview({
             ...(growsWider ? { width: open ? width : anchor.width } : null),
           }}
           transition={MORPH}
+          // The card landing back on its row is what "closed" MEANS, so it is
+          // what unmounts the overlay — not a timer running alongside it. The
+          // timer was set to exactly MORPH_MS but the animation does not begin
+          // until the commit after `closing` flips, so it always ran out with
+          // the card still short of the row: the overlay disappeared, the row
+          // un-hid a few pixels away, and that offset read as a flash.
+          onAnimationComplete={() => {
+            if (closing) finishClose();
+          }}
         >
           {/* The lift, on its own layer so only an OPACITY animates — see
               LIFT_SHADOW. `inset-0` inside this transform wrapper makes it the
@@ -449,15 +445,9 @@ export function FlightContextPreview({
                   <Row label="Landing" value={dayNight(flight.dayLandings, flight.nightLandings)} />
                 </div>
 
-                {/* Crew get full-width rows — a name does not fit the grid's
-                    label/value column without truncating to uselessness. */}
-                {(flight.picName || flight.sicName) ? (
-                  <div className="mt-1 border-t border-border/70 pt-1">
-                    {flight.picName ? <Row label="PIC" value={flight.picName} /> : null}
-                    {flight.sicName ? <Row label="SIC" value={flight.sicName} /> : null}
-                  </div>
-                ) : null}
-
+                {/* No PIC/SIC rows — the card body above already names the
+                    crew, so repeating them here was the one part of the detail
+                    that said nothing new. */}
                 {flight.remarks ? (
                   <p className="mt-2 border-t border-border/70 pt-2 text-[13px] leading-snug text-muted-foreground">
                     {flight.remarks}
