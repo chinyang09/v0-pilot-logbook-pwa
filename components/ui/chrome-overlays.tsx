@@ -167,7 +167,7 @@ export const MODAL_SCRIM = "bg-black/15 dark:bg-black/50";
  * or a mask, or a filter — becomes a **backdrop root**, and a descendant's
  * `backdrop-filter` can then only sample content *inside* that root. Wrap these
  * layers in something that fades and they sample an empty backdrop: no blur at
- * all for the whole fade, then the full four-layer blur snapping on the instant
+ * all for the whole fade, then the full stack snapping on the instant
  * opacity reaches exactly 1. That is what a caller who fades a wrapper gets,
  * and it reads as a hitch at the end of the animation rather than as a fade.
  *

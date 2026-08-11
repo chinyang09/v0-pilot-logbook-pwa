@@ -2149,19 +2149,19 @@ When making changes, be aware of these high-impact files:
   expanded one, `layout="position"` on the title/description, `AnimatePresence`
   around a portal. Everything it animates is composited (transform + opacity),
   so **per frame it is genuinely cheaper than ours**, which animates `width`,
-  two `height: auto`s, a `boxShadow` and a `blur()` — layout and paint. It was
+  two `height: auto`s and a `boxShadow` — layout and paint. It was
   still rejected, and the reasons are contextual rather than about the
   technique:
 
   - Its `layoutId` has to sit on the card **in the list**. Ours is virtualised
     and re-renders every scroll frame, so that is ~24 projection nodes measured
-    per frame, permanently — trading a 340ms one-shot cost for a continuous one.
+    per frame, permanently — trading a one-shot morph cost for a continuous one.
   - Its demo is ONE card whose dominant content is an **image**, which scales
     without complaint. Our card is four OOOI clock times, three durations and a
     registration — `tabular-nums` text, where a scale-based morph shows.
   - Its backdrop is a flat `bg-black/40` with **no blur** (the `backdrop-blur-xs`
     variant is commented out in its source). Ours fades in `RadialBlurBackdrop`
-    — four full-viewport `backdrop-filter` layers. That difference, not the
+    — a stack of full-viewport `backdrop-filter` layers. That difference, not the
     morph technique, is the largest single cost gap between the two, and it is
     a look decision rather than an implementation one.
 
@@ -2174,8 +2174,11 @@ When making changes, be aware of these high-impact files:
   the card's opening `y`/`x`/`width` are the difference between that and the
   row's own box; and the detail and actions animate their real `height`
   (0 → auto) while the flex centring re-centres the group frame by frame. One
-  clock (`MORPH`, 340ms) drives all of it, so the travel and the unfurl are one
-  motion.
+  clock (`MORPH_MS`, **460ms**) drives all of it, so the travel and the unfurl
+  are one motion. It was 340ms, and the owner's verdict on device was "a lot
+  snappier than I want" — the whole choreography is derived from that one
+  number (`DETAIL_DELAY` at 30% of it, `DETAIL_MS` at 76%), so retiming it
+  stretches the parts together rather than putting them out of step.
 
   The anchor is the **card's** box (`[data-slot="card"]`), not the row
   wrapper's — the wrapper carries the list's per-row top gap, and 4px out is a
@@ -2193,8 +2196,11 @@ When making changes, be aware of these high-impact files:
   width clamps to what it had and the growth is all height (measured: +143px);
   there is nowhere else for it to go.
 
-  The DETAIL arrives a beat after the box that holds it — `opacity`/`y`/`blur`
-  on a 260ms curve delayed 100ms inside the 340ms box growth. The box growing is
+  The DETAIL arrives a beat after the box that holds it — `opacity` and `y`,
+  delayed 30% into the box growth and running for 76% of it. There is
+  deliberately **no `blur()`** in that reveal: it is a per-frame filter pass on
+  the busiest frames of the overlay, and the delay plus the travel already read
+  as content settling in. The box growing is
   the card changing shape; this is the content settling into the room that just
   appeared, and separating the two is most of what makes the expansion legible
   rather than a jump.
@@ -2361,10 +2367,10 @@ When making changes, be aware of these high-impact files:
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
 - Do not build the flight card's extra actions from glass — glass is chrome floating over content, and these have to be read; as a glass slab the flight cards showed straight through the labels. They are the SWIPE PANEL's button repeated (64px `rounded-lg`, `bg-secondary`, icon over a `text-xs` word, the panel's own 8px gap), because the run comes out of a control in that panel; 56px circles in `bg-card` read as a different family of control turning up beside it
-- Do not let the context preview come to rest in the row's own column — it settles CENTRED ON THE VIEWPORT at `MAX_WIDTH`, or on anything wider than a phone it is the same width it started and the morph reads as nothing happening (measured on a 1180 tablet: 336 → 672). And keep the detail's own delayed reveal (opacity/y/blur, 100ms in): the box growing and the content arriving are two things, and running them together reads as a jump
-- Do not run the context preview's backdrop blur on the MORPH's clock — four full-viewport `backdrop-filter` layers, each sampling the one below it, recompute the whole stack every frame their opacity changes, and that lands on exactly the frames the card is travelling. `BACKDROP_FADE_MS` (160) settles it before the morph is half done, after which it composites a texture that no longer changes (nothing behind the preview can move). Not zero, though: with no fade the CLOSE pops, because the blur would still be at full strength once the scrim has faded to transparent
+- Do not let the context preview come to rest in the row's own column — it settles CENTRED ON THE VIEWPORT at `MAX_WIDTH`, or on anything wider than a phone it is the same width it started and the morph reads as nothing happening (measured on a 1180 tablet: 336 → 672). And keep the detail's own delayed reveal (opacity + y, ~30% of the morph in): the box growing and the content arriving are two things, and running them together reads as a jump. It does NOT animate `blur()` any more — that is a per-frame filter pass on the busiest frames of the overlay, and the delayed opacity/travel already says "settling into the room"
+- Do not run the context preview's backdrop blur on the MORPH's clock — full-viewport `backdrop-filter` layers, each sampling the one below it, recompute the whole stack every frame their opacity changes, and that lands on exactly the frames the card is travelling. `BACKDROP_FADE_MS` (160) settles it before the morph is half done, after which it composites a texture that no longer changes (nothing behind the preview can move). Not zero, though: with no fade the CLOSE pops, because the blur would still be at full strength once the scrim has faded to transparent
 - **Blur animation rules, app-wide.** Never ANIMATE `backdrop-filter`, `filter`, `mask-image`, `height` or `top` — they are layout- or paint-bound and re-rasterise every frame. Animate `opacity` and `transform` only. Where a progressive blur has to appear or disappear, fade the layers' OPACITY on a SHORT clock of their own (~160ms) rather than the surrounding motion's, so the blur settles before the thing it sits behind has finished moving and the rest of the animation composites a texture that no longer changes. And keep the stack to THREE layers on a full-viewport effect: each layer samples the output of the one below, so it is a chain rather than a sum, and the fourth link is the one a weak mobile GPU shows. `RadialBlurBackdrop` and `SIDEBAR_BACKDROP_BLUR` both follow this; `ChromeFade` is static and does not animate at all
-- Do not fade a `backdrop-filter` layer by fading an ANCESTOR — an element with `opacity` below 1 (or `will-change: opacity`, a mask, or a filter) is a **backdrop root**, so its descendants' `backdrop-filter` can only sample inside it. The context preview's `RadialBlurBackdrop` used to sit inside the scrim that fades: for the whole 340ms morph the four layers blurred nothing, then the full stack snapped on the instant the scrim hit exactly 1 — a hitch at the end of the animation, and the part of that overlay most likely to be felt on a phone. Fade each LAYER's own opacity instead (an element's own opacity is fine — the root is an ancestor boundary), which is how `SIDEBAR_BACKDROP_BLUR` has always done it. A CSS transition there also needs the layers to MOUNT at 0, or there is no previous value to run from
+- Do not fade a `backdrop-filter` layer by fading an ANCESTOR — an element with `opacity` below 1 (or `will-change: opacity`, a mask, or a filter) is a **backdrop root**, so its descendants' `backdrop-filter` can only sample inside it. The context preview's `RadialBlurBackdrop` used to sit inside the scrim that fades: for the whole morph the layers blurred nothing, then the full stack snapped on the instant the scrim hit exactly 1 — a hitch at the end of the animation, and the part of that overlay most likely to be felt on a phone. Fade each LAYER's own opacity instead (an element's own opacity is fine — the root is an ancestor boundary), which is how `SIDEBAR_BACKDROP_BLUR` has always done it. A CSS transition there also needs the layers to MOUNT at 0, or there is no previous value to run from
 - Do not put a `layout`/`layoutId` prop on a flight card to morph the context preview out of it — the rows are VIRTUALISED, and that hands framer every rendered row to measure on every layout change (the per-row measuring the list was rebuilt to remove), while FLIP animates the box by SCALE and this growth is nearly all height, so the card's text stretches on the way up. The morph's geometry is derived instead: a centred flex column, a collapsed rest position of `(innerHeight − cardHeight) / 2`, and the detail/actions animating their REAL height. Anchor it to the card (`[data-slot="card"]`), not the row wrapper — the wrapper carries the per-row top gap and 4px out is a visible jump on the first frame
 - Do not tear the context preview down on the dismissing tap — the morph runs BOTH ways, so closing collapses it back onto the row first and `onClose` fires on a timer. And keep the source row `invisible` while it is up, or the copy opening on top of it shows the same flight twice through the scrim
 - Do not let the flight card's hold arm from a press on the row's own CONTROLS — the pointer hooks sit on `SwipeableCard`'s outer container, so the swipe buttons are inside them, and a thumb tap on `…` outlasts `HOLD_MS` on a phone. That opened the context preview instead of the cascade. Bail when the press starts on a `button`/`a`/`input`/`textarea` or inside `[data-swipe-actions]`

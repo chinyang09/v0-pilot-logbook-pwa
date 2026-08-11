@@ -110,14 +110,14 @@ const DETAIL_MS = MORPH_MS * 0.76;
 /**
  * The backdrop blur fades on its OWN short clock, not the morph's.
  *
- * Those are four full-viewport `backdrop-filter` layers, and each one samples
+ * Those are three full-viewport `backdrop-filter` layers, and each one samples
  * the output of the one below it — so while their opacity is changing, the
  * whole stack is recomputed every frame. Running that for the morph's full
- * 340ms is the most expensive thing in this overlay by a wide margin, and it
+ * length is the most expensive thing in this overlay by a wide margin, and it
  * lands on exactly the frames where the card is travelling.
  *
- * At 160ms the blur has settled before the morph is half done, and the
- * remaining ~180ms composites a texture that no longer changes (nothing behind
+ * At 160ms the blur has settled well before the morph is half done, and the
+ * remaining ~300ms composites a texture that no longer changes (nothing behind
  * the preview moves — the list can't scroll under it). Short enough to be
  * cheap, long enough that neither end is a visible cut.
  *
@@ -261,7 +261,7 @@ export function FlightContextPreview({
           It used to live inside the scrim above — which fades — and an element
           with opacity below 1 is a `backdrop-filter` BACKDROP ROOT, so for the
           whole morph these layers sampled an empty backdrop and blurred
-          nothing, then the full four-layer blur snapped on the instant the
+          nothing, then the full blur stack snapped on the instant the
           scrim reached exactly 1. That was a hitch at the end of the animation
           rather than a fade, and the part of this overlay most likely to be
           felt on a phone.
