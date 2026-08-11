@@ -280,24 +280,60 @@ export async function getFavoriteAirports(): Promise<Airport[]> {
 // ============================================
 
 /**
+ * `Intl.DateTimeFormat` instances, cached per (timezone × shape).
+ *
+ * Constructing one resolves locale and timezone data and is by far the most
+ * expensive part of these helpers — and `getAirportTimeInfo` built TWO of them
+ * on every call. That is fine for a detail panel and not fine for an import:
+ * the logbook parser and the roster executor both resolve a departure and an
+ * arrival offset per sector, so a report of a few hundred rows was constructing
+ * formatters in the thousands.
+ *
+ * Caching the FORMATTER rather than the answer is what keeps this a pure
+ * speed-up. A formatter is stateless — the DST-dependent part is the instant
+ * you hand it, and every caller still passes the current one — whereas caching
+ * an offset would pin whatever DST was in force the first time an airport was
+ * seen.
+ *
+ * Keyed on the timezone string, which is a bounded set (the airports a pilot
+ * flies to), and only populated for zones that actually resolve: an invalid one
+ * throws out of the constructor and is left for the caller's catch.
+ */
+const tzFormatters = new Map<string, Intl.DateTimeFormat>()
+
+function tzFormatter(
+  tz: string,
+  options: Omit<Intl.DateTimeFormatOptions, "timeZone">,
+  cacheKey: string,
+): Intl.DateTimeFormat {
+  const key = `${tz} ${cacheKey}`
+  const cached = tzFormatters.get(key)
+  if (cached) return cached
+  const made = new Intl.DateTimeFormat("en-US", { timeZone: tz, ...options })
+  tzFormatters.set(key, made)
+  return made
+}
+
+function offsetName(tz: string, style: "shortOffset" | "longOffset", at: Date): string {
+  return (
+    tzFormatter(tz, { timeZoneName: style }, style)
+      .formatToParts(at)
+      .find((p) => p.type === "timeZoneName")?.value || ""
+  )
+}
+
+/**
  * Get airport local time display string
  */
 export function getAirportLocalTime(tz: string): string {
   try {
     const now = new Date()
-    const offsetStr =
-      new Intl.DateTimeFormat("en-US", {
-        timeZone: tz,
-        timeZoneName: "shortOffset",
-      })
-        .formatToParts(now)
-        .find((p) => p.type === "timeZoneName")?.value || "UTC"
-
-    const timeStr = now.toLocaleTimeString("en-US", {
-      timeZone: tz,
-      hour: "2-digit",
-      minute: "2-digit",
-    })
+    const offsetStr = offsetName(tz, "shortOffset", now) || "UTC"
+    const timeStr = tzFormatter(
+      tz,
+      { hour: "2-digit", minute: "2-digit" },
+      "hhmm",
+    ).format(now)
 
     return `${timeStr} (${offsetStr})`
   } catch {
@@ -312,20 +348,11 @@ export function getAirportLocalTime(tz: string): string {
 export function getAirportTimeInfo(tz: string): { offset: number; offsetStr: string } {
   try {
     const now = new Date()
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      timeZoneName: "longOffset",
-    }).formatToParts(now)
-
-    const offsetPart = parts.find((p) => p.type === "timeZoneName")?.value || ""
+    const offsetPart = offsetName(tz, "longOffset", now)
     const match = offsetPart.match(/([+-]\d+)/)
     const offset = match ? Number.parseInt(match[1]) : 0
 
-    const shortParts = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      timeZoneName: "shortOffset",
-    }).formatToParts(now)
-    const offsetStr = shortParts.find((p) => p.type === "timeZoneName")?.value || "UTC"
+    const offsetStr = offsetName(tz, "shortOffset", now) || "UTC"
 
     return { offset, offsetStr }
   } catch {
