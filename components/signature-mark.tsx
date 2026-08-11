@@ -31,11 +31,25 @@ export function SignatureMark({
   signature,
   className,
   height = 56,
+  renderWidth,
 }: {
   signature: FlightSignature;
   className?: string;
   /** CSS height of the strip; the width is whatever the container gives. */
   height?: number;
+  /**
+   * The width to back the bitmap at, when the container is going to CHANGE
+   * width after this paints.
+   *
+   * The canvas is laid out `w-full`, so the browser scales the bitmap to
+   * whatever the box currently is. Downscaling is fine; upscaling is not. The
+   * context preview animates its card's width — on a tablet from ~336 to 672 —
+   * so a bitmap sized from `clientWidth` at mount would be stretched to twice
+   * its resolution by the time the morph settles, and the signature would come
+   * to rest visibly soft. Passing the RESTING width paints once, at the size it
+   * will end up, and every frame before that is a downscale.
+   */
+  renderWidth?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -48,7 +62,7 @@ export function SignatureMark({
     // Back the canvas at device resolution — a signature is thin strokes, and
     // at 1x on a 3x phone it reads as a smudge.
     const dpr = window.devicePixelRatio || 1;
-    const cssWidth = canvas.clientWidth;
+    const cssWidth = renderWidth ?? canvas.clientWidth;
     if (cssWidth <= 0) return;
     canvas.width = Math.round(cssWidth * dpr);
     canvas.height = Math.round(height * dpr);
@@ -64,7 +78,7 @@ export function SignatureMark({
       lineWidth: 2 * dpr,
       padding: 0.04,
     });
-  }, [signature, height]);
+  }, [signature, height, renderWidth]);
 
   return (
     <canvas

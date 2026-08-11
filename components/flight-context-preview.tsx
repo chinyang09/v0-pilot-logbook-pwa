@@ -341,7 +341,15 @@ export function FlightContextPreview({
                   an empty signature strip would imply one is missing. */}
               {flight.signature ? (
                 <div className="mb-2 border-b border-border/70 pb-2">
-                  <SignatureMark signature={flight.signature} height={52} />
+                  {/* Backed at the card's RESTING content width (the detail's
+                      `px-4` either side), not whatever the box is mid-morph —
+                      the card's width animates, and a bitmap painted at the
+                      opening width would be upscaled by the time it settles. */}
+                  <SignatureMark
+                    signature={flight.signature}
+                    height={52}
+                    renderWidth={width - 32}
+                  />
                   <div className="mt-1 flex items-baseline justify-between gap-3">
                     <span className="truncate text-[13px] font-medium text-foreground">
                       {flight.signature.signerName || "Signed"}
