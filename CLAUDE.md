@@ -1292,6 +1292,12 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   still answering `false`. Same shape as `useDBReady`/`useIsDesktop`. The
   provider publishes on COMMIT (an effect), because a store read during render
   must return what React last rendered with or `useSyncExternalStore` tears
+- The two together are also what makes the SIDEBAR toggle cheap. `AppShellContent`
+  reads `useSidebar()` and renders `KeepAlivePages` as its children, so opening
+  the sidebar re-rendered the shell and, through it, all six pages — Recharts
+  trees and the virtualised logbook included — on the first frames of the 300ms
+  pill↔sidebar morph. That is now the shell, `KeepAlivePages` and six wrapper
+  `div`s.
 - **`KeepAlivePage` is `memo`ized on its route key.** The stack recreated
   `<PageComponent />` on every navigation, and a new element is a re-render
   however unchanged the props are — so the context fix alone would not have
