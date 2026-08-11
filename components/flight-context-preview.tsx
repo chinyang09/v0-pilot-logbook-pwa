@@ -95,10 +95,26 @@ const GAP = 14;
  *  Ease-out with no overshoot: the card is arriving, not landing. */
 const MORPH_MS = 340;
 const MORPH = { duration: MORPH_MS / 1000, ease: [0.32, 0.72, 0, 1] as const };
-/** The same curve as a CSS string, for the backdrop layers — they fade on a
- *  plain transition rather than through framer, because their opacity has to
- *  sit on each LAYER (see RadialBlurBackdrop's backdrop-root note). */
-const MORPH_CSS_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
+/**
+ * The backdrop blur fades on its OWN short clock, not the morph's.
+ *
+ * Those are four full-viewport `backdrop-filter` layers, and each one samples
+ * the output of the one below it — so while their opacity is changing, the
+ * whole stack is recomputed every frame. Running that for the morph's full
+ * 340ms is the most expensive thing in this overlay by a wide margin, and it
+ * lands on exactly the frames where the card is travelling.
+ *
+ * At 160ms the blur has settled before the morph is half done, and the
+ * remaining ~180ms composites a texture that no longer changes (nothing behind
+ * the preview moves — the list can't scroll under it). Short enough to be
+ * cheap, long enough that neither end is a visible cut.
+ *
+ * Not zero: with no fade at all the CLOSE pops, because the blur would still be
+ * at full strength once the scrim has faded to transparent — an un-darkened but
+ * fully blurred background for the last stretch of the collapse.
+ */
+const BACKDROP_FADE_MS = 160;
+const BACKDROP_FADE_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -215,17 +231,21 @@ export function FlightContextPreview({
         onClick={() => requestClose()}
       />
 
-      {/* A SIBLING of the scrim, not a child of it, and fading per LAYER.
-          The blur used to live inside the scrim above — which fades — and an
-          element with opacity below 1 is a `backdrop-filter` BACKDROP ROOT, so
-          for the whole 340ms morph these layers sampled an empty backdrop and
-          blurred nothing, then the full four-layer blur snapped on the instant
-          the scrim reached exactly 1. A hitch at the end of the animation, and
-          the part of this overlay most likely to be felt on a phone.
+      {/* A SIBLING of the scrim, not a child of it, fading per LAYER, and on a
+          SHORTER clock than the morph (see BACKDROP_FADE_MS).
+
+          It used to live inside the scrim above — which fades — and an element
+          with opacity below 1 is a `backdrop-filter` BACKDROP ROOT, so for the
+          whole morph these layers sampled an empty backdrop and blurred
+          nothing, then the full four-layer blur snapped on the instant the
+          scrim reached exactly 1. That was a hitch at the end of the animation
+          rather than a fade, and the part of this overlay most likely to be
+          felt on a phone.
+
           `pointer-events-none`, so the scrim underneath still takes the tap. */}
       <RadialBlurBackdrop
         opacity={open && entered ? 1 : 0}
-        transition={`opacity ${MORPH_MS}ms ${MORPH_CSS_EASE}`}
+        transition={`opacity ${BACKDROP_FADE_MS}ms ${BACKDROP_FADE_EASE}`}
       />
 
       {/* The positioning wrapper is `pointer-events-none` and only the card and
