@@ -62,6 +62,20 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
    * dismisses on `scroll`/`wheel`/`touchmove`.
    */
   const dismissingRef = useRef(false)
+  /**
+   * The URL the marker was pushed at.
+   *
+   * `back()` only takes the marker back while the marker is the TOP of the
+   * stack. If something navigated in the meantime — the sidebar's
+   * close-on-`pathname` effect is exactly this shape: a route change closes it,
+   * which tears this down — the marker is buried one entry below the new page,
+   * and `back()` would undo the navigation instead of releasing anything. So a
+   * release only fires while we are still where we pushed. A buried marker is
+   * left alone; it is a duplicate entry for a page the user was already on, so
+   * passing back through it looks like nothing happened rather than like the
+   * app refusing to navigate.
+   */
+  const hrefRef = useRef("")
 
   useEffect(() => {
     if (!active) return
@@ -80,6 +94,7 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
       window.location.href,
     )
     ownsEntryRef.current = true
+    hrefRef.current = window.location.href
 
     const onPop = () => {
       // Our entry is gone — either the user swiped back or `dismiss()` popped
@@ -96,10 +111,11 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
       window.removeEventListener("popstate", onPop)
       // Torn down without going through `dismiss` (a parent dropped the
       // overlay outright). Take the marker back so it can't swallow the user's
-      // next back press.
+      // next back press — but only while it is still the top of the stack, or
+      // the `back()` undoes whatever navigated. See hrefRef.
       if (ownsEntryRef.current) {
         ownsEntryRef.current = false
-        window.history.back()
+        if (window.location.href === hrefRef.current) window.history.back()
       }
     }
   }, [active])
@@ -107,13 +123,16 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
   return useCallback((after?: () => void) => {
     if (dismissingRef.current) return
     dismissingRef.current = true
-    if (ownsEntryRef.current) {
+    if (ownsEntryRef.current && window.location.href === hrefRef.current) {
       // Do NOT close here. `onPop` is the one place that closes, so the entry
       // is always released before anything downstream navigates.
       afterRef.current = after ?? null
       window.history.back()
       return
     }
+    // No marker of ours on top — either it was never pushed or something
+    // navigated past it. Close directly; popping here would navigate.
+    ownsEntryRef.current = false
     onDismissRef.current()
     after?.()
   }, [])
