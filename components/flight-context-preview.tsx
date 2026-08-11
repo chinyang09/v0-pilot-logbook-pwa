@@ -71,6 +71,14 @@ import {
  *   • the detail and the actions animate their real `height` (0 → auto), and
  *     the flex centring re-centres the group frame by frame as they grow.
  *
+ * Everything else is a TRANSFORM or an OPACITY, which framer hands to the
+ * compositor. The two exceptions were removed rather than accepted: the card's
+ * `width` is only animated where the card can actually grow (`MIN_GROWTH` —
+ * on a phone it could not, and the reflow was pure cost), and the lift is a
+ * static shadow on its own layer faded by opacity (`LIFT_SHADOW`) instead of
+ * an interpolated `boxShadow` string. What is left on the main thread is the
+ * two unfurling heights, which is what the nav morph animates too.
+ *
  * Closing plays the same thing backwards and only then unmounts.
  */
 export interface PreviewAnchor {
@@ -89,6 +97,41 @@ const MARGIN = 16;
  *  the viewport, so this clamps to the same width it had and the growth is all
  *  height; there is nowhere else for it to go. */
 const MAX_WIDTH = 672;
+/**
+ * How much wider the card has to be able to GET before its width is animated
+ * at all.
+ *
+ * `width` is the ONE property in this morph that reflows the card's whole
+ * subtree — the twelve-row grid, the signature canvas, the crew rows, the
+ * remarks — on every frame. Everything else animated here is a transform, an
+ * opacity, or the height of a box whose children do not depend on it.
+ *
+ * On a phone that reflow was being paid for NOTHING. A logbook row is
+ * `innerWidth - 2 x --panel-gutter` (24) and this rests at
+ * `innerWidth - 2 x MARGIN` (32), so the "growth" was the card getting 8px
+ * NARROWER — invisible, unlike the cost of it. The note above already claimed
+ * a phone "clamps to the width it had"; this is what makes that true.
+ *
+ * 48px is about where a width change starts reading as the card growing rather
+ * than twitching. Below it, resting at the row's own width is both what it
+ * looks like anyway and free.
+ */
+const MIN_GROWTH = 48;
+/**
+ * The lift — a STATIC shadow on its own layer, faded with `opacity`.
+ *
+ * It used to be an animated `boxShadow` on the card itself, from
+ * `0 0 0 0 transparent` to this. framer interpolates a box-shadow by rebuilding
+ * the declaration string every frame; the browser then re-parses it and
+ * re-blurs a 50px shadow. That is main-thread work on exactly the frames the
+ * card is travelling, and it was one of only two things left in this morph
+ * that could not be handed to the compositor (the other is the unfurling
+ * height, which has to stay).
+ *
+ * The layer is `absolute inset-0` inside the card's transform wrapper, so it
+ * tracks the box to the pixel and only its opacity moves.
+ */
+const LIFT_SHADOW = "0px 25px 50px -12px rgba(0,0,0,0.45)";
 /** The gap between the card and its action row — inside the collapsing box, so
  *  it disappears with the row rather than holding the card off its mark. */
 const GAP = 14;
@@ -233,7 +276,13 @@ export function FlightContextPreview({
   // panel it came from barely moved on a desktop, which is what made the morph
   // invisible there. It still OPENS at the row's own width and place, wherever
   // that is, so the first frame is the row to the pixel.
-  const width = Math.min(MAX_WIDTH, window.innerWidth - MARGIN * 2);
+  const available = Math.min(MAX_WIDTH, window.innerWidth - MARGIN * 2);
+  // Only grow if there is somewhere to grow TO — see MIN_GROWTH. On a phone
+  // there is not, so the card rests at exactly the row's width and `width` is
+  // left out of the animation entirely rather than animated from a value to
+  // itself.
+  const growsWider = available - anchor.width >= MIN_GROWTH;
+  const width = growsWider ? available : anchor.width;
   const left = (window.innerWidth - width) / 2;
   const fromX = anchor.left - left;
   // Where the COLLAPSED card comes to rest in the centred wrapper — and so how
@@ -288,117 +337,135 @@ export function FlightContextPreview({
         {/* THE CARD, lifted — and at the first frame it is still the row: same
             surface, same `px-3 py-1` body, sitting on the row's own box. */}
         <motion.div
-          className="pointer-events-auto overflow-hidden rounded-xl border border-border bg-card"
-          initial={{ y: fromY, x: fromX, width: anchor.width, boxShadow: "0px 0px 0px 0px rgba(0,0,0,0)" }}
+          className="pointer-events-auto relative"
+          initial={{
+            y: fromY,
+            x: fromX,
+            ...(growsWider ? { width: anchor.width } : null),
+          }}
           animate={{
             y: open ? 0 : fromY,
             x: open ? 0 : fromX,
-            width: open ? width : anchor.width,
-            boxShadow: open
-              ? "0px 25px 50px -12px rgba(0,0,0,0.45)"
-              : "0px 0px 0px 0px rgba(0,0,0,0)",
+            ...(growsWider ? { width: open ? width : anchor.width } : null),
           }}
           transition={MORPH}
         >
-          <div className="px-3 py-1">
-            <FlightCardBody flight={flight} displayPrefs={displayPrefs} />
-          </div>
-
-          {/* What the compact card has no room for — the part that UNFURLS.
-              Real height, not a scale: the card's text must not stretch. */}
+          {/* The lift, on its own layer so only an OPACITY animates — see
+              LIFT_SHADOW. `inset-0` inside this transform wrapper makes it the
+              card's box exactly; the shadow paints OUTSIDE that box, which is
+              why the clipping moved down onto the surface below. */}
           <motion.div
-            className="overflow-hidden"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }}
+            aria-hidden
+            className="pointer-events-none absolute inset-0 rounded-xl"
+            style={{ boxShadow: LIFT_SHADOW }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: open ? 1 : 0 }}
             transition={MORPH}
-          >
-            <div className="mx-4 border-t border-border/70" />
-            {/* The detail arrives a beat AFTER the box that holds it. The box
-                growing is the card changing shape; this is the content settling
-                into the room that just appeared, and separating the two is most
-                of what makes the expansion legible rather than a jump.
+          />
+          {/* The card's own surface. It carries the clip, so the unfurling
+              detail below is masked by the rounded box rather than by the
+              wrapper the shadow needs to escape. */}
+          <div className="relative overflow-hidden rounded-xl border border-border bg-card">
+            <div className="px-3 py-1">
+              <FlightCardBody flight={flight} displayPrefs={displayPrefs} />
+            </div>
 
-                OPACITY AND TRANSFORM ONLY. This used to also animate
-                `filter: blur(4px) → blur(0px)`, which re-rasterises the whole
-                subtree every frame — a paint-bound animation running on exactly
-                the frames the card is travelling, for a softness you cannot
-                really see against text that is also moving. The `y` lift does
-                the same job for free. */}
+            {/* What the compact card has no room for — the part that UNFURLS.
+                Real height, not a scale: the card's text must not stretch. */}
             <motion.div
-              className="px-4 py-2"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: open ? 1 : 0, y: open ? 0 : 10 }}
-              transition={{
-                duration: DETAIL_MS / 1000,
-                ease: [0.32, 0.72, 0, 1],
-                delay: open ? DETAIL_DELAY / 1000 : 0,
-              }}
+              className="overflow-hidden"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }}
+              transition={MORPH}
             >
-              {/* THE SIGNATURE FIRST, above everything it attests to.
-                  A signed entry is a statement about the flight, so the mark
-                  and who made it come before the figures rather than being
-                  filed at the bottom with the remarks. Absent when unsigned —
-                  an empty signature strip would imply one is missing. */}
-              {flight.signature ? (
-                <div className="mb-2 border-b border-border/70 pb-2">
-                  {/* Backed at the card's RESTING content width (the detail's
-                      `px-4` either side), not whatever the box is mid-morph —
-                      the card's width animates, and a bitmap painted at the
-                      opening width would be upscaled by the time it settles. */}
-                  <SignatureMark
-                    signature={flight.signature}
-                    height={52}
-                    renderWidth={width - 32}
-                  />
-                  <div className="mt-1 flex items-baseline justify-between gap-3">
-                    <span className="truncate text-[13px] font-medium text-foreground">
-                      {flight.signature.signerName || "Signed"}
-                      {flight.signature.signerRole ? (
-                        <span className="ml-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
-                          {flight.signature.signerRole}
+              <div className="mx-4 border-t border-border/70" />
+              {/* The detail arrives a beat AFTER the box that holds it. The box
+                  growing is the card changing shape; this is the content settling
+                  into the room that just appeared, and separating the two is most
+                  of what makes the expansion legible rather than a jump.
+
+                  OPACITY AND TRANSFORM ONLY. This used to also animate
+                  `filter: blur(4px) → blur(0px)`, which re-rasterises the whole
+                  subtree every frame — a paint-bound animation running on exactly
+                  the frames the card is travelling, for a softness you cannot
+                  really see against text that is also moving. The `y` lift does
+                  the same job for free. */}
+              <motion.div
+                className="px-4 py-2"
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: open ? 1 : 0, y: open ? 0 : 10 }}
+                transition={{
+                  duration: DETAIL_MS / 1000,
+                  ease: [0.32, 0.72, 0, 1],
+                  delay: open ? DETAIL_DELAY / 1000 : 0,
+                }}
+              >
+                {/* THE SIGNATURE FIRST, above everything it attests to.
+                    A signed entry is a statement about the flight, so the mark
+                    and who made it come before the figures rather than being
+                    filed at the bottom with the remarks. Absent when unsigned —
+                    an empty signature strip would imply one is missing. */}
+                {flight.signature ? (
+                  <div className="mb-2 border-b border-border/70 pb-2">
+                    {/* Backed at the card's RESTING content width (the detail's
+                        `px-4` either side), not whatever the box is mid-morph —
+                        the card's width animates, and a bitmap painted at the
+                        opening width would be upscaled by the time it settles. */}
+                    <SignatureMark
+                      signature={flight.signature}
+                      height={52}
+                      renderWidth={width - 32}
+                    />
+                    <div className="mt-1 flex items-baseline justify-between gap-3">
+                      <span className="truncate text-[13px] font-medium text-foreground">
+                        {flight.signature.signerName || "Signed"}
+                        {flight.signature.signerRole ? (
+                          <span className="ml-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+                            {flight.signature.signerRole}
+                          </span>
+                        ) : null}
+                      </span>
+                      {flight.signature.signerLicenseNumber ? (
+                        <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">
+                          {flight.signature.signerLicenseNumber}
                         </span>
                       ) : null}
-                    </span>
-                    {flight.signature.signerLicenseNumber ? (
-                      <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">
-                        {flight.signature.signerLicenseNumber}
-                      </span>
-                    ) : null}
+                    </div>
                   </div>
+                ) : null}
+
+                <div className="grid grid-cols-2 gap-x-6">
+                  <Row label="Out" value={clock(flight.outTime)} />
+                  <Row label="Off" value={clock(flight.offTime)} />
+                  <Row label="On" value={clock(flight.onTime)} />
+                  <Row label="In" value={clock(flight.inTime)} />
+                  <Row label="Block" value={dur(flight.blockTime)} />
+                  <Row label="Flight" value={dur(flight.flightTime)} />
+                  <Row label="Night" value={dur(flight.nightTime)} />
+                  <Row label="IFR" value={dur(flight.ifrTime)} />
+                  <Row label="Role" value={flight.pilotRole || "—"} />
+                  <Row label="Reg" value={flight.aircraftReg || "—"} />
+                  <Row label="Take-off" value={dayNight(flight.dayTakeoffs, flight.nightTakeoffs)} />
+                  <Row label="Landing" value={dayNight(flight.dayLandings, flight.nightLandings)} />
                 </div>
-              ) : null}
 
-              <div className="grid grid-cols-2 gap-x-6">
-                <Row label="Out" value={clock(flight.outTime)} />
-                <Row label="Off" value={clock(flight.offTime)} />
-                <Row label="On" value={clock(flight.onTime)} />
-                <Row label="In" value={clock(flight.inTime)} />
-                <Row label="Block" value={dur(flight.blockTime)} />
-                <Row label="Flight" value={dur(flight.flightTime)} />
-                <Row label="Night" value={dur(flight.nightTime)} />
-                <Row label="IFR" value={dur(flight.ifrTime)} />
-                <Row label="Role" value={flight.pilotRole || "—"} />
-                <Row label="Reg" value={flight.aircraftReg || "—"} />
-                <Row label="Take-off" value={dayNight(flight.dayTakeoffs, flight.nightTakeoffs)} />
-                <Row label="Landing" value={dayNight(flight.dayLandings, flight.nightLandings)} />
-              </div>
+                {/* Crew get full-width rows — a name does not fit the grid's
+                    label/value column without truncating to uselessness. */}
+                {(flight.picName || flight.sicName) ? (
+                  <div className="mt-1 border-t border-border/70 pt-1">
+                    {flight.picName ? <Row label="PIC" value={flight.picName} /> : null}
+                    {flight.sicName ? <Row label="SIC" value={flight.sicName} /> : null}
+                  </div>
+                ) : null}
 
-              {/* Crew get full-width rows — a name does not fit the grid's
-                  label/value column without truncating to uselessness. */}
-              {(flight.picName || flight.sicName) ? (
-                <div className="mt-1 border-t border-border/70 pt-1">
-                  {flight.picName ? <Row label="PIC" value={flight.picName} /> : null}
-                  {flight.sicName ? <Row label="SIC" value={flight.sicName} /> : null}
-                </div>
-              ) : null}
-
-              {flight.remarks ? (
-                <p className="mt-2 border-t border-border/70 pt-2 text-[13px] leading-snug text-muted-foreground">
-                  {flight.remarks}
-                </p>
-              ) : null}
+                {flight.remarks ? (
+                  <p className="mt-2 border-t border-border/70 pt-2 text-[13px] leading-snug text-muted-foreground">
+                    {flight.remarks}
+                  </p>
+                ) : null}
+              </motion.div>
             </motion.div>
-          </motion.div>
+          </div>
         </motion.div>
 
         {/* The actions, as a row beneath the card — the same set and the same

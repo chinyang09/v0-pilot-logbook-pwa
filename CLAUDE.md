@@ -1867,6 +1867,29 @@ When making changes, be aware of these high-impact files:
     collapsed they were no longer cancelled by anything, so the face is now
     blur + a themed brightness lift + `saturate(1.5)` (the vibrancy term —
     without it the material reads as frosted film rather than glass).
+  - **A surface OVER A BLUR is more translucent** (`overBlur` →
+    `[data-over-blur]`). The material's opacity exists to stop what is behind
+    it reading through as legible content. Where something else has already
+    blurred and darkened that backdrop — the header's `ChromeFade` band, the
+    mobile sidebar's progressive backdrop, a modal's bottom fade — the work is
+    done before the glass gets there, and a full undercoat on top only buries a
+    backdrop that is unreadable anyway while costing the material its whole
+    point. Only `--glass-base` moves (52% dark / 32% light against the standard
+    82/55); the face blur, the veil, the rim and the specular are untouched, so
+    it is the same material letting more through, not a second material.
+
+    | over a blur | NOT |
+    |---|---|
+    | header controls (`GlassIconButton`/`GlassButtonGroup`/`GlassSearchButton` — they ARE the `ChromeFade` band by construction) | the mobile bottom pill — `bottom-edge-blur` is a DARKEN with no blur in it, so the flight cards would read straight through the tabs |
+    | the DESKTOP pill in pill shape (same header band) | the DESKTOP sidebar — no backdrop at all, it stands beside the content |
+    | the MOBILE nav in sidebar shape (over `SIDEBAR_BACKDROP_BLUR`) | the logbook calendar and its panels, the login page, the import segmented tabs |
+    | the review modal's footer controls (over a bottom `ChromeFade`) | the import status dialog's Done button (plain dialog surface) |
+
+    The nav is deliberately on BOTH lists, one per shape, and in opposite
+    directions on the two morphs — which is why `background-color` rides the
+    same 320ms clock as the corner radius on `.GlassMaterial::after`. A solid
+    fill is repainted on those frames regardless (the box is resizing), so that
+    costs the fill's colour and not an extra pass.
   - **Opacity comes from `--glass-base`, presence from `--glass-veil`.** They
     are two coats on `.GlassMaterial::after` doing different jobs, and the
     split is load-bearing: the veil is a LIGHTENING paint (warm off-white), so
@@ -2202,6 +2225,29 @@ When making changes, be aware of these high-impact files:
   So: if this preview ever needs to feel cheaper, the backdrop is the lever,
   not the geometry.
 
+  **What DOES animate is transforms, opacities and two heights — nothing
+  else.** Two properties were removed rather than accepted, and both were
+  costing frames on a phone:
+
+  - **`width` is only animated where the card can actually GROW**
+    (`MIN_GROWTH`, 48px). It is the one property here that reflows the card's
+    whole subtree — the twelve-row grid, the signature canvas, the crew rows,
+    the remarks — every frame. On a phone it was being paid for nothing: a
+    logbook row is `innerWidth − 2 × --panel-gutter` (24) and the preview rests
+    at `innerWidth − 2 × MARGIN` (32), so the "growth" was the card getting 8px
+    NARROWER. Invisible, unlike the reflow. The phone case now rests at the
+    row's own width and `width` is left out of the animation object entirely.
+  - **The lift is a static shadow on its own layer, faded by `opacity`**
+    (`LIFT_SHADOW`), not an animated `boxShadow`. framer interpolates a
+    box-shadow by rebuilding the declaration string every frame; the browser
+    re-parses it and re-blurs a 50px shadow. The layer is `absolute inset-0`
+    inside the card's transform wrapper so it tracks the box exactly — which is
+    why the `overflow-hidden` clip moved down onto an inner surface div: the
+    shadow has to paint OUTSIDE the box the clip applies to.
+
+  What is left on the main thread is the two unfurling heights, which is what
+  the nav morph animates too.
+
   Instead the geometry is DERIVED, not measured, and nothing scales: the
   wrapper is a centred flex column, so with the detail and the actions
   collapsed to `height: 0` the card rests at `(innerHeight − cardHeight) / 2`;
@@ -2392,6 +2438,7 @@ When making changes, be aware of these high-impact files:
 - Do not add an inline copy of the header gradient — render `ChromeFade` (it now carries the progressive blur + fade as one treatment; an inline gradient silently loses the blur). Do not swap the top/bottom edge treatments: blur belongs to the TOP band only (the bottom band is too short — blur there read as smearing and the owner rejected it; the bottom gets the darkening fade in `bottom-edge-blur.tsx`). And do not paint a `--background` scrim over a translucent glass surface (the sidebar) — mask the content out instead
 - Do not leave `--on-glass` at a guessed value when the material changes — it must equal the colour the FINISHED face reads as (base + veil + the brightened backdrop through the remainder). Get it wrong and everything painted on the glass lands on the wrong side of it: at the old value the nav's gravity blob (0.292) was indistinguishable from the face (0.276) in dark mode
 - Do not name only the anchor month while the calendar is showing two — the header and the month picker both cover the pair
+- Do not give a glass surface `overBlur` because it looks better — it is a claim that something has ALREADY blurred what is behind it, and the two bottom treatments are not the same: the header's `ChromeFade` carries a real progressive blur, `bottom-edge-blur` is a darken with none. The mobile bottom pill over a scrolling logbook is the case that breaks if you get this wrong
 - Do not drive the glass's opacity from `--glass-veil` — that coat is a warm LIGHTENING paint and raising its alpha whitens a dark surface instead of solidifying it. Opacity belongs to `--glass-base`, the card-coloured undercoat; the two are separate on purpose
 - Do not paint an extra background over a glass surface to make one instance more opaque (the calendar did, at `--background` 0.85, and read as a different material from every other glass surface). Change the shared material instead
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
@@ -2403,6 +2450,7 @@ When making changes, be aware of these high-impact files:
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
 - Do not build the flight card's extra actions from glass — glass is chrome floating over content, and these have to be read; as a glass slab the flight cards showed straight through the labels. They are the SWIPE PANEL's button repeated (64px `rounded-lg`, `bg-secondary`, icon over a `text-xs` word, the panel's own 8px gap), because the run comes out of a control in that panel; 56px circles in `bg-card` read as a different family of control turning up beside it
+- Do not animate the context preview's `width` when the card has nowhere to grow — it is the only property in that morph that reflows the whole detail subtree per frame, and on a phone the "growth" is the card getting 8px NARROWER (the row's gutter is 12, the preview's margin 16). Keep the `MIN_GROWTH` guard and keep `width` out of the animation object entirely below it. Same rule for the lift: a static shadow on its own `inset-0` layer faded by opacity, never an interpolated `boxShadow` (framer rebuilds the declaration string every frame and the browser re-blurs it)
 - Do not let the context preview come to rest in the row's own column — it settles CENTRED ON THE VIEWPORT at `MAX_WIDTH`, or on anything wider than a phone it is the same width it started and the morph reads as nothing happening (measured on a 1180 tablet: 336 → 672). And keep the detail's own delayed reveal (opacity + y, ~30% of the morph in): the box growing and the content arriving are two things, and running them together reads as a jump. It does NOT animate `blur()` any more — that is a per-frame filter pass on the busiest frames of the overlay, and the delayed opacity/travel already says "settling into the room"
 - Do not run the context preview's backdrop blur on the MORPH's clock — full-viewport `backdrop-filter` layers, each sampling the one below it, recompute the whole stack every frame their opacity changes, and that lands on exactly the frames the card is travelling. `BACKDROP_FADE_MS` (160) settles it before the morph is half done, after which it composites a texture that no longer changes (nothing behind the preview can move). Not zero, though: with no fade the CLOSE pops, because the blur would still be at full strength once the scrim has faded to transparent
 - **Blur animation rules, app-wide.** Never ANIMATE `backdrop-filter`, `filter`, `mask-image`, `height` or `top` — they are layout- or paint-bound and re-rasterise every frame. Animate `opacity` and `transform` only. Where a progressive blur has to appear or disappear, fade the layers' OPACITY on a SHORT clock of their own (~160ms) rather than the surrounding motion's, so the blur settles before the thing it sits behind has finished moving and the rest of the animation composites a texture that no longer changes. And keep the stack to THREE layers on a full-viewport effect: each layer samples the output of the one below, so it is a chain rather than a sum, and the fourth link is the one a weak mobile GPU shows. `RadialBlurBackdrop` and `SIDEBAR_BACKDROP_BLUR` both follow this; `ChromeFade` is static and does not animate at all
