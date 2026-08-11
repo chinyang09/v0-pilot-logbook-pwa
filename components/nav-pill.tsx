@@ -1620,6 +1620,13 @@ function DesktopPillMorph({
           // scrolling list reads as the layout wobbling, not as a press.
           disableTapFeedback={isSidebarShape}
           spotlight
+          // As a PILL it sits in the header's ChromeFade band with the action
+          // buttons, so it can be as thin as they are. As the desktop SIDEBAR
+          // it has no backdrop at all — it stands beside the content rather
+          // than over it — so there it keeps the full undercoat. The mobile
+          // morph below is the exact reverse, which is why the material's
+          // background-color transitions.
+          overBlur={!isSidebarShape}
         >
           {/* Pill bar — always visible */}
           <div
@@ -1837,6 +1844,13 @@ function MobilePillMorph({
           // scrolling list reads as the layout wobbling, not as a press.
           disableTapFeedback={isSidebarShape}
           spotlight
+          // The reverse of the desktop morph. As the SIDEBAR this sits over
+          // SIDEBAR_BACKDROP_BLUR, which has already taken the page apart, so
+          // the panel can be see-through. As the bottom PILL it sits directly
+          // over the list — the bottom edge treatment is a DARKEN with no blur
+          // in it — so it keeps the full undercoat or the flight cards read
+          // straight through the tabs.
+          overBlur={isSidebarShape}
         >
           {/* Pill bar — visible when collapsed */}
           <div

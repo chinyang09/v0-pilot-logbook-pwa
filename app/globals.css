@@ -682,6 +682,9 @@ textarea:focus-within {
   /* Surface undercoat — see the note on `--glass-base` in `.dark`. Light: with
      the white veil over it the face lands at ~86% opaque. */
   --glass-base: color-mix(in oklab, var(--card) 55%, transparent);
+  /* Over-a-blur undercoat — see `[data-over-blur]`. The light theme starts
+     thinner, so it steps down proportionally rather than by the same amount. */
+  --glass-base-over-blur: color-mix(in oklab, var(--card) 32%, transparent);
   /* The solid colour the finished face reads as, for anything painted ON the
      glass. See `--on-glass-*` below. */
   --on-glass: oklch(0.965 0.005 75);
@@ -765,6 +768,9 @@ textarea:focus-within {
      the saturate still act on the remaining fifth, so it is still glass rather
      than a card with a rim. */
   --glass-base: color-mix(in oklab, var(--card) 82%, transparent);
+  /* The undercoat for a surface that sits OVER A BLUR — see
+     `[data-over-blur]` below. Roughly two thirds of the standard coat. */
+  --glass-base-over-blur: color-mix(in oklab, var(--card) 52%, transparent);
   /* The colour the FINISHED face reads as — base + veil + the brightened
      backdrop showing through the remaining fifth. It is NOT `--card`: get it
      wrong and everything painted on the glass lands on the wrong side of it.
@@ -1006,7 +1012,48 @@ textarea:focus-within {
      solidifying it. */
   background-color: var(--glass-base, transparent);
   background-image: linear-gradient(var(--glass-veil, transparent), var(--glass-veil, transparent));
-  transition: border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* `background-color` rides the same clock as the radius because the nav
+     changes BOTH across the pill↔sidebar morph: its corners, and — since the
+     pill and the sidebar sit over different things — which undercoat it wants.
+     A solid fill is repainted on those frames regardless (the box is
+     resizing), so this costs the fill's colour, not an extra pass. */
+  transition:
+    border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/**
+ * A glass surface that sits OVER A BLUR can afford to be more see-through.
+ *
+ * The material's opacity exists to keep whatever is behind it from reading
+ * through as legible content. Where the backdrop has ALREADY been blurred and
+ * darkened by something else — the header's `ChromeFade` band, the mobile
+ * sidebar's progressive backdrop, a modal's blur — that work is done before
+ * the glass gets there, and a thick undercoat on top only buries a backdrop
+ * that is already unreadable. It also costs the material its whole point: a
+ * surface you can see the app through.
+ *
+ * So the OPACITY is the part that varies, not the blur, the veil or the rim —
+ * the face keeps its colour and its edge and simply lets more through. Only
+ * `--glass-base` moves (see the note on it: the veil is a lightening coat and
+ * cannot carry opacity without whitening a dark surface).
+ *
+ * This is opt-IN and per-surface, because "is there a blur under this?" is a
+ * fact about where a surface is rendered, not about the material:
+ *
+ *   over a blur   header controls · the desktop pill (in the header band) ·
+ *                 the mobile sidebar (over its backdrop) · a modal's footer
+ *                 controls (over a bottom `ChromeFade`)
+ *   NOT           the mobile bottom pill (the bottom edge treatment is a
+ *                 DARKEN, with no blur) · the desktop sidebar (no backdrop —
+ *                 it sits alongside content) · the logbook calendar and its
+ *                 panels · the login page
+ *
+ * The nav is deliberately both, one per shape, and in opposite directions on
+ * the two morphs — hence the transition above.
+ */
+.GlassContainer[data-over-blur="true"] {
+  --glass-base: var(--glass-base-over-blur);
 }
 
 .GlassMaterial > div {

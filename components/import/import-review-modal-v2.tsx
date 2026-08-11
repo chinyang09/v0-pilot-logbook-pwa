@@ -520,8 +520,10 @@ export function ImportReviewModalV2({
             <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
               {breakdown || "No changes selected"}
             </p>
+            {/* Both carry `overBlur`: the footer sits on a bottom ChromeFade,
+                so the rows scrolling under them are already blurred. */}
             <div className="flex shrink-0 items-center gap-2">
-              <GlassContainer cornerRadius={20}>
+              <GlassContainer cornerRadius={20} overBlur>
                 <Button
                   variant="ghost"
                   onClick={onCancel}
@@ -530,7 +532,7 @@ export function ImportReviewModalV2({
                   Cancel
                 </Button>
               </GlassContainer>
-              <GlassContainer cornerRadius={20}>
+              <GlassContainer cornerRadius={20} overBlur>
                 <Button
                   variant="ghost"
                   onClick={handleConfirm}

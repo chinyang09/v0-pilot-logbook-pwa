@@ -25,6 +25,20 @@ interface GlassContainerProps {
    * their own affordances).
    */
   spotlight?: boolean
+  /**
+   * This surface sits over something that has ALREADY blurred the page — the
+   * header's `ChromeFade` band, the mobile sidebar's backdrop, a modal's blur.
+   *
+   * The material then only needs enough opacity to read as a surface, not
+   * enough to hide a legible backdrop, so `--glass-base` steps down and the
+   * glass becomes properly see-through. Everything else — the face blur, the
+   * veil, the rim, the specular — is unchanged: this varies the opacity alone.
+   *
+   * It is a fact about WHERE a surface is rendered, so it is set per call
+   * site. See the `[data-over-blur]` rule in globals.css for which surfaces
+   * qualify and which deliberately do not.
+   */
+  overBlur?: boolean
 }
 
 /**
@@ -93,6 +107,7 @@ export function GlassContainer({
   style,
   disableTapFeedback,
   spotlight,
+  overBlur,
 }: GlassContainerProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const reduceMotion = useReducedMotion()
@@ -320,6 +335,7 @@ export function GlassContainer({
     <motion.div
       ref={rootRef}
       className={cn("GlassContainer", className)}
+      data-over-blur={overBlur ? "true" : undefined}
       style={{
         "--corner-radius": `${cornerRadius}px`,
         "--glass-press": 0,
