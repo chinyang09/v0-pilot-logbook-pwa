@@ -95,6 +95,10 @@ const GAP = 14;
  *  Ease-out with no overshoot: the card is arriving, not landing. */
 const MORPH_MS = 340;
 const MORPH = { duration: MORPH_MS / 1000, ease: [0.32, 0.72, 0, 1] as const };
+/** The same curve as a CSS string, for the backdrop layers — they fade on a
+ *  plain transition rather than through framer, because their opacity has to
+ *  sit on each LAYER (see RadialBlurBackdrop's backdrop-root note). */
+const MORPH_CSS_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -151,6 +155,18 @@ export function FlightContextPreview({
     return () => setMenuOpen(false);
   }, []);
 
+  // The backdrop layers fade on a CSS transition, which needs a PREVIOUS value
+  // to run from — rendering them at their target on the first commit is just a
+  // jump. framer's `initial`/`animate` handles this for us elsewhere; here the
+  // opacity lives on the layers themselves, so the entry tick is explicit.
+  // Set from a rAF callback rather than the effect body (see the lint note in
+  // CLAUDE.md).
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") requestClose();
@@ -197,9 +213,20 @@ export function FlightContextPreview({
         // Wrapped, not passed directly — the handler's MouseEvent would
         // otherwise arrive as `requestClose`'s follow-up action.
         onClick={() => requestClose()}
-      >
-        <RadialBlurBackdrop />
-      </motion.div>
+      />
+
+      {/* A SIBLING of the scrim, not a child of it, and fading per LAYER.
+          The blur used to live inside the scrim above — which fades — and an
+          element with opacity below 1 is a `backdrop-filter` BACKDROP ROOT, so
+          for the whole 340ms morph these layers sampled an empty backdrop and
+          blurred nothing, then the full four-layer blur snapped on the instant
+          the scrim reached exactly 1. A hitch at the end of the animation, and
+          the part of this overlay most likely to be felt on a phone.
+          `pointer-events-none`, so the scrim underneath still takes the tap. */}
+      <RadialBlurBackdrop
+        opacity={open && entered ? 1 : 0}
+        transition={`opacity ${MORPH_MS}ms ${MORPH_CSS_EASE}`}
+      />
 
       {/* The positioning wrapper is `pointer-events-none` and only the card and
           the action row take pointers back.

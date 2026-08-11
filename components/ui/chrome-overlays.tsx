@@ -158,8 +158,38 @@ export const MODAL_SCRIM = "bg-black/15 dark:bg-black/50";
  * Radial progressive blur for a modal backdrop: heaviest right around the
  * dialog, clearing toward the edges of the screen so the app stays legible
  * behind it.
+ *
+ * ── FADING THIS IS NOT THE SAME AS FADING ITS PARENT ──────────────────────
+ *
+ * `opacity`/`transition` are applied to EACH LAYER, never to a wrapper, and
+ * that is a correctness requirement rather than a style choice. Per the Filter
+ * Effects spec, an element with `opacity` below 1 — or `will-change: opacity`,
+ * or a mask, or a filter — becomes a **backdrop root**, and a descendant's
+ * `backdrop-filter` can then only sample content *inside* that root. Wrap these
+ * layers in something that fades and they sample an empty backdrop: no blur at
+ * all for the whole fade, then the full four-layer blur snapping on the instant
+ * opacity reaches exactly 1. That is what a caller who fades a wrapper gets,
+ * and it reads as a hitch at the end of the animation rather than as a fade.
+ *
+ * An element's OWN opacity is fine — the backdrop root is an *ancestor*
+ * boundary, so each layer still samples the real page and merely composites at
+ * that alpha. `SIDEBAR_BACKDROP_BLUR` in `nav-pill.tsx` has always been built
+ * this way; this is the same rule.
+ *
+ * Callers that don't fade (the dialogs, which put this in `backdropSlot` as a
+ * SIBLING of the overlay Radix fades) can ignore both props.
  */
-export function RadialBlurBackdrop({ className }: { className?: string }) {
+export function RadialBlurBackdrop({
+  className,
+  /** 0–1, applied per layer. See the backdrop-root note above. */
+  opacity = 1,
+  /** CSS transition for that opacity, e.g. `opacity 340ms ease`. */
+  transition,
+}: {
+  className?: string;
+  opacity?: number;
+  transition?: string;
+}) {
   const layers: Array<{ blur: number; stop: number }> = [
     { blur: 2, stop: 100 },
     { blur: 6, stop: 72 },
@@ -179,6 +209,8 @@ export function RadialBlurBackdrop({ className }: { className?: string }) {
               WebkitBackdropFilter: `blur(${blur}px)`,
               maskImage: mask,
               WebkitMaskImage: mask,
+              opacity,
+              transition,
             }}
           />
         );
