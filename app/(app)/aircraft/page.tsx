@@ -223,7 +223,9 @@ export default function AircraftPage() {
   // Sort aircraft with registrations alphabetically
   const allSortedAircraft = useMemo(() => {
     if (allAircraft.length === 0) return []
-    return [...allAircraft]
+    // `.filter()` already returns a new array, so the sort cannot reach the
+    // hook's cached one — no defensive copy needed in front of it.
+    return allAircraft
       .filter((a) => a.registration)
       .sort((a, b) => a.registration.localeCompare(b.registration))
   }, [allAircraft])
