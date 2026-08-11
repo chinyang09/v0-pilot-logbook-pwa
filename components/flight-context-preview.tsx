@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import type { FlightLog } from "@/lib/db";
 import { FlightCardBody } from "@/components/flight-card-body";
+import { SignatureMark } from "@/components/signature-mark";
 import { MODAL_SCRIM, RadialBlurBackdrop } from "@/components/ui/chrome-overlays";
 import { formatClockDisplay, formatHHMMDisplay } from "@/lib/utils/time";
 import type { DisplayPreferences } from "@/types/db/stores.types";
@@ -91,10 +92,21 @@ const MAX_WIDTH = 672;
 /** The gap between the card and its action row — inside the collapsing box, so
  *  it disappears with the row rather than holding the card off its mark. */
 const GAP = 14;
-/** One clock for the whole morph, so the travel and the unfurl are one motion.
- *  Ease-out with no overshoot: the card is arriving, not landing. */
-const MORPH_MS = 340;
+/**
+ * One clock for the whole morph, so the travel and the unfurl are one motion.
+ * Ease-out with no overshoot: the card is arriving, not landing.
+ *
+ * 340 read as SNAPPY rather than smooth — the card had arrived before the eye
+ * had finished following it, which makes an expansion feel like a cut. The
+ * choreography below is expressed as fractions of this so the whole sequence
+ * stretches together: retiming the box alone would leave the detail arriving
+ * at the same absolute moment and the beat between them would go.
+ */
+const MORPH_MS = 460;
 const MORPH = { duration: MORPH_MS / 1000, ease: [0.32, 0.72, 0, 1] as const };
+/** The detail settles into the room the box just made — a beat after it. */
+const DETAIL_DELAY = MORPH_MS * 0.3;
+const DETAIL_MS = MORPH_MS * 0.76;
 /**
  * The backdrop blur fades on its OWN short clock, not the morph's.
  *
@@ -115,6 +127,18 @@ const MORPH = { duration: MORPH_MS / 1000, ease: [0.32, 0.72, 0, 1] as const };
  */
 const BACKDROP_FADE_MS = 160;
 const BACKDROP_FADE_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
+
+/**
+ * Day/night counts, written the way the card's chips write them (`1D`, `2N`)
+ * so the two surfaces agree. A bare `2 / 1` would need the reader to know
+ * which side is which.
+ */
+function dayNight(day?: number, night?: number): string {
+  const parts: string[] = [];
+  if (day) parts.push(`${day}D`);
+  if (night) parts.push(`${night}N`);
+  return parts.length ? parts.join(" / ") : "—";
+}
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -289,21 +313,53 @@ export function FlightContextPreview({
             transition={MORPH}
           >
             <div className="mx-4 border-t border-border/70" />
-            {/* The detail arrives a beat AFTER the box that holds it, out of a
-                slight blur. The box growing is the card changing shape; this is
-                the content settling into the room that just appeared, and
-                separating the two is most of what makes the expansion legible
-                rather than a jump. */}
+            {/* The detail arrives a beat AFTER the box that holds it. The box
+                growing is the card changing shape; this is the content settling
+                into the room that just appeared, and separating the two is most
+                of what makes the expansion legible rather than a jump.
+
+                OPACITY AND TRANSFORM ONLY. This used to also animate
+                `filter: blur(4px) → blur(0px)`, which re-rasterises the whole
+                subtree every frame — a paint-bound animation running on exactly
+                the frames the card is travelling, for a softness you cannot
+                really see against text that is also moving. The `y` lift does
+                the same job for free. */}
             <motion.div
               className="px-4 py-2"
-              initial={{ opacity: 0, y: 16, filter: "blur(4px)" }}
-              animate={{
-                opacity: open ? 1 : 0,
-                y: open ? 0 : 10,
-                filter: open ? "blur(0px)" : "blur(4px)",
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: open ? 1 : 0, y: open ? 0 : 10 }}
+              transition={{
+                duration: DETAIL_MS / 1000,
+                ease: [0.32, 0.72, 0, 1],
+                delay: open ? DETAIL_DELAY / 1000 : 0,
               }}
-              transition={{ duration: 0.26, ease: [0.32, 0.72, 0, 1], delay: open ? 0.1 : 0 }}
             >
+              {/* THE SIGNATURE FIRST, above everything it attests to.
+                  A signed entry is a statement about the flight, so the mark
+                  and who made it come before the figures rather than being
+                  filed at the bottom with the remarks. Absent when unsigned —
+                  an empty signature strip would imply one is missing. */}
+              {flight.signature ? (
+                <div className="mb-2 border-b border-border/70 pb-2">
+                  <SignatureMark signature={flight.signature} height={52} />
+                  <div className="mt-1 flex items-baseline justify-between gap-3">
+                    <span className="truncate text-[13px] font-medium text-foreground">
+                      {flight.signature.signerName || "Signed"}
+                      {flight.signature.signerRole ? (
+                        <span className="ml-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+                          {flight.signature.signerRole}
+                        </span>
+                      ) : null}
+                    </span>
+                    {flight.signature.signerLicenseNumber ? (
+                      <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">
+                        {flight.signature.signerLicenseNumber}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="grid grid-cols-2 gap-x-6">
                 <Row label="Out" value={clock(flight.outTime)} />
                 <Row label="Off" value={clock(flight.offTime)} />
@@ -312,8 +368,22 @@ export function FlightContextPreview({
                 <Row label="Block" value={dur(flight.blockTime)} />
                 <Row label="Flight" value={dur(flight.flightTime)} />
                 <Row label="Night" value={dur(flight.nightTime)} />
+                <Row label="IFR" value={dur(flight.ifrTime)} />
+                <Row label="Role" value={flight.pilotRole || "—"} />
                 <Row label="Reg" value={flight.aircraftReg || "—"} />
+                <Row label="Take-off" value={dayNight(flight.dayTakeoffs, flight.nightTakeoffs)} />
+                <Row label="Landing" value={dayNight(flight.dayLandings, flight.nightLandings)} />
               </div>
+
+              {/* Crew get full-width rows — a name does not fit the grid's
+                  label/value column without truncating to uselessness. */}
+              {(flight.picName || flight.sicName) ? (
+                <div className="mt-1 border-t border-border/70 pt-1">
+                  {flight.picName ? <Row label="PIC" value={flight.picName} /> : null}
+                  {flight.sicName ? <Row label="SIC" value={flight.sicName} /> : null}
+                </div>
+              ) : null}
+
               {flight.remarks ? (
                 <p className="mt-2 border-t border-border/70 pt-2 text-[13px] leading-snug text-muted-foreground">
                   {flight.remarks}

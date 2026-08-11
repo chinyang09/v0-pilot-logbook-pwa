@@ -190,10 +190,20 @@ export function RadialBlurBackdrop({
   opacity?: number;
   transition?: string;
 }) {
+  /**
+   * THREE layers, not four.
+   *
+   * Each one samples the output of the one below it, so the cost of the stack
+   * is not additive — it is a chain, and on a weak mobile GPU a fourth
+   * full-viewport link is the one that shows. The ramp is what reads as depth
+   * (a single radius reads as a flat frosted sheet), and three stops still
+   * describe a ramp; the dropped stop was the 6px, whose neighbours are close
+   * enough on either side to carry it. The end radii are unchanged, so the
+   * heaviest and lightest parts of the field look the same.
+   */
   const layers: Array<{ blur: number; stop: number }> = [
     { blur: 2, stop: 100 },
-    { blur: 6, stop: 72 },
-    { blur: 14, stop: 48 },
+    { blur: 10, stop: 60 },
     { blur: 26, stop: 28 },
   ];
   return (

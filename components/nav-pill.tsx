@@ -27,6 +27,7 @@ import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths"
 import { usePreferences } from "@/components/providers/preferences-provider"
+import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { navSections, dashboardNavItem } from "@/components/nav-sections"
 import { SyncStatus } from "@/components/sync-status"
 import type { BottomNavTab } from "@/types/db/stores.types"
@@ -530,6 +531,22 @@ const SIDEBAR_BACKDROP_BLUR = [
   { blur: 10, width: "68%", solid: "40%" },
   { blur: 20, width: "46%", solid: "35%" },
 ] as const
+
+/**
+ * The BLUR fades on its own short clock, not the morph's.
+ *
+ * The scrim still rides `TOTAL` — it is a flat colour, so fading it is free and
+ * it should arrive with the panel. These three layers are not free: each one
+ * samples the output of the one below, so while their opacity is changing the
+ * whole chain recomputes every frame, and stretching that across the morph put
+ * it on exactly the frames the panel is travelling. That is the same thing that
+ * made the flight card's context preview feel heavy on a phone.
+ *
+ * Settling the blur early leaves the rest of the morph compositing a texture
+ * that no longer changes. Not instant, though — with no fade the CLOSE cuts,
+ * because the blur would still be at full strength once the scrim had gone.
+ */
+const SIDEBAR_BACKDROP_FADE_MS = 160
 
 /**
  * How much the PILL is squeezed inside the lens — vertically ONLY.
@@ -1673,6 +1690,7 @@ function MobilePillMorph({
   prefersReducedMotion: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const DUR = prefersReducedMotion ? 0 : MORPH_DUR
   const LEAD = prefersReducedMotion ? 0 : MORPH_LEAD
@@ -1680,7 +1698,46 @@ function MobilePillMorph({
 
   const { phase, advancePhase, isSidebarShape } = useMorphPhase(sidebarOpen, TOTAL)
 
-  // Close sidebar on route change
+  /**
+   * The system BACK gesture closes the sidebar instead of navigating out from
+   * under it. On Android that swipe is a history back, and with nothing of ours
+   * on the stack it took the router to the previous page while the sidebar
+   * stayed open over the top of it.
+   *
+   * Every other close goes through `dismissSidebar` too, so there is one path.
+   */
+  const dismissSidebar = useBackDismiss(sidebarOpen, () => setSidebarOpen(false))
+
+  /**
+   * A tap on a nav item has to release the marker BEFORE it navigates.
+   *
+   * This is the hazard `useBackDismiss` is built around, and the sidebar is the
+   * worst case for it: the items are `<Link>`s, so left alone they push the new
+   * route on top of our marker and the marker is then a duplicate entry for the
+   * page you just left — one back press that visibly does nothing. Popping it
+   * afterwards is no better, because `back()` is queued and would undo the
+   * navigation instead.
+   *
+   * So the click is intercepted once, here, rather than in each item: cancel
+   * the Link's own navigation and hand the push to `dismiss` as its follow-up,
+   * which runs it after the marker is provably gone.
+   */
+  const onSidebarNavCapture = useCallback(
+    (e: React.MouseEvent) => {
+      const link = (e.target as Element | null)?.closest?.("[data-nav-link]")
+      const href = link?.getAttribute("href")
+      if (!href) return
+      // Let the browser handle anything that isn't a plain left-click open.
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      dismissSidebar(() => router.push(href))
+    },
+    [dismissSidebar, router],
+  )
+
+  // Close on route change — a navigation from anywhere else (a deep link, the
+  // bottom pill) should not leave the panel up.
   useEffect(() => {
     setSidebarOpen(false)
   }, [pathname])
@@ -1745,7 +1802,7 @@ function MobilePillMorph({
           pointerEvents: sidebarOpen ? "auto" : "none",
           transition: `opacity ${TOTAL}ms ${MORPH_EASE}`,
         }}
-        onClick={() => setSidebarOpen(false)}
+        onClick={() => dismissSidebar()}
       />
       {SIDEBAR_BACKDROP_BLUR.map(({ blur, width, solid }) => (
         <div
@@ -1756,7 +1813,7 @@ function MobilePillMorph({
             width,
             opacity: sidebarOpen ? 1 : 0,
             pointerEvents: "none",
-            transition: `opacity ${TOTAL}ms ${MORPH_EASE}`,
+            transition: `opacity ${SIDEBAR_BACKDROP_FADE_MS}ms ${MORPH_EASE}`,
             backdropFilter: `blur(${blur}px)`,
             WebkitBackdropFilter: `blur(${blur}px)`,
             maskImage: `linear-gradient(to right, #000 0 ${solid}, transparent 100%)`,
@@ -1826,13 +1883,13 @@ function MobilePillMorph({
                 branch used to lay the strip out as an ordinary row, which is
                 why the scroll-under only ever worked on desktop — on a phone
                 the list simply stopped at the icons. */}
-            <div className="relative flex-1 min-h-0">
+            <div className="relative flex-1 min-h-0" onClickCapture={onSidebarNavCapture}>
               <SidebarNav
                 pathname={pathname}
                 className="h-full"
                 topInset={SIDEBAR_HEADER_HEIGHT}
               />
-              <SidebarTopStrip onToggle={() => setSidebarOpen(false)} />
+              <SidebarTopStrip onToggle={() => dismissSidebar()} />
             </div>
           </div>
         </GlassContainer>
