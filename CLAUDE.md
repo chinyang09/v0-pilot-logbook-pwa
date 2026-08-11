@@ -1284,6 +1284,19 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
 - Returns `isActive` boolean
 - Fires `onActivated()` callback only on inactive→active transitions (not initial mount)
 - Used to re-sync detail panel content when returning to a page
+- **The active route is a STORE read through `useSyncExternalStore`, not a value
+  in context.** As a context value it re-rendered every consumer on every
+  navigation — six permanently mounted pages, of which at most two have an
+  answer that changed. The snapshot is the BOOLEAN `isActive`, so the
+  comparison happens inside the subscription and React skips the four pages
+  still answering `false`. Same shape as `useDBReady`/`useIsDesktop`. The
+  provider publishes on COMMIT (an effect), because a store read during render
+  must return what React last rendered with or `useSyncExternalStore` tears
+- **`KeepAlivePage` is `memo`ized on its route key.** The stack recreated
+  `<PageComponent />` on every navigation, and a new element is a re-render
+  however unchanged the props are — so the context fix alone would not have
+  helped. The wrapper `div` still re-renders (its visibility and z-index really
+  do change); the page inside it does not
 
 **Detail panel integration** (`hooks/use-detail-panel.tsx`):
 - The keep-alive route set lives in ONE registry — `components/keep-alive-routes.ts`
@@ -2297,6 +2310,7 @@ When making changes, be aware of these high-impact files:
 - Do not expose FR24 as the data source in UI — the user explicitly requires online lookups to be transparent (no "Online Results" labels, no Globe icons, no "FlightRadar24" branding)
 - Do not add hexdb.io fallback for aircraft lookup — if FR24 fails, manual entry is the only option
 - Do not bypass `recalculateFlightFields()` `manualOverrides` — users' manually entered field values must never be overwritten by enrichment
+- Do not put the active route back into context as a plain value, and do not render a keep-alive page's element inline in the stack — either one re-renders all six retained pages on every tab switch. The route is a store whose SNAPSHOT is the per-page boolean (`useSyncExternalStore`), and each page is `memo`ized on its route key
 - Do not add pages to `PERSISTENT_PAGES` in `keep-alive-pages.tsx` without considering memory impact — only heavy virtualized pages should be persistent
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
 - Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
