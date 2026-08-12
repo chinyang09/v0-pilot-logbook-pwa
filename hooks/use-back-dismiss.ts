@@ -76,9 +76,35 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
    * app refusing to navigate.
    */
   const hrefRef = useRef("")
+  /**
+   * A release scheduled by cleanup but not yet issued.
+   *
+   * The cleanup pops our marker, and `history.back()` only takes effect in a
+   * later task — so a teardown IMMEDIATELY followed by a re-run (React
+   * StrictMode double-invokes every effect in development, and any fast
+   * `active` toggle does the same) issued the `back()` after the new effect had
+   * already pushed a fresh marker and attached its listener. The overlay then
+   * dismissed itself, on its own, a few hundred milliseconds after opening.
+   * Measured in dev: the context preview closed before the user touched it.
+   *
+   * Deferring the release by a task and cancelling it if the effect comes
+   * straight back means a remount keeps the marker it already had, and a real
+   * teardown still gives it up on the next tick.
+   */
+  const pendingReleaseRef = useRef<number | undefined>(undefined)
 
   useEffect(() => {
     if (!active) return
+
+    // Came straight back — keep the entry we were about to give up.
+    if (pendingReleaseRef.current !== undefined) {
+      window.clearTimeout(pendingReleaseRef.current)
+      pendingReleaseRef.current = undefined
+      ownsEntryRef.current = true
+      hrefRef.current = window.location.href
+    }
+
+    const alreadyOwned = ownsEntryRef.current
 
     // Reset on the OPEN edge, not on close. A dialog wrapper stays mounted
     // across open/close cycles — its `active` merely goes false — so a
@@ -87,14 +113,17 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
     afterRef.current = null
 
     // Same URL, so there is nothing to navigate to — `history.state` carries a
-    // flag purely so this entry is identifiable in a debugger.
-    window.history.pushState(
-      { ...window.history.state, __overlay: true },
-      "",
-      window.location.href,
-    )
-    ownsEntryRef.current = true
-    hrefRef.current = window.location.href
+    // flag purely so this entry is identifiable in a debugger. Skipped when we
+    // just reclaimed a pending release, or the stack grows an entry per remount.
+    if (!alreadyOwned) {
+      window.history.pushState(
+        { ...window.history.state, __overlay: true },
+        "",
+        window.location.href,
+      )
+      ownsEntryRef.current = true
+      hrefRef.current = window.location.href
+    }
 
     const onPop = () => {
       // Our entry is gone — either the user swiped back or `dismiss()` popped
@@ -115,7 +144,13 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
       // the `back()` undoes whatever navigated. See hrefRef.
       if (ownsEntryRef.current) {
         ownsEntryRef.current = false
-        if (window.location.href === hrefRef.current) window.history.back()
+        if (window.location.href === hrefRef.current) {
+          // Deferred and cancellable — see pendingReleaseRef.
+          pendingReleaseRef.current = window.setTimeout(() => {
+            pendingReleaseRef.current = undefined
+            window.history.back()
+          }, 0)
+        }
       }
     }
   }, [active])
