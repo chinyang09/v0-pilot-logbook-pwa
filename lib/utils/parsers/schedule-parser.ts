@@ -1079,12 +1079,3 @@ export async function parseScheduleCSV(
 // CSV type detector (unchanged from v1)
 // ============================================================
 
-export function detectCSVType(
-  csvContent: string
-): "schedule" | "logbook" | "unknown" {
-  const firstLines = csvContent.split(/\r?\n/).slice(0, 10).join("\n");
-  if (firstLines.includes("Personal Crew Schedule Report")) return "schedule";
-  if (firstLines.includes("Crew Logbook Report")) return "logbook";
-  return "unknown";
-}
-

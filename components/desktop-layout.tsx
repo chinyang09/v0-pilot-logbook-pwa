@@ -3,7 +3,6 @@
 import type React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
-import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useIsDesktop, useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import type { ImperativePanelHandle } from "react-resizable-panels"
@@ -111,7 +110,6 @@ function DetailPanelContent() {
  *   < 720px: Mobile — single panel + bottom pill + overlay sidebar
  */
 function AppShellContent({ children }: AppShellProps) {
-  const { handleScroll } = useScrollNavbarContext()
   const { selectedId, setSelectedId, selectionExplicit } = useDetailPanel()
   const isDesktop = useIsDesktop()
   const hydrated = useHydrated()
@@ -397,12 +395,6 @@ function AppShellContent({ children }: AppShellProps) {
         <div
           ref={overlayPanelRef}
           className="fixed inset-0 z-[55] bg-background md:hidden"
-          onScrollCapture={(e) => {
-            const target = e.target as HTMLElement
-            if (target !== e.currentTarget) {
-              handleScroll({ currentTarget: target } as React.UIEvent<HTMLElement>)
-            }
-          }}
         >
           {/* Mobile detail header bar — gradient overlay with back button + detail actions */}
           <div className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none pt-chrome-bar">

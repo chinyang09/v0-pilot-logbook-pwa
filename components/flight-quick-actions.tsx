@@ -8,6 +8,7 @@ import type { FlightLog } from "@/lib/db";
 import { cn } from "@/lib/utils";
 import { POP_SPRING } from "@/lib/motion";
 import { setMenuOpen } from "@/lib/utils/menu-lock";
+import { useBackDismiss } from "@/hooks/use-back-dismiss";
 
 export type FlightQuickAction = "next-leg" | "return-trip" | "duplicate" | "share" | "lock";
 
@@ -127,6 +128,13 @@ export function FlightQuickActions({
     closeRef.current = onClose;
   }, [onClose]);
 
+  // The system back gesture closes the cascade rather than navigating out from
+  // under it — same rule as the context preview, since both are portalled to
+  // `document.body` and nothing else would take them down. `requestClose` is
+  // the ONE close path; an action runs as its follow-up so the marker history
+  // entry is released before the action's own `router.push`.
+  const requestClose = useBackDismiss(true, () => closeRef.current());
+
   const items = QUICK_ACTION_ITEMS(!!flight.isLocked);
 
   // DOWN by default; UP only when the run would not fit below. DERIVED, not
@@ -181,13 +189,13 @@ export function FlightQuickActions({
       if (inside(e.target)) return;
       e.preventDefault();
       e.stopPropagation();
-      if (armed) closeRef.current();
+      if (armed) requestClose();
     };
     const dismissOnly = (e: Event) => {
-      if (armed && !inside(e.target)) closeRef.current();
+      if (armed && !inside(e.target)) requestClose();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeRef.current();
+      if (e.key === "Escape") requestClose();
     };
 
     document.addEventListener("pointerdown", block, true);
@@ -211,7 +219,9 @@ export function FlightQuickActions({
       document.removeEventListener("touchmove", dismissOnly, true);
       window.removeEventListener("keydown", onKey);
     };
-  }, []);
+    // `requestClose` is stable (useCallback with no deps), so listing it here
+    // never re-subscribes this listener set.
+  }, [requestClose]);
 
   if (typeof document === "undefined") return null;
 
@@ -250,10 +260,10 @@ export function FlightQuickActions({
               aria-label={a.label}
               // `group` so the circle can carry the pressed state for the whole
               // item (the tap target is the circle PLUS its caption).
-              onClick={() => {
-                onSelect(a.id);
-                onClose();
-              }}
+              // The action is the CLOSE's follow-up: several of these end
+              // in a `router.push`, and the marker history entry has to be
+              // released first or our own `back()` would undo it.
+              onClick={() => requestClose(() => onSelect(a.id))}
               // Each starts ON the `…` and travels to its slot, so the run
               // reads as coming OUT of the button rather than appearing.
               initial={{

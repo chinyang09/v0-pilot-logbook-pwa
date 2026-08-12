@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react"
 import { FlightList, type FlightListRef } from "@/components/flight-list"
-import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useDebounce } from "@/hooks/use-debounce"
-import { LogbookCalendar, type CalendarHandle } from "@/components/logbook-calendar"
+import { type CalendarHandle } from "@/components/logbook-calendar"
+import { CalendarPanel, PANEL_MS, PANEL_MOTION } from "@/components/calendar-panel"
 import { type FlightLog } from "@/lib/db"
-import { syncService } from "@/lib/sync"
 import { useCreateFlight } from "@/hooks/use-create-flight"
 import {
   useFlights,
@@ -18,8 +17,6 @@ import { mutate } from "swr"
 import { Calendar, Plus, Search, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { GlassContainer } from "@/components/ui/glass-container"
-import { MORPH_EASE } from "@/lib/motion"
-import { MONTH_PANE_PX } from "@/lib/layout/panel-widths"
 import { usePanelDualMonth } from "@/lib/layout/panel-mode"
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date"
 import { insertFlightSorted } from "@/lib/utils/flight-sort"
@@ -50,9 +47,6 @@ function inSamePair(anchorMonth: number, anchorYear: number, month: number, year
   const start = pairStart(anchorMonth)
   return year === anchorYear && (month === start || month === start + 1)
 }
-
-const PANEL_MS = 300
-const PANEL_MOTION = `height ${PANEL_MS}ms ${MORPH_EASE}`
 
 /** Gap between the CHROME and the first flight card, matching what crew /
  *  aircraft / airports get from their content wrapper. Not applied under an
@@ -98,7 +92,6 @@ export default function LogbookPage() {
   const [searchTerms, setSearchTerms] = useState<string[]>([])
   const [showSearch, setShowSearch] = useState(false)
   const [showMonthPicker, setShowMonthPicker] = useState(false)
-  const { handleScroll } = useScrollNavbarContext()
 
   // Detail panel integration
   // The layout now renders FlightForm directly based on selectedId (Smart Switcher pattern).
@@ -117,7 +110,6 @@ export default function LogbookPage() {
 
   const searchBlockRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const calendarContentRef = useRef<HTMLDivElement>(null)
 
   // Declared (and kept in step) ahead of the measuring effects below, which
   // read it from their ResizeObserver callback.
@@ -155,45 +147,31 @@ export default function LogbookPage() {
     }
   }, [])
 
-  useEffect(() => {
-    const el = calendarContainerRef.current
-    if (!el) return
-    let rafId = 0
-    // The calendar stays MOUNTED and is collapsed to height 0, so its natural
-    // height is always readable — measuring the animating wrapper would read
-    // whatever the transition is passing through.
-    const measure = () => {
-      const h = calendarContentRef.current?.offsetHeight ?? 0
-      if (h > 0) {
-        // A calendar that is already OPEN and merely changes shape (one month
-        // → two, when the panel widens) moves the spacer under a list that is
-        // not being pushed. Anchoring is off on that scroller by design, so
-        // absorb the delta here — otherwise switching the panel width slid the
-        // whole logbook a couple of rows, which is what the owner saw.
-        //
-        // The spacer also has to make this change INSTANTLY rather than over
-        // PANEL_MOTION: the compensation is a single scrollTop write, so an
-        // eased spacer would drift against it for 300ms.
-        const prev = calendarHeightRef.current
-        calendarHeightRef.current = h
-        if (prev > 0 && prev !== h && showCalendarRef.current) {
-          pendingAbsorbRef.current += h - prev
-          setSpacerAnimated(false)
-        }
-        setCalendarNaturalHeight(h)
-      }
+  /**
+   * The calendar's natural height, reported by `CalendarPanel` (which measures
+   * its own content — the calendar stays MOUNTED and collapsed to 0, so what it
+   * reads is never a frame of the transition).
+   *
+   * The absorb logic below is the load-bearing part and is unchanged: a
+   * calendar that is already OPEN and merely changes SHAPE (one month → two,
+   * when the panel widens) moves the spacer under a list that is not being
+   * pushed. Anchoring is off on that scroller by design, so the delta is
+   * absorbed here — otherwise switching the panel width slid the whole logbook
+   * a couple of rows.
+   *
+   * The spacer also has to make that change INSTANTLY rather than over
+   * PANEL_MOTION: the compensation is a single `scrollTop` write, so an eased
+   * spacer would drift against it for 300ms.
+   */
+  const handleCalendarHeight = useCallback((h: number) => {
+    if (h <= 0) return
+    const prev = calendarHeightRef.current
+    calendarHeightRef.current = h
+    if (prev > 0 && prev !== h && showCalendarRef.current) {
+      pendingAbsorbRef.current += h - prev
+      setSpacerAnimated(false)
     }
-    measure()
-    const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(rafId)
-      rafId = requestAnimationFrame(measure)
-    })
-    observer.observe(el)
-    if (calendarContentRef.current) observer.observe(calendarContentRef.current)
-    return () => {
-      observer.disconnect()
-      cancelAnimationFrame(rafId)
-    }
+    setCalendarNaturalHeight(h)
   }, [])
 
   // Apply a queued resize compensation in the same paint as the spacer's new
@@ -223,12 +201,9 @@ export default function LogbookPage() {
   const selectedMonthRef = useRef(selectedMonth)
   const dualMonthRef = useRef(false)
 
-  useEffect(() => {
-    const unsubscribe = syncService.onDataChanged(() => {
-      refreshAllData()
-    })
-    return unsubscribe
-  }, [])
+  // No `onDataChanged` subscription here: `SyncProvider` owns the one global
+  // one, and this page is keep-alive — a second permanent subscriber just ran
+  // the whole refresh twice per sync cycle.
 
   useEffect(() => {
     selectedMonthRef.current = selectedMonth
@@ -296,9 +271,16 @@ export default function LogbookPage() {
       if (!topFlight) return
       topFlightIdRef.current = topFlight.id
       topFlightDateRef.current = topFlight.date
+
+      // The calendar is the ONLY consumer of `topFlightDate`, and it is
+      // collapsed to height 0 rather than unmounted when stowed — so while it
+      // is closed this setState re-rendered the page and a whole month grid
+      // once per card scrolled past, for something nobody can see. The ref
+      // above is kept current either way, and opening the calendar seeds the
+      // state from it (see toggleCalendar).
+      if (!showCalendarRef.current) return
       setTopFlightDate(topFlight.date)
 
-      if (!showCalendarRef.current) return
       if (syncSourceRef.current !== "flights") return
 
       const flightDate = parseDateLocal(topFlight.date)
@@ -345,6 +327,10 @@ export default function LogbookPage() {
       const month = date.getMonth()
       setSelectedMonth({ year, month })
       selectedMonthRef.current = { year, month }
+      // Catch the highlight up to wherever the list was scrolled to while the
+      // calendar was stowed — `handleFlightScroll` only keeps the ref current
+      // in that state, so this is where the state re-joins it.
+      setTopFlightDate(targetFlight.date)
       calendarRef.current?.scrollToMonth(year, month)
       syncSourceRef.current = "flights"
     }
@@ -381,29 +367,54 @@ export default function LogbookPage() {
     setSelectedFlightId(flight.id)
   }, [setSelectedFlightId])
 
-  const handleFlightDeleted = async () => {
+  // MUST stay stable. It is `FlightList`'s `onDeleted`, which its `performDelete`
+  // and `handleToggleLock` close over — so a fresh identity here changed the
+  // `onDelete` prop of every `SwipeableFlightCard` on every render of this page,
+  // and this page re-renders on scroll (the top-flight date) and on every
+  // keystroke in search. The cards are `memo`'d; unstable callbacks were the
+  // one thing defeating it.
+  const handleFlightDeleted = useCallback(async () => {
     // Clear the detail panel — the deleted flight's form must not remain open.
     // This also prevents FlightForm's auto-save from re-creating the deleted record in Dexie.
     setSelectedFlightId(null)
     // Flights already removed optimistically from SWR cache in FlightList.
     // Only revalidate stats so totals reflect the deletion.
     await mutate(CACHE_KEYS.stats, undefined, { revalidate: true })
-  }
+  }, [setSelectedFlightId])
 
-  /** Every searchable string on a flight, lowercased once per flight. */
-  const searchableFields = useCallback((f: FlightLog): string[] => [
-    f.flightNumber ?? "",
-    f.aircraftReg ?? "",
-    f.aircraftType ?? "",
-    f.departureIcao ?? "",
-    f.arrivalIcao ?? "",
-    f.departureIata ?? "",
-    f.arrivalIata ?? "",
-    f.picName ?? "",
-    f.sicName ?? "",
-    ...(f.additionalCrew?.map((c) => c.name ?? "") ?? []),
-    f.date ?? "",
-  ], [])
+  /**
+   * One lowercased haystack per flight, built once per flights array rather
+   * than per keystroke. The previous form allocated an 11-element array and
+   * lowercased every field of every flight on every term change — with a few
+   * thousand flights that is tens of thousands of string allocations between
+   * one character and the next, which is exactly when the main thread is
+   * needed for the caret.
+   *
+   * Kept as a per-field LIST rather than one joined string, so a term still has
+   * to sit inside a single field — joining would let "wsss wica" match across
+   * the boundary between two fields that are only adjacent by accident.
+   */
+  const searchIndex = useMemo(
+    () =>
+      flights.map((f) =>
+        [
+          f.flightNumber,
+          f.aircraftReg,
+          f.aircraftType,
+          f.departureIcao,
+          f.arrivalIcao,
+          f.departureIata,
+          f.arrivalIata,
+          f.picName,
+          f.sicName,
+          ...(f.additionalCrew?.map((c) => c.name) ?? []),
+          f.date,
+        ]
+          .filter((v): v is string => !!v)
+          .map((v) => v.toLowerCase()),
+      ),
+    [flights],
+  )
 
   const filteredFlights = useMemo(() => {
     // Committed chips AND the text still being typed — so a query narrows the
@@ -412,11 +423,11 @@ export default function LogbookPage() {
     const terms = [...searchTerms.map((t) => t.toLowerCase()), ...(pending ? [pending] : [])]
     if (terms.length === 0) return flights
 
-    return flights.filter((flight) => {
-      const fields = searchableFields(flight).map((v) => v.toLowerCase())
+    return flights.filter((_, i) => {
+      const fields = searchIndex[i]
       return terms.every((term) => fields.some((v) => v.includes(term)))
     })
-  }, [flights, searchTerms, debouncedSearchQuery, searchableFields])
+  }, [flights, searchTerms, debouncedSearchQuery, searchIndex])
 
   /** Stow/open the search row. Opening focuses the field; stowing clears the
    *  filters, because a hidden filter silently narrowing the logbook is the
@@ -614,56 +625,36 @@ export default function LogbookPage() {
           </div>
         </div>
 
-        {/* CALENDAR — always mounted, collapsed to 0. Mounted rather than
-            conditionally rendered so its natural height is always measurable
-            and the collapse is a plain height transition the spacer can
-            match exactly. */}
-        <div
-          className="overflow-hidden"
-          style={{
-            height: showCalendar ? calendarNaturalHeight : 0,
-            transition: PANEL_MOTION,
-            willChange: "height",
+        {/* CALENDAR — the shared panel, so this and the dashboard cannot drift
+            into looking like two different calendars again. */}
+        <CalendarPanel
+          ref={calendarRef}
+          open={showCalendar}
+          onNaturalHeight={handleCalendarHeight}
+          flights={flights}
+          selectedMonth={selectedMonth}
+          onMonthChange={handleCalendarMonthChange}
+          onDateSelect={handleDateSelect}
+          selectedDate={selectedDate || topFlightDate}
+          onScrollStart={handleCalendarScrollStart}
+          dualMonth={dualMonth}
+          splitLayout={isSplitLayout}
+          monthYearView={showMonthPicker}
+          onHeaderPress={() => setShowMonthPicker((v) => !v)}
+          onMonthSelect={(year, month) => {
+            setSelectedMonth({ year, month })
+            selectedMonthRef.current = { year, month }
+            syncSourceRef.current = "calendar"
+            handleCalendarMonthChange(year, month)
+            setShowMonthPicker(false)
           }}
-          aria-hidden={!showCalendar}
-        >
-          <div ref={calendarContentRef} className="px-2 pb-2">
-            <LogbookCalendar
-              ref={calendarRef}
-              className="bg-transparent shadow-none border-none"
-              flights={flights}
-              selectedMonth={selectedMonth}
-              onMonthChange={handleCalendarMonthChange}
-              onDateSelect={handleDateSelect}
-              selectedDate={selectedDate || topFlightDate}
-              onScrollStart={handleCalendarScrollStart}
-              glass
-              cornerRadius={20}
-              dualMonth={dualMonth}
-              // In the split layout a month is always ONE PANE wide, so the
-              // calendar is the same height with one month as with two and the
-              // width toggle stops resizing the list. A phone has no dual mode
-              // to match, so it keeps the full-width default.
-              paneMaxWidth={isSplitLayout ? MONTH_PANE_PX : undefined}
-              view={showMonthPicker ? "monthYear" : "calendar"}
-              onHeaderPress={() => setShowMonthPicker((v) => !v)}
-              headerActive={showMonthPicker}
-              onMonthSelect={(year, month) => {
-                setSelectedMonth({ year, month })
-                selectedMonthRef.current = { year, month }
-                syncSourceRef.current = "calendar"
-                handleCalendarMonthChange(year, month)
-                setShowMonthPicker(false)
-              }}
-              onYearChange={(newYear) => {
-                setSelectedMonth({ year: newYear, month: selectedMonth.month })
-                selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
-                syncSourceRef.current = "calendar"
-                handleCalendarMonthChange(newYear, selectedMonth.month)
-              }}
-            />
-          </div>
-        </div>
+          onYearChange={(newYear) => {
+            setSelectedMonth({ year: newYear, month: selectedMonth.month })
+            selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
+            syncSourceRef.current = "calendar"
+            handleCalendarMonthChange(newYear, selectedMonth.month)
+          }}
+        />
       </div>
 
       {/* FLIGHT LIST */}
@@ -676,7 +667,6 @@ export default function LogbookPage() {
           onDeleted={handleFlightDeleted}
           onTopFlightChange={handleFlightScroll}
           onScrollStart={handleFlightScrollStart}
-          onScroll={handleScroll}
           // `LIST_TOP_GAP` separates the first card from the CHROME, which is
           // where crew / aircraft / airports get theirs — the logbook was alone
           // in butting its first card straight against the header.

@@ -2,7 +2,6 @@
 
 import type React from "react"
 import { Suspense } from "react"
-import { ScrollNavbarProvider } from "@/hooks/use-scroll-navbar-context"
 import { SidebarProvider } from "@/hooks/use-sidebar-context"
 import { DetailPanelProvider } from "@/hooks/use-detail-panel"
 import { PageActionsProvider } from "@/hooks/use-page-actions"
@@ -41,19 +40,17 @@ export default function AppLayout({
 }) {
   return (
     <PreferencesProvider>
-      <ScrollNavbarProvider>
-        <SidebarProvider defaultOpen={false}>
-          <Suspense fallback={null}>
-            <DetailPanelProvider>
-              <PageActionsProvider>
-                <DashboardPeriodProvider>
-                  <AppLayoutContent>{children}</AppLayoutContent>
-                </DashboardPeriodProvider>
-              </PageActionsProvider>
-            </DetailPanelProvider>
-          </Suspense>
-        </SidebarProvider>
-      </ScrollNavbarProvider>
+      <SidebarProvider defaultOpen={false}>
+        <Suspense fallback={null}>
+          <DetailPanelProvider>
+            <PageActionsProvider>
+              <DashboardPeriodProvider>
+                <AppLayoutContent>{children}</AppLayoutContent>
+              </DashboardPeriodProvider>
+            </PageActionsProvider>
+          </DetailPanelProvider>
+        </Suspense>
+      </SidebarProvider>
     </PreferencesProvider>
   )
 }

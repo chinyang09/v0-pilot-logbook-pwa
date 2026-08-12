@@ -86,7 +86,8 @@ export function GlassSearchButton({
         willChange: isOpen ? "max-width" : undefined,
       }}
     >
-      <GlassContainer cornerRadius={22}>
+      {/* A header control, so it sits in the ChromeFade band — see overBlur. */}
+      <GlassContainer cornerRadius={22} overBlur>
         <div className="flex items-center h-11 relative">
           {/* Search icon — always visible, acts as button when collapsed */}
           <button

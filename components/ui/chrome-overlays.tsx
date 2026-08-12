@@ -55,36 +55,31 @@ function fadeFor(side: Side): string {
 }
 
 /**
- * The progressive blur under the fade: heaviest at the anchored edge, gone by
- * the far end. Ordered smallest-radius-first with decreasing coverage so each
- * layer fully covers the ones below wherever it is opaque — the stack can
- * then only ADD blur and the ramp stays monotonic on both engines (see
- * SIDEBAR_BACKDROP_BLUR in nav-pill for the same rule).
+ * ONE blur layer under the fade, not three.
  *
- * The band has to read as chrome you cannot reach through — at the original
- * 2.4px peak a card scrolling under the action buttons still looked sharp and
- * tappable. Going the other way is the easier mistake to make, though, and it
- * was made twice: 22px, then 11px. Both were judged from the BOTTOM of the
- * band, which is the part these layers barely touch.
+ * This used to be a three-layer ramp (0.6 / 1 / 1.4px, decreasing coverage),
+ * which composes as the root-sum-square to a 1.8px peak at the top of the
+ * band. The optics were right and the cost was not: a `backdrop-filter` is a
+ * readback of everything behind the element plus a blur, re-rasterised
+ * whenever the BACKDROP changes — which, for a header sitting over a scrolling
+ * list, is every single scroll frame. Three of them, full width, on every
+ * panel header in the app.
  *
- * The number that matters is the one at the TOP — the status-bar strip, where
- * all three layers overlap AND iOS is already applying its own. Sequential
- * blurs compose as the root-sum-square, so the peak here is not the largest
- * radius but √(Σr²), and reading the largest radius instead is what kept this
- * being set too high: 12.2px at 2/5/11, then still 6.0px at 2/3.2/4.6.
+ * A single 1.8px layer is the same peak for a third of the work. What is lost
+ * is the RAMP — the band no longer softens gradually from its lower edge to
+ * the status bar — and that is a fair trade here precisely because the numbers
+ * are so small: the difference between 0.6px and 1.8px of blur is not
+ * something you can see, where the difference between three backdrop readbacks
+ * a frame and one is something you can feel.
  *
- * At **0.6 / 1 / 1.4** the stack peaks at **1.8px** and the bottom of the band
- * is 0.6px — a tenth of where this started, and deliberately almost nothing.
- * This is a DARKEN-led treatment (see the veil above): the veil is what makes
- * the band read as chrome, and the blur's only job is to take the crispness
- * off an edge so it does not look touchable. Every round that judged the blur
- * by how much it HID was tuning the wrong layer.
+ * This is a DARKEN-led treatment (see the veil above). The veil is what makes
+ * the band read as chrome; the blur's only job is to take the crispness off an
+ * edge so it does not look touchable. Every round that judged the blur by how
+ * much it HID was tuning the wrong layer.
  */
-const BLUR_LAYERS: Array<{ blur: number; coverage: string; ramp: string }> = [
-  { blur: 0.6, coverage: "100%", ramp: "60%" },
-  { blur: 1, coverage: "76%", ramp: "46%" },
-  { blur: 1.4, coverage: "46%", ramp: "36%" },
-];
+const FACE_BLUR = 1.8;
+/** Where the single layer's own ramp reaches full strength. */
+const BLUR_RAMP = "58%";
 
 /**
  * How far the treatment extends BEYOND the bar it sits on.
@@ -125,23 +120,17 @@ export function ChromeFade({
       // Taller than the bar by FADE_TAIL — see the note there.
       style={{ ...anchor, height: `calc(100% + ${FADE_TAIL}px)` }}
     >
-      {BLUR_LAYERS.map(({ blur, coverage, ramp }) => {
-        const mask = `linear-gradient(to ${side}, transparent 0, black ${ramp})`;
-        return (
-          <div
-            key={blur}
-            className="absolute inset-x-0"
-            style={{
-              ...anchor,
-              height: coverage,
-              backdropFilter: `blur(${blur}px)`,
-              WebkitBackdropFilter: `blur(${blur}px)`,
-              maskImage: mask,
-              WebkitMaskImage: mask,
-            }}
-          />
-        );
-      })}
+      <div
+        className="absolute inset-x-0"
+        style={{
+          ...anchor,
+          height: "100%",
+          backdropFilter: `blur(${FACE_BLUR}px)`,
+          WebkitBackdropFilter: `blur(${FACE_BLUR}px)`,
+          maskImage: `linear-gradient(to ${side}, transparent 0, black ${BLUR_RAMP})`,
+          WebkitMaskImage: `linear-gradient(to ${side}, transparent 0, black ${BLUR_RAMP})`,
+        }}
+      />
       <div className="absolute inset-0" style={{ background: fadeFor(side) }} />
     </div>
   );
@@ -155,34 +144,47 @@ export function ChromeFade({
 export const MODAL_SCRIM = "bg-black/15 dark:bg-black/50";
 
 /**
- * Radial progressive blur for a modal backdrop: heaviest right around the
+ * Radial progressive DARKENING for a modal backdrop: heaviest right around the
  * dialog, clearing toward the edges of the screen so the app stays legible
  * behind it.
+ *
+ * It was a radial progressive BLUR — three full-viewport `backdrop-filter`
+ * layers, each sampling the output of the one below. That is a chain rather
+ * than a sum, and on a weak mobile GPU the whole stack recomputes whenever the
+ * backdrop or its own opacity changes. A gradient does the same job for one
+ * paint: the dialog separates from the page because the page is DARKER around
+ * it, not because it is softer.
+ *
+ * Keeping the same ellipse and the same stops means the falloff is unchanged —
+ * only what falls off is different.
+ *
+ * `opacity`/`transition` are still per LAYER rather than on a wrapper, because
+ * a caller that fades this wants a composited fade and a wrapper would add a
+ * stacking layer for nothing. (The backdrop-root hazard that used to make this
+ * mandatory is gone with the filter, but the shape is worth keeping: it is one
+ * element either way.)
  */
-export function RadialBlurBackdrop({ className }: { className?: string }) {
-  const layers: Array<{ blur: number; stop: number }> = [
-    { blur: 2, stop: 100 },
-    { blur: 6, stop: 72 },
-    { blur: 14, stop: 48 },
-    { blur: 26, stop: 28 },
-  ];
+export function RadialBlurBackdrop({
+  className,
+  /** 0–1. */
+  opacity = 1,
+  /** CSS transition for that opacity, e.g. `opacity 340ms ease`. */
+  transition,
+}: {
+  className?: string;
+  opacity?: number;
+  transition?: string;
+}) {
   return (
-    <div aria-hidden className={cn("pointer-events-none absolute inset-0", className)}>
-      {layers.map(({ blur, stop }) => {
-        const mask = `radial-gradient(ellipse 70% 60% at 50% 50%, black 0%, black ${stop * 0.4}%, transparent ${stop}%)`;
-        return (
-          <div
-            key={blur}
-            className="absolute inset-0"
-            style={{
-              backdropFilter: `blur(${blur}px)`,
-              WebkitBackdropFilter: `blur(${blur}px)`,
-              maskImage: mask,
-              WebkitMaskImage: mask,
-            }}
-          />
-        );
-      })}
-    </div>
+    <div
+      aria-hidden
+      className={cn("pointer-events-none absolute inset-0", className)}
+      style={{
+        background:
+          "radial-gradient(ellipse 70% 60% at 50% 50%, var(--modal-scrim-core) 0%, var(--modal-scrim-core) 24%, transparent 68%)",
+        opacity,
+        transition,
+      }}
+    />
   );
 }

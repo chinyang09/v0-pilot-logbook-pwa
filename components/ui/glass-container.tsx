@@ -26,11 +26,30 @@ interface GlassContainerProps {
    */
   spotlight?: boolean
   /**
-   * True while this glass surface is mid-morph (pill ↔ sidebar). The material
-   * surges — extra blur/brightness/vibrancy, like a droplet swelling — then
-   * settles when the morph lands.
+   * This surface sits over something that has ALREADY blurred the page — the
+   * header's `ChromeFade` band, the mobile sidebar's backdrop, a modal's blur.
+   *
+   * The material then only needs enough opacity to read as a surface, not
+   * enough to hide a legible backdrop, so `--glass-base` steps down and the
+   * glass becomes properly see-through. Everything else — the face blur, the
+   * veil, the rim, the specular — is unchanged: this varies the opacity alone.
+   *
+   * It is a fact about WHERE a surface is rendered, so it is set per call
+   * site. See the `[data-over-blur]` rule in globals.css for which surfaces
+   * qualify and which deliberately do not.
    */
-  morphing?: boolean
+  overBlur?: boolean
+  /**
+   * This surface is MOVING — drop the edge filters until it settles.
+   *
+   * Four of the material's five `backdrop-filter`s are edge layers, and a
+   * backdrop-filter re-rasterises whenever the element's geometry changes. The
+   * nav morph interpolates `left`/`width`/`height`, so all five run every frame
+   * on a panel growing to the height of the screen. See the `[data-quiet]` rule
+   * in globals.css for what is given up (single-pixel edge reflections, on a
+   * surface in fast motion) and what is not (the painted specular hairline).
+   */
+  quiet?: boolean
 }
 
 /**
@@ -99,7 +118,8 @@ export function GlassContainer({
   style,
   disableTapFeedback,
   spotlight,
-  morphing,
+  overBlur,
+  quiet,
 }: GlassContainerProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const reduceMotion = useReducedMotion()
@@ -132,16 +152,55 @@ export function GlassContainer({
       detachRef.current = null
       window.clearTimeout(graceRef.current)
       window.clearTimeout(settleRef.current)
+      // No need to cancel a queued track frame here — `applyPoint` bails when
+      // the element is gone, so a stray frame is a no-op.
     },
     []
   )
 
-  const setSpotlightAt = (clientX: number, clientY: number) => {
+  /**
+   * The press's latest point, applied ONCE PER FRAME.
+   *
+   * Tracking used to run straight off the event: `setSpotlightAt` took a
+   * `getBoundingClientRect`, then `trackTo` took another one — two forced
+   * layout reads per `pointermove`, and pointer events fire faster than frames
+   * on a 120Hz panel (and arrive coalesced besides). Nothing downstream can
+   * show more than one position per frame, so the reads were pure cost paid
+   * during the one interaction that has to feel immediate.
+   *
+   * Coalescing into a rAF gives one rect per frame instead of two per event,
+   * and keeps the rect FRESH — caching it at pointerdown would be cheaper still
+   * but goes stale for a surface that moves under the finger (the nav pill
+   * morphing mid-press).
+   */
+  const pointRef = useRef<{ x: number; y: number } | null>(null)
+  const trackRafRef = useRef(0)
+
+  const applyPoint = () => {
+    trackRafRef.current = 0
+    const point = pointRef.current
     const el = rootRef.current
-    if (!el) return
+    if (!point || !el) return
     const rect = el.getBoundingClientRect()
-    el.style.setProperty("--press-x", `${clientX - rect.left}px`)
-    el.style.setProperty("--press-y", `${clientY - rect.top}px`)
+    el.style.setProperty("--press-x", `${point.x - rect.left}px`)
+    el.style.setProperty("--press-y", `${point.y - rect.top}px`)
+    if (!interactive) return
+    const dx = point.x - (rect.left + rect.width / 2)
+    const dy = point.y - (rect.top + rect.height / 2)
+    const clamp = (v: number) => Math.max(-PULL_MAX, Math.min(PULL_MAX, v))
+    tx.set(clamp(dx * PULL))
+    ty.set(clamp(dy * PULL))
+    // Stretch along the pull axis — the glass "gives" toward the drag. The
+    // stretch dominates over the translation (see PULL above).
+    sx.set(BLOOM + Math.min(Math.abs(dx) * 0.0012, 0.05))
+    sy.set(BLOOM + Math.min(Math.abs(dy) * 0.0012, 0.05))
+  }
+
+  /** Place the spotlight immediately — for pointerdown, which must not wait. */
+  const setSpotlightAt = (clientX: number, clientY: number) => {
+    pointRef.current = { x: clientX, y: clientY }
+    if (trackRafRef.current) cancelAnimationFrame(trackRafRef.current)
+    applyPoint()
   }
 
   /**
@@ -154,21 +213,11 @@ export function GlassContainer({
     rootRef.current?.style.setProperty("--glass-press", on ? "1" : "0")
   }
 
+  /** Move handler: record the point, let the frame do the work. */
   const trackTo = (clientX: number, clientY: number) => {
-    setSpotlightAt(clientX, clientY)
-    if (!interactive) return
-    const el = rootRef.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    const dx = clientX - (rect.left + rect.width / 2)
-    const dy = clientY - (rect.top + rect.height / 2)
-    const clamp = (v: number) => Math.max(-PULL_MAX, Math.min(PULL_MAX, v))
-    tx.set(clamp(dx * PULL))
-    ty.set(clamp(dy * PULL))
-    // Stretch along the pull axis — the glass "gives" toward the drag. The
-    // stretch dominates over the translation (see PULL above).
-    sx.set(BLOOM + Math.min(Math.abs(dx) * 0.0012, 0.05))
-    sy.set(BLOOM + Math.min(Math.abs(dy) * 0.0012, 0.05))
+    pointRef.current = { x: clientX, y: clientY }
+    if (trackRafRef.current) return
+    trackRafRef.current = requestAnimationFrame(applyPoint)
   }
 
   /** Home, with no settle — for a cancelled gesture, which isn't a release. */
@@ -203,6 +252,11 @@ export function GlassContainer({
     pressedRef.current = false
     detachRef.current?.()
     detachRef.current = null
+    // A queued frame would re-apply the pull after the settle has started.
+    if (trackRafRef.current) {
+      cancelAnimationFrame(trackRafRef.current)
+      trackRafRef.current = 0
+    }
     const el = rootRef.current
     if (el && clientX !== undefined && clientY !== undefined) {
       const rect = el.getBoundingClientRect()
@@ -293,7 +347,8 @@ export function GlassContainer({
     <motion.div
       ref={rootRef}
       className={cn("GlassContainer", className)}
-      data-morphing={morphing ? "true" : undefined}
+      data-over-blur={overBlur ? "true" : undefined}
+      data-quiet={quiet ? "true" : undefined}
       style={{
         "--corner-radius": `${cornerRadius}px`,
         "--glass-press": 0,

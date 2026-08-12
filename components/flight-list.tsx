@@ -15,9 +15,7 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { FlightLog } from "@/lib/db";
 import { deleteFlight } from "@/lib/db";
-import { formatHHMMDisplay } from "@/lib/utils/time";
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date";
-import { getDepartureDisplay, getArrivalDisplay } from "@/lib/utils/airport-display";
 import { usePreferences } from "@/components/providers/preferences-provider";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import { syncService } from "@/lib/sync";
@@ -27,14 +25,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { FlightCardBody } from "@/components/flight-card-body";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Plane,
-  Trash2,
-  MoreHorizontal,
-  Sun,
-  Moon,
-  Pen,
-} from "lucide-react";
+import { Plane, Trash2, MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { primeFlightCache } from "@/components/flight-form";
@@ -76,7 +67,6 @@ interface FlightListProps {
   onDeleted?: () => void;
   onTopFlightChange?: (flight: FlightLog | null) => void;
   onScrollStart?: () => void;
-  onScroll?: (e: React.UIEvent<HTMLElement>) => void;
   /** CSS length: the header offset plus whatever floats above the list. */
   topSpacerHeight?: string;
   /** CSS transition for the spacer, so it moves in lock-step with whatever is
@@ -87,20 +77,6 @@ interface FlightListProps {
 }
 
 
-const MONTHS = [
-  "JAN",
-  "FEB",
-  "MAR",
-  "APR",
-  "MAY",
-  "JUN",
-  "JUL",
-  "AUG",
-  "SEP",
-  "OCT",
-  "NOV",
-  "DEC",
-];
 
 /** How long after a dismissal an open request is treated as the same tap. */
 const CASCADE_REOPEN_GUARD_MS = 350;
@@ -110,19 +86,6 @@ const CASCADE_REOPEN_GUARD_MS = 350;
 const HOLD_MS = 450;
 /** Movement that cancels the hold — a scroll, or the start of a swipe. */
 const HOLD_SLOP = 8;
-
-function timeToMinutes(hhmm: string): number {
-  const parts = hhmm.split(":").map(Number);
-  return (parts[0] || 0) * 60 + (parts[1] || 0);
-}
-
-function formatScheduledDuration(scheduledOut: string, scheduledIn: string): string {
-  let diff = timeToMinutes(scheduledIn) - timeToMinutes(scheduledOut);
-  if (diff < 0) diff += 1440;
-  const h = Math.floor(diff / 60);
-  const m = diff % 60;
-  return `${h}:${m.toString().padStart(2, "0")}`;
-}
 
 // Callbacks receive the flight so the parent can pass stable (useCallback)
 // handlers — inline `() => …` closures would give every card new props each
@@ -177,6 +140,12 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
         // is comfortably slower than on a trackpad.
         const target = e.target as Element | null;
         if (target?.closest?.("button, a, input, textarea, [data-swipe-actions]")) return;
+        // Nor is a press on a row whose SWIPE PANEL is already out. The actions
+        // are showing and the card has been pushed aside to show them, so a
+        // press there is aimed at one of those buttons or at putting the row
+        // back — not at holding the card. Opening the preview on top of an open
+        // panel also loses the panel, since the preview locks the list.
+        if (e.currentTarget.getAttribute("data-swipe-open") === "true") return;
         holdFromRef.current = { x: e.clientX, y: e.clientY };
         // The CARD's own box, not the row's. The row wrapper carries the
         // list's per-row top gap, and the preview opens as an exact copy of
@@ -252,15 +221,22 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           icon: <Trash2 className="h-5 w-5" />,
           onClick: () => onDelete(flight),
           variant: "destructive",
-          holdToConfirm: true,
-          cancelLabel: "Cancel delete",
           disabled: isLocked,
         },
       ]}
     >
       <Card
         className={cn(
-          "bg-card border-border cursor-pointer relative py-0 transition-all",
+          // `transition-colors`, NOT `transition-all` — this row's visibility is
+          // toggled by the context preview, and `transition-all` animates
+          // `visibility`. Measured: hidden→visible still computes `hidden` for
+          // the first frame, so the overlay unmounted and the row was blank for
+          // a frame before it appeared — that is the flash on collapse. The
+          // other direction is worse in principle: visible→hidden HOLDS visible
+          // for the full 150ms, so the source row showed through the opening
+          // morph as a second copy of the same flight. Only the hover/selected
+          // colours ever wanted a transition here.
+          "bg-card border-border cursor-pointer relative py-0 transition-colors",
           isLocked && "opacity-75",
           isScheduled && "border-l-2 border-l-orange-600/70 dark:border-l-orange-400/70",
           isSelected && "bg-primary/20 border-primary",
@@ -328,7 +304,6 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       onDeleted,
       onTopFlightChange,
       onScrollStart,
-      onScroll,
       topSpacerHeight = "0px",
       topSpacerTransition,
       headerContent,
@@ -542,21 +517,16 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       const container = scrollContainerRef.current;
       if (!container) return;
 
+      // One rAF-throttled listener, and nothing runs per raw scroll event: the
+      // calendar sync is the only work the list owes a scroll.
       let ticking = false;
-      const scrollHandler = (e: Event) => {
-        // Call external onScroll for navbar hiding (on every scroll event)
-        if (onScroll) {
-          onScroll(e as unknown as React.UIEvent<HTMLElement>);
-        }
-
-        // Throttle bidirectional sync logic with RAF
-        if (!ticking) {
-          requestAnimationFrame(() => {
-            handleScroll();
-            ticking = false;
-          });
-          ticking = true;
-        }
+      const scrollHandler = () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+          handleScroll();
+          ticking = false;
+        });
       };
 
       container.addEventListener("scroll", scrollHandler, { passive: true });
@@ -564,7 +534,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       return () => {
         container.removeEventListener("scroll", scrollHandler);
       };
-    }, [handleScroll, onScroll]);
+    }, [handleScroll]);
 
     const handleEdit = useCallback(
       (flight: FlightLog) => onEdit?.(flight),

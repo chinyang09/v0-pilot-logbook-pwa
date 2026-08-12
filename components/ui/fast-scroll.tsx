@@ -51,12 +51,24 @@ export function FastScroll({
     }
   }, [])
 
+  /**
+   * The rail's box, taken once per drag.
+   *
+   * `getItemFromPosition` ran on every raw move event and took a
+   * `getBoundingClientRect` each time — a layout read per `touchmove`, during
+   * the one gesture that is simultaneously driving `scrollToIndex` on a
+   * virtualised list. The rail cannot move or resize while a finger is on it:
+   * it is absolutely positioned against the viewport, and the drag calls
+   * `preventDefault` so the page underneath does not scroll.
+   */
+  const railRectRef = React.useRef<DOMRect | null>(null)
+
   const getItemFromPosition = React.useCallback(
     (clientY: number): FastScrollItem | null => {
       if (!containerRef.current || items.length === 0) return null
 
       const container = containerRef.current
-      const rect = container.getBoundingClientRect()
+      const rect = railRectRef.current ?? container.getBoundingClientRect()
       const relativeY = clientY - rect.top
       const percentage = Math.max(0, Math.min(1, relativeY / rect.height))
       const index = Math.min(
@@ -92,6 +104,9 @@ export function FastScroll({
     (clientY: number) => {
       if (disabled) return
 
+      // Measured BEFORE the first hit-test, so every move in this drag —
+      // including this one — reads the same cached box.
+      railRectRef.current = containerRef.current?.getBoundingClientRect() ?? null
       setIsDragging(true)
       lastSelectedRef.current = null
       onScrollStart?.()
@@ -101,6 +116,7 @@ export function FastScroll({
   )
 
   const handleEnd = React.useCallback(() => {
+    railRectRef.current = null
     if (isDragging) {
       setIsDragging(false)
       setHoveredKey(null)

@@ -15,7 +15,6 @@ export const SPRING = { type: "spring" as const, stiffness: 520, damping: 42, ma
 export const POP_SPRING = { stiffness: 700, damping: 24, mass: 0.6 }
 
 /** Light tap-feedback spring (glass containers). */
-export const TAP_SPRING = { type: "spring" as const, stiffness: 400, damping: 25, duration: 0.15 }
 
 /** Bouncy overshoot bezier — gravity blob position, pill scroll re-show. */
 export const OVERSHOOT_BEZIER = "cubic-bezier(0.34, 1.5, 0.64, 1)"

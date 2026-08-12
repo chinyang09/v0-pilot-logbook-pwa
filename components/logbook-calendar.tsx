@@ -143,9 +143,19 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     ref
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [swipeStartY, setSwipeStartY] = useState(0);
-    const [isSwiping, setIsSwiping] = useState(false);
-    const [hasTriggeredSwipeStart, setHasTriggeredSwipeStart] = useState(false);
+    /**
+     * Swipe bookkeeping — REFS, not state.
+     *
+     * None of these three is rendered or read by a memo; they exist only
+     * inside the touch handlers. As state, `handleTouchStart` fired three
+     * updates and the threshold crossing in `handleTouchMove` a fourth, so
+     * merely putting a finger on the calendar re-rendered the whole grid —
+     * forty-two day cells, or eighty-four in dual mode — up to three times
+     * before anything visible had happened.
+     */
+    const swipeStartYRef = useRef(0);
+    const isSwipingRef = useRef(false);
+    const hasTriggeredSwipeStartRef = useRef(false);
     const isExternalScrollRef = useRef(false);
 
     /* The three-panel month CAROUSEL is gone.
@@ -330,9 +340,9 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     );
 
     const handleTouchStart = (e: React.TouchEvent) => {
-      setSwipeStartY(e.touches[0].clientY);
-      setIsSwiping(true);
-      setHasTriggeredSwipeStart(false);
+      swipeStartYRef.current = e.touches[0].clientY;
+      isSwipingRef.current = true;
+      hasTriggeredSwipeStartRef.current = false;
 
       if (!isExternalScrollRef.current) {
         onScrollStart?.();
@@ -340,16 +350,16 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     };
 
     const handleTouchMove = (e: React.TouchEvent) => {
-      if (!isSwiping) return;
+      if (!isSwipingRef.current) return;
 
-      const diffY = Math.abs(swipeStartY - e.touches[0].clientY);
+      const diffY = Math.abs(swipeStartYRef.current - e.touches[0].clientY);
 
       if (
         diffY > 30 &&
-        !hasTriggeredSwipeStart &&
+        !hasTriggeredSwipeStartRef.current &&
         !isExternalScrollRef.current
       ) {
-        setHasTriggeredSwipeStart(true);
+        hasTriggeredSwipeStartRef.current = true;
         onSwipeStart?.();
       }
     };
@@ -367,10 +377,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     };
 
     const handleTouchEnd = (e: React.TouchEvent) => {
-      if (!isSwiping) return;
-      setIsSwiping(false);
+      if (!isSwipingRef.current) return;
+      isSwipingRef.current = false;
 
-      const diffY = swipeStartY - e.changedTouches[0].clientY;
+      const diffY = swipeStartYRef.current - e.changedTouches[0].clientY;
 
       if (Math.abs(diffY) > 50 && !isExternalScrollRef.current) {
         stepMonths(diffY > 0);

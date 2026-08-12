@@ -1,11 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { motion, AnimatePresence } from "framer-motion"
 
-import { LogbookCalendar } from "@/components/logbook-calendar"
+import { CalendarPanel } from "@/components/calendar-panel"
 import { useFlights } from "@/hooks/data/use-flights"
 import { useDashboardPeriod } from "@/hooks/use-dashboard-period"
+import { usePanelDualMonth } from "@/lib/layout/panel-mode"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
 
 /**
  * Range-mode wrapper around the logbook calendar.
@@ -19,8 +20,14 @@ import { useDashboardPeriod } from "@/hooks/use-dashboard-period"
  * - Second tap completes the range, auto-orders, and commits to the period.
  *
  * The visible month and the day-grid / month-year view toggle live in
- * `DashboardPeriodProvider` so the action bar's "MMM YY" label can read
- * and write them.
+ * `DashboardPeriodProvider`; the month/year picker opens from the CALENDAR's
+ * own header, the same as the logbook's. The action bar used to carry an
+ * expanding "MMM YYYY" label as well, which said the same thing twice and is
+ * exactly what the logbook removed.
+ *
+ * Everything visual — the collapse, the width, the radius, the glass, the dual
+ * month — comes from the shared `CalendarPanel`, so the two pages cannot drift
+ * apart again.
  */
 export function DashboardCalendarPanel() {
   const {
@@ -34,6 +41,8 @@ export function DashboardCalendarPanel() {
     setMonthYearView,
   } = useDashboardPeriod()
   const { flights } = useFlights()
+  const dualMonth = usePanelDualMonth()
+  const isSplitLayout = useIsDesktop()
 
   const [midPickStart, setMidPickStart] = React.useState<string | null>(null)
 
@@ -75,38 +84,34 @@ export function DashboardCalendarPanel() {
   const displayEnd = midPickStart ? null : resolved.toIso
 
   return (
-    <AnimatePresence initial={false}>
-      {showCalendar && (
-        <motion.div
-          key="dashboard-calendar"
-          initial={{ y: -16, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          exit={{ y: -16, opacity: 0 }}
-          transition={{ type: "spring", stiffness: 380, damping: 32 }}
-          className="pointer-events-none absolute inset-x-0 top-16 z-[60] flex justify-center px-2"
-        >
-          <div className="pointer-events-auto w-full max-w-md">
-            <LogbookCalendar
-              flights={flights}
-              selectedMonth={selectedMonth}
-              onMonthChange={(year, month) => setSelectedMonth({ year, month })}
-              onDateSelect={handleDateSelect}
-              rangeStart={displayStart}
-              rangeEnd={displayEnd}
-              view={monthYearView ? "monthYear" : "calendar"}
-              onMonthSelect={(year, month) => {
-                setSelectedMonth({ year, month })
-                setMonthYearView(false)
-              }}
-              onYearChange={(year) =>
-                setSelectedMonth({ year, month: selectedMonth.month })
-              }
-              glass
-              cornerRadius={24}
-            />
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    /* Absolute, so the dashboard's grid scrolls behind it — the same
+       arrangement the logbook's list uses, and what the glass needs to have
+       something to see through. Full panel width rather than the old
+       `max-w-md` card. */
+    <div
+      className="z-40 absolute left-0 right-0"
+      style={{ top: "var(--chrome-top)", contain: "layout style paint" }}
+    >
+      <CalendarPanel
+        open={showCalendar}
+        flights={flights}
+        selectedMonth={selectedMonth}
+        onMonthChange={(year, month) => setSelectedMonth({ year, month })}
+        onDateSelect={handleDateSelect}
+        rangeStart={displayStart}
+        rangeEnd={displayEnd}
+        dualMonth={dualMonth}
+        splitLayout={isSplitLayout}
+        monthYearView={monthYearView}
+        onHeaderPress={() => setMonthYearView(!monthYearView)}
+        onMonthSelect={(year, month) => {
+          setSelectedMonth({ year, month })
+          setMonthYearView(false)
+        }}
+        onYearChange={(year) =>
+          setSelectedMonth({ year, month: selectedMonth.month })
+        }
+      />
+    </div>
   )
 }

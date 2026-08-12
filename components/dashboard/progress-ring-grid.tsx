@@ -49,7 +49,7 @@ export function ProgressRingGrid({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm backdrop-blur-sm",
+        "rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm",
         className,
       )}
     >

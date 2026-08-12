@@ -22,7 +22,9 @@ export interface Aircraft {
   isHighPerformance: boolean;
   createdAt: number;
   updatedAt?: number;
-  deletedAt?: number;
+  /** Soft-delete stamp — the row is in Recently Deleted. `null` when cleared,
+   *  never undefined (see SyncableEntity). */
+  deletedAt?: number | null;
   syncStatus: SyncStatus;
   // Sync engine: server-authored monotonic version (delta cursor) + authoring device (LWW tiebreak)
   serverSeq?: number;
@@ -38,6 +40,14 @@ export type AircraftUpdate = Partial<Aircraft>;
 export interface AircraftReference {
   registration: string;
   data: string; // JSON string with aircraft details
+  /**
+   * Soft-delete stamp — the entry is in Recently Deleted.
+   *
+   * Local only: `referenceDb` has no sync queue, so a removed custom aircraft
+   * is removed on this device. That is what deleting one has always meant; the
+   * change here is only that it is recoverable for 30 days first.
+   */
+  deletedAt?: number | null;
 }
 
 /**

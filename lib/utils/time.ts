@@ -4,29 +4,6 @@
  */
 
 /**
- * Convert decimal hours to HH:MM string
- */
-export function decimalToHHMM(decimal: number): string {
-  if (!decimal || decimal <= 0 || !Number.isFinite(decimal)) return "00:00"
-  const hours = Math.floor(decimal)
-  const minutes = Math.round((decimal - hours) * 60)
-  return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-}
-
-/**
- * Convert HH:MM string to decimal hours
- */
-export function hhmmToDecimal(hhmm: string | undefined | null): number {
-  if (!hhmm || typeof hhmm !== "string") return 0
-  const parts = hhmm.split(":")
-  if (parts.length !== 2) return 0
-  const hours = Number.parseInt(parts[0], 10)
-  const minutes = Number.parseInt(parts[1], 10)
-  if (Number.isNaN(hours) || Number.isNaN(minutes)) return 0
-  return hours + minutes / 60
-}
-
-/**
  * Convert HH:MM string to total minutes
  */
 export function hhmmToMinutes(hhmm: string | undefined | null): number {
@@ -48,15 +25,6 @@ export function minutesToHHMM(totalMinutes: number): string {
   const hours = Math.floor(total / 60)
   const minutes = total % 60
   return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-}
-
-/**
- * Add two HH:MM times together
- */
-export function addHHMM(time1: string | undefined | null, time2: string | undefined | null): string {
-  const mins1 = hhmmToMinutes(time1)
-  const mins2 = hhmmToMinutes(time2)
-  return minutesToHHMM(mins1 + mins2)
 }
 
 /**
@@ -184,22 +152,6 @@ export function utcToLocal(utcTime: string | undefined | null, timezoneOffset: n
 }
 
 /**
- * Convert local time (HH:MM) to UTC given timezone offset in hours
- */
-export function localToUtc(localTime: string | undefined | null, timezoneOffset: number): string {
-  if (!localTime || !isValidHHMM(localTime)) return ""
-
-  const localMinutes = hhmmToMinutes(localTime)
-  let utcMinutes = localMinutes - timezoneOffset * 60
-
-  // Handle day wraparound
-  if (utcMinutes < 0) utcMinutes += 24 * 60
-  if (utcMinutes >= 24 * 60) utcMinutes -= 24 * 60
-
-  return minutesToHHMM(utcMinutes)
-}
-
-/**
  * Format timezone offset for display (e.g., "UTC+8", "UTC-5")
  */
 export function formatTimezoneOffset(offset: number): string {
@@ -214,56 +166,6 @@ export function formatTimezoneOffset(offset: number): string {
 export function getCurrentTimeUTC(): string {
   const now = new Date()
   return `${now.getUTCHours().toString().padStart(2, "0")}:${now.getUTCMinutes().toString().padStart(2, "0")}`
-}
-
-/**
- * Get current date in YYYY-MM-DD format (UTC)
- */
-export function getCurrentDateUTC(): string {
-  const now = new Date()
-  return now.toISOString().split("T")[0]
-}
-
-/**
- * Parse time input that might be in various formats
- * Accepts: "1430", "14:30", "2:30"
- * Returns: "14:30" (standardized HH:MM)
- */
-export function parseTimeInput(input: string): string {
-  if (!input) return ""
-
-  // Remove all non-digit characters except colon
-  const cleaned = input.replace(/[^\d:]/g, "")
-
-  // If it has a colon, split and format
-  if (cleaned.includes(":")) {
-    const [h, m] = cleaned.split(":")
-    const hours = Number.parseInt(h, 10)
-    const minutes = Number.parseInt(m, 10)
-    if (Number.isNaN(hours) || Number.isNaN(minutes)) return ""
-    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return ""
-    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-  }
-
-  // No colon - assume HHMM format
-  if (cleaned.length === 4) {
-    const hours = Number.parseInt(cleaned.slice(0, 2), 10)
-    const minutes = Number.parseInt(cleaned.slice(2, 4), 10)
-    if (Number.isNaN(hours) || Number.isNaN(minutes)) return ""
-    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return ""
-    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-  }
-
-  // HMM format (e.g., "230" for 2:30)
-  if (cleaned.length === 3) {
-    const hours = Number.parseInt(cleaned.slice(0, 1), 10)
-    const minutes = Number.parseInt(cleaned.slice(1, 3), 10)
-    if (Number.isNaN(hours) || Number.isNaN(minutes)) return ""
-    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return ""
-    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-  }
-
-  return ""
 }
 
 /**
@@ -371,43 +273,4 @@ export function parseTimeToUTC(
   }
 
   return date
-}
-
-/**
- * Detect if a flight is overnight (end time is before start time)
- * and return the appropriate day offset for the end time
- */
-export function detectOvernightOffset(
-  startTime: string,
-  endTime: string
-): number {
-  const startParts = parseTimeString(startTime)
-  const endParts = parseTimeString(endTime)
-
-  if (!startParts || !endParts) return 0
-
-  const startMinutes = startParts.hours * 60 + startParts.minutes
-  const endMinutes = endParts.hours * 60 + endParts.minutes
-
-  return endMinutes < startMinutes ? 1 : 0
-}
-
-/**
- * Apply a day offset to a date string
- * @param dateStr - Date in YYYY-MM-DD format
- * @param dayOffset - Number of days to add (can be negative)
- * @returns New date string in YYYY-MM-DD format, or empty string if invalid
- */
-export function applyDayOffset(dateStr: string, dayOffset: number): string {
-  const dateParts = parseDateString(dateStr)
-  if (!dateParts) return ""
-
-  const date = new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day))
-  date.setUTCDate(date.getUTCDate() + dayOffset)
-
-  const year = date.getUTCFullYear()
-  const month = (date.getUTCMonth() + 1).toString().padStart(2, "0")
-  const day = date.getUTCDate().toString().padStart(2, "0")
-
-  return `${year}-${month}-${day}`
 }

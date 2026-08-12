@@ -7,7 +7,7 @@ import { PageContainer } from "@/components/page-container";
 import { useDebounce } from "@/hooks/use-debounce";
 import { Button } from "@/components/ui/button";
 import { usePersonnel, useFlights } from "@/hooks/data";
-import { deletePersonnel, updateFlight, updatePersonnel } from "@/lib/db";
+import { deletePersonnel, updateFlight, updatePersonnel, type Personnel } from "@/lib/db";
 import { syncService } from "@/lib/sync";
 import {
   Loader2,
@@ -31,8 +31,12 @@ import { usePageActive } from "@/hooks/use-page-active";
 import { useRegisterMainActions } from "@/hooks/use-page-actions";
 import { GlassSearchButton } from "@/components/ui/glass-search-button";
 import { GlassIconButton } from "@/components/ui/glass-icon-button";
+import { PanelLoading } from "@/components/ui/page-loading";
 
 // Memoized crew card to prevent unnecessary re-renders during virtualization
+/** What a crew row renders from — the stored record. */
+type CrewCardItem = Personnel;
+
 const SwipeableCrewCard = memo(function SwipeableCrewCard({
   crew,
   onSelect,
@@ -43,16 +47,15 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
   isFavorite = false,
   onToggleFavorite,
 }: {
-  crew: {
-    id: string;
-    name: string;
-    crewId?: string;
-    organization?: string;
-    roles?: string[];
-    isMe?: boolean;
-  };
-  onSelect: () => void;
-  onDelete: () => void;
+  crew: CrewCardItem;
+  /**
+   * Given the crew member, so the page can pass ONE stable handler for every
+   * card. An inline `() => handleCrewSelect(crew)` per row gives each card new
+   * props on every render of this page and defeats the `memo` above outright —
+   * the same rule the flight list documents.
+   */
+  onSelect: (crew: CrewCardItem) => void;
+  onDelete: (crew: CrewCardItem) => void;
   isSelectMode: boolean;
   isSelected?: boolean;
   isRecent?: boolean;
@@ -68,14 +71,12 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
   return (
     <SwipeableCard
       id={`crew-${crew.id}`}
-      onClick={onSelect}
+      onClick={() => onSelect(crew)}
       actions={[
         {
           icon: <Trash2 className="h-5 w-5" />,
-          onClick: onDelete,
+          onClick: () => onDelete(crew),
           variant: "destructive",
-          holdToConfirm: true,
-          cancelLabel: "Cancel delete",
         },
       ]}
     >
@@ -239,6 +240,20 @@ export default function CrewPage() {
   // The list to virtualize
   const displayPersonnel = debouncedSearchQuery.trim() ? filteredPersonnel : browsePersonnel;
 
+  /**
+   * The two pinned groups above the alphabet, derived once.
+   *
+   * The JSX built each of these by scanning `sortedPersonnel` TWICE — once for
+   * the `length > 0` guard and again for the `.map` — so rendering this page
+   * walked the full crew list four times, on every render, for two short
+   * lists.
+   */
+  const selfCrew = useMemo(() => sortedPersonnel.filter((p) => p.isMe), [sortedPersonnel]);
+  const favoriteCrew = useMemo(
+    () => sortedPersonnel.filter((p) => p.favorite && !p.isMe),
+    [sortedPersonnel]
+  );
+
   // Generate FastScroll items from crew names (all personnel for full alphabet coverage)
   const fastScrollItems = useMemo(() => {
     const allCrew = sortedPersonnel.filter((p) => !p.isMe && !p.favorite);
@@ -318,9 +333,7 @@ export default function CrewPage() {
 
     if (isLoading) {
       setDetailContent(
-        <div className="flex items-center justify-center h-full">
-          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
-        </div>
+        <PanelLoading />
       );
       return;
     }
@@ -511,10 +524,11 @@ export default function CrewPage() {
     await mutate(CACHE_KEYS.personnel);
   }, [personnel]);
 
-  const performDelete = async (crew: (typeof personnel)[0]) => {
+  // Stable, so the memoized cards actually hold — see SwipeableCrewCard.onDelete.
+  const performDelete = useCallback(async (crew: CrewCardItem) => {
     await deletePersonnel(crew.id);
     await mutate(CACHE_KEYS.personnel);
-  };
+  }, []);
 
   const pageTitle = fieldType
     ? `Select ${
@@ -567,16 +581,15 @@ export default function CrewPage() {
             {!debouncedSearchQuery.trim() && (
               <div className="space-y-3">
                 {/* Self Section */}
-                {sortedPersonnel.filter((p) => p.isMe).length > 0 && (
+                {selfCrew.length > 0 && (
                   <div className="space-y-1">
-                    {sortedPersonnel
-                      .filter((p) => p.isMe)
+                    {selfCrew
                       .map((crew) => (
                         <SwipeableCrewCard
                           key={crew.id}
                           crew={crew}
-                          onSelect={() => handleCrewSelect(crew)}
-                          onDelete={() => performDelete(crew)}
+                          onSelect={handleCrewSelect}
+                          onDelete={performDelete}
                           isSelectMode={!!fieldType}
                           isSelected={!fieldType && selectedCrewId === crew.id}
                           isFavorite={!!crew.favorite}
@@ -587,20 +600,19 @@ export default function CrewPage() {
                 )}
 
                 {/* Favorites Section */}
-                {sortedPersonnel.filter((p) => p.favorite && !p.isMe).length > 0 && (
+                {favoriteCrew.length > 0 && (
                   <div className="space-y-1.5">
                     <h2 className="text-xs font-semibold text-primary uppercase px-1 flex items-center gap-1">
                       <Star className="h-3 w-3 fill-primary" /> Favorites
                     </h2>
                     <div className="space-y-1">
-                      {sortedPersonnel
-                        .filter((p) => p.favorite && !p.isMe)
+                      {favoriteCrew
                         .map((crew) => (
                           <SwipeableCrewCard
                             key={crew.id}
                             crew={crew}
-                            onSelect={() => handleCrewSelect(crew)}
-                            onDelete={() => performDelete(crew)}
+                            onSelect={handleCrewSelect}
+                            onDelete={performDelete}
                             isSelectMode={!!fieldType}
                             isSelected={!fieldType && selectedCrewId === crew.id}
                             isFavorite
@@ -623,8 +635,8 @@ export default function CrewPage() {
                         <SwipeableCrewCard
                           key={`recent-${crew.id}`}
                           crew={crew}
-                          onSelect={() => handleCrewSelect(crew)}
-                          onDelete={() => performDelete(crew)}
+                          onSelect={handleCrewSelect}
+                          onDelete={performDelete}
                           isSelectMode={!!fieldType}
                           isSelected={!fieldType && selectedCrewId === crew.id}
                           isRecent
@@ -691,8 +703,8 @@ export default function CrewPage() {
                       <div className="pt-1">
                         <SwipeableCrewCard
                           crew={crew}
-                          onSelect={() => handleCrewSelect(crew)}
-                          onDelete={() => performDelete(crew)}
+                          onSelect={handleCrewSelect}
+                          onDelete={performDelete}
                           isSelectMode={!!fieldType}
                           isSelected={!fieldType && selectedCrewId === crew.id}
                           isRecent={recentCrewIds.has(crew.id)}

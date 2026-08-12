@@ -1,4 +1,4 @@
-import { getSyncQueue, getLastSyncTime } from "@/lib/db"
+import { getSyncQueueCount, getLastSyncTime } from "@/lib/db"
 
 /**
  * Configuration for sync triggers
@@ -186,14 +186,17 @@ export class SyncTriggerManager {
     should: boolean
     reason?: string
   }> {
-    // Get queue size
-    const queue = await getSyncQueue()
-    if (queue.length === 0) {
+    // Queue SIZE only — counted off the index rather than read into memory.
+    // This runs on the 10s poll for the whole session, and materialising every
+    // pending row to compare a length against zero is the kind of work that
+    // lands in the middle of a scroll.
+    const queueSize = await getSyncQueueCount()
+    if (queueSize === 0) {
       return { should: false, reason: "queue-empty" }
     }
 
     // Check queue size threshold
-    if (queue.length >= this.config.queueSizeThreshold) {
+    if (queueSize >= this.config.queueSizeThreshold) {
       return { should: true, reason: "queue-size-threshold" }
     }
 

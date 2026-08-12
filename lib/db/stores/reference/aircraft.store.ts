@@ -7,6 +7,7 @@
  */
 
 import { referenceDb } from "../../reference-db"
+import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
 import { normalizeRegistration } from "@/lib/utils/string"
 import type { AircraftReference, AircraftRecord } from "@/types/entities/aircraft.types"
 
@@ -319,20 +320,78 @@ export async function getAircraftFromDatabase(
   return referenceDb.aircraftDatabase.get(registration.toUpperCase())
 }
 
+/**
+ * SOFT delete — the entry goes to Recently Deleted for 30 days.
+ *
+ * Local only, because `referenceDb` has no sync queue; deleting a custom
+ * aircraft has always been a local act. What changes is that it is now
+ * recoverable rather than destroyed on the tap.
+ */
 export async function deleteAircraftFromDatabase(
   registration: string
 ): Promise<boolean> {
-  const aircraft = await referenceDb.aircraftDatabase.get(
-    registration.toUpperCase()
-  )
+  const key = registration.toUpperCase()
+  const aircraft = await referenceDb.aircraftDatabase.get(key)
   if (!aircraft) return false
 
-  await referenceDb.aircraftDatabase.delete(registration.toUpperCase())
+  await referenceDb.aircraftDatabase.put({ ...aircraft, deletedAt: Date.now() })
   return true
 }
 
+/** Put a soft-deleted entry back. */
+export async function restoreAircraftInDatabase(
+  registration: string
+): Promise<boolean> {
+  const key = registration.toUpperCase()
+  const aircraft = await referenceDb.aircraftDatabase.get(key)
+  if (!aircraft) return false
+
+  await referenceDb.aircraftDatabase.put({ ...aircraft, deletedAt: null })
+  return true
+}
+
+/** Destroy it now rather than in 30 days. */
+export async function permanentlyDeleteAircraftFromDatabase(
+  registration: string
+): Promise<boolean> {
+  const key = registration.toUpperCase()
+  const aircraft = await referenceDb.aircraftDatabase.get(key)
+  if (!aircraft) return false
+
+  await referenceDb.aircraftDatabase.delete(key)
+  return true
+}
+
+/** Sweep whatever has run out its 30 days. */
+export async function purgeExpiredDeletedAircraftReferences(
+  now = Date.now()
+): Promise<number> {
+  const expired = await referenceDb.aircraftDatabase
+    .filter(
+      (r) =>
+        r.deletedAt != null &&
+        !isWithinRetention(r.deletedAt, now, DELETED_RETENTION_MS)
+    )
+    .toArray()
+  for (const r of expired) {
+    await referenceDb.aircraftDatabase.delete(r.registration)
+  }
+  return expired.length
+}
+
+/** Everything currently in Recently Deleted, newest first. */
+export async function getDeletedAircraftReferences(): Promise<
+  AircraftReference[]
+> {
+  const rows = await referenceDb.aircraftDatabase
+    .filter((r) => r.deletedAt != null)
+    .toArray()
+  return rows.sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0))
+}
+
 export async function getAllAircraftFromDatabase(): Promise<AircraftReference[]> {
-  return referenceDb.aircraftDatabase.toArray()
+  // LIVE entries only — a deleted one is in Recently Deleted.
+  return referenceDb.aircraftDatabase.filter((r) => r.deletedAt == null).toArray()
 }
 
 export async function hasAircraftInDatabase(

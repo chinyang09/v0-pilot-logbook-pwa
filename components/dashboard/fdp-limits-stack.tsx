@@ -6,6 +6,7 @@ import { ShieldAlert, Clock, ArrowUpRight } from "lucide-react"
 
 import { MiniBar } from "@/components/ui/mini-bar"
 import { useFDPData } from "@/hooks/data/use-fdp-data"
+import { usePageActive } from "@/hooks/use-page-active"
 import { cn } from "@/lib/utils"
 
 interface LimitRow {
@@ -27,12 +28,34 @@ function formatHours(hours: number): string {
   return hours.toFixed(1)
 }
 
-function useLiveClock(intervalMs: number = 1000): number {
+/**
+ * A 1Hz clock, and it only runs when something is actually counting down.
+ *
+ * The dashboard is a keep-alive page: mounted on first visit and never
+ * unmounted. An unconditional interval here therefore re-rendered this whole
+ * stack — four limit rows and their bars — once a second for the rest of the
+ * session, including while the user was somewhere else entirely, scrolling the
+ * logbook. It exists to drive ONE countdown, which is only shown when the pilot
+ * is not yet legal to fly; the rest of the time there is nothing to tick.
+ *
+ * So it is gated on both: a pending deadline, and this tab being the one on
+ * screen. `now` simply holds its last value while the clock is off, and no
+ * consumer can see it in that state.
+ */
+function useLiveClock(active: boolean, intervalMs: number = 1000): number {
   const [now, setNow] = React.useState(() => Date.now())
   React.useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), intervalMs)
-    return () => window.clearInterval(id)
-  }, [intervalMs])
+    if (!active) return
+    const tick = () => setNow(Date.now())
+    // Catch up immediately on re-activation, from a callback rather than the
+    // effect body (see the react-compiler lint note in CLAUDE.md).
+    const first = window.setTimeout(tick, 0)
+    const id = window.setInterval(tick, intervalMs)
+    return () => {
+      window.clearTimeout(first)
+      window.clearInterval(id)
+    }
+  }, [active, intervalMs])
   return now
 }
 
@@ -48,7 +71,10 @@ function formatDuration(ms: number): string {
 
 export function FDPLimitsStack({ className }: { className?: string }) {
   const { cumulativeLimits, capacity, restUntilLegal, forecast } = useFDPData()
-  const now = useLiveClock(1000)
+  // Tick only while there is a deadline to count down AND the dashboard is the
+  // tab on screen — see useLiveClock.
+  const isVisibleTab = usePageActive("/")
+  const now = useLiveClock(isVisibleTab && !!restUntilLegal?.legalAtUtc)
 
   const rows: LimitRow[] = [
     {
@@ -91,7 +117,7 @@ export function FDPLimitsStack({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex h-full flex-col rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm backdrop-blur-sm",
+        "flex h-full flex-col rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm",
         className,
       )}
     >

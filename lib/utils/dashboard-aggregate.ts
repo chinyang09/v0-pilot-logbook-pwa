@@ -354,10 +354,6 @@ export function aggregateDashboard({
   return result
 }
 
-export function minutesToDecimal(minutes: number): number {
-  return Math.round((minutes / 60) * 10) / 10
-}
-
 export function formatDecimalHours(minutes: number): string {
   const dec = minutes / 60
   if (!Number.isFinite(dec) || dec <= 0) return "0.0"

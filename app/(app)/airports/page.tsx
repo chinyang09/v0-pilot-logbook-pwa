@@ -10,6 +10,7 @@ import {
   hasExactAirportCodeMatch,
   toggleAirportFavorite,
   getAirportByIcao,
+  getAirportByICAO,
   updateFlight,
   addCustomAirport,
   type Airport,
@@ -31,6 +32,7 @@ import { usePageActive } from "@/hooks/use-page-active";
 import { useRegisterMainActions } from "@/hooks/use-page-actions";
 import { GlassSearchButton } from "@/components/ui/glass-search-button";
 import { GlassIconButton } from "@/components/ui/glass-icon-button";
+import { PanelLoading } from "@/components/ui/page-loading";
 
 // Memoized airport card to prevent unnecessary re-renders during virtualization
 interface AirportCardProps {
@@ -231,10 +233,27 @@ export default function AirportsPage() {
       }
       if (recentIcaoList.length >= 10) break;
     }
+    // Indexed lookup, not a scan. This was `airports.find(…)` per recent code —
+    // up to ten passes over the whole ~10k reference table, each uppercasing
+    // every row, inside a memo that re-runs whenever `flights` changes (so:
+    // after every sync).
     return recentIcaoList
-      .map((icao) => airports.find((a) => a.icao.toUpperCase() === icao))
+      .map((icao) => getAirportByICAO(airports, icao))
       .filter((a): a is Airport => !!a && !a.isFavorite);
   }, [flights, airports]);
+
+  /**
+   * The pinned favourites, derived once.
+   *
+   * The JSX asked `airports.some(a => a.isFavorite)` for the section guard and
+   * then `airports.filter(…)` for the rows — two full passes over the ~10k
+   * reference table on every render of this page, to produce a list that is
+   * usually a handful of entries.
+   */
+  const favoriteAirports = useMemo(
+    () => airports.filter((a: Airport) => a.isFavorite),
+    [airports]
+  );
 
   // Set of recent ICAO codes for fast lookup
   const recentIcaos = useMemo(() => {
@@ -328,9 +347,7 @@ export default function AirportsPage() {
 
     if (isLoading) {
       setDetailContent(
-        <div className="flex items-center justify-center h-full">
-          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
-        </div>
+        <PanelLoading />
       );
       return;
     }
@@ -645,14 +662,13 @@ export default function AirportsPage() {
             {!debouncedSearchQuery.trim() && (
               <div className={`space-y-3 `}>
                 {/* Favorites Section */}
-                {airports.some((a: Airport) => a.isFavorite) && (
+                {favoriteAirports.length > 0 && (
                   <div className="space-y-1.5">
                     <h2 className="text-xs font-semibold text-primary uppercase px-1 flex items-center gap-1">
                       <Star className="h-3 w-3 fill-primary" /> Favorites
                     </h2>
                     <div className="space-y-1">
-                      {airports
-                        .filter((a: Airport) => a.isFavorite)
+                      {favoriteAirports
                         .map((a: Airport) => (
                           <AirportCard
                             key={a.icao}

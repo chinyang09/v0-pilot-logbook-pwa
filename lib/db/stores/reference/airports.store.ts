@@ -10,6 +10,7 @@
 
 import { referenceDb } from "../../reference-db"
 import type { Airport } from "@/types/entities/airport.types"
+import { tzFormatter, tzOffsetName } from "@/lib/utils/tz-format"
 
 // ============================================
 // Types (re-export for convenience)
@@ -68,6 +69,28 @@ function mapRawAirports(rawData: Record<string, any>, favoriteIcaos: Set<string>
  * .equals(1)` index query that never matched the boolean values actually
  * stored, silently dropping favorites on every dataset version bump).
  */
+/**
+ * Bumped by every write to the airports table, so a cached in-memory copy can
+ * tell whether it is still current.
+ *
+ * `useAirportDatabase` used to re-read the WHOLE table from IndexedDB on every
+ * mount — ten thousand records deserialised each time the flight form opened,
+ * i.e. on every flight tap — because a blind reload was the only way it could
+ * notice an airport added by the import enricher (which writes to Dexie
+ * directly, not through the hook). A counter says the same thing precisely:
+ * the hook reloads when something actually changed and skips otherwise.
+ *
+ * Every write to `referenceDb.airports` lives in THIS FILE — the three
+ * functions below are the complete set — so this stays trustworthy as long as
+ * new writers bump it too.
+ */
+let airportsRevision = 0
+
+/** The current airports-table revision. See `airportsRevision`. */
+export function getAirportsRevision(): number {
+  return airportsRevision
+}
+
 async function rebuildAirportsTable(rawData: Record<string, any>): Promise<Airport[]> {
   const existing = await referenceDb.airports.toArray()
   const favoriteIcaos = new Set(existing.filter((a) => a.isFavorite).map((a) => a.icao))
@@ -85,6 +108,7 @@ async function rebuildAirportsTable(rawData: Record<string, any>): Promise<Airpo
     }
     await referenceDb.setMetadata("airport_version", DATA_VERSION)
   })
+  airportsRevision++
 
   return airports
 }
@@ -221,6 +245,7 @@ export async function addCustomAirport(airport: Omit<Airport, "id"> & { icao: st
     submissionId,
   }
   await referenceDb.airports.put(newAirport)
+  airportsRevision++
   return newAirport
 }
 
@@ -237,6 +262,7 @@ export async function toggleAirportFavorite(icao: string): Promise<boolean> {
 
   const newStatus = !airport.isFavorite
   await referenceDb.airports.update(icao.toUpperCase(), { isFavorite: newStatus })
+  airportsRevision++
   return newStatus
 }
 
@@ -260,19 +286,12 @@ export async function getFavoriteAirports(): Promise<Airport[]> {
 export function getAirportLocalTime(tz: string): string {
   try {
     const now = new Date()
-    const offsetStr =
-      new Intl.DateTimeFormat("en-US", {
-        timeZone: tz,
-        timeZoneName: "shortOffset",
-      })
-        .formatToParts(now)
-        .find((p) => p.type === "timeZoneName")?.value || "UTC"
-
-    const timeStr = now.toLocaleTimeString("en-US", {
-      timeZone: tz,
-      hour: "2-digit",
-      minute: "2-digit",
-    })
+    const offsetStr = tzOffsetName(tz, "shortOffset", now) || "UTC"
+    const timeStr = tzFormatter(
+      tz,
+      { hour: "2-digit", minute: "2-digit" },
+      "hhmm",
+    ).format(now)
 
     return `${timeStr} (${offsetStr})`
   } catch {
@@ -287,20 +306,11 @@ export function getAirportLocalTime(tz: string): string {
 export function getAirportTimeInfo(tz: string): { offset: number; offsetStr: string } {
   try {
     const now = new Date()
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      timeZoneName: "longOffset",
-    }).formatToParts(now)
-
-    const offsetPart = parts.find((p) => p.type === "timeZoneName")?.value || ""
+    const offsetPart = tzOffsetName(tz, "longOffset", now)
     const match = offsetPart.match(/([+-]\d+)/)
     const offset = match ? Number.parseInt(match[1]) : 0
 
-    const shortParts = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      timeZoneName: "shortOffset",
-    }).formatToParts(now)
-    const offsetStr = shortParts.find((p) => p.type === "timeZoneName")?.value || "UTC"
+    const offsetStr = tzOffsetName(tz, "shortOffset", now) || "UTC"
 
     return { offset, offsetStr }
   } catch {
@@ -326,13 +336,53 @@ export function formatAirport(airport: Airport): string {
 // ============================================
 
 /**
+ * Code → airport indexes, built once per ARRAY and cached against it.
+ *
+ * Both lookups below used to be `airports.find(a => a.code.toUpperCase() === …)`
+ * over the whole reference table — roughly ten thousand rows, each one
+ * allocating an uppercased string, for a single hit. The flight form does FOUR
+ * of these every time it opens (two memos for the departure/arrival airport and
+ * two more in the timezone effect), and again whenever either ICAO changes, so
+ * opening one flight burned about forty thousand string allocations.
+ *
+ * A `WeakMap` keyed on the array itself means no call site changes and no
+ * invalidation to get wrong: a new array (a reload, or `mutate` adding a custom
+ * airport) is simply a different key, and the old index is collected with the
+ * old array.
+ *
+ * `find` returns the FIRST match, so a duplicate code must not overwrite the
+ * entry already in the map.
+ */
+const icaoIndexes = new WeakMap<Airport[], Map<string, Airport>>()
+const iataIndexes = new WeakMap<Airport[], Map<string, Airport>>()
+
+function codeIndex(
+  cache: WeakMap<Airport[], Map<string, Airport>>,
+  airports: Airport[],
+  code: (a: Airport) => string | undefined,
+): Map<string, Airport> {
+  let index = cache.get(airports)
+  if (!index) {
+    index = new Map()
+    for (const airport of airports) {
+      const value = code(airport)
+      if (!value) continue
+      const key = value.toUpperCase()
+      if (!index.has(key)) index.set(key, airport)
+    }
+    cache.set(airports, index)
+  }
+  return index
+}
+
+/**
  * @deprecated Use getAirportByIcao instead
  */
 export const getAirportByICAO = (airports: Airport[], icao: string) =>
-  airports.find((a) => a.icao.toUpperCase() === icao.toUpperCase())
+  codeIndex(icaoIndexes, airports, (a) => a.icao).get(icao.toUpperCase())
 
 /**
  * @deprecated Use getAirportByIata instead
  */
 export const getAirportByIATA = (airports: Airport[], iata: string) =>
-  airports.find((a) => a.iata && a.iata.toUpperCase() === iata.toUpperCase())
+  codeIndex(iataIndexes, airports, (a) => a.iata).get(iata.toUpperCase())

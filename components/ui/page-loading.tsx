@@ -12,3 +12,21 @@ export function PageLoading() {
     </div>
   )
 }
+
+/**
+ * The same state for a DETAIL PANEL, which already has its height from the
+ * pane it fills (so no `min-h`) and no background of its own.
+ *
+ * The aircraft, airports and crew pages each carried their own copy of a
+ * hand-rolled ring (`border-2 border-primary border-t-transparent`) — the same
+ * markup three times, and a different spinner from the one every route-level
+ * load shows. Waiting for a pane looked like a different kind of waiting
+ * depending on which tab you were on.
+ */
+export function PanelLoading() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+    </div>
+  )
+}

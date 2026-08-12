@@ -57,13 +57,6 @@ export function base64URLDecode(str: string): Uint8Array<ArrayBuffer> {
   return bytes
 }
 
-// Generate a random challenge
-export function generateChallenge(): string {
-  const buffer = new Uint8Array(32)
-  crypto.getRandomValues(buffer)
-  return base64URLEncode(buffer)
-}
-
 // RP (Relying Party) configuration
 // Pass the request host header from API routes for accurate production domain detection
 export function getRP(requestHost?: string) {
@@ -169,44 +162,6 @@ export function generateAuthenticationOptions(
       type: "public-key" as const,
       transports: cred.transports,
     })),
-  }
-}
-
-// Parse registration response and extract credential data
-export async function parseRegistrationResponse(credential: PublicKeyCredential): Promise<{
-  credentialId: string
-  publicKey: string
-  counter: number
-  deviceType: "singleDevice" | "multiDevice"
-  backedUp: boolean
-  transports?: AuthenticatorTransport[]
-}> {
-  const response = credential.response as AuthenticatorAttestationResponse
-
-  const credentialId = base64URLEncode(credential.rawId)
-  const publicKey = base64URLEncode(response.getPublicKey()!)
-
-  // Get authenticator data
-  const authData = new Uint8Array(response.getAuthenticatorData())
-
-  // Flags are at byte 32
-  const flags = authData[32]
-  const backedUp = (flags & 0x10) !== 0 // BS flag
-  const deviceType = (flags & 0x08) !== 0 ? "multiDevice" : "singleDevice" // BE flag
-
-  // Counter is at bytes 33-36 (big endian)
-  const counter = new DataView(authData.buffer, 33, 4).getUint32(0, false)
-
-  // Get transports if available
-  const transports = response.getTransports?.() as AuthenticatorTransport[] | undefined
-
-  return {
-    credentialId,
-    publicKey,
-    counter,
-    deviceType,
-    backedUp,
-    transports,
   }
 }
 

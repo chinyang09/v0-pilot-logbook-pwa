@@ -1,11 +1,10 @@
 "use client"
 
-import { useEffect, useMemo } from "react"
+import { useMemo } from "react"
 import { Loader2 } from "lucide-react"
 
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
-import { syncService } from "@/lib/sync"
 import { useAuth } from "@/components/providers/auth-provider"
 import { refreshAllData } from "@/hooks/data"
 
@@ -17,12 +16,9 @@ import { DashboardGrid } from "@/components/dashboard/dashboard-grid"
 export default function Dashboard() {
   const { isLoading: authLoading, isAuthenticated } = useAuth()
 
-  useEffect(() => {
-    const unsubscribe = syncService.onDataChanged(() => {
-      refreshAllData()
-    })
-    return unsubscribe
-  }, [])
+  // No `onDataChanged` subscription here: `SyncProvider` owns the one global
+  // one. This page is keep-alive, so a second permanent subscriber just ran
+  // the whole refresh twice per sync cycle.
 
   // Keep-alive: only the active tab owns the header actions, and re-activation
   // refreshes data so the retained page never shows stale numbers.

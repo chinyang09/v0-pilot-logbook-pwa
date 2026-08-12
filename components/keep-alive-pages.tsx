@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, Suspense, lazy, Component, type ReactNode, type ErrorInfo } from "react"
+import { useState, useEffect, useRef, memo, Suspense, lazy, Component, type ReactNode, type ErrorInfo } from "react"
 import { usePathname } from "next/navigation"
 import { ActiveRouteProvider } from "@/hooks/use-page-active"
 import { PageLoading } from "@/components/ui/page-loading"
@@ -74,6 +74,33 @@ const PERSISTENT_PAGES: Record<KeepAliveRouteKey, React.LazyExoticComponent<Reac
   "/crew": lazy(() => import("@/app/(app)/crew/page")),
   "/roster": lazy(() => import("@/app/(app)/roster/page")),
 }
+
+/**
+ * One kept-alive page, memoized on its route key — which never changes for a
+ * given mount, so this subtree is only ever rendered by the page itself.
+ *
+ * Without the `memo` the surrounding stack recreated `<PageComponent />` on
+ * every navigation, and a new element is a re-render however unchanged the
+ * props are. All six retained pages therefore re-rendered on every tab switch,
+ * for a route change that concerns two of them. (The wrapper `div` still
+ * re-renders — its visibility/z-index DO change — but a div is not a page.)
+ */
+const KeepAlivePage = memo(function KeepAlivePage({
+  routeKey,
+}: {
+  routeKey: KeepAliveRouteKey
+}) {
+  const PageComponent = PERSISTENT_PAGES[routeKey]
+  return (
+    <PageErrorBoundary>
+      {/* Shared spinner instead of a blank pane while the lazy chunk loads on
+          the first visit to this tab. */}
+      <Suspense fallback={<PageLoading />}>
+        <PageComponent />
+      </Suspense>
+    </PageErrorBoundary>
+  )
+})
 
 /**
  * Normalise pathname → route key.
@@ -181,7 +208,6 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
       <div ref={stackRef} className="flex-1 relative overflow-hidden">
         {/* Persistent pages: lazy-mounted on first visit, never unmounted */}
         {renderKeys.map(key => {
-          const PageComponent = PERSISTENT_PAGES[key as KeepAliveRouteKey]
           const isActive = key === routeKey
           return (
             <div
@@ -198,13 +224,7 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
                 zIndex: isActive ? 1 : 0,
               }}
             >
-              <PageErrorBoundary>
-                {/* Shared spinner instead of a blank pane while the lazy chunk
-                    loads on the first visit to this tab. */}
-                <Suspense fallback={<PageLoading />}>
-                  <PageComponent />
-                </Suspense>
-              </PageErrorBoundary>
+              <KeepAlivePage routeKey={key as KeepAliveRouteKey} />
             </div>
           )
         })}

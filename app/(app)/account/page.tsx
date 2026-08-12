@@ -169,9 +169,17 @@ export default function AccountPage() {
       e.preventDefault()
       setDeferredInstallPrompt(e)
     }
+    // `appinstalled` used to be an inline arrow with no matching removal. This
+    // page is NOT keep-alive, so it unmounts on every navigation away and each
+    // visit left another listener behind, holding this component's scope alive
+    // through the `setPwaInstalled` closure.
+    const onInstalled = () => setPwaInstalled(true)
     window.addEventListener("beforeinstallprompt", handler)
-    window.addEventListener("appinstalled", () => setPwaInstalled(true))
-    return () => window.removeEventListener("beforeinstallprompt", handler)
+    window.addEventListener("appinstalled", onInstalled)
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handler)
+      window.removeEventListener("appinstalled", onInstalled)
+    }
   }, [])
 
   const handlePwaInstall = useCallback(async () => {
@@ -798,8 +806,6 @@ export default function AccountPage() {
                       icon: <Trash2 className="h-5 w-5" />,
                       ariaLabel: "Delete passkey",
                       variant: "destructive",
-                      holdToConfirm: true,
-                      cancelLabel: "Cancel revoke",
                       disabled: !canRemove,
                       onClick: () => handleRemovePasskey(pk.credentialId),
                     },
@@ -875,8 +881,6 @@ export default function AccountPage() {
                       icon: session.isCurrent ? <LogOut className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />,
                       ariaLabel: session.isCurrent ? "Sign out this device" : "Revoke session",
                       variant: "destructive",
-                      holdToConfirm: true,
-                      cancelLabel: "Cancel revoke",
                       onClick: () => handleRevokeSession(session),
                     },
                   ]}

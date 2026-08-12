@@ -32,7 +32,7 @@ export function ToLogCard({
       href="/logbook"
       aria-label="Takeoffs and landings"
       className={cn(
-        "flex h-full flex-col rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm backdrop-blur-sm transition-colors hover:border-primary/40",
+        "flex h-full flex-col rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm transition-colors hover:border-primary/40",
         className,
       )}
     >

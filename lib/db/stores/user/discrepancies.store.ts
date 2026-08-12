@@ -9,7 +9,7 @@ import type {
   DiscrepancyType,
 } from "@/types/entities/roster.types"
 import { addToSyncQueue, enqueueMany, getDeviceId } from "./sync-queue.store"
-import { updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
+import { updateEntity, purgeEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
 import { isWithinRetention } from "@/lib/utils/retention"
 
 /**
@@ -133,7 +133,7 @@ export async function purgeExpiredAcceptedDiscrepancies(
     .toArray()
 
   for (const d of expired) {
-    await deleteEntity<Discrepancy>(userDb.discrepancies, "discrepancies", d.id)
+    await purgeEntity<Discrepancy>(userDb.discrepancies, "discrepancies", d.id)
   }
   return expired.length
 }
@@ -186,10 +186,15 @@ export async function getDiscrepanciesByFlightLog(flightLogId: string): Promise<
 }
 
 /**
- * Delete discrepancy
+ * Delete a discrepancy — HARD, no Recently Deleted.
+ *
+ * A discrepancy is import bookkeeping, not a record the pilot authored: the
+ * comparison it stands for is regenerated from the next report, and its own
+ * 90-day accepted window is the undo that matters. Putting these in Recently
+ * Deleted would fill it with rows nobody thinks of as things they deleted.
  */
 export async function deleteDiscrepancy(id: string): Promise<boolean> {
-  return deleteEntity<Discrepancy>(userDb.discrepancies, "discrepancies", id)
+  return purgeEntity<Discrepancy>(userDb.discrepancies, "discrepancies", id)
 }
 
 /**

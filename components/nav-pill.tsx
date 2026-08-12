@@ -26,8 +26,8 @@ import { GlassContainer } from "@/components/ui/glass-container"
 import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths"
-import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { usePreferences } from "@/components/providers/preferences-provider"
+import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { navSections, dashboardNavItem } from "@/components/nav-sections"
 import { SyncStatus } from "@/components/sync-status"
 import type { BottomNavTab } from "@/types/db/stores.types"
@@ -505,32 +505,30 @@ const LENS_OVERHANG = 10
  *  circle, over narrow tabs (matches Apple's tab-bar lens proportions). */
 const LENS_PAD_X = 26
 /**
- * The mobile sidebar's backdrop blur, as a real PROGRESSIVE blur: heaviest
- * against the sidebar's edge and gone by the far side of the screen.
+ * The mobile sidebar's backdrop is a PROGRESSIVE DARKEN — no blur.
  *
- * A single blurred layer behind an alpha ramp — which is what this was — does
- * not do that. It cross-fades a fully blurred page with a fully sharp one, so
- * the middle reads as a ghosted double image rather than as "less blurred".
- * A ramp of RADII is what reads as depth.
+ * It used to be three stacked `backdrop-filter` layers (4 / 10 / 20px, each
+ * narrower than the last) making a real ramp of radii, and the reasoning for
+ * that construction still holds optically. What it does not survive is the
+ * cost: a `backdrop-filter` is a readback of everything behind the element
+ * plus a separable blur, re-rasterised whenever the backdrop OR the geometry
+ * changes — and this fires during the one 300ms window where the panel beside
+ * it is animating `left`, `width` and `height`, on the surface a phone user
+ * touches most. Three of them, full screen height.
  *
- * Ordered smallest-radius/widest first, so each layer completely covers the
- * ones below it wherever they are opaque: the stack can then only ever add
- * blur, and the ramp stays monotonic whether or not the engine composes one
- * layer's output into the next one's backdrop (Blink does, WebKit may not).
- * That is the whole reason this is safe to stack when the glass material is
- * not — these are PURE blurs, so the two engines differ by a few px of
- * effective radius near the edge instead of by colour.
+ * A gradient costs one paint and nothing else, and fading it is a composited
+ * opacity. The depth cue moves from "how blurred" to "how dark", which is what
+ * the bottom edge treatment has always used and what most native apps use
+ * during an active transition.
  *
- * Each layer is only as WIDE as it needs to be, rather than full-screen: the
- * total blur work is ~20% more than the single 16px full-screen layer it
- * replaces, not 3x. `solid` is where that layer's own ramp starts, as a
- * fraction of its own width.
+ * It is ONE element, not two: the flat scrim is the gradient's own
+ * `background-color` (from `MODAL_SCRIM`) and the ramp is its
+ * `background-image`, so the whole backdrop is a single composited layer that
+ * also takes the dismissing tap.
  */
-const SIDEBAR_BACKDROP_BLUR = [
-  { blur: 4, width: "92%", solid: "45%" },
-  { blur: 10, width: "68%", solid: "40%" },
-  { blur: 20, width: "46%", solid: "35%" },
-] as const
+const SIDEBAR_BACKDROP_RAMP =
+  "linear-gradient(to right, var(--sidebar-scrim) 0%, transparent 58%)"
+
 
 /**
  * How much the PILL is squeezed inside the lens — vertically ONLY.
@@ -603,6 +601,8 @@ function PillBarContent({
   // the drag starts (Safari keeps null → the CSS convex material fallback).
   const suppressClickRef = useRef(false)
   const lastPtRef = useRef({ x: 0, y: 0 })
+  /** Pending lens frame — see applyLens. 0 when nothing is queued. */
+  const lensRafRef = useRef(0)
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // The pill's GlassContainer — its finger-tracking spotlight is driven
   // imperatively while the lens has pointer capture (its own move handler
@@ -691,19 +691,36 @@ function PillBarContent({
     host.appendChild(clone)
   }, [lensPhase, lensIndex])
 
-  const paintSpotlight = useCallback((clientX: number, clientY: number) => {
-    const gr = glassRootRef.current
-    if (!gr) return
-    const rect = gr.getBoundingClientRect()
-    gr.style.setProperty("--press-x", `${clientX - rect.left}px`)
-    gr.style.setProperty("--press-y", `${clientY - rect.top}px`)
-  }, [])
-
-  const positionLens = useCallback((clientX: number, clientY: number) => {
-    lastPtRef.current = { x: clientX, y: clientY }
+  /**
+   * Place the lens from `lastPtRef`, ONCE PER FRAME.
+   *
+   * This used to run straight off `pointermove`, and it read the glass root's
+   * rect (for the spotlight) at the END — after nine writes to `left`/`top`/
+   * `width`/`height` on the lens and its refraction copy. A layout READ after
+   * layout WRITES forces the browser to flush and recompute layout
+   * synchronously, and it did so on every pointer event of the one gesture in
+   * the app that has to feel like it is stuck to the finger. On a 120Hz panel
+   * that is twice a frame, and pointer events arrive coalesced besides.
+   *
+   * So: one pass per frame, and inside it every READ happens before any WRITE.
+   * Same values, same 1:1 follow — the finger cannot outrun a frame.
+   */
+  const applyLens = useCallback(() => {
+    lensRafRef.current = 0
+    const { x: clientX, y: clientY } = lastPtRef.current
     const lens = lensRef.current
     const drag = dragRef.current
     if (!lens || !drag || drag.rects.length === 0) return
+
+    // ── READS, all of them, before a single write ──
+    // The glass root's live box (for the spotlight) and the transform framer
+    // wrote this frame (for the refraction copy). `style.transform` is an
+    // inline read, so it forces nothing; the rect is the only real layout read
+    // in the pass, and taking it here means it never flushes our own writes.
+    const gr = glassRootRef.current
+    const grRect = gr?.getBoundingClientRect()
+    const grTransform = gr?.style.transform ?? ""
+
     const rects = drag.rects
     const localX = Math.max(0, Math.min(drag.base.width, clientX - drag.base.left))
     let nearest = 0
@@ -765,7 +782,7 @@ function PillBarContent({
       copy.style.top = `${drag.pill.top - lensTop}px`
       copy.style.width = `${drag.pill.width}px`
       copy.style.height = `${drag.pill.height}px`
-      copy.style.transform = glassRootRef.current?.style.transform ?? ""
+      copy.style.transform = grTransform
     }
 
     // Liquid wall: compress into the edge + strain toward the finger. The
@@ -774,8 +791,31 @@ function PillBarContent({
     squishX.set(1 - t * 0.16)
     squishY.set(1 + t * 0.12)
     nudgeX.set(Math.sign(overshoot) * t * 12)
-    paintSpotlight(clientX, clientY)
-  }, [paintSpotlight, squishX, squishY, nudgeX])
+
+    // The pill's spotlight follows the finger too — written here rather than in
+    // its own helper so it shares this pass's single rect read.
+    if (gr && grRect) {
+      gr.style.setProperty("--press-x", `${clientX - grRect.left}px`)
+      gr.style.setProperty("--press-y", `${clientY - grRect.top}px`)
+    }
+  }, [squishX, squishY, nudgeX])
+
+  /** Move handler: record the point, let the frame do the work. */
+  const positionLens = useCallback((clientX: number, clientY: number) => {
+    lastPtRef.current = { x: clientX, y: clientY }
+    if (lensRafRef.current) return
+    lensRafRef.current = requestAnimationFrame(applyLens)
+  }, [applyLens])
+
+  /** Apply immediately — for the portal mount, which must be placed before the
+   *  reveal on the next frame rather than a frame after it. */
+  const positionLensNow = useCallback(() => {
+    if (lensRafRef.current) {
+      cancelAnimationFrame(lensRafRef.current)
+      lensRafRef.current = 0
+    }
+    applyLens()
+  }, [applyLens])
 
   // Portal mount: position immediately from the live drag state, then reveal
   // on the next frame so the pop-in transition fires from the base styles.
@@ -783,9 +823,9 @@ function PillBarContent({
     lensRef.current = node
     const drag = dragRef.current
     if (!node || !drag) return
-    positionLens(lastPtRef.current.x, lastPtRef.current.y)
+    positionLensNow()
     requestAnimationFrame(() => node.classList.add("PillDragLens--on"))
-  }, [positionLens])
+  }, [positionLensNow])
 
   const handleLensDown = useCallback((e: React.PointerEvent) => {
     if (reduce || lensPhase === "settle") return
@@ -834,6 +874,13 @@ function PillBarContent({
   const handleLensEnd = useCallback((e: React.PointerEvent) => {
     const drag = dragRef.current
     dragRef.current = null
+    // A queued frame would re-place the lens from the last drag point, on top
+    // of the release settle. (`applyLens` bails on a null `dragRef` anyway —
+    // this just avoids the wasted frame.)
+    if (lensRafRef.current) {
+      cancelAnimationFrame(lensRafRef.current)
+      lensRafRef.current = 0
+    }
     // Fade the pill spotlight back out. Kill the horizontal strain INSTANTLY
     // (jump, not set) so releasing never springs the lens left/right.
     glassRootRef.current?.style.setProperty("--glass-press", "0")
@@ -1318,7 +1365,6 @@ export function NavPill() {
   const canPush = useDesktopPill()
   const hydrated = useHydrated()
   const { isOpen: sidebarOpen, toggle: toggleSidebar } = useSidebar()
-  const { hideNavbar } = useScrollNavbarContext()
   const pathname = usePathname()
   const { preferences } = usePreferences()
   const prefersReducedMotion = useReducedMotion()
@@ -1338,7 +1384,6 @@ export function NavPill() {
     <MobilePillMorph
       tabs={tabs}
       pathname={pathname}
-      hideNavbar={hideNavbar}
       prefersReducedMotion={!!prefersReducedMotion}
     />
   )
@@ -1557,7 +1602,16 @@ function DesktopPillMorph({
           // scrolling list reads as the layout wobbling, not as a press.
           disableTapFeedback={isSidebarShape}
           spotlight
-          morphing={phase === "opening" || phase === "closing"}
+          // As a PILL it sits in the header's ChromeFade band with the action
+          // buttons, so it can be as thin as they are. As the desktop SIDEBAR
+          // it has no backdrop at all — it stands beside the content rather
+          // than over it — so there it keeps the full undercoat. The mobile
+          // morph below is the exact reverse, which is why the material's
+          // background-color transitions.
+          overBlur={!isSidebarShape}
+          // The edge filters cost five backdrop readbacks a frame while the
+          // panel is resizing — see the [data-quiet] rule in globals.css.
+          quiet={phase === "opening" || phase === "closing"}
         >
           {/* Pill bar — always visible */}
           <div
@@ -1620,15 +1674,14 @@ function DesktopPillMorph({
 function MobilePillMorph({
   tabs,
   pathname,
-  hideNavbar,
   prefersReducedMotion,
 }: {
   tabs: readonly BottomNavTab[]
   pathname: string
-  hideNavbar: boolean
   prefersReducedMotion: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const DUR = prefersReducedMotion ? 0 : MORPH_DUR
   const LEAD = prefersReducedMotion ? 0 : MORPH_LEAD
@@ -1636,7 +1689,46 @@ function MobilePillMorph({
 
   const { phase, advancePhase, isSidebarShape } = useMorphPhase(sidebarOpen, TOTAL)
 
-  // Close sidebar on route change
+  /**
+   * The system BACK gesture closes the sidebar instead of navigating out from
+   * under it. On Android that swipe is a history back, and with nothing of ours
+   * on the stack it took the router to the previous page while the sidebar
+   * stayed open over the top of it.
+   *
+   * Every other close goes through `dismissSidebar` too, so there is one path.
+   */
+  const dismissSidebar = useBackDismiss(sidebarOpen, () => setSidebarOpen(false))
+
+  /**
+   * A tap on a nav item has to release the marker BEFORE it navigates.
+   *
+   * This is the hazard `useBackDismiss` is built around, and the sidebar is the
+   * worst case for it: the items are `<Link>`s, so left alone they push the new
+   * route on top of our marker and the marker is then a duplicate entry for the
+   * page you just left — one back press that visibly does nothing. Popping it
+   * afterwards is no better, because `back()` is queued and would undo the
+   * navigation instead.
+   *
+   * So the click is intercepted once, here, rather than in each item: cancel
+   * the Link's own navigation and hand the push to `dismiss` as its follow-up,
+   * which runs it after the marker is provably gone.
+   */
+  const onSidebarNavCapture = useCallback(
+    (e: React.MouseEvent) => {
+      const link = (e.target as Element | null)?.closest?.("[data-nav-link]")
+      const href = link?.getAttribute("href")
+      if (!href) return
+      // Let the browser handle anything that isn't a plain left-click open.
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      dismissSidebar(() => router.push(href))
+    },
+    [dismissSidebar, router],
+  )
+
+  // Close on route change — a navigation from anywhere else (a deep link, the
+  // bottom pill) should not leave the panel up.
   useEffect(() => {
     setSidebarOpen(false)
   }, [pathname])
@@ -1691,35 +1783,21 @@ function MobilePillMorph({
 
   return (
     <>
-      {/* Backdrop — dark scrim + progressive blur ramping out from the sidebar.
-          Both fade on the MORPH's own clock (`TOTAL`), so the veil arrives with
-          the panel instead of on a timing of its own. */}
+      {/* Backdrop — a flat scrim with a darker ramp against the sidebar's edge,
+          in ONE element (see SIDEBAR_BACKDROP_RAMP). It rides the MORPH's own
+          clock, so the veil arrives with the panel: it is a gradient, so
+          fading it is a composited opacity and there is no reason to settle it
+          early the way the old blur stack had to. */}
       <div
         className={cn("fixed inset-0 z-[58]", MODAL_SCRIM)}
         style={{
+          backgroundImage: SIDEBAR_BACKDROP_RAMP,
           opacity: sidebarOpen ? 1 : 0,
           pointerEvents: sidebarOpen ? "auto" : "none",
           transition: `opacity ${TOTAL}ms ${MORPH_EASE}`,
         }}
-        onClick={() => setSidebarOpen(false)}
+        onClick={() => dismissSidebar()}
       />
-      {SIDEBAR_BACKDROP_BLUR.map(({ blur, width, solid }) => (
-        <div
-          key={blur}
-          aria-hidden
-          className="fixed left-0 top-0 bottom-0 z-[59]"
-          style={{
-            width,
-            opacity: sidebarOpen ? 1 : 0,
-            pointerEvents: "none",
-            transition: `opacity ${TOTAL}ms ${MORPH_EASE}`,
-            backdropFilter: `blur(${blur}px)`,
-            WebkitBackdropFilter: `blur(${blur}px)`,
-            maskImage: `linear-gradient(to right, #000 0 ${solid}, transparent 100%)`,
-            WebkitMaskImage: `linear-gradient(to right, #000 0 ${solid}, transparent 100%)`,
-          }}
-        />
-      ))}
 
       <div
         ref={ref}
@@ -1737,7 +1815,15 @@ function MobilePillMorph({
           // scrolling list reads as the layout wobbling, not as a press.
           disableTapFeedback={isSidebarShape}
           spotlight
-          morphing={phase === "opening" || phase === "closing"}
+          // The reverse of the desktop morph. As the SIDEBAR this sits over
+          // SIDEBAR_BACKDROP_RAMP, which has already darkened the page, so
+          // the panel can be see-through. As the bottom PILL it sits directly
+          // over the list — the bottom edge treatment is a DARKEN with no blur
+          // in it — so it keeps the full undercoat or the flight cards read
+          // straight through the tabs.
+          overBlur={isSidebarShape}
+          // See the desktop morph above.
+          quiet={phase === "opening" || phase === "closing"}
         >
           {/* Pill bar — visible when collapsed */}
           <div
@@ -1782,13 +1868,13 @@ function MobilePillMorph({
                 branch used to lay the strip out as an ordinary row, which is
                 why the scroll-under only ever worked on desktop — on a phone
                 the list simply stopped at the icons. */}
-            <div className="relative flex-1 min-h-0">
+            <div className="relative flex-1 min-h-0" onClickCapture={onSidebarNavCapture}>
               <SidebarNav
                 pathname={pathname}
                 className="h-full"
                 topInset={SIDEBAR_HEADER_HEIGHT}
               />
-              <SidebarTopStrip onToggle={() => setSidebarOpen(false)} />
+              <SidebarTopStrip onToggle={() => dismissSidebar()} />
             </div>
           </div>
         </GlassContainer>

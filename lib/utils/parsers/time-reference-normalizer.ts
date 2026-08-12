@@ -15,6 +15,8 @@
  * with the IANA tz, so historical DST transitions are respected.
  */
 
+import { tzOffsetName } from "@/lib/utils/tz-format";
+
 // ============================================================
 // Types
 // ============================================================
@@ -146,12 +148,9 @@ export function getOffsetMinutesForDate(tz: string, isoDate: string): number {
     const anchor = new Date(`${isoDate}T12:00:00Z`);
     if (Number.isNaN(anchor.getTime())) return 0;
 
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      timeZoneName: "longOffset",
-    }).formatToParts(anchor);
-
-    const offsetPart = parts.find((p) => p.type === "timeZoneName")?.value;
+    // Cached formatter — this runs per TIME TOKEN, i.e. roughly six times a
+    // row on a schedule import. See lib/utils/tz-format.
+    const offsetPart = tzOffsetName(tz, "longOffset", anchor);
     if (!offsetPart) return 0;
 
     // longOffset yields strings like "GMT+08:00", "GMT+05:30", "GMT-05:00", or just "GMT"

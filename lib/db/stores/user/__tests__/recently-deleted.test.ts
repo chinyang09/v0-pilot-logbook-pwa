@@ -25,7 +25,8 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { FlightLog } from "@/types/entities/flight.types";
-import { RETENTION_MS } from "@/lib/utils/retention";
+// The sweep runs on the DELETION window, not the 90-day decision window.
+import { DELETED_RETENTION_MS } from "@/lib/utils/retention";
 
 // ---- in-memory stand-in for the Dexie flights table ------------------------
 
@@ -184,28 +185,28 @@ describe("the retention sweep", () => {
   });
 
   it("leaves a flight alone for the whole window", async () => {
-    expect(await purgeExpiredDeletedFlights(T0 + RETENTION_MS - 1)).toBe(0);
+    expect(await purgeExpiredDeletedFlights(T0 + DELETED_RETENTION_MS - 1)).toBe(0);
     expect(rows.map((f) => f.id).sort()).toEqual(["fresh", "live"]);
   });
 
   it("destroys it the moment the window closes", async () => {
-    expect(await purgeExpiredDeletedFlights(T0 + RETENTION_MS)).toBe(1);
+    expect(await purgeExpiredDeletedFlights(T0 + DELETED_RETENTION_MS)).toBe(1);
     expect(rows.map((f) => f.id)).toEqual(["live"]);
   });
 
   it("pushes a real delete, so the removal propagates", async () => {
-    await purgeExpiredDeletedFlights(T0 + RETENTION_MS);
+    await purgeExpiredDeletedFlights(T0 + DELETED_RETENTION_MS);
     expect(queued).toEqual([{ type: "delete", id: "fresh" }]);
   });
 
   it("never touches a flight that isn't in the bin", async () => {
-    await purgeExpiredDeletedFlights(T0 + 10 * RETENTION_MS);
+    await purgeExpiredDeletedFlights(T0 + 10 * DELETED_RETENTION_MS);
     expect(rows.map((f) => f.id)).toEqual(["live"]);
   });
 
   it("leaves a restored flight alone however long ago it was deleted", async () => {
     rows = [flight("restored", "2026-06-01", { deletedAt: null })];
-    expect(await purgeExpiredDeletedFlights(T0 + 10 * RETENTION_MS)).toBe(0);
+    expect(await purgeExpiredDeletedFlights(T0 + 10 * DELETED_RETENTION_MS)).toBe(0);
     expect(rows).toHaveLength(1);
   });
 });

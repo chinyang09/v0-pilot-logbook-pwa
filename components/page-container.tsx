@@ -1,8 +1,7 @@
 "use client"
 
-import { ReactNode, useCallback, useState, type RefCallback, type UIEvent } from "react"
+import { ReactNode, useCallback, useState, type RefCallback } from "react"
 import { usePathname } from "next/navigation"
-import { useScrollNavbarContext } from "@/hooks/use-scroll-navbar-context"
 import { useScrollRestoration } from "@/hooks/use-scroll-restoration"
 import { cn } from "@/lib/utils"
 import { ScrollIndicator } from "@/components/ui/scroll-indicator"
@@ -24,7 +23,6 @@ interface PageContainerProps {
 }
 
 export function PageContainer({ children, header, className, rightContent, mainRef, scrollRestoreKey }: PageContainerProps) {
-  const { handleScroll } = useScrollNavbarContext()
   const pathname = usePathname()
 
   // Freeze the pathname captured at mount as the default scroll key. Keep-alive
@@ -47,22 +45,13 @@ export function PageContainer({ children, header, className, rightContent, mainR
     [scrollRestoreRef, mainRef]
   )
 
-  // Compose the navbar scroll handler with the scroll-position saver.
-  const onMainScroll = useCallback(
-    (e: UIEvent<HTMLElement>) => {
-      handleScroll(e)
-      onScrollSave(e)
-    },
-    [handleScroll, onScrollSave]
-  )
-
   return (
     <div className="h-full relative flex flex-col">
       {header && <div className="absolute top-0 left-0 right-0 z-50">{header}</div>}
 
       <main
         ref={setMainRef}
-        onScroll={onMainScroll}
+        onScroll={onScrollSave}
         // scrollbar-hide: the native overlay indicator spans the scroller's
         // full box, i.e. from the screen edge over the status bar — the inset
         // ScrollIndicator below replaces it, running from under the action

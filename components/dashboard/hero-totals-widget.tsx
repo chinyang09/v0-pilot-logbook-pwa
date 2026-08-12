@@ -44,7 +44,7 @@ export function HeroTotalsWidget({
       href="/logbook"
       aria-label={`View logbook for ${resolved.rangeLabel}`}
       className={cn(
-        "group relative flex flex-col overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-card/90 via-card/70 to-card/40 p-3 sm:p-4 shadow-sm backdrop-blur-sm",
+        "group relative flex flex-col overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-card/90 via-card/70 to-card/40 p-3 sm:p-4 shadow-sm",
         "transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}

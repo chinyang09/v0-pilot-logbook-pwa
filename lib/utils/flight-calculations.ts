@@ -238,16 +238,6 @@ export function createEmptyFlightLog(): Omit<FlightLog, "id" | "createdAt" | "up
 }
 
 /**
- * Check if a value was manually overridden
- */
-export function isManuallyOverridden(
-  fieldName: keyof ManualOverrides,
-  manualOverrides: ManualOverrides
-): boolean {
-  return manualOverrides[fieldName] === true
-}
-
-/**
  * Recalculate all derived fields for a flight
  * Respects manual overrides and auto-fill preferences
  */

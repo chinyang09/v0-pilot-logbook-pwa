@@ -15,9 +15,12 @@ export function SyncStatus({ className }: { className?: string }) {
     setStatus(syncService.getStatus())
 
     const checkPending = async () => {
-      const { getSyncQueue } = await import("@/lib/db")
-      const queue = await getSyncQueue()
-      setPendingCount(queue.length)
+      // Counted off the index. This runs three times per sync cycle (status
+      // flips to syncing, back to online, then onDataChanged), and reading the
+      // whole queue to take `.length` deserialised every pending row each time
+      // — on the sync path, where the main thread is already busy.
+      const { getSyncQueueCount } = await import("@/lib/db")
+      setPendingCount(await getSyncQueueCount())
     }
 
     // Event-driven instead of a 5s poll (which ran forever in every open tab):
@@ -50,9 +53,8 @@ export function SyncStatus({ className }: { className?: string }) {
     // Use force sync which triggers immediately via trigger manager
     await syncService.forceSyncNow()
     // Refresh pending count after sync
-    const { getSyncQueue } = await import("@/lib/db")
-    const queue = await getSyncQueue()
-    setPendingCount(queue.length)
+    const { getSyncQueueCount } = await import("@/lib/db")
+    setPendingCount(await getSyncQueueCount())
   }
 
   const busy = status === "offline" || status === "syncing"

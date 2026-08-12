@@ -6,6 +6,7 @@ import {
   getAllAirports,
   bulkLoadAirports,
   getAirportDatabase,
+  getAirportsRevision,
   type Airport,
 } from "@/lib/db"
 import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
@@ -55,7 +56,12 @@ export function useAirports() {
 
   const refresh = useCallback(() => {
     console.log("[Airports] Refreshing...")
-    return mutateAirports(undefined, { revalidate: true })
+    // Revalidate WITHOUT clearing the cache. Passing `undefined` as data wipes it
+    // first, which flips `isLoading` true and flashes this list's skeleton on every
+    // background refresh — and hands out a NEW array reference even when nothing
+    // changed, so SWR's deep `compare` can't hold the old one and every downstream
+    // memo recomputes. `use-flights` has always done it this way; the rest had not.
+    return mutateAirports()
   }, [mutateAirports])
 
   return {
@@ -76,6 +82,8 @@ export function useAirports() {
  * timezone-derived fields (UTC offsets) briefly compute from an empty database.
  */
 let airportDbCache: Airport[] | null = null
+/** The store revision `airportDbCache` was read at. -1 = never loaded. */
+let airportDbCacheRevision = -1
 
 export function useAirportDatabase() {
   const [airports, setAirports] = useState<Airport[]>(() => airportDbCache ?? [])
@@ -89,8 +97,12 @@ export function useAirportDatabase() {
       try {
         // Only show the loading state when we have nothing cached to render yet.
         if (!airportDbCache) setIsLoading(true)
+        // Captured BEFORE the read: a write that lands while we are loading
+        // must leave the cache looking stale, not falsely current.
+        const revisionAtLoad = getAirportsRevision()
         const data = await getAirportDatabase()
         airportDbCache = data as unknown as Airport[]
+        airportDbCacheRevision = revisionAtLoad
 
         if (mounted) {
           setAirports(airportDbCache)
@@ -106,6 +118,19 @@ export function useAirportDatabase() {
           setIsLoading(false)
         }
       }
+    }
+
+    // Reload only when the table has actually changed since the cached copy was
+    // read. This hook used to re-read all ~10k airports from IndexedDB on EVERY
+    // mount, and the flight form mounts on every flight tap. The blind reload
+    // existed because the import enricher adds airports through Dexie directly
+    // rather than through `mutate` below; the store's revision counter reports
+    // that precisely, and covers a write while a component stays mounted, which
+    // reload-on-mount never did.
+    if (airportDbCache && airportDbCacheRevision === getAirportsRevision()) {
+      // `airports` was already seeded from the cache in useState, and
+      // `isLoading` initialised false — there is nothing to do.
+      return
     }
 
     load()

@@ -212,6 +212,24 @@ single `COLLECTION_HANDLERS` registry in `sync-service.ts`, keyed by the closed
 `SyncCollection` union — add a collection in one compile-checked place, not in
 parallel switch/if-else chains.
 
+**`SyncProvider` is the ONE `onDataChanged` → `refreshAllData` subscriber.**
+The dashboard and the logbook each had their own as well, and both of those
+pages are keep-alive — permanently mounted once visited — so a single sync
+cycle ran the entire cache refresh three times over, which is three full reads
+of every table plus the re-renders each one triggers. A page that needs its own
+data back after a background pull gets it from the shared refresh; a page that
+needs it on RE-ACTIVATION uses `usePageActive`'s callback, which is a different
+trigger.
+
+`refreshAllData` (`hooks/data/use-db.ts`) also **coalesces**: concurrent callers
+share one in-flight pass, so a provider refresh landing on the same tick as a
+page's re-activation refresh is still one pass. And it revalidates by **key
+filter** (`key.startsWith("idb:")`), not a hardcoded list — the old four-key
+version never touched the schedule, currency or discrepancy caches, so those
+pages showed pre-sync numbers until they remounted. Every SWR key in
+`hooks/data/` carries the `idb:` prefix, including derived ones
+(`idb:discrepancies:counts`, `idb:schedule:<from>:<to>`); keep it that way.
+
 
 ### Authentication Flow
 
@@ -401,6 +419,33 @@ Three things keep the delta at zero:
 
 Measured after the fix: jumping to the middle and scrolling up 40 steps
 produces **zero** scroll corrections.
+
+### ONE Calendar Panel (`components/calendar-panel.tsx`)
+
+The logbook and the dashboard were already rendering the same
+`LogbookCalendar`; what made them look like two different calendars was
+everything AROUND it. `CalendarPanel` owns that wrapper now, and a page
+supplies only what genuinely differs — the logbook picks a single date, the
+dashboard picks a range.
+
+| | was (dashboard) | is (both) |
+|---|---|---|
+| open | spring-in floating card | collapsing height on `PANEL_MOTION` |
+| width | `max-w-md` | the full panel width |
+| radius | 24 | 20 |
+| material | its own glass | transparent inside the panel's glass |
+| dual month | never | when the layout allows |
+| month picker | a second "MMM YYYY" label in the ACTION BAR | the calendar's own header (`onHeaderPress`) |
+
+That last row is the one worth stating twice: the action-bar month label is
+exactly what the logbook removed for saying the same thing twice, and it was
+what grew the left action group into the centred nav pill. The dashboard still
+had it.
+
+The calendar stays MOUNTED and collapsed to `height: 0` so its natural height
+is always measurable, and `onNaturalHeight` reports it — which is what the
+logbook's list spacer reserves. The **absorb** logic stays in the logbook
+(`handleCalendarHeight`): only the ResizeObserver moved.
 
 ### The Logbook's Floating Panels (search + calendar)
 
@@ -648,12 +693,20 @@ restarting it. The card shows the days left, because when
 goes with it. `tracked-mismatch.test.ts` pins the stamp both ways round: on the
 wrong row, the sweep eventually deletes a difference the pilot never conceded.
 
-### The 90-Day Undo Window (`lib/utils/retention.ts`)
+### The Undo Windows (`lib/utils/retention.ts`)
 
-`RETENTION_MS` is defined **once** and shared by everything reversible-for-a-
-while: import decisions, accepted comparisons, and the flight recycle bin.
-Roughly three company report cycles — long enough to catch a mistake in a
-quarterly review, short enough that what's retained stays a handful of rows.
+Two clocks, both defined here, and the helpers take the window as an argument
+so a caller states which one it is on:
+
+| | Window | What |
+|---|---|---|
+| `RETENTION_MS` | **90 days** | import decisions, accepted comparisons — roughly three company report cycles, so a quarterly review can still put one back |
+| `DELETED_RETENTION_MS` | **30 days** | anything the user DELETED, held in Recently Deleted |
+
+They were one number. A deletion is an ACT, not a difference between two
+records: you know within days whether you meant it, and holding every deleted
+flight, aircraft and crew member for a quarter turns a safety net into an
+archive.
 
 **Clearing a retention stamp writes `null`, never `undefined`.**
 `/api/sync/bulk` applies an update as a `$set` of the payload's keys and
@@ -661,15 +714,34 @@ quarterly review, short enough that what's retained stays a handful of rows.
 in place and the next pull undoes the undo — a restored flight drops straight
 back in the bin. `isWithinRetention` and `isLiveFlight` therefore test `== null`.
 
-### Recycle Bin (deleted flights)
+### Recently Deleted (everything you delete)
 
-`deleteFlight()` is a **soft delete**: it sets `FlightLog.deletedAt` and pushes
-an **update**. That is what makes the bin work across devices — binning and
-restoring both ride the ordinary sync path, and only
-`purgeExpiredDeletedFlights()` (at 90 days) writes a tombstone.
-`app/(app)/recycle-bin/page.tsx` sweeps on load, then lists what's left with the
-days remaining; `permanentlyDeleteFlight()` is the explicit "now, not in three
-months".
+**Every delete in the app is a SOFT delete**, not just flights. `deleteEntity`
+in `crud-helpers.ts` sets `deletedAt` and pushes an **update** — that is what
+makes Recently Deleted work across devices, since binning and restoring both
+ride the ordinary sync path. Only `purgeEntity` (and the 30-day sweep) writes a
+tombstone.
+
+There is no confirmation on the way out. Deleting is one tap, and the holding
+area is the undo — see "Destructive Actions" below for why the countdown went.
+
+| Kind | Store | Synced? |
+|---|---|---|
+| flights | `flights.store` | yes |
+| crew | `crew.store` | yes |
+| currencies | `currencies.store` | yes |
+| aircraft | **`reference/aircraft.store`** — the aircraft PAGE lists the reference database, not `userDb.aircraft` | no (referenceDb has no sync queue, which is what deleting a custom aircraft has always meant) |
+
+**Discrepancies and schedule entries stay HARD deletes.** They are import
+bookkeeping rather than records the pilot authored: a comparison is regenerated
+from the next report, and schedule rows are replaced wholesale by the next
+import. Putting them in Recently Deleted would fill it with rows nobody thinks
+of as things they deleted.
+
+`app/(app)/recently-deleted/page.tsx` sweeps every kind on load, then lists
+what's left GROUPED BY KIND with the days remaining. The per-kind
+restore/destroy/sweep triple lives in one `OPS` lookup, not a switch at each of
+the three call sites.
 
 The cost is that `userDb.flights` now holds rows nothing should show. Read lists
 through `getAllFlights()`, or filter with **`isLiveFlight`** when reading the
@@ -783,26 +855,25 @@ report watermarks). Do not go back to an allowlist.
 On a **translucent** surface (the glass sidebar) a painted scrim would flatten
 the material — mask the content out instead.
 
-### Destructive Actions: Countdown, not Hold
+### Destructive Actions: No Confirmation, but Recoverable
 
-Press-and-hold is gone. Tapping a destructive action **arms** it: the row blurs
-and a pill reads `Cancel delete 9` while the action counts down (10s default),
-the border tracing the time remaining. Left alone it fires; the pill cancels it.
+Deleting is **one tap**. There is no dialog, no press-and-hold, and no armed
+countdown — the undo is `Recently Deleted`, which holds the row for 30 days.
 
-- The timer lives in **`lib/utils/pending-actions.ts`**, at module scope, NOT in
-  the card. A virtualised list recycles rows as it scrolls, and an in-component
-  timer meant scrolling away silently cancelled the deletion — with the user
-  every reason to think it went through. `SwipeableCard` only renders the
-  remaining time and offers the cancel; a remount resumes from the stored
-  deadline.
-- Pass a **data-derived `id`** to any `SwipeableCard` that can be armed. The
-  `useId()` fallback changes on recycle and orphans the registry entry.
-- The `swipe-card-close-others` handler must close the swipe **panel only**. It
-  fires on any interaction with any other row, so clearing the pending confirm
-  there made it impossible to arm a delete and move on.
-- Tapping outside deliberately does NOT disarm.
-- `HoldToConfirmButton` / `useHoldToConfirm` still exist but nothing
-  destructive uses them.
+That is a better trade than the countdown it replaced. A timed arm charged you
+ten seconds every time you deleted something on purpose, and gave you nothing
+at all once the ten seconds were up; a holding area costs nothing on the way
+out and is still there tomorrow.
+
+**The one exception is "Log out of all devices"** (`app/(app)/account/page.tsx`),
+which still uses `CountdownConfirmButton`. It is not a delete: nothing is
+recoverable afterwards because there is nothing to recover — the only undo is
+signing back in on each device, so the pause before it fires is the whole
+safety net.
+
+`SwipeableCard`'s `holdToConfirm` / `holdDuration` / `cancelLabel` props and the
+`lib/utils/pending-actions.ts` registry behind them are still in place for that
+one caller. Do not wire them to a delete again.
 
 ### Camera OCR (`lib/ocr/oooi-extractor.ts`)
 
@@ -889,15 +960,14 @@ re-renders).
 
 ### Motion Primitives & Navigation Animation
 
-- **`components/ui/hold-to-confirm-button.tsx`** (`HoldToConfirmButton`) — the
-  shared press-and-hold confirm control (used by the swipe confirm overlay and
-  the account "Log out of all devices" button). Built on
-  `hooks/use-hold-to-confirm.ts` (a `MotionValue` progress 0→1 via rAF). The fill
-  is a soft red left→right gradient revealed by a CSS mask; an optional
-  `HoldProgressBorder` draws the perimeter. Accepts an external `progress`
-  MotionValue so a surrounding surface can advance in lock-step. `showBorder={false}`
-  when the surrounding element owns the border (the swipe overlay puts the border
-  on the card, not the pill).
+- **`components/ui/countdown-confirm-button.tsx`** (`CountdownConfirmButton`) —
+  the shared confirm control, used by the swipe confirm overlay and the account
+  page's "Log out of all devices". Built on `hooks/use-countdown-confirm.ts` (a
+  `MotionValue` progress 0→1 via rAF, with the whole-second label guarded so it
+  re-renders at 1Hz rather than per frame). Accepts an external `progress`
+  MotionValue so a surrounding surface can advance in lock-step, and
+  `showBorder={false}` when that surface owns the border (the swipe overlay puts
+  the border on the card, not the pill).
 - **`components/ui/hold-progress-border.tsx`** (`HoldProgressBorder` +
   `topCenterRoundedRectPath`) — an SVG rounded-rect stroke that draws from **12
   o'clock clockwise** (custom path; a `<rect>` starts at a corner), thickening,
@@ -1000,22 +1070,23 @@ re-renders).
   collapse 94% home in the first HALF of its duration, which is a snap followed
   by a crawl at any of these lengths.
 
-  **The mobile backdrop rides the morph's clock.** The scrim and the blur
-  layers fade over `TOTAL` with `MORPH_EASE`, not on a duration of their own,
-  so the veil arrives with the panel. `SIDEBAR_BACKDROP_BLUR` makes that blur
-  genuinely **progressive** — three layers of increasing radius (4 / 10 / 20px)
-  and decreasing width (92 / 68 / 46%), each with its own alpha ramp, so it is
-  heaviest against the sidebar and gone by the far edge. A single blurred layer
-  behind an alpha ramp — what this was — cross-fades a fully blurred page with
-  a sharp one, which reads as a ghosted double image rather than as "less
-  blurred"; a ramp of RADII is what reads as depth. Ordered smallest-radius-
-  first so each layer fully covers the ones below wherever they are opaque: the
-  stack can then only ADD blur, and the ramp stays monotonic whether or not the
-  engine feeds one layer's output into the next one's backdrop (Blink does,
-  WebKit may not). Each layer is only as wide as it needs to be, so the total
-  blur work is ~20% more than the single full-screen 16px layer it replaced,
-  not 3x. Desktop has no backdrop at all — its sidebar sits alongside the
-  content rather than over it.
+  **The mobile backdrop is a PROGRESSIVE DARKEN, in one element.** It rides the
+  morph's clock (`TOTAL`, `MORPH_EASE`) so the veil arrives with the panel, and
+  it is a single layer: the flat scrim is its `background-color` (from
+  `MODAL_SCRIM`) and `SIDEBAR_BACKDROP_RAMP` is its `background-image`, heaviest
+  against the sidebar's edge and gone by 58% of the screen. It also takes the
+  dismissing tap.
+
+  It used to be three stacked `backdrop-filter` layers (4 / 10 / 20px, each
+  narrower than the last) forming a real ramp of radii — optically the right
+  construction, and unaffordable. A backdrop-filter is a readback plus a blur,
+  re-rasterised whenever the backdrop or the geometry changes, and these fired
+  during the one 300ms window where the panel beside them is animating `left`,
+  `width` and `height`. A gradient is one paint and a composited opacity. The
+  depth cue moves from "how blurred" to "how dark" — which is what the bottom
+  edge treatment has always used, and what most native apps use during an
+  active transition. Desktop has no backdrop at all — its sidebar sits
+  alongside the content rather than over it.
 
   **The pill's width is MEASURED (`usePillWidth`), never `auto`.** `width` rides
   in the position group so the pill resizes *while* it moves, and CSS cannot
@@ -1243,8 +1314,8 @@ identical:
 Four heavy pages are kept mounted across navigations for instant tab-switching and scroll preservation:
 
 **Persistent pages** (`components/keep-alive-pages.tsx`):
-- `/logbook`, `/aircraft`, `/airports`, `/crew` — lazy-imported via `React.lazy()`, mounted on first visit, never unmounted
-- All other pages (currencies, roster, etc.) unmount normally via Next.js `children`
+- `/` (dashboard), `/logbook`, `/aircraft`, `/airports`, `/crew`, `/roster` — the primary tabs, lazy-imported via `React.lazy()`, mounted on first visit, never unmounted. The one list lives in `components/keep-alive-routes.ts`; `PERSISTENT_PAGES` is typed against it
+- All other pages (currencies, discrepancies, settings, account, …) unmount normally via Next.js `children`
 
 **How it works:**
 - `KeepAlivePages` wraps `children` in `app/(app)/layout.tsx`
@@ -1265,6 +1336,25 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
 - Returns `isActive` boolean
 - Fires `onActivated()` callback only on inactive→active transitions (not initial mount)
 - Used to re-sync detail panel content when returning to a page
+- **The active route is a STORE read through `useSyncExternalStore`, not a value
+  in context.** As a context value it re-rendered every consumer on every
+  navigation — six permanently mounted pages, of which at most two have an
+  answer that changed. The snapshot is the BOOLEAN `isActive`, so the
+  comparison happens inside the subscription and React skips the four pages
+  still answering `false`. Same shape as `useDBReady`/`useIsDesktop`. The
+  provider publishes on COMMIT (an effect), because a store read during render
+  must return what React last rendered with or `useSyncExternalStore` tears
+- The two together are also what makes the SIDEBAR toggle cheap. `AppShellContent`
+  reads `useSidebar()` and renders `KeepAlivePages` as its children, so opening
+  the sidebar re-rendered the shell and, through it, all six pages — Recharts
+  trees and the virtualised logbook included — on the first frames of the 300ms
+  pill↔sidebar morph. That is now the shell, `KeepAlivePages` and six wrapper
+  `div`s.
+- **`KeepAlivePage` is `memo`ized on its route key.** The stack recreated
+  `<PageComponent />` on every navigation, and a new element is a re-render
+  however unchanged the props are — so the context fix alone would not have
+  helped. The wrapper `div` still re-renders (its visibility and z-index really
+  do change); the page inside it does not
 
 **Detail panel integration** (`hooks/use-detail-panel.tsx`):
 - The keep-alive route set lives in ONE registry — `components/keep-alive-routes.ts`
@@ -1307,11 +1397,19 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
 
 **Provider hierarchy:**
 ```
-AppLayout → ScrollNavbarProvider → SidebarProvider → DetailPanelProvider
-  → AppShell → KeepAlivePages
-    ├── /logbook, /aircraft, /airports, /crew (lazy, persistent)
+AppLayout → PreferencesProvider → SidebarProvider → DetailPanelProvider
+  → PageActionsProvider → DashboardPeriodProvider → AppShell → KeepAlivePages
+    ├── /, /logbook, /aircraft, /airports, /crew, /roster (lazy, persistent)
     └── children (other routes, normal unmount)
 ```
+
+**Every provider above `KeepAlivePages` must give a MEMOIZED value**, because
+its subtree is all six keep-alive pages at once — a fresh `{...}` per render
+re-renders every one of them. `PageActionsProvider` goes further and is **two**
+contexts: the registered action nodes (which change on every tab switch, and
+are read only by the shell's header) and the SETTERS (which never change, and
+are all the register hooks need). Held together, one page registering its
+buttons re-rendered the other five.
 
 ### Display Preferences
 
@@ -1381,6 +1479,17 @@ Data hooks in `hooks/data/` use SWR backed by Dexie:
 // Pattern: hook reads from Dexie, mutations write to Dexie + enqueue sync
 const { flights, isLoading } = useFlights();
 ```
+
+**`useDBReady` is a MODULE STORE**, read through `useSyncExternalStore` — the
+same shape as `useIsDesktop`, and for the same reason. It used to be a
+`useState(false)` plus an effect in every consumer, so every page that reads
+data rendered once as "not ready" and again as ready, *even when the database
+had been open since the first page*. That first render is what put a skeleton
+on screen for a frame on every mount of every list, and five of them mount at
+once. With one process-wide answer a page mounting after init has it on its
+FIRST render and paints its data straight away. Its snapshot object is cached
+and rebuilt only on a real transition (`useSyncExternalStore` compares by
+identity and will loop forever on a fresh object).
 
 ### Forms
 
@@ -1552,6 +1661,60 @@ Assessment on record:
   render into the detail panel (today it replaces the main list). To be
   designed together with the owner in a future session — do not implement
   piecemeal.
+
+### Performance work surveyed but NOT actioned (audit trail)
+
+Each of these was measured or read closely during a performance pass and left
+alone on purpose. The reason is recorded so the next pass doesn't re-derive it
+— and so that anyone who *does* action one knows what they are trading.
+
+- **`.GlassContainer`'s 60s specular drift is the largest continuous cost in
+  the app.** `--glass-specular-angle` is a registered `@property` feeding a
+  conic gradient, so it REPAINTS every frame rather than compositing, on every
+  glass surface, forever — to move 36° over a minute, i.e. ~0.01° per frame.
+  Every way to make it cheaper changes the material: stepping it introduces
+  visible micro-jumps in a specular highlight, and hoisting it to `:root` so
+  all surfaces share one animation puts them in phase (they currently drift
+  independently, which is the look). Only touch this with the owner.
+- **The glass rim adds three more `backdrop-filter`s per surface** on top of
+  `.GlassBlur`'s one (`.GlassEdgeReflection`, `.GlassEmbossReflection`,
+  `.GlassRefraction`). They are masked to a ~2px band but the filter still
+  processes the whole element box. Same rule as above — this IS the material.
+- **`dedupingInterval: 0` on every data hook** means the five keep-alive pages
+  reading `useFlights()` each fire their own full IndexedDB read on first
+  mount. Raising it is safe *in principle* — SWR only consults the interval for
+  `revalidateOnMount`/focus/polling, and an explicit `mutate()` always sets
+  `shouldStartNewRequest`, so a post-write refresh is never swallowed (verified
+  against the SWR source). What it does open is a window where a page mounting
+  shortly after another reuses the earlier request's result. Needs testing
+  against the running app before changing.
+- **`useFDPData`'s airport-timezone effect runs once per consumer** — three on
+  the dashboard — each resolving the same IATA set from IndexedDB. A module
+  cache would collapse them, but a cached offset would pin a PLACEHOLDER
+  timezone if a custom airport were enriched later, and that feeds the FDP
+  legality math. Do not cache it without invalidation tied to enrichment.
+- **`SwipeableCard` renders its action buttons for every row**, at `opacity: 0`
+  when closed — in the logbook that is ~48 hidden buttons carrying ~144 framer
+  motion values, torn down and rebuilt as the virtualiser recycles rows.
+  Deferring them to the first drag would cut that, but moves the cost into the
+  start of every swipe, which is an experience trade rather than a free win.
+- **The OCR preloader fires on a fixed 3s timer** (`ocr-models-preloader.tsx`),
+  which lands while the user is making their first interactions. The ~16MB
+  fetch itself is done by the service worker, so it is off the main thread and
+  this is network contention only — but `requestIdleCallback` (with the 3s as a
+  floor and a timeout so it always runs) would be strictly better timed.
+- **The Google Fonts stylesheet is render-blocking** — a third-party
+  `<link rel="stylesheet">` in `<head>`, so first paint waits on a
+  `fonts.googleapis.com` round trip on a cold start. See the `next/font` note
+  under Linting for why the migration was deferred.
+- **Root-level setup docs are stale** — `BUILD_FIX_SUMMARY.md`,
+  `OCR_INTEGRATION.md`, `OCR_IMPLEMENTATION_SUMMARY.md`,
+  `OCR_SETUP_CHECKLIST.md`, `ROSTER_FEATURE.md` (~1,100 lines) describe
+  finished work whose live rules are already in this file.
+  `OCR_SETUP_CHECKLIST.md` is actively misleading: its "Required Actions" tell
+  the reader to fix **npm install** issues, which contradicts the pnpm-only
+  rule and would desync `pnpm-lock.yaml` and break the Vercel build. Delete or
+  correct — owner's call.
 
 ### Lower-priority items (not yet actioned)
 
@@ -1756,6 +1919,29 @@ When making changes, be aware of these high-impact files:
     collapsed they were no longer cancelled by anything, so the face is now
     blur + a themed brightness lift + `saturate(1.5)` (the vibrancy term —
     without it the material reads as frosted film rather than glass).
+  - **A surface OVER A BLUR is more translucent** (`overBlur` →
+    `[data-over-blur]`). The material's opacity exists to stop what is behind
+    it reading through as legible content. Where something else has already
+    blurred and darkened that backdrop — the header's `ChromeFade` band, the
+    mobile sidebar's progressive backdrop, a modal's bottom fade — the work is
+    done before the glass gets there, and a full undercoat on top only buries a
+    backdrop that is unreadable anyway while costing the material its whole
+    point. Only `--glass-base` moves (52% dark / 32% light against the standard
+    82/55); the face blur, the veil, the rim and the specular are untouched, so
+    it is the same material letting more through, not a second material.
+
+    | over a blur | NOT |
+    |---|---|
+    | header controls (`GlassIconButton`/`GlassButtonGroup`/`GlassSearchButton` — they ARE the `ChromeFade` band by construction) | the mobile bottom pill — `bottom-edge-blur` is a DARKEN with no blur in it, so the flight cards would read straight through the tabs |
+    | the DESKTOP pill in pill shape (same header band) | the DESKTOP sidebar — no backdrop at all, it stands beside the content |
+    | the MOBILE nav in sidebar shape (over `SIDEBAR_BACKDROP_BLUR`) | the logbook calendar and its panels, the login page, the import segmented tabs |
+    | the review modal's footer controls (over a bottom `ChromeFade`) | the import status dialog's Done button (plain dialog surface) |
+
+    The nav is deliberately on BOTH lists, one per shape, and in opposite
+    directions on the two morphs — which is why `background-color` rides the
+    same 320ms clock as the corner radius on `.GlassMaterial::after`. A solid
+    fill is repainted on those frames regardless (the box is resizing), so that
+    costs the fill's colour and not an extra pass.
   - **Opacity comes from `--glass-base`, presence from `--glass-veil`.** They
     are two coats on `.GlassMaterial::after` doing different jobs, and the
     split is load-bearing: the veil is a LIGHTENING paint (warm off-white), so
@@ -1852,10 +2038,37 @@ When making changes, be aware of these high-impact files:
     of one even fill (iOS Control Center controls are uniform edge to edge). Do
     not reintroduce the inset, and do not feather the face outward either —
     that pulls the tone DOWN at the edges, which is the opposite problem.
-  - **Morph surge:** `data-morphing` on the container drives a heavier
-    `.GlassBlur` backdrop-filter in CSS, so the material swells as the pill and
-    sidebar merge and settles when it lands. Compositor-friendly — it is one
-    filter value changing, not a filter graph being rebuilt.
+  - **`quiet` drops the EDGE filters while a surface is in motion.** The
+    material carries five `backdrop-filter`s — the face plus four edge layers,
+    three of them masked to a ~2px band but still filtering the whole element
+    box. At rest nothing re-rasterises and that is fine. During the pill↔sidebar
+    morph, which interpolates `left`/`width`/`height`, all five re-read and
+    re-blur every frame on a panel growing to the height of a phone.
+    `[data-quiet]` drops the four edge ones for those 300ms; the face keeps its
+    own, and the rim you actually SEE is unaffected because the conic specular
+    on `.GlassMaterial::before` is a painted background, not a filter. Same
+    trick the drag lens uses on its landing (`--settle`), and the exact opposite
+    of the old `data-morphing` surge: this removes work rather than adding it,
+    and it is a step change rather than an animation.
+  - **`.GlassBlur`'s filter value is CONSTANT — it is never animated.** There
+    used to be a "morph surge": `data-morphing` on the container raised the
+    blur by 6px and the brightness to 1.4 over a 240ms transition, so the
+    material swelled like a merging droplet as the pill and the sidebar
+    merged. It was described as compositor-friendly (one filter value, not a
+    filter graph) and it is not. A `backdrop-filter` is a readback of
+    everything behind the element plus a separable blur, re-rasterised
+    whenever the geometry OR the filter changes — and the morph already
+    interpolates `left`, `width` and `height`, so the readback happens every
+    frame regardless. Animating the radius on top meant the kernel changed
+    every frame too, so nothing in the pass could be reused, for the busiest
+    300ms in the app on the surface a phone user touches most. That was the
+    mobile sidebar's jank.
+
+    The swell cannot be rebuilt compositor-side. A second element carrying the
+    surged filter and fading in is precisely the stacked-backdrop-filter
+    construct that made this material render differently on iOS and Android.
+    The `morphing` prop and the `data-morphing` attribute are GONE with it,
+    rather than left as a hook with nothing behind it.
   - **The press is tracked on the WINDOW, not the element.** Only
     `pointerdown` is bound to the glass; everything after it listens on
     `window` until release. The element stops receiving pointer moves once the
@@ -2052,14 +2265,95 @@ When making changes, be aware of these high-impact files:
   - A FLIP morph animates the box by **scale**, and this growth is nearly all
     height, so the card's text would visibly stretch on the way up.
 
-  Instead the geometry is DERIVED, not measured, and nothing scales: the
-  wrapper is a centred flex column, so with the detail and the actions
-  collapsed to `height: 0` the card rests at `(innerHeight − cardHeight) / 2`;
-  the card's opening `y`/`x`/`width` are the difference between that and the
-  row's own box; and the detail and actions animate their real `height`
-  (0 → auto) while the flex centring re-centres the group frame by frame. One
-  clock (`MORPH`, 340ms) drives all of it, so the travel and the unfurl are one
-  motion.
+  **The morph IS Shadix UI's `expandable-card` technique** — framer's `layout`
+  projection (a FLIP), adopted after three rounds of the hand-derived version
+  still reading as less smooth than the nav morph. The difference is
+  structural, not a matter of tuning: **nothing animates a length any more.**
+  The card is laid out COLLAPSED on one commit (`position: fixed` on the row's
+  own box, which we already measure as `anchor`) and EXPANDED on the next (an
+  ordinary centred flex child at its natural height), and framer interpolates
+  the difference as a transform. Per frame that is a transform and some
+  opacities, where it used to be `width` plus two `height: 0 → auto` boxes plus
+  an interpolated `boxShadow`.
+
+  The two objections that held it off for three rounds both have answers:
+
+  - **`layoutId` would put every virtualised row into framer's measurement
+    pass.** So there is no `layoutId` and the list is not involved at all.
+    Shadix shares an id between a collapsed card and an expanded one; we
+    already measure the row when the hold fires, so the collapsed box is stated
+    outright. Same projection, none of the cost.
+  - **FLIP animates the box by SCALE, so `tabular-nums` text stretches.** Every
+    content block therefore carries `layout="position"`, which makes it its own
+    projection node — framer cancels the parent's scale on it, so it animates
+    where it SITS and never how big it is. One wrapper per block is enough;
+    everything inside a corrected node is corrected with it. This is what
+    Shadix's `layout="position"` on its title and description is for.
+
+  Measured on a 390×844 viewport, opening (row at `[12,12,366,105]`):
+
+  | t | card box | scaleY | compact body |
+  |---|---|---|---|
+  | 51ms | 12,12,366,105 | — | 103×364 |
+  | 108ms | 12,12,366,105 | 0.329 | 103×364 |
+  | 250ms | 12,201,366,295 | 0.927 | 103×364 |
+  | 649ms | 12,224,366,319 | none | 103×364 |
+
+  The first frame is the row to the pixel, and the compact body is **103×364 in
+  every frame** while the card's scaleY runs 0.33 → 1 — the scale correction
+  holds exactly. Closing: the card lands back on `[12,12,366,105]` at 459ms and
+  the overlay unmounts at 510ms, with **zero frames** where both the overlay and
+  the un-hidden row are visible.
+
+  **The card WIDENS, and which projection mode each block gets is what makes
+  that possible.** The card's projection scales its subtree on both axes. The
+  vertical part must be cancelled — it would crush the row's text to a fifth of
+  its height — but the horizontal part IS the card widening, and the compact
+  body is supposed to follow it. So:
+
+  | | prop | why |
+  |---|---|---|
+  | compact body | `layout` (full) | exists in BOTH states, and its own height is 103 either way — so its delta is **scaleX only**. Condensed at the first frame, relaxing out as the card widens. |
+  | detail, actions | `layout="position"` | exist only while open, so they have no delta of their own; this cancels the parent's scale outright, which is what keeps them true-size while the card collapses under them on close. |
+
+  `layout="position"` on the compact body was tried first and is wrong for it:
+  it lays the body out at the RESTING width from the first frame and lets the
+  card clip it, so on a tablet the arrival time and ICAO are simply missing
+  until the card has widened past them. Condensed type reads as motion; half
+  the flight missing reads as broken. (Shadix hits this too — its title is
+  `layout="position"` and laid out at the expanded width from frame one — but
+  its text is short enough to fit the collapsed card, so nothing is clipped.)
+
+  Measured at 1180 wide, from a 312px row: card `[12,12,312,105]` at the first
+  frame with the body at **310×103**, and `[254,212,672,319]` at rest with the
+  body at **670×103** — the body's height is 103 in every frame while its width
+  tracks the card's. On a phone `MIN_GROWTH` suppresses the growth entirely
+  (measured: scaleX exactly 1 throughout, body 364×103 in every frame), because
+  a row is `innerWidth − 24` and the wrapper's margin only allows
+  `innerWidth − 32`, so "growing" would mean getting 8px narrower.
+
+  The width only ever GROWS. A row already wider than `MAX_WIDTH` rests at its
+  own width rather than shrinking to 672 — shrinking would mean laying the body
+  out narrow and stretching it, which is the frame-one mismatch again in the
+  other direction.
+
+  **Every style key is supplied in BOTH states, never a switch between two
+  differently-shaped objects.** A `motion` component does not clear a style
+  property that simply disappears from the object — measured: with the
+  collapsed branch dropping `position`/`top`/`left`/`height`, those stayed on
+  the element as `position: fixed; top: 12px; left: 12px; height: 104.75px` for
+  the whole morph, so the card never left the row and there was no layout
+  change to animate at all.
+
+  What remains: the CARD carries `layout`; the compact body, the detail and the
+  action row carry `layout="position"`; the detail and the actions are MOUNTED
+  only while open (inside `AnimatePresence`) so the card's natural height is
+  what changes; and the lift is a static shadow on its own projected node
+  (`LIFT_SHADOW`), faded by opacity — it needs `layout` of its own or the
+  card's scale would squash a 50px blur, and it sits OUTSIDE the clip because a
+  box-shadow paints beyond its element's box and `overflow: hidden` on an
+  ancestor takes all of it. That is why the wrapper and the surface are two
+  elements rather than one.
 
   The anchor is the **card's** box (`[data-slot="card"]`), not the row
   wrapper's — the wrapper carries the list's per-row top gap, and 4px out is a
@@ -2077,8 +2371,11 @@ When making changes, be aware of these high-impact files:
   width clamps to what it had and the growth is all height (measured: +143px);
   there is nowhere else for it to go.
 
-  The DETAIL arrives a beat after the box that holds it — `opacity`/`y`/`blur`
-  on a 260ms curve delayed 100ms inside the 340ms box growth. The box growing is
+  The DETAIL arrives a beat after the box that holds it — `opacity` and `y`,
+  delayed 30% into the box growth and running for 76% of it. There is
+  deliberately **no `blur()`** in that reveal: it is a per-frame filter pass on
+  the busiest frames of the overlay, and the delay plus the travel already read
+  as content settling in. The box growing is
   the card changing shape; this is the content settling into the room that just
   appeared, and separating the two is most of what makes the expansion legible
   rather than a jump.
@@ -2151,6 +2448,7 @@ When making changes, be aware of these high-impact files:
 - Do not trust client-supplied `userId`/`callsign`/`totpSecret` in `register/complete` — read them from the consumed server-issued challenge doc
 - Do not re-tighten the WebAuthn counter check to always-strict — synced/platform passkeys report `signCount 0` forever; only enforce strict increase when a counter is in use (either side non-zero)
 - Do not accept a TOTP code without the `auth.lastTotpCounter` replay check, and keep the OTP comparison constant-time (`verifyTOTPWithCounter`)
+- Do not verify a TOTP code with a bare `verifyTOTP` — that wrapper is GONE. It called `verifyTOTPWithCounter` and threw the counter away, which is the replay-protection signal, so an unused export sitting next to the correct one was a footgun with the more obvious name. `verifyTOTPWithCounter` is the only entry point
 - Do not reintroduce per-file registration normalizers — use the canonical `normalizeRegistration` in `lib/utils/string.ts` on both client and server
 - Do not re-add a bulk CDN aircraft download — the aircraft DB is populated from FR24, custom entries, and the MongoDB enriched pool only
 - Do not remove `"use client"` directives — server/client boundary is intentionally designed
@@ -2159,26 +2457,29 @@ When making changes, be aware of these high-impact files:
 - Do not expose FR24 as the data source in UI — the user explicitly requires online lookups to be transparent (no "Online Results" labels, no Globe icons, no "FlightRadar24" branding)
 - Do not add hexdb.io fallback for aircraft lookup — if FR24 fails, manual entry is the only option
 - Do not bypass `recalculateFlightFields()` `manualOverrides` — users' manually entered field values must never be overwritten by enrichment
+- Do not put the active route back into context as a plain value, and do not render a keep-alive page's element inline in the stack — either one re-renders all six retained pages on every tab switch. The route is a store whose SNAPSHOT is the per-page boolean (`useSyncExternalStore`), and each page is `memo`ized on its route key
 - Do not add pages to `PERSISTENT_PAGES` in `keep-alive-pages.tsx` without considering memory impact — only heavy virtualized pages should be persistent
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
 - Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
-- Do not bring back press-and-hold for destructive actions. A `holdToConfirm` action ARMS a countdown that only its own Cancel button stops — tapping outside must not disarm, and the `swipe-card-close-others` handler must close the swipe panel only (it fires on any interaction with any other row, so clearing the pending confirm there makes it impossible to arm a delete and move on)
+- Do not put a confirmation in front of a delete — not a dialog, not a hold, not an armed countdown. Deleting is one tap and `Recently Deleted` is the undo (30 days). The countdown machinery survives for exactly ONE caller, "Log out of all devices", because that genuinely has no undo; do not wire `holdToConfirm` to a delete again
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not move the sidebar's gravity blob back into a non-scrolling overlay translated from a scroll listener — that is a main-thread reaction to a scroll that already happened, so the blob trails the items by a frame. It belongs inside the scroller, where it moves on the compositor; the top band is masked anyway, so there is no overshoot clipping to protect it from
 - Do not give the morph different open and close leads — one `MORPH_LEAD` keeps the two directions exact mirrors, which is what makes the top pill and the bottom pill read as the same animation
-- Do not put the sidebar backdrop's fade on a duration of its own — it rides the morph's `TOTAL`/`MORPH_EASE` so the veil arrives with the panel. And do not collapse `SIDEBAR_BACKDROP_BLUR` back to one blurred layer behind an alpha ramp: that cross-fades blurred and sharp copies of the page (a ghosted double image), it does not ramp the blur. Keep the layers ordered smallest-radius-first so the stack can only add blur and stays monotonic on both engines
+- Do not put a `backdrop-filter` back into the sidebar backdrop, the modal backdrop, or a second layer into `ChromeFade`. Progressive BLUR is a chain of full-viewport readbacks that re-rasterise whenever the backdrop or the geometry changes — under the sidebar that is every frame of the morph, and under a header it is every scroll frame. All three are progressive DARKENING now (`SIDEBAR_BACKDROP_RAMP`, `--modal-scrim-core`, and `ChromeFade`'s single 1.8px layer under its veil), which is one paint and a composited opacity
 - Do not put `width: auto` back on the nav pill — `width` animates alongside `left`/`transform`, and CSS can't interpolate to `auto`, so it snaps on the morph's first frame and the pill resizes before it moves. Keep the measured px endpoint from `usePillWidth` (measured only while settled as a pill, in a ResizeObserver callback)
 - Do not animate the gravity nav indicator with a Framer/JS spring, and do not put its motion back on a bezier — it is two damped harmonic oscillators (`springTrack()`) sampled into WAAPI transform keyframes, so the physics runs on the compositor. A JS spring hitches when a heavy page mounts; a bezier can't express a landing squash that stays in step with the travel. Keep the travel heavily damped (no hunting) and the SHAPE on its own looser oscillator — deriving the squash from the travel spring's velocity gives no landing compression at that damping, and loosening the travel to fix it reintroduces the hunting For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
 - Do not add a rule, material or layout that only one engine gets — iOS and Android must render the app identically. In particular do not reintroduce `@supports (-webkit-touch-callout: none)`, the WebKit-only sniff: it silently made Android's date fields shorter and its focused fields slower to take a tap. A vendor-prefixed property paired with the standard one, or inert elsewhere, is fine. The sole exception is the PWA install prompt, where the OS flow itself differs
 - Do not end the glass press on `touchcancel`/`pointercancel` — Chrome fires those the moment a move looks like a scroll, which is what made the Android spotlight die as soon as the finger moved. Track on the window, treat a cancel as bloom-only, and let the grace timer close it out
 - Do not set the dark theme's `--glass-veil` back to `transparent` — a backdrop-filter has nothing to work with over pure black (blur/saturate of black is black; brightness is multiplicative), so the veil is the only thing giving the slab a face on an empty screen. Keep it warm rather than plain white, or the material reads grey over content again
+- Do not animate `.GlassBlur`'s filter VALUE — no transition on it, and no `data-morphing` surge. The nav morph already interpolates `left`/`width`/`height`, so the backdrop readback runs every frame; changing the blur RADIUS on top of that means the kernel changes too and nothing in the pass can be reused, for the busiest 300ms in the app. That was the mobile sidebar's jank. The swell it produced cannot be rebuilt compositor-side — a second element carrying the surged filter is the stacked-backdrop-filter construct below
 - Do not add a second full-face `backdrop-filter` to the glass — `.GlassBlur` carries the only one, as a single filter *list*. Six of them stacked on separate elements is what made the nav pill warm-and-dark on iOS and flat grey on Android: Blink composes the chain, WebKit doesn't, and neither is wrong. Anything the material needs goes into that one list (and the rim layers stay masked to the edge band)
 - Do not give the drag lens's `-refract` layer a `backdrop-filter` instead of its background — the lens is portalled to `<body>` and carries its own `scale`, so it forms a backdrop root and a backdrop-filter there does not sample the pill at all (measured — `blur(10px)` leaves the label underneath perfectly sharp). The layer must paint over the pill it duplicates, or the copy and the original show at once. Cutting the pill out with a mask instead was tried and rejected on the look
 - Do not minify the drag lens's copy uniformly — the squeeze is `scaleY` ONLY, with the row counter-scaled so the labels keep their size and only the control gets shorter. And do not push `LENS_SQUASH` much below 0.84: the counter-scaled row has to fit the copy's box, and the mobile pill's 44px tab item in a 56px bar is what sets that floor (at 0.72 the icons and labels were clipped away entirely)
 - Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
-- Do not delete a flight outright — `deleteFlight` is a **soft delete** into the 90-day recycle bin and pushes an UPDATE; only `purgeExpiredDeletedFlights` writes a tombstone. Push a delete when the user merely binned it and the flight is gone on every device with nothing to restore
+- Do not delete a user record outright — `deleteEntity` is a **soft delete** into Recently Deleted (30 days) and pushes an UPDATE; only `purgeEntity` writes a tombstone. Push a real delete when the user merely binned it and the row is gone on every device with nothing to restore. The two exceptions are discrepancies and schedule entries, which are import bookkeeping and stay hard
 - Do not order flights anywhere but `lib/utils/flight-sort.ts` — the order must be TOTAL (date, then actual-or-SCHEDULED out time, then departure, then id) or rows move on their own: a new flight sat at the top of the logbook until the next refetch and then jumped, and reading `outTime` alone treated every unflown sector as 00:00 so scheduled flights sank below completed ones on the same day. An optimistic cache write inserts with `insertFlightSorted`, never by prepending
-- Do not read `userDb.flights` for a list, a total or an import match without `isLiveFlight` — a binned flight reaching the reconciler silently updates, and so resurrects, a flight the user deleted
+- Do not read a user table for a list, a total or an import match without filtering deleted rows (`isLiveFlight` for flights, `isLiveEntity` for the rest) — a binned row reaching the reconciler silently updates, and so resurrects, something the user deleted. The store's own `getAllX` already filters; go through it rather than hitting the table
+- Do not use `RETENTION_MS` for a deletion sweep or `DELETED_RETENTION_MS` for a decision — they are 90 and 30 days and the helpers take the window as an argument precisely so a caller has to say which
 - Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
 - Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
 - Do not open a detail with `router.replace` — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
@@ -2233,6 +2534,7 @@ When making changes, be aware of these high-impact files:
 - Do not add an inline copy of the header gradient — render `ChromeFade` (it now carries the progressive blur + fade as one treatment; an inline gradient silently loses the blur). Do not swap the top/bottom edge treatments: blur belongs to the TOP band only (the bottom band is too short — blur there read as smearing and the owner rejected it; the bottom gets the darkening fade in `bottom-edge-blur.tsx`). And do not paint a `--background` scrim over a translucent glass surface (the sidebar) — mask the content out instead
 - Do not leave `--on-glass` at a guessed value when the material changes — it must equal the colour the FINISHED face reads as (base + veil + the brightened backdrop through the remainder). Get it wrong and everything painted on the glass lands on the wrong side of it: at the old value the nav's gravity blob (0.292) was indistinguishable from the face (0.276) in dark mode
 - Do not name only the anchor month while the calendar is showing two — the header and the month picker both cover the pair
+- Do not give a glass surface `overBlur` because it looks better — it is a claim that something has ALREADY blurred what is behind it, and the two bottom treatments are not the same: the header's `ChromeFade` carries a real progressive blur, `bottom-edge-blur` is a darken with none. The mobile bottom pill over a scrolling logbook is the case that breaks if you get this wrong
 - Do not drive the glass's opacity from `--glass-veil` — that coat is a warm LIGHTENING paint and raising its alpha whitens a dark surface instead of solidifying it. Opacity belongs to `--glass-base`, the card-coloured undercoat; the two are separate on purpose
 - Do not paint an extra background over a glass surface to make one instance more opaque (the calendar did, at `--background` 0.85, and read as a different material from every other glass surface). Change the shared material instead
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
@@ -2244,19 +2546,46 @@ When making changes, be aware of these high-impact files:
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
 - Do not build the flight card's extra actions from glass — glass is chrome floating over content, and these have to be read; as a glass slab the flight cards showed straight through the labels. They are the SWIPE PANEL's button repeated (64px `rounded-lg`, `bg-secondary`, icon over a `text-xs` word, the panel's own 8px gap), because the run comes out of a control in that panel; 56px circles in `bg-card` read as a different family of control turning up beside it
-- Do not let the context preview come to rest in the row's own column — it settles CENTRED ON THE VIEWPORT at `MAX_WIDTH`, or on anything wider than a phone it is the same width it started and the morph reads as nothing happening (measured on a 1180 tablet: 336 → 672). And keep the detail's own delayed reveal (opacity/y/blur, 100ms in): the box growing and the content arriving are two things, and running them together reads as a jump
-- Do not put a `layout`/`layoutId` prop on a flight card to morph the context preview out of it — the rows are VIRTUALISED, and that hands framer every rendered row to measure on every layout change (the per-row measuring the list was rebuilt to remove), while FLIP animates the box by SCALE and this growth is nearly all height, so the card's text stretches on the way up. The morph's geometry is derived instead: a centred flex column, a collapsed rest position of `(innerHeight − cardHeight) / 2`, and the detail/actions animating their REAL height. Anchor it to the card (`[data-slot="card"]`), not the row wrapper — the wrapper carries the per-row top gap and 4px out is a visible jump on the first frame
-- Do not tear the context preview down on the dismissing tap — the morph runs BOTH ways, so closing collapses it back onto the row first and `onClose` fires on a timer. And keep the source row `invisible` while it is up, or the copy opening on top of it shows the same flight twice through the scrim
+- Do not give the context preview's compact body `layout="position"` — it is the one block that exists in BOTH states, so it takes a FULL `layout`. Its height is unchanged either way, which makes its delta scaleX only: the row's content is condensed at the first frame and relaxes out as the card widens. `layout="position"` cancels the horizontal scale too, which lays it out at the RESTING width from frame one and lets the card clip it — on a tablet the arrival time and ICAO are missing until the card widens past them. The detail and the actions DO take `layout="position"`; they exist only while open. And keep the lift a static shadow on its own PROJECTED (`layout`) node faded by opacity, outside the clip: an interpolated `boxShadow` is rebuilt as a string every frame, and `overflow: hidden` on an ancestor eats a shadow entirely
+- Do not let the context preview come to rest in the row's own column — it settles CENTRED ON THE VIEWPORT at `MAX_WIDTH`, and only ever GROWS (a row already wider than that keeps its own width rather than shrinking, which would be the same frame-one mismatch in reverse). Keep the detail's own delayed reveal (opacity + y, ~30% of the morph in): the box growing and the content arriving are two things, and running them together reads as a jump. It does NOT animate `blur()` — that is a per-frame filter pass on the busiest frames of the overlay, and the delayed opacity/travel already says "settling into the room"
+- Do not give the context preview's backdrop a blur — it is a plain darken (`SCRIM`). Full-viewport `backdrop-filter` layers each sample the one below, so the whole stack recomputes every frame their opacity changes, and that landed on exactly the frames the card is travelling. Giving it its own short clock helped and was not enough; the reference implementation this morph was measured against has no blur either. A DIALOG's backdrop keeps its blur — nothing is animating a card behind it
+- Do not unmount the context preview on a timer set to `MORPH_MS` — the collapse only STARTS on the commit after the closing state flips, so that timer is systematically a frame or two early and the overlay disappeared with the card still short of its row, which un-hid underneath and read as a flash on the flight card. The card's own `onLayoutAnimationComplete` is what "closed" means; the timer stays only as a safety net, and longer than the morph (measured: card lands at 459ms, overlay unmounts at 510ms, zero frames with both visible)
+- **Blur animation rules, app-wide.** Never ANIMATE `backdrop-filter`, `filter`, `mask-image`, `height` or `top` — they are layout- or paint-bound and re-rasterise every frame. Animate `opacity` and `transform` only. Where a progressive blur has to appear or disappear, fade the layers' OPACITY on a SHORT clock of their own (~160ms) rather than the surrounding motion's, so the blur settles before the thing it sits behind has finished moving and the rest of the animation composites a texture that no longer changes. And keep the stack to THREE layers on a full-viewport effect: each layer samples the output of the one below, so it is a chain rather than a sum, and the fourth link is the one a weak mobile GPU shows. `RadialBlurBackdrop` and `SIDEBAR_BACKDROP_BLUR` both follow this; `ChromeFade` is static and does not animate at all
+- Do not fade a `backdrop-filter` layer by fading an ANCESTOR — an element with `opacity` below 1 (or `will-change: opacity`, a mask, or a filter) is a **backdrop root**, so its descendants' `backdrop-filter` can only sample inside it. The context preview's `RadialBlurBackdrop` used to sit inside the scrim that fades: for the whole morph the layers blurred nothing, then the full stack snapped on the instant the scrim hit exactly 1 — a hitch at the end of the animation, and the part of that overlay most likely to be felt on a phone. Fade each LAYER's own opacity instead (an element's own opacity is fine — the root is an ancestor boundary), which is how `SIDEBAR_BACKDROP_BLUR` has always done it. A CSS transition there also needs the layers to MOUNT at 0, or there is no previous value to run from
+- Do not put a `layout`/`layoutId` prop on a flight card in the LIST to morph the context preview out of it — the rows are VIRTUALISED, and that hands framer every rendered row to measure on every layout change. The preview is a FLIP, but only the OVERLAY carries the projection: the collapsed box is stated outright from the anchor we already measure when the hold fires, so the list is never involved. Anchor it to the card (`[data-slot="card"]`), not the row wrapper — the wrapper carries the per-row top gap and 4px out is a visible jump on the first frame
+- Do not put `transition-all` on a flight card — its visibility is toggled by the context preview, and `transition-all` animates `visibility`. Measured: hidden→visible still computes `hidden` for the FIRST FRAME, so the overlay unmounts and the row is blank for a frame (the flash on collapse); visible→hidden holds `visible` for the whole 150ms, so the source row shows through the opening morph as a second copy of the same flight. `transition-colors` is what the hover/selected states actually wanted
+- Do not let the flight card's press-and-hold fire on a row whose SWIPE PANEL is open — the actions are showing and the card has been pushed aside to reveal them, so a press there is aimed at a button, not at holding the card. `SwipeableCard` publishes `data-swipe-open` for exactly this (unconditional, unlike `data-swipe-active`, which is scoped to `separated` rows because it drives their divider morph)
+- Do not tear the context preview down on the dismissing tap — the morph runs BOTH ways, so closing collapses it back onto the row first. And keep the source row `invisible` while it is up, or the copy opening on top of it shows the same flight twice through the scrim
+- Do not switch a `motion` component's `style` between two differently-shaped objects — a motion component does NOT clear a style property that merely disappears from the object. Measured on the context preview: the collapsed branch set `position`/`top`/`left`/`height` and the expanded branch omitted them, so they stayed on the element for the whole morph, the card never left the row, and there was no layout change for `layout` to animate. Supply every key in BOTH states
+- Do not release a `useBackDismiss` marker synchronously in the effect cleanup — `history.back()` lands in a later task, so a teardown immediately followed by a re-run (React StrictMode double-invokes every effect in development, and any fast `active` toggle does the same) issued the `back()` after the new effect had already pushed a fresh marker and attached its listener, and the overlay dismissed ITSELF a few hundred ms after opening. The release is deferred by a task and cancelled if the effect comes straight back, which also stops the stack growing an entry per remount
 - Do not let the flight card's hold arm from a press on the row's own CONTROLS — the pointer hooks sit on `SwipeableCard`'s outer container, so the swipe buttons are inside them, and a thumb tap on `…` outlasts `HOLD_MS` on a phone. That opened the context preview instead of the cascade. Bail when the press starts on a `button`/`a`/`input`/`textarea` or inside `[data-swipe-actions]`
 - Do not put the flight card's ACTIONS back behind a press-and-hold — they live in the swipe panel behind `…`. A hold is an invisible gesture that nothing advertises, and as the actions menu it competed with the swipe and the scroll for the same pointer. The hold now drives the CONTEXT PREVIEW instead, which is a different job (a look, not a menu) and the one thing a hold has always meant; it still needs the movement cancel and the synthetic `pointercancel`
 - Do not let a dismissing tap on the `…` reopen the cascade — the swallow closes it on `pointerup` and the follow-up `click` then arrives with the listeners already gone. Keep `CASCADE_REOPEN_GUARD_MS`: an open request within 350ms of a close is the same tap, whichever order an engine delivers it in
 - Do not confine the header's blur to the bar's own height, and do not scroll a row to `--chrome-top` — content has to clear `--chrome-clear` (the bar PLUS the fade's tail). A row parked at the bar's edge sits in the blur and looks sharp enough to tap when it isn't
-- Do not let the bottom nav hide on scroll — it is the app's primary navigation on a phone, and it disappeared exactly when a long read made you want it, with a scroll UP as the only way back
+- Do not let the bottom nav hide on scroll — it is the app's primary navigation on a phone, and it disappeared exactly when a long read made you want it, with a scroll UP as the only way back. The machinery for it is GONE, not merely switched off, and that is the point: `ScrollNavbarProvider` sat at the very top of the app tree and flipped a `hideNavbar` state on every scroll direction change past a 10px threshold, so a single flick re-rendered the whole tree — six mounted keep-alive pages, the shell, the virtualised logbook — to compute a value the nav had already stopped reading. Do not reintroduce a scroll handler that writes state anywhere above a page
+- Do not `refresh` a data hook with `mutate(undefined, { revalidate: true })` — clearing the cache first flips `isLoading` true and flashes the list's skeleton on every background refresh, and it hands out a NEW array even when nothing changed, which defeats SWR's default deep `compare` (`dequal`) and makes every downstream memo recompute (the FDP pipeline, the dashboard aggregates, the calendar's flight-date map). Bare `mutate()` revalidates in place. For the same reason `isLoading` must NOT be `isLoading || isValidating`: SWR's `isLoading` already means "no data yet", and folding in `isValidating` turns every revalidation into a skeleton
+- Do not construct an `Intl.DateTimeFormat` per call — go through `lib/utils/tz-format.ts` (`tzFormatter` / `tzOffsetName`). — resolving locale and timezone data is by far the most expensive part of formatting, and `getAirportTimeInfo` built TWO per call while the logbook parser and the roster executor each resolve a departure and an arrival offset PER SECTOR, and the schedule parser's `normalizeTimeToUTC` resolves one per TIME TOKEN (~six a row). Cache the FORMATTER (stateless, and every caller still hands it the current instant), never the resolved offset — a cached offset pins whatever DST was in force the first time that airport was seen. Measured on 800 lookups across 8 zones: 143ms → 8ms
+- Do not look a reference record up with `array.find(a => a.code.toUpperCase() === …)` — the airport table is ~10k rows and that allocates an uppercased string for every one of them, per lookup. `getAirportByICAO`/`getAirportByIATA` are backed by a `WeakMap` index keyed on the array itself (no invalidation to get wrong: a new array is a new key), and they must keep `find`'s FIRST-match rule, which `airport-code-index.test.ts` pins. The same shape appears wherever recents are resolved — build the Map once, then look up
+- Do not reload a whole reference table on mount to notice a write — `useAirportDatabase` re-read all ~10k airports from IndexedDB every time it mounted, and the flight form mounts on every flight tap. Writers bump `getAirportsRevision()` and the hook reloads only on a mismatch. Every write to `referenceDb.airports` lives in `airports.store.ts` (rebuild / addCustom / toggleFavorite) — a NEW writer must bump it too, or a cached copy goes stale. Capture the revision BEFORE the read, so a write landing mid-load leaves the cache looking stale rather than falsely current
+- Do not compute a list twice in JSX — `xs.some(p)` for the section guard and `xs.filter(p)` for the rows is two full passes per render, and on the airports page that was two scans of the whole reference table for a handful of pinned entries. Derive it once in a `useMemo` and test `.length`
+- Do not pass a memoized list card an INLINE arrow (`onDelete={() => performDelete(item)}`) — it hands every row new props on each render of the page and defeats the `memo` outright, which is the whole reason the card is memoized. The card takes its own item back (`onDelete: (item) => void`) and the page passes ONE `useCallback`'d handler; a plain function declared in the page body is just as bad as the arrow, so the handler itself has to be stable. This bit the logbook, crew and aircraft lists independently
+- Do not put a `backdrop-filter` (`backdrop-blur-*`) on a surface whose backdrop is a FLAT colour — blurring a uniform field returns that same field, so it is pixel-identical to no filter while still forcing a backdrop root, a readback and a blur pass every frame the layer is painted. The dashboard's six widget cards each carried `backdrop-blur-sm` over `bg-background`, which has no gradient and nothing behind it (the grid is sequentially placed, so items never overlap). Glass surfaces, the chrome fade and the modal backdrops keep theirs — those sit over real, moving content, which is the case the filter exists for
+- Do not hold gesture bookkeeping in React STATE when nothing renders it. The calendar kept `swipeStartY` / `isSwiping` / `hasTriggeredSwipeStart` as state and read them only inside its touch handlers, so putting a finger on it re-rendered the whole grid — 42 day cells, or 84 in dual mode — up to three times before anything visible happened. Refs, and the same for any drag box that can't move mid-gesture (`fast-scroll` caches the rail's rect for the drag's duration rather than reading it per `touchmove`, while that same drag is driving `scrollToIndex` on a virtualised list)
+- Do not do a gesture's work per POINTER EVENT — pointer events fire faster than frames (120Hz+, and coalesced besides) and nothing can show more than one position per frame. `GlassContainer`'s press-follow, the nav drag lens and the signature canvas each accumulate the latest point in a ref and apply it in ONE rAF pass. Within that pass, every layout READ comes before any WRITE: the drag lens used to write nine `left`/`top`/`width`/`height` values and then read a rect for the spotlight, which forces a synchronous layout flush on every event of the one gesture that has to feel stuck to the finger
+- Do not accumulate a signature stroke in React state — `signature-canvas.tsx` keeps the in-progress stroke in a REF and repaints once per frame, handing React ONE update when the stroke ends. As state, every point copied the whole array, re-rendered, took a `getBoundingClientRect`, forced a style flush via `getComputedStyle`, and redrew every stroke — so the cost per point grew with the stroke and the line visibly trailed the finger. The box and the resolved colour are cached for the stroke's duration; neither can change while a finger is down
+- Do not leave a `setState` in a rAF loop unguarded when the value it writes changes slower than the frame rate. `useCountdownConfirm` ticks at 60fps to drive a MotionValue (free) but `remaining` is whole SECONDS, so it compares before dispatching — ~60 scheduler entries a second for 59 non-changes, for the whole 10s a delete is armed, which is exactly when the user is scrolling the list it was armed from
+- Do not run a clock, poll or subscription that a keep-alive page owns without gating it on that page being the ACTIVE route. The dashboard's FDP stack ticks at 1Hz to drive one countdown; the dashboard is mounted forever after its first visit, so ungated it re-rendered four limit rows every second for the rest of the session while the user was somewhere else entirely. Gate on `usePageActive` AND on there being something to tick for
+- Do not answer "is anything queued?" by reading a table — the sync trigger manager polls that every 10 seconds for the whole session, and `getSyncQueue().length` deserialised every pending row to compare a number against zero. Use `getSyncQueueCount()`, which counts off the index
+- Do not release a `useBackDismiss` marker without checking the URL is still the one it was pushed at. `history.back()` only takes the marker back while the marker is the TOP of the stack; if something navigated in the meantime — the sidebar's close-on-`pathname` effect is exactly that shape, a route change tears the overlay down — the marker is buried one entry below the new page and the `back()` undoes the navigation. A buried marker is left alone: it is a duplicate entry for a page the user was already on, which is invisible, where undoing a navigation is not
+- Do not let an overlay rely on Escape alone — on Android the back gesture is the other half of the same intent, and without `useBackDismiss` the router navigates and the overlay (portalled to `document.body`) is left over whatever page arrives. Every dismissal must go through the hook's `dismiss()`, and an action that navigates has to run as its FOLLOW-UP: closing first and popping the marker entry on the way out issues the `router.push` while our own `back()` is still queued, and the back then undoes it
+- Do not give a scroll handler ANY work that isn't per-frame cheap, and never let one write React state above the component that needs it. The logbook's list runs one rAF-throttled listener whose only job is the calendar sync; `topFlightDate` is pushed into state only while the calendar is actually OPEN, because the calendar is collapsed to `height: 0` rather than unmounted and updating it while stowed re-rendered a whole month grid per card scrolled past, for something nobody can see
+- Do not hand-roll a spinner — waiting is one thing and should look like one thing. `PageLoading` is the route-level state (every `loading.tsx`, the keep-alive Suspense fallback) and `PanelLoading` is the detail-panel one, both in `components/ui/page-loading.tsx`. The aircraft, airports and crew pages each carried an identical copy of a `border-2 border-primary border-t-transparent` ring, so waiting for a pane looked like a different kind of waiting depending on which tab you were on
 - Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (56 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
 - Do not give the bottom bar a squarer corner than a stadium — `MOBILE_PILL_RADIUS` is half its own height, the same rule the 44px controls follow; it is a separate constant only because the bar is a different height. A third-of-the-height radius was tried (the proportion the reference tab bars use) and rejected on the look: what reads as a squircle there is CONTINUOUS CURVATURE, not a smaller radius, and a circular arc at that radius is just a rounded rectangle. Drawing the real thing needs `corner-shape`, and a corner shape one engine falls back from would leave iOS and Android with different bars
 - Do not give the gravity blob a colour of its own — it is `--on-glass-active`, THE selected-thing fill, shared with an action button's active state so the nav and the header say "this is the one you are on" the same way. It must stay a mix of two OPAQUE colours: any translucency shows up as the blob letting the page through, which is the one thing it must not do
 - Do not put `--primary` on `--on-glass-active` — a 32% tint of a colour is the same hue at a similar lightness, which is exactly why the active action button read as barely selected. The label is `--on-glass-active-fg`, the primary pushed AWAY from the fill (lighter on dark, darker on light) so it still reads as the accent
 - Do not close the flight card's `…` cascade on POINTERDOWN — the overlay unmounts mid-gesture and the click that follows lands on the card underneath, so dismissing it also opened the flight. Close on the lift and swallow the synthesised click at the capture phase
+- Do not give a page its own copy of the calendar's wrapper — `CalendarPanel` is the one presentation, and the logbook and the dashboard both render it. They drifted into looking like two different calendars once already (radius, width, glass, dual month, and a duplicate month label in the dashboard's action bar)
 - Do not derive the calendar's dual/single mode from a ResizeObserver on the page — read `usePanelDualMonth()`. A measurement lands a frame behind the resize, and in that frame the calendar renders the outgoing mode at the incoming width (the "flash" on the collapse)
 - Do not scroll a dynamically-measured virtual list by asking the virtualizer where a row is — every offset it can give you is built from `estimateSize` for the rows it has never measured, so `scrollToIndex`/`getOffsetForIndex` are wrong by however far the estimate is off. `scrollToIndexSettled` scrolls roughly, then MEASURES the row in the DOM and corrects by the difference, which is exact
 - Do not let the `…` cascade change the flight card's size, and do not drop `keepOpen` from the `…` action — the run is a PORTALLED overlay anchored to the `…` button's own box, and the swipe panel has to stay open beneath it or the buttons appear to come from nothing. A menu that grew the row would move every row below it

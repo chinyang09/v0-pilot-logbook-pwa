@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, FileWarning, Loader2 } from "lucide-react";
+import { FileText, FileWarning } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { NormalizedDocument } from "@/lib/utils/parsers/types";
 
@@ -41,14 +41,5 @@ export function DetectedFilesChip({ files }: DetectedFilesChipProps) {
         );
       })}
     </div>
-  );
-}
-
-export function ImportSpinner({ label }: { label?: string }) {
-  return (
-    <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-      <Loader2 className="h-4 w-4 animate-spin" />
-      {label}
-    </span>
   );
 }

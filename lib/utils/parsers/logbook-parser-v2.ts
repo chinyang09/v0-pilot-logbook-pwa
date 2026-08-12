@@ -19,7 +19,7 @@
  */
 
 import type { Personnel } from "@/types/entities/crew.types";
-import { getCurrentUserPersonnel, getAirportByIata, getAllPersonnel, getAirportTimeInfo } from "@/lib/db";
+import { getCurrentUserPersonnel, getAllPersonnel, getAirportTimeInfo } from "@/lib/db";
 import {
   calculateNightTimeComplete,
   findDayBoundariesUtc,

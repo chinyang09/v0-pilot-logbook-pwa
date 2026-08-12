@@ -396,6 +396,13 @@ export function SwipeableCard({
       id={id}
       data-swipe-row={separated ? "" : undefined}
       data-swipe-active={separated && active ? "true" : undefined}
+      // Unconditional, where `data-swipe-active` above is scoped to `separated`
+      // rows (it drives their divider morph). A consumer that owns a gesture on
+      // the same pointer needs to know the panel is out whatever the variant —
+      // the flight card's press-and-hold reads this to stand down, because a
+      // thumb resting on a revealed row is aiming at a button, not holding the
+      // card.
+      data-swipe-open={active ? "true" : undefined}
       className={cn(
         "relative overflow-hidden",
         isCard && "rounded-lg",

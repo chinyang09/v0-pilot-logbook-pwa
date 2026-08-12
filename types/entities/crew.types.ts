@@ -27,7 +27,9 @@ export interface Personnel {
   defaultSIC?: boolean
   createdAt: number
   updatedAt?: number
-  deleteddAt?: number
+  /** Soft-delete stamp — the row is in Recently Deleted. `null` when cleared,
+   *  never undefined (see SyncableEntity). */
+  deletedAt?: number | null
   syncStatus: SyncStatus
   // Sync engine: server-authored monotonic version (delta cursor) + authoring device (LWW tiebreak)
   serverSeq?: number

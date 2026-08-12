@@ -35,6 +35,7 @@ import { usePageActive } from "@/hooks/use-page-active"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassSearchButton } from "@/components/ui/glass-search-button"
 import { GlassIconButton } from "@/components/ui/glass-icon-button"
+import { PanelLoading } from "@/components/ui/page-loading"
 
 // Memoized swipeable aircraft card (matches crew card pattern)
 interface AircraftCardProps {
@@ -44,7 +45,12 @@ interface AircraftCardProps {
   isFavorite?: boolean
   onSelect: (aircraft: NormalizedAircraft) => void
   onToggleFavorite?: (e: React.MouseEvent, registration: string) => void
-  onDelete: () => void
+  /**
+   * Given the aircraft, like `onSelect` — an inline `() => performDelete(a)`
+   * per row hands every card a new prop on each render of this page and
+   * defeats the `memo` below.
+   */
+  onDelete: (aircraft: NormalizedAircraft) => void
 }
 
 const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
@@ -63,10 +69,8 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
       actions={[
         {
           icon: <Trash2 className="h-5 w-5" />,
-          onClick: onDelete,
+          onClick: () => onDelete(aircraft),
           variant: "destructive",
-          holdToConfirm: true,
-          cancelLabel: "Cancel delete",
         },
       ]}
     >
@@ -197,9 +201,18 @@ export default function AircraftPage() {
         if (recentRegs.length >= 10) break
       }
     }
+    // ONE pass to index, then O(1) per lookup. This was a `find` per recent
+    // registration — up to ten scans of the whole aircraft table, each
+    // uppercasing every row, in a memo that re-runs whenever `flights` changes.
+    // First match wins, exactly as `find` did.
+    const byReg = new Map<string, NormalizedAircraft>()
+    for (const ac of allAircraft) {
+      const key = ac.registration?.toUpperCase()
+      if (key && !byReg.has(key)) byReg.set(key, ac)
+    }
     const recent: NormalizedAircraft[] = []
     for (const reg of recentRegs) {
-      const found = allAircraft.find((ac) => ac.registration?.toUpperCase() === reg)
+      const found = byReg.get(reg)
       if (found) recent.push(found)
     }
     return recent
@@ -208,7 +221,9 @@ export default function AircraftPage() {
   // Sort aircraft with registrations alphabetically
   const allSortedAircraft = useMemo(() => {
     if (allAircraft.length === 0) return []
-    return [...allAircraft]
+    // `.filter()` already returns a new array, so the sort cannot reach the
+    // hook's cached one — no defensive copy needed in front of it.
+    return allAircraft
       .filter((a) => a.registration)
       .sort((a, b) => a.registration.localeCompare(b.registration))
   }, [allAircraft])
@@ -396,9 +411,7 @@ export default function AircraftPage() {
 
     if (isLoading) {
       setDetailContent(
-        <div className="flex items-center justify-center h-full">
-          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
-        </div>
+        <PanelLoading />
       )
       return
     }
@@ -515,12 +528,13 @@ export default function AircraftPage() {
     })
   }, [])
 
-  const performDelete = async (aircraft: NormalizedAircraft) => {
+  // Stable, so the memoized cards actually hold — see AircraftCardProps.onDelete.
+  const performDelete = useCallback(async (aircraft: NormalizedAircraft) => {
     if (aircraft.registration) {
       await deleteAircraftFromDatabase(aircraft.registration)
       await refreshAircraft()
     }
-  }
+  }, [refreshAircraft])
 
   const handleSelectAircraft = useCallback(
     async (aircraft: NormalizedAircraft) => {
@@ -713,7 +727,7 @@ export default function AircraftPage() {
                             key={`fav-${aircraft.registration}`}
                             aircraft={aircraft}
                             onSelect={handleSelectAircraft}
-                            onDelete={() => performDelete(aircraft)}
+                            onDelete={performDelete}
                             isFavorite
                             onToggleFavorite={handleToggleFavorite}
                             isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}
@@ -734,7 +748,7 @@ export default function AircraftPage() {
                             key={`recent-${aircraft.registration || aircraft.icao24}`}
                             aircraft={aircraft}
                             onSelect={handleSelectAircraft}
-                            onDelete={() => performDelete(aircraft)}
+                            onDelete={performDelete}
                             isRecent
                             isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
                             onToggleFavorite={handleToggleFavorite}
@@ -833,7 +847,7 @@ export default function AircraftPage() {
                         <SwipeableAircraftCard
                           aircraft={aircraft}
                           onSelect={handleSelectAircraft}
-                          onDelete={() => performDelete(aircraft)}
+                          onDelete={performDelete}
                           isFavorite={favoriteRegs.has(aircraft.registration.toUpperCase())}
                           onToggleFavorite={handleToggleFavorite}
                           isSelected={!selectMode && selectedAircraftReg === (aircraft.registration || aircraft.icao24)}

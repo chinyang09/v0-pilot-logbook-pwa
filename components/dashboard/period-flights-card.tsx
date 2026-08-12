@@ -35,7 +35,7 @@ export function PeriodFlightsCard({ flights, className }: PeriodFlightsCardProps
       className={cn(
         // @container: row columns adapt to the CARD's width (it lives in a
         // resizable split panel, so viewport breakpoints are meaningless here).
-        "@container flex h-full w-full flex-col rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm backdrop-blur-sm",
+        "@container flex h-full w-full flex-col rounded-2xl border border-border/60 bg-card/70 p-2.5 sm:p-3 shadow-sm",
         className,
       )}
     >

@@ -19,6 +19,13 @@ import { cn } from "@/lib/utils"
  *   (month picker label, period pills, import/alerts triggers).
  * - `GlassSearchButton` (components/ui/glass-search-button.tsx) — the
  *   expanding search control; collapsed it matches `GlassIconButton`.
+ *
+ * All of them carry `overBlur`: a header control is, by definition, sitting in
+ * the header's `ChromeFade` band, which has already blurred and darkened
+ * whatever is scrolling under it. A thick undercoat on top of that only buries
+ * a backdrop that is unreadable anyway, so the material is thinner here and
+ * you can actually see the app through the controls. See the
+ * `[data-over-blur]` rule in globals.css.
  */
 /**
  * The shared corner radius. It has to be half the control height or the pill
@@ -41,7 +48,7 @@ export function GlassIconButton({
   children: React.ReactNode
 }) {
   return (
-    <GlassContainer cornerRadius={CONTROL_RADIUS}>
+    <GlassContainer cornerRadius={CONTROL_RADIUS} overBlur>
       <Button
         variant="ghost"
         size="icon"
@@ -71,7 +78,7 @@ export function GlassTextButton({
   children: React.ReactNode
 }) {
   return (
-    <GlassContainer cornerRadius={CONTROL_RADIUS}>
+    <GlassContainer cornerRadius={CONTROL_RADIUS} overBlur>
       <Button
         variant="ghost"
         onClick={onClick}
@@ -86,7 +93,7 @@ export function GlassTextButton({
 
 export function GlassButtonGroup({ children }: { children: React.ReactNode }) {
   return (
-    <GlassContainer cornerRadius={CONTROL_RADIUS}>
+    <GlassContainer cornerRadius={CONTROL_RADIUS} overBlur>
       <div className="flex items-center gap-0.5 px-1 h-11">{children}</div>
     </GlassContainer>
   )
