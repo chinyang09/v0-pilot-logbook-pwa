@@ -44,11 +44,10 @@ import {
  * (same `px-3 py-1` body, same `rounded-xl border bg-card`), then travels to
  * the centre while the detail and the action row unfurl beneath it.
  *
- * It comes to rest CENTRED ON THE VIEWPORT, at the row's own width, and the
- * growth is all height. The width used to expand to `MAX_WIDTH` on anything
- * bigger than a phone; the projection cannot do that without either clipping
- * the compact body at the first frame or squashing its text, so it does not —
- * see the note on `MAX_WIDTH`.
+ * It comes to rest CENTRED ON THE VIEWPORT and as wide as the screen allows
+ * (`MAX_WIDTH`) — a dialog held to the width of the panel it came out of barely
+ * moves on a tablet. On a phone the row already fills the screen, so it rests
+ * at the row's own width and the growth is all height (see `MIN_GROWTH`).
  *
  * ── IT IS A FLIP (framer's `layout` projection) ───────────────────────────
  *
@@ -103,35 +102,25 @@ export interface PreviewAnchor {
 }
 
 const MARGIN = 16;
-/** Upper clamp on the card's width. It is no longer a growth TARGET — see the
- *  note below on why the width is constant — but a logbook row in a very wide
- *  single-panel layout should still not become a full-bleed slab. */
+/** How wide the lifted card is allowed to GROW (Tailwind's `max-w-2xl`).
+ *
+ *  On anything bigger than a phone the row is the width of one panel, and
+ *  expanding to a screen-centred card plainly bigger than the row IS the
+ *  transformation. See the compact body's `layout` prop for how the projection
+ *  is made to widen without clipping or crushing what is inside it. */
 const MAX_WIDTH = 672;
 /**
- * THE CARD'S WIDTH DOES NOT CHANGE, and that is a consequence of the technique
- * rather than a preference.
+ * How much wider the card has to be able to GET before it grows sideways.
  *
- * A FLIP makes the box appear at the source by SCALING it, and the scale
- * applies to the whole subtree. Text cannot take that — this card is clock
- * times and registrations in `tabular-nums` — so every content block is a
- * `layout="position"` node, which framer renders at its TRUE size and merely
- * moves. That is exactly the right answer vertically, where the compact body's
- * height never changes anyway.
+ * A logbook row is `innerWidth - 2 x --panel-gutter` (24) and the wrapper's
+ * margin would allow `innerWidth - 2 x MARGIN` (32), so on a phone "growing"
+ * would mean the card getting 8px NARROWER. Below this threshold it rests at
+ * the row's own width instead and there is no horizontal scale at all.
  *
- * Horizontally it forces the issue. If the resting width were wider than the
- * row, the compact body would be laid out at the RESTING width from the first
- * frame and clipped to the row's — so on a tablet the first frame would show
- * the arrival time and ICAO missing off the right edge, sliding in as the card
- * widened. The alternative is to let the body scale with the card, which
- * squashes the row's own text to about a fifth of its height at frame 1.
- * Neither is acceptable, and framer has no per-axis layout mode.
- *
- * So the preview rests at the row's own width and the growth is all height —
- * which is what a phone always did, and what the notes above always claimed.
- * On a tablet the card no longer widens; it grows downward and travels to the
- * centre. (Shadix's demo does change width, but its content is an image, which
- * takes a scale without complaint.)
+ * 48px is about where a width change reads as the card growing rather than
+ * twitching.
  */
+const MIN_GROWTH = 48;
 /**
  * The lift — a STATIC shadow on its own projected node, faded with `opacity`.
  *
@@ -314,12 +303,12 @@ export function FlightContextPreview({
   // panel it came from barely moved on a desktop, which is what made the morph
   // invisible there. It still OPENS at the row's own width and place, wherever
   // that is, so the first frame is the row to the pixel.
-  // The row's own width, so the projection has no horizontal scale to apply at
-  // all — see the note on MAX_WIDTH. It is deliberately NOT clamped to the
-  // wrapper's margin: a logbook row is `innerWidth - 24` and the margin would
-  // put it at `innerWidth - 32`, which is the 8px narrowing this is here to
-  // avoid (measured: the card came to rest 358 wide against a 366 row).
-  const width = Math.min(anchor.width, MAX_WIDTH);
+  const available = Math.min(MAX_WIDTH, window.innerWidth - MARGIN * 2);
+  // Grow only where there is somewhere to grow to — see MIN_GROWTH. On a phone
+  // there is not, so the card rests at exactly the ROW's width (not at
+  // `available`, which is 8px narrower) and there is no horizontal scale at all.
+  const width =
+    available - anchor.width >= MIN_GROWTH ? available : anchor.width;
   // Nothing else to derive. The travel used to be computed by hand — the delta
   // between the row's box and where a centred flex column would put the
   // collapsed card — because the card was moved with `x`/`y`. The projection
@@ -411,17 +400,28 @@ export function FlightContextPreview({
             className="relative overflow-hidden rounded-xl border border-border bg-card"
             style={{ height: open ? undefined : "100%" }}
           >
-            {/* SCALE CORRECTION. The card's projection scales its whole subtree —
-                from a 110px row to a ~500px card that is a scaleY of about 4.5 —
-                and this app's card is clock times and registrations in
-                `tabular-nums`, which shows that immediately. `layout="position"`
-                makes each block its own projection node: framer then animates
-                only where it sits and cancels the parent's scale, so the text
-                keeps its true size the whole way. This is what Shadix's
-                `layout="position"` on its title and description is doing, and it
-                is why one wrapper per block is enough — everything inside a
-                corrected node is corrected with it. */}
-            <motion.div layout="position" className="px-3 py-1">
+            {/* FULL `layout` here, `layout="position"` on every block below,
+                and that difference is what lets the card widen at all.
+
+                The card's projection scales its subtree on BOTH axes: from a
+                105px row to a ~500px card, and on a tablet from a 336px row to
+                a 672px one. The VERTICAL part would crush this row's text to a
+                fifth of its height and must be cancelled. The HORIZONTAL part
+                is the card widening, which this content is meant to follow.
+
+                `layout="position"` cancels both. That is right for a block
+                which only exists while open, but for this one it would lay the
+                body out at the RESTING width from the first frame and let the
+                card clip it — so on a tablet the arrival time and ICAO would
+                simply be missing until the card had widened past them.
+
+                Full `layout` gives this its own projection node with its own
+                delta. Its height is 103 in both states, so that delta is
+                scaleX ONLY: the row's content is horizontally condensed at the
+                first frame and relaxes out as the card widens, with no vertical
+                distortion and nothing hidden. Condensed type reads as motion;
+                half the flight missing reads as broken. */}
+            <motion.div layout className="px-3 py-1">
               <FlightCardBody flight={flight} displayPrefs={displayPrefs} />
             </motion.div>
 

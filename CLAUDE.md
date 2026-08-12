@@ -2241,18 +2241,37 @@ When making changes, be aware of these high-impact files:
   the overlay unmounts at 510ms, with **zero frames** where both the overlay and
   the un-hidden row are visible.
 
-  **The card's WIDTH is constant, and that is forced by the technique.** If the
-  resting width were wider than the row, `layout="position"` would lay the
-  compact body out at the RESTING width from the first frame and the card would
-  clip it — on a tablet, the arrival time and ICAO would be missing off the
-  right edge and slide in as the card widened. Letting the body scale instead
-  squashes the row's own text to a fifth of its height at frame one, and framer
-  has no per-axis layout mode. So the preview rests at the row's own width and
-  the growth is all height. (Shadix's demo does change width; its content is an
-  image, which takes a scale without complaint.) `width` is **not** clamped to
-  the wrapper's margin either — a logbook row is `innerWidth − 24` and the
-  margin would put it at `innerWidth − 32`, which is exactly the 8px narrowing
-  this exists to avoid (measured: 358 against a 366 row before the fix).
+  **The card WIDENS, and which projection mode each block gets is what makes
+  that possible.** The card's projection scales its subtree on both axes. The
+  vertical part must be cancelled — it would crush the row's text to a fifth of
+  its height — but the horizontal part IS the card widening, and the compact
+  body is supposed to follow it. So:
+
+  | | prop | why |
+  |---|---|---|
+  | compact body | `layout` (full) | exists in BOTH states, and its own height is 103 either way — so its delta is **scaleX only**. Condensed at the first frame, relaxing out as the card widens. |
+  | detail, actions | `layout="position"` | exist only while open, so they have no delta of their own; this cancels the parent's scale outright, which is what keeps them true-size while the card collapses under them on close. |
+
+  `layout="position"` on the compact body was tried first and is wrong for it:
+  it lays the body out at the RESTING width from the first frame and lets the
+  card clip it, so on a tablet the arrival time and ICAO are simply missing
+  until the card has widened past them. Condensed type reads as motion; half
+  the flight missing reads as broken. (Shadix hits this too — its title is
+  `layout="position"` and laid out at the expanded width from frame one — but
+  its text is short enough to fit the collapsed card, so nothing is clipped.)
+
+  Measured at 1180 wide, from a 312px row: card `[12,12,312,105]` at the first
+  frame with the body at **310×103**, and `[254,212,672,319]` at rest with the
+  body at **670×103** — the body's height is 103 in every frame while its width
+  tracks the card's. On a phone `MIN_GROWTH` suppresses the growth entirely
+  (measured: scaleX exactly 1 throughout, body 364×103 in every frame), because
+  a row is `innerWidth − 24` and the wrapper's margin only allows
+  `innerWidth − 32`, so "growing" would mean getting 8px narrower.
+
+  The width only ever GROWS. A row already wider than `MAX_WIDTH` rests at its
+  own width rather than shrinking to 672 — shrinking would mean laying the body
+  out narrow and stretching it, which is the frame-one mismatch again in the
+  other direction.
 
   **Every style key is supplied in BOTH states, never a switch between two
   differently-shaped objects.** A `motion` component does not clear a style
@@ -2462,8 +2481,8 @@ When making changes, be aware of these high-impact files:
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
 - Do not build the flight card's extra actions from glass — glass is chrome floating over content, and these have to be read; as a glass slab the flight cards showed straight through the labels. They are the SWIPE PANEL's button repeated (64px `rounded-lg`, `bg-secondary`, icon over a `text-xs` word, the panel's own 8px gap), because the run comes out of a control in that panel; 56px circles in `bg-card` read as a different family of control turning up beside it
-- Do not let the context preview's card change WIDTH — it rests at the row's own width and the growth is all height. The morph is a FLIP, and every content block is a `layout="position"` node so `tabular-nums` text is not scaled; that correction lays a block out at the RESTING width from the first frame, so a wider rest would clip the compact body's right-hand half on a tablet. Do not clamp the width to the wrapper's margin either — a row is `innerWidth − 24` and the margin gives `innerWidth − 32`, which is the 8px narrowing the constant width exists to avoid. And keep the lift a static shadow on its own PROJECTED (`layout`) node faded by opacity, outside the clip: an interpolated `boxShadow` is rebuilt as a string every frame, and `overflow: hidden` on an ancestor eats a shadow entirely
-- Do not let the context preview come to rest in the row's own column — it settles CENTRED ON THE VIEWPORT. Keep the detail's own delayed reveal (opacity + y, ~30% of the morph in): the box growing and the content arriving are two things, and running them together reads as a jump. It does NOT animate `blur()` — that is a per-frame filter pass on the busiest frames of the overlay, and the delayed opacity/travel already says "settling into the room"
+- Do not give the context preview's compact body `layout="position"` — it is the one block that exists in BOTH states, so it takes a FULL `layout`. Its height is unchanged either way, which makes its delta scaleX only: the row's content is condensed at the first frame and relaxes out as the card widens. `layout="position"` cancels the horizontal scale too, which lays it out at the RESTING width from frame one and lets the card clip it — on a tablet the arrival time and ICAO are missing until the card widens past them. The detail and the actions DO take `layout="position"`; they exist only while open. And keep the lift a static shadow on its own PROJECTED (`layout`) node faded by opacity, outside the clip: an interpolated `boxShadow` is rebuilt as a string every frame, and `overflow: hidden` on an ancestor eats a shadow entirely
+- Do not let the context preview come to rest in the row's own column — it settles CENTRED ON THE VIEWPORT at `MAX_WIDTH`, and only ever GROWS (a row already wider than that keeps its own width rather than shrinking, which would be the same frame-one mismatch in reverse). Keep the detail's own delayed reveal (opacity + y, ~30% of the morph in): the box growing and the content arriving are two things, and running them together reads as a jump. It does NOT animate `blur()` — that is a per-frame filter pass on the busiest frames of the overlay, and the delayed opacity/travel already says "settling into the room"
 - Do not give the context preview's backdrop a blur — it is a plain darken (`SCRIM`). Full-viewport `backdrop-filter` layers each sample the one below, so the whole stack recomputes every frame their opacity changes, and that landed on exactly the frames the card is travelling. Giving it its own short clock helped and was not enough; the reference implementation this morph was measured against has no blur either. A DIALOG's backdrop keeps its blur — nothing is animating a card behind it
 - Do not unmount the context preview on a timer set to `MORPH_MS` — the collapse only STARTS on the commit after the closing state flips, so that timer is systematically a frame or two early and the overlay disappeared with the card still short of its row, which un-hid underneath and read as a flash on the flight card. The card's own `onLayoutAnimationComplete` is what "closed" means; the timer stays only as a safety net, and longer than the morph (measured: card lands at 459ms, overlay unmounts at 510ms, zero frames with both visible)
 - **Blur animation rules, app-wide.** Never ANIMATE `backdrop-filter`, `filter`, `mask-image`, `height` or `top` — they are layout- or paint-bound and re-rasterise every frame. Animate `opacity` and `transform` only. Where a progressive blur has to appear or disappear, fade the layers' OPACITY on a SHORT clock of their own (~160ms) rather than the surrounding motion's, so the blur settles before the thing it sits behind has finished moving and the rest of the animation composites a texture that no longer changes. And keep the stack to THREE layers on a full-viewport effect: each layer samples the output of the one below, so it is a chain rather than a sum, and the fourth link is the one a weak mobile GPU shows. `RadialBlurBackdrop` and `SIDEBAR_BACKDROP_BLUR` both follow this; `ChromeFade` is static and does not animate at all
