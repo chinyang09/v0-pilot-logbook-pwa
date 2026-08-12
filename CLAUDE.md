@@ -420,6 +420,33 @@ Three things keep the delta at zero:
 Measured after the fix: jumping to the middle and scrolling up 40 steps
 produces **zero** scroll corrections.
 
+### ONE Calendar Panel (`components/calendar-panel.tsx`)
+
+The logbook and the dashboard were already rendering the same
+`LogbookCalendar`; what made them look like two different calendars was
+everything AROUND it. `CalendarPanel` owns that wrapper now, and a page
+supplies only what genuinely differs — the logbook picks a single date, the
+dashboard picks a range.
+
+| | was (dashboard) | is (both) |
+|---|---|---|
+| open | spring-in floating card | collapsing height on `PANEL_MOTION` |
+| width | `max-w-md` | the full panel width |
+| radius | 24 | 20 |
+| material | its own glass | transparent inside the panel's glass |
+| dual month | never | when the layout allows |
+| month picker | a second "MMM YYYY" label in the ACTION BAR | the calendar's own header (`onHeaderPress`) |
+
+That last row is the one worth stating twice: the action-bar month label is
+exactly what the logbook removed for saying the same thing twice, and it was
+what grew the left action group into the centred nav pill. The dashboard still
+had it.
+
+The calendar stays MOUNTED and collapsed to `height: 0` so its natural height
+is always measurable, and `onNaturalHeight` reports it — which is what the
+logbook's list spacer reserves. The **absorb** logic stays in the logbook
+(`handleCalendarHeight`): only the ResizeObserver moved.
+
 ### The Logbook's Floating Panels (search + calendar)
 
 The search block and the calendar both live in ONE absolutely-positioned stack
@@ -2558,6 +2585,7 @@ When making changes, be aware of these high-impact files:
 - Do not give the gravity blob a colour of its own — it is `--on-glass-active`, THE selected-thing fill, shared with an action button's active state so the nav and the header say "this is the one you are on" the same way. It must stay a mix of two OPAQUE colours: any translucency shows up as the blob letting the page through, which is the one thing it must not do
 - Do not put `--primary` on `--on-glass-active` — a 32% tint of a colour is the same hue at a similar lightness, which is exactly why the active action button read as barely selected. The label is `--on-glass-active-fg`, the primary pushed AWAY from the fill (lighter on dark, darker on light) so it still reads as the accent
 - Do not close the flight card's `…` cascade on POINTERDOWN — the overlay unmounts mid-gesture and the click that follows lands on the card underneath, so dismissing it also opened the flight. Close on the lift and swallow the synthesised click at the capture phase
+- Do not give a page its own copy of the calendar's wrapper — `CalendarPanel` is the one presentation, and the logbook and the dashboard both render it. They drifted into looking like two different calendars once already (radius, width, glass, dual month, and a duplicate month label in the dashboard's action bar)
 - Do not derive the calendar's dual/single mode from a ResizeObserver on the page — read `usePanelDualMonth()`. A measurement lands a frame behind the resize, and in that frame the calendar renders the outgoing mode at the incoming width (the "flash" on the collapse)
 - Do not scroll a dynamically-measured virtual list by asking the virtualizer where a row is — every offset it can give you is built from `estimateSize` for the rows it has never measured, so `scrollToIndex`/`getOffsetForIndex` are wrong by however far the estimate is off. `scrollToIndexSettled` scrolls roughly, then MEASURES the row in the DOM and corrects by the difference, which is exact
 - Do not let the `…` cascade change the flight card's size, and do not drop `keepOpen` from the `…` action — the run is a PORTALLED overlay anchored to the `…` button's own box, and the swipe panel has to stay open beneath it or the buttons appear to come from nothing. A menu that grew the row would move every row below it

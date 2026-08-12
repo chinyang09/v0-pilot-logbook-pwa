@@ -59,30 +59,11 @@ export function DashboardActions() {
             <Calendar className="h-5 w-5" />
           </GlassGroupButton>
 
-          <AnimatePresence initial={false}>
-            {showCalendar && (
-              <motion.button
-                key="month-year-label"
-                type="button"
-                onClick={() => setMonthYearView(!monthYearView)}
-                aria-label="Choose month"
-                aria-expanded={monthYearView}
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: "auto", opacity: 1 }}
-                exit={{ width: 0, opacity: 0, transition: COLLAPSE }}
-                transition={SPRING}
-                className="flex items-center gap-1 overflow-hidden whitespace-nowrap rounded-full px-2 py-1 text-sm font-medium text-[var(--on-glass-label)] transition-colors hover:bg-foreground/5"
-              >
-                {MONTHS[selectedMonth.month]} {selectedMonth.year}
-                <ChevronDown
-                  className={cn(
-                    "h-3 w-3 opacity-50 transition-transform",
-                    monthYearView && "rotate-180",
-                  )}
-                />
-              </motion.button>
-            )}
-          </AnimatePresence>
+          {/* NO month label here. The calendar's own header is the date
+              selector and the thing that opens the month/year picker — a second
+              one in the action bar says the same thing twice, and it is what
+              grew the left action group into the centred nav pill on the
+              logbook before it was removed there. */}
 
           <button
             type="button"
