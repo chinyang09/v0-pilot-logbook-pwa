@@ -141,11 +141,13 @@ export async function getAircraftByRegistrationFromDB(
 
   // Try exact key match first
   let record = await referenceDb.aircraftDatabase.get(reg)
+  if (record && record.deletedAt != null) record = undefined
 
   // Fallback: scan for normalized match
   if (!record) {
     record = await referenceDb.aircraftDatabase
       .filter((r) => {
+        if (r.deletedAt != null) return false
         const ac = parseRecordData(r)
         if (!ac) return false
         return normalizeForSearch(ac.registration) === regNormalized
@@ -181,6 +183,39 @@ export async function getAircraftByIcao24FromDB(
 // ============================================
 
 /**
+ * Pair each unmatched input registration with the stored primary key that
+ * means the same tail.
+ *
+ * "The same tail" is the canonical `normalizeRegistration` key — uppercase,
+ * alphanumerics only — so `9vnca`, `9V NCA` and `9VNCA` all resolve to a
+ * record stored as `9V-NCA`. A `bulkGet` cannot do this: it matches the
+ * primary key exactly, which covers "input has a dash, stored has none" and
+ * not the reverse. The reverse is the common case for a migrated logbook.
+ *
+ * Pure, and separated from the Dexie call so the matching rule can be tested
+ * without standing up IndexedDB.
+ */
+export function matchRegistrationKeys(
+  storedKeys: readonly string[],
+  inputs: readonly string[]
+): Array<{ orig: string; key: string }> {
+  const byNormalized = new Map<string, string>()
+  for (const key of storedKeys) {
+    const norm = normalizeForSearch(String(key))
+    // First key wins, so a lookup is stable when a table somehow holds both
+    // "9V-NCA" and "9VNCA".
+    if (norm && !byNormalized.has(norm)) byNormalized.set(norm, String(key))
+  }
+
+  const resolvable: Array<{ orig: string; key: string }> = []
+  for (const orig of inputs) {
+    const key = byNormalized.get(normalizeForSearch(orig))
+    if (key) resolvable.push({ orig, key })
+  }
+  return resolvable
+}
+
+/**
  * Batch lookup multiple registrations at once
  * Returns a Map for O(1) lookup by the caller
  */
@@ -200,7 +235,7 @@ export async function batchGetAircraftByRegistrations(
   // 615k-record table.
   //
   // Registrations may be stored with or without dashes depending on source
-  // (CDN vs custom-entered). Look up both the original form AND a dashless
+  // (FR24 vs custom-entered). Look up both the original form AND a dashless
   // form for each input; the union covers both storage shapes.
   const lookupKeys: string[] = []
   const keyToOriginal = new Map<string, string>()
@@ -227,11 +262,52 @@ export async function batchGetAircraftByRegistrations(
 
   records.forEach((record, i) => {
     if (!record) return
+    // A SOFT-DELETED entry must not answer a lookup. It is in Recently
+    // Deleted, so treating it as a hit both hides it from the list forever and
+    // stops the enrichment chain ever asking the network for it again — which
+    // is what made a deleted aircraft impossible to re-import.
+    if (record.deletedAt != null) return
     const ac = parseRecordData(record)
     if (!ac || !ac.registration) return
     const orig = keyToOriginal.get(lookupKeys[i])
     if (orig && !results.has(orig)) results.set(orig, ac)
   })
+
+  // ---- Normalized fallback for whatever the key lookups missed ----
+  //
+  // `bulkGet` can only match the primary key as stored, so the two forms above
+  // cover "input has a dash, stored does not". They cannot cover the reverse —
+  // and that is the common case for a migrated logbook, where LogTen holds
+  // "9VNCA" while the reference table is keyed "9V-NCA". Only the SINGLE
+  // lookup had that fallback, so every bulk import silently missed.
+  //
+  // Resolved over the table's PRIMARY KEYS, which Dexie can walk off the index
+  // without deserializing a single record blob — cheap enough to do once per
+  // import, and only when something actually missed.
+  const misses = uniqueRegs.filter((reg) => !results.has(reg))
+  if (misses.length > 0) {
+    try {
+      const allKeys = (await referenceDb.aircraftDatabase
+        .toCollection()
+        .primaryKeys()) as string[]
+      const resolvable = matchRegistrationKeys(allKeys, misses)
+
+      if (resolvable.length > 0) {
+        const found = await referenceDb.aircraftDatabase.bulkGet(
+          resolvable.map((r) => r.key)
+        )
+        found.forEach((record, i) => {
+          if (!record || record.deletedAt != null) return
+          const ac = parseRecordData(record)
+          if (!ac || !ac.registration) return
+          results.set(resolvable[i].orig, ac)
+        })
+      }
+    } catch {
+      // The fallback is an enhancement — a failure here just means those
+      // registrations go on to the server/FR24 legs of the chain.
+    }
+  }
 
   return results
 }

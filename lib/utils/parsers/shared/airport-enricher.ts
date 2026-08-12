@@ -24,6 +24,7 @@ import {
 } from "@/lib/db/stores/reference/airports.store"
 import { submitAirportToServer } from "@/lib/submissions/submit"
 import { createId } from "@/lib/auth/shared/cuid"
+import { pooledForEach } from "./pooled-map"
 import type { Airport } from "@/types/entities/airport.types"
 
 export interface EnrichAirportProgress {
@@ -165,8 +166,9 @@ export async function enrichAirportBatch(
   const failedCodes: string[] = []
   if (remaining.length > 0) {
     let done = 0
-    await Promise.allSettled(
-      remaining.map(async (code) => {
+    // Bounded — see `pooled-map.ts`. A career's logbook touches far more
+    // airports than one roster does.
+    await pooledForEach(remaining, async (code) => {
         try {
           const res = await fetch(
             `/api/search/airport?q=${encodeURIComponent(code)}`,
@@ -221,7 +223,7 @@ export async function enrichAirportBatch(
             stage: "fr24",
           })
         }
-      })
+      }
     )
   }
 

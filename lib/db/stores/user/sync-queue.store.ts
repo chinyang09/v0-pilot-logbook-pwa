@@ -198,12 +198,30 @@ const DEVICE_ID_KEY = "deviceId";
  * deterministic tiebreaker in last-write-wins conflict resolution so two edits
  * with the same `updatedAt` resolve the same way on every device.
  */
+/**
+ * Cached for the life of the process, because it is a per-device CONSTANT that
+ * was being read from IndexedDB on every single entity write — one extra
+ * round-trip per created or updated row, and an import creates thousands.
+ *
+ * The promise itself is cached rather than the value, so concurrent first
+ * callers share one read instead of racing to mint competing ids.
+ */
+let deviceIdPromise: Promise<string> | null = null;
+
 export async function getDeviceId(): Promise<string> {
-  const existing = await getMetaValue<string>(DEVICE_ID_KEY);
-  if (existing && typeof existing === "string") return existing;
-  const id = crypto.randomUUID();
-  await setMetaValue(DEVICE_ID_KEY, id);
-  return id;
+  if (deviceIdPromise) return deviceIdPromise;
+  deviceIdPromise = (async () => {
+    const existing = await getMetaValue<string>(DEVICE_ID_KEY);
+    if (existing && typeof existing === "string") return existing;
+    const id = crypto.randomUUID();
+    await setMetaValue(DEVICE_ID_KEY, id);
+    return id;
+  })().catch((error) => {
+    // Never cache a failure — the next caller should get a real attempt.
+    deviceIdPromise = null;
+    throw error;
+  });
+  return deviceIdPromise;
 }
 
 const cursorKey = (collection: SyncCollection) => `cursor:${collection}`;

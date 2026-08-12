@@ -48,8 +48,11 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 
 | Area | What it pins down |
 |---|---|
-| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp |
+| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation |
+| `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
+| `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
+| `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts, from synthetic bounding boxes |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution |
 
@@ -369,6 +372,147 @@ the next import (earliest kept, rest deleted, counted in the summary).
 `update_consult`, `update_conflict` (legacy), `edited_conflict`,
 `delete_missing`. `plan-summary.ts` owns the default-acceptance set and the
 summary counts — one definition, not a switch per call site.
+
+### LogTen Pro Migration (`lib/utils/parsers/logten/`)
+
+A pilot arriving from LogTen Pro brings up to three tab-separated exports —
+**Flights**, **Aircraft**, **Address Book** — and they are cross-dependent, so
+they are parsed in that dependency order and the earlier results feed the
+later:
+
+```
+Address Book ─▶ crew, which the flight rows' PIC/SIC columns resolve against
+Aircraft ────▶ the fleet, which supplies a type for a flight row that has none
+Flights ─────▶ the logbook
+```
+
+Any subset works. `parseLogtenExport` plans, `executeLogtenImport` writes, and
+`UnifiedImportButton` routes to them off `detectReportType` — one import
+button, because a second one in that header grows the action group into the
+centred nav pill.
+
+**It does NOT go through `reconcileRoster`.** That reconciler is for the
+recurring eCrew import: it forces flight numbers into the `TR…` house style,
+files anything else as `skip_non_airline`, and arbitrates field ownership
+between a pilot and their company. A migration is the opposite situation — a
+one-time bulk load of a logbook the pilot already owns outright, possibly
+across several carriers — so the only question per row is "do I already have
+this flight?" and the ops are `create` / `skip_duplicate` / `update_fill`.
+`update_fill` only ever writes fields the existing record leaves **blank**.
+
+**Everything is addressed by NAME, never by column index** (`header-map.ts`).
+The Flights tab is ~280 columns and the set depends on which fields the user
+enabled, LogTen ships two naming styles (`flight_totalTime` in the Flights tab,
+`Aircraft ID` elsewhere), and the header itself is dirty — several columns
+arrive with a leading space. Every name reduces to a key (lowercase,
+alphanumerics only) and a field is looked up through aliases in both styles.
+Duplicate labels are real: the Aircraft export has **two** "Notes" columns, so
+the second keeps the bare key suffixed (`notes#2`) rather than being lost.
+
+**The clock-time zone is DETECTED, not assumed** (`time-reference.ts`). LogTen
+writes no marker — it exports whatever the app was set to display — and reading
+local times as UTC files a whole logbook hours out, with night time, day/night
+landings and FDP all computed off the wrong instants. The file already holds
+the evidence: it records the out/in times AND the block time it derived from
+them, and on a sector between two DIFFERENT timezones only one reading
+reproduces that block time. The whole file votes. A single-timezone operation
+gives it nothing, so the verdict comes back `assumed` and the review dialog
+puts a UTC/Local switch in front of the pilot before anything is written — the
+sample export is entirely inside UTC+8 and lands exactly there. Converting also
+moves the **date** when the out time wraps (03:40 at UTC+8 is 19:40 the
+previous day), and the app keys a flight on the UTC date of its out time.
+
+**The pilot's own figures are pinned, not recomputed.** Everything LogTen
+populated — night, the role times, day/night takeoffs and landings — is written
+with a matching `manualOverrides` flag, so `recalculateFlightFields` fills in
+only what the file left blank. The file IS their existing legal record;
+recomputing night time from sun position would quietly restate totals they have
+already certified. (`preserveSourceValues`, on by default.) The day/night
+TO/LDG override is set only for a NON-ZERO count — a blank is LogTen not
+recording the split, where the sun calculation is a better answer than a hard
+zero.
+
+The OOOI mapping is one-to-one, because LogTen keeps the four times in four
+columns the way the app does:
+
+| LogTen | app |
+|---|---|
+| `flight_actualDepartureTime` | `outTime` |
+| `flight_takeoffTime` | `offTime` |
+| `flight_landingTime` | `onTime` |
+| `flight_actualArrivalTime` | `inTime` |
+| `flight_totalTime` | `blockTime` (out→in) |
+| `flight_duration` | `flightTime` (off→on) |
+| `flight_pic`/`sic`/`p1us`/`dualReceived`/`dualGiven` | the role times, and `pilotRole` |
+| `flight_selectedApproach1-10` | `approaches[]` — `"1;ILS;20R;WSSS"`, count first |
+
+The seat comes from the role TIME column, not a capacity flag: LogTen fills
+exactly one per flight and it is the column a licence authority reads. A
+**simulator is recognised structurally** (no registration, no route), the same
+rule the rest of the app uses — LogTen's `flight_type` is an unlabelled enum
+index and `flight_simulator` is *blank* on the sim row of a real export, so
+neither is safe to key on. Its duration goes to `simulatedInstrumentTime` with
+`blockTime` left at 00:00, and the executor skips the recalculation pass for
+sims outright, or the recomputed block would put the session into flight-hour
+totals.
+
+Two smaller rules that came straight off the real files: LogTen keeps
+placeholder aircraft whose registration is literally **"New"** (skipped, and
+reported rather than silently dropped), and it zero-pads numeric crew ids
+(`00009766`), which would never match the unpadded form the eCrew reports
+carry.
+
+**No row can take down the import.** `values.ts` never throws — a corrupt cell
+degrades to a blank and the row-level parser decides whether that blank is
+fatal — and the plan carries `skipped` / `warnings` / `errors` separately, so a
+file with a few bad lines still imports the rest. Only a file-level failure (no
+header, no rows, no pilot profile) is fatal.
+
+**The aircraft loop closes from either end.** Both files' registrations go
+through the SHARED enrichment chain (local reference DB → server batch → FR24)
+in one call, before either file is parsed — the same chain the schedule and
+crew-logbook imports use. Which file arrives first does not matter:
+
+| | what happens | what closes it |
+|---|---|---|
+| **Flights first** | the chain types each tail; anything it can't answer for is listed in `untypedRegistrations` and its flights import UNTYPED | importing the Aircraft export **back-tags** them (`backTagFlights` — only flights with a blank type) |
+| **Aircraft first** | the chain types the fleet; an unresolvable tail is taken wholesale from the file AND seeded into the **reference** DB (`seedReferenceDatabase`) | a later flight import now resolves it LOCALLY, first step of the chain |
+
+**A RESOLVED lookup outranks the file, on both the type and the registration's
+spelling.** If the chain answers for 9V-SKU it knows that tail is an A388, and
+a LogTen table pairing it with an A21N is stale data worth correcting. The file
+supplies whatever the chain could not answer for. The one case this reads wrong
+is a registration RE-ISSUED to a different type during a career — the lookup
+describes the airframe flying under that mark today, not the one logged in 2011
+— and `preferFileType` is the escape hatch for it. The canonical SPELLING
+follows the lookup either way: that is punctuation, not a claim about the
+aeroplane.
+
+That spelling matters as much as the code. A LogTen user writes a tail however
+they like — `9VSKU`, `9vnca`, `9V NCA` — and a flight card reading "9VSKU,
+A21N" beside an aircraft list reading "9V-SKU, A388" is two different
+aeroplanes as far as anyone can tell.
+
+**`batchGetAircraftByRegistrations` resolves a dashless input to a DASHED
+stored key**, which is what makes any of that work. A `bulkGet` matches the
+primary key exactly; trying the input plus a dashless copy of it covers "input
+has a dash, stored has none" and NOT the reverse — and the reverse is the
+common case for a migrated logbook. Misses now fall back to one pass over the
+table's PRIMARY KEYS (Dexie walks those off the index without deserialising a
+record), matched on `normalizeRegistration`. `matchRegistrationKeys` is the
+pure half, so the rule is tested without IndexedDB.
+
+**A soft-deleted reference aircraft must not answer a lookup.** Neither the
+single nor the batch lookup filtered `deletedAt`, so a deleted aircraft read as
+a live local hit: it stayed invisible in the list AND the enrichment chain
+never asked the network for it again, which made it impossible to re-import.
+
+LogTen's per-airframe detail (serial number, operator, owner, year, notes) has
+nowhere to go in the app's `Aircraft`, so the type carries five OPTIONAL,
+non-indexed fields for it — no Dexie migration, and nothing is populated unless
+a source supplies it. `normalizeAircraftFromServer` had to stop being an
+explicit allowlist for them to survive a round trip (the same trap
+`normalizeFlightFromServer` was rebuilt to avoid).
 
 ### Entry Type (flight vs simulator)
 
@@ -2102,6 +2246,7 @@ When making changes, be aware of these high-impact files:
 **Report Import:**
 - `lib/utils/roster/reconciler.ts` — classification + the global match assignment
 - `lib/utils/roster/match-assign.ts` — cost-ranked pairing shared with cross-hydrate
+- `lib/utils/roster/flight-window.ts` — the MATCH window (widened by the sectors) vs the report's stated range (which still bounds deletion)
 - `lib/utils/roster/classification.ts` — SAFE / CRITICAL / `TRACKED_FIELDS`
 - `lib/utils/roster/executor.ts` — applies a confirmed plan (flights, sims, aircraft, discrepancies)
 - `lib/utils/roster/import-decisions.ts` — decision memory, on the shared window
@@ -2109,6 +2254,11 @@ When making changes, be aware of these high-impact files:
 - `lib/utils/roster/sim-sessions.ts` — structural simulator recognition/dedup
 - `lib/utils/parsers/cross-hydrate.ts` — merge a logbook plan with a schedule plan
 - `components/import/import-review-modal-v2.tsx` — the consent surface
+- `lib/utils/parsers/logten/` — the LogTen Pro migration: `header-map.ts` (name-addressed columns), `values.ts` (non-throwing coercion), `time-reference.ts` (UTC-vs-local detection + the date-shifting conversion), `flights.ts` / `aircraft.ts` / `address-book.ts`, `executor.ts`
+- `components/import/logten-review-dialog.tsx` — the migration's consent surface, including the UTC/Local switch
+- `lib/utils/parsers/shared/csv-split.ts` — `sniffDelimiter` + `splitDelimitedLine` (eCrew is comma, LogTen is tab)
+- `lib/utils/history-markers.ts` — which overlay owns the top history marker, so a deferred release can't pop another dialog's entry
+- `lib/db/stores/reference/aircraft.store.ts` — `matchRegistrationKeys` (dashless↔dashed key matching) + the `deletedAt` filter every lookup owes
 - `components/flight-card-body.tsx` — the one flight-card definition
 - `lib/utils/retention.ts` — the single 90-day undo window (decisions, accepted comparisons, recycle bin)
 - `lib/utils/flight-sort.ts` — the one list order (date, out time, departure, id)
@@ -2509,12 +2659,33 @@ When making changes, be aware of these high-impact files:
 - Do not hardcode `orange-400` for scheduled flight cards — light and dark themes use separate colors (`orange-600` light / `orange-400` dark) for contrast
 
 **Report import:**
+- Do not write an imported record with a bare `table.put()` — it is a raw Dexie write with NO sync-queue entry behind it, so the row lives only on the device that ran the import. The importers reached for it because their rows already carry the ids the flight rows point at, which rules out `addPersonnel`/`addCurrency`; `putManyWithSync` (`crud-helpers.ts`) is the shape that keeps the id AND enqueues, in one `bulkPut` + one `enqueueMany` rather than 2N round trips. Crew, currencies and discrepancies were all silently local for exactly this reason
+- Do not close the import status dialog when an execution finishes — it is the ONLY surface that renders the summary and the error message, and closing it in the `finally` meant every eCrew import ended in silence with the work done and nothing said. `onDone` closes it; a cancel closes it without setting a summary nobody will see
+- Do not fan a per-item enrichment leg out with `Promise.allSettled(remaining.map(…))` — that is every unresolved registration or airport at once, each holding an 8s timeout through one proxy route. Go through `pooledForEach` (`shared/pooled-map.ts`); a roster's handful behaves identically and a career's logbook gets a queue instead of a stampede
+- Do not let a schedule report be read without it STATING its time reference — `timeReference` defaults to UTC, and eCrew issues the same report in three frames that differ only by the "All times in …" header line, so a Local Base report read as UTC puts every time in the file eight hours out as an auto-applied `update_safe`. Missing line = refuse the import
+- Do not import a report without checking WHOSE it is. The header names its subject; nothing was comparing it, so a colleague's PDF wrote their flights into this pilot's logbook as ordinary creates. Refuse only when BOTH crew ids are present and differ — a missing id is an unknown, not a mismatch
+- Do not auto-accept an operation whose sector carries `timesUncertain`. It means a LOCAL_STATION row named an airport nothing could resolve, so the offset fell back to zero and the times may be a whole timezone out. `applyDefaultAcceptance` withholds acceptance regardless of kind — a silently wrong time is exactly the change nobody reviews
+- Do not feed the reconciler sectors without deduping them (`dedupeSectors`) — a PDF page break that repeats a row pairs the first copy with the stored flight, leaves the second nothing to claim, and turns it into an auto-accepted `create` duplicating the flight matched a line earlier. The key is date + flight number + route + out time, so a genuine repeated-route day keeps all its legs
+- Do not scope an import's MATCH pool to the date range the report's header states — eCrew includes the trailing leg of a duty that starts on the last day, so a `01/01 - 31/01` report carries a `01/02` row. Filtering candidates to the stated range left that flight out of the pool, the sector had nothing to pair with, and `create` fired — auto-accepted, so every re-upload added another copy of the same flight. Widen with `flightMatchWindow` (`roster/flight-window.ts`) and keep handing the reconciler the STATED range: its delete pass re-checks `csvDateRange`, which is what stops a spilled sector turning unrelated flights outside the window into deletion proposals
 - Do not match an imported sector to a flight by "first unclaimed on this route" — pairing is decided globally in `match-assign.ts` with time as part of the key. The crew logbook report has no flight-number column, so on a repeated-route day the greedy version pairs every leg with the wrong one (see `repeat-route-day.test.ts`)
 - Do not reclassify the company's OOOI/scheduled/block times as CRITICAL — they are the record of when the aircraft moved and apply without asking. Conversely do not make `pilotFlying`/`pilotRole`/day-night TO-LDG safe: they are the pilot's own account, and every difference is kept as a `Discrepancy` for the licence record
 - Do not skip `detectEditReasons` before classification — it is what protects a signed/remarked/manually-overridden flight regardless of which fields changed
 - Do not dedupe simulator sessions on `date|simSessionCode` alone — recognition must stay structural (no route, no registration), or sims written by an older build duplicate on every import
 - Do not read `FlightLog.entryType` directly — go through `getEntryType()`, and write through `entryTypePatch()` so the legacy `isSimulator` flag stays in step for the dashboard and FDP pipeline
 - Do not let a simulator's duration reach `blockTime` — it belongs in `simulatedInstrumentTime`, which is what keeps sims out of flight-hour totals
+
+**LogTen Pro migration:**
+- Do not route a LogTen migration through `reconcileRoster` — that reconciler rewrites flight numbers into the `TR…` house style and files everything else as `skip_non_airline`, which is right for one airline's recurring roster and wrong for a career's logbook. The migration has its own three ops (`create` / `skip_duplicate` / `update_fill`), and `update_fill` writes only fields the existing record leaves BLANK
+- Do not address a LogTen column by index — the Flights tab is ~280 columns whose set depends on which fields the user enabled, and LogTen ships two naming styles. Go through `header-map.ts`'s aliases, and keep the duplicate-label suffixing (`notes#2`) — the Aircraft export really does have two "Notes" columns
+- Do not assume a LogTen export's clock times are UTC. It carries no marker and exports whatever the app was set to display; `detectTimeReference` votes across the file's cross-timezone sectors, and when it comes back `assumed` the pilot has to be asked before anything is written. Converting a local time must move the DATE too when it wraps — the app keys a flight on the UTC date of its out time
+- Do not let the migration recompute what LogTen already recorded — set the matching `manualOverrides` flag for every field the file populated (`preserveSourceValues`), or first save silently restates totals the pilot has already certified. Only a NON-ZERO day/night TO/LDG count is pinned; a blank means LogTen didn't record the split and the sun calculation is the better answer
+- Do not recognise a LogTen simulator from `flight_simulator` or `flight_type` — the first is blank on the sim row of a real export and the second is an unlabelled enum index. It is structural (no registration, no route), the same rule as everywhere else, and the executor must skip the recalculation pass for sims or the recomputed block time reaches flight-hour totals
+- Do not store a LogTen registration as the file spelled it once the lookup has resolved it — `9VSKU`, `9vnca` and `9V NCA` all mean the record the chain returned, and its punctuation is what the app stores. A flight card reading "9VSKU, A21N" beside an aircraft list reading "9V-SKU, A388" is two different aeroplanes as far as the reader can tell. A resolved lookup outranks the file on the TYPE too (`preferFileType` is the escape hatch for a re-issued registration)
+- Do not let a `bulkGet` be the whole registration lookup — it matches the primary key exactly, so a dashless input never finds a dashed stored key, which is the common case for a migrated logbook. Keep the normalized fallback over the table's primary keys (`matchRegistrationKeys`), and keep it gated on the keys that actually missed
+- Do not let a soft-deleted reference aircraft answer a lookup — it reads as a live local hit, so the entry stays invisible in the list AND the enrichment chain never asks the network for it again. That is what made a deleted aircraft impossible to re-import
+- Do not break either half of the aircraft loop: an unresolvable tail is seeded into the reference DB so a later flight import finds it locally, and a fleet import back-tags flights that have a registration and no type
+- Do not write a migrated pilot's own name into a crew seat — the app's convention is `"Self"` (what `deriveSectorCrew` writes on every eCrew import, and what the flight card renders verbatim). Their own name in the seat reads as though somebody else was flying
+- Do not make `values.ts` throw. A corrupt cell degrades to a blank and the row parser decides whether that is fatal — that is what stops one bad line taking down a 4,000-flight migration. Keep `toDuration` and `toClock` separate too: a duration may exceed 24h, a clock time may not, and a four-figure totals row wrapping into a plausible departure time is a silent error
 
 **Formatting & chrome:**
 - Do not format a clock time with `formatHHMMDisplay` — that is for durations (which always keep their colon). Points in time go through `formatClockDisplay` so `clockSeparator` governs them all
@@ -2576,6 +2747,7 @@ When making changes, be aware of these high-impact files:
 - Do not leave a `setState` in a rAF loop unguarded when the value it writes changes slower than the frame rate. `useCountdownConfirm` ticks at 60fps to drive a MotionValue (free) but `remaining` is whole SECONDS, so it compares before dispatching — ~60 scheduler entries a second for 59 non-changes, for the whole 10s a delete is armed, which is exactly when the user is scrolling the list it was armed from
 - Do not run a clock, poll or subscription that a keep-alive page owns without gating it on that page being the ACTIVE route. The dashboard's FDP stack ticks at 1Hz to drive one countdown; the dashboard is mounted forever after its first visit, so ungated it re-rendered four limit rows every second for the rest of the session while the user was somewhere else entirely. Gate on `usePageActive` AND on there being something to tick for
 - Do not answer "is anything queued?" by reading a table — the sync trigger manager polls that every 10 seconds for the whole session, and `getSyncQueue().length` deserialised every pending row to compare a number against zero. Use `getSyncQueueCount()`, which counts off the index
+- Do not decide a `useBackDismiss` release is safe at the moment it is SCHEDULED — check at the moment it FIRES, against the shared marker stack (`lib/utils/history-markers.ts`). The release is deferred by a task precisely so other things can happen in between, and one of them is another overlay pushing its own marker: `history.back()` takes whatever is on TOP, so the outgoing dialog popped the incoming one's entry and the incoming one dismissed itself. That is what made a LogTen import report itself cancelled a moment after its review dialog opened. Two dialogs handing off in one commit is the ordinary case, not an exotic one — the import status dialog does it to every review modal it opens
 - Do not release a `useBackDismiss` marker without checking the URL is still the one it was pushed at. `history.back()` only takes the marker back while the marker is the TOP of the stack; if something navigated in the meantime — the sidebar's close-on-`pathname` effect is exactly that shape, a route change tears the overlay down — the marker is buried one entry below the new page and the `back()` undoes the navigation. A buried marker is left alone: it is a duplicate entry for a page the user was already on, which is invisible, where undoing a navigation is not
 - Do not let an overlay rely on Escape alone — on Android the back gesture is the other half of the same intent, and without `useBackDismiss` the router navigates and the overlay (portalled to `document.body`) is left over whatever page arrives. Every dismissal must go through the hook's `dismiss()`, and an action that navigates has to run as its FOLLOW-UP: closing first and popping the marker entry on the way out issues the `router.push` while our own `back()` is still queued, and the back then undoes it
 - Do not give a scroll handler ANY work that isn't per-frame cheap, and never let one write React state above the component that needs it. The logbook's list runs one rAF-throttled listener whose only job is the calendar sync; `topFlightDate` is pushed into state only while the calendar is actually OPEN, because the calendar is collapsed to `height: 0` rather than unmounted and updating it while stowed re-rendered a whole month grid per card scrolled past, for something nobody can see

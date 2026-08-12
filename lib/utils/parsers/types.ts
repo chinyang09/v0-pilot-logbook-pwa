@@ -68,4 +68,11 @@ export interface NormalizedDocument {
   rawText: string;
   /** Original filename when available (diagnostics + UI chips). */
   fileName?: string;
+  /**
+   * Cell delimiter the extractor split on. Only meaningful for `csv` — eCrew
+   * exports are `,`, LogTen Pro's are `\t`. Carried so a parser can report
+   * what it read, and so a re-split (should one ever be needed) uses the same
+   * character the first one did.
+   */
+  delimiter?: string;
 }

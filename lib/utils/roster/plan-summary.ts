@@ -19,13 +19,23 @@ const DEFAULT_ACCEPTED_KINDS = new Set<ReconcilerOperation["kind"]>([
 export type AcceptedOperation<T extends ReconcilerOperation = ReconcilerOperation> =
   T & { accepted: boolean };
 
-/** Attach the default acceptance flag to each operation. */
+/**
+ * Attach the default acceptance flag to each operation.
+ *
+ * An op whose sector carries `timesUncertain` is NEVER auto-accepted, whatever
+ * its kind. That flag means the parser could not convert the row's times to
+ * UTC with confidence — a Local Station report naming an airport nothing could
+ * resolve — so the times may be a whole timezone out. Auto-applying those as
+ * `update_safe` would be a silent, hours-wide rewrite, which is exactly the
+ * class of change that never gets looked at.
+ */
 export function applyDefaultAcceptance(
   operations: ReconcilerOperation[]
 ): AcceptedOperation[] {
   return operations.map((op) => ({
     ...op,
-    accepted: DEFAULT_ACCEPTED_KINDS.has(op.kind),
+    accepted:
+      DEFAULT_ACCEPTED_KINDS.has(op.kind) && !("sector" in op && op.sector?.timesUncertain),
   }));
 }
 

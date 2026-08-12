@@ -117,6 +117,91 @@ describe("reconcileRoster — create", () => {
 });
 
 // ============================================================
+// A sector that spills past the report's stated range
+// ============================================================
+
+describe("reconcileRoster — the report's last duty spills a day", () => {
+  // eCrew's "01/01/2026 - 31/01/2026" report carries a 01/02/2026 row: the
+  // return leg of a duty that started on the 31st. The caller now widens the
+  // MATCH pool to cover it (`flight-window.ts`) while still handing the
+  // reconciler the stated range — these two tests are the reason that split
+  // exists.
+  const STATED = { start: "2026-01-01", end: "2026-01-31" };
+
+  const spilledSector = makeSector({
+    date: "2026-02-01",
+    flightNumber: "TR135",
+    departureIata: "XIY",
+    arrivalIata: "SIN",
+    scheduledOut: "16:35",
+    scheduledIn: "22:24",
+    actualOut: "18:24",
+    actualIn: "00:13",
+  });
+
+  const spilledFlight = makeFlight({
+    date: "2026-02-01",
+    flightNumber: "TR135",
+    departureIcao: "ZLXY",
+    departureIata: "XIY",
+    arrivalIcao: "WSSS",
+    arrivalIata: "SIN",
+    scheduledOut: "16:35",
+    scheduledIn: "22:24",
+    outTime: "18:24",
+    inTime: "00:13",
+    aircraftReg: "9V-TNH",
+  });
+
+  it("matches the out-of-range flight instead of creating a duplicate", () => {
+    // The flight is in the pool because the caller widened the window. Without
+    // that it was absent, the sector had nothing to pair with, and `create`
+    // fired — auto-accepted, so every re-upload added another copy.
+    const ops = reconcileRoster({
+      sectors: [spilledSector],
+      existingFlights: [spilledFlight],
+      csvDateRange: STATED,
+    });
+    expect(ops.map((o) => o.kind)).not.toContain("create");
+    expect(ops).toHaveLength(1);
+  });
+
+  it("still refuses to propose deleting anything outside the stated range", () => {
+    // The widened pool must NOT widen the delete scope: a report is
+    // authoritative for the window it names and merely present outside it, so
+    // an unrelated February flight is nobody's business here.
+    const unrelatedFebruary = makeFlight({
+      date: "2026-02-14",
+      flightNumber: "TR900",
+    });
+
+    const ops = reconcileRoster({
+      sectors: [spilledSector],
+      existingFlights: [spilledFlight, unrelatedFebruary],
+      csvDateRange: STATED,
+    });
+
+    expect(ops.map((o) => o.kind)).not.toContain("delete_missing");
+  });
+
+  it("does delete an unmatched flight INSIDE the stated range", () => {
+    const insideRange = makeFlight({
+      date: "2026-01-15",
+      flightNumber: "TR900",
+    });
+
+    const ops = reconcileRoster({
+      sectors: [spilledSector],
+      existingFlights: [spilledFlight, insideRange],
+      csvDateRange: STATED,
+    });
+
+    const deletes = ops.filter((o) => o.kind === "delete_missing");
+    expect(deletes).toHaveLength(1);
+  });
+});
+
+// ============================================================
 // Identical match
 // ============================================================
 

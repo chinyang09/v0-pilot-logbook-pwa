@@ -20,6 +20,20 @@ export interface Aircraft {
   engineType: EngineType;
   isComplex: boolean;
   isHighPerformance: boolean;
+  /**
+   * Detail a migrated fleet brings that has nowhere else to go — LogTen Pro's
+   * Aircraft tab carries a serial number, operator, owner, year and free notes
+   * per airframe, and dropping them on import loses information the pilot
+   * curated by hand.
+   *
+   * All optional and NON-INDEXED, so they need no Dexie migration. They are
+   * only populated when a source actually supplies them.
+   */
+  serialNumber?: string;
+  operator?: string;
+  owner?: string;
+  year?: string;
+  notes?: string;
   createdAt: number;
   updatedAt?: number;
   /** Soft-delete stamp — the row is in Recently Deleted. `null` when cleared,

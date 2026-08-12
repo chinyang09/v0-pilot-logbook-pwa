@@ -20,17 +20,26 @@ function classifyFormat(file: File): ImportFormat {
 
 export async function extractDocument(file: File): Promise<NormalizedDocument> {
   const format = classifyFormat(file);
-  const { rows, rawText } =
-    format === "pdf"
-      ? await extractPdfRows(file)
-      : extractCsvRows(await file.text());
 
+  if (format === "pdf") {
+    const { rows, rawText } = await extractPdfRows(file);
+    return {
+      format,
+      reportType: detectReportType(rawText),
+      rows,
+      rawText,
+      fileName: file.name,
+    };
+  }
+
+  const { rows, rawText, delimiter } = extractCsvRows(await file.text());
   return {
     format,
     reportType: detectReportType(rawText),
     rows,
     rawText,
     fileName: file.name,
+    delimiter,
   };
 }
 
@@ -39,7 +48,15 @@ export async function extractDocuments(
 ): Promise<NormalizedDocument[]> {
   const out: NormalizedDocument[] = [];
   for (const file of files) {
-    out.push(await extractDocument(file));
+    try {
+      out.push(await extractDocument(file));
+    } catch (error) {
+      // Name the file. A corrupt PDF or an unreadable pick used to surface as
+      // a bare "Unknown import error" with no way to tell which of three
+      // dropped files was the problem.
+      const reason = error instanceof Error ? error.message : "unreadable";
+      throw new Error(`Could not read "${file.name}": ${reason}`);
+    }
   }
   return out;
 }

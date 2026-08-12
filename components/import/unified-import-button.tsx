@@ -1,16 +1,38 @@
 /**
- * Unified import entry point — accepts CSV/PDF for both Crew Logbook Report
- * and Personal Crew Schedule Report. When both are dropped together, runs
- * cross-hydration so logbook actuals + aircraft regs merge with schedule
- * crew + flight numbers in a single import.
+ * Unified import entry point.
+ *
+ * Two families of file arrive through the same button, because from the
+ * pilot's side there is only one thing happening — they are putting a file
+ * into their logbook — and a second button in this header would grow the
+ * action group into the centred nav pill:
+ *
+ *  - **eCrew** (CSV/PDF): Crew Logbook Report and Personal Crew Schedule
+ *    Report, the recurring import. Dropped together they cross-hydrate, so
+ *    logbook actuals + aircraft regs merge with schedule crew + flight
+ *    numbers in one pass.
+ *  - **LogTen Pro** (tab-separated .txt): a one-time migration from another
+ *    logbook app, up to three files (Flights, Aircraft, Address Book) that
+ *    feed each other. This routes to its own parser and its own review
+ *    dialog — see `lib/utils/parsers/logten`.
+ *
+ * Which family a file belongs to is decided by `detectReportType`, not by the
+ * user picking a mode.
  */
 
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { Upload, Loader2, AlertTriangle } from "lucide-react";
+import { Upload, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { extractDocuments } from "@/lib/utils/parsers/extractors";
+import { isLogtenKind } from "@/lib/utils/parsers/detect";
+import {
+  executeLogtenImport,
+  parseLogtenExport,
+  type LogtenImportPlan,
+  type LogtenTimeReference,
+} from "@/lib/utils/parsers/logten";
+import { LogtenReviewDialog } from "./logten-review-dialog";
 import {
   parseScheduleCSV,
   type PlannedImport,
@@ -21,6 +43,11 @@ import {
   logbookSectorToParsedSector,
 } from "@/lib/utils/parsers/cross-hydrate";
 import { reconcileRoster } from "@/lib/utils/roster/reconciler";
+import {
+  flightMatchWindow,
+  inWindow,
+  sectorDates,
+} from "@/lib/utils/roster/flight-window";
 import {
   executeRosterImport,
   type ExecutionResult,
@@ -37,9 +64,9 @@ import {
   DEFAULT_IMPORT_DEFAULTS,
 } from "@/lib/db";
 import type { FlightLog } from "@/types/entities/flight.types";
+import type { NormalizedDocument } from "@/lib/utils/parsers/types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
 import { ImportStatusDialog, type ImportStage } from "./import-status-dialog";
-import { DetectedFilesChip } from "./detected-files-chip";
 
 interface Props {
   /** Where the button is mounted — affects success-message wording. */
@@ -70,13 +97,92 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
     logbookGeneratedAt: number | null;
   }>({ scheduleGeneratedAt: null, logbookGeneratedAt: null });
 
+  // ---- LogTen migration state ----
+  const [logtenPlan, setLogtenPlan] = useState<LogtenImportPlan | null>(null);
+  const [showLogtenReview, setShowLogtenReview] = useState(false);
+  // The extracted documents are held so the review dialog's UTC/Local switch
+  // can re-parse WITHOUT re-reading the files — the pilot is answering a
+  // question about the same bytes, not choosing a different import.
+  const logtenDocsRef = useRef<NormalizedDocument[]>([]);
+
   const reset = () => {
     setProgress(null);
     setPendingPlan(null);
     setShowReview(false);
+    setLogtenPlan(null);
+    setShowLogtenReview(false);
+    logtenDocsRef.current = [];
     setBusy(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  const runLogtenParse = useCallback(
+    async (docs: NormalizedDocument[], timeReference?: LogtenTimeReference) => {
+      const plan = await parseLogtenExport(docs, {
+        timeReference,
+        onProgress: (percent, stage, detail) =>
+          setProgress({ percent: 10 + Math.floor(percent * 0.85), stage, detail }),
+      });
+      if (!plan.success && plan.errors.length > 0) {
+        throw new Error(plan.errors[0].message);
+      }
+      return plan;
+    },
+    []
+  );
+
+  const handleLogtenTimeReference = useCallback(
+    async (reference: LogtenTimeReference) => {
+      if (logtenDocsRef.current.length === 0) return;
+      setBusy(true);
+      try {
+        setLogtenPlan(await runLogtenParse(logtenDocsRef.current, reference));
+      } catch (error) {
+        setErrorMsg(error instanceof Error ? error.message : "Re-read failed");
+        setShowLogtenReview(false);
+      } finally {
+        setBusy(false);
+        setProgress(null);
+      }
+    },
+    [runLogtenParse]
+  );
+
+  const handleLogtenExecute = useCallback(async () => {
+    if (!logtenPlan) return;
+    setBusy(true);
+    setShowLogtenReview(false);
+    setProgress({ percent: 5, stage: "Applying", detail: "Writing changes..." });
+    try {
+      const result = await executeLogtenImport(logtenPlan, {
+        onProgress: (percent, stage, detail) =>
+          setProgress({ percent, stage, detail }),
+      });
+      const parts: string[] = [];
+      if (result.flightsCreated) parts.push(`${result.flightsCreated} flights`);
+      if (result.simulatorsCreated)
+        parts.push(`${result.simulatorsCreated} sim sessions`);
+      if (result.flightsUpdated) parts.push(`${result.flightsUpdated} completed`);
+      if (result.flightsSkipped)
+        parts.push(`${result.flightsSkipped} already present`);
+      if (result.crewCreated) parts.push(`${result.crewCreated} crew`);
+      if (result.aircraftCreated)
+        parts.push(`${result.aircraftCreated} aircraft`);
+      if (result.flightsBackTagged)
+        parts.push(`${result.flightsBackTagged} flights linked to aircraft`);
+      if (result.errors.length) parts.push(`${result.errors.length} error(s)`);
+      setSummary(parts.join(", ") || "No changes applied");
+      setErrorMsg(null);
+      onComplete?.();
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : "Import failed");
+    } finally {
+      setProgress(null);
+      setLogtenPlan(null);
+      logtenDocsRef.current = [];
+      setBusy(false);
+    }
+  }, [logtenPlan, onComplete]);
 
   const handleExecute = useCallback(
     async (plan: PlannedImport) => {
@@ -110,8 +216,11 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
       } catch (error) {
         setErrorMsg(error instanceof Error ? error.message : "Import failed");
       } finally {
+        // The status dialog STAYS OPEN — it is the only place the summary and
+        // the error message are ever shown, and closing it here meant every
+        // eCrew import ended in silence: the work was done, `summary` was set,
+        // and the surface that renders it had already gone. `onDone` closes it.
         setProgress(null);
-        setIsOpen(false);
         setShowReview(false);
         setBusy(false);
       }
@@ -129,6 +238,29 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
 
       try {
         const docs = await extractDocuments(files);
+
+        // ---- LogTen Pro migration ----
+        // Routed before anything else because the two families share nothing
+        // downstream: a LogTen file has no report type, no "Generated on"
+        // watermark and no company to reconcile against.
+        const logtenDocs = docs.filter((d) => isLogtenKind(d.reportType));
+        if (logtenDocs.length > 0) {
+          if (logtenDocs.length !== docs.length) {
+            throw new Error(
+              "Import LogTen Pro files on their own — they can't be merged with an eCrew report."
+            );
+          }
+          setProgress({
+            percent: 10,
+            stage: "Parsing",
+            detail: "LogTen Pro export",
+          });
+          logtenDocsRef.current = logtenDocs;
+          setLogtenPlan(await runLogtenParse(logtenDocs));
+          setShowLogtenReview(true);
+          setProgress(null);
+          return;
+        }
 
         // Needed so the reconciler can resolve "Self" crew seats and diff the
         // full PIC + SIC crew (not just the logbook-derived PIC) on updates.
@@ -245,12 +377,16 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
                 : schedulePlan.dateRange.end || logbookPlan.dateRange.end,
           };
 
+          // Match against every date the sectors touch, not just the range the
+          // headers state — a report's last duty spills its return leg into
+          // the next day. See `flight-window.ts`.
+          const matchWindow = flightMatchWindow(
+            dateRange,
+            sectorDates(merged.sectors)
+          );
           const allFlights = await userDb.flights.toArray();
           const flightsInRange = allFlights.filter(
-            (f) =>
-              isLiveFlight(f) &&
-              f.date >= dateRange.start &&
-              f.date <= dateRange.end
+            (f) => isLiveFlight(f) && inWindow(f.date, matchWindow)
           );
 
           const operations = reconcileRoster({
@@ -292,12 +428,13 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           // which routes planned (future) sectors to scheduled times.
           const sectors = logbookPlan.sectors.map(logbookSectorToParsedSector);
 
+          const matchWindow = flightMatchWindow(
+            logbookPlan.dateRange,
+            sectorDates(sectors)
+          );
           const allFlights = await userDb.flights.toArray();
           const flightsInRange = allFlights.filter(
-            (f) =>
-              isLiveFlight(f) &&
-              f.date >= logbookPlan.dateRange.start &&
-              f.date <= logbookPlan.dateRange.end
+            (f) => isLiveFlight(f) && inWindow(f.date, matchWindow)
           );
           logbookGeneratedAt = logbookPlan.generatedAt;
           const operations = reconcileRoster({
@@ -373,7 +510,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         if (fileInputRef.current) fileInputRef.current.value = "";
       }
     },
-    [handleExecute]
+    [handleExecute, runLogtenParse]
   );
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -383,7 +520,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
   };
 
   const onDialogChange = (open: boolean) => {
-    if (!open && !showReview && !busy) {
+    if (!open && !showReview && !showLogtenReview && !busy) {
       setIsOpen(false);
       reset();
     }
@@ -395,7 +532,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         type="file"
         ref={fileInputRef}
         className="hidden"
-        accept=".csv,.pdf"
+        accept=".csv,.pdf,.txt,.tsv"
         multiple
         onChange={onChange}
       />
@@ -416,7 +553,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
       </Button>
 
       <ImportStatusDialog
-        open={isOpen && !showReview}
+        open={isOpen && !showReview && !showLogtenReview}
         onOpenChange={onDialogChange}
         progress={progress}
         errorMsg={errorMsg}
@@ -437,19 +574,32 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           handleExecute(updatedPlan);
         }}
         onCancel={() => {
+          // Setting a summary and closing in the same breath meant it was
+          // never seen. Cancelling is its own confirmation — the dialog goes.
           setShowReview(false);
           setPendingPlan(null);
-          setSummary("Import cancelled");
+          setSummary(null);
           setIsOpen(false);
         }}
       />
 
-      {/* Suppress unused-import warnings while keeping these available for
-          future inline filename chip rendering. */}
-      <span className="hidden">
-        <AlertTriangle />
-        <DetectedFilesChip files={[]} />
-      </span>
+      <LogtenReviewDialog
+        plan={logtenPlan}
+        isOpen={showLogtenReview}
+        busy={busy}
+        onConfirm={handleLogtenExecute}
+        onCancel={() => {
+          // Close the whole flow rather than falling back to the status
+          // dialog — it would come up wearing its success face ("Import
+          // complete / Your logbook is up to date") over the word "cancelled".
+          setShowLogtenReview(false);
+          setLogtenPlan(null);
+          logtenDocsRef.current = [];
+          setIsOpen(false);
+          setSummary(null);
+        }}
+        onTimeReferenceChange={handleLogtenTimeReference}
+      />
     </>
   );
 }
