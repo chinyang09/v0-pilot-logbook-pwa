@@ -4,7 +4,7 @@
  */
 
 import type { Table } from "dexie"
-import { addToSyncQueue, getDeviceId } from "./sync-queue.store"
+import { addToSyncQueue, enqueueMany, getDeviceId } from "./sync-queue.store"
 import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
 
 /**
@@ -98,6 +98,57 @@ export async function createEntity<T extends SyncableEntity>(
   await addToSyncQueue("create", tableName, newEntity)
 
   return newEntity
+}
+
+/**
+ * Write rows that ALREADY HAVE ids, and put them on the sync queue.
+ *
+ * `createEntity` mints an id, which is exactly why the importers could not use
+ * it: an import resolves crew before it builds flights, so the flight rows are
+ * already pointing at `person.id` by the time anything is written. They reached
+ * for `table.put()` instead — and that is a raw Dexie write with no queue entry
+ * behind it, so **every crew member, currency and discrepancy an import created
+ * lived only on the device that ran the import**. Flights and aircraft were
+ * fine; they go through the store helpers.
+ *
+ * Bulk on purpose: one `bulkPut` and one `enqueueMany` instead of 2N round
+ * trips, which for a migration's crew list is the difference between one write
+ * and several hundred.
+ */
+export async function putManyWithSync<T extends SyncableEntity>(
+  table: Table<T>,
+  tableName: SyncableTableName,
+  entities: T[],
+  type: "create" | "update" = "create"
+): Promise<T[]> {
+  if (entities.length === 0) return []
+
+  const now = Date.now()
+  const deviceId = await getDeviceId()
+  const stamped = entities.map((entity) => ({
+    ...entity,
+    updatedAt: now,
+    deviceId,
+    syncStatus: "pending" as const,
+  })) as T[]
+
+  await table.bulkPut(stamped)
+  await enqueueMany(
+    stamped.map((data) => ({ type, collection: tableName, data }))
+  )
+
+  return stamped
+}
+
+/** Single-row form of `putManyWithSync`, for a call site that has just one. */
+export async function putWithSync<T extends SyncableEntity>(
+  table: Table<T>,
+  tableName: SyncableTableName,
+  entity: T,
+  type: "create" | "update" = "create"
+): Promise<T> {
+  const [written] = await putManyWithSync(table, tableName, [entity], type)
+  return written
 }
 
 /**

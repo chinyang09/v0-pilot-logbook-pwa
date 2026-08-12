@@ -18,6 +18,7 @@ import {
 } from "@/lib/db/stores/reference/aircraft.store";
 import { submitAircraftToServer } from "@/lib/submissions/submit";
 import { normalizeRegistration } from "@/lib/utils/string";
+import { pooledForEach } from "./pooled-map";
 import type { AircraftRecord } from "@/types/entities/aircraft.types";
 
 export interface EnrichProgress {
@@ -54,8 +55,12 @@ export async function enrichAircraftBatch(
     return { enriched, failedRegs: [], stats };
   }
 
+  // UPPERCASED once, so every leg of the chain keys the result map the same
+  // way. The local leg used to return the uppercased form while the server and
+  // FR24 legs keyed on the raw input, leaving callers to guess which casing a
+  // given hit came back under.
   const uniqueRegs = Array.from(
-    new Set(registrations.map((r) => r.trim()).filter(Boolean))
+    new Set(registrations.map((r) => r.trim().toUpperCase()).filter(Boolean))
   );
 
   // ---------- 1. Local IndexedDB ----------
@@ -65,9 +70,7 @@ export async function enrichAircraftBatch(
     stats.localHits++;
   }
 
-  let remaining = uniqueRegs.filter(
-    (reg) => !enriched.has(reg) && !enriched.has(reg.toUpperCase())
-  );
+  let remaining = uniqueRegs.filter((reg) => !enriched.has(reg));
 
   // ---------- 2. Server batch (MongoDB enrichment cache) ----------
   if (remaining.length > 0) {
@@ -138,8 +141,9 @@ export async function enrichAircraftBatch(
   const failedRegs: string[] = [];
   if (remaining.length > 0) {
     let done = 0;
-    await Promise.allSettled(
-      remaining.map(async (reg) => {
+    // Bounded — a migration's worth of unresolved tails would otherwise all go
+    // out at once. See `pooled-map.ts`.
+    await pooledForEach(remaining, async (reg) => {
         try {
           const res = await fetch(
             `/api/search/aircraft?q=${encodeURIComponent(reg)}`,
@@ -202,7 +206,7 @@ export async function enrichAircraftBatch(
             stage: "fr24",
           });
         }
-      })
+      }
     );
   }
 

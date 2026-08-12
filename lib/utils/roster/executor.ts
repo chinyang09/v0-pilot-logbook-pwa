@@ -41,6 +41,7 @@ import {
   userDb,
   DEFAULT_IMPORT_DEFAULTS,
 } from "@/lib/db";
+import { putManyWithSync } from "@/lib/db/stores/user/crud-helpers";
 import {
   toEngineType,
   toDashboardCategory,
@@ -55,7 +56,6 @@ import { recalculateFlightFields } from "@/lib/utils/flight-calculations";
 import { normalizeAircraftType } from "@/lib/utils/parsers/shared/aircraft-type-map";
 import { hhmmToMinutes } from "@/lib/utils/time";
 import {
-  TOLDG_DECISION_MARKER,
   deriveSectorCrew,
   type ParsedSector,
   type FieldDiff,
@@ -79,10 +79,10 @@ const TOLDG_FIELDS = new Set([
   "nightLandings",
 ]);
 
-// The TO/LDG decision is now recorded in `FlightLog.toLdgDecidedAt` rather than
-// appended to `remarks` — remarks belong to the user. TOLDG_DECISION_MARKER is
-// still imported so the reconciler can honour it on legacy rows.
-void TOLDG_DECISION_MARKER;
+// The TO/LDG decision is recorded in `FlightLog.toLdgDecidedAt`, not appended
+// to `remarks` — remarks belong to the user. The legacy `TOLDG_DECISION_MARKER`
+// is still honoured when READING an old row, but that lives in the reconciler;
+// nothing here needs it.
 
 // ============================================================
 // Result type
@@ -703,30 +703,44 @@ export async function executeRosterImport(
   };
 
   // ----- 1. Personnel (always applied; not part of user-reviewed diff) -----
-  for (const person of plan.personnelToCreate) {
-    try {
-      await userDb.personnel.put(person);
-      result.personnelCreated++;
-    } catch (error) {
-      result.errors.push({
-        operation: `create personnel ${person.name}`,
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
+  //
+  // Through `putManyWithSync`, NOT a raw `table.put`: the plan's rows already
+  // carry the ids the flight rows point at, so `addPersonnel` can't be used —
+  // but a bare put leaves nothing on the sync queue, and imported crew then
+  // existed only on the device that ran the import.
+  try {
+    const created = await putManyWithSync(
+      userDb.personnel,
+      "personnel",
+      plan.personnelToCreate,
+      "create"
+    );
+    result.personnelCreated += created.length;
+  } catch (error) {
+    result.errors.push({
+      operation: "create personnel",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
   }
-  for (const { id, data } of plan.personnelToUpdate) {
-    try {
+
+  try {
+    const merged: Personnel[] = [];
+    for (const { id, data } of plan.personnelToUpdate) {
       const existing = await userDb.personnel.get(id);
-      if (existing) {
-        await userDb.personnel.put({ ...existing, ...data });
-        result.personnelUpdated++;
-      }
-    } catch (error) {
-      result.errors.push({
-        operation: `update personnel ${id}`,
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
+      if (existing) merged.push({ ...existing, ...data });
     }
+    const updated = await putManyWithSync(
+      userDb.personnel,
+      "personnel",
+      merged,
+      "update"
+    );
+    result.personnelUpdated += updated.length;
+  } catch (error) {
+    result.errors.push({
+      operation: "update personnel",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
   }
 
   // ----- 2. Flight operations -----
@@ -930,43 +944,48 @@ export async function executeRosterImport(
   }
 
   // ----- 4. Currencies (always applied) -----
-  for (const currency of plan.currencies) {
-    try {
+  // Batched through the sync queue for the same reason as personnel above.
+  try {
+    const toWrite: Currency[] = [];
+    for (const currency of plan.currencies) {
       const existing = await userDb.currencies
         .where("code")
         .equals(currency.code)
         .first();
-      if (existing) {
-        await userDb.currencies.put({
-          ...existing,
-          ...currency,
-        } as Currency);
-      } else {
-        await userDb.currencies.put({
-          ...currency,
-          id: crypto.randomUUID(),
-          createdAt: Date.now(),
-          syncStatus: "pending",
-        } as Currency);
-      }
-      result.currenciesSaved++;
-    } catch (error) {
-      result.errors.push({
-        operation: `currency ${currency.code}`,
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
+      toWrite.push(
+        existing
+          ? ({ ...existing, ...currency } as Currency)
+          : ({
+              ...currency,
+              id: crypto.randomUUID(),
+              createdAt: Date.now(),
+            } as Currency)
+      );
     }
+    const written = await putManyWithSync(
+      userDb.currencies,
+      "currencies",
+      toWrite,
+      "update"
+    );
+    result.currenciesSaved += written.length;
+  } catch (error) {
+    result.errors.push({
+      operation: "currencies",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
   }
 
   // ----- 5. Persist discrepancies as DB rows so /discrepancies surfaces them -----
-  for (const d of result.discrepancies) {
-    try {
+  try {
+    const toWrite: Discrepancy[] = [];
+    for (const d of result.discrepancies) {
       // Mismatch ids are deterministic so a re-import refreshes the row in
       // place. Carry the original timestamps across: the undo window runs from
       // when the user first accepted, not from the last time they happened to
       // re-upload the same report.
       const existing = await userDb.discrepancies.get(d.id);
-      await userDb.discrepancies.put(
+      toWrite.push(
         existing
           ? {
               ...d,
@@ -978,12 +997,18 @@ export async function executeRosterImport(
             }
           : d
       );
-    } catch (error) {
-      result.errors.push({
-        operation: `discrepancy ${d.id}`,
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
     }
+    await putManyWithSync(
+      userDb.discrepancies,
+      "discrepancies",
+      toWrite,
+      "update"
+    );
+  } catch (error) {
+    result.errors.push({
+      operation: "discrepancies",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
   }
 
   // ----- 6. Recompute derived fields on every touched flight, and gather

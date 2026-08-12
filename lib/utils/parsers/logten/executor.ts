@@ -14,7 +14,6 @@
 import {
   addAircraft,
   addFlight,
-  addPersonnel,
   getAirportByIata,
   getAirportByIcao,
   getAllAircraft,
@@ -23,6 +22,7 @@ import {
   updatePersonnel,
   userDb,
 } from "@/lib/db";
+import { putManyWithSync } from "@/lib/db/stores/user/crud-helpers";
 import type { Aircraft } from "@/types/entities/aircraft.types";
 import type { Airport } from "@/types/entities/airport.types";
 import { recalculateFlightFields } from "@/lib/utils/flight-calculations";
@@ -78,23 +78,37 @@ export async function executeLogtenImport(
   };
 
   // ---- 1. Crew ----
+  //
+  // `putManyWithSync` rather than `addPersonnel`, because the flight rows are
+  // already pointing at `person.id` — but also rather than a raw `table.put`,
+  // which is what this used to do and which leaves nothing on the sync queue:
+  // migrated crew then existed only on the device that ran the import.
   onProgress?.(5, "Applying", "Crew");
-  for (const row of plan.crew.toCreate) {
-    try {
-      // `put` rather than `addPersonnel` so the id the flight rows already
-      // reference is the id that lands in the table.
-      await userDb.personnel.put(row.personnel);
-      result.crewCreated++;
-    } catch (error) {
-      result.errors.push({
-        operation: `create crew ${row.personnel.name}`,
-        message: message(error),
-      });
+  try {
+    const wanted = plan.crew.toCreate.map((row) => row.personnel);
+    // A name the address book carried AND a flight row invented resolves to
+    // one record; only write the ones that aren't already there.
+    for (const person of plan.flights.personnelToCreate) {
+      if (wanted.some((p) => p.id === person.id)) continue;
+      const already = await userDb.personnel.get(person.id);
+      if (!already) wanted.push(person);
     }
+    const created = await putManyWithSync(
+      userDb.personnel,
+      "personnel",
+      wanted,
+      "create"
+    );
+    result.crewCreated += created.length;
+  } catch (error) {
+    result.errors.push({ operation: "create crew", message: message(error) });
   }
+
   for (const row of plan.crew.toUpdate) {
     if (!row.matchedPersonnelId) continue;
     try {
+      // An existing record keeps its id, so the ordinary store helper applies
+      // — and it already enqueues.
       await updatePersonnel(row.matchedPersonnelId, row.patch);
       result.crewUpdated++;
     } catch (error) {
@@ -104,23 +118,6 @@ export async function executeLogtenImport(
       });
     }
   }
-
-  // Crew referenced only by a flight row (no address book, or a name the
-  // address book didn't carry) still needs a record to point at.
-  for (const person of plan.flights.personnelToCreate) {
-    try {
-      const already = await userDb.personnel.get(person.id);
-      if (already) continue;
-      await userDb.personnel.put(person);
-      result.crewCreated++;
-    } catch (error) {
-      result.errors.push({
-        operation: `create crew ${person.name}`,
-        message: message(error),
-      });
-    }
-  }
-  void addPersonnel; // store helper kept in scope for future non-id-preserving paths
 
   // ---- 2. Aircraft ----
   onProgress?.(15, "Applying", "Aircraft");
@@ -224,13 +221,26 @@ export async function executeLogtenImport(
   // have no airports to compute against, and a recomputed block time would put
   // the session into flight-hour totals.
   onProgress?.(85, "Applying", "Recalculating");
+  // The airport lookups are memoised for the run. A career's logbook is
+  // thousands of flights over a few dozen airports, and without this the pass
+  // hits IndexedDB twice per flight for the same few dozen answers.
+  const airportCache = new Map<string, Airport | null>();
+  const cachedAirport = async (icao: string, iata: string) => {
+    const key = `${icao}|${iata}`;
+    const hit = airportCache.get(key);
+    if (hit !== undefined) return hit;
+    const found = await resolveAirport(icao, iata);
+    airportCache.set(key, found);
+    return found;
+  };
+
   for (const id of touched) {
     try {
       const flight = await userDb.flights.get(id);
       if (!flight || isSimulatorEntry(flight)) continue;
       const [dep, arr] = await Promise.all([
-        resolveAirport(flight.departureIcao, flight.departureIata),
-        resolveAirport(flight.arrivalIcao, flight.arrivalIata),
+        cachedAirport(flight.departureIcao, flight.departureIata),
+        cachedAirport(flight.arrivalIcao, flight.arrivalIata),
       ]);
       const updates = recalculateFlightFields(flight, dep, arr);
       if (Object.keys(updates).length > 0) await updateFlight(id, updates);

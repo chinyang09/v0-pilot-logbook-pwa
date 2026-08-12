@@ -22,7 +22,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { Upload, Loader2, AlertTriangle } from "lucide-react";
+import { Upload, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { extractDocuments } from "@/lib/utils/parsers/extractors";
 import { isLogtenKind } from "@/lib/utils/parsers/detect";
@@ -62,7 +62,6 @@ import type { FlightLog } from "@/types/entities/flight.types";
 import type { NormalizedDocument } from "@/lib/utils/parsers/types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
 import { ImportStatusDialog, type ImportStage } from "./import-status-dialog";
-import { DetectedFilesChip } from "./detected-files-chip";
 
 interface Props {
   /** Where the button is mounted — affects success-message wording. */
@@ -212,8 +211,11 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
       } catch (error) {
         setErrorMsg(error instanceof Error ? error.message : "Import failed");
       } finally {
+        // The status dialog STAYS OPEN — it is the only place the summary and
+        // the error message are ever shown, and closing it here meant every
+        // eCrew import ended in silence: the work was done, `summary` was set,
+        // and the surface that renders it had already gone. `onDone` closes it.
         setProgress(null);
-        setIsOpen(false);
         setShowReview(false);
         setBusy(false);
       }
@@ -562,9 +564,11 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           handleExecute(updatedPlan);
         }}
         onCancel={() => {
+          // Setting a summary and closing in the same breath meant it was
+          // never seen. Cancelling is its own confirmation — the dialog goes.
           setShowReview(false);
           setPendingPlan(null);
-          setSummary("Import cancelled");
+          setSummary(null);
           setIsOpen(false);
         }}
       />
@@ -586,13 +590,6 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         }}
         onTimeReferenceChange={handleLogtenTimeReference}
       />
-
-      {/* Suppress unused-import warnings while keeping these available for
-          future inline filename chip rendering. */}
-      <span className="hidden">
-        <AlertTriangle />
-        <DetectedFilesChip files={[]} />
-      </span>
     </>
   );
 }

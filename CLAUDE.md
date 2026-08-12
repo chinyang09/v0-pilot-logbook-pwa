@@ -50,6 +50,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 |---|---|
 | `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation |
+| `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts, from synthetic bounding boxes |
@@ -2657,6 +2658,9 @@ When making changes, be aware of these high-impact files:
 - Do not hardcode `orange-400` for scheduled flight cards — light and dark themes use separate colors (`orange-600` light / `orange-400` dark) for contrast
 
 **Report import:**
+- Do not write an imported record with a bare `table.put()` — it is a raw Dexie write with NO sync-queue entry behind it, so the row lives only on the device that ran the import. The importers reached for it because their rows already carry the ids the flight rows point at, which rules out `addPersonnel`/`addCurrency`; `putManyWithSync` (`crud-helpers.ts`) is the shape that keeps the id AND enqueues, in one `bulkPut` + one `enqueueMany` rather than 2N round trips. Crew, currencies and discrepancies were all silently local for exactly this reason
+- Do not close the import status dialog when an execution finishes — it is the ONLY surface that renders the summary and the error message, and closing it in the `finally` meant every eCrew import ended in silence with the work done and nothing said. `onDone` closes it; a cancel closes it without setting a summary nobody will see
+- Do not fan a per-item enrichment leg out with `Promise.allSettled(remaining.map(…))` — that is every unresolved registration or airport at once, each holding an 8s timeout through one proxy route. Go through `pooledForEach` (`shared/pooled-map.ts`); a roster's handful behaves identically and a career's logbook gets a queue instead of a stampede
 - Do not match an imported sector to a flight by "first unclaimed on this route" — pairing is decided globally in `match-assign.ts` with time as part of the key. The crew logbook report has no flight-number column, so on a repeated-route day the greedy version pairs every leg with the wrong one (see `repeat-route-day.test.ts`)
 - Do not reclassify the company's OOOI/scheduled/block times as CRITICAL — they are the record of when the aircraft moved and apply without asking. Conversely do not make `pilotFlying`/`pilotRole`/day-night TO-LDG safe: they are the pilot's own account, and every difference is kept as a `Discrepancy` for the licence record
 - Do not skip `detectEditReasons` before classification — it is what protects a signed/remarked/manually-overridden flight regardless of which fields changed
