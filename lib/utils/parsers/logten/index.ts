@@ -47,6 +47,7 @@ import type {
   LogtenFlightPlan,
   LogtenImportPlan,
   LogtenParseOptions,
+  ResolvedAircraft,
 } from "./types";
 
 export * from "./types";
@@ -175,7 +176,7 @@ export async function parseLogtenExport(
     ])
   );
 
-  const lookupByRegistration = new Map<string, string>();
+  const lookupByRegistration = new Map<string, ResolvedAircraft>();
   let unresolvedRegistrations: string[] = [];
 
   if (!options.skipEnrichment && registrations.length > 0) {
@@ -190,10 +191,16 @@ export async function parseLogtenExport(
           );
         }
       );
-      for (const [reg, record] of enriched.enriched) {
-        if (record.typecode) {
-          lookupByRegistration.set(normalizeRegistration(reg), record.typecode);
-        }
+      for (const [reg, record] of enriched.enriched as Iterable<
+        [string, { registration?: string; typecode?: string }]
+      >) {
+        // Keyed on the NORMALIZED form so the file's spelling doesn't matter,
+        // and carrying the resolved record's own registration so the canonical
+        // punctuation ("9V-SKU") replaces whatever LogTen wrote ("9VSKU").
+        lookupByRegistration.set(normalizeRegistration(reg), {
+          registration: record.registration || reg,
+          typecode: record.typecode || "",
+        });
       }
       unresolvedRegistrations = enriched.failedRegs;
     } catch {

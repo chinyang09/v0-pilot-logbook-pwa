@@ -230,22 +230,28 @@ export function LogtenReviewDialog({
         </div>
 
         <div className="mt-5 flex shrink-0 items-center justify-end gap-2">
-          <Button
-            variant="ghost"
-            className="h-10 rounded-full px-4"
-            disabled={busy}
-            onClick={onCancel}
-          >
-            Cancel
-          </Button>
+          {!nothingToDo && (
+            <Button
+              variant="ghost"
+              className="h-10 rounded-full px-4"
+              disabled={busy}
+              onClick={onCancel}
+            >
+              Cancel
+            </Button>
+          )}
           <GlassContainer cornerRadius={20}>
+            {/* A plan with nothing to apply gets a DONE button, not a disabled
+                Import one. A dead primary button reads as the dialog being
+                broken — which is exactly how it read after deleting an
+                aircraft and re-importing the same file. */}
             <Button
               variant="ghost"
               className="h-10 rounded-full px-5 font-semibold text-primary"
-              disabled={busy || nothingToDo}
-              onClick={onConfirm}
+              disabled={busy}
+              onClick={nothingToDo ? onCancel : onConfirm}
             >
-              Import
+              {nothingToDo ? "Done" : "Import"}
             </Button>
           </GlassContainer>
         </div>

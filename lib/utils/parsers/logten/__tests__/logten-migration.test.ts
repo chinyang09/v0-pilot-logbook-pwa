@@ -206,21 +206,92 @@ describe("parseLogtenExport", () => {
     );
   });
 
-  it("lets the FILE outrank the lookup on aircraft type", async () => {
-    // A registration is re-issued over a career — the tail that was an A320 in
-    // 2011 can be a 787 today — so a live lookup is evidence about the airframe
-    // flying under that mark NOW, not the one the pilot logged.
+  it("takes the canonical registration and type from a resolved lookup", async () => {
+    // LogTen holds the tail unpunctuated and paired with a stale type. The
+    // chain knows that mark is an A388 registered "9V-SKU", and a flight card
+    // showing "9VSKU, A21N" beside an aircraft list showing "9V-SKU, A388"
+    // reads as two different aeroplanes.
     enrichAircraftBatch.mockResolvedValueOnce({
-      enriched: new Map([["9V-NCE", { typecode: "B78X" }]]),
+      enriched: new Map([
+        ["9VSKU", { registration: "9V-SKU", typecode: "A388" }],
+      ]),
+      failedRegs: [],
+      stats: { localHits: 0, serverBatchHits: 0, fr24Hits: 1, failed: 0 },
+    });
+
+    const doc = fixture("aircraft.txt");
+    doc.rows[1].cells[0] = "9VSKU";
+
+    const plan = await parseLogtenExport([doc]);
+    const sku = plan.aircraft.toCreate.find((r) =>
+      r.aircraft.registration.startsWith("9V-SKU")
+    )!;
+    expect(sku.aircraft.registration).toBe("9V-SKU");
+    expect(sku.aircraft.typeDesignator).toBe("A388");
+  });
+
+  it("canonicalises a flight's registration to the resolved spelling", async () => {
+    enrichAircraftBatch.mockResolvedValueOnce({
+      enriched: new Map([
+        ["9VNCI", { registration: "9V-NCI", typecode: "A21N" }],
+      ]),
       failedRegs: [],
       stats: { localHits: 1, serverBatchHits: 0, fr24Hits: 0, failed: 0 },
     });
 
-    const plan = await parseLogtenExport([fixture("aircraft.txt")]);
-    const nce = plan.aircraft.toCreate.find(
-      (r) => r.aircraft.registration === "9V-NCE"
-    )!;
-    expect(nce.aircraft.typeDesignator).toBe("A21N");
+    const doc = fixture("flights.txt");
+    const regCol = doc.rows[0].cells.findIndex(
+      (c) => c.trim() === "aircraft_aircraftID"
+    );
+    // Every permutation a LogTen user might have typed means the same tail.
+    doc.rows[2].cells[regCol] = "9vnci";
+    doc.rows[3].cells[regCol] = "9V NCI";
+
+    const plan = await parseLogtenExport([doc]);
+    const creates = plan.flights.operations.filter((op) => op.kind === "create");
+    for (const op of creates) {
+      if (op.kind !== "create" || !op.flight.aircraftReg) continue;
+      expect(op.flight.aircraftReg).toBe("9V-NCI");
+    }
+  });
+
+  it("keeps the file's type when the pilot asks it to", async () => {
+    // The escape hatch for a career containing a re-issued registration: the
+    // lookup describes the airframe flying under that mark TODAY, not the one
+    // logged in 2011. The canonical SPELLING still follows the lookup — that
+    // is punctuation, not a claim about the aeroplane.
+    enrichAircraftBatch.mockResolvedValueOnce({
+      enriched: new Map([
+        ["9V-NCI", { registration: "9V-NCI", typecode: "B78X" }],
+      ]),
+      failedRegs: [],
+      stats: { localHits: 1, serverBatchHits: 0, fr24Hits: 0, failed: 0 },
+    });
+
+    const plan = await parseLogtenExport([fixture("flights.txt")], {
+      preferFileType: true,
+    });
+    const tr118 = plan.flights.operations.find(
+      (op) => op.kind === "create" && op.flight.flightNumber === "TR118"
+    );
+    if (tr118?.kind !== "create") throw new Error("expected create");
+    expect(tr118.flight.aircraftType).toBe("A21N");
+    expect(tr118.flight.aircraftReg).toBe("9V-NCI");
+  });
+
+  it("writes 'Self' for the seat the logged-in pilot occupied", async () => {
+    // The app's convention, written by `deriveSectorCrew` on every eCrew
+    // import and rendered verbatim on the flight card. A migrated row carrying
+    // the pilot's own name instead read as though somebody else was in the seat.
+    const plan = await parseLogtenExport(ALL_THREE(), { skipEnrichment: true });
+    const tr118 = plan.flights.operations.find(
+      (op) => op.kind === "create" && op.flight.flightNumber === "TR118"
+    );
+    if (tr118?.kind !== "create") throw new Error("expected create");
+    expect(tr118.flight.sicName).toBe("Self");
+    expect(tr118.flight.sicId).toBe("self");
+    // …and the other seat keeps its real name.
+    expect(tr118.flight.picName).toBe("Tan Wei Ming");
   });
 
   it("flags an unresolvable tail so the executor seeds it locally", async () => {

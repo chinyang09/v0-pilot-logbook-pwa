@@ -80,6 +80,7 @@ import type {
   LogtenFlightOperation,
   LogtenFlightPlan,
   LogtenParseOptions,
+  ResolvedAircraft,
 } from "./types";
 import type { NormalizedDocument } from "../types";
 
@@ -334,14 +335,15 @@ export interface ParseLogtenFlightsContext {
   /** Registration (normalized) → ICAO type, from the Aircraft export. */
   typeByRegistration?: Map<string, string>;
   /**
-   * Registration (normalized) → ICAO type, from the shared enrichment chain
-   * (local reference DB → server batch → FR24).
+   * Registration (normalized) → the record the shared enrichment chain
+   * resolved (local reference DB → server batch → FR24).
    *
-   * Third in line, behind the flight row's own type columns and the Aircraft
-   * export, because both of those are the pilot's own record of what they flew
-   * and a registration can be re-issued to a different type over a career.
+   * Carries the CANONICAL registration as well as the type, because the
+   * spelling matters as much as the code: LogTen holds "9VSKU" where the app's
+   * reference data holds "9V-SKU", and a flight card showing one while the
+   * aircraft list shows the other reads as two different aeroplanes.
    */
-  lookupByRegistration?: Map<string, string>;
+  lookupByRegistration?: Map<string, ResolvedAircraft>;
 }
 
 /**
@@ -496,7 +498,7 @@ export function parseLogtenFlights(
             newPersonnel,
             unresolved,
             untypedRegs,
-          });
+          }, options.preferFileType === true);
 
       dates.push(flight.date);
 
@@ -589,7 +591,8 @@ function buildFlight(
   plan: LogtenFlightPlan,
   reference: "utc" | "local",
   preserve: boolean,
-  crew: CrewState
+  crew: CrewState,
+  preferFileType: boolean
 ): FlightLogCreate {
   const depAirport = ctx.airports.get(raw.from);
   const arrAirport = ctx.airports.get(raw.to);
@@ -644,33 +647,27 @@ function buildFlight(
     }
   }
 
-  const picCrew = raw.picName
-    ? resolveCrewByName(raw.picName, {
-        existingCrew: crew.existingCrew,
-        crewCache: crew.crewCache,
-        currentUserName: ctx.currentUser.name,
-        currentUserId: ctx.currentUser.id,
-        newPersonnel: crew.newPersonnel,
-      })
-    : null;
-  const sicCrew = raw.sicName
-    ? resolveCrewByName(raw.sicName, {
-        existingCrew: crew.existingCrew,
-        crewCache: crew.crewCache,
-        currentUserName: ctx.currentUser.name,
-        currentUserId: ctx.currentUser.id,
-        newPersonnel: crew.newPersonnel,
-      })
-    : null;
+  // Crew resolution is the SHARED resolver the crew-logbook import uses, so a
+  // name arriving from LogTen lands on the same Personnel row an eCrew report
+  // would have found: exact match on the normalized name first, then the
+  // truncation-tolerant prefix match (an eCrew row created as "Mohamed Azmi
+  // Bin Moh" is upgraded by LogTen's full form), and only then a new row.
+  const resolveSeat = (name: string) =>
+    name
+      ? resolveCrewByName(name, {
+          existingCrew: crew.existingCrew,
+          crewCache: crew.crewCache,
+          currentUserName: ctx.currentUser.name,
+          currentUserId: ctx.currentUser.id,
+          newPersonnel: crew.newPersonnel,
+        })
+      : null;
+
+  const picCrew = resolveSeat(raw.picName);
+  const sicCrew = resolveSeat(raw.sicName);
 
   const additionalCrew: AdditionalCrew[] = raw.extraCrew.map(({ name, role }) => {
-    const resolved = resolveCrewByName(name, {
-      existingCrew: crew.existingCrew,
-      crewCache: crew.crewCache,
-      currentUserName: ctx.currentUser.name,
-      currentUserId: ctx.currentUser.id,
-      newPersonnel: crew.newPersonnel,
-    });
+    const resolved = resolveSeat(name)!;
     return {
       id: resolved.personnelId || undefined,
       name: resolved.resolvedName || name,
@@ -689,21 +686,34 @@ function buildFlight(
     raw.isPF ??
     raw.dayTakeoffs + raw.nightTakeoffs + raw.dayLandings + raw.nightLandings > 0;
 
+  // A tail is written however the LogTen user felt like writing it — "9VSKU",
+  // "9vnca", "9V NCA" — and all of those are the record the chain resolved. The
+  // canonical punctuation is what the app stores, so a flight card and the
+  // aircraft list say the same thing about the same aeroplane.
   const regKey = normalizeRegistration(raw.aircraftReg);
+  const resolved = ctx.lookupByRegistration?.get(regKey);
+  const aircraftReg = resolved?.registration
+    ? resolved.registration.toUpperCase()
+    : raw.aircraftReg;
+
+  // Type follows the same rule the fleet import uses: a resolved lookup wins,
+  // the file fills what it could not answer. See `aircraft.ts` for the caveat
+  // and the `preferFileType` escape hatch.
   const aircraftType =
-    raw.aircraftType ||
+    (preferFileType
+      ? raw.aircraftType || resolved?.typecode
+      : resolved?.typecode || raw.aircraftType) ||
     ctx.typeByRegistration?.get(regKey) ||
-    ctx.lookupByRegistration?.get(regKey) ||
     "";
   // A flight left without a type is not an error — the Aircraft export may
   // simply not have been imported yet. The executor back-tags it when that
   // file arrives, which is the other half of the loop.
-  if (raw.aircraftReg && !aircraftType) crew.untypedRegs.add(raw.aircraftReg);
+  if (aircraftReg && !aircraftType) crew.untypedRegs.add(aircraftReg);
 
   const create: FlightLogCreate = {
     date,
     flightNumber: raw.flightNumber,
-    aircraftReg: raw.aircraftReg,
+    aircraftReg,
     aircraftType,
     departureIcao: depAirport?.icao || (raw.from.length === 4 ? raw.from : ""),
     departureIata: depAirport?.iata || (raw.from.length === 3 ? raw.from : ""),
@@ -721,10 +731,14 @@ function buildFlight(
     flightTime: raw.flightTime || "00:00",
     nightTime: raw.nightTime || "00:00",
     dayTime: "00:00",
+    // "Self" is the app's convention for the seat the logged-in pilot occupied
+    // — `deriveSectorCrew` writes it on every eCrew import, and the flight card
+    // renders it verbatim. Writing the pilot's own name instead made a
+    // migrated row read as though somebody else was in the seat.
     picId: picCrew?.personnelId ?? "",
-    picName: picCrew?.resolvedName ?? raw.picName,
+    picName: seatName(picCrew, raw.picName),
     sicId: sicCrew?.personnelId ?? "",
-    sicName: sicCrew?.resolvedName ?? raw.sicName,
+    sicName: seatName(sicCrew, raw.sicName),
     additionalCrew,
     pilotFlying,
     pilotRole,
@@ -753,6 +767,15 @@ function buildFlight(
   };
 
   return create;
+}
+
+/** The name to store for a seat — "Self" for the logged-in pilot. */
+function seatName(
+  resolved: { isUser: boolean; resolvedName: string } | null,
+  fallback: string
+): string {
+  if (!resolved) return fallback;
+  return resolved.isUser ? "Self" : resolved.resolvedName || fallback;
 }
 
 /**

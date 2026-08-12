@@ -477,11 +477,34 @@ crew-logbook imports use. Which file arrives first does not matter:
 | **Flights first** | the chain types each tail; anything it can't answer for is listed in `untypedRegistrations` and its flights import UNTYPED | importing the Aircraft export **back-tags** them (`backTagFlights` — only flights with a blank type) |
 | **Aircraft first** | the chain types the fleet; an unresolvable tail is taken wholesale from the file AND seeded into the **reference** DB (`seedReferenceDatabase`) | a later flight import now resolves it LOCALLY, first step of the chain |
 
-**The FILE outranks the lookup on type, and only ever fills a blank from it.**
-A registration is re-issued over a career — the tail that was an A320 in 2011
-may be a 787 today — so a live lookup is evidence about the airframe flying
-under that mark NOW, not about the one the pilot logged. Order is: the flight
-row's own `aircraftType_type` → the Aircraft export → the lookup chain.
+**A RESOLVED lookup outranks the file, on both the type and the registration's
+spelling.** If the chain answers for 9V-SKU it knows that tail is an A388, and
+a LogTen table pairing it with an A21N is stale data worth correcting. The file
+supplies whatever the chain could not answer for. The one case this reads wrong
+is a registration RE-ISSUED to a different type during a career — the lookup
+describes the airframe flying under that mark today, not the one logged in 2011
+— and `preferFileType` is the escape hatch for it. The canonical SPELLING
+follows the lookup either way: that is punctuation, not a claim about the
+aeroplane.
+
+That spelling matters as much as the code. A LogTen user writes a tail however
+they like — `9VSKU`, `9vnca`, `9V NCA` — and a flight card reading "9VSKU,
+A21N" beside an aircraft list reading "9V-SKU, A388" is two different
+aeroplanes as far as anyone can tell.
+
+**`batchGetAircraftByRegistrations` resolves a dashless input to a DASHED
+stored key**, which is what makes any of that work. A `bulkGet` matches the
+primary key exactly; trying the input plus a dashless copy of it covers "input
+has a dash, stored has none" and NOT the reverse — and the reverse is the
+common case for a migrated logbook. Misses now fall back to one pass over the
+table's PRIMARY KEYS (Dexie walks those off the index without deserialising a
+record), matched on `normalizeRegistration`. `matchRegistrationKeys` is the
+pure half, so the rule is tested without IndexedDB.
+
+**A soft-deleted reference aircraft must not answer a lookup.** Neither the
+single nor the batch lookup filtered `deletedAt`, so a deleted aircraft read as
+a live local hit: it stayed invisible in the list AND the enrichment chain
+never asked the network for it again, which made it impossible to re-import.
 
 LogTen's per-airframe detail (serial number, operator, owner, year, notes) has
 nowhere to go in the app's `Aircraft`, so the type carries five OPTIONAL,
@@ -2233,6 +2256,7 @@ When making changes, be aware of these high-impact files:
 - `components/import/logten-review-dialog.tsx` — the migration's consent surface, including the UTC/Local switch
 - `lib/utils/parsers/shared/csv-split.ts` — `sniffDelimiter` + `splitDelimitedLine` (eCrew is comma, LogTen is tab)
 - `lib/utils/history-markers.ts` — which overlay owns the top history marker, so a deferred release can't pop another dialog's entry
+- `lib/db/stores/reference/aircraft.store.ts` — `matchRegistrationKeys` (dashless↔dashed key matching) + the `deletedAt` filter every lookup owes
 - `components/flight-card-body.tsx` — the one flight-card definition
 - `lib/utils/retention.ts` — the single 90-day undo window (decisions, accepted comparisons, recycle bin)
 - `lib/utils/flight-sort.ts` — the one list order (date, out time, departure, id)
@@ -2646,7 +2670,11 @@ When making changes, be aware of these high-impact files:
 - Do not assume a LogTen export's clock times are UTC. It carries no marker and exports whatever the app was set to display; `detectTimeReference` votes across the file's cross-timezone sectors, and when it comes back `assumed` the pilot has to be asked before anything is written. Converting a local time must move the DATE too when it wraps — the app keys a flight on the UTC date of its out time
 - Do not let the migration recompute what LogTen already recorded — set the matching `manualOverrides` flag for every field the file populated (`preserveSourceValues`), or first save silently restates totals the pilot has already certified. Only a NON-ZERO day/night TO/LDG count is pinned; a blank means LogTen didn't record the split and the sun calculation is the better answer
 - Do not recognise a LogTen simulator from `flight_simulator` or `flight_type` — the first is blank on the sim row of a real export and the second is an unlabelled enum index. It is structural (no registration, no route), the same rule as everywhere else, and the executor must skip the recalculation pass for sims or the recomputed block time reaches flight-hour totals
-- Do not let the aircraft lookup outrank the FILE on type — a registration is re-issued over a career, so the chain is evidence about the tail flying under that mark NOW. It fills a blank only. And keep BOTH halves of the loop: an unresolvable tail is seeded into the reference DB so a later flight import finds it locally, and a fleet import back-tags flights that have a registration and no type
+- Do not store a LogTen registration as the file spelled it once the lookup has resolved it — `9VSKU`, `9vnca` and `9V NCA` all mean the record the chain returned, and its punctuation is what the app stores. A flight card reading "9VSKU, A21N" beside an aircraft list reading "9V-SKU, A388" is two different aeroplanes as far as the reader can tell. A resolved lookup outranks the file on the TYPE too (`preferFileType` is the escape hatch for a re-issued registration)
+- Do not let a `bulkGet` be the whole registration lookup — it matches the primary key exactly, so a dashless input never finds a dashed stored key, which is the common case for a migrated logbook. Keep the normalized fallback over the table's primary keys (`matchRegistrationKeys`), and keep it gated on the keys that actually missed
+- Do not let a soft-deleted reference aircraft answer a lookup — it reads as a live local hit, so the entry stays invisible in the list AND the enrichment chain never asks the network for it again. That is what made a deleted aircraft impossible to re-import
+- Do not break either half of the aircraft loop: an unresolvable tail is seeded into the reference DB so a later flight import finds it locally, and a fleet import back-tags flights that have a registration and no type
+- Do not write a migrated pilot's own name into a crew seat — the app's convention is `"Self"` (what `deriveSectorCrew` writes on every eCrew import, and what the flight card renders verbatim). Their own name in the seat reads as though somebody else was flying
 - Do not make `values.ts` throw. A corrupt cell degrades to a blank and the row parser decides whether that is fatal — that is what stops one bad line taking down a 4,000-flight migration. Keep `toDuration` and `toClock` separate too: a duration may exceed 24h, a clock time may not, and a four-figure totals row wrapping into a plausible departure time is a silent error
 
 **Formatting & chrome:**

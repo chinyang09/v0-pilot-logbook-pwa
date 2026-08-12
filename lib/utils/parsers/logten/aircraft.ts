@@ -33,6 +33,7 @@ import { text, toBool, upper } from "./values";
 import type {
   LogtenAircraftPlan,
   LogtenAircraftPlanRow,
+  ResolvedAircraft,
 } from "./types";
 import type { NormalizedDocument } from "../types";
 
@@ -69,13 +70,21 @@ export function toAppEngineType(
 
 function buildAircraft(
   row: LogtenRow,
-  lookup?: Map<string, string>
+  lookup?: Map<string, ResolvedAircraft>
 ): { record: Omit<Aircraft, "id" | "createdAt" | "syncStatus">; registration: string } | null {
-  const registration = upper(
+  const fileRegistration = upper(
     row.get("Aircraft ID", "aircraft_aircraftID", "Registration", "Tail Number")
   );
-  if (!registration) return null;
-  if (PLACEHOLDER_IDS.has(registration)) return null;
+  if (!fileRegistration) return null;
+  if (PLACEHOLDER_IDS.has(fileRegistration)) return null;
+
+  // The lookup's registration is the CANONICAL one. LogTen users write a tail
+  // however they like — "9VSKU", "9vnca", "9V NCA" — and all of those mean the
+  // record the chain resolved, so the app stores and shows its punctuation.
+  const resolved = lookup?.get(normalizeRegistration(fileRegistration));
+  const registration = resolved?.registration
+    ? upper(resolved.registration)
+    : fileRegistration;
 
   const rawType = row.get("Type", "aircraftType_type", "Type Code");
   const make = row.get("Make", "aircraftType_make");
@@ -87,14 +96,16 @@ function buildAircraft(
   // "32Q" → "A21N": LogTen users who fed their logbook from a carrier roster
   // carry the carrier's codes, and the rest of the app is on ICAO DOC 8643.
   //
-  // The FILE wins over the lookup, and only fills from it when the file said
-  // nothing. A registration is re-issued over a career — the tail that was an
-  // A320 in 2011 may be a 787 today — so a live lookup is evidence about the
-  // airframe flying under that mark NOW, not about the one the pilot flew.
+  // When the chain RESOLVED the tail, its answer wins: it knows 9V-SKU is an
+  // A388, and a LogTen table that pairs that tail with an A21N is out of date.
+  // The file supplies whatever the chain could not answer for.
+  //
+  // The case this reads wrong is a registration RE-ISSUED to a different type
+  // during the pilot's career — the lookup describes the airframe flying under
+  // that mark now, not the one they logged in 2011. `preferFileType` exists for
+  // a pilot who needs the other rule.
   const typeDesignator =
-    normalizeAircraftType(rawType) ||
-    lookup?.get(normalizeRegistration(registration)) ||
-    "";
+    resolved?.typecode || normalizeAircraftType(rawType) || "";
 
   // LogTen's own detail. Nothing here is derivable from a lookup — it is what
   // the pilot curated by hand — so it is carried across verbatim.
@@ -171,14 +182,14 @@ export function collectAircraftRegistrations(doc: NormalizedDocument): string[] 
 export interface ParseAircraftContext {
   existingAircraft: Aircraft[];
   /**
-   * Normalized registration → ICAO type, from the shared enrichment chain
-   * (local reference DB → server batch → FR24) the schedule and crew-logbook
-   * imports already use.
+   * Normalized registration → the record the shared enrichment chain resolved
+   * (local reference DB → server batch → FR24), the same chain the schedule
+   * and crew-logbook imports use.
    *
-   * It only ever FILLS a type the file left blank. See `buildAircraft` for why
-   * the file outranks it.
+   * Supplies the canonical registration spelling as well as the type — see
+   * `buildAircraft`.
    */
-  lookupByRegistration?: Map<string, string>;
+  lookupByRegistration?: Map<string, ResolvedAircraft>;
   /** Registrations no source could resolve — reported so the user knows. */
   unresolvedRegistrations?: string[];
 }

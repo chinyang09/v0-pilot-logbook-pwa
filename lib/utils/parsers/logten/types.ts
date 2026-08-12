@@ -22,6 +22,21 @@ import type { Personnel } from "@/types/entities/crew.types";
 /** Where a LogTen export's clock times are expressed. */
 export type LogtenTimeReference = "utc" | "local";
 
+/**
+ * What the shared aircraft lookup chain (local reference DB → server batch →
+ * FR24) came back with for one registration.
+ *
+ * The `registration` is the CANONICAL punctuation, and it is the point of
+ * carrying the whole record rather than just a type code: LogTen users write
+ * a tail every which way — `9VSKU`, `9vnca`, `9V NCA` — and the app's
+ * reference data, its aircraft list and its flight cards should all show the
+ * one form the lookup resolved to.
+ */
+export interface ResolvedAircraft {
+  registration: string;
+  typecode: string;
+}
+
 export interface LogtenIssue {
   /** 1-based line in the source file. 0 for a file-level problem. */
   line: number;
@@ -189,4 +204,18 @@ export interface LogtenParseOptions {
   preserveSourceValues?: boolean;
   /** Skip the network enrichment chains (tests, offline). */
   skipEnrichment?: boolean;
+  /**
+   * Keep the aircraft type LogTen recorded even when the lookup chain resolves
+   * the tail to something else.
+   *
+   * Off by default: a chain that resolves 9V-SKU knows that tail is an A388,
+   * and a LogTen table pairing it with an A21N is stale data worth correcting.
+   * The case that wants this on is a long career containing a registration
+   * RE-ISSUED to a different type — the lookup describes the airframe flying
+   * under that mark today, not the one the pilot logged in 2011.
+   *
+   * The canonical registration SPELLING always follows the lookup either way;
+   * that is punctuation, not a claim about the aeroplane.
+   */
+  preferFileType?: boolean;
 }
