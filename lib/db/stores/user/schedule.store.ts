@@ -9,7 +9,7 @@ import type {
   DutyType,
 } from "@/types/entities/roster.types"
 import { addToSyncQueue, enqueueMany, getDeviceId } from "./sync-queue.store"
-import { updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
+import { updateEntity, purgeEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
 
 /**
  * Add new schedule entry
@@ -41,10 +41,13 @@ export async function updateScheduleEntry(
 }
 
 /**
- * Delete schedule entry
+ * Delete a schedule entry — HARD, no Recently Deleted.
+ *
+ * Schedule rows are replaced wholesale by the next roster import rather than
+ * curated by hand, so a holding area for them would only ever be noise.
  */
 export async function deleteScheduleEntry(id: string): Promise<boolean> {
-  return deleteEntity<ScheduleEntry>(userDb.scheduleEntries, "scheduleEntries", id)
+  return purgeEntity<ScheduleEntry>(userDb.scheduleEntries, "scheduleEntries", id)
 }
 
 /**

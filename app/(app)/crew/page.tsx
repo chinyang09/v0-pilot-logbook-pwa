@@ -77,8 +77,6 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
           icon: <Trash2 className="h-5 w-5" />,
           onClick: () => onDelete(crew),
           variant: "destructive",
-          holdToConfirm: true,
-          cancelLabel: "Cancel delete",
         },
       ]}
     >

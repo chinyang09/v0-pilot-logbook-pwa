@@ -5,6 +5,7 @@
 
 import type { Table } from "dexie"
 import { addToSyncQueue, getDeviceId } from "./sync-queue.store"
+import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
 
 /**
  * Base entity interface that all syncable entities must implement
@@ -19,6 +20,32 @@ export interface SyncableEntity {
   serverSeq?: number
   // Sync engine: authoring device, used as a deterministic LWW tiebreaker
   deviceId?: string
+  /**
+   * Soft-delete stamp — the row is in Recently Deleted, not gone.
+   *
+   * `null` rather than `undefined` when CLEARED: `/api/sync/bulk` applies an
+   * update as a `$set` of the payload's keys and `JSON.stringify` drops
+   * undefined ones, so an undefined here would leave the server's stamp in
+   * place and the next pull would undo the restore.
+   */
+  deletedAt?: number | null
+}
+
+/**
+ * A row that should appear in a list, a total or an import match.
+ *
+ * Read every list through this. A deleted row that reaches the reconciler
+ * would be silently updated and so resurrected — the exact bug `isLiveFlight`
+ * exists to prevent, now that every entity can be deleted rather than only
+ * flights.
+ */
+export function isLiveEntity<T extends SyncableEntity>(entity: T): boolean {
+  return entity.deletedAt == null
+}
+
+/** In Recently Deleted and still restorable. */
+export function isDeletedEntity<T extends SyncableEntity>(entity: T): boolean {
+  return entity.deletedAt != null && isWithinRetention(entity.deletedAt, Date.now(), DELETED_RETENTION_MS)
 }
 
 /**
@@ -101,9 +128,45 @@ export async function updateEntity<T extends SyncableEntity>(
 }
 
 /**
- * Generic delete operation for syncable entities
+ * SOFT delete — the row goes to Recently Deleted, it does not go away.
+ *
+ * This pushes an UPDATE, not a delete, and that is what makes Recently Deleted
+ * work across devices: binning and restoring both ride the ordinary sync path,
+ * and only `purgeEntity` below ever writes a tombstone. Pushing a real delete
+ * here would mean the row was gone on every other device with nothing left to
+ * restore.
  */
 export async function deleteEntity<T extends SyncableEntity>(
+  table: Table<T>,
+  tableName: SyncableTableName,
+  id: string
+): Promise<boolean> {
+  const existing = await table.get(id)
+  if (!existing) return false
+  if (existing.deletedAt != null) return true
+
+  return (await updateEntity(table, tableName, id, { deletedAt: Date.now() } as Partial<T>)) != null
+}
+
+/** Put a soft-deleted row back. Clears the stamp with `null`, never undefined. */
+export async function restoreEntity<T extends SyncableEntity>(
+  table: Table<T>,
+  tableName: SyncableTableName,
+  id: string
+): Promise<boolean> {
+  const existing = await table.get(id)
+  if (!existing) return false
+
+  return (await updateEntity(table, tableName, id, { deletedAt: null } as Partial<T>)) != null
+}
+
+/**
+ * HARD delete — the row and a tombstone, so it is gone everywhere.
+ *
+ * Only two things call this: "Delete permanently" in Recently Deleted, and the
+ * sweep that runs when a row's 30 days are up.
+ */
+export async function purgeEntity<T extends SyncableEntity>(
   table: Table<T>,
   tableName: SyncableTableName,
   id: string
@@ -115,6 +178,20 @@ export async function deleteEntity<T extends SyncableEntity>(
   await addToSyncQueue("delete", tableName, { id })
 
   return true
+}
+
+/** Destroy everything whose window has closed. Returns how many went. */
+export async function purgeExpiredEntities<T extends SyncableEntity>(
+  table: Table<T>,
+  tableName: SyncableTableName,
+  now = Date.now()
+): Promise<number> {
+  const all = await table.toArray()
+  const expired = all.filter(
+    (e) => e.deletedAt != null && !isWithinRetention(e.deletedAt, now, DELETED_RETENTION_MS)
+  )
+  for (const e of expired) await purgeEntity(table, tableName, e.id)
+  return expired.length
 }
 
 /**

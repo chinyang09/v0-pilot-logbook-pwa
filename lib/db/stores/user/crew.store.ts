@@ -8,7 +8,17 @@ import type {
   PersonnelCreate,
   PersonnelRole,
 } from "@/types/entities/crew.types";
-import { createEntity, updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers";
+import {
+  createEntity,
+  updateEntity,
+  deleteEntity,
+  silentDeleteEntity,
+  upsertFromServer,
+  restoreEntity,
+  purgeEntity,
+  purgeExpiredEntities,
+  isLiveEntity,
+} from "./crud-helpers";
 
 /**
  * Add new personnel
@@ -44,10 +54,37 @@ export async function silentDeletePersonnel(id: string): Promise<boolean> {
 }
 
 /**
+ * Put a soft-deleted personnel back — see `deletePersonnel`.
+ */
+export async function restorePersonnel(id: string): Promise<boolean> {
+  return restoreEntity<Personnel>(userDb.personnel, "personnel", id);
+}
+
+/** Destroy it now rather than in 30 days. Writes a tombstone. */
+export async function permanentlyDeletePersonnel(id: string): Promise<boolean> {
+  return purgeEntity<Personnel>(userDb.personnel, "personnel", id);
+}
+
+/** Sweep whatever has run out its 30 days. */
+export async function purgeExpiredDeletedPersonnel(): Promise<number> {
+  return purgeExpiredEntities<Personnel>(userDb.personnel, "personnel");
+}
+
+/** Everything currently in Recently Deleted, newest first. */
+export async function getDeletedPersonnel(): Promise<Personnel[]> {
+  const all = await userDb.personnel.toArray();
+  return all
+    .filter((e) => e.deletedAt != null)
+    .sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0));
+}
+
+
+/**
  * Get all personnel
  */
 export async function getAllPersonnel(): Promise<Personnel[]> {
-  return userDb.personnel.toArray();
+  // LIVE rows only — see isLiveEntity.
+  return (await userDb.personnel.toArray()).filter(isLiveEntity);
 }
 
 /**
@@ -64,7 +101,7 @@ export async function getPersonnelById(
  */
 export async function getCurrentUserPersonnel(): Promise<Personnel | null> {
   const meRecord = await userDb.personnel
-    .filter((p) => p.isMe === true)
+    .filter((p) => p.isMe === true && isLiveEntity(p))
     .first();
   return meRecord || null;
 }
@@ -76,7 +113,7 @@ export async function getPersonnelByRole(
   role: PersonnelRole
 ): Promise<Personnel[]> {
   return userDb.personnel
-    .filter((p) => p.roles?.includes(role) ?? false)
+    .filter((p) => (p.roles?.includes(role) ?? false) && isLiveEntity(p))
     .toArray();
 }
 

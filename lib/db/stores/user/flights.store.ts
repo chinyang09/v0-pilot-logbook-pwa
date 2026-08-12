@@ -16,8 +16,8 @@
 
 import { userDb } from "../../user-db"
 import type { FlightLog, FlightLogCreate } from "@/types/entities/flight.types"
-import { createEntity, updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
-import { isWithinRetention } from "@/lib/utils/retention"
+import { createEntity, updateEntity, purgeEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
+import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
 import { sortFlights } from "@/lib/utils/flight-sort"
 
 /**
@@ -78,11 +78,11 @@ export async function restoreFlight(id: string): Promise<FlightLog | null> {
  * by an explicit "delete permanently" from the bin.
  */
 export async function permanentlyDeleteFlight(id: string): Promise<boolean> {
-  return deleteEntity<FlightLog>(userDb.flights, "flights", id)
+  return purgeEntity<FlightLog>(userDb.flights, "flights", id)
 }
 
 /**
- * Empty out the flights whose 90 days are up.
+ * Empty out the flights whose 30 days are up.
  *
  * This is the only place a flight is destroyed without the user asking, so it
  * goes through the normal delete path: a tombstone is written and the removal
@@ -92,12 +92,16 @@ export async function permanentlyDeleteFlight(id: string): Promise<boolean> {
 export async function purgeExpiredDeletedFlights(now = Date.now()): Promise<number> {
   const expired = await userDb.flights
     .filter(
-      (f: FlightLog) => !isLiveFlight(f) && !isWithinRetention(f.deletedAt!, now)
+      // The DELETION window (30 days), not the 90-day decision window —
+      // see lib/utils/retention.
+      (f: FlightLog) =>
+        !isLiveFlight(f) &&
+        !isWithinRetention(f.deletedAt!, now, DELETED_RETENTION_MS)
     )
     .toArray()
 
   for (const flight of expired) {
-    await deleteEntity<FlightLog>(userDb.flights, "flights", flight.id)
+    await purgeEntity<FlightLog>(userDb.flights, "flights", flight.id)
   }
   return expired.length
 }

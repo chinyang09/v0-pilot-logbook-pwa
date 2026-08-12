@@ -666,12 +666,20 @@ restarting it. The card shows the days left, because when
 goes with it. `tracked-mismatch.test.ts` pins the stamp both ways round: on the
 wrong row, the sweep eventually deletes a difference the pilot never conceded.
 
-### The 90-Day Undo Window (`lib/utils/retention.ts`)
+### The Undo Windows (`lib/utils/retention.ts`)
 
-`RETENTION_MS` is defined **once** and shared by everything reversible-for-a-
-while: import decisions, accepted comparisons, and the flight recycle bin.
-Roughly three company report cycles — long enough to catch a mistake in a
-quarterly review, short enough that what's retained stays a handful of rows.
+Two clocks, both defined here, and the helpers take the window as an argument
+so a caller states which one it is on:
+
+| | Window | What |
+|---|---|---|
+| `RETENTION_MS` | **90 days** | import decisions, accepted comparisons — roughly three company report cycles, so a quarterly review can still put one back |
+| `DELETED_RETENTION_MS` | **30 days** | anything the user DELETED, held in Recently Deleted |
+
+They were one number. A deletion is an ACT, not a difference between two
+records: you know within days whether you meant it, and holding every deleted
+flight, aircraft and crew member for a quarter turns a safety net into an
+archive.
 
 **Clearing a retention stamp writes `null`, never `undefined`.**
 `/api/sync/bulk` applies an update as a `$set` of the payload's keys and
@@ -679,15 +687,34 @@ quarterly review, short enough that what's retained stays a handful of rows.
 in place and the next pull undoes the undo — a restored flight drops straight
 back in the bin. `isWithinRetention` and `isLiveFlight` therefore test `== null`.
 
-### Recycle Bin (deleted flights)
+### Recently Deleted (everything you delete)
 
-`deleteFlight()` is a **soft delete**: it sets `FlightLog.deletedAt` and pushes
-an **update**. That is what makes the bin work across devices — binning and
-restoring both ride the ordinary sync path, and only
-`purgeExpiredDeletedFlights()` (at 90 days) writes a tombstone.
-`app/(app)/recycle-bin/page.tsx` sweeps on load, then lists what's left with the
-days remaining; `permanentlyDeleteFlight()` is the explicit "now, not in three
-months".
+**Every delete in the app is a SOFT delete**, not just flights. `deleteEntity`
+in `crud-helpers.ts` sets `deletedAt` and pushes an **update** — that is what
+makes Recently Deleted work across devices, since binning and restoring both
+ride the ordinary sync path. Only `purgeEntity` (and the 30-day sweep) writes a
+tombstone.
+
+There is no confirmation on the way out. Deleting is one tap, and the holding
+area is the undo — see "Destructive Actions" below for why the countdown went.
+
+| Kind | Store | Synced? |
+|---|---|---|
+| flights | `flights.store` | yes |
+| crew | `crew.store` | yes |
+| currencies | `currencies.store` | yes |
+| aircraft | **`reference/aircraft.store`** — the aircraft PAGE lists the reference database, not `userDb.aircraft` | no (referenceDb has no sync queue, which is what deleting a custom aircraft has always meant) |
+
+**Discrepancies and schedule entries stay HARD deletes.** They are import
+bookkeeping rather than records the pilot authored: a comparison is regenerated
+from the next report, and schedule rows are replaced wholesale by the next
+import. Putting them in Recently Deleted would fill it with rows nobody thinks
+of as things they deleted.
+
+`app/(app)/recently-deleted/page.tsx` sweeps every kind on load, then lists
+what's left GROUPED BY KIND with the days remaining. The per-kind
+restore/destroy/sweep triple lives in one `OPS` lookup, not a switch at each of
+the three call sites.
 
 The cost is that `userDb.flights` now holds rows nothing should show. Read lists
 through `getAllFlights()`, or filter with **`isLiveFlight`** when reading the
@@ -801,28 +828,25 @@ report watermarks). Do not go back to an allowlist.
 On a **translucent** surface (the glass sidebar) a painted scrim would flatten
 the material — mask the content out instead.
 
-### Destructive Actions: Countdown, not Hold
+### Destructive Actions: No Confirmation, but Recoverable
 
-Press-and-hold is gone. Tapping a destructive action **arms** it: the row blurs
-and a pill reads `Cancel delete 9` while the action counts down (10s default),
-the border tracing the time remaining. Left alone it fires; the pill cancels it.
+Deleting is **one tap**. There is no dialog, no press-and-hold, and no armed
+countdown — the undo is `Recently Deleted`, which holds the row for 30 days.
 
-- The timer lives in **`lib/utils/pending-actions.ts`**, at module scope, NOT in
-  the card. A virtualised list recycles rows as it scrolls, and an in-component
-  timer meant scrolling away silently cancelled the deletion — with the user
-  every reason to think it went through. `SwipeableCard` only renders the
-  remaining time and offers the cancel; a remount resumes from the stored
-  deadline.
-- Pass a **data-derived `id`** to any `SwipeableCard` that can be armed. The
-  `useId()` fallback changes on recycle and orphans the registry entry.
-- The `swipe-card-close-others` handler must close the swipe **panel only**. It
-  fires on any interaction with any other row, so clearing the pending confirm
-  there made it impossible to arm a delete and move on.
-- Tapping outside deliberately does NOT disarm.
-- The press-and-hold control and its hook are **gone**, not merely unused.
-  `CountdownConfirmButton` replaced them at both call sites (the swipe confirm
-  overlay and the account page's "Log out of all devices"), so what remained
-  were two orphaned modules the docs still described as live.
+That is a better trade than the countdown it replaced. A timed arm charged you
+ten seconds every time you deleted something on purpose, and gave you nothing
+at all once the ten seconds were up; a holding area costs nothing on the way
+out and is still there tomorrow.
+
+**The one exception is "Log out of all devices"** (`app/(app)/account/page.tsx`),
+which still uses `CountdownConfirmButton`. It is not a delete: nothing is
+recoverable afterwards because there is nothing to recover — the only undo is
+signing back in on each device, so the pause before it fires is the whole
+safety net.
+
+`SwipeableCard`'s `holdToConfirm` / `holdDuration` / `cancelLabel` props and the
+`lib/utils/pending-actions.ts` registry behind them are still in place for that
+one caller. Do not wire them to a delete again.
 
 ### Camera OCR (`lib/ocr/oooi-extractor.ts`)
 
@@ -2410,7 +2434,7 @@ When making changes, be aware of these high-impact files:
 - Do not add pages to `PERSISTENT_PAGES` in `keep-alive-pages.tsx` without considering memory impact — only heavy virtualized pages should be persistent
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
 - Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
-- Do not bring back press-and-hold for destructive actions. A `holdToConfirm` action ARMS a countdown that only its own Cancel button stops — tapping outside must not disarm, and the `swipe-card-close-others` handler must close the swipe panel only (it fires on any interaction with any other row, so clearing the pending confirm there makes it impossible to arm a delete and move on)
+- Do not put a confirmation in front of a delete — not a dialog, not a hold, not an armed countdown. Deleting is one tap and `Recently Deleted` is the undo (30 days). The countdown machinery survives for exactly ONE caller, "Log out of all devices", because that genuinely has no undo; do not wire `holdToConfirm` to a delete again
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not move the sidebar's gravity blob back into a non-scrolling overlay translated from a scroll listener — that is a main-thread reaction to a scroll that already happened, so the blob trails the items by a frame. It belongs inside the scroller, where it moves on the compositor; the top band is masked anyway, so there is no overshoot clipping to protect it from
 - Do not give the morph different open and close leads — one `MORPH_LEAD` keeps the two directions exact mirrors, which is what makes the top pill and the bottom pill read as the same animation
@@ -2425,9 +2449,10 @@ When making changes, be aware of these high-impact files:
 - Do not give the drag lens's `-refract` layer a `backdrop-filter` instead of its background — the lens is portalled to `<body>` and carries its own `scale`, so it forms a backdrop root and a backdrop-filter there does not sample the pill at all (measured — `blur(10px)` leaves the label underneath perfectly sharp). The layer must paint over the pill it duplicates, or the copy and the original show at once. Cutting the pill out with a mask instead was tried and rejected on the look
 - Do not minify the drag lens's copy uniformly — the squeeze is `scaleY` ONLY, with the row counter-scaled so the labels keep their size and only the control gets shorter. And do not push `LENS_SQUASH` much below 0.84: the counter-scaled row has to fit the copy's box, and the mobile pill's 44px tab item in a 56px bar is what sets that floor (at 0.72 the icons and labels were clipped away entirely)
 - Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
-- Do not delete a flight outright — `deleteFlight` is a **soft delete** into the 90-day recycle bin and pushes an UPDATE; only `purgeExpiredDeletedFlights` writes a tombstone. Push a delete when the user merely binned it and the flight is gone on every device with nothing to restore
+- Do not delete a user record outright — `deleteEntity` is a **soft delete** into Recently Deleted (30 days) and pushes an UPDATE; only `purgeEntity` writes a tombstone. Push a real delete when the user merely binned it and the row is gone on every device with nothing to restore. The two exceptions are discrepancies and schedule entries, which are import bookkeeping and stay hard
 - Do not order flights anywhere but `lib/utils/flight-sort.ts` — the order must be TOTAL (date, then actual-or-SCHEDULED out time, then departure, then id) or rows move on their own: a new flight sat at the top of the logbook until the next refetch and then jumped, and reading `outTime` alone treated every unflown sector as 00:00 so scheduled flights sank below completed ones on the same day. An optimistic cache write inserts with `insertFlightSorted`, never by prepending
-- Do not read `userDb.flights` for a list, a total or an import match without `isLiveFlight` — a binned flight reaching the reconciler silently updates, and so resurrects, a flight the user deleted
+- Do not read a user table for a list, a total or an import match without filtering deleted rows (`isLiveFlight` for flights, `isLiveEntity` for the rest) — a binned row reaching the reconciler silently updates, and so resurrects, something the user deleted. The store's own `getAllX` already filters; go through it rather than hitting the table
+- Do not use `RETENTION_MS` for a deletion sweep or `DELETED_RETENTION_MS` for a decision — they are 90 and 30 days and the helpers take the window as an argument precisely so a caller has to say which
 - Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
 - Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
 - Do not open a detail with `router.replace` — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back

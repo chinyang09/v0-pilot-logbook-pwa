@@ -806,8 +806,6 @@ export default function AccountPage() {
                       icon: <Trash2 className="h-5 w-5" />,
                       ariaLabel: "Delete passkey",
                       variant: "destructive",
-                      holdToConfirm: true,
-                      cancelLabel: "Cancel revoke",
                       disabled: !canRemove,
                       onClick: () => handleRemovePasskey(pk.credentialId),
                     },
@@ -883,8 +881,6 @@ export default function AccountPage() {
                       icon: session.isCurrent ? <LogOut className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />,
                       ariaLabel: session.isCurrent ? "Sign out this device" : "Revoke session",
                       variant: "destructive",
-                      holdToConfirm: true,
-                      cancelLabel: "Cancel revoke",
                       onClick: () => handleRevokeSession(session),
                     },
                   ]}

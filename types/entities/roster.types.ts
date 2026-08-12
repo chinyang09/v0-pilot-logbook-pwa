@@ -153,7 +153,9 @@ export interface ScheduleEntry {
   // Sync
   createdAt: number
   updatedAt?: number
-  deleteddAt?: number
+  /** Soft-delete stamp — the row is in Recently Deleted. `null` when cleared,
+   *  never undefined (see SyncableEntity). */
+  deletedAt?: number | null
   syncStatus: SyncStatus
   serverSeq?: number
   deviceId?: string
@@ -188,7 +190,9 @@ export interface Currency {
   // Sync
   createdAt: number
   updatedAt?: number
-  deleteddAt?: number
+  /** Soft-delete stamp — the row is in Recently Deleted. `null` when cleared,
+   *  never undefined (see SyncableEntity). */
+  deletedAt?: number | null
   syncStatus: SyncStatus
   serverSeq?: number
   deviceId?: string
@@ -362,7 +366,9 @@ export interface Discrepancy {
   userId?: string
   createdAt: number
   updatedAt?: number
-  deleteddAt?: number
+  /** Soft-delete stamp — the row is in Recently Deleted. `null` when cleared,
+   *  never undefined (see SyncableEntity). */
+  deletedAt?: number | null
   syncStatus?: SyncStatus
   serverSeq?: number
   deviceId?: string

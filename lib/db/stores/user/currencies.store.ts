@@ -10,7 +10,16 @@ import type {
   CurrencyWithStatus,
 } from "@/types/entities/roster.types"
 import { addToSyncQueue, getDeviceId } from "./sync-queue.store"
-import { updateEntity, deleteEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
+import {
+  updateEntity,
+  deleteEntity,
+  silentDeleteEntity,
+  upsertFromServer,
+  restoreEntity,
+  purgeEntity,
+  purgeExpiredEntities,
+  isLiveEntity,
+} from "./crud-helpers";
 
 /**
  * Calculate currency status based on expiry date
@@ -90,18 +99,44 @@ export async function silentDeleteCurrency(id: string): Promise<boolean> {
 }
 
 /**
+ * Put a soft-deleted currency back — see `deleteCurrency`.
+ */
+export async function restoreCurrency(id: string): Promise<boolean> {
+  return restoreEntity<Currency>(userDb.currencies, "currencies", id);
+}
+
+/** Destroy it now rather than in 30 days. Writes a tombstone. */
+export async function permanentlyDeleteCurrency(id: string): Promise<boolean> {
+  return purgeEntity<Currency>(userDb.currencies, "currencies", id);
+}
+
+/** Sweep whatever has run out its 30 days. */
+export async function purgeExpiredDeletedCurrency(): Promise<number> {
+  return purgeExpiredEntities<Currency>(userDb.currencies, "currencies");
+}
+
+/** Everything currently in Recently Deleted, newest first. */
+export async function getDeletedCurrency(): Promise<Currency[]> {
+  const all = await userDb.currencies.toArray();
+  return all
+    .filter((e) => e.deletedAt != null)
+    .sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0));
+}
+
+
+/**
  * Get all currencies
  */
 export async function getAllCurrencies(): Promise<Currency[]> {
-  return userDb.currencies.toArray()
+  // LIVE rows only — see isLiveEntity.
+  return (await userDb.currencies.toArray()).filter(isLiveEntity)
 }
 
 /**
  * Get all currencies with status
  */
 export async function getAllCurrenciesWithStatus(): Promise<CurrencyWithStatus[]> {
-  const currencies = await userDb.currencies.toArray()
-  return currencies.map(getCurrencyStatus)
+  return (await getAllCurrencies()).map(getCurrencyStatus)
 }
 
 /**
@@ -115,7 +150,10 @@ export async function getCurrencyById(id: string): Promise<Currency | undefined>
  * Get currency by code
  */
 export async function getCurrencyByCode(code: string): Promise<Currency | undefined> {
-  return userDb.currencies.where("code").equals(code).first()
+  // A deleted currency must not answer a lookup by code, or re-adding the same
+  // certificate silently edits the binned one instead of creating a new row.
+  const rows = await userDb.currencies.where("code").equals(code).toArray()
+  return rows.find(isLiveEntity)
 }
 
 /**
@@ -196,7 +234,7 @@ export async function clearAllCurrencies(): Promise<void> {
  * Get currencies count
  */
 export async function getCurrenciesCount(): Promise<number> {
-  return userDb.currencies.count()
+  return (await getAllCurrencies()).length
 }
 
 /**
