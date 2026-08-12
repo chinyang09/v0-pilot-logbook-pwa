@@ -71,6 +71,13 @@ export interface LogtenAircraftPlan {
   errors: LogtenIssue[];
   /** Registration → ICAO type designator, for the flight parser to fall back on. */
   typeByRegistration: Map<string, string>;
+  /**
+   * Registrations the enrichment chain could not resolve. These are imported
+   * wholesale from the file instead, and the executor writes them into the
+   * REFERENCE database as custom records — which is what lets a later flight
+   * import find them locally rather than asking the network again.
+   */
+  unresolvedRegistrations: string[];
 }
 
 /**
@@ -120,6 +127,15 @@ export interface LogtenFlightPlan {
   airportCodes: string[];
   /** Codes no source could resolve — their flights still import, without a tz. */
   unresolvedAirports: string[];
+  /**
+   * Registrations that ended up with no aircraft type from any source: not in
+   * the flight row, not in the Aircraft export (or it wasn't supplied), and
+   * not resolvable by the lookup chain.
+   *
+   * Their flights import anyway, untyped. Importing the Aircraft export later
+   * back-tags them — the closing half of the loop.
+   */
+  untypedRegistrations: string[];
   /** New crew discovered in the flight rows themselves (not the address book). */
   personnelToCreate: Personnel[];
   skipped: LogtenIssue[];

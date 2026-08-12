@@ -50,6 +50,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 |---|---|
 | `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation |
+| `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts, from synthetic bounding boxes |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution |
@@ -465,6 +466,29 @@ degrades to a blank and the row-level parser decides whether that blank is
 fatal — and the plan carries `skipped` / `warnings` / `errors` separately, so a
 file with a few bad lines still imports the rest. Only a file-level failure (no
 header, no rows, no pilot profile) is fatal.
+
+**The aircraft loop closes from either end.** Both files' registrations go
+through the SHARED enrichment chain (local reference DB → server batch → FR24)
+in one call, before either file is parsed — the same chain the schedule and
+crew-logbook imports use. Which file arrives first does not matter:
+
+| | what happens | what closes it |
+|---|---|---|
+| **Flights first** | the chain types each tail; anything it can't answer for is listed in `untypedRegistrations` and its flights import UNTYPED | importing the Aircraft export **back-tags** them (`backTagFlights` — only flights with a blank type) |
+| **Aircraft first** | the chain types the fleet; an unresolvable tail is taken wholesale from the file AND seeded into the **reference** DB (`seedReferenceDatabase`) | a later flight import now resolves it LOCALLY, first step of the chain |
+
+**The FILE outranks the lookup on type, and only ever fills a blank from it.**
+A registration is re-issued over a career — the tail that was an A320 in 2011
+may be a 787 today — so a live lookup is evidence about the airframe flying
+under that mark NOW, not about the one the pilot logged. Order is: the flight
+row's own `aircraftType_type` → the Aircraft export → the lookup chain.
+
+LogTen's per-airframe detail (serial number, operator, owner, year, notes) has
+nowhere to go in the app's `Aircraft`, so the type carries five OPTIONAL,
+non-indexed fields for it — no Dexie migration, and nothing is populated unless
+a source supplies it. `normalizeAircraftFromServer` had to stop being an
+explicit allowlist for them to survive a round trip (the same trap
+`normalizeFlightFromServer` was rebuilt to avoid).
 
 ### Entry Type (flight vs simulator)
 
@@ -2208,6 +2232,7 @@ When making changes, be aware of these high-impact files:
 - `lib/utils/parsers/logten/` — the LogTen Pro migration: `header-map.ts` (name-addressed columns), `values.ts` (non-throwing coercion), `time-reference.ts` (UTC-vs-local detection + the date-shifting conversion), `flights.ts` / `aircraft.ts` / `address-book.ts`, `executor.ts`
 - `components/import/logten-review-dialog.tsx` — the migration's consent surface, including the UTC/Local switch
 - `lib/utils/parsers/shared/csv-split.ts` — `sniffDelimiter` + `splitDelimitedLine` (eCrew is comma, LogTen is tab)
+- `lib/utils/history-markers.ts` — which overlay owns the top history marker, so a deferred release can't pop another dialog's entry
 - `components/flight-card-body.tsx` — the one flight-card definition
 - `lib/utils/retention.ts` — the single 90-day undo window (decisions, accepted comparisons, recycle bin)
 - `lib/utils/flight-sort.ts` — the one list order (date, out time, departure, id)
@@ -2621,6 +2646,7 @@ When making changes, be aware of these high-impact files:
 - Do not assume a LogTen export's clock times are UTC. It carries no marker and exports whatever the app was set to display; `detectTimeReference` votes across the file's cross-timezone sectors, and when it comes back `assumed` the pilot has to be asked before anything is written. Converting a local time must move the DATE too when it wraps — the app keys a flight on the UTC date of its out time
 - Do not let the migration recompute what LogTen already recorded — set the matching `manualOverrides` flag for every field the file populated (`preserveSourceValues`), or first save silently restates totals the pilot has already certified. Only a NON-ZERO day/night TO/LDG count is pinned; a blank means LogTen didn't record the split and the sun calculation is the better answer
 - Do not recognise a LogTen simulator from `flight_simulator` or `flight_type` — the first is blank on the sim row of a real export and the second is an unlabelled enum index. It is structural (no registration, no route), the same rule as everywhere else, and the executor must skip the recalculation pass for sims or the recomputed block time reaches flight-hour totals
+- Do not let the aircraft lookup outrank the FILE on type — a registration is re-issued over a career, so the chain is evidence about the tail flying under that mark NOW. It fills a blank only. And keep BOTH halves of the loop: an unresolvable tail is seeded into the reference DB so a later flight import finds it locally, and a fleet import back-tags flights that have a registration and no type
 - Do not make `values.ts` throw. A corrupt cell degrades to a blank and the row parser decides whether that is fatal — that is what stops one bad line taking down a 4,000-flight migration. Keep `toDuration` and `toClock` separate too: a duration may exceed 24h, a clock time may not, and a four-figure totals row wrapping into a plausible departure time is a silent error
 
 **Formatting & chrome:**
@@ -2683,6 +2709,7 @@ When making changes, be aware of these high-impact files:
 - Do not leave a `setState` in a rAF loop unguarded when the value it writes changes slower than the frame rate. `useCountdownConfirm` ticks at 60fps to drive a MotionValue (free) but `remaining` is whole SECONDS, so it compares before dispatching — ~60 scheduler entries a second for 59 non-changes, for the whole 10s a delete is armed, which is exactly when the user is scrolling the list it was armed from
 - Do not run a clock, poll or subscription that a keep-alive page owns without gating it on that page being the ACTIVE route. The dashboard's FDP stack ticks at 1Hz to drive one countdown; the dashboard is mounted forever after its first visit, so ungated it re-rendered four limit rows every second for the rest of the session while the user was somewhere else entirely. Gate on `usePageActive` AND on there being something to tick for
 - Do not answer "is anything queued?" by reading a table — the sync trigger manager polls that every 10 seconds for the whole session, and `getSyncQueue().length` deserialised every pending row to compare a number against zero. Use `getSyncQueueCount()`, which counts off the index
+- Do not decide a `useBackDismiss` release is safe at the moment it is SCHEDULED — check at the moment it FIRES, against the shared marker stack (`lib/utils/history-markers.ts`). The release is deferred by a task precisely so other things can happen in between, and one of them is another overlay pushing its own marker: `history.back()` takes whatever is on TOP, so the outgoing dialog popped the incoming one's entry and the incoming one dismissed itself. That is what made a LogTen import report itself cancelled a moment after its review dialog opened. Two dialogs handing off in one commit is the ordinary case, not an exotic one — the import status dialog does it to every review modal it opens
 - Do not release a `useBackDismiss` marker without checking the URL is still the one it was pushed at. `history.back()` only takes the marker back while the marker is the TOP of the stack; if something navigated in the meantime — the sidebar's close-on-`pathname` effect is exactly that shape, a route change tears the overlay down — the marker is buried one entry below the new page and the `back()` undoes the navigation. A buried marker is left alone: it is a duplicate entry for a page the user was already on, which is invisible, where undoing a navigation is not
 - Do not let an overlay rely on Escape alone — on Android the back gesture is the other half of the same intent, and without `useBackDismiss` the router navigates and the overlay (portalled to `document.body`) is left over whatever page arrives. Every dismissal must go through the hook's `dismiss()`, and an action that navigates has to run as its FOLLOW-UP: closing first and popping the marker entry on the way out issues the `router.push` while our own `back()` is still queued, and the back then undoes it
 - Do not give a scroll handler ANY work that isn't per-frame cheap, and never let one write React state above the component that needs it. The logbook's list runs one rAF-throttled listener whose only job is the calendar sync; `topFlightDate` is pushed into state only while the calendar is actually OPEN, because the calendar is collapsed to `height: 0` rather than unmounted and updating it while stowed re-rendered a whole month grid per card scrolled past, for something nobody can see

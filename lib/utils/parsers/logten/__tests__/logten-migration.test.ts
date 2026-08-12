@@ -48,15 +48,25 @@ vi.mock("@/lib/db/stores/reference/airports.store", () => ({
   addCustomAirport: vi.fn(async () => undefined),
 }));
 
-// The airport enricher reaches the network and, through the submission
-// helper, the sync engine at module scope — the established stub for any test
-// that touches a parser's orchestration layer.
+// Both enrichers reach the network and, through the submission helper, the
+// sync engine at module scope — the established stub for any test that touches
+// a parser's orchestration layer.
 vi.mock("@/lib/utils/parsers/shared/airport-enricher", () => ({
   enrichAirportBatch: vi.fn(async () => ({
     enriched: new Map(),
     failedCodes: [],
     stats: { localHits: 0, serverBatchHits: 0, fr24Hits: 0, failed: 0 },
   })),
+}));
+
+const enrichAircraftBatch = vi.fn(async (regs: string[]) => ({
+  // The chain knows nothing by default; individual tests re-point it.
+  enriched: new Map<string, { typecode: string }>(),
+  failedRegs: regs,
+  stats: { localHits: 0, serverBatchHits: 0, fr24Hits: 0, failed: regs.length },
+}));
+vi.mock("@/lib/utils/parsers/shared/aircraft-enricher", () => ({
+  enrichAircraftBatch: (regs: string[]) => enrichAircraftBatch(regs),
 }));
 
 import { extractCsvRows } from "../../extractors/csv.extractor";
@@ -145,6 +155,106 @@ describe("parseLogtenExport", () => {
     const plan = await parseLogtenExport([], { skipEnrichment: true });
     expect(plan.success).toBe(false);
     expect(plan.errors[0].message).toMatch(/No LogTen Pro export/i);
+  });
+
+  // ============================================================
+  // The aircraft loop
+  // ============================================================
+
+  it("types a flight from the lookup chain when the file has no type", async () => {
+    // Scenario A: the pilot imports the Flights tab on its own, and LogTen
+    // never recorded a type for the tail. The shared enrichment chain — the
+    // same one the schedule and crew-logbook imports use — answers for it.
+    enrichAircraftBatch.mockResolvedValueOnce({
+      enriched: new Map([["9V-NCI", { typecode: "A21N" }]]),
+      failedRegs: [],
+      stats: { localHits: 1, serverBatchHits: 0, fr24Hits: 0, failed: 0 },
+    });
+
+    const doc = fixture("flights.txt");
+    // Blank out the flight rows' own type columns, leaving only the tail.
+    const typeCol = doc.rows[0].cells.findIndex((c) => c.trim() === "aircraftType_type");
+    for (const row of doc.rows.slice(1)) row.cells[typeCol] = "";
+
+    const plan = await parseLogtenExport([doc]);
+    const tr118 = plan.flights.operations.find(
+      (op) => op.kind === "create" && op.flight.flightNumber === "TR118"
+    );
+    if (tr118?.kind !== "create") throw new Error("expected create");
+    expect(tr118.flight.aircraftType).toBe("A21N");
+    expect(plan.flights.untypedRegistrations).toHaveLength(0);
+  });
+
+  it("reports a tail nothing could type, rather than failing the import", async () => {
+    // Same scenario, but no source knows the tail. The flight still imports;
+    // the registration is listed so the Aircraft export can back-tag it later.
+    const doc = fixture("flights.txt");
+    const typeCol = doc.rows[0].cells.findIndex((c) => c.trim() === "aircraftType_type");
+    for (const row of doc.rows.slice(1)) row.cells[typeCol] = "";
+
+    const plan = await parseLogtenExport([doc]);
+    const tr118 = plan.flights.operations.find(
+      (op) => op.kind === "create" && op.flight.flightNumber === "TR118"
+    );
+    if (tr118?.kind !== "create") throw new Error("expected create");
+    expect(tr118.flight.aircraftType).toBe("");
+    expect(tr118.flight.aircraftReg).toBe("9V-NCI");
+    expect(plan.flights.untypedRegistrations).toContain("9V-NCI");
+    expect(plan.success).toBe(true);
+    expect(plan.warnings.some((w) => /Aircraft export/i.test(w.message))).toBe(
+      true
+    );
+  });
+
+  it("lets the FILE outrank the lookup on aircraft type", async () => {
+    // A registration is re-issued over a career — the tail that was an A320 in
+    // 2011 can be a 787 today — so a live lookup is evidence about the airframe
+    // flying under that mark NOW, not the one the pilot logged.
+    enrichAircraftBatch.mockResolvedValueOnce({
+      enriched: new Map([["9V-NCE", { typecode: "B78X" }]]),
+      failedRegs: [],
+      stats: { localHits: 1, serverBatchHits: 0, fr24Hits: 0, failed: 0 },
+    });
+
+    const plan = await parseLogtenExport([fixture("aircraft.txt")]);
+    const nce = plan.aircraft.toCreate.find(
+      (r) => r.aircraft.registration === "9V-NCE"
+    )!;
+    expect(nce.aircraft.typeDesignator).toBe("A21N");
+  });
+
+  it("flags an unresolvable tail so the executor seeds it locally", async () => {
+    // Scenario B: the Aircraft export arrives first and the chain can't type
+    // some tails. They import wholesale from the file, and get written into the
+    // reference DB so a later flight import resolves them without the network.
+    const plan = await parseLogtenExport([fixture("aircraft.txt")]);
+    expect(plan.aircraft.unresolvedRegistrations).toEqual(
+      expect.arrayContaining(["9V-NCE", "9V-NCI", "9V-TNA"])
+    );
+    // …and they still carry the file's own type.
+    const nci = plan.aircraft.toCreate.find(
+      (r) => r.aircraft.registration === "9V-NCI"
+    )!;
+    expect(nci.aircraft.typeDesignator).toBe("A21N");
+  });
+
+  it("carries LogTen's own aircraft detail across", async () => {
+    const doc = fixture("aircraft.txt");
+    const header = doc.rows[0].cells;
+    const serialCol = header.findIndex((c) => c.trim() === "Serial Number");
+    const notesCol = header.indexOf("Notes"); // the aircraft's, not the type's
+    const operatorCol = header.findIndex((c) => c.trim() === "Operator");
+    doc.rows[1].cells[serialCol] = "8412";
+    doc.rows[1].cells[notesCol] = "Cabin mod Jan 26";
+    doc.rows[1].cells[operatorCol] = "Scoot";
+
+    const plan = await parseLogtenExport([doc]);
+    const nce = plan.aircraft.toCreate.find(
+      (r) => r.aircraft.registration === "9V-NCE"
+    )!;
+    expect(nce.aircraft.serialNumber).toBe("8412");
+    expect(nce.aircraft.notes).toBe("Cabin mod Jan 26");
+    expect(nce.aircraft.operator).toBe("Scoot");
   });
 
   it("collects every issue the three parsers raised", async () => {

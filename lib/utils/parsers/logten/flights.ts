@@ -333,6 +333,15 @@ export interface ParseLogtenFlightsContext {
   offsets: Map<string, number>;
   /** Registration (normalized) → ICAO type, from the Aircraft export. */
   typeByRegistration?: Map<string, string>;
+  /**
+   * Registration (normalized) → ICAO type, from the shared enrichment chain
+   * (local reference DB → server batch → FR24).
+   *
+   * Third in line, behind the flight row's own type columns and the Aircraft
+   * export, because both of those are the pilot's own record of what they flew
+   * and a registration can be re-issued to a different type over a career.
+   */
+  lookupByRegistration?: Map<string, string>;
 }
 
 /**
@@ -381,6 +390,7 @@ export function parseLogtenFlights(
     registrations: [],
     airportCodes: [],
     unresolvedAirports: [],
+    untypedRegistrations: [],
     personnelToCreate: [],
     skipped: [],
     warnings: [],
@@ -462,6 +472,7 @@ export function parseLogtenFlights(
   const registrations = new Set<string>();
   const airportCodes = new Set<string>();
   const unresolved = new Set<string>();
+  const untypedRegs = new Set<string>();
   const dates: string[] = [];
 
   // Existing flights are indexed once; every row is then a map lookup rather
@@ -484,6 +495,7 @@ export function parseLogtenFlights(
             existingCrew,
             newPersonnel,
             unresolved,
+            untypedRegs,
           });
 
       dates.push(flight.date);
@@ -544,7 +556,15 @@ export function parseLogtenFlights(
   plan.registrations = Array.from(registrations);
   plan.airportCodes = Array.from(airportCodes);
   plan.unresolvedAirports = Array.from(unresolved);
+  plan.untypedRegistrations = Array.from(untypedRegs);
   plan.personnelToCreate = newPersonnel;
+
+  if (untypedRegs.size > 0) {
+    plan.warnings.push({
+      line: 0,
+      message: `No aircraft type found for ${Array.from(untypedRegs).join(", ")} — import your LogTen Aircraft export to fill these in.`,
+    });
+  }
 
   return plan;
 }
@@ -557,7 +577,10 @@ interface CrewState {
   crewCache: Map<string, string>;
   existingCrew: Personnel[];
   newPersonnel: Personnel[];
+  /** Airport codes no source could resolve. */
   unresolved: Set<string>;
+  /** Registrations that ended up with no aircraft type from any source. */
+  untypedRegs: Set<string>;
 }
 
 function buildFlight(
@@ -666,10 +689,16 @@ function buildFlight(
     raw.isPF ??
     raw.dayTakeoffs + raw.nightTakeoffs + raw.dayLandings + raw.nightLandings > 0;
 
+  const regKey = normalizeRegistration(raw.aircraftReg);
   const aircraftType =
     raw.aircraftType ||
-    ctx.typeByRegistration?.get(normalizeRegistration(raw.aircraftReg)) ||
+    ctx.typeByRegistration?.get(regKey) ||
+    ctx.lookupByRegistration?.get(regKey) ||
     "";
+  // A flight left without a type is not an error — the Aircraft export may
+  // simply not have been imported yet. The executor back-tags it when that
+  // file arrives, which is the other half of the loop.
+  if (raw.aircraftReg && !aircraftType) crew.untypedRegs.add(raw.aircraftReg);
 
   const create: FlightLogCreate = {
     date,

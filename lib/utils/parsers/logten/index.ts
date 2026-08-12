@@ -27,10 +27,15 @@ import {
   isLiveFlight,
   userDb,
 } from "@/lib/db";
+import { normalizeRegistration } from "@/lib/utils/string";
 import { enrichAirportBatch } from "../shared/airport-enricher";
+import { enrichAircraftBatch } from "../shared/aircraft-enricher";
 import type { NormalizedDocument } from "../types";
 import { parseLogtenAddressBook } from "./address-book";
-import { parseLogtenAircraft } from "./aircraft";
+import {
+  collectAircraftRegistrations,
+  parseLogtenAircraft,
+} from "./aircraft";
 import {
   collectAirportCodes,
   collectRegistrations,
@@ -66,6 +71,7 @@ const EMPTY_AIRCRAFT: LogtenAircraftPlan = {
   warnings: [],
   errors: [],
   typeByRegistration: new Map(),
+  unresolvedRegistrations: [],
 };
 
 const EMPTY_FLIGHTS: LogtenFlightPlan = {
@@ -77,6 +83,7 @@ const EMPTY_FLIGHTS: LogtenFlightPlan = {
   registrations: [],
   airportCodes: [],
   unresolvedAirports: [],
+  untypedRegistrations: [],
   personnelToCreate: [],
   skipped: [],
   warnings: [],
@@ -148,10 +155,63 @@ export async function parseLogtenExport(
   }
 
   // ---- 2. Aircraft ----
-  onProgress?.(25, "Reading", "Aircraft");
+  //
+  // Both files' registrations go through the SHARED enrichment chain (local
+  // reference DB → server batch → FR24) in one call, before either is parsed.
+  // That is what closes the loop in both directions:
+  //
+  //   flights first  → the chain types the flights, and anything it can't
+  //                    resolve is reported; the Aircraft export back-tags
+  //                    those flights whenever it arrives.
+  //   aircraft first → the chain types the fleet, unresolved tails are taken
+  //                    wholesale from the file and written to the reference
+  //                    DB, so a later flight import resolves them LOCALLY.
+  onProgress?.(20, "Resolving", "Aircraft");
+
+  const registrations = Array.from(
+    new Set([
+      ...(aircraftDoc ? collectAircraftRegistrations(aircraftDoc) : []),
+      ...(flightsDoc ? collectRegistrations(flightsDoc) : []),
+    ])
+  );
+
+  const lookupByRegistration = new Map<string, string>();
+  let unresolvedRegistrations: string[] = [];
+
+  if (!options.skipEnrichment && registrations.length > 0) {
+    try {
+      const enriched = await enrichAircraftBatch(
+        registrations,
+        ({ current, total, reg }) => {
+          onProgress?.(
+            20 + Math.floor((current / total) * 10),
+            "Resolving aircraft",
+            `${current}/${total}: ${reg}`
+          );
+        }
+      );
+      for (const [reg, record] of enriched.enriched) {
+        if (record.typecode) {
+          lookupByRegistration.set(normalizeRegistration(reg), record.typecode);
+        }
+      }
+      unresolvedRegistrations = enriched.failedRegs;
+    } catch {
+      // Offline, or the lookup is down. Every registration falls back to what
+      // the files themselves say, which for a migration is usually everything
+      // — never fail an import over an enrichment that is an enhancement.
+      unresolvedRegistrations = registrations;
+    }
+  }
+
+  onProgress?.(30, "Reading", "Aircraft");
   if (aircraftDoc) {
     const existingAircraft = await getAllAircraft().catch(() => []);
-    plan.aircraft = parseLogtenAircraft(aircraftDoc, { existingAircraft });
+    plan.aircraft = parseLogtenAircraft(aircraftDoc, {
+      existingAircraft,
+      lookupByRegistration,
+      unresolvedRegistrations,
+    });
   }
 
   // ---- 3. Flights ----
@@ -205,6 +265,7 @@ export async function parseLogtenExport(
         airports,
         offsets,
         typeByRegistration: plan.aircraft.typeByRegistration,
+        lookupByRegistration,
       },
       {
         ...options,

@@ -164,6 +164,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
       if (result.crewCreated) parts.push(`${result.crewCreated} crew`);
       if (result.aircraftCreated)
         parts.push(`${result.aircraftCreated} aircraft`);
+      if (result.flightsBackTagged)
+        parts.push(`${result.flightsBackTagged} flights linked to aircraft`);
       if (result.errors.length) parts.push(`${result.errors.length} error(s)`);
       setSummary(parts.join(", ") || "No changes applied");
       setErrorMsg(null);
@@ -573,10 +575,14 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         busy={busy}
         onConfirm={handleLogtenExecute}
         onCancel={() => {
+          // Close the whole flow rather than falling back to the status
+          // dialog — it would come up wearing its success face ("Import
+          // complete / Your logbook is up to date") over the word "cancelled".
           setShowLogtenReview(false);
           setLogtenPlan(null);
           logtenDocsRef.current = [];
-          setSummary("Import cancelled");
+          setIsOpen(false);
+          setSummary(null);
         }}
         onTimeReferenceChange={handleLogtenTimeReference}
       />

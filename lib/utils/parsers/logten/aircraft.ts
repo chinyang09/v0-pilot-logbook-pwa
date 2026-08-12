@@ -68,7 +68,8 @@ export function toAppEngineType(
 }
 
 function buildAircraft(
-  row: LogtenRow
+  row: LogtenRow,
+  lookup?: Map<string, string>
 ): { record: Omit<Aircraft, "id" | "createdAt" | "syncStatus">; registration: string } | null {
   const registration = upper(
     row.get("Aircraft ID", "aircraft_aircraftID", "Registration", "Tail Number")
@@ -85,7 +86,25 @@ function buildAircraft(
 
   // "32Q" → "A21N": LogTen users who fed their logbook from a carrier roster
   // carry the carrier's codes, and the rest of the app is on ICAO DOC 8643.
-  const typeDesignator = normalizeAircraftType(rawType);
+  //
+  // The FILE wins over the lookup, and only fills from it when the file said
+  // nothing. A registration is re-issued over a career — the tail that was an
+  // A320 in 2011 may be a 787 today — so a live lookup is evidence about the
+  // airframe flying under that mark NOW, not about the one the pilot flew.
+  const typeDesignator =
+    normalizeAircraftType(rawType) ||
+    lookup?.get(normalizeRegistration(registration)) ||
+    "";
+
+  // LogTen's own detail. Nothing here is derivable from a lookup — it is what
+  // the pilot curated by hand — so it is carried across verbatim.
+  const serialNumber = row.get("Serial Number", "aircraft_serialNumber");
+  const operator = row.get("Operator", "aircraft_selectedOperatorName");
+  const owner = row.get("Owner", "aircraft_selectedOwnerName");
+  const year = row.get("Year", "aircraft_year");
+  // The header carries "Notes" TWICE — the aircraft's and the type's. The
+  // header index keeps both, so the first is reachable without the second.
+  const notes = row.get("Notes", "aircraft_notes");
 
   return {
     registration,
@@ -102,6 +121,11 @@ function buildAircraft(
       isHighPerformance: toBool(
         row.get("High Performance", "aircraft_highPerformance")
       ),
+      ...(serialNumber ? { serialNumber } : {}),
+      ...(operator ? { operator } : {}),
+      ...(owner ? { owner } : {}),
+      ...(year ? { year } : {}),
+      ...(notes ? { notes } : {}),
     },
   };
 }
@@ -118,11 +142,45 @@ function backfillPatch(
   if (!existing.type && incoming.type) patch.type = incoming.type;
   if (!existing.model && incoming.model) patch.model = incoming.model;
   if (!existing.category && incoming.category) patch.category = incoming.category;
+  for (const field of [
+    "serialNumber",
+    "operator",
+    "owner",
+    "year",
+    "notes",
+  ] as const) {
+    if (!existing[field] && incoming[field]) patch[field] = incoming[field];
+  }
   return patch;
+}
+
+/** Registrations a fleet export references, for the enrichment chain. */
+export function collectAircraftRegistrations(doc: NormalizedDocument): string[] {
+  const bound = bindRows(doc.rows);
+  if (!bound) return [];
+  const regs = new Set<string>();
+  for (const row of bound.dataRows) {
+    const reg = upper(
+      row.get("Aircraft ID", "aircraft_aircraftID", "Registration", "Tail Number")
+    );
+    if (reg && !PLACEHOLDER_IDS.has(reg)) regs.add(reg);
+  }
+  return Array.from(regs);
 }
 
 export interface ParseAircraftContext {
   existingAircraft: Aircraft[];
+  /**
+   * Normalized registration → ICAO type, from the shared enrichment chain
+   * (local reference DB → server batch → FR24) the schedule and crew-logbook
+   * imports already use.
+   *
+   * It only ever FILLS a type the file left blank. See `buildAircraft` for why
+   * the file outranks it.
+   */
+  lookupByRegistration?: Map<string, string>;
+  /** Registrations no source could resolve — reported so the user knows. */
+  unresolvedRegistrations?: string[];
 }
 
 export function parseLogtenAircraft(
@@ -136,6 +194,7 @@ export function parseLogtenAircraft(
     warnings: [],
     errors: [],
     typeByRegistration: new Map(),
+    unresolvedRegistrations: [],
   };
 
   const bound = bindRows(doc.rows);
@@ -152,9 +211,13 @@ export function parseLogtenAircraft(
   );
   const seenInFile = new Set<string>();
 
+  const unresolved = new Set(
+    (ctx.unresolvedRegistrations ?? []).map(normalizeRegistration)
+  );
+
   for (const row of bound.dataRows) {
     try {
-      const built = buildAircraft(row);
+      const built = buildAircraft(row, ctx.lookupByRegistration);
       if (!built) {
         plan.skipped.push({
           line: row.sourceLine,
@@ -176,6 +239,12 @@ export function parseLogtenAircraft(
           message: `${registration} has no aircraft type — imported without one.`,
         });
       }
+
+      // A registration no source could resolve is imported wholesale from the
+      // file, and flagged so the executor also writes it into the reference
+      // database — that is what makes a later flight import find it locally
+      // instead of asking the network again and failing again.
+      if (unresolved.has(key)) plan.unresolvedRegistrations.push(registration);
 
       if (seenInFile.has(key)) {
         plan.skipped.push({

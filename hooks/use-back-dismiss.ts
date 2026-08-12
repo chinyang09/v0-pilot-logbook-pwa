@@ -2,6 +2,13 @@
 
 import { useCallback, useEffect, useRef } from "react"
 
+import {
+  createMarkerId,
+  dropMarker,
+  isTopMarker,
+  pushMarker,
+} from "@/lib/utils/history-markers"
+
 /**
  * Make the SYSTEM BACK gesture close an overlay instead of leaving the app.
  *
@@ -92,9 +99,20 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
    * teardown still gives it up on the next tick.
    */
   const pendingReleaseRef = useRef<number | undefined>(undefined)
+  /**
+   * This instance's claim on the shared marker stack.
+   *
+   * The href guard above catches a marker buried by a NAVIGATION. It cannot see
+   * a marker buried by ANOTHER OVERLAY, which is what happens when two dialogs
+   * hand off in one commit: the outgoing one's deferred release fires after the
+   * incoming one has pushed, so `back()` takes the new dialog's entry and the
+   * new dialog dismisses itself. See `lib/utils/history-markers.ts`.
+   */
+  const markerIdRef = useRef(createMarkerId())
 
   useEffect(() => {
     if (!active) return
+    const markerId = markerIdRef.current
 
     // Came straight back — keep the entry we were about to give up.
     if (pendingReleaseRef.current !== undefined) {
@@ -124,11 +142,13 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
       ownsEntryRef.current = true
       hrefRef.current = window.location.href
     }
+    pushMarker(markerId)
 
     const onPop = () => {
       // Our entry is gone — either the user swiped back or `dismiss()` popped
       // it. Both mean the same thing from here.
       ownsEntryRef.current = false
+      dropMarker(markerId)
       const after = afterRef.current
       afterRef.current = null
       onDismissRef.current()
@@ -148,8 +168,14 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
           // Deferred and cancellable — see pendingReleaseRef.
           pendingReleaseRef.current = window.setTimeout(() => {
             pendingReleaseRef.current = undefined
-            window.history.back()
+            // Re-checked HERE, not when the release was scheduled: the whole
+            // point of the deferral is that other things happen in between,
+            // and one of them is another overlay pushing its own marker on
+            // top of ours. Popping then would dismiss THAT overlay.
+            if (dropMarker(markerId)) window.history.back()
           }, 0)
+        } else {
+          dropMarker(markerId)
         }
       }
     }
@@ -158,16 +184,23 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
   return useCallback((after?: () => void) => {
     if (dismissingRef.current) return
     dismissingRef.current = true
-    if (ownsEntryRef.current && window.location.href === hrefRef.current) {
+    const markerId = markerIdRef.current
+    if (
+      ownsEntryRef.current &&
+      window.location.href === hrefRef.current &&
+      isTopMarker(markerId)
+    ) {
       // Do NOT close here. `onPop` is the one place that closes, so the entry
       // is always released before anything downstream navigates.
       afterRef.current = after ?? null
       window.history.back()
       return
     }
-    // No marker of ours on top — either it was never pushed or something
-    // navigated past it. Close directly; popping here would navigate.
+    // No marker of ours on top — either it was never pushed, something
+    // navigated past it, or another overlay pushed on top. Close directly;
+    // popping here would take the wrong entry.
     ownsEntryRef.current = false
+    dropMarker(markerId)
     onDismissRef.current()
     after?.()
   }, [])
