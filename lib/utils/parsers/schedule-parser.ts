@@ -143,6 +143,17 @@ const CREW_ROLE_MAP: Record<string, CrewRole> = {
 
 interface ParsedHeader {
   timeReference: TimeReference;
+  /**
+   * Whether the report actually SAID which zone its times are in.
+   *
+   * `timeReference` defaults to UTC, and eCrew issues the same report in three
+   * frames that differ only by that one header line. A cover page, a reordered
+   * export or a failed text extraction that pushes the line out of reach would
+   * therefore be read as UTC in silence — and every time in the file would land
+   * hours out, as `update_safe`, applied without review. False here means the
+   * default was assumed rather than read, and the caller must say so.
+   */
+  timeReferenceStated: boolean;
   dateRange: { start: string; end: string };
   crewInfo: PlannedImport["crewMember"];
   columnIndices: {
@@ -160,10 +171,12 @@ interface ParsedHeader {
 
 function parseHeader(rows: NormalizedRow[]): ParsedHeader {
   let timeReference: TimeReference = "UTC";
+  let timeReferenceStated = false;
   let dateRange = { start: "", end: "" };
 
   for (const { raw: line } of rows.slice(0, 10)) {
     if (line.includes("All times in")) {
+      timeReferenceStated = true;
       if (line.includes("Local Base")) timeReference = "LOCAL_BASE";
       else if (line.includes("Local Station")) timeReference = "LOCAL_STATION";
       else timeReference = "UTC";
@@ -238,6 +251,7 @@ function parseHeader(rows: NormalizedRow[]): ParsedHeader {
 
   return {
     timeReference,
+    timeReferenceStated,
     dateRange,
     crewInfo,
     columnIndices,
@@ -511,10 +525,24 @@ async function normalizeSector(
     lookupAirport(raw.arrivalIata),
   ]);
 
+  // An unresolved airport only corrupts the TIMES under LOCAL_STATION, where
+  // the offset comes from the airport itself. Falling back to UTC there is not
+  // a small inaccuracy — it is the whole of that airport's offset, applied to
+  // the times as if they were already UTC, and it lands as an auto-applied
+  // `update_safe`. Under a UTC report the fallback costs nothing, and under
+  // LOCAL_BASE the offset comes from the base airport instead.
+  const timesUncertain =
+    header.timeReference === "LOCAL_STATION" && (!dep || !arr);
+
   if (!dep || !arr) {
+    const missing = [!dep ? raw.departureIata : "", !arr ? raw.arrivalIata : ""]
+      .filter(Boolean)
+      .join(" and ");
     warnings.push({
       line: raw.sourceLine,
-      message: `Unknown airport: ${!dep ? raw.departureIata : ""}${!dep && !arr ? " and " : ""}${!arr ? raw.arrivalIata : ""} — using UTC offset 0`,
+      message: timesUncertain
+        ? `Unknown airport ${missing} on a Local Station report — ${raw.flightNumber}'s times cannot be converted to UTC and need checking.`
+        : `Unknown airport: ${missing} — using UTC offset 0`,
     });
   }
 
@@ -563,6 +591,7 @@ async function normalizeSector(
     actualIn: actIn?.utcTime,
     sourceLine: raw.sourceLine,
     crew: raw.crew,
+    ...(timesUncertain ? { timesUncertain: true } : {}),
   };
 }
 
@@ -792,6 +821,27 @@ export async function parseScheduleCSV(
     plan.dateRange = header.dateRange;
     plan.crewMember = header.crewInfo;
 
+    // The report has to SAY which zone it is in. Defaulting to UTC in silence
+    // is a whole-file, hours-wide error applied as `update_safe` — the exact
+    // shape of mistake nobody reviews.
+    if (!header.timeReferenceStated) {
+      plan.errors.push({
+        line: 0,
+        message:
+          "This report does not state its time reference (the \"All times in …\" header). " +
+          "Reading it could put every time hours out, so nothing was imported. " +
+          "Re-export the report from eCrew.",
+      });
+      return plan;
+    }
+    if (!header.dateRange.start || !header.dateRange.end) {
+      plan.warnings.push({
+        line: 0,
+        message:
+          "Could not read the report's date range — flights it does not mention will not be offered for deletion.",
+      });
+    }
+
     // PDF rows arrive one-per-Y-bucket; regroup them so each table entry is
     // a single row whose multi-line cells match the CSV format. No-op for
     // CSV (rows have no Y).
@@ -810,6 +860,27 @@ export async function parseScheduleCSV(
       throw new Error(
         "No user profile found. Please create a crew member with 'This is me' enabled."
       );
+    }
+
+    // Whose roster is this? The report names its subject in the header, and
+    // nothing was checking it — importing a colleague's PDF would have written
+    // their flights into this pilot's logbook as their own, silently, as
+    // ordinary creates.
+    //
+    // Only refused when BOTH ids are present and disagree. A missing id on
+    // either side is an unknown, not a mismatch, and blocking on an unknown
+    // would break a legitimate import for a pilot who never set their crew id.
+    const reportCrewId = (header.crewInfo.crewId || "").trim();
+    const myCrewId = (currentUser.crewId || "").trim();
+    if (reportCrewId && myCrewId && reportCrewId !== myCrewId) {
+      plan.errors.push({
+        line: 0,
+        message:
+          `This report belongs to crew ${reportCrewId}${
+            header.crewInfo.name ? ` (${header.crewInfo.name})` : ""
+          }, but you are ${myCrewId}. Nothing was imported.`,
+      });
+      return plan;
     }
 
     // Base airport TZ (required for LOCAL_BASE; informational otherwise)

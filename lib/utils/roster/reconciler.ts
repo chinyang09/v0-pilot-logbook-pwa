@@ -68,6 +68,17 @@ export interface ParsedSector {
   actualIn?: string;
   /** Line number in source CSV — for error reporting. */
   sourceLine: number;
+  /**
+   * The times on this sector could not be converted to UTC with confidence —
+   * a Local Station report whose airport the lookup chain could not resolve,
+   * so the offset fell back to zero.
+   *
+   * Set by the parser, read by `applyDefaultAcceptance`: an op built from an
+   * uncertain sector is never auto-accepted, however safe its fields look. A
+   * time that is silently a whole timezone out is precisely the change nobody
+   * would think to review.
+   */
+  timesUncertain?: boolean;
   /** Crew from the CSV row — CPT/PIC and FO. */
   crew?: ScheduledCrewMember[];
 
@@ -484,6 +495,37 @@ function matchTier(sector: ParsedSector, flight: FlightLog): number | null {
   }
 
   return null;
+}
+
+/**
+ * Collapse sectors that describe the same leg.
+ *
+ * The identity is the same one `matchTier` reasons about — date, flight
+ * number, route — plus the out time, so a genuine repeated-route day (SIN→PEN
+ * →SIN→PEN) keeps all of its legs while a row the extractor emitted twice does
+ * not. The FIRST copy wins: later copies of a PDF row come from page-break
+ * repetition and carry no more information.
+ *
+ * Without this the second copy finds its flight already claimed by the first
+ * (`assignByCost` uses each side once), falls through to `create`, and is
+ * auto-accepted — a duplicate of the flight that was matched a line earlier.
+ */
+export function dedupeSectors(sectors: ParsedSector[]): ParsedSector[] {
+  const seen = new Set<string>();
+  const out: ParsedSector[] = [];
+  for (const sector of sectors) {
+    const key = [
+      sector.date,
+      normalizeFlightNumber(sector.flightNumber || ""),
+      sector.departureIata,
+      sector.arrivalIata,
+      sector.actualOut || sector.scheduledOut || "",
+    ].join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(sector);
+  }
+  return out;
 }
 
 /** A tier is always worth more than any possible time distance (2 × 720). */
@@ -937,7 +979,7 @@ export function reconcileRoster(
   input: ReconcileInput
 ): ReconcilerOperation[] {
   const {
-    sectors,
+    sectors: rawSectors,
     existingFlights,
     csvDateRange,
     reportGeneratedAt,
@@ -946,6 +988,12 @@ export function reconcileRoster(
   } = input;
   const todayUtc = input.todayUtc || todayUtcDate();
   const operations: ReconcilerOperation[] = [];
+
+  // One leg cannot be two sectors. A PDF whose page break repeats a row, or a
+  // report that lists the same duty twice, would otherwise pair the first copy
+  // with the stored flight and turn every other copy into a `create` — an
+  // auto-accepted duplicate of a flight that was matched a moment earlier.
+  const sectors = dedupeSectors(rawSectors);
 
   // Decide every pairing up front, cheapest-first across the whole import, so
   // two same-route legs on one day bind by their times instead of by whichever
