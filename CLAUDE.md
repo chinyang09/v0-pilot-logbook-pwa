@@ -1019,22 +1019,23 @@ re-renders).
   collapse 94% home in the first HALF of its duration, which is a snap followed
   by a crawl at any of these lengths.
 
-  **The mobile backdrop rides the morph's clock.** The scrim and the blur
-  layers fade over `TOTAL` with `MORPH_EASE`, not on a duration of their own,
-  so the veil arrives with the panel. `SIDEBAR_BACKDROP_BLUR` makes that blur
-  genuinely **progressive** — three layers of increasing radius (4 / 10 / 20px)
-  and decreasing width (92 / 68 / 46%), each with its own alpha ramp, so it is
-  heaviest against the sidebar and gone by the far edge. A single blurred layer
-  behind an alpha ramp — what this was — cross-fades a fully blurred page with
-  a sharp one, which reads as a ghosted double image rather than as "less
-  blurred"; a ramp of RADII is what reads as depth. Ordered smallest-radius-
-  first so each layer fully covers the ones below wherever they are opaque: the
-  stack can then only ADD blur, and the ramp stays monotonic whether or not the
-  engine feeds one layer's output into the next one's backdrop (Blink does,
-  WebKit may not). Each layer is only as wide as it needs to be, so the total
-  blur work is ~20% more than the single full-screen 16px layer it replaced,
-  not 3x. Desktop has no backdrop at all — its sidebar sits alongside the
-  content rather than over it.
+  **The mobile backdrop is a PROGRESSIVE DARKEN, in one element.** It rides the
+  morph's clock (`TOTAL`, `MORPH_EASE`) so the veil arrives with the panel, and
+  it is a single layer: the flat scrim is its `background-color` (from
+  `MODAL_SCRIM`) and `SIDEBAR_BACKDROP_RAMP` is its `background-image`, heaviest
+  against the sidebar's edge and gone by 58% of the screen. It also takes the
+  dismissing tap.
+
+  It used to be three stacked `backdrop-filter` layers (4 / 10 / 20px, each
+  narrower than the last) forming a real ramp of radii — optically the right
+  construction, and unaffordable. A backdrop-filter is a readback plus a blur,
+  re-rasterised whenever the backdrop or the geometry changes, and these fired
+  during the one 300ms window where the panel beside them is animating `left`,
+  `width` and `height`. A gradient is one paint and a composited opacity. The
+  depth cue moves from "how blurred" to "how dark" — which is what the bottom
+  edge treatment has always used, and what most native apps use during an
+  active transition. Desktop has no backdrop at all — its sidebar sits
+  alongside the content rather than over it.
 
   **The pill's width is MEASURED (`usePillWidth`), never `auto`.** `width` rides
   in the position group so the pill resizes *while* it moves, and CSS cannot
@@ -1986,6 +1987,18 @@ When making changes, be aware of these high-impact files:
     of one even fill (iOS Control Center controls are uniform edge to edge). Do
     not reintroduce the inset, and do not feather the face outward either —
     that pulls the tone DOWN at the edges, which is the opposite problem.
+  - **`quiet` drops the EDGE filters while a surface is in motion.** The
+    material carries five `backdrop-filter`s — the face plus four edge layers,
+    three of them masked to a ~2px band but still filtering the whole element
+    box. At rest nothing re-rasterises and that is fine. During the pill↔sidebar
+    morph, which interpolates `left`/`width`/`height`, all five re-read and
+    re-blur every frame on a panel growing to the height of a phone.
+    `[data-quiet]` drops the four edge ones for those 300ms; the face keeps its
+    own, and the rim you actually SEE is unaffected because the conic specular
+    on `.GlassMaterial::before` is a painted background, not a filter. Same
+    trick the drag lens uses on its landing (`--settle`), and the exact opposite
+    of the old `data-morphing` surge: this removes work rather than adding it,
+    and it is a step change rather than an animation.
   - **`.GlassBlur`'s filter value is CONSTANT — it is never animated.** There
     used to be a "morph surge": `data-morphing` on the container raised the
     blur by 6px and the brightness to 1.4 over a 240ms transition, so the
@@ -2401,7 +2414,7 @@ When making changes, be aware of these high-impact files:
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not move the sidebar's gravity blob back into a non-scrolling overlay translated from a scroll listener — that is a main-thread reaction to a scroll that already happened, so the blob trails the items by a frame. It belongs inside the scroller, where it moves on the compositor; the top band is masked anyway, so there is no overshoot clipping to protect it from
 - Do not give the morph different open and close leads — one `MORPH_LEAD` keeps the two directions exact mirrors, which is what makes the top pill and the bottom pill read as the same animation
-- Do not put the sidebar backdrop's fade on a duration of its own — it rides the morph's `TOTAL`/`MORPH_EASE` so the veil arrives with the panel. And do not collapse `SIDEBAR_BACKDROP_BLUR` back to one blurred layer behind an alpha ramp: that cross-fades blurred and sharp copies of the page (a ghosted double image), it does not ramp the blur. Keep the layers ordered smallest-radius-first so the stack can only add blur and stays monotonic on both engines
+- Do not put a `backdrop-filter` back into the sidebar backdrop, the modal backdrop, or a second layer into `ChromeFade`. Progressive BLUR is a chain of full-viewport readbacks that re-rasterise whenever the backdrop or the geometry changes — under the sidebar that is every frame of the morph, and under a header it is every scroll frame. All three are progressive DARKENING now (`SIDEBAR_BACKDROP_RAMP`, `--modal-scrim-core`, and `ChromeFade`'s single 1.8px layer under its veil), which is one paint and a composited opacity
 - Do not put `width: auto` back on the nav pill — `width` animates alongside `left`/`transform`, and CSS can't interpolate to `auto`, so it snaps on the morph's first frame and the pill resizes before it moves. Keep the measured px endpoint from `usePillWidth` (measured only while settled as a pill, in a ResizeObserver callback)
 - Do not animate the gravity nav indicator with a Framer/JS spring, and do not put its motion back on a bezier — it is two damped harmonic oscillators (`springTrack()`) sampled into WAAPI transform keyframes, so the physics runs on the compositor. A JS spring hitches when a heavy page mounts; a bezier can't express a landing squash that stays in step with the travel. Keep the travel heavily damped (no hunting) and the SHAPE on its own looser oscillator — deriving the squash from the travel spring's velocity gives no landing compression at that damping, and loosening the travel to fix it reintroduces the hunting For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
 - Do not add a rule, material or layout that only one engine gets — iOS and Android must render the app identically. In particular do not reintroduce `@supports (-webkit-touch-callout: none)`, the WebKit-only sniff: it silently made Android's date fields shorter and its focused fields slower to take a tap. A vendor-prefixed property paired with the standard one, or inert elsewhere, is fine. The sole exception is the PWA install prompt, where the OS flow itself differs

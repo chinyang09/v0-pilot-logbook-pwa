@@ -685,6 +685,11 @@ textarea:focus-within {
   /* Over-a-blur undercoat — see `[data-over-blur]`. The light theme starts
      thinner, so it steps down proportionally rather than by the same amount. */
   --glass-base-over-blur: color-mix(in oklab, var(--card) 32%, transparent);
+  /* See the dark theme. Lighter here — the light scrim is only 15%, and the
+     page behind it is cream, so the same alpha reads as a bruise. */
+  --sidebar-scrim: rgba(0, 0, 0, 0.16);
+  /* See the dark theme. */
+  --modal-scrim-core: rgba(0, 0, 0, 0.14);
   /* The solid colour the finished face reads as, for anything painted ON the
      glass. See `--on-glass-*` below. */
   --on-glass: oklch(0.965 0.005 75);
@@ -771,6 +776,15 @@ textarea:focus-within {
   /* The undercoat for a surface that sits OVER A BLUR — see
      `[data-over-blur]` below. Roughly two thirds of the standard coat. */
   --glass-base-over-blur: color-mix(in oklab, var(--card) 52%, transparent);
+  /* The extra darkening laid against the mobile sidebar's edge, on top of the
+     flat MODAL_SCRIM. It replaces a three-layer progressive BLUR — see
+     SIDEBAR_BACKDROP_RAMP in nav-pill — so it has to carry that stack's whole
+     sense of depth on its own, which is why it is heavier than the scrim under
+     it rather than a token nudge. */
+  --sidebar-scrim: rgba(0, 0, 0, 0.42);
+  /* The core of a modal's radial darkening, laid over the flat MODAL_SCRIM.
+     Replaces a three-layer radial progressive blur — see RadialBlurBackdrop. */
+  --modal-scrim-core: rgba(0, 0, 0, 0.34);
   /* The colour the FINISHED face reads as — base + veil + the brightened
      backdrop showing through the remaining fifth. It is NOT `--card`: get it
      wrong and everything painted on the glass lands on the wrong side of it.
@@ -1020,6 +1034,39 @@ textarea:focus-within {
   transition:
     border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1),
     background-color 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/**
+ * QUIET MODE — drop the edge filters while the surface is in motion.
+ *
+ * The glass carries five `backdrop-filter`s: the face (`.GlassBlur`) and four
+ * edge layers, three of which are masked to a ~2px band but still run their
+ * filter over the WHOLE element box. That is fine at rest, where nothing
+ * re-rasterises. It is not fine during the pill↔sidebar morph, which
+ * interpolates `left`, `width` and `height` — so every one of those five is
+ * re-read and re-blurred every frame, on a panel growing to the full height of
+ * a phone, for the busiest 300ms in the app.
+ *
+ * While `data-quiet` is set, the four EDGE filters are dropped and the face
+ * keeps its own. What is lost for those 300ms is the edge reflection and the
+ * refracted band — subtleties measured in single pixels, on a surface that is
+ * moving fast. What is NOT lost is the rim you actually see: the conic
+ * specular on `.GlassMaterial::before` is a painted background, not a filter,
+ * so the hairline is continuous the whole way through.
+ *
+ * This is the same trick the drag lens already uses on its landing (`--settle`
+ * drops the glass's backdrop-filter outright while it fades). It is the
+ * opposite of the old `data-morphing` surge, which ANIMATED a filter value
+ * across these frames and was the mobile sidebar's jank: this removes work
+ * rather than adding it, and it is a step change rather than an animation, so
+ * there is nothing per-frame about it.
+ */
+.GlassContainer[data-quiet="true"] .GlassEdgeReflection,
+.GlassContainer[data-quiet="true"] .GlassEmbossReflection,
+.GlassContainer[data-quiet="true"] .GlassRefraction,
+.GlassContainer[data-quiet="true"] .Highlight {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /**

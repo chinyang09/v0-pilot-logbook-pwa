@@ -505,48 +505,30 @@ const LENS_OVERHANG = 10
  *  circle, over narrow tabs (matches Apple's tab-bar lens proportions). */
 const LENS_PAD_X = 26
 /**
- * The mobile sidebar's backdrop blur, as a real PROGRESSIVE blur: heaviest
- * against the sidebar's edge and gone by the far side of the screen.
+ * The mobile sidebar's backdrop is a PROGRESSIVE DARKEN — no blur.
  *
- * A single blurred layer behind an alpha ramp — which is what this was — does
- * not do that. It cross-fades a fully blurred page with a fully sharp one, so
- * the middle reads as a ghosted double image rather than as "less blurred".
- * A ramp of RADII is what reads as depth.
+ * It used to be three stacked `backdrop-filter` layers (4 / 10 / 20px, each
+ * narrower than the last) making a real ramp of radii, and the reasoning for
+ * that construction still holds optically. What it does not survive is the
+ * cost: a `backdrop-filter` is a readback of everything behind the element
+ * plus a separable blur, re-rasterised whenever the backdrop OR the geometry
+ * changes — and this fires during the one 300ms window where the panel beside
+ * it is animating `left`, `width` and `height`, on the surface a phone user
+ * touches most. Three of them, full screen height.
  *
- * Ordered smallest-radius/widest first, so each layer completely covers the
- * ones below it wherever they are opaque: the stack can then only ever add
- * blur, and the ramp stays monotonic whether or not the engine composes one
- * layer's output into the next one's backdrop (Blink does, WebKit may not).
- * That is the whole reason this is safe to stack when the glass material is
- * not — these are PURE blurs, so the two engines differ by a few px of
- * effective radius near the edge instead of by colour.
+ * A gradient costs one paint and nothing else, and fading it is a composited
+ * opacity. The depth cue moves from "how blurred" to "how dark", which is what
+ * the bottom edge treatment has always used and what most native apps use
+ * during an active transition.
  *
- * Each layer is only as WIDE as it needs to be, rather than full-screen: the
- * total blur work is ~20% more than the single 16px full-screen layer it
- * replaces, not 3x. `solid` is where that layer's own ramp starts, as a
- * fraction of its own width.
+ * It is ONE element, not two: the flat scrim is the gradient's own
+ * `background-color` (from `MODAL_SCRIM`) and the ramp is its
+ * `background-image`, so the whole backdrop is a single composited layer that
+ * also takes the dismissing tap.
  */
-const SIDEBAR_BACKDROP_BLUR = [
-  { blur: 4, width: "92%", solid: "45%" },
-  { blur: 10, width: "68%", solid: "40%" },
-  { blur: 20, width: "46%", solid: "35%" },
-] as const
+const SIDEBAR_BACKDROP_RAMP =
+  "linear-gradient(to right, var(--sidebar-scrim) 0%, transparent 58%)"
 
-/**
- * The BLUR fades on its own short clock, not the morph's.
- *
- * The scrim still rides `TOTAL` — it is a flat colour, so fading it is free and
- * it should arrive with the panel. These three layers are not free: each one
- * samples the output of the one below, so while their opacity is changing the
- * whole chain recomputes every frame, and stretching that across the morph put
- * it on exactly the frames the panel is travelling. That is the same thing that
- * made the flight card's context preview feel heavy on a phone.
- *
- * Settling the blur early leaves the rest of the morph compositing a texture
- * that no longer changes. Not instant, though — with no fade the CLOSE cuts,
- * because the blur would still be at full strength once the scrim had gone.
- */
-const SIDEBAR_BACKDROP_FADE_MS = 160
 
 /**
  * How much the PILL is squeezed inside the lens — vertically ONLY.
@@ -1627,6 +1609,9 @@ function DesktopPillMorph({
           // morph below is the exact reverse, which is why the material's
           // background-color transitions.
           overBlur={!isSidebarShape}
+          // The edge filters cost five backdrop readbacks a frame while the
+          // panel is resizing — see the [data-quiet] rule in globals.css.
+          quiet={phase === "opening" || phase === "closing"}
         >
           {/* Pill bar — always visible */}
           <div
@@ -1798,35 +1783,21 @@ function MobilePillMorph({
 
   return (
     <>
-      {/* Backdrop — dark scrim + progressive blur ramping out from the sidebar.
-          Both fade on the MORPH's own clock (`TOTAL`), so the veil arrives with
-          the panel instead of on a timing of its own. */}
+      {/* Backdrop — a flat scrim with a darker ramp against the sidebar's edge,
+          in ONE element (see SIDEBAR_BACKDROP_RAMP). It rides the MORPH's own
+          clock, so the veil arrives with the panel: it is a gradient, so
+          fading it is a composited opacity and there is no reason to settle it
+          early the way the old blur stack had to. */}
       <div
         className={cn("fixed inset-0 z-[58]", MODAL_SCRIM)}
         style={{
+          backgroundImage: SIDEBAR_BACKDROP_RAMP,
           opacity: sidebarOpen ? 1 : 0,
           pointerEvents: sidebarOpen ? "auto" : "none",
           transition: `opacity ${TOTAL}ms ${MORPH_EASE}`,
         }}
         onClick={() => dismissSidebar()}
       />
-      {SIDEBAR_BACKDROP_BLUR.map(({ blur, width, solid }) => (
-        <div
-          key={blur}
-          aria-hidden
-          className="fixed left-0 top-0 bottom-0 z-[59]"
-          style={{
-            width,
-            opacity: sidebarOpen ? 1 : 0,
-            pointerEvents: "none",
-            transition: `opacity ${SIDEBAR_BACKDROP_FADE_MS}ms ${MORPH_EASE}`,
-            backdropFilter: `blur(${blur}px)`,
-            WebkitBackdropFilter: `blur(${blur}px)`,
-            maskImage: `linear-gradient(to right, #000 0 ${solid}, transparent 100%)`,
-            WebkitMaskImage: `linear-gradient(to right, #000 0 ${solid}, transparent 100%)`,
-          }}
-        />
-      ))}
 
       <div
         ref={ref}
@@ -1845,12 +1816,14 @@ function MobilePillMorph({
           disableTapFeedback={isSidebarShape}
           spotlight
           // The reverse of the desktop morph. As the SIDEBAR this sits over
-          // SIDEBAR_BACKDROP_BLUR, which has already taken the page apart, so
+          // SIDEBAR_BACKDROP_RAMP, which has already darkened the page, so
           // the panel can be see-through. As the bottom PILL it sits directly
           // over the list — the bottom edge treatment is a DARKEN with no blur
           // in it — so it keeps the full undercoat or the flight cards read
           // straight through the tabs.
           overBlur={isSidebarShape}
+          // See the desktop morph above.
+          quiet={phase === "opening" || phase === "closing"}
         >
           {/* Pill bar — visible when collapsed */}
           <div

@@ -39,6 +39,17 @@ interface GlassContainerProps {
    * qualify and which deliberately do not.
    */
   overBlur?: boolean
+  /**
+   * This surface is MOVING — drop the edge filters until it settles.
+   *
+   * Four of the material's five `backdrop-filter`s are edge layers, and a
+   * backdrop-filter re-rasterises whenever the element's geometry changes. The
+   * nav morph interpolates `left`/`width`/`height`, so all five run every frame
+   * on a panel growing to the height of the screen. See the `[data-quiet]` rule
+   * in globals.css for what is given up (single-pixel edge reflections, on a
+   * surface in fast motion) and what is not (the painted specular hairline).
+   */
+  quiet?: boolean
 }
 
 /**
@@ -108,6 +119,7 @@ export function GlassContainer({
   disableTapFeedback,
   spotlight,
   overBlur,
+  quiet,
 }: GlassContainerProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const reduceMotion = useReducedMotion()
@@ -336,6 +348,7 @@ export function GlassContainer({
       ref={rootRef}
       className={cn("GlassContainer", className)}
       data-over-blur={overBlur ? "true" : undefined}
+      data-quiet={quiet ? "true" : undefined}
       style={{
         "--corner-radius": `${cornerRadius}px`,
         "--glass-press": 0,
