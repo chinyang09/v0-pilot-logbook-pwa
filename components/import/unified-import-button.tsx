@@ -44,6 +44,11 @@ import {
 } from "@/lib/utils/parsers/cross-hydrate";
 import { reconcileRoster } from "@/lib/utils/roster/reconciler";
 import {
+  flightMatchWindow,
+  inWindow,
+  sectorDates,
+} from "@/lib/utils/roster/flight-window";
+import {
   executeRosterImport,
   type ExecutionResult,
 } from "@/lib/utils/roster/executor";
@@ -372,12 +377,16 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
                 : schedulePlan.dateRange.end || logbookPlan.dateRange.end,
           };
 
+          // Match against every date the sectors touch, not just the range the
+          // headers state — a report's last duty spills its return leg into
+          // the next day. See `flight-window.ts`.
+          const matchWindow = flightMatchWindow(
+            dateRange,
+            sectorDates(merged.sectors)
+          );
           const allFlights = await userDb.flights.toArray();
           const flightsInRange = allFlights.filter(
-            (f) =>
-              isLiveFlight(f) &&
-              f.date >= dateRange.start &&
-              f.date <= dateRange.end
+            (f) => isLiveFlight(f) && inWindow(f.date, matchWindow)
           );
 
           const operations = reconcileRoster({
@@ -419,12 +428,13 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           // which routes planned (future) sectors to scheduled times.
           const sectors = logbookPlan.sectors.map(logbookSectorToParsedSector);
 
+          const matchWindow = flightMatchWindow(
+            logbookPlan.dateRange,
+            sectorDates(sectors)
+          );
           const allFlights = await userDb.flights.toArray();
           const flightsInRange = allFlights.filter(
-            (f) =>
-              isLiveFlight(f) &&
-              f.date >= logbookPlan.dateRange.start &&
-              f.date <= logbookPlan.dateRange.end
+            (f) => isLiveFlight(f) && inWindow(f.date, matchWindow)
           );
           logbookGeneratedAt = logbookPlan.generatedAt;
           const operations = reconcileRoster({

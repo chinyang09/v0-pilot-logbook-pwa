@@ -60,6 +60,11 @@ import {
 } from "@/lib/utils/roster/plan-summary";
 import { normalizeAircraftType } from "./shared/aircraft-type-map";
 import { enrichAirportBatch } from "./shared/airport-enricher";
+import {
+  flightMatchWindow,
+  inWindow,
+  sectorDates,
+} from "@/lib/utils/roster/flight-window";
 
 // ============================================================
 // Public types
@@ -964,16 +969,27 @@ export async function parseScheduleCSV(
 
     onProgress?.(75, "Reconciling", "Comparing against existing flights...");
 
-    // Stage C: load existing flights within the CSV date range
+    // Stage C: load the flights this report could be talking about.
+    //
+    // The MATCH window covers the sectors as well as the header's stated
+    // range: eCrew includes the trailing leg of a duty that starts on the last
+    // day, so a "01/01 - 31/01" report carries a 01/02 row. Filtering to the
+    // stated range left that flight out of the pool entirely, and the sector
+    // then had nothing to match against and was created afresh on every
+    // upload. The DELETE scope is unaffected — the reconciler re-checks
+    // `csvDateRange` itself.
     const rangeStart = header.dateRange.start;
     const rangeEnd = header.dateRange.end;
+    const matchWindow = flightMatchWindow(
+      { start: rangeStart, end: rangeEnd },
+      sectorDates(parsedSectors)
+    );
     const allFlights = await userDb.flights.toArray();
     // Flights in the recycle bin are not "existing" as far as a report is
     // concerned — matching one would silently update, and so resurrect, a
     // flight the user deleted.
     const flightsInRange = allFlights.filter(
-      (f: FlightLog) =>
-        isLiveFlight(f) && f.date >= rangeStart && f.date <= rangeEnd
+      (f: FlightLog) => isLiveFlight(f) && inWindow(f.date, matchWindow)
     );
 
     const operations = reconcileRoster({
