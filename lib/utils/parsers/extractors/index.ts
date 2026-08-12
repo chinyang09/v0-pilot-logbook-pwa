@@ -20,17 +20,26 @@ function classifyFormat(file: File): ImportFormat {
 
 export async function extractDocument(file: File): Promise<NormalizedDocument> {
   const format = classifyFormat(file);
-  const { rows, rawText } =
-    format === "pdf"
-      ? await extractPdfRows(file)
-      : extractCsvRows(await file.text());
 
+  if (format === "pdf") {
+    const { rows, rawText } = await extractPdfRows(file);
+    return {
+      format,
+      reportType: detectReportType(rawText),
+      rows,
+      rawText,
+      fileName: file.name,
+    };
+  }
+
+  const { rows, rawText, delimiter } = extractCsvRows(await file.text());
   return {
     format,
     reportType: detectReportType(rawText),
     rows,
     rawText,
     fileName: file.name,
+    delimiter,
   };
 }
 

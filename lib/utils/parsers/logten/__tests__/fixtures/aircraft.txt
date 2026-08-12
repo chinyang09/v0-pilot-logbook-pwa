@@ -1,0 +1,8 @@
+Aircraft ID	Secondary ID	Weight	Operator	Owner	Serial Number	Notes	Aerobatic	Auto Engine	Complex	EFIS	Experimental	Fuel Injection	High Performance	Military	Pressurized	Radial Engine	Tailwheel	TAA	Turbo Charged	Amphibian	Floats	Retractable	Skids	Skis	Warbird	Wheel Configuration	Custom 1	Custom 2	Custom 3	Custom 4	Custom 5	Powerplant	Year	Custom Text 1	Custom Text 2	Custom Text 3	Custom Text 4	Type	Make	Model	Engine Type	Category	Class	Notes
+9V-NCE																						1																A21N	AIRBUS INDUSTRIES (International)	A-321neo	Jet	Airplane	Multi-Engine Land	
+9V-NCI																																						A21N	AIRBUS INDUSTRIES (International)	A-321neo	Jet	Airplane	Multi-Engine Land	
+9V-TNA																																						A20N	AIRBUS INDUSTRIES (International)	A-320neo	Jet	Airplane	Multi-Engine Land	
+9V-TNB																																						A20N	AIRBUS INDUSTRIES (International)	A-320neo	Jet	Airplane	Multi-Engine Land	
+9V-TNC																																						A20N	AIRBUS INDUSTRIES (International)	A-320neo	Jet	Airplane	Multi-Engine Land	
+New																																												
+New																						1																						

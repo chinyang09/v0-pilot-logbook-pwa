@@ -11,6 +11,9 @@ interface DetectedFilesChipProps {
 const KIND_LABEL: Record<NormalizedDocument["reportType"], string> = {
   logbook: "Logbook",
   schedule: "Schedule",
+  logten_flights: "LogTen Flights",
+  logten_aircraft: "LogTen Aircraft",
+  logten_crew: "LogTen Crew",
   unknown: "Unknown",
 };
 

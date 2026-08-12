@@ -50,6 +50,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 |---|---|
 | `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation |
+| `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts, from synthetic bounding boxes |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution |
 
@@ -369,6 +370,101 @@ the next import (earliest kept, rest deleted, counted in the summary).
 `update_consult`, `update_conflict` (legacy), `edited_conflict`,
 `delete_missing`. `plan-summary.ts` owns the default-acceptance set and the
 summary counts — one definition, not a switch per call site.
+
+### LogTen Pro Migration (`lib/utils/parsers/logten/`)
+
+A pilot arriving from LogTen Pro brings up to three tab-separated exports —
+**Flights**, **Aircraft**, **Address Book** — and they are cross-dependent, so
+they are parsed in that dependency order and the earlier results feed the
+later:
+
+```
+Address Book ─▶ crew, which the flight rows' PIC/SIC columns resolve against
+Aircraft ────▶ the fleet, which supplies a type for a flight row that has none
+Flights ─────▶ the logbook
+```
+
+Any subset works. `parseLogtenExport` plans, `executeLogtenImport` writes, and
+`UnifiedImportButton` routes to them off `detectReportType` — one import
+button, because a second one in that header grows the action group into the
+centred nav pill.
+
+**It does NOT go through `reconcileRoster`.** That reconciler is for the
+recurring eCrew import: it forces flight numbers into the `TR…` house style,
+files anything else as `skip_non_airline`, and arbitrates field ownership
+between a pilot and their company. A migration is the opposite situation — a
+one-time bulk load of a logbook the pilot already owns outright, possibly
+across several carriers — so the only question per row is "do I already have
+this flight?" and the ops are `create` / `skip_duplicate` / `update_fill`.
+`update_fill` only ever writes fields the existing record leaves **blank**.
+
+**Everything is addressed by NAME, never by column index** (`header-map.ts`).
+The Flights tab is ~280 columns and the set depends on which fields the user
+enabled, LogTen ships two naming styles (`flight_totalTime` in the Flights tab,
+`Aircraft ID` elsewhere), and the header itself is dirty — several columns
+arrive with a leading space. Every name reduces to a key (lowercase,
+alphanumerics only) and a field is looked up through aliases in both styles.
+Duplicate labels are real: the Aircraft export has **two** "Notes" columns, so
+the second keeps the bare key suffixed (`notes#2`) rather than being lost.
+
+**The clock-time zone is DETECTED, not assumed** (`time-reference.ts`). LogTen
+writes no marker — it exports whatever the app was set to display — and reading
+local times as UTC files a whole logbook hours out, with night time, day/night
+landings and FDP all computed off the wrong instants. The file already holds
+the evidence: it records the out/in times AND the block time it derived from
+them, and on a sector between two DIFFERENT timezones only one reading
+reproduces that block time. The whole file votes. A single-timezone operation
+gives it nothing, so the verdict comes back `assumed` and the review dialog
+puts a UTC/Local switch in front of the pilot before anything is written — the
+sample export is entirely inside UTC+8 and lands exactly there. Converting also
+moves the **date** when the out time wraps (03:40 at UTC+8 is 19:40 the
+previous day), and the app keys a flight on the UTC date of its out time.
+
+**The pilot's own figures are pinned, not recomputed.** Everything LogTen
+populated — night, the role times, day/night takeoffs and landings — is written
+with a matching `manualOverrides` flag, so `recalculateFlightFields` fills in
+only what the file left blank. The file IS their existing legal record;
+recomputing night time from sun position would quietly restate totals they have
+already certified. (`preserveSourceValues`, on by default.) The day/night
+TO/LDG override is set only for a NON-ZERO count — a blank is LogTen not
+recording the split, where the sun calculation is a better answer than a hard
+zero.
+
+The OOOI mapping is one-to-one, because LogTen keeps the four times in four
+columns the way the app does:
+
+| LogTen | app |
+|---|---|
+| `flight_actualDepartureTime` | `outTime` |
+| `flight_takeoffTime` | `offTime` |
+| `flight_landingTime` | `onTime` |
+| `flight_actualArrivalTime` | `inTime` |
+| `flight_totalTime` | `blockTime` (out→in) |
+| `flight_duration` | `flightTime` (off→on) |
+| `flight_pic`/`sic`/`p1us`/`dualReceived`/`dualGiven` | the role times, and `pilotRole` |
+| `flight_selectedApproach1-10` | `approaches[]` — `"1;ILS;20R;WSSS"`, count first |
+
+The seat comes from the role TIME column, not a capacity flag: LogTen fills
+exactly one per flight and it is the column a licence authority reads. A
+**simulator is recognised structurally** (no registration, no route), the same
+rule the rest of the app uses — LogTen's `flight_type` is an unlabelled enum
+index and `flight_simulator` is *blank* on the sim row of a real export, so
+neither is safe to key on. Its duration goes to `simulatedInstrumentTime` with
+`blockTime` left at 00:00, and the executor skips the recalculation pass for
+sims outright, or the recomputed block would put the session into flight-hour
+totals.
+
+Two smaller rules that came straight off the real files: LogTen keeps
+placeholder aircraft whose registration is literally **"New"** (skipped, and
+reported rather than silently dropped), and it zero-pads numeric crew ids
+(`00009766`), which would never match the unpadded form the eCrew reports
+carry.
+
+**No row can take down the import.** `values.ts` never throws — a corrupt cell
+degrades to a blank and the row-level parser decides whether that blank is
+fatal — and the plan carries `skipped` / `warnings` / `errors` separately, so a
+file with a few bad lines still imports the rest. Only a file-level failure (no
+header, no rows, no pilot profile) is fatal.
 
 ### Entry Type (flight vs simulator)
 
@@ -2109,6 +2205,9 @@ When making changes, be aware of these high-impact files:
 - `lib/utils/roster/sim-sessions.ts` — structural simulator recognition/dedup
 - `lib/utils/parsers/cross-hydrate.ts` — merge a logbook plan with a schedule plan
 - `components/import/import-review-modal-v2.tsx` — the consent surface
+- `lib/utils/parsers/logten/` — the LogTen Pro migration: `header-map.ts` (name-addressed columns), `values.ts` (non-throwing coercion), `time-reference.ts` (UTC-vs-local detection + the date-shifting conversion), `flights.ts` / `aircraft.ts` / `address-book.ts`, `executor.ts`
+- `components/import/logten-review-dialog.tsx` — the migration's consent surface, including the UTC/Local switch
+- `lib/utils/parsers/shared/csv-split.ts` — `sniffDelimiter` + `splitDelimitedLine` (eCrew is comma, LogTen is tab)
 - `components/flight-card-body.tsx` — the one flight-card definition
 - `lib/utils/retention.ts` — the single 90-day undo window (decisions, accepted comparisons, recycle bin)
 - `lib/utils/flight-sort.ts` — the one list order (date, out time, departure, id)
@@ -2515,6 +2614,14 @@ When making changes, be aware of these high-impact files:
 - Do not dedupe simulator sessions on `date|simSessionCode` alone — recognition must stay structural (no route, no registration), or sims written by an older build duplicate on every import
 - Do not read `FlightLog.entryType` directly — go through `getEntryType()`, and write through `entryTypePatch()` so the legacy `isSimulator` flag stays in step for the dashboard and FDP pipeline
 - Do not let a simulator's duration reach `blockTime` — it belongs in `simulatedInstrumentTime`, which is what keeps sims out of flight-hour totals
+
+**LogTen Pro migration:**
+- Do not route a LogTen migration through `reconcileRoster` — that reconciler rewrites flight numbers into the `TR…` house style and files everything else as `skip_non_airline`, which is right for one airline's recurring roster and wrong for a career's logbook. The migration has its own three ops (`create` / `skip_duplicate` / `update_fill`), and `update_fill` writes only fields the existing record leaves BLANK
+- Do not address a LogTen column by index — the Flights tab is ~280 columns whose set depends on which fields the user enabled, and LogTen ships two naming styles. Go through `header-map.ts`'s aliases, and keep the duplicate-label suffixing (`notes#2`) — the Aircraft export really does have two "Notes" columns
+- Do not assume a LogTen export's clock times are UTC. It carries no marker and exports whatever the app was set to display; `detectTimeReference` votes across the file's cross-timezone sectors, and when it comes back `assumed` the pilot has to be asked before anything is written. Converting a local time must move the DATE too when it wraps — the app keys a flight on the UTC date of its out time
+- Do not let the migration recompute what LogTen already recorded — set the matching `manualOverrides` flag for every field the file populated (`preserveSourceValues`), or first save silently restates totals the pilot has already certified. Only a NON-ZERO day/night TO/LDG count is pinned; a blank means LogTen didn't record the split and the sun calculation is the better answer
+- Do not recognise a LogTen simulator from `flight_simulator` or `flight_type` — the first is blank on the sim row of a real export and the second is an unlabelled enum index. It is structural (no registration, no route), the same rule as everywhere else, and the executor must skip the recalculation pass for sims or the recomputed block time reaches flight-hour totals
+- Do not make `values.ts` throw. A corrupt cell degrades to a blank and the row parser decides whether that is fatal — that is what stops one bad line taking down a 4,000-flight migration. Keep `toDuration` and `toClock` separate too: a duration may exceed 24h, a clock time may not, and a four-figure totals row wrapping into a plausible departure time is a silent error
 
 **Formatting & chrome:**
 - Do not format a clock time with `formatHHMMDisplay` — that is for durations (which always keep their colon). Points in time go through `formatClockDisplay` so `clockSeparator` governs them all
