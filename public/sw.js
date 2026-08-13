@@ -379,7 +379,15 @@ self.addEventListener("fetch", (event) => {
           const response = await fetch(request)
           return response
         } catch (e) {
-          // Return offline indicator for API calls
+          // Return offline indicator for API calls.
+          //
+          // This synthetic response is a RESOLVED fetch, so a caller that only
+          // inspects the parsed body cannot tell it apart from a real answer —
+          // and a body with no `authenticated` key reads as "not authenticated"
+          // to anything doing `!data.authenticated`. That is how going offline
+          // used to bounce the user to /login. The `X-SW-Offline` header makes
+          // the stub unambiguous even to a caller that ignores the status code;
+          // see `probeSession` in components/providers/auth-provider.tsx.
           return new Response(
             JSON.stringify({
               error: "Offline",
@@ -388,7 +396,11 @@ self.addEventListener("fetch", (event) => {
             }),
             {
               status: 503,
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                "X-SW-Offline": "1",
+                "Cache-Control": "no-store",
+              },
             }
           )
         }

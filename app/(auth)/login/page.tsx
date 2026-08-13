@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   Copy,
   ShieldCheck,
+  WifiOff,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
@@ -60,6 +61,21 @@ export default function LoginPage() {
 
   useEffect(() => {
     setMounted(true)
+  }, [])
+
+  // Connectivity, tracked reactively so the offline notice appears and clears
+  // without a reload. `navigator.onLine` is read post-mount to avoid a
+  // hydration mismatch (the server has no such thing).
+  const [isOffline, setIsOffline] = useState(false)
+  useEffect(() => {
+    const update = () => setIsOffline(!navigator.onLine)
+    update()
+    window.addEventListener("online", update)
+    window.addEventListener("offline", update)
+    return () => {
+      window.removeEventListener("online", update)
+      window.removeEventListener("offline", update)
+    }
   }, [])
 
   // Auto-submit TOTP once BOTH the 6-digit code and (for recovery) the callsign
@@ -164,7 +180,6 @@ export default function LoginPage() {
         await login({
           userId: result.user.id,
           callsign: result.user.callsign,
-          sessionToken: result.session.token,
           expiresAt:
             typeof result.session.expiresAt === "string"
               ? new Date(result.session.expiresAt).getTime()
@@ -217,7 +232,6 @@ export default function LoginPage() {
       await login({
         userId: data.user.id,
         callsign: data.user.callsign,
-        sessionToken: data.session?.token || "",
         expiresAt: new Date(data.session.expiresAt).getTime(),
       })
 
@@ -412,7 +426,6 @@ export default function LoginPage() {
       await login({
         userId: result.user.id,
         callsign: result.user.callsign,
-        sessionToken: result.session?.token || "",
         expiresAt: new Date(result.session.expiresAt).getTime(),
       })
 
@@ -608,11 +621,24 @@ export default function LoginPage() {
                     </div>
                   )}
 
+                  {/* Every path off this screen needs the network: a passkey
+                      assertion is verified server-side and a recovery code is
+                      checked against MongoDB. Say so, rather than leaving the
+                      user tapping a button that cannot work. */}
+                  {isOffline && (
+                    <div className="flex items-start gap-2 p-3 bg-amber-500/15 border border-amber-500/25 rounded-lg text-sm text-amber-200">
+                      <WifiOff className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                      <span>
+                        You&apos;re offline. Signing in needs a connection — reconnect and try again.
+                      </span>
+                    </div>
+                  )}
+
                   {passkeySupported && (
                     <Button
                       className="w-full h-12 text-base bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
                       onClick={attemptPasskeyLogin}
-                      disabled={isLoading}
+                      disabled={isLoading || isOffline}
                     >
                       <Fingerprint className="mr-2 h-5 w-5" />
                       Sign in with Passkey

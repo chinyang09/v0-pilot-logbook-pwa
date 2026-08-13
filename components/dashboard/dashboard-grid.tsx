@@ -56,9 +56,13 @@ export function DashboardGrid({ className }: { className?: string }) {
 
       {/* Progress rings — auto-fill-driven */}
       <div className="col-span-6">
+        {/* Denominator is BLOCK time, the same clock as the hero ring above.
+            Against flight time the role percentages were nonsense: SIC 33.7h
+            and P1US 16.9h are a complete split of a 50.6h block total, and
+            they rendered as 81% + 40% = 121%. */}
         <ProgressRingGrid
           byAutoFillField={aggregates.byAutoFillField}
-          totalFlightMinutes={aggregates.totals.flightMinutes}
+          totalFlightMinutes={aggregates.totals.blockMinutes}
           className="h-full"
         />
       </div>

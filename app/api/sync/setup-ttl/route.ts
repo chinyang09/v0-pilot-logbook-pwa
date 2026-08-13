@@ -1,10 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getMongoClient } from "@/lib/mongodb"
-import { validateSessionFromHeader } from "@/lib/auth/server/session"
+import { validateRequestSession, assertSameOrigin } from "@/lib/auth/server/session"
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await validateSessionFromHeader(request)
+    if (!assertSameOrigin(request)) {
+      return NextResponse.json({ error: "Cross-origin request rejected" }, { status: 403 })
+    }
+    const session = await validateRequestSession(request)
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }

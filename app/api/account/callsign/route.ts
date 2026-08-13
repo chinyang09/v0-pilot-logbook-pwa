@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server"
-import { validateSession } from "@/lib/auth/server/session"
+import { validateSession, assertSameOrigin } from "@/lib/auth/server/session"
 import { verifyTOTPWithCounter } from "@/lib/auth/server/totp"
 import { normalizeCallsign } from "@/lib/auth/shared/cuid"
 import { getDB } from "@/lib/mongodb/client"
 import { verifyStepUpAssertion, type StepUpAssertion } from "@/lib/auth/server/step-up"
 
 export async function PUT(request: Request) {
+  if (!assertSameOrigin(request)) {
+    return NextResponse.json({ error: "Cross-origin request rejected" }, { status: 403 })
+  }
   const session = await validateSession()
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

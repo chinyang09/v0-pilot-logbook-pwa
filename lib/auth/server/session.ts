@@ -139,6 +139,19 @@ export async function validateSession(): Promise<SessionData | null> {
   }
 }
 
+/**
+ * @deprecated Legacy bearer-token authentication, kept only so a client running
+ * a build from before the cookie migration keeps working through a rollout.
+ *
+ * The token it reads is the SAME secret as the session cookie, but a bearer
+ * token has to be readable by JavaScript to be attached to a request — which
+ * meant the client kept a 30-day credential in IndexedDB, where any XSS could
+ * read and exfiltrate it. That completely defeated the HttpOnly cookie sitting
+ * beside it. New code must use `validateRequestSession`; the client no longer
+ * stores a token at all (see `saveUserSession`), so nothing should reach here.
+ *
+ * Safe to delete once no client is running a pre-migration build.
+ */
 export async function validateSessionFromHeader(
   request: Request
 ): Promise<SessionData | null> {
@@ -151,7 +164,7 @@ export async function validateSessionFromHeader(
 
   const session = await db.collection("sessions").findOne({
     token: token,
-    expiresAt: { $gt: new Date() }, 
+    expiresAt: { $gt: new Date() },
   });
 
   if (!session) return null;
@@ -164,4 +177,57 @@ export async function validateSessionFromHeader(
         ? session.expiresAt
         : new Date(session.expiresAt),
   };
+}
+
+/**
+ * THE way an API route authenticates a request.
+ *
+ * Prefers the HttpOnly session cookie — a credential JavaScript cannot read, so
+ * an XSS on the page cannot steal it — and falls back to the legacy bearer
+ * header only for clients still running a pre-migration build.
+ *
+ * Cookie auth means CSRF becomes relevant, so a state-changing request must
+ * ALSO pass `assertSameOrigin`. See that function for why `SameSite=Lax` alone
+ * is not the whole answer.
+ */
+export async function validateRequestSession(
+  request: Request
+): Promise<SessionData | null> {
+  const fromCookie = await validateSession();
+  if (fromCookie) return fromCookie;
+  return validateSessionFromHeader(request);
+}
+
+/**
+ * Reject a state-changing request that did not originate from this app.
+ *
+ * The session cookie is `SameSite=Lax`, which already stops a cross-site POST
+ * from carrying it — Lax only rides top-level GET navigations. This is the
+ * second lock: Lax has known soft edges (some clients have treated a top-level
+ * form POST leniently, and `SameSite` is only as good as the browser
+ * implementing it), and once sync moved onto the cookie every mutating endpoint
+ * became worth protecting properly.
+ *
+ * Checks `Origin`, falling back to `Referer` for the handful of clients that
+ * omit Origin on same-origin requests. A request with NEITHER header is
+ * allowed: same-origin GETs and some server-to-server callers legitimately send
+ * neither, and rejecting those would break them without closing anything — a
+ * browser-driven cross-site request always sends Origin.
+ */
+export function assertSameOrigin(request: Request): boolean {
+  const origin = request.headers.get("origin");
+  const referer = request.headers.get("referer");
+  const stated = origin || referer;
+  if (!stated) return true;
+
+  // Compare against the host the request actually arrived on, so this works
+  // across localhost, preview deployments and production without configuration.
+  const host = request.headers.get("host");
+  if (!host) return true;
+
+  try {
+    return new URL(stated).host === host;
+  } catch {
+    return false;
+  }
 }

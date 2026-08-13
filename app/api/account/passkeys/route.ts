@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { validateSession } from "@/lib/auth/server/session"
+import { validateSession, assertSameOrigin } from "@/lib/auth/server/session"
 import { getDB } from "@/lib/mongodb/client"
 
 export async function GET() {
@@ -27,6 +27,9 @@ export async function GET() {
 }
 
 export async function DELETE(request: Request) {
+  if (!assertSameOrigin(request)) {
+    return NextResponse.json({ error: "Cross-origin request rejected" }, { status: 403 })
+  }
   const session = await validateSession()
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

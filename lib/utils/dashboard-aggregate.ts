@@ -14,6 +14,8 @@ import type { Aircraft } from "@/types/entities/aircraft.types"
 import type { AutoFillPreferences } from "@/types/db/stores.types"
 import { hhmmToMinutes } from "./time"
 import { isFlownFlight } from "./flight-calculations"
+import { normalizeRegistration } from "./string"
+import { normalizeAircraftType } from "./parsers/shared/aircraft-type-map"
 
 export type AutoFillKey = keyof AutoFillPreferences
 
@@ -184,26 +186,73 @@ function classifyEngine(engineType: string | undefined): keyof DashboardAggregat
   }
 }
 
+/** The subset of a reference-database record the dashboard joins against. */
+export interface ReferenceTypeInfo {
+  /** ICAO type designator, e.g. "A20N". */
+  typecode?: string
+  /** ICAO DOC 8643 description code, e.g. "L2J" — landplane, 2 engines, jet. */
+  shortDescription?: string
+}
+
 export interface AggregateInput {
   flights: FlightLog[]
   aircraft: Aircraft[]
+  /**
+   * The reference fleet, keyed on the CANONICAL registration.
+   *
+   * `aircraft` above is only what the pilot has created by hand in their own
+   * aircraft list; the reference database tags every registration the app has
+   * ever resolved with its ICAO type. Without this second lookup a flight on a
+   * tail that was never added by hand produced no type row at all, so the type
+   * breakdown silently came up short against the total beside it.
+   */
+  referenceTypes?: Map<string, ReferenceTypeInfo>
   fromIso: string
   toIso: string
   now?: Date
 }
 
+/**
+ * Engine class from an ICAO DOC 8643 description code ("L2J" → jet).
+ *
+ * Deliberately narrow: only the engine LETTER is read, and only a multi-engine
+ * jet/turboprop/piston is classified. A single-engine turboprop is "SET" and a
+ * twin is "MET", which is the same SEP/MEP/SET/MET/JET vocabulary
+ * `classifyEngine` already speaks.
+ */
+function engineFromDescription(
+  desc: string | undefined,
+): keyof DashboardAggregates["byEngine"] | null {
+  if (!desc || desc.length !== 3) return null
+  const count = Number.parseInt(desc[1], 10)
+  const engine = desc[2]
+  if (engine === "J") return "jet"
+  if (!Number.isFinite(count) || count < 1) return null
+  if (engine === "P" || engine === "T") return count > 1 ? "me" : "se"
+  return null
+}
+
 export function aggregateDashboard({
   flights,
   aircraft,
+  referenceTypes,
   fromIso,
   toIso,
   now = new Date(),
 }: AggregateInput): DashboardAggregates {
   if (!flights.length) return EMPTY
 
+  // Keyed on the CANONICAL registration (`normalizeRegistration`: uppercase,
+  // all non-alphanumerics stripped), not a bare `.toUpperCase()`. A tail is
+  // spelled "9V-NCE" by one source and "9VNCE" by another — an eCrew import, a
+  // LogTen migration, OCR, a manual entry — and an exact-string map silently
+  // missed every flight whose spelling differed from its aircraft record's.
+  // A miss costs the flight its engine class (so the SE/ME/Jet split under-counts
+  // against the flight total) AND its type row.
   const regToAircraft = new Map<string, Aircraft>()
   for (const a of aircraft) {
-    if (a.registration) regToAircraft.set(a.registration.toUpperCase(), a)
+    const key = normalizeRegistration(a.registration || "")
+    if (key) regToAircraft.set(key, a)
   }
 
   const result: DashboardAggregates = {
@@ -327,17 +376,48 @@ export function aggregateDashboard({
       }
     }
 
-    const reg = (flight.aircraftReg || "").toUpperCase()
+    // Everything attributed to an aircraft is attributed in BLOCK minutes.
+    //
+    // This widget's headline ring, the day/night tiles beside it and the
+    // per-flight list are all block time — chocks-off to chocks-on, which is
+    // what an airline logbook records — but the category, engine and type
+    // breakdowns used to accumulate FLIGHT time (off→on, i.e. block minus
+    // taxi). Two clocks under one heading: the engine split read ~8 hours
+    // lower than the total directly above it, and the type rows could never
+    // sum to it however well the join worked.
+    const attributedM = blockM
+
+    const reg = normalizeRegistration(flight.aircraftReg || "")
     const ac = regToAircraft.get(reg)
+    // The reference database is consulted whenever the pilot's own aircraft
+    // list has no answer — see `referenceTypes` above.
+    const ref = referenceTypes?.get(reg)
+
     const cat = classifyCategory(ac?.category)
-    result.byCategory[cat] += flightM
+    result.byCategory[cat] += attributedM
 
-    const eng = classifyEngine(ac?.engineType)
-    if (eng) result.byEngine[eng] += flightM
+    const eng = classifyEngine(ac?.engineType) ?? engineFromDescription(ref?.shortDescription)
+    if (eng) result.byEngine[eng] += attributedM
 
-    const typeKey = ac?.typeDesignator || ac?.type || flight.aircraftType
+    // ONE vocabulary for the type key. The candidate fields are not written by
+    // the same producer: `typeDesignator` and the reference `typecode` are ICAO
+    // DOC 8643 designators, but `type` and `flight.aircraftType` can still hold
+    // a carrier code from an eCrew export ("32N", "32Q", "320"). Unnormalized,
+    // one physical fleet showed up as several rows — "32N" (the carrier's
+    // A320neo code) sitting beside "A20N" (the same aeroplane's ICAO
+    // designator) with the hours split between them, so the type breakdown
+    // didn't reconcile against the total and named a type the pilot has never
+    // logged.
+    //
+    // Order is most-authoritative-first: an ICAO designator, then the reference
+    // database's answer for the tail, then the looser free-text fields.
+    // `normalizeAircraftType` passes anything it doesn't recognise through
+    // unchanged, so an unmapped type is still its own row.
+    const rawTypeKey =
+      ac?.typeDesignator || ref?.typecode || ac?.type || flight.aircraftType
+    const typeKey = normalizeAircraftType(rawTypeKey || "")
     if (typeKey) {
-      typeMinutes.set(typeKey, (typeMinutes.get(typeKey) ?? 0) + flightM)
+      typeMinutes.set(typeKey, (typeMinutes.get(typeKey) ?? 0) + attributedM)
     }
   }
 

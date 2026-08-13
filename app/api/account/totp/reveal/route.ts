@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic"
 
 import { type NextRequest, NextResponse } from "next/server"
-import { validateSession } from "@/lib/auth/server/session"
+import { validateSession, assertSameOrigin } from "@/lib/auth/server/session"
 import { getDB } from "@/lib/mongodb/client"
 import { verifyStepUpAssertion, type StepUpAssertion } from "@/lib/auth/server/step-up"
 import { generateTOTPUri } from "@/lib/auth/server/totp"
@@ -11,6 +11,9 @@ import { generateTOTPUri } from "@/lib/auth/server/totp"
 // sensitive, so it is gated behind a fresh passkey step-up: the seed is never
 // served on a plain GET and never without re-proving possession of a passkey.
 export async function POST(request: NextRequest) {
+  if (!assertSameOrigin(request)) {
+    return NextResponse.json({ error: "Cross-origin request rejected" }, { status: 403 })
+  }
   const session = await validateSession()
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

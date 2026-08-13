@@ -47,7 +47,11 @@ export interface Session {
 export interface LocalSession {
   userId: string; // CUID reference
   callsign: string;
-  sessionToken: string; // Matches 'token' in MongoDB
+  /**
+   * @deprecated Never populated. The session secret lives only in the HttpOnly
+   * `session` cookie, so nothing client-side holds a copy to be stolen.
+   */
+  sessionToken?: string;
   expiresAt: number; // Unix timestamp
   createdAt: number;
 }

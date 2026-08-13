@@ -37,6 +37,8 @@ import {
   updateFlight,
   updatePersonnel,
   getAirportByICAO,
+  getFlightById,
+  isLiveFlight,
 } from "@/lib/db";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useAirportDatabase } from "@/hooks/data";
@@ -781,6 +783,39 @@ export function FlightForm({
   // Track which flight ID the baseline was captured for
   const baselineFlightIdRef = useRef<string | null>(null);
 
+  /**
+   * The ONE write path for this form — the debounced auto-save, the
+   * navigate-away flush and the unmount flush all go through here.
+   *
+   * Two rules it enforces that a bare `updateFlight` does not:
+   *
+   * 1. The row must still be LIVE, re-read from Dexie at write time. Render-time
+   *    state is not good enough for a flush that fires during teardown: the
+   *    flight may have been deleted in the very commit that unmounted the form,
+   *    and `updateEntity` bumps `updatedAt` and enqueues a push, so a stale save
+   *    can last-write-wins over the deletion on another device.
+   * 2. `deletedAt` never leaves this form. The form has no business setting bin
+   *    state, and a record that carries an explicit `deletedAt: null` (a
+   *    restored flight) would otherwise spread that null over a fresh delete
+   *    stamp and resurrect the flight.
+   */
+  const persistFlight = useCallback(
+    async (
+      data: Partial<FlightLog>,
+      overrides: FlightLog["manualOverrides"],
+    ): Promise<boolean> => {
+      if (!data?.id) return false;
+
+      const stored = await getFlightById(data.id);
+      if (!stored || !isLiveFlight(stored)) return false;
+
+      const { deletedAt: _binState, ...safe } = data;
+      await updateFlight(data.id, { ...safe, manualOverrides: overrides });
+      return true;
+    },
+    []
+  );
+
   // Auto-save to IndexedDB for existing flights (drafts or otherwise)
   // This replaces sessionStorage draft management
   useEffect(() => {
@@ -813,10 +848,8 @@ export function FlightForm({
       }
 
       try {
-        await updateFlight(debouncedFormData.id, {
-          ...debouncedFormData,
-          manualOverrides,
-        });
+        const written = await persistFlight(debouncedFormData, manualOverrides);
+        if (!written) return;
         lastSavedStateRef.current = currentState;
         mutate(CACHE_KEYS.flights);
       } catch (error) {
@@ -1028,12 +1061,78 @@ export function FlightForm({
     const currentState = JSON.stringify({ ...formData, manualOverrides });
     if (lastSavedStateRef.current === currentState) return;
     try {
-      await updateFlight(formData.id, { ...formData, manualOverrides });
+      const written = await persistFlight(formData, manualOverrides);
+      if (!written) return;
       lastSavedStateRef.current = currentState;
+      // Refresh the list too. A forced save is the LAST write before the form
+      // goes away, so if it doesn't revalidate nothing else will — the logbook
+      // would keep showing pre-edit values until something unrelated refetched.
+      mutate(CACHE_KEYS.flights);
     } catch (error) {
-      console.error("Force save before picker navigation failed:", error);
+      console.error("Force save failed:", error);
     }
-  }, [formData, resolvedFlight?.id, flightIdProp, manualOverrides]);
+  }, [formData, resolvedFlight?.id, flightIdProp, manualOverrides, persistFlight]);
+
+  // The latest `forceSave`, held in a ref.
+  //
+  // The unmount flush below MUST have `[]` deps — that is what makes it fire on
+  // unmount and not on every edit — and a `[]` effect closes over the FIRST
+  // render's `forceSave`, which sees an empty form. The ref is what lets a
+  // teardown reach the current data. Synced in an effect rather than during
+  // render so this stays compiler-clean.
+  const forceSaveRef = useRef(forceSave);
+  useEffect(() => {
+    forceSaveRef.current = forceSave;
+  }, [forceSave]);
+
+  const flushPendingEdit = useCallback(() => {
+    // No baseline captured yet means the debounced auto-save has not completed
+    // a single pass, so nothing on screen is user-authored — the form is still
+    // showing what it loaded. Skip rather than write it back: it would enqueue a
+    // sync item for an unchanged record, and in development StrictMode's
+    // mount/unmount/remount would do exactly that on every open.
+    if (lastSavedStateRef.current === null) return;
+    void forceSaveRef.current();
+  }, []);
+
+  // Flush an edit that the 500ms auto-save debounce has not written yet.
+  //
+  // THIS IS DATA LOSS IF IT IS MISSING, and it was. Auto-save is debounced, and
+  // the timer lives inside this component — so tapping a value and leaving
+  // within 500ms destroyed the pending write along with the component. On the
+  // desktop panel the form survives a flight switch (handled separately, via
+  // the `flightIdProp` layout effect), but on a phone the detail panel is
+  // conditionally rendered: `setSelectedId(null)` unmounts the form outright.
+  //
+  // That is the exact shape of "tap USE, tap back, repeat" across a batch of
+  // flights: every flight left inside 500ms lost its edit and every one lingered
+  // on kept it, so the damage looked random when it was purely a race against
+  // the debounce.
+  //
+  // `forceSave` dedupes against `lastSavedStateRef`, so this is a no-op when the
+  // debounce already won the race.
+  useEffect(() => {
+    return () => {
+      flushPendingEdit();
+    };
+  }, [flushPendingEdit]);
+
+  // The same flush for the app being backgrounded or killed rather than
+  // navigated away from. An installed PWA can be swapped out or discarded at any
+  // moment, and iOS does not reliably fire `beforeunload`/`unload` — `pagehide`
+  // and the visibility transition to `hidden` are the two that can be counted
+  // on, so both are wired and the dedupe makes the overlap free.
+  useEffect(() => {
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") flushPendingEdit();
+    };
+    window.addEventListener("pagehide", flushPendingEdit);
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      window.removeEventListener("pagehide", flushPendingEdit);
+      document.removeEventListener("visibilitychange", onHidden);
+    };
+  }, [flushPendingEdit]);
 
   // Instant in-logbook flight switching. When the selected flight changes while
   // the form stays mounted, flush the outgoing flight's edits, then seed the
