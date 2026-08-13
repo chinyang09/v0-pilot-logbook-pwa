@@ -66,7 +66,6 @@ async function refreshLocalSessionExpiry(expiresAt: number | undefined): Promise
     await saveUserSession({
       userId: local.userId,
       callsign: local.callsign,
-      sessionToken: local.sessionToken,
       expiresAt,
     })
     console.log("[Auth] local session mirror extended to match server")
@@ -174,7 +173,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await saveUserSession({
       userId: currentSession.userId,
       callsign: newCallsign,
-      sessionToken: currentSession.sessionToken,
       expiresAt: currentSession.expiresAt,
     })
 
@@ -255,7 +253,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await saveUserSession({
         userId: userData.id,
         callsign: userData.callsign,
-        sessionToken: session.token,
         expiresAt: typeof session.expiresAt === "number" ? session.expiresAt : new Date(session.expiresAt).getTime(),
       })
 

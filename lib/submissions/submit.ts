@@ -28,14 +28,14 @@ export async function submitAircraftToServer(params: {
 }): Promise<void> {
   try {
     const session = await getUserSession()
-    if (!session?.sessionToken) return
+    if (!session) return
 
     const res = await fetch("/api/submissions/aircraft", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.sessionToken}`,
-      },
+      // Authenticated by the HttpOnly session cookie, which the browser
+      // attaches to this same-origin request on its own. No bearer token is
+      // stored client-side to send — see `saveUserSession`.
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
     })
 
@@ -84,14 +84,14 @@ export async function submitAirportToServer(params: {
 }): Promise<void> {
   try {
     const session = await getUserSession()
-    if (!session?.sessionToken) return
+    if (!session) return
 
     const res = await fetch("/api/submissions/airport", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.sessionToken}`,
-      },
+      // Authenticated by the HttpOnly session cookie, which the browser
+      // attaches to this same-origin request on its own. No bearer token is
+      // stored client-side to send — see `saveUserSession`.
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
     })
 

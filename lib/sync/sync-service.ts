@@ -205,15 +205,19 @@ class SyncService {
     this.onDataChangedCallbacks.forEach((cb) => cb())
   }
 
+  /**
+   * Sync requests authenticate with the HttpOnly session COOKIE, which the
+   * browser attaches by itself on a same-origin request — there is no bearer
+   * token to add, and deliberately none stored to add it from. See
+   * `saveUserSession`: keeping a copy of the session secret in IndexedDB so it
+   * could be sent as a header handed a 30-day credential to any XSS on the
+   * page, which defeated the HttpOnly cookie sitting beside it.
+   *
+   * Kept `async` because every call site awaits it and the shape may need to
+   * grow again (a CSRF token, say).
+   */
   private async getAuthHeaders(): Promise<HeadersInit> {
-    const session = await getUserSession()
-    if (!session) {
-      return { "Content-Type": "application/json" }
-    }
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${session.sessionToken}`,
-    }
+    return { "Content-Type": "application/json" }
   }
 
   async fullSync(): Promise<{ pushed: number; pulled: number; failed: number }> {
@@ -614,8 +618,9 @@ class SyncService {
 
   /**
    * Best-effort final push on page unload. Uses `fetch(..., {keepalive:true})`
-   * — NOT `sendBeacon`, which can't attach the `Authorization` header the bulk
-   * endpoint requires. Fire-and-forget and push-only: the response is ignored
+   * — NOT `sendBeacon`, which cannot set `Content-Type: application/json` (it
+   * sends a Blob's type, and the endpoint parses JSON) and gives no way to
+   * observe the request at all. Fire-and-forget and push-only: the response is ignored
    * and queue rows are cleared on the NEXT confirmed sync, never on send, so a
    * dropped unload request can't lose data.
    */

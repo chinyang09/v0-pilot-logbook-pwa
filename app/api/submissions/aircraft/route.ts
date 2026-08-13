@@ -13,13 +13,16 @@
 
 import { NextResponse } from "next/server"
 import { getMongoClient } from "@/lib/mongodb"
-import { validateSessionFromHeader } from "@/lib/auth/server/session"
+import { validateRequestSession, assertSameOrigin } from "@/lib/auth/server/session"
 import { enrichAircraftFromFR24 } from "@/lib/enrichment/aircraft-enrichment"
 import { getICAOTypeByDesignator } from "@/lib/icao-types/icao-types-server"
 import { normalizeRegistration } from "@/lib/utils/string"
 
 export async function POST(request: Request) {
-  const session = await validateSessionFromHeader(request)
+  if (!assertSameOrigin(request)) {
+    return NextResponse.json({ error: "Cross-origin request rejected" }, { status: 403 })
+  }
+  const session = await validateRequestSession(request)
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }

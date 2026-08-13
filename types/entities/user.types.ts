@@ -57,7 +57,21 @@ export interface UserSession {
   id: string
   userId: string
   callsign: string
-  sessionToken: string
+  /**
+   * @deprecated NEVER persisted. `saveUserSession` strips it, and reading it
+   * back always yields undefined.
+   *
+   * The session secret lives in the HttpOnly `session` cookie, which JavaScript
+   * cannot read — that is the point of it being HttpOnly. Keeping a copy here
+   * so it could be attached as an `Authorization: Bearer` header handed the
+   * same 30-day credential to any XSS on the page, in a store that survives
+   * restarts, which defeated the cookie entirely. Requests are same-origin, so
+   * the browser attaches the cookie on its own and nothing needs the token.
+   *
+   * The field remains on the type only so a record written by an older build
+   * still parses. Do not reintroduce a writer.
+   */
+  sessionToken?: string
   expiresAt: number
   createdAt: number
 }
@@ -68,7 +82,11 @@ export interface UserSession {
 export interface LocalSession {
   userId: string
   callsign: string
-  sessionToken: string
+  /**
+   * @deprecated Never populated. The session secret lives only in the HttpOnly
+   * `session` cookie — see `UserSession.sessionToken` / `saveUserSession`.
+   */
+  sessionToken?: string
   expiresAt: number
   createdAt: number
 }

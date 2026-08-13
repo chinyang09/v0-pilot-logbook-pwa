@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDB } from "@/lib/mongodb";
 import { cookies } from "next/headers";
-import { setSessionCookie, clearSessionCookie } from "@/lib/auth/server/session";
+import { setSessionCookie, clearSessionCookie, assertSameOrigin } from "@/lib/auth/server/session";
 
 // This endpoint is per-request and must never be cached by a CDN, a proxy or
 // the browser — a cached "authenticated: true" would outlive a revoked session.
@@ -99,7 +99,16 @@ export async function GET() {
 }
 
 // DELETE /api/auth/session - Logout
-export async function DELETE() {
+export async function DELETE(request: Request) {
+  // Forced logout is a nuisance rather than a breach, but it is still a
+  // state change driven by a cookie, so it gets the same guard as the rest.
+  if (!assertSameOrigin(request)) {
+    return NextResponse.json(
+      { error: "Cross-origin request rejected" },
+      { status: 403, headers: NO_STORE },
+    );
+  }
+
   try {
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("session")?.value;

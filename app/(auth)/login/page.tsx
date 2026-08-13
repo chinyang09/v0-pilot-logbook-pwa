@@ -180,7 +180,6 @@ export default function LoginPage() {
         await login({
           userId: result.user.id,
           callsign: result.user.callsign,
-          sessionToken: result.session.token,
           expiresAt:
             typeof result.session.expiresAt === "string"
               ? new Date(result.session.expiresAt).getTime()
@@ -233,7 +232,6 @@ export default function LoginPage() {
       await login({
         userId: data.user.id,
         callsign: data.user.callsign,
-        sessionToken: data.session?.token || "",
         expiresAt: new Date(data.session.expiresAt).getTime(),
       })
 
@@ -428,7 +426,6 @@ export default function LoginPage() {
       await login({
         userId: result.user.id,
         callsign: result.user.callsign,
-        sessionToken: result.session?.token || "",
         expiresAt: new Date(result.session.expiresAt).getTime(),
       })
 

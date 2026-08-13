@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { getMongoClient, ensureBackfilled, SEQ_COLLECTIONS } from "@/lib/mongodb";
-import { validateSessionFromHeader } from "@/lib/auth/server/session";
+import { validateRequestSession } from "@/lib/auth/server/session";
 
 const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_PAGE_SIZE = 500;
@@ -21,7 +21,7 @@ export async function GET(
   { params }: { params: Promise<{ collection: string }> }
 ) {
   try {
-    const session = await validateSessionFromHeader(request);
+    const session = await validateRequestSession(request);
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

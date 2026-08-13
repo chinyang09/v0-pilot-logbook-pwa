@@ -470,6 +470,31 @@ export async function getAllAircraftFromDatabase(): Promise<AircraftReference[]>
   return referenceDb.aircraftDatabase.filter((r) => r.deletedAt == null).toArray()
 }
 
+/**
+ * The whole reference fleet as a registration → record index, keyed on the
+ * CANONICAL registration (`normalizeRegistration`).
+ *
+ * This table is the app's authoritative answer to "what type is this tail?" —
+ * every entry carries an ICAO `typecode` and, usually, a DOC 8643
+ * `shortDescription` ("L2J") that also yields the engine class. `userDb.aircraft`
+ * holds only the aircraft the pilot happens to have created, so anything read
+ * from it alone leaves a flight untyped whenever the tail was never added by
+ * hand — which is what left hours out of the dashboard's type breakdown.
+ *
+ * Built as a Map because the caller joins every flight against it.
+ */
+export async function getAircraftTypeIndex(): Promise<Map<string, NormalizedAircraft>> {
+  const records = await getAllAircraftFromDatabase()
+  const index = new Map<string, NormalizedAircraft>()
+  for (const record of records) {
+    const parsed = parseRecordData(record)
+    if (!parsed) continue
+    const key = normalizeForSearch(parsed.registration || record.registration || "")
+    if (key) index.set(key, parsed)
+  }
+  return index
+}
+
 export async function hasAircraftInDatabase(
   registration: string
 ): Promise<boolean> {
