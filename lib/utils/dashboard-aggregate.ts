@@ -14,6 +14,8 @@ import type { Aircraft } from "@/types/entities/aircraft.types"
 import type { AutoFillPreferences } from "@/types/db/stores.types"
 import { hhmmToMinutes } from "./time"
 import { isFlownFlight } from "./flight-calculations"
+import { normalizeRegistration } from "./string"
+import { normalizeAircraftType } from "./parsers/shared/aircraft-type-map"
 
 export type AutoFillKey = keyof AutoFillPreferences
 
@@ -201,9 +203,17 @@ export function aggregateDashboard({
 }: AggregateInput): DashboardAggregates {
   if (!flights.length) return EMPTY
 
+  // Keyed on the CANONICAL registration (`normalizeRegistration`: uppercase,
+  // all non-alphanumerics stripped), not a bare `.toUpperCase()`. A tail is
+  // spelled "9V-NCE" by one source and "9VNCE" by another — an eCrew import, a
+  // LogTen migration, OCR, a manual entry — and an exact-string map silently
+  // missed every flight whose spelling differed from its aircraft record's.
+  // A miss costs the flight its engine class (so the SE/ME/Jet split under-counts
+  // against the flight total) AND its type row.
   const regToAircraft = new Map<string, Aircraft>()
   for (const a of aircraft) {
-    if (a.registration) regToAircraft.set(a.registration.toUpperCase(), a)
+    const key = normalizeRegistration(a.registration || "")
+    if (key) regToAircraft.set(key, a)
   }
 
   const result: DashboardAggregates = {
@@ -327,7 +337,7 @@ export function aggregateDashboard({
       }
     }
 
-    const reg = (flight.aircraftReg || "").toUpperCase()
+    const reg = normalizeRegistration(flight.aircraftReg || "")
     const ac = regToAircraft.get(reg)
     const cat = classifyCategory(ac?.category)
     result.byCategory[cat] += flightM
@@ -335,7 +345,19 @@ export function aggregateDashboard({
     const eng = classifyEngine(ac?.engineType)
     if (eng) result.byEngine[eng] += flightM
 
-    const typeKey = ac?.typeDesignator || ac?.type || flight.aircraftType
+    // ONE vocabulary for the type key. The three candidate fields are not
+    // written by the same producer: `typeDesignator` is an ICAO DOC 8643 code,
+    // but `type` and `flight.aircraftType` can still hold a carrier code from
+    // an eCrew export ("32N", "32Q", "320"). Unnormalized, one physical fleet
+    // showed up as several rows — "32N" (the carrier's A320neo code) sitting
+    // beside "A20N" (the same aeroplane's ICAO designator) with the hours split
+    // between them, so the type breakdown didn't reconcile against the total
+    // and named a type the pilot has never logged.
+    //
+    // `normalizeAircraftType` passes anything it doesn't recognise through
+    // unchanged, so an unmapped type is still its own row.
+    const rawTypeKey = ac?.typeDesignator || ac?.type || flight.aircraftType
+    const typeKey = normalizeAircraftType(rawTypeKey || "")
     if (typeKey) {
       typeMinutes.set(typeKey, (typeMinutes.get(typeKey) ?? 0) + flightM)
     }
