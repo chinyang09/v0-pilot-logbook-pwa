@@ -51,6 +51,14 @@ export interface Requirement {
    * problem rather than hunting the grid for a red row.
    */
   urgency?: number
+  /**
+   * What to DO about it, when this requirement is the binding one — "2 landings
+   * required", not "landings 1 / 3". Phrased here rather than in the component
+   * because this is where the shortfall is actually in hand, and a dashboard
+   * that states the problem without the remedy has made the pilot do the last
+   * step themselves.
+   */
+  action?: string
 }
 
 export interface LegalityModel {
@@ -86,6 +94,9 @@ const LIMIT_CAUTION = 0.8
 
 /** Recency is worth flagging before it lapses, not on the day. */
 const RECENCY_CAUTION_DAYS = 14
+
+/** Takeoffs (and landings) required inside the 90-day window. */
+const RECENCY_REQUIRED_EVENTS = 3
 
 function hours(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0"
@@ -197,19 +208,21 @@ export function buildLegalityModel({
           : 1,
       href: "/fdp",
       urgency: 1000 - Math.min(999, short),
+      action: "Rest before next duty",
     })
   }
 
   // ── Recency ─────────────────────────────────────────────────────────────
-  const recencyRows: Array<{ id: string; label: string; count: number }> = [
-    { id: "recency-to", label: "T/O 90d", count: recency.takeoffs },
-    { id: "recency-ldg", label: "Ldg 90d", count: recency.landings },
+  const recencyRows: Array<{ id: string; label: string; count: number; noun: string }> = [
+    { id: "recency-to", label: "T/O 90d", count: recency.takeoffs, noun: "takeoff" },
+    { id: "recency-ldg", label: "Ldg 90d", count: recency.landings, noun: "landing" },
   ]
   const daysToLapse = recency.lapseIso ? daysBetween(todayIso, recency.lapseIso) : null
   for (const row of recencyRows) {
     const met = row.count >= 3
     const lapsingSoon =
       met && daysToLapse !== null && daysToLapse <= RECENCY_CAUTION_DAYS
+    const shortfall = Math.max(0, RECENCY_REQUIRED_EVENTS - row.count)
     requirements.push({
       id: row.id,
       group: "recency",
@@ -223,6 +236,11 @@ export function buildLegalityModel({
       progress: Math.min(1, row.count / 3),
       href: "/logbook",
       urgency: !met ? 900 : lapsingSoon ? 400 - Math.min(399, daysToLapse) : undefined,
+      action: !met
+        ? `${shortfall} ${row.noun}${shortfall === 1 ? "" : "s"} required`
+        : lapsingSoon
+          ? `${row.noun.charAt(0).toUpperCase()}${row.noun.slice(1)} within ${daysToLapse}d`
+          : undefined,
     })
   }
 
@@ -265,6 +283,12 @@ export function buildLegalityModel({
           : state === "caution"
             ? Math.round(fraction * 300)
             : undefined,
+      action:
+        state === "fail"
+          ? `${row.label} at limit`
+          : state === "caution"
+            ? `${hours(Math.max(0, limit - used))}h left on ${row.label}`
+            : undefined,
     })
   }
 
@@ -305,6 +329,12 @@ export function buildLegalityModel({
           ? 700
           : state === "caution"
             ? 300 - Math.min(299, Math.max(0, doc.daysRemaining))
+            : undefined,
+      action:
+        state === "fail"
+          ? `${doc.code} expired — renew`
+          : state === "caution"
+            ? `${doc.code} expires in ${doc.daysRemaining}d`
             : undefined,
     })
   }

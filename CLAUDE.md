@@ -528,42 +528,132 @@ A simulator carries its duration in `simulatedInstrumentTime`, NOT `blockTime`
 `entryDuration()` is what a card should display. The flight form's **Type** row
 sits above the date and moves the duration across when the type changes.
 
-### The Dashboard
+### The Dashboard — TWO pages, one toggle
 
-Four blocks, one column, in the order the questions get asked:
+The dashboard is two screens behind a segmented control in the header, because
+it was being asked two questions that want opposite layouts:
 
-| | Block | Answers |
+| | Answers | Shape |
 |---|---|---|
-| 1 | `LegalityPanel` | **Can I fly?** — every requirement, each with its own state |
-| 2 | `PeriodSummary` | what the selected period came to |
-| 3 | `PeriodFlights` | which flights those were, and what each one was |
-| 4 | `BreakdownPanel` | how the hours split by role and by fleet |
+| **Legal** (default) | am I current, what must I do, where am I in my duty | ONE SCREEN, NO SCROLL |
+| **Summary** | what have I flown and how does it add up | period-scoped, scrolls |
 
-**ONE COLUMN AT EVERY WIDTH, and that is the whole layout decision.** The blocks
-stack in that order on a 390px phone and in the same order on a 1400px desktop:
-nothing moves, nothing is reordered, nothing appears in one and not the other.
-What a wider screen buys is DENSITY INSIDE each block — the legality grid goes
-2 → 6 columns, a flight's detail 4 → 8 fields per row, the breakdown stacked →
-side by side. Desktop carries more information without becoming a second layout
-the reader has to learn.
+Serving both from one layout is what turns a dashboard into a spreadsheet. A
+pilot about to report wants an instrument they can read in two seconds; a pilot
+reviewing a month wants depth and is happy to scroll for it. They get different
+containers: the legal page is laid out TO the available height
+(`px-panel pt-chrome pb-chrome` on a full-height flex column), the summary page
+is an ordinary `PageContainer`.
 
-Every one of those steps is a **container query, never a viewport breakpoint**.
-The page renders inside a resizable split panel, so the window's width says
-nothing about the room a block actually has; a panel dragged to 360px is a phone
-and lays out like one (measured: identical section geometry at viewport 390 and
-panel 360).
+`useDashboardView` is a MODULE STORE read through `useSyncExternalStore` — the
+same shape as `useDBReady`/`useIsDesktop` — persisted to `localStorage` and
+hydrated inside `subscribe` (which React calls in an effect), so there is no
+setState-in-effect and no first render with the wrong page.
 
-What it replaced was a 6-column grid of six cards which, on a phone, was several
-screens of scrolling before the first flight — and which spread the legality
-question over four of those cards, none of them first.
+**The period controls belong to the summary page only.** The calendar button and
+the expanding period pills are meaningless on the legal page, and the action bar
+is the one thing that can push a button under the centred nav pill — so they are
+not rendered there at all.
+
+#### The legal page is ONE CONTINUOUS SURFACE
+
+Not a stack of cards. Six glass cards with their own borders, radii and 12px
+margins spend roughly 120px of a phone's height on separation alone, which is
+the difference between this fitting and not. Sections are hairline `divide-y`
+rules inside one surface — what an EFB page does, and why it can be dense
+without being noisy.
+
+Measured, with zero page scroll and zero internal overflow: **390×844 phone,
+360×780 phone, and a 1180 desktop.** The surface is `max-h-full`, NOT `h-full` —
+stretching it makes the one `flex-1` section absorb every spare pixel, which
+left ~200px of empty grid under the last requirement on a tall phone.
+
+Five bands, in the order a pilot asks:
+
+```
+AUG 14 · 12:24 GMT+8              WSSS-VTBS/VTBS-WSSS   ← date, live clock, route
+⚠ CAUTION                                               ← master annunciator
+  Takeoff within 8d                                     ← what to DO
+  Tightest: T/O 90d 8d left                             ← the governing constraint
+DUTY  [Table A] [3 sectors]
+  5:42                              7:18                ← elapsed / FDP left
+  ELAPSED             FDP LEFT · MAX 13:00
+  ▬▬▬▬▬▬▬▬░░░░░░░░
+  FT 2:11  ⚠ Duty 14d 74/90h  Duty 28d 121/180h  …      ← rolling statutory caps
+CURRENCY & LIMITS                                       ← every requirement, urgent first
+  ⚠ T/O 90d  8d left    ⚠ Ldg 90d  8d left
+  ✓ Since duty Rested   ✓ Duty 28d 121/180h   …
+RECENT ›
+  Aug 14  SIN → BKK  2.2h
+```
+
+#### The FDP maximum is NEVER hardcoded
+
+This is the one number on that screen where a wrong answer could put someone
+over a limit. Under CAAS Reg 14 (Fifth Schedule) the maximum daily FDP moves
+with report time, sector count, crew complement, acclimatisation and the
+long-sector adjustment — a fixed "13:00" is wrong for most duties.
+
+`DutyPeriod` **already carries** `maxFdpMinutes` and the `fdpTableUsed` that
+produced it, computed by `calculateMaxFDP` when the duty period was built.
+`duty-status.ts` READS that number; it does not invent one, and the panel prints
+the table beside it so the figure can be checked rather than trusted. A duty
+carrying no computed maximum shows a dash and "No FDP limit computed" — a
+default is a number somebody might fly to.
+
+**There is deliberately no 7-day duty figure.** CAAS imposes 14-day and 28-day
+duty caps (Reg 12) and 28-day/12-month flight caps (Reg 107). Printing a 7-day
+limit the regulation does not contain is worse than printing none.
+
+#### Adaptive: the panel changes with the duty phase
+
+`deriveDutyStatus` classifies `off` / `on_duty` / `post_duty` from the duty
+periods' absolute UTC windows (with the past-midnight wrap), and the duty band
+answers a different question in each:
+
+| Phase | Leads with |
+|---|---|
+| `on_duty` | elapsed, FDP remaining against this duty's max, the meter |
+| `post_duty` (≤3h after debrief) | the duty just flown, and time to next report |
+| `off` | not on duty, and time to next report |
+
+A SCHEDULED duty that has started counts as the one being flown — waiting for
+logbook entries would leave the panel blank for exactly the hours it is most
+wanted. When two windows contain the instant, the LATER-starting one wins (a
+merged overnight and a sector inside it; the pilot is in the inner one).
+
+#### Annunciator, governing constraint, next action
+
+`pilot-status.ts` joins the standing requirements with the duty phase. Three
+states on the ECAM vocabulary the reader already has — `CURRENT` / `CAUTION` /
+`ACTION REQUIRED`, each with its own icon, never colour alone. An `unknown`
+requirement is a caution, not a fourth colour. **An exceeded FDP outranks every
+standing requirement** — it is the only thing on the page happening right now
+rather than being true today.
+
+- **The governing constraint, not a count.** "12 / 12 current" is noise: a pilot
+  does not need telling about the eleven that are fine. The panel names the
+  tightest one, and when nothing is flagged falls back to the fullest rolling
+  limit, because "what runs out first" is the useful answer on a clear day.
+- **The next action states the REMEDY, not the reading** — "2 landings
+  required", not "landings 1 / 3". Phrased in `legality.ts` where the shortfall
+  is actually in hand (`Requirement.action`). Triage order: something wrong with
+  the duty in progress → rest → the binding requirement → the next report →
+  nothing required.
+
+#### Requirements are sorted, not grouped, on this page
+
+Most pressing first, so the top-left cell is always the thing closest to
+stopping the pilot — the same thing the annunciator names. Group headings would
+cost four rules and ~56px to impose an order nobody is reading for on a
+no-scroll page.
 
 #### Legality is a LIST OF REQUIREMENTS, not a banner
 
 `lib/utils/dashboard/legality.ts` is the model, and it is pure — no React, no
-Dexie, no clock beyond the `now` handed in. It does not compute a verdict and
-explain it afterwards: it computes the REQUIREMENTS and **the verdict is nothing
-more than the worst one of them** (`worst()`, ranked fail > caution > unknown >
-ok — never an average or a majority, or one expired medical reads as legal).
+Dexie, no clock beyond the `now` handed in. The verdict is **nothing more than
+the worst requirement** (`worst()`, ranked fail > caution > unknown > ok — never
+an average or a majority, or one expired medical reads as legal).
 
 | Group | Requirement | Source |
 |---|---|---|
@@ -573,14 +663,8 @@ ok — never an average or a majority, or one expired medical reads as legal).
 | Documents | medical, licence, OPC, IR, line check… | the currencies table |
 
 Every requirement reduces to the same four fields — label, state, one readout,
-one fraction — so `RequirementRow` is ONE row shape for all of them and a new
-requirement is a new entry rather than a new layout. That sameness is the point:
-a pilot is asking one question of every row ("met, and how close?"), so every row
-answers it in the same two places.
-
-**`binding`** is the requirement closest to stopping the pilot — the panel's
-subtitle. When nothing is flagged it falls back to the fullest limit, because
-"what runs out first" is the useful answer on a clear day.
+one fraction — so one cell shape renders all of them and a new requirement is a
+new entry rather than a new layout.
 
 Three rules that are easy to get wrong:
 
@@ -600,21 +684,57 @@ Three rules that are easy to get wrong:
   exact match binds every forecast breach to no row and drops the warning
   silently.
 
+#### The live clock and hydration
+
+Everything the 1Hz tick drives — the header clock, the rest countdown, the duty
+figures — is marked `suppressHydrationWarning`, **on every text-bearing node,
+because the attribute does not inherit.** The offset name is the one that
+actually bites: Node's ICU renders `GMT` where the browser renders `GMT+0` for
+the same zone, so it mismatches in production even when the clock value agrees.
+The tick is gated on `usePageActive` — the dashboard is keep-alive, so an
+ungated interval re-renders this panel every second for the rest of the session
+while the user is somewhere else.
+
+`usePilotStatus` buckets `now` to the MINUTE before rebuilding the model: the
+model changes state on minute boundaries, so rebuilding it 60 times a minute
+computes an identical answer 59 times, while the seconds are read straight off
+the clock by the component.
+
+### The Summary Page
+
+Three blocks, one column, in the order the questions get asked:
+
+| | Block | Answers |
+|---|---|---|
+| 1 | `PeriodSummary` | what the selected period came to |
+| 2 | `PeriodFlights` | which flights those were, and what each one was |
+| 3 | `BreakdownPanel` | how the hours split by role and by fleet |
+
+**ONE COLUMN AT EVERY WIDTH.** The blocks stack in that order on a 390px phone
+and in the same order on a 1400px desktop: nothing moves, nothing is reordered.
+What a wider screen buys is DENSITY INSIDE each block — a flight's detail goes
+4 → 8 fields per row, the breakdown stacked → side by side.
+
+Every one of those steps is a **container query, never a viewport breakpoint**.
+The page renders inside a resizable split panel, so the window's width says
+nothing about the room a block actually has; a panel dragged to 360px is a phone
+and lays out like one.
+
 #### No repetition — what was removed and where it went
 
 The old dashboard printed several things twice. Each now has exactly one home:
 
 | | Was | Is |
 |---|---|---|
-| 90-day recency | a chip in the T/O card **and** the alerts bell | two requirement rows |
-| FDP utilisation | the limits stack **and** the bell | four requirement rows |
-| Rest until legal | a pill in the limits stack **and** the bell | one requirement row + the panel's headline countdown |
-| Currency expiries | the bell only | document requirement rows |
+| 90-day recency | a chip in the T/O card **and** the alerts bell | two requirement cells, legal page |
+| FDP utilisation | the limits stack **and** the bell | the duty band's rolling line + four requirement cells |
+| Rest until legal | a pill in the limits stack **and** the bell | one requirement cell + the annunciator countdown |
+| Currency expiries | the bell only | document requirement cells |
 | Night / Sim hours | the hero **and** again as rings in the auto-fill grid | the period summary only (`SHOWN_ELSEWHERE`) |
 | Recent T/O–LDG events | its own list under the flight list | gone — it was the flight list |
 
 The bell (`AlertsDropdown`) is therefore scoped to **import notes only** — the
-one alert class the page does not otherwise show, and not a legality question.
+one alert class neither page otherwise shows, and not a legality question.
 
 #### Charts: only where there is something to plot
 
@@ -622,7 +742,8 @@ one alert class the page does not otherwise show, and not a legality question.
   a hardcoded 100-hour maximum, so 48 hours in a week and 48 hours in a year drew
   the same arc. A ratio needs a real denominator; period block hours have none.
   It uses **proportional figures** — `tabular-nums` gives every digit the width
-  of a zero, which reads loose at display size. Tabular is for columns.
+  of a zero, which reads loose at display size. Tabular is for columns, and for
+  the legal page's CLOCKS, which would otherwise shift sideways every tick.
 - **Day/night IS drawn** — it partitions the block time, so it has a
   denominator. Two fills with a **2px surface gap** between them; no stroke is
   drawn around either, and the two keys beside it are the legend (identity is
@@ -631,14 +752,12 @@ one alert class the page does not otherwise show, and not a legality question.
   ≥2 non-zero classes). An airline pilot flies one class, and a single-series
   "part-to-whole" bar is a full-width fill at 100% under a one-item legend,
   restating the hero figure.
-- **The status ramp is RESERVED.** Requirement rows use green/amber/red because
+- **The status ramp is RESERVED.** Requirement cells use green/amber/red because
   the colour means met/close/not-met. Role and type meters are magnitudes —
   forty hours of SIC is neither good nor bad — so they use ONE hue
   (`MagnitudeRow`, primary on a lighter step of itself). Painting them with the
   status ramp would teach the reader that the colour means the same thing there
-  as in the legality panel, where it means whether they can legally fly.
-- **State is never colour alone**, in the rows or in the header tally: each
-  state has its own icon and the value is written out.
+  as on the legal page, where it means whether they can legally fly.
 
 #### The flight list opens IN PLACE
 
@@ -648,9 +767,6 @@ costs a back-navigation to get it back. `PeriodFlight` carries the detail
 (OOOI, air, night, T/O–LDG, reg, type, role, PF/PM) — the aggregator already has
 all of it in hand, so it costs field copies rather than a per-row read when a row
 opens. The row still offers the full page for anything beyond that.
-
-Same interaction at every width: a phone and a 1400px desktop open the same row
-the same way, and only the detail's column count changes.
 
 `periodFlights` is ordered by **`sortFlights`**, the one comparator — sorting on
 the date alone left same-day sectors in table order, so they could read in a
@@ -2372,11 +2488,13 @@ When making changes, be aware of these high-impact files:
     `touchmove` keeps feeding the spotlight position until the real lift. The
     fade lives on `.GlassContent::after`'s `transition`.
 
-**Dashboard:**
-- `lib/utils/dashboard/legality.ts` — the requirement model ("can I fly", as a list); the verdict is the worst requirement
-- `components/dashboard/legality-panel.tsx` — the verdict, the binding constraint and the requirement grid
-- `components/dashboard/requirement-row.tsx` — the ONE row shape every requirement renders as (status ramp, icon + value, hairline meter)
-- `components/dashboard/dashboard-grid.tsx` — the four blocks, one column, in question order
+**Dashboard (two pages, one toggle):**
+- `hooks/use-dashboard-view.ts` — which page is showing; a module store, persisted, hydrated in `subscribe`
+- `components/dashboard/legal-dashboard.tsx` — page 1: one screen, no scroll, one continuous surface
+- `lib/utils/dashboard/pilot-status.ts` — the annunciator, the governing constraint and the NEXT ACTION
+- `lib/utils/dashboard/duty-status.ts` — duty phase + the per-duty FDP maximum (read, never invented)
+- `lib/utils/dashboard/legality.ts` — the requirement model; the verdict is the worst requirement
+- `components/dashboard/summary-dashboard.tsx` — page 2: the three period blocks, one column
 - `lib/utils/dashboard-aggregate.ts` — period totals, the 90-day recency lapse, and the per-flight detail the list unfolds
 
 **Report Import:**
@@ -2763,12 +2881,23 @@ When making changes, be aware of these high-impact files:
 - Do not minify the drag lens's copy uniformly — the squeeze is `scaleY` ONLY, with the row counter-scaled so the labels keep their size and only the control gets shorter. And do not push `LENS_SQUASH` much below 0.84: the counter-scaled row has to fit the copy's box, and the mobile pill's 44px tab item in a 56px bar is what sets that floor (at 0.72 the icons and labels were clipped away entirely)
 - Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
 - Do not delete a user record outright — `deleteEntity` is a **soft delete** into Recently Deleted (30 days) and pushes an UPDATE; only `purgeEntity` writes a tombstone. Push a real delete when the user merely binned it and the row is gone on every device with nothing to restore. The two exceptions are discrepancies and schedule entries, which are import bookkeeping and stay hard
-- Do not reduce the dashboard's legality panel to a banner, and do not compute its verdict any way but the WORST requirement — an average or a majority reads one expired medical as legal. The requirements are the content; the verdict is derived from them and they stay visible
+- Do not merge the dashboard's two pages back into one. Legal and Summary want opposite layouts — an instrument read in two seconds versus a month's review — and one layout serving both is what makes a dashboard a spreadsheet. They get different containers: Legal is laid out TO the height (no scroll), Summary is an ordinary scrolling page
+- Do not HARDCODE an FDP maximum, ever. Under CAAS Reg 14 it moves with report time, sectors, crew complement, acclimatisation and the long-sector adjustment; `DutyPeriod.maxFdpMinutes` already holds the figure `calculateMaxFDP` computed for THAT duty, and `fdpTableUsed` is printed beside it so it can be checked. A duty with no computed maximum shows a dash, not a default — a default is a number somebody might fly to
+- Do not add a 7-day duty figure to the dashboard. CAAS imposes 14-day and 28-day duty caps (Reg 12) and 28-day/12-month flight caps (Reg 107); a 7-day limit is not in the regulation and printing one is worse than printing none
+- Do not turn the legal page back into a stack of glass cards — six cards' borders, radii and margins cost ~120px of a phone's height, which is the difference between it fitting and not. One surface, hairline `divide-y` rules. And keep it `max-h-full`, not `h-full`: stretching makes the one `flex-1` section absorb every spare pixel and leaves a hole under the last requirement
+- Do not print "12 / 12 currencies current" — a pilot does not need telling about the eleven that are fine. The panel names the TIGHTEST constraint, and falls back to the fullest rolling limit only when nothing is flagged
+- Do not state a problem without its remedy on the legal page. The next-action line is the imperative ("2 landings required"), phrased in `legality.ts` where the shortfall is in hand — not the reading ("landings 1 / 3"), which the requirement cell already shows
+- Do not let a standing requirement outrank an exceeded FDP — that one is happening right now rather than being true today, and it is the only thing that overrides the legality verdict for the annunciator
+- Do not group the legal page's requirements under headings — they are sorted most-pressing-first so the top-left cell is always the thing closest to stopping the pilot. Headings cost four rules and ~56px to impose an order nobody is reading for on a no-scroll page
+- Do not put the period controls (calendar, period pills) on the legal page — they do nothing there, and the action bar is the one thing that can push a button under the centred nav pill
+- Do not drop `suppressHydrationWarning` from the legal page's clock nodes, and do not assume it inherits — it applies only to the element it is on. Node's ICU renders `GMT` where the browser renders `GMT+0` for the same zone, so the offset mismatches in production even when the clock value agrees
+- Do not rebuild the pilot-status model on every clock tick — `usePilotStatus` buckets `now` to the MINUTE, because the model changes state on minute boundaries and the seconds are read straight off the clock by the component
+- Do not reduce the legal page's requirement grid to a banner, and do not compute its verdict any way but the WORST requirement — an average or a majority reads one expired medical as legal. The requirements are the content; the verdict is derived from them and they stay visible
 - Do not answer recency with a current/not-current chip — it must carry the LAPSE DATE, and that is 90 days after the flight supplying the THIRD event, not the newest. Takeoffs and landings lapse independently and the EARLIER one wins (a sector flown as PM lands without taking off). The fortnight before it lapses is the only window in which a pilot can still do something about it
 - Do not fail a document that is merely inside its warning window — expired FAILS, warning/critical CAUTION. That is the whole reason a currency carries two thresholds. Meter it against its own `warningDays`, never its full validity, or every document sits near empty for a year and the meter says nothing
 - Do not match a forecast breach to a limit row by exact string — `forecastExceedances` appends the regulation ("28-day flight (Reg 107a)") where `calculateCapacity` does not. The match is by PREFIX; exact binds every breach to no row and drops the warning silently
-- Do not paint a magnitude with the status ramp. Green/amber/red is RESERVED for requirement state (met / close / not met); role hours and type hours are quantities with no status, and they use one hue (`MagnitudeRow`). Sharing the ramp teaches the reader that a colour means the same thing in the breakdown as in the legality panel, where it means whether they can legally fly. And never let a state be carried by colour alone — every state has its own icon, in the rows and in the header tally
-- Do not give the dashboard a second layout at a breakpoint. It is ONE COLUMN at every width, same blocks in the same order; a wider container buys DENSITY INSIDE a block (2→6 requirement columns, 4→8 detail fields, stacked→side-by-side), never a rearrangement. Every step is a CONTAINER query — the page renders in a resizable split panel, so the viewport's width says nothing about the room a block has
+- Do not paint a magnitude with the status ramp. Green/amber/red is RESERVED for requirement state (met / close / not met); role hours and type hours are quantities with no status, and they use one hue (`MagnitudeRow`). Sharing the ramp teaches the reader that a colour means the same thing in the breakdown as on the legal page, where it means whether they can legally fly. And never let a state be carried by colour alone — every state has its own icon, in the rows and in the header tally
+- Do not give the SUMMARY page a second layout at a breakpoint. It is ONE COLUMN at every width, same blocks in the same order; a wider container buys DENSITY INSIDE a block (2→6 requirement columns, 4→8 detail fields, stacked→side-by-side), never a rearrangement. Every step is a CONTAINER query — the page renders in a resizable split panel, so the viewport's width says nothing about the room a block has
 - Do not re-add a ring for the dashboard's period hours — the one it replaced was metered against a hardcoded 100-hour max, so a week and a year drew the same arc. A ratio needs a real denominator; period block hours have none, so the form is a hero figure (with PROPORTIONAL figures — `tabular-nums` reads loose at display size). Day/night does have one and is drawn
 - Do not draw the engine split with a single class present — a one-segment part-to-whole bar is a 100% fill under a one-item legend, restating the hero figure. Gate it on ≥2 non-zero classes
 - Do not put a number on the dashboard twice. Night and sim live in the period summary (`SHOWN_ELSEWHERE` keeps them out of the breakdown), recency/limits/rest/expiries live in the legality panel, and the alerts bell is scoped to import notes — the one alert class the page does not otherwise show. Every one of those was printed in two places before
