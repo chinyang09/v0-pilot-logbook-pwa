@@ -203,3 +203,99 @@ describe("aggregateDashboard — block time is the one clock", () => {
     expect(result.topTypes.map((t) => t.type).sort()).toEqual(["A20N", "A21N", "A320"])
   })
 })
+
+describe("aggregateDashboard — 90-day recency", () => {
+  const NOW = new Date("2026-08-13T00:00:00Z")
+
+  function landing(date: string, count: number): FlightLog {
+    return flight({
+      id: `${date}-${count}`,
+      date,
+      dayTakeoffs: count,
+      dayLandings: count,
+    })
+  }
+
+  it("lapses 90 days after the flight supplying the THIRD event, not the newest", () => {
+    // The newest flight is not what holds recency up — the third-newest is. A
+    // pilot who flew three sectors in May and one yesterday is current until 90
+    // days after MAY, and reading the lapse off the most recent flight would
+    // promise them another three months they do not have.
+    const result = aggregateDashboard({
+      flights: [
+        landing("2026-08-12", 1), // 1st
+        landing("2026-06-02", 1), // 2nd
+        landing("2026-06-01", 1), // 3rd — the binding one
+        landing("2026-05-20", 1), // surplus
+      ],
+      aircraft: [],
+      fromIso: "2026-08-01",
+      toIso: "2026-08-31",
+      now: NOW,
+    })
+
+    expect(result.ninetyDayCurrency.current).toBe(true)
+    expect(result.ninetyDayCurrency.lapseIso).toBe("2026-08-30")
+  })
+
+  it("counts every event on a multi-sector day toward the three", () => {
+    // One flight can carry several takeoffs. Counting flights rather than
+    // events would call this pilot un-current with six landings in the window.
+    const result = aggregateDashboard({
+      flights: [landing("2026-08-10", 3)],
+      aircraft: [],
+      fromIso: "2026-08-01",
+      toIso: "2026-08-31",
+      now: NOW,
+    })
+
+    expect(result.ninetyDayCurrency.takeoffs).toBe(3)
+    expect(result.ninetyDayCurrency.current).toBe(true)
+    expect(result.ninetyDayCurrency.lapseIso).toBe("2026-11-08")
+  })
+
+  it("reports no lapse date when recency is not met", () => {
+    const result = aggregateDashboard({
+      flights: [landing("2026-08-10", 2)],
+      aircraft: [],
+      fromIso: "2026-08-01",
+      toIso: "2026-08-31",
+      now: NOW,
+    })
+
+    expect(result.ninetyDayCurrency.current).toBe(false)
+    expect(result.ninetyDayCurrency.lapseIso).toBeNull()
+  })
+
+  it("ignores events that have already aged out of the window", () => {
+    const result = aggregateDashboard({
+      flights: [landing("2026-08-12", 1), landing("2026-01-01", 5)],
+      aircraft: [],
+      fromIso: "2026-08-01",
+      toIso: "2026-08-31",
+      now: NOW,
+    })
+
+    expect(result.ninetyDayCurrency.landings).toBe(1)
+    expect(result.ninetyDayCurrency.current).toBe(false)
+  })
+
+  it("takes the EARLIER of the takeoff and landing lapses", () => {
+    // A pilot can be current on landings longer than takeoffs (a sector flown
+    // as PM lands but does not take off). Recency ends with whichever runs out
+    // first, so reporting the later one would overstate it.
+    const result = aggregateDashboard({
+      flights: [
+        flight({ id: "n", date: "2026-08-12", dayTakeoffs: 1, dayLandings: 3 }),
+        flight({ id: "o", date: "2026-06-15", dayTakeoffs: 2, dayLandings: 0 }),
+      ],
+      aircraft: [],
+      fromIso: "2026-08-01",
+      toIso: "2026-08-31",
+      now: NOW,
+    })
+
+    // Landings hit three on 08-12 → lapse 11-10. Takeoffs need 06-15 → 09-13.
+    expect(result.ninetyDayCurrency.lapseIso).toBe("2026-09-13")
+  })
+})

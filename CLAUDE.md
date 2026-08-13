@@ -528,6 +528,135 @@ A simulator carries its duration in `simulatedInstrumentTime`, NOT `blockTime`
 `entryDuration()` is what a card should display. The flight form's **Type** row
 sits above the date and moves the duration across when the type changes.
 
+### The Dashboard
+
+Four blocks, one column, in the order the questions get asked:
+
+| | Block | Answers |
+|---|---|---|
+| 1 | `LegalityPanel` | **Can I fly?** — every requirement, each with its own state |
+| 2 | `PeriodSummary` | what the selected period came to |
+| 3 | `PeriodFlights` | which flights those were, and what each one was |
+| 4 | `BreakdownPanel` | how the hours split by role and by fleet |
+
+**ONE COLUMN AT EVERY WIDTH, and that is the whole layout decision.** The blocks
+stack in that order on a 390px phone and in the same order on a 1400px desktop:
+nothing moves, nothing is reordered, nothing appears in one and not the other.
+What a wider screen buys is DENSITY INSIDE each block — the legality grid goes
+2 → 6 columns, a flight's detail 4 → 8 fields per row, the breakdown stacked →
+side by side. Desktop carries more information without becoming a second layout
+the reader has to learn.
+
+Every one of those steps is a **container query, never a viewport breakpoint**.
+The page renders inside a resizable split panel, so the window's width says
+nothing about the room a block actually has; a panel dragged to 360px is a phone
+and lays out like one (measured: identical section geometry at viewport 390 and
+panel 360).
+
+What it replaced was a 6-column grid of six cards which, on a phone, was several
+screens of scrolling before the first flight — and which spread the legality
+question over four of those cards, none of them first.
+
+#### Legality is a LIST OF REQUIREMENTS, not a banner
+
+`lib/utils/dashboard/legality.ts` is the model, and it is pure — no React, no
+Dexie, no clock beyond the `now` handed in. It does not compute a verdict and
+explain it afterwards: it computes the REQUIREMENTS and **the verdict is nothing
+more than the worst one of them** (`worst()`, ranked fail > caution > unknown >
+ok — never an average or a majority, or one expired medical reads as legal).
+
+| Group | Requirement | Source |
+|---|---|---|
+| Rest | rest since last debrief vs. the minimum | CAAS Reg 3, `calculateRestUntilLegal` |
+| Recency | 3 takeoffs + 3 landings in 90 days | the logbook |
+| Limits | duty 14d/28d, flight 28d/365d | CAAS Reg 12 / 107, `calculateCapacity` |
+| Documents | medical, licence, OPC, IR, line check… | the currencies table |
+
+Every requirement reduces to the same four fields — label, state, one readout,
+one fraction — so `RequirementRow` is ONE row shape for all of them and a new
+requirement is a new entry rather than a new layout. That sameness is the point:
+a pilot is asking one question of every row ("met, and how close?"), so every row
+answers it in the same two places.
+
+**`binding`** is the requirement closest to stopping the pilot — the panel's
+subtitle. When nothing is flagged it falls back to the fullest limit, because
+"what runs out first" is the useful answer on a clear day.
+
+Three rules that are easy to get wrong:
+
+- **Recency carries a LAPSE DATE** (`ninetyDayCurrency.lapseIso`), and it is 90
+  days after the flight supplying the THIRD event, not the newest one. A pilot
+  who flew three sectors in May and one yesterday is current until 90 days after
+  MAY. Takeoffs and landings lapse independently and the EARLIER wins — a sector
+  flown as PM lands without taking off. A "current / not current" chip cannot say
+  any of this, and the fortnight before it lapses is the only time a pilot can
+  still act on it.
+- **A document inside its warning window CAUTIONS; only an expired one FAILS.**
+  That distinction is the entire reason a currency carries two thresholds. Its
+  meter runs against its own `warningDays`, not its whole validity — against the
+  latter every document sits near empty for a year and the meter says nothing.
+- **The forecast names a limit differently from the capacity calculation**
+  ("28-day flight (Reg 107a)" vs "28-day flight"), so the match is by PREFIX. An
+  exact match binds every forecast breach to no row and drops the warning
+  silently.
+
+#### No repetition — what was removed and where it went
+
+The old dashboard printed several things twice. Each now has exactly one home:
+
+| | Was | Is |
+|---|---|---|
+| 90-day recency | a chip in the T/O card **and** the alerts bell | two requirement rows |
+| FDP utilisation | the limits stack **and** the bell | four requirement rows |
+| Rest until legal | a pill in the limits stack **and** the bell | one requirement row + the panel's headline countdown |
+| Currency expiries | the bell only | document requirement rows |
+| Night / Sim hours | the hero **and** again as rings in the auto-fill grid | the period summary only (`SHOWN_ELSEWHERE`) |
+| Recent T/O–LDG events | its own list under the flight list | gone — it was the flight list |
+
+The bell (`AlertsDropdown`) is therefore scoped to **import notes only** — the
+one alert class the page does not otherwise show, and not a legality question.
+
+#### Charts: only where there is something to plot
+
+- The hero is a **figure, not a ring**. The ring it replaced was metered against
+  a hardcoded 100-hour maximum, so 48 hours in a week and 48 hours in a year drew
+  the same arc. A ratio needs a real denominator; period block hours have none.
+  It uses **proportional figures** — `tabular-nums` gives every digit the width
+  of a zero, which reads loose at display size. Tabular is for columns.
+- **Day/night IS drawn** — it partitions the block time, so it has a
+  denominator. Two fills with a **2px surface gap** between them; no stroke is
+  drawn around either, and the two keys beside it are the legend (identity is
+  never colour alone).
+- **The engine split is drawn only when there is a split** (`showEngineSplit`,
+  ≥2 non-zero classes). An airline pilot flies one class, and a single-series
+  "part-to-whole" bar is a full-width fill at 100% under a one-item legend,
+  restating the hero figure.
+- **The status ramp is RESERVED.** Requirement rows use green/amber/red because
+  the colour means met/close/not-met. Role and type meters are magnitudes —
+  forty hours of SIC is neither good nor bad — so they use ONE hue
+  (`MagnitudeRow`, primary on a lighter step of itself). Painting them with the
+  status ramp would teach the reader that the colour means the same thing there
+  as in the legality panel, where it means whether they can legally fly.
+- **State is never colour alone**, in the rows or in the header tally: each
+  state has its own icon and the value is written out.
+
+#### The flight list opens IN PLACE
+
+A row unfolds under itself rather than navigating. The list exists because the
+pilot is reading the period as a whole; a full flight page loses that period and
+costs a back-navigation to get it back. `PeriodFlight` carries the detail
+(OOOI, air, night, T/O–LDG, reg, type, role, PF/PM) — the aggregator already has
+all of it in hand, so it costs field copies rather than a per-row read when a row
+opens. The row still offers the full page for anything beyond that.
+
+Same interaction at every width: a phone and a 1400px desktop open the same row
+the same way, and only the detail's column count changes.
+
+`periodFlights` is ordered by **`sortFlights`**, the one comparator — sorting on
+the date alone left same-day sectors in table order, so they could read in a
+different order here than in the logbook. `SortableFlight`'s `scheduledOut` is
+optional so a projection of a flown flight can use it.
+
 ### The Logbook's Virtualized List
 
 `components/flight-list.tsx` uses `@tanstack/react-virtual` with dynamic
@@ -2243,6 +2372,13 @@ When making changes, be aware of these high-impact files:
     `touchmove` keeps feeding the spotlight position until the real lift. The
     fade lives on `.GlassContent::after`'s `transition`.
 
+**Dashboard:**
+- `lib/utils/dashboard/legality.ts` — the requirement model ("can I fly", as a list); the verdict is the worst requirement
+- `components/dashboard/legality-panel.tsx` — the verdict, the binding constraint and the requirement grid
+- `components/dashboard/requirement-row.tsx` — the ONE row shape every requirement renders as (status ramp, icon + value, hairline meter)
+- `components/dashboard/dashboard-grid.tsx` — the four blocks, one column, in question order
+- `lib/utils/dashboard-aggregate.ts` — period totals, the 90-day recency lapse, and the per-flight detail the list unfolds
+
 **Report Import:**
 - `lib/utils/roster/reconciler.ts` — classification + the global match assignment
 - `lib/utils/roster/match-assign.ts` — cost-ranked pairing shared with cross-hydrate
@@ -2627,6 +2763,16 @@ When making changes, be aware of these high-impact files:
 - Do not minify the drag lens's copy uniformly — the squeeze is `scaleY` ONLY, with the row counter-scaled so the labels keep their size and only the control gets shorter. And do not push `LENS_SQUASH` much below 0.84: the counter-scaled row has to fit the copy's box, and the mobile pill's 44px tab item in a 56px bar is what sets that floor (at 0.72 the icons and labels were clipped away entirely)
 - Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
 - Do not delete a user record outright — `deleteEntity` is a **soft delete** into Recently Deleted (30 days) and pushes an UPDATE; only `purgeEntity` writes a tombstone. Push a real delete when the user merely binned it and the row is gone on every device with nothing to restore. The two exceptions are discrepancies and schedule entries, which are import bookkeeping and stay hard
+- Do not reduce the dashboard's legality panel to a banner, and do not compute its verdict any way but the WORST requirement — an average or a majority reads one expired medical as legal. The requirements are the content; the verdict is derived from them and they stay visible
+- Do not answer recency with a current/not-current chip — it must carry the LAPSE DATE, and that is 90 days after the flight supplying the THIRD event, not the newest. Takeoffs and landings lapse independently and the EARLIER one wins (a sector flown as PM lands without taking off). The fortnight before it lapses is the only window in which a pilot can still do something about it
+- Do not fail a document that is merely inside its warning window — expired FAILS, warning/critical CAUTION. That is the whole reason a currency carries two thresholds. Meter it against its own `warningDays`, never its full validity, or every document sits near empty for a year and the meter says nothing
+- Do not match a forecast breach to a limit row by exact string — `forecastExceedances` appends the regulation ("28-day flight (Reg 107a)") where `calculateCapacity` does not. The match is by PREFIX; exact binds every breach to no row and drops the warning silently
+- Do not paint a magnitude with the status ramp. Green/amber/red is RESERVED for requirement state (met / close / not met); role hours and type hours are quantities with no status, and they use one hue (`MagnitudeRow`). Sharing the ramp teaches the reader that a colour means the same thing in the breakdown as in the legality panel, where it means whether they can legally fly. And never let a state be carried by colour alone — every state has its own icon, in the rows and in the header tally
+- Do not give the dashboard a second layout at a breakpoint. It is ONE COLUMN at every width, same blocks in the same order; a wider container buys DENSITY INSIDE a block (2→6 requirement columns, 4→8 detail fields, stacked→side-by-side), never a rearrangement. Every step is a CONTAINER query — the page renders in a resizable split panel, so the viewport's width says nothing about the room a block has
+- Do not re-add a ring for the dashboard's period hours — the one it replaced was metered against a hardcoded 100-hour max, so a week and a year drew the same arc. A ratio needs a real denominator; period block hours have none, so the form is a hero figure (with PROPORTIONAL figures — `tabular-nums` reads loose at display size). Day/night does have one and is drawn
+- Do not draw the engine split with a single class present — a one-segment part-to-whole bar is a 100% fill under a one-item legend, restating the hero figure. Gate it on ≥2 non-zero classes
+- Do not put a number on the dashboard twice. Night and sim live in the period summary (`SHOWN_ELSEWHERE` keeps them out of the breakdown), recency/limits/rest/expiries live in the legality panel, and the alerts bell is scoped to import notes — the one alert class the page does not otherwise show. Every one of those was printed in two places before
+- Do not send the dashboard's flight rows to a full page to show their detail — they open IN PLACE, because the reader is looking at the period as a whole and navigating away loses it. `PeriodFlight` already carries the detail off the aggregator's existing walk
 - Do not order flights anywhere but `lib/utils/flight-sort.ts` — the order must be TOTAL (date, then actual-or-SCHEDULED out time, then departure, then id) or rows move on their own: a new flight sat at the top of the logbook until the next refetch and then jumped, and reading `outTime` alone treated every unflown sector as 00:00 so scheduled flights sank below completed ones on the same day. An optimistic cache write inserts with `insertFlightSorted`, never by prepending
 - Do not read a user table for a list, a total or an import match without filtering deleted rows (`isLiveFlight` for flights, `isLiveEntity` for the rest) — a binned row reaching the reconciler silently updates, and so resurrects, something the user deleted. The store's own `getAllX` already filters; go through it rather than hitting the table
 - Do not use `RETENTION_MS` for a deletion sweep or `DELETED_RETENTION_MS` for a decision — they are 90 and 30 days and the helpers take the window as an argument precisely so a caller has to say which
@@ -2650,7 +2796,7 @@ When making changes, be aware of these high-impact files:
 - Do not give the drag lens its own copy of the highlight to land on — it is portalled to `<body>`, so an opaque fill there covers the tab's icon and label and the landing flashes a solid pill with nothing in it. The REAL blob is revealed instead (it lives behind the row) and the glass dissolves off it; the lens stays translucent the whole way, so the content is never covered
 - Do not collapse `FADE_TAIL` and `--chrome-clear` into one number — the first is how far the DARKENING reaches (41px, i.e. 45 below the buttons), the second is where the quick-scroll rail PARKS a row (60 below, ~15px clear of the band). Equalising them is wrong in both directions: the band ends up far down the screen, or the scrolled-to row ends up inside the treatment
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
-- Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely
+- Do not re-gate the dashboard's meters / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so they can animate freely
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`
 - Do not give `register/complete`, `add-passkey`, the callsign change, or the TOTP-reveal routes a path that skips `verifyAuthenticationResponse`/`verifyStepUpAssertion` — the TOTP seed must never be revealed without a fresh passkey step-up
 - Do not give `SwipeableCard` action panels horizontal padding — the panel must collapse to 0 width when closed (the left gap comes from `openWidth`/`justify-end`), otherwise a sliver of the action button peeks at the card edge
@@ -2740,12 +2886,12 @@ When making changes, be aware of these high-impact files:
 - Do not reload a whole reference table on mount to notice a write — `useAirportDatabase` re-read all ~10k airports from IndexedDB every time it mounted, and the flight form mounts on every flight tap. Writers bump `getAirportsRevision()` and the hook reloads only on a mismatch. Every write to `referenceDb.airports` lives in `airports.store.ts` (rebuild / addCustom / toggleFavorite) — a NEW writer must bump it too, or a cached copy goes stale. Capture the revision BEFORE the read, so a write landing mid-load leaves the cache looking stale rather than falsely current
 - Do not compute a list twice in JSX — `xs.some(p)` for the section guard and `xs.filter(p)` for the rows is two full passes per render, and on the airports page that was two scans of the whole reference table for a handful of pinned entries. Derive it once in a `useMemo` and test `.length`
 - Do not pass a memoized list card an INLINE arrow (`onDelete={() => performDelete(item)}`) — it hands every row new props on each render of the page and defeats the `memo` outright, which is the whole reason the card is memoized. The card takes its own item back (`onDelete: (item) => void`) and the page passes ONE `useCallback`'d handler; a plain function declared in the page body is just as bad as the arrow, so the handler itself has to be stable. This bit the logbook, crew and aircraft lists independently
-- Do not put a `backdrop-filter` (`backdrop-blur-*`) on a surface whose backdrop is a FLAT colour — blurring a uniform field returns that same field, so it is pixel-identical to no filter while still forcing a backdrop root, a readback and a blur pass every frame the layer is painted. The dashboard's six widget cards each carried `backdrop-blur-sm` over `bg-background`, which has no gradient and nothing behind it (the grid is sequentially placed, so items never overlap). Glass surfaces, the chrome fade and the modal backdrops keep theirs — those sit over real, moving content, which is the case the filter exists for
+- Do not put a `backdrop-filter` (`backdrop-blur-*`) on a surface whose backdrop is a FLAT colour — blurring a uniform field returns that same field, so it is pixel-identical to no filter while still forcing a backdrop root, a readback and a blur pass every frame the layer is painted. The dashboard's widget cards each carried `backdrop-blur-sm` over `bg-background`, which has no gradient and nothing behind it (the blocks are stacked in one column, so they never overlap). Glass surfaces, the chrome fade and the modal backdrops keep theirs — those sit over real, moving content, which is the case the filter exists for
 - Do not hold gesture bookkeeping in React STATE when nothing renders it. The calendar kept `swipeStartY` / `isSwiping` / `hasTriggeredSwipeStart` as state and read them only inside its touch handlers, so putting a finger on it re-rendered the whole grid — 42 day cells, or 84 in dual mode — up to three times before anything visible happened. Refs, and the same for any drag box that can't move mid-gesture (`fast-scroll` caches the rail's rect for the drag's duration rather than reading it per `touchmove`, while that same drag is driving `scrollToIndex` on a virtualised list)
 - Do not do a gesture's work per POINTER EVENT — pointer events fire faster than frames (120Hz+, and coalesced besides) and nothing can show more than one position per frame. `GlassContainer`'s press-follow, the nav drag lens and the signature canvas each accumulate the latest point in a ref and apply it in ONE rAF pass. Within that pass, every layout READ comes before any WRITE: the drag lens used to write nine `left`/`top`/`width`/`height` values and then read a rect for the spotlight, which forces a synchronous layout flush on every event of the one gesture that has to feel stuck to the finger
 - Do not accumulate a signature stroke in React state — `signature-canvas.tsx` keeps the in-progress stroke in a REF and repaints once per frame, handing React ONE update when the stroke ends. As state, every point copied the whole array, re-rendered, took a `getBoundingClientRect`, forced a style flush via `getComputedStyle`, and redrew every stroke — so the cost per point grew with the stroke and the line visibly trailed the finger. The box and the resolved colour are cached for the stroke's duration; neither can change while a finger is down
 - Do not leave a `setState` in a rAF loop unguarded when the value it writes changes slower than the frame rate. `useCountdownConfirm` ticks at 60fps to drive a MotionValue (free) but `remaining` is whole SECONDS, so it compares before dispatching — ~60 scheduler entries a second for 59 non-changes, for the whole 10s a delete is armed, which is exactly when the user is scrolling the list it was armed from
-- Do not run a clock, poll or subscription that a keep-alive page owns without gating it on that page being the ACTIVE route. The dashboard's FDP stack ticks at 1Hz to drive one countdown; the dashboard is mounted forever after its first visit, so ungated it re-rendered four limit rows every second for the rest of the session while the user was somewhere else entirely. Gate on `usePageActive` AND on there being something to tick for
+- Do not run a clock, poll or subscription that a keep-alive page owns without gating it on that page being the ACTIVE route. The dashboard's legality panel ticks at 1Hz to drive one countdown; the dashboard is mounted forever after its first visit, so ungated it re-rendered the whole requirement grid every second for the rest of the session while the user was somewhere else entirely. Gate on `usePageActive` AND on there being something to tick for — the countdown only exists while rest is outstanding, which is most of the time not at all
 - Do not answer "is anything queued?" by reading a table — the sync trigger manager polls that every 10 seconds for the whole session, and `getSyncQueue().length` deserialised every pending row to compare a number against zero. Use `getSyncQueueCount()`, which counts off the index
 - Do not decide a `useBackDismiss` release is safe at the moment it is SCHEDULED — check at the moment it FIRES, against the shared marker stack (`lib/utils/history-markers.ts`). The release is deferred by a task precisely so other things can happen in between, and one of them is another overlay pushing its own marker: `history.back()` takes whatever is on TOP, so the outgoing dialog popped the incoming one's entry and the incoming one dismissed itself. That is what made a LogTen import report itself cancelled a moment after its review dialog opened. Two dialogs handing off in one commit is the ordinary case, not an exotic one — the import status dialog does it to every review modal it opens
 - Do not release a `useBackDismiss` marker without checking the URL is still the one it was pushed at. `history.back()` only takes the marker back while the marker is the TOP of the stack; if something navigated in the meantime — the sidebar's close-on-`pathname` effect is exactly that shape, a route change tears the overlay down — the marker is buried one entry below the new page and the `back()` undoes the navigation. A buried marker is left alone: it is a duplicate entry for a page the user was already on, which is invisible, where undoing a navigation is not
