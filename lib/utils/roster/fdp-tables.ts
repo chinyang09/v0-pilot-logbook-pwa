@@ -120,38 +120,59 @@ export function lookupTableC(localHour: number, sectors: number): number {
 // ============================================
 
 /**
- * Apply long sector adjustment for large aeroplanes.
- * A single long sector counts as multiple sectors for table lookup.
+ * What ONE sector of a given block time counts as, per para 14(2).
  *
- * Table A: >7h≤9h → 2, >9h≤11h → 3, >11h → 4
- * Table B: >7h≤9h → 3, >9h≤11h → 4, >11h → 5
+ * | Single sector length (block time) | Table A | Table B |
+ * |---|---|---|
+ * | Over 7 but not over 9 hours | 2 | 3 |
+ * | Over 9 but not over 11 hours | 3 | 4 |
+ * | Over 11 hours | 4 | 5 |
  *
- * @param sectors - Actual number of sectors
- * @param longestSectorMinutes - Block time of the longest sector in minutes
+ * The boundaries are "over X but not over Y", so exactly 7:00 is not over 7
+ * and exactly 9:00 is not over 9.
+ */
+function sectorCountsAs(blockMinutes: number, table: "A" | "B"): number {
+  if (blockMinutes <= 7 * 60) return 1
+  if (blockMinutes <= 9 * 60) return table === "A" ? 2 : 3
+  if (blockMinutes <= 11 * 60) return table === "A" ? 3 : 4
+  return table === "A" ? 4 : 5
+}
+
+/**
+ * Apply the long sector adjustment of para 14(2).
+ *
+ * **EVERY long sector counts up, not just the longest.** The schedule says
+ * "counting long sectorS as more than one sector", and a duty of two 8-hour
+ * sectors is four effective sectors under Table A rather than three. Counting
+ * only the longest under-states the sector count, which RAISES the FDP maximum
+ * — the dangerous direction to be wrong in.
+ *
+ * The caller may pass either every sector's block time (preferred) or a single
+ * figure for the longest one, which is all the older callers had.
+ *
+ * Note this adjustment applies only where the assigned flight crew "only
+ * consists of 2 pilots" — `calculateMaxFDP` is what enforces that.
+ *
+ * @param sectors - Actual number of sectors flown
+ * @param sectorMinutes - Every sector's block time, or just the longest
  * @param table - Which table is being used ("A" or "B")
- * @returns Effective sector count (never less than actual sectors)
+ * @returns Effective sector count (never less than the actual count)
  */
 export function applyLongSectorAdjustment(
   sectors: number,
-  longestSectorMinutes: number,
+  sectorMinutes: number | number[],
   table: "A" | "B"
 ): number {
-  if (longestSectorMinutes <= 420) return sectors // ≤ 7h, no adjustment
+  const lengths = Array.isArray(sectorMinutes) ? sectorMinutes : [sectorMinutes]
 
-  let longSectorEquivalent: number
-  if (table === "A") {
-    if (longestSectorMinutes <= 540) longSectorEquivalent = 2       // >7h ≤9h
-    else if (longestSectorMinutes <= 660) longSectorEquivalent = 3  // >9h ≤11h
-    else longSectorEquivalent = 4                                    // >11h
-  } else {
-    if (longestSectorMinutes <= 540) longSectorEquivalent = 3       // >7h ≤9h
-    else if (longestSectorMinutes <= 660) longSectorEquivalent = 4  // >9h ≤11h
-    else longSectorEquivalent = 5                                    // >11h
-  }
+  // Each supplied length contributes what it counts as; any sector we have no
+  // length for counts as itself.
+  const counted = lengths
+    .slice(0, sectors)
+    .reduce((total, minutes) => total + sectorCountsAs(minutes, table), 0)
+  const unmeasured = Math.max(0, sectors - Math.min(lengths.length, sectors))
 
-  // Replace 1 actual sector with its equivalent, add remaining sectors
-  const effectiveSectors = longSectorEquivalent + (sectors - 1)
-  return Math.max(effectiveSectors, sectors)
+  return Math.max(counted + unmeasured, sectors)
 }
 
 // ============================================
@@ -159,26 +180,39 @@ export function applyLongSectorAdjustment(
 // ============================================
 
 /**
- * Apply augmented crew FDP extension cap.
- * +1 crew member + rest facilities → max 15h (900 min)
- * +2 crew members + rest facilities → max 18h (1080 min)
+ * Apply the augmented flight crew extension of para 15.
  *
- * The augmented max is a cap — it allows up to 15h/18h but does not
- * reduce below the base table FDP value.
+ * - augmented with ONE extra flight crew member and a rest facility for one
+ *   pilot → up to a maximum FDP of **15 hours**;
+ * - augmented with TWO and rest facilities for two pilots → **18 hours**.
  *
- * @param baseFdpMinutes - FDP from table lookup
+ * **Rest facilities are a CONDITION, not a detail.** Para 15(1)(b) requires
+ * "appropriate in-flight rest facilities", and 15(3)(b) states outright that
+ * "no extension of flight duty period is permitted even with augmented flight
+ * crew if no rest facilities are available". So the extension is withheld when
+ * facilities are absent — and also when they are simply UNKNOWN, because
+ * guessing in favour of a longer duty is the wrong way to be wrong.
+ *
+ * The extension is a ceiling, never a reduction: a base maximum already above
+ * it stands.
+ *
+ * @param baseFdpMinutes - FDP from the table lookup
  * @param level - Augmented crew level
- * @returns Adjusted max FDP in minutes
+ * @param inFlightRestFacilities - Whether suitable facilities are confirmed
  */
 export function applyAugmentedCrewExtension(
   baseFdpMinutes: number,
-  level: AugmentedCrewLevel
+  level: AugmentedCrewLevel,
+  inFlightRestFacilities?: boolean
 ): number {
+  if (level === "none") return baseFdpMinutes
+  if (inFlightRestFacilities !== true) return baseFdpMinutes
+
   switch (level) {
     case "plus-one":
-      return Math.max(baseFdpMinutes, Math.min(900, 900))   // cap at 15h
+      return Math.max(baseFdpMinutes, 15 * 60)
     case "plus-two":
-      return Math.max(baseFdpMinutes, Math.min(1080, 1080)) // cap at 18h
+      return Math.max(baseFdpMinutes, 18 * 60)
     default:
       return baseFdpMinutes
   }
@@ -189,8 +223,16 @@ export function applyAugmentedCrewExtension(
 // ============================================
 
 /**
- * Determine if crew is acclimated based on departure timezone offset.
- * Acclimated = time difference from SGT (UTC+8) is ≤ 2 hours.
+ * Whether Table A applies, per para 14(1)(a): the time difference between the
+ * person's ACCLIMATED time and the local time where the FDP commences "does
+ * not exceed 2 hours".
+ *
+ * The acclimated time is approximated by home base (SGT). That is exact for a
+ * pilot who has been operating from base, and it is what the schedule's own
+ * para 5(5) implies is restored by 82 hours at base after a long trip away; it
+ * is an approximation for a pilot part-way through a multi-day pattern in
+ * another zone, where the acclimated time has drifted. Erring toward Table A
+ * would raise the maximum, so any doubt should move a duty to Table B.
  *
  * Examples:
  *   SIN (UTC+8) → true (diff = 0)

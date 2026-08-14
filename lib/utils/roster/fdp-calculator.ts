@@ -78,9 +78,10 @@ export function calculateDutyPeriodFromSchedule(
     dutyMinutes += 1440 // Add 24 hours
   }
 
-  // Calculate flight time and longest sector from sectors
+  // Flight time, and EVERY sector's block time — para 14(2) counts each long
+  // sector up, not only the longest.
   let flightMinutes = 0
-  let longestSectorMinutes = 0
+  const sectorMinutes: number[] = []
   if (entry.sectors && entry.sectors.length > 0) {
     entry.sectors.forEach((sector) => {
       const outTime = sector.actualOut || sector.scheduledOut
@@ -91,7 +92,9 @@ export function calculateDutyPeriodFromSchedule(
         let blockTime = in_ - out
         if (blockTime < 0) blockTime += 1440
         flightMinutes += blockTime
-        longestSectorMinutes = Math.max(longestSectorMinutes, blockTime)
+        sectorMinutes.push(blockTime)
+      } else {
+        sectorMinutes.push(0)
       }
     })
   }
@@ -121,7 +124,7 @@ export function calculateDutyPeriodFromSchedule(
     reportTimeLocal: localReportTime,
     sectors: sectorCount,
     departureTimezoneOffset,
-    longestSectorMinutes,
+    sectorMinutes,
   })
 
   const today = new Date().toISOString().split("T")[0]
@@ -139,6 +142,7 @@ export function calculateDutyPeriodFromSchedule(
     fdpTableUsed: fdpResult.tableUsed,
     departureTimezoneOffset,
     effectiveSectors: fdpResult.effectiveSectors,
+    sectorMinutes,
     source: "schedule",
     isFuture: entry.date > today,
     scheduleEntryIds: [entry.id],
@@ -322,9 +326,10 @@ function createDutyPeriodFromFlightGroup(
   // Departure timezone from first flight (default SGT)
   const depTzOffset = groupFlights[0]?.departureTimezone ?? 8
 
-  // Longest sector block time for long sector adjustment
-  const longestSectorMinutes = Math.max(
-    ...groupFlights.map((f) => (f.blockTime ? hhmmToMinutes(f.blockTime) : 0))
+  // EVERY sector's block time — para 14(2) counts each long sector up, not
+  // only the longest.
+  const sectorMinutes = groupFlights.map((f) =>
+    f.blockTime ? hhmmToMinutes(f.blockTime) : 0
   )
 
   // Convert scheduled report time to local for FDP table lookup
@@ -336,7 +341,7 @@ function createDutyPeriodFromFlightGroup(
     reportTimeLocal: localReportTime,
     sectors: groupFlights.length,
     departureTimezoneOffset: depTzOffset,
-    longestSectorMinutes,
+    sectorMinutes,
   })
 
   // Use unique id when multiple duty periods exist on same date
@@ -363,6 +368,7 @@ function createDutyPeriodFromFlightGroup(
     fdpTableUsed: fdpResult.tableUsed,
     departureTimezoneOffset: depTzOffset,
     effectiveSectors: fdpResult.effectiveSectors,
+    sectorMinutes,
     source: "logbook",
     isFuture: date > new Date().toISOString().split("T")[0],
     scheduleEntryIds: [],
@@ -496,10 +502,20 @@ export function mergeAdjacentDutyPeriods(dutyPeriods: DutyPeriod[]): DutyPeriod[
       if (localReportMinutes < 0) localReportMinutes += 1440
       const localReportTime = minutesToHHMM(localReportMinutes % 1440)
 
+      // The merged duty's sector lengths, so para 14(2) still applies. Without
+      // them this recompute used the sector COUNT alone and silently dropped
+      // the long sector adjustment, so an over-long merged overnight read as
+      // compliant.
+      const mergedSectorMinutes = [
+        ...(prev.sectorMinutes ?? []),
+        ...(curr.sectorMinutes ?? []),
+      ]
+
       const fdpResult = calculateMaxFDP({
         reportTimeLocal: localReportTime,
         sectors: totalSectors,
         departureTimezoneOffset: depTzOffset,
+        sectorMinutes: mergedSectorMinutes,
       })
 
       result[result.length - 1] = {
@@ -511,6 +527,7 @@ export function mergeAdjacentDutyPeriods(dutyPeriods: DutyPeriod[]): DutyPeriod[
         maxFdpMinutes: fdpResult.maxFdpMinutes,
         fdpTableUsed: fdpResult.tableUsed,
         effectiveSectors: fdpResult.effectiveSectors,
+        sectorMinutes: mergedSectorMinutes,
         flightIds: [...prev.flightIds, ...curr.flightIds],
         scheduleEntryIds: [...prev.scheduleEntryIds, ...curr.scheduleEntryIds],
         source: prev.source !== curr.source ? "merged" : prev.source,
@@ -543,7 +560,21 @@ export interface FdpCalculationParams {
   crewConfig?: CrewConfiguration       // default: "two-pilot"
   augmentedCrew?: AugmentedCrewLevel   // default: "none"
   departureTimezoneOffset?: number     // default: 8 (SGT = acclimated)
-  longestSectorMinutes?: number        // default: 0 (no long sector adj)
+  /**
+   * EVERY sector's block time, in minutes. Preferred over
+   * `longestSectorMinutes`: para 14(2) counts every long sector up, not only
+   * the longest one.
+   */
+  sectorMinutes?: number[]
+  /** Just the longest sector, for callers that have nothing better. */
+  longestSectorMinutes?: number
+  /**
+   * Whether appropriate in-flight rest facilities are confirmed available.
+   * Para 15(1)(b) makes them a condition of any augmented-crew extension and
+   * 15(3)(b) forbids the extension without them, so an unset value withholds
+   * it rather than assuming.
+   */
+  inFlightRestFacilities?: boolean
 }
 
 export interface FdpCalculationResult {
@@ -582,7 +613,9 @@ function calculateMaxFDPFull(params: FdpCalculationParams): FdpCalculationResult
     crewConfig = "two-pilot",
     augmentedCrew = "none",
     departureTimezoneOffset = 8,
+    sectorMinutes,
     longestSectorMinutes = 0,
+    inFlightRestFacilities,
   } = params
 
   const localHour = Math.floor(hhmmToMinutes(reportTimeLocal) / 60)
@@ -597,12 +630,18 @@ function calculateMaxFDPFull(params: FdpCalculationParams): FdpCalculationResult
     tableUsed = "B"
   }
 
-  // Apply long sector adjustment (only for 2-pilot, Tables A/B)
+  // Long sector adjustment — para 14(2).
+  //
+  // It applies ONLY "when the assigned flight crew for a flight of a large
+  // aeroplane only consists of 2 pilots", and only to Tables A and B: an
+  // augmented crew is not that crew (its ceiling comes from para 15 instead),
+  // and Table C is not named in 14(2) at all.
+  const lengths = sectorMinutes?.length ? sectorMinutes : longestSectorMinutes
   let effectiveSectors = sectors
-  if (tableUsed !== "C" && longestSectorMinutes > 420) {
+  if (tableUsed !== "C" && augmentedCrew === "none") {
     effectiveSectors = applyLongSectorAdjustment(
       sectors,
-      longestSectorMinutes,
+      lengths,
       tableUsed as "A" | "B"
     )
   }
@@ -621,9 +660,14 @@ function calculateMaxFDPFull(params: FdpCalculationParams): FdpCalculationResult
       break
   }
 
-  // Apply augmented crew extension (Reg 15)
+  // Augmented crew extension — para 15. Withheld without confirmed rest
+  // facilities (para 15(3)(b)).
   if (augmentedCrew !== "none") {
-    maxFdpMinutes = applyAugmentedCrewExtension(maxFdpMinutes, augmentedCrew)
+    maxFdpMinutes = applyAugmentedCrewExtension(
+      maxFdpMinutes,
+      augmentedCrew,
+      inFlightRestFacilities
+    )
   }
 
   return { maxFdpMinutes, tableUsed, effectiveSectors }
@@ -674,14 +718,23 @@ function dateToDays(dateStr: string): number {
   return Math.floor(d.getTime() / 86400000)
 }
 
+/** The inverse of `dateToDays` — needed to name the day a wrapped debrief
+ *  actually falls on. */
+function daysToDate(days: number): string {
+  return new Date(days * 86400000).toISOString().slice(0, 10)
+}
+
 /**
- * Calculate rest period between two consecutive duty periods per CAAS Reg 3.
+ * Calculate rest period between two consecutive duty periods, per the Fifth
+ * Schedule paragraph 3.
  *
- * Rules (applied in order of precedence):
- *   (d) preceding duty > 16h → ≥24h rest + must include local night
- *   (c) preceding duty > 10h but ≤ 16h → rest ≥ preceding duty rounded up to next whole hour
- *   (a) rest includes local night → ≥10h
- *   (b) rest without local night → ≥12h
+ * The four sub-rules are CUMULATIVE conditions, not a precedence chain — every
+ * one that applies must be satisfied, so the requirement is the largest of
+ * them:
+ *   (a) rest includes a local night → ≥10h
+ *   (b) rest includes no local night → ≥12h
+ *   (c) preceding duty over 10h and ≤16h → ≥ that duty, rounded up to the hour
+ *   (d) preceding duty over 16h → ≥24h AND inclusive of a local night
  */
 export function calculateRestPeriod(
   current: DutyPeriod,
@@ -707,45 +760,72 @@ export function calculateRestPeriod(
   // also isn't rest.
   const restMinutes = currReportAbsolute - prevDebriefAbsolute - REST_START_BUFFER_MINUTES
 
-  // Check if rest includes local night
+  // Check if rest includes local night. The debrief DATE must be the wrapped
+  // one: a duty that crossed midnight debriefs on the following day, and
+  // testing the night window against the wrong day picks the wrong rest rule.
+  const wrappedDebriefDate = daysToDate(Math.floor(prevDebriefAbsolute / 1440))
+  const wrappedDebriefTime = minutesToHHMM(
+    ((prevDebriefAbsolute % 1440) + 1440) % 1440
+  )
   const hasLocalNight = includesLocalNight(
-    previous.date,
-    previous.debriefTime,
+    wrappedDebriefDate,
+    wrappedDebriefTime,
     current.date,
     current.reportTime
   )
 
   const precedingDutyMinutes = previous.dutyMinutes
 
-  // Determine required rest and applicable rule
-  let requiredRestMinutes: number
-  let rule: RestPeriodInfo["rule"]
+  // ── Para 3(1): EVERY applicable sub-rule must be satisfied ──────────────
+  //
+  // The schedule lists the minimum rest as "(a) … (b) … (c) … ; and (d) …",
+  // which is a set of conditions, not a menu. (a) and (b) exclude each other
+  // by their own wording, and so do (c) and (d) — but an (a)/(b) rule and a
+  // (c)/(d) rule can BOTH bite at once, and then the longer one governs.
+  //
+  // Read as an if/else chain (which is what this was), an 11-hour duty
+  // followed by rest with no local night required only the 11 hours of 3(c)
+  // and ignored the 12 hours of 3(b). That under-states the requirement, which
+  // is the dangerous direction.
+  const candidates: Array<{ minutes: number; rule: RestPeriodInfo["rule"] }> = []
 
-  if (precedingDutyMinutes > 16 * 60) {
-    // Reg 3(1)(d): preceding duty > 16h → ≥24h + local night
-    requiredRestMinutes = 24 * 60
-    rule = "3d"
-  } else if (precedingDutyMinutes > 10 * 60) {
-    // Reg 3(1)(c): preceding duty > 10h but ≤ 16h → ≥ preceding duty rounded up to next whole hour
-    const precedingHours = Math.ceil(precedingDutyMinutes / 60)
-    requiredRestMinutes = precedingHours * 60
-    rule = "3c"
-  } else if (hasLocalNight) {
-    // Reg 3(1)(a): rest includes local night → ≥10h
-    requiredRestMinutes = 10 * 60
-    rule = "3a"
+  // 3(1)(a) / 3(1)(b) — turns on whether the rest contains a local night.
+  if (hasLocalNight) {
+    candidates.push({ minutes: 10 * 60, rule: "3a" })
   } else {
-    // Reg 3(1)(b): no local night → ≥12h
-    requiredRestMinutes = 12 * 60
-    rule = "3b"
+    candidates.push({ minutes: 12 * 60, rule: "3b" })
   }
+
+  // 3(1)(c) — preceding duty over 10h and not more than 16h: at least as long
+  // as that duty, rounded UP to the next whole hour.
+  if (precedingDutyMinutes > 10 * 60 && precedingDutyMinutes <= 16 * 60) {
+    candidates.push({
+      minutes: Math.ceil(precedingDutyMinutes / 60) * 60,
+      rule: "3c",
+    })
+  }
+
+  // 3(1)(d) — preceding duty over 16h: at least 24h AND inclusive of a local
+  // night. The local night is part of the requirement, not a footnote.
+  if (precedingDutyMinutes > 16 * 60) {
+    candidates.push({ minutes: 24 * 60, rule: "3d" })
+  }
+
+  // The governing rule is whichever demands the most.
+  const governing = candidates.reduce((a, b) => (b.minutes > a.minutes ? b : a))
+  const requiredRestMinutes = governing.minutes
+  const rule = governing.rule
+
+  // 3(1)(d) additionally requires the rest to include a local night, so a
+  // 24-hour rest with none is still not compliant.
+  const localNightSatisfied = precedingDutyMinutes > 16 * 60 ? hasLocalNight : true
 
   return {
     restMinutes: Math.max(0, restMinutes),
     requiredRestMinutes,
     includesLocalNight: hasLocalNight,
     precedingDutyMinutes,
-    compliant: restMinutes >= requiredRestMinutes,
+    compliant: restMinutes >= requiredRestMinutes && localNightSatisfied,
     rule,
   }
 }

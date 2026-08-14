@@ -251,6 +251,15 @@ export interface DutyPeriod {
   fdpTableUsed?: FdpTableUsed             // which CAAS table was applied
   departureTimezoneOffset?: number        // UTC offset of departure airport
   effectiveSectors?: number               // after long sector adjustment
+  /**
+   * Every sector's block time, in minutes.
+   *
+   * Carried on the duty period so that a MERGE can re-apply the long sector
+   * adjustment of para 14(2). Without it, merging an overnight duty recomputed
+   * the FDP maximum from the sector COUNT alone and silently dropped the
+   * adjustment — so an over-long merged duty read as compliant.
+   */
+  sectorMinutes?: number[]
 
   // Data origin
   source: DutyPeriodSource

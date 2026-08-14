@@ -2068,33 +2068,103 @@ instead of effect-then-setState, and avoid `useLiveQuery` in new components
 
 ## Known Issues & Deferred Work
 
-### FDP / roster legality calculations (DEFERRED — needs domain review before changing)
+### FDP / roster legality — audited against the regulation (14 Aug 2026)
 
-A subsystem audit surfaced three issues in `lib/utils/roster/fdp-calculator.ts`.
-These drive the **legality/limits dashboard**, so they are intentionally left
-untouched until reviewed with the user — a wrong "fix" to regulatory math is
-worse than the current behavior. Do **not** change these casually.
+The source is the **Air Navigation (121 — Commercial Air Transport by Large
+Aeroplanes) Regulations, FIFTH SCHEDULE (Regulation 178)**. Everything below
+was checked cell by cell against that document.
 
-1. **Rolling-limit windows mix UTC and local date parsing** (`~:787`).
-   `calculateRollingStats` parses duty dates with `new Date(dp.date +
-   "T00:00:00")` (runtime-local TZ), but callers build the as-of date in UTC
-   (`generateTimelineData ~:1080`, `simulateScenario ~:1560`,
-   `simulateHypotheticalDuty ~:1354` all use `…T23:59:59Z`), while
-   `forecastExceedances ~:928` uses local `…T23:59:59`. For a non-UTC user
-   (the app targets SGT/UTC+8) a duty period on the inclusive/exclusive window
-   boundary can be silently included or excluded. Fix is to settle on one date
-   convention end-to-end.
-2. **`includesLocalNight` ignores a past-midnight debrief** (`~:641-668`, called
-   from `calculateRestPeriod ~:711`). The raw `previous.debriefTime` + un-wrapped
-   `previous.date` are passed even when the prior duty crossed midnight, so the
-   rest-window night test runs against the wrong day → wrong rest rule (3a vs 3b).
-   `calculateRestPeriod` already wraps `prevDebriefAbsolute` for the rest-minutes
-   math but not before this call.
-3. **`mergeAdjacentDutyPeriods` drops the long-sector FDP adjustment**
-   (`~:499-503`). The merged-duty max-FDP recompute omits `longestSectorMinutes`
-   (the `DutyPeriod` type doesn't even carry it), so `applyLongSectorAdjustment`
-   never runs on a merged overnight duty — an over-long merged duty can read as
-   compliant.
+**`lib/utils/roster/__tests__/fdp-tables.test.ts` transcribes the schedule's
+own figures**, not the implementation's — it is the check ON the tables rather
+than a copy of them. `rest-period.test.ts` does the same for paragraph 3. If a
+table ever needs to change, change the test from the regulation first.
+
+#### Verified correct
+
+| | Source |
+|---|---|
+| Table A, all 32 cells | para 14(1)(a) |
+| Table B, all 6 cells | para 14(1)(b) |
+| Table C, all 20 cells | para 14(1A) |
+| Long-sector count-as values | para 14(2) |
+| Duty 90h/14d, 180h/28d — the FLIGHT crew figures | para 12(1) |
+| Flight 100h/28d, 1000h/12mo | Reg 107 |
+| 60 min pre-flight, 90 min pre+post | para 7(2) |
+| Rest 10h / 12h / round-up / 24h and the ordering | para 3(1) |
+
+Note para 12(2) gives CABIN crew 100h/14d and 200h/28d. The app is a FLIGHT
+crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
+"correct" them to the cabin numbers.
+
+#### Fixed in this pass (all were wrong in the permissive direction)
+
+- **Rest sub-rules are CUMULATIVE, not alternatives.** Para 3(1) joins (a)–(d)
+  with "and", so every applicable one must be met and the requirement is the
+  LARGEST. Read as an if/else chain, an 11-hour duty followed by rest with no
+  local night required only 3(c)'s 11 hours and ignored 3(b)'s 12.
+- **Para 14(2) counts long sectorS, plural.** Only the longest was counted up,
+  so a duty of two 8-hour sectors read as 3 effective sectors instead of 4 —
+  an hour and a half of FDP the schedule does not allow. `calculateMaxFDP` now
+  takes `sectorMinutes: number[]`; `longestSectorMinutes` remains for old
+  callers.
+- **Para 14(2) applies only to a crew that "only consists of 2 pilots".** The
+  adjustment was being applied to augmented crews too (their ceiling comes from
+  para 15) and is not named for Table C at all.
+- **Para 15(3)(b): no extension without rest facilities.** The augmented
+  extension was granted unconditionally. It now requires
+  `inFlightRestFacilities === true` — unknown withholds it, because guessing in
+  favour of a longer duty is the wrong way to be wrong. Nothing currently sets
+  `augmentedCrew`, so this changes no existing figure.
+- **A merged overnight duty dropped the long-sector adjustment.** The recompute
+  in `mergeAdjacentDutyPeriods` had only the sector COUNT, so an over-long
+  merged duty read as compliant. `DutyPeriod.sectorMinutes` now carries the
+  lengths through the merge.
+- **`includesLocalNight` was given the un-wrapped debrief date.** A duty
+  crossing midnight debriefs the following day, and testing the night window
+  against the wrong day picked the wrong rest rule (3a vs 3b).
+
+#### Known gaps — these need the OWNER's input, not a guess
+
+- **Standby is not counted as duty at all.** `getDutyPeriodsFromSchedule`
+  filters to `dutyType === "flight"`, so standby, training and ground duties
+  contribute nothing to the 90h/180h cumulative limits, which para 12 counts as
+  duty hours. Para 6(7) says only **20%** of standby at home or in local
+  accommodation counts, and para 6(3) says AIRPORT standby is part of the rest
+  period with adequate facilities or part of the FDP without. Implementing this
+  needs a mapping from the company's own standby codes (BKUP, SBYG, …) to
+  home / airport, which only the owner has. Until then the app UNDER-counts
+  duty hours.
+- **Para 6(2)(a): standby must not exceed 18 hours for flight crew.** Not
+  checked, same reason.
+- **Para 5: days off.** Not more than 7 consecutive days between days off; at
+  least 2 days off every 2 weeks; 8 every 4 weeks (6 permissible with
+  make-good); 82 hours at base after 7+ days away. None of this is computed.
+  It needs COMPLETE roster coverage to tell a day off from a day with no data,
+  and a false "you have worked 8 days straight" is worse than silence.
+- **Para 8: positioning is not an operating sector.** A positioning leg
+  imported as an ordinary flight row inflates the sector count. `ScheduleEntry`
+  has `dutyType: "positioning"` but `FlightLog` carries no equivalent flag.
+- **Para 9: simulator then flying in the same duty.** Sim time counts in full
+  toward the subsequent FDP but is not a sector. The dashboard's
+  `buildPlannedDuties` skips simulators entirely.
+- **Para 10: delayed reporting.** A delay under 4h keeps the maximum based on
+  the ORIGINAL report time; 4h or more re-bases it on the actual. Not modelled.
+- **Para 13 / 3(2): commander's discretion.** +3h FDP and −2h rest are not
+  representable, so a duty legitimately extended reads as an exceedance.
+- **Acclimatisation is approximated by home base.** Para 14(1)(a) measures
+  against the person's ACCLIMATED time, which drifts on a multi-day pattern
+  away from base (para 5(5) implies 82 hours at base restores it).
+  `isAcclimated` compares the departure zone against SGT, which is exact from
+  base and approximate mid-pattern. Erring toward Table A raises the maximum,
+  so any doubt should move a duty to Table B.
+
+#### Still deferred — rolling-window date handling
+
+`calculateRollingStats` parses duty dates with `new Date(dp.date + "T00:00:00")`
+(runtime-local), while callers build the as-of date in UTC
+(`generateTimelineData`, `simulateScenario`, `simulateHypotheticalDuty`) or in
+local (`forecastExceedances`). For a non-UTC user a duty on the window boundary
+can be silently included or excluded. Settle on one date convention end to end.
 
 ### OCR engine (owner is weighing a change)
 
@@ -2955,6 +3025,12 @@ When making changes, be aware of these high-impact files:
 - Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
 - Do not delete a user record outright — `deleteEntity` is a **soft delete** into Recently Deleted (30 days) and pushes an UPDATE; only `purgeEntity` writes a tombstone. Push a real delete when the user merely binned it and the row is gone on every device with nothing to restore. The two exceptions are discrepancies and schedule entries, which are import bookkeeping and stay hard
 - Do not merge the dashboard's two pages back into one. Legal and Summary want opposite layouts — an instrument read in two seconds versus a month's review — and one layout serving both is what makes a dashboard a spreadsheet. They get different containers: Legal is laid out TO the height (no scroll), Summary is an ordinary scrolling page
+- Do not change a figure in `fdp-tables.ts` without changing `fdp-tables.test.ts` FROM THE REGULATION first — that test transcribes the Fifth Schedule's own numbers, so it is the check ON the tables rather than a copy of them. Same for `rest-period.test.ts` and paragraph 3
+- Do not treat the rest sub-rules of para 3(1) as alternatives — they are joined by "and", so every applicable one must be met and the requirement is the LARGEST of them. As an if/else chain an 11-hour duty resting without a local night asked for 11 hours instead of 12
+- Do not count only the LONGEST sector for the para 14(2) adjustment — the schedule says long sectorS. Two 8-hour sectors are 4 effective sectors under Table A, not 3, and under-counting raises the FDP maximum. Pass `sectorMinutes: number[]`, and carry `DutyPeriod.sectorMinutes` through `mergeAdjacentDutyPeriods` or a merged overnight silently loses the adjustment
+- Do not apply the para 14(2) long-sector adjustment to an augmented crew or to Table C — it applies where the crew "only consists of 2 pilots", and an augmented crew's ceiling comes from para 15 instead
+- Do not grant the augmented-crew extension without `inFlightRestFacilities === true` — para 15(3)(b) forbids any extension without rest facilities, and UNKNOWN must withhold it rather than assume in favour of a longer duty
+- Do not swap `DEFAULT_FTL_LIMITS` for the cabin-crew figures. Para 12(1) gives FLIGHT crew 90h/14d and 180h/28d; 12(2) gives cabin crew 100h and 200h. This is a flight-crew logbook
 - Do not HARDCODE an FDP maximum, ever. Under CAAS Reg 14 it moves with report time, sectors, crew complement, acclimatisation and the long-sector adjustment; `DutyPeriod.maxFdpMinutes` already holds the figure `calculateMaxFDP` computed for THAT duty, and `fdpTableUsed` is printed beside it so it can be checked. A duty with no computed maximum shows a dash, not a default — a default is a number somebody might fly to
 - Do not add a 7-day duty figure to the dashboard. CAAS imposes 14-day and 28-day duty caps (Reg 12) and 28-day/12-month flight caps (Reg 107); a 7-day limit is not in the regulation and printing one is worse than printing none
 - Do not turn the legal page back into a stack of glass cards — six cards' borders, radii and margins cost ~120px of a phone's height, which is the difference between it fitting and not. One surface, hairline `divide-y` rules. And keep it `max-h-full`, not `h-full`: stretching makes the one `flex-1` section absorb every spare pixel and leaves a hole under the last requirement
