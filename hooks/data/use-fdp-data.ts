@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect } from "react"
 import { useFlights } from "./use-flights"
 import { buildPlannedDuties } from "@/lib/utils/dashboard/planned-duties"
+import { applyAcclimatisation } from "@/lib/utils/roster/fdp-calculator"
 import { useScheduleEntries } from "./use-schedule"
 import { useDBReady } from "./use-db"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
@@ -122,7 +123,13 @@ function computeFDPResult(
     )
 
     const merged = mergeDutyPeriods(logbookDPs, scheduleDPs)
-    const withRest = calculateAllRestPeriods(merged)
+    // Correct each duty's FDP table against the crew member's ACTUAL
+    // acclimatised zone, which only the whole timeline can tell us — a duty
+    // period is built before anything knows the three-nights history that
+    // decides it. Must run before the rest calculation, which reads the
+    // corrected duty figures.
+    const acclimatised = applyAcclimatisation(merged)
+    const withRest = calculateAllRestPeriods(acclimatised)
 
     const today = new Date()
     const limits = DEFAULT_FTL_LIMITS
@@ -147,8 +154,12 @@ function computeFDPResult(
     // Timeline chart data
     const timelineData = generateTimelineData(withRest, limits)
 
-    // Rest until legal for next duty
-    const restUntilLegal = calculateRestUntilLegal(currentDPs)
+    // Rest until legal for the next duty. Given the WHOLE timeline, not just
+    // the past: it picks the last COMPLETED duty itself, and para 4's 24-hour
+    // requirement turns on whether the duty AHEAD encompasses an early start,
+    // a late finish or a take-off or landing in the window of circadian low —
+    // which is invisible in a past-only list.
+    const restUntilLegal = calculateRestUntilLegal(withRest)
 
     const value: FDPResult = {
       allDutyPeriods: withRest,

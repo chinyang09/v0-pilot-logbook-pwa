@@ -2071,13 +2071,87 @@ instead of effect-then-setState, and avoid `useLiveQuery` in new components
 ### FDP / roster legality — audited against the regulation (14 Aug 2026)
 
 The source is the **Air Navigation (121 — Commercial Air Transport by Large
-Aeroplanes) Regulations, FIFTH SCHEDULE (Regulation 178)**. Everything below
-was checked cell by cell against that document.
+Aeroplanes) Regulations**: the **FIFTH SCHEDULE (Regulation 178)** for the
+limits, and the **FIRST SCHEDULE (Regulation 2)** for the words those limits
+are written in. Everything below was checked cell by cell against those
+documents.
 
 **`lib/utils/roster/__tests__/fdp-tables.test.ts` transcribes the schedule's
 own figures**, not the implementation's — it is the check ON the tables rather
-than a copy of them. `rest-period.test.ts` does the same for paragraph 3. If a
-table ever needs to change, change the test from the regulation first.
+than a copy of them. `rest-period.test.ts` does the same for paragraph 3,
+`regulation-definitions.test.ts` for the First Schedule and
+`circadian-rest.test.ts` for paragraph 4. If a table ever needs to change,
+change the test from the regulation first.
+
+#### The FIRST SCHEDULE definitions are code, not assumptions
+
+`lib/utils/roster/regulation-definitions.ts` holds them. They are not helper
+utilities — they are the vocabulary the Fifth Schedule is written in, and every
+one of them used to be an assumption scattered through the calculator. Three of
+those assumptions were **wrong**, all in the permissive direction:
+
+| Term | What the code assumed | What the schedule says |
+|---|---|---|
+| local night | a fixed 22:00–06:00 SGT band | an 8-hour period falling between **2200 and 0800** local |
+| rest start | 30 minutes after gate-in | **one hour after the crew member is free of all duties** |
+| acclimated | within 2 hours of home base | **3 consecutive local nights free of duty in a time zone** |
+
+- **A local night is any 8 contiguous hours inside a TEN-hour window.** Rest
+  running 00:30 → 08:30 is a full local night and used to read as none, taking
+  the requirement from 10 hours to 12. In the other direction, ANY overlap used
+  to count, so rest that merely clipped 22:00 claimed 3(1)(a)'s 10 hours when
+  3(1)(b)'s 12 applied. And it is measured **where the crew member actually
+  is** (`DutyPeriod.arrivalTimezoneOffset`), not at home base — a Singapore
+  night was being tested against a rest period spent in London.
+- **A duty period ends when the crew member is free of ALL duties.** Para 7(2)
+  puts 90 minutes of checks around the flying with at least 60 before it, so at
+  least 30 minutes of post-flight checks are still duty — and the rest period
+  then commences an hour after THAT. The old model ended the duty at gate-in
+  and let 30 minutes stand for both, over-counting rest by an hour.
+- **Acclimatisation is a STATE built from history, not a property of the
+  airport a duty starts at.** `applyAcclimatisation` walks the whole timeline,
+  and each duty's FDP table is re-derived against the zone the crew member was
+  acclimated to **as at that duty's report time** — so landing somewhere cannot
+  retroactively justify its own table. A pilot who night-stops once in London
+  is not acclimated to London (Table B); one who has been there a week is
+  (Table A). It runs between `mergeDutyPeriods` and `calculateAllRestPeriods`,
+  because the rest calculation reads the corrected figures.
+
+#### Paragraph 4 — duties around the window of circadian low
+
+Three First Schedule terms, all defined in **acclimated time**:
+
+| | Definition |
+|---|---|
+| early start | a scheduled DEPARTURE commencing 0500–0659 |
+| late finish | a scheduled ARRIVAL ending 0100–0159 |
+| window of circadian low | a TAKE-OFF or LANDING in 0200–0459 |
+
+The last one is defined *in relation to a take-off or landing* — not to a duty
+period and not to the cruise. A sector airborne at 2310 and landing at 0650 is
+over the window for its whole middle and touches neither end of it.
+
+A duty encompassing any of the three is **disruptive**, and para 4 then asks for
+a rest period of **24 hours inclusive of a local night**: 4(1)(a) before the
+FIRST of a series, and 4(2) again once two consecutive ones are complete.
+Between them, 4(1)(b) hands it back to paragraph 3.
+
+- **The classification happens in `applyAcclimatisation`, not at construction.**
+  The duty period producers store the raw instants (`departureMs`, `arrivalMs`,
+  `takeoffLandingMs`); only the whole timeline knows what clock to read them in.
+- **The run of consecutive disruptive duties is tracked across the timeline**
+  (`calculateAllRestPeriods`), because neither duty in a pair can see it — 4(2)
+  reacts to the two duties BEFORE the one whose rest is being measured. The
+  count is "since the last 24-hour circadian rest": once para 4 has required its
+  24 hours, the duty that follows opens a fresh series. An ordinary duty clears
+  it outright.
+- **Gate times stand in for wheels times when a flight records none.** Every
+  planned sector and older logbook rows carry out/in only; treating those as "no
+  take-off or landing" would classify all of them as never touching the window.
+- **A LOCAL_STATION schedule report supplies no instants at all.** Its
+  departure-side and arrival-side times are in different zones and the entry
+  does not carry the arrival's offset, so it is left unclassified rather than
+  read against a clock that could be a whole timezone out.
 
 #### Verified correct
 
@@ -2122,6 +2196,16 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
 - **`includesLocalNight` was given the un-wrapped debrief date.** A duty
   crossing midnight debriefs the following day, and testing the night window
   against the wrong day picked the wrong rest rule (3a vs 3b).
+- **The three First Schedule definitions above**, each of which shortened a
+  required rest or raised an FDP maximum.
+- **Paragraph 4 was not implemented at all.** A roster of consecutive early
+  starts asked only for paragraph 3's 10 or 12 hours where the schedule
+  requires 24 inclusive of a local night.
+- **`calculateRestUntilLegal` still had the if/else chain** the same pass fixed
+  in `calculateRestPeriod` — so the countdown a pilot actually reads off the
+  dashboard under-stated an 11-hour duty's rest by an hour, and measured the
+  local night at home base rather than where the crew member was. It now builds
+  the same candidate set, and folds in para 4 when the NEXT duty is known.
 
 #### Known gaps — these need the OWNER's input, not a guess
 
@@ -2151,12 +2235,17 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
   the ORIGINAL report time; 4h or more re-bases it on the actual. Not modelled.
 - **Para 13 / 3(2): commander's discretion.** +3h FDP and −2h rest are not
   representable, so a duty legitimately extended reads as an exceedance.
-- **Acclimatisation is approximated by home base.** Para 14(1)(a) measures
-  against the person's ACCLIMATED time, which drifts on a multi-day pattern
-  away from base (para 5(5) implies 82 hours at base restores it).
-  `isAcclimated` compares the departure zone against SGT, which is exact from
-  base and approximate mid-pattern. Erring toward Table A raises the maximum,
-  so any doubt should move a duty to Table B.
+- **Acclimatisation is only as good as the roster's COVERAGE.**
+  `acclimatisedOffsetMinutes` now walks the real duty history rather than
+  assuming home base, but it reads a gap between two known duties as "free of
+  duty" — so a period the app simply has no data for looks like three nights
+  somewhere. With a complete roster loaded it is exact; with a partial one it
+  can move a duty to Table A, which raises the maximum. It cannot be fixed
+  without knowing where roster coverage begins and ends.
+- **A rest period away from base may be over-reported.** The First Schedule's
+  rest definition takes the SHORTER of "one hour after free of all duties" and
+  "on reaching the designated accommodation". The app has no idea when a crew
+  member reached their hotel, so it models the first limb only.
 
 #### Still deferred — rolling-window date handling
 
@@ -3026,7 +3115,15 @@ When making changes, be aware of these high-impact files:
 - Do not delete a user record outright — `deleteEntity` is a **soft delete** into Recently Deleted (30 days) and pushes an UPDATE; only `purgeEntity` writes a tombstone. Push a real delete when the user merely binned it and the row is gone on every device with nothing to restore. The two exceptions are discrepancies and schedule entries, which are import bookkeeping and stay hard
 - Do not merge the dashboard's two pages back into one. Legal and Summary want opposite layouts — an instrument read in two seconds versus a month's review — and one layout serving both is what makes a dashboard a spreadsheet. They get different containers: Legal is laid out TO the height (no scroll), Summary is an ordinary scrolling page
 - Do not change a figure in `fdp-tables.ts` without changing `fdp-tables.test.ts` FROM THE REGULATION first — that test transcribes the Fifth Schedule's own numbers, so it is the check ON the tables rather than a copy of them. Same for `rest-period.test.ts` and paragraph 3
-- Do not treat the rest sub-rules of para 3(1) as alternatives — they are joined by "and", so every applicable one must be met and the requirement is the LARGEST of them. As an if/else chain an 11-hour duty resting without a local night asked for 11 hours instead of 12
+- Do not treat the rest sub-rules of para 3(1) as alternatives — they are joined by "and", so every applicable one must be met and the requirement is the LARGEST of them. As an if/else chain an 11-hour duty resting without a local night asked for 11 hours instead of 12. The same rule holds in `calculateRestUntilLegal`, which had the chain long after `calculateRestPeriod` lost it — that one is the countdown a pilot reads off the dashboard
+- Do not reintroduce a definition the FIRST SCHEDULE already gives. `lib/utils/roster/regulation-definitions.ts` is the vocabulary the Fifth Schedule is written in, and the three terms that were assumed were all assumed WRONG: a local night is any 8 contiguous hours in the **2200–0800** window (not a fixed 22:00–06:00 band, and not any overlap with one), a rest period commences **one hour after free of all duties** (not 30 minutes after gate-in), and "acclimated" is **3 consecutive local nights free of duty in a zone** (not proximity to home base)
+- Do not measure a local night at home base — it is local time **where the crew member actually is**, which is the preceding duty's `arrivalTimezoneOffset`. Testing a Singapore night against a rest period spent in London picks the wrong rest rule in whichever direction the zones happen to fall
+- Do not end a duty period at gate-in. Para 7(2) requires 90 minutes of checks around the flying with at least 60 before it, so at least 30 minutes of post-flight checks are still DUTY — and the rest period commences an hour after that, not 30 minutes after the aeroplane parks
+- Do not decide an FDP table from the departure airport's offset alone. `applyAcclimatisation` re-derives each duty against the zone the crew member was acclimated to **as at that duty's report time**, from the duties before it — reading the duty's own arrival zone would let landing somewhere instantly justify its own table. It must run between `mergeDutyPeriods` and `calculateAllRestPeriods`, because the rest calculation reads the corrected figures
+- Do not classify a duty's circadian state where the duty period is BUILT — early start, late finish and the window of circadian low are all defined in ACCLIMATED time, and acclimatisation is a property of the whole timeline. The producers store the raw instants (`departureMs`/`arrivalMs`/`takeoffLandingMs`) and `applyAcclimatisation` does the classifying. Carry all three through `mergeAdjacentDutyPeriods` too, or a merged overnight — precisely the shape that lands in the window — is classified against half of itself
+- Do not read the window of circadian low against a duty period or a cruise — it is defined "in relation to a **take-off or landing**", 0200–0459. A sector airborne at 2310 and landing at 0650 is over the window for its whole middle and touches neither end of it
+- Do not track paragraph 4's disruptive run inside `calculateRestPeriod` — 4(2) reacts to the two duties BEFORE the one whose rest is being measured, so neither duty in a pair can see it. `calculateAllRestPeriods` carries the count, and it is "since the last 24-hour circadian rest": a duty that para 4 already demanded 24 hours before opens a NEW series rather than extending the old one, and an ordinary duty clears it
+- Do not treat a flight with no wheels times as never touching the window of circadian low — every PLANNED sector and older logbook rows carry out/in only, so the gate times stand in for them. Silence there is the permissive way to be wrong. A LOCAL_STATION schedule report is the opposite case and is left unclassified on purpose: its departure-side and arrival-side times are in different zones the entry cannot resolve
 - Do not count only the LONGEST sector for the para 14(2) adjustment — the schedule says long sectorS. Two 8-hour sectors are 4 effective sectors under Table A, not 3, and under-counting raises the FDP maximum. Pass `sectorMinutes: number[]`, and carry `DutyPeriod.sectorMinutes` through `mergeAdjacentDutyPeriods` or a merged overnight silently loses the adjustment
 - Do not apply the para 14(2) long-sector adjustment to an augmented crew or to Table C — it applies where the crew "only consists of 2 pilots", and an augmented crew's ceiling comes from para 15 instead
 - Do not grant the augmented-crew extension without `inFlightRestFacilities === true` — para 15(3)(b) forbids any extension without rest facilities, and UNKNOWN must withhold it rather than assume in favour of a longer duty

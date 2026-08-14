@@ -241,6 +241,9 @@ export function applyAugmentedCrewExtension(
  *   LHR (UTC+0) → false (diff = 8)
  *   JFK (UTC-5) → false (diff = 13)
  */
-export function isAcclimated(departureTimezoneOffset: number): boolean {
-  return Math.abs(departureTimezoneOffset - BASE_TZ_OFFSET) <= MAX_ACCLIMATION_DIFF
+export function isAcclimated(
+  departureTimezoneOffset: number,
+  acclimatedOffset: number = BASE_TZ_OFFSET
+): boolean {
+  return Math.abs(departureTimezoneOffset - acclimatedOffset) <= MAX_ACCLIMATION_DIFF
 }

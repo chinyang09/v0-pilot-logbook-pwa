@@ -57,10 +57,13 @@ describe("buildPlannedDuties", () => {
 
     expect(dp.sectorCount).toBe(2)
     expect(dp.route).toBe("WSSS-VTCC-WSSS")
-    // Report is one hour before the first gate-out; debrief is the last
-    // gate-in, which here is the SCHEDULED arrival of sector two.
+    // A duty period runs from report to being free of ALL duties, and para
+    // 7(2) puts 90 minutes of checks around the flying with at least 60 of
+    // them before it. So report is an hour before the first gate-out and
+    // debrief is 30 minutes after the last gate-in — which here is the
+    // SCHEDULED arrival of sector two.
     expect(dp.reportTime).toBe("02:35")
-    expect(dp.debriefTime).toBe("10:30")
+    expect(dp.debriefTime).toBe("11:00")
   })
 
   it("computes the FDP maximum for the sectors PLANNED, not the one flown", () => {

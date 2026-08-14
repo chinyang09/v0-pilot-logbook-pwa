@@ -22,8 +22,13 @@ import type { DutyPeriod } from "@/types/entities/roster.types"
  * menu to pick the first matching entry from — which is what makes the
  * combination cases below the interesting ones.
  *
- * Local night in Singapore is 22:00–06:00 SGT, i.e. 14:00–22:00 UTC, and duty
- * period times here are UTC.
+ * "Local night" is defined in the FIRST SCHEDULE as a period of 8 hours falling
+ * between 2200 and 0800 LOCAL time — see `regulation-definitions.test.ts`.
+ * Duty period times here are UTC, and the fixtures are read in Singapore local
+ * time (UTC+8) unless a fixture says otherwise.
+ *
+ * A rest period commences ONE HOUR after the crew member is free of all duties,
+ * so the figures below are the gap between debrief and report less 60 minutes.
  */
 
 function duty(over: Partial<DutyPeriod>): DutyPeriod {
@@ -164,9 +169,62 @@ describe("a duty that crossed midnight", () => {
         dutyMinutes: 6 * 60,
       }),
     )
-    // Debrief is 03:00 on the 15th; rest to 18:00 the same day is 15 hours less
-    // the buffer, and it does not reach the 14:00 UTC night start until the end.
-    expect(r.restMinutes).toBe(15 * 60 - 30)
+    // Debrief is 03:00 on the 15th; rest to 18:00 the same day is 15 hours,
+    // less the hour before a rest period commences.
+    expect(r.restMinutes).toBe(15 * 60 - 60)
     expect(r.precedingDutyMinutes).toBe(6 * 60)
+  })
+})
+
+
+describe("the local night is the DEFINED one, not a fixed 2200–0600 band", () => {
+  it("counts a night that runs 0000 to 0800 local", () => {
+    // Eight full hours between 2200 and 0800, none of it before midnight. The
+    // old fixed 2200–0600 band called this no local night and asked for 12
+    // hours of rest instead of 10.
+    const r = calculateRestPeriod(
+      duty({ date: "2026-08-15", reportTime: "01:00" }), // 09:00 SGT
+      duty({ date: "2026-08-14", debriefTime: "15:30", dutyMinutes: 8 * 60 }), // 23:30 SGT
+    )
+    expect(r.includesLocalNight).toBe(true)
+    expect(r.requiredRestMinutes).toBe(10 * 60)
+  })
+
+  it("rejects a rest that only clips the edge of the window", () => {
+    // 21:00 → 23:00 SGT touches the window for an hour. Any-overlap logic
+    // called that a local night and granted the 10-hour rule.
+    const r = calculateRestPeriod(
+      duty({ date: "2026-08-14", reportTime: "15:00" }), // 23:00 SGT
+      duty({ date: "2026-08-14", debriefTime: "13:00", dutyMinutes: 8 * 60 }), // 21:00 SGT
+    )
+    expect(r.includesLocalNight).toBe(false)
+    expect(r.requiredRestMinutes).toBe(12 * 60)
+  })
+
+  it("measures the night where the crew member actually is", () => {
+    // Rest taken at a UTC+0 station: 22:00 → 08:00 THERE is a local night,
+    // even though in Singapore it is the middle of the working day.
+    const away = calculateRestPeriod(
+      duty({ date: "2026-08-15", reportTime: "09:00" }),
+      duty({
+        date: "2026-08-14",
+        debriefTime: "21:00",
+        dutyMinutes: 8 * 60,
+        arrivalTimezoneOffset: 0,
+      }),
+    )
+    expect(away.includesLocalNight).toBe(true)
+
+    // The same absolute rest, but recorded as ending at home base, is not one.
+    const home = calculateRestPeriod(
+      duty({ date: "2026-08-15", reportTime: "09:00" }),
+      duty({
+        date: "2026-08-14",
+        debriefTime: "21:00",
+        dutyMinutes: 8 * 60,
+        arrivalTimezoneOffset: 8,
+      }),
+    )
+    expect(home.includesLocalNight).toBe(false)
   })
 })

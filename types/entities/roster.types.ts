@@ -215,13 +215,43 @@ export interface CurrencyWithStatus extends Currency {
 export interface RestPeriodInfo {
   restMinutes: number               // Actual rest between duties
   requiredRestMinutes: number       // Minimum required per Reg 3
-  includesLocalNight: boolean       // Rest overlaps 22:00-06:00 SGT
+  /**
+   * Whether the rest contains a LOCAL NIGHT as the First Schedule defines it —
+   * 8 hours falling between 2200 and 0800 local time, measured where the crew
+   * member actually is. Not a fixed 22:00–06:00 home-base band.
+   */
+  includesLocalNight: boolean
   precedingDutyMinutes: number      // Duration of preceding duty
   compliant: boolean                // restMinutes >= requiredRestMinutes
-  rule: "3a" | "3b" | "3c" | "3d"  // Which Reg 3 sub-rule applies
+  /**
+   * Which sub-rule governs — the one demanding the most rest.
+   *
+   * `3a`–`3d` are the minimum rest periods of paragraph 3. `4a` and `4b` are
+   * paragraph 4's 24-hour requirement around duties that encompass an early
+   * start, a late finish, or a take-off or landing in the window of circadian
+   * low: `4a` before the FIRST of such a series, `4b` after two consecutive
+   * ones.
+   */
+  rule: "3a" | "3b" | "3c" | "3d" | "4a" | "4b"
 }
 
 export type DutyPeriodSource = "logbook" | "schedule" | "merged"
+
+/**
+ * The three things paragraph 4 of the Fifth Schedule reacts to, each defined in
+ * the First Schedule in ACCLIMATED time:
+ *
+ * - **early start** — a scheduled departure commencing 0500–0659
+ * - **late finish** — a scheduled arrival ending 0100–0159
+ * - **window of circadian low** — a take-off or landing in 0200–0459
+ */
+export interface CircadianFlags {
+  earlyStart: boolean
+  lateFinish: boolean
+  woclOperation: boolean
+  /** Any of the three — what para 4 calls a duty that "encompasses" one. */
+  disruptive: boolean
+}
 
 export interface DutyPeriod {
   id: string
@@ -250,6 +280,35 @@ export interface DutyPeriod {
   augmentedCrew?: AugmentedCrewLevel      // defaults to "none"
   fdpTableUsed?: FdpTableUsed             // which CAAS table was applied
   departureTimezoneOffset?: number        // UTC offset of departure airport
+  /**
+   * UTC offset of the ARRIVAL airport of the last sector — i.e. where the crew
+   * member actually is once the duty ends.
+   *
+   * "Local night" is defined in local time, and the local time that matters for
+   * the rest after a duty is the one where the rest is taken. Assuming home
+   * base put a Singapore night against a rest period spent in London.
+   */
+  arrivalTimezoneOffset?: number
+  /**
+   * The zone the crew member was ACCLIMATED to when this duty commenced, in
+   * hours from UTC — the state defined in the First Schedule, not home base.
+   * Set by `applyAcclimatisation` once the whole timeline is known.
+   */
+  acclimatedOffset?: number
+  /**
+   * Absolute UTC instants the circadian classification of para 4 needs:
+   * the first scheduled gate-out, the last scheduled gate-in, and every
+   * take-off and landing.
+   *
+   * Stored rather than classified at construction because "early start",
+   * "late finish" and "window of circadian low" are all defined in ACCLIMATED
+   * time, and acclimatisation is only known once the whole timeline is in hand.
+   */
+  departureMs?: number
+  arrivalMs?: number
+  takeoffLandingMs?: number[]
+  /** Set by `applyAcclimatisation`, against the acclimated time. */
+  circadian?: CircadianFlags
   effectiveSectors?: number               // after long sector adjustment
   /**
    * Every sector's block time, in minutes.

@@ -24,6 +24,17 @@ import type {
 import type { FlightLog } from "@/types/entities/flight.types"
 import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time"
 import {
+  acclimatisedOffsetMinutes,
+  CIRCADIAN_REST_MIN,
+  circadianRestRule,
+  classifyCircadian,
+  containsLocalNight,
+  POST_FLIGHT_CHECK_MIN,
+  PRE_FLIGHT_CHECK_MIN,
+  REST_STARTS_AFTER_DUTY_MIN,
+  type DutyInterval,
+} from "@/lib/utils/roster/regulation-definitions"
+import {
   lookupTableA,
   lookupTableB,
   lookupTableC,
@@ -36,23 +47,25 @@ import {
 // Constants
 // ============================================
 
-/** Report time buffer before first OUT time (minutes) */
-const REPORT_BUFFER_MINUTES = 60
+/**
+ * Report time buffer before first OUT time — para 7(2)'s "minimum of one hour
+ * to the completion of pre-flight checks".
+ */
+const REPORT_BUFFER_MINUTES = PRE_FLIGHT_CHECK_MIN
 
 /**
- * Rest start buffer after gate-in (minutes).
- * Duty period ends at gate-in (no post-duty extension), but the pilot is
- * considered "at rest" only after this buffer — accounting for shutdown,
- * debrief, and transit to rest location.
+ * Where a duty period ENDS relative to gate-in.
+ *
+ * A "duty period" ends when the crew member "is free from all duties" (First
+ * Schedule), and para 7(2) requires 90 minutes for pre-flight and post-flight
+ * checks together with at least 60 of those before the flight — so at least 30
+ * minutes of post-flight checks are still DUTY. The code used to end the duty
+ * at gate-in and treat the 30 minutes as part of the rest instead.
  */
-const REST_START_BUFFER_MINUTES = 30
+const DEBRIEF_BUFFER_MINUTES = POST_FLIGHT_CHECK_MIN
 
-/**
- * SGT local night window in UTC minutes.
- * Local night in Singapore (UTC+8) = 22:00-06:00 SGT = 14:00-22:00 UTC.
- */
-const LOCAL_NIGHT_UTC_START = 14 * 60   // 14:00 UTC = 22:00 SGT
-const LOCAL_NIGHT_UTC_END = 22 * 60     // 22:00 UTC = 06:00 SGT (next day)
+/** Home base offset, in minutes from UTC — Singapore. */
+const HOME_BASE_OFFSET_MINUTES = 8 * 60
 
 // ============================================
 // DutyPeriod creation from schedule entries
@@ -143,6 +156,7 @@ export function calculateDutyPeriodFromSchedule(
     departureTimezoneOffset,
     effectiveSectors: fdpResult.effectiveSectors,
     sectorMinutes,
+    ...collectScheduleCircadianInstants(entry),
     source: "schedule",
     isFuture: entry.date > today,
     scheduleEntryIds: [entry.id],
@@ -305,12 +319,12 @@ function createDutyPeriodFromFlightGroup(
 
   if (earliestOut === Infinity || latestIn === -Infinity) return null
 
-  // Report = 1h before first gate-out. Debrief = last gate-in (no buffer).
-  // Duty period duration = 1h report + (gate-out to gate-in). The +30min post-duty
-  // buffer is NOT counted toward duty hours — it's applied to rest start instead
-  // (see REST_START_BUFFER_MINUTES in rest calculations).
+  // A duty period "ends when that crew member is free from all duties", and
+  // para 7(2) puts at least 30 minutes of post-flight checks after gate-in. So
+  // the duty runs from one hour before gate-out to 30 minutes after gate-in;
+  // the rest period then commences an hour after THAT.
   const reportMinutes = Math.max(0, earliestOut - REPORT_BUFFER_MINUTES)
-  const debriefMinutes = latestIn
+  const debriefMinutes = latestIn + DEBRIEF_BUFFER_MINUTES
 
   // For FDP table lookup: use scheduled OUT when available, else actual OUT
   const scheduledReportMinutes = earliestScheduledOut !== Infinity
@@ -323,14 +337,20 @@ function createDutyPeriodFromFlightGroup(
 
   const dutyMinutes = debriefMinutes - reportMinutes
 
-  // Departure timezone from first flight (default SGT)
+  // Departure timezone from the first flight, arrival timezone from the last —
+  // the latter is where the crew member is when the duty ends, which is the
+  // "local time" a local night is measured in.
   const depTzOffset = groupFlights[0]?.departureTimezone ?? 8
+  const arrTzOffset =
+    groupFlights[groupFlights.length - 1]?.arrivalTimezone ?? depTzOffset
 
   // EVERY sector's block time — para 14(2) counts each long sector up, not
   // only the longest.
   const sectorMinutes = groupFlights.map((f) =>
     f.blockTime ? hhmmToMinutes(f.blockTime) : 0
   )
+
+  const circadianInstants = collectCircadianInstants(date, groupFlights)
 
   // Convert scheduled report time to local for FDP table lookup
   let localReportMinutes = scheduledReportMinutes + depTzOffset * 60
@@ -367,13 +387,139 @@ function createDutyPeriodFromFlightGroup(
     fdpExtensionUsed: false,
     fdpTableUsed: fdpResult.tableUsed,
     departureTimezoneOffset: depTzOffset,
+    arrivalTimezoneOffset: arrTzOffset,
     effectiveSectors: fdpResult.effectiveSectors,
     sectorMinutes,
+    ...circadianInstants,
     source: "logbook",
     isFuture: date > new Date().toISOString().split("T")[0],
     scheduleEntryIds: [],
     flightIds: groupFlights.map((f) => f.id),
     route,
+  }
+}
+
+// ============================================
+// Circadian instants (para 4 / First Schedule)
+// ============================================
+
+/** The absolute UTC instants paragraph 4's classification is drawn from. */
+interface CircadianInstants {
+  departureMs?: number
+  arrivalMs?: number
+  takeoffLandingMs?: number[]
+}
+
+/**
+ * Collect the instants the three circadian definitions are tested against.
+ *
+ * They are stored as absolute UTC instants rather than classified here, because
+ * "early start", "late finish" and "window of circadian low" are all defined in
+ * the crew member's ACCLIMATED time — and acclimatisation is a property of the
+ * whole timeline, not of one duty (`applyAcclimatisation` does the classifying).
+ *
+ * Two readings of the source data are deliberate:
+ *
+ * - **One source per flight.** A flight that has been flown supplies its actual
+ *   times; one that has not supplies its scheduled ones. Mixing the two within a
+ *   sector risks an actual time reading as earlier than the scheduled one it
+ *   follows, which the day-wrap below would push a whole day out.
+ * - **Gate times stand in for wheels times when a flight has none.** The window
+ *   of circadian low is defined in relation to a TAKE-OFF or LANDING, so off/on
+ *   are preferred; a duty that records neither (every planned duty, and older
+ *   logbook rows) would otherwise be classified as never touching the window at
+ *   all, which is the permissive way to be wrong.
+ */
+function collectCircadianInstants(
+  date: string,
+  groupFlights: FlightLog[]
+): CircadianInstants {
+  const dayStartMinutes = dateToDays(date) * 1440
+
+  // A duty runs strictly forward from its first gate-out, so any time that
+  // reads as earlier than the one before it belongs to the following day.
+  let cursor = -1
+  const step = (time?: string): number | undefined => {
+    if (!time) return undefined
+    let m = hhmmToMinutes(time)
+    while (m < cursor) m += 1440
+    cursor = m
+    return (dayStartMinutes + m) * 60_000
+  }
+
+  let departureMs: number | undefined
+  let arrivalMs: number | undefined
+  const takeoffLandingMs: number[] = []
+
+  for (const flight of groupFlights) {
+    const flown = Boolean(flight.outTime)
+    const outT = flown ? flight.outTime : flight.scheduledOut
+    const inT = flown ? flight.inTime : flight.scheduledIn
+    const offT = (flown ? flight.offTime : undefined) ?? outT
+    const onT = (flown ? flight.onTime : undefined) ?? inT
+
+    const out = step(outT)
+    const off = step(offT)
+    const on = step(onT)
+    const arrived = step(inT)
+
+    if (out !== undefined && departureMs === undefined) departureMs = out
+    if (off !== undefined) takeoffLandingMs.push(off)
+    if (on !== undefined) takeoffLandingMs.push(on)
+    if (arrived !== undefined) arrivalMs = arrived
+  }
+
+  return {
+    departureMs,
+    arrivalMs,
+    takeoffLandingMs: takeoffLandingMs.length ? takeoffLandingMs : undefined,
+  }
+}
+
+/**
+ * The same instants, from a schedule entry's sectors.
+ *
+ * A schedule entry's times are in whatever frame the report stated, so they are
+ * shifted to UTC first. A LOCAL_STATION report cannot be: its departure-side and
+ * arrival-side times are in DIFFERENT zones and the entry does not carry the
+ * arrival's offset, so it returns nothing rather than a classification that
+ * could be a whole timezone out.
+ */
+function collectScheduleCircadianInstants(entry: ScheduleEntry): CircadianInstants {
+  if (entry.timeReference === "LOCAL_STATION") return {}
+  const toUtcShift =
+    entry.timeReference === "UTC" ? 0 : -HOME_BASE_OFFSET_MINUTES
+
+  const dayStartMinutes = dateToDays(entry.date) * 1440
+
+  let cursor = -1
+  const step = (time?: string): number | undefined => {
+    if (!time) return undefined
+    let m = hhmmToMinutes(time)
+    while (m < cursor) m += 1440
+    cursor = m
+    return (dayStartMinutes + m + toUtcShift) * 60_000
+  }
+
+  let departureMs: number | undefined
+  let arrivalMs: number | undefined
+  const takeoffLandingMs: number[] = []
+
+  for (const sector of entry.sectors ?? []) {
+    const out = step(sector.actualOut || sector.scheduledOut)
+    const arrived = step(sector.actualIn || sector.scheduledIn)
+    if (out !== undefined && departureMs === undefined) departureMs = out
+    // A schedule carries gate times only — they stand in for the wheels times,
+    // as above.
+    if (out !== undefined) takeoffLandingMs.push(out)
+    if (arrived !== undefined) takeoffLandingMs.push(arrived)
+    if (arrived !== undefined) arrivalMs = arrived
+  }
+
+  return {
+    departureMs,
+    arrivalMs,
+    takeoffLandingMs: takeoffLandingMs.length ? takeoffLandingMs : undefined,
   }
 }
 
@@ -528,6 +674,17 @@ export function mergeAdjacentDutyPeriods(dutyPeriods: DutyPeriod[]): DutyPeriod[
         fdpTableUsed: fdpResult.tableUsed,
         effectiveSectors: fdpResult.effectiveSectors,
         sectorMinutes: mergedSectorMinutes,
+        // The merged duty departs when the first one did and arrives when the
+        // second one did, and every take-off and landing belongs to it. Dropped,
+        // a merged overnight would be classified against half of itself — and
+        // an overnight is precisely the shape that lands in the window of
+        // circadian low.
+        departureMs: prev.departureMs ?? curr.departureMs,
+        arrivalMs: curr.arrivalMs ?? prev.arrivalMs,
+        takeoffLandingMs:
+          prev.takeoffLandingMs || curr.takeoffLandingMs
+            ? [...(prev.takeoffLandingMs ?? []), ...(curr.takeoffLandingMs ?? [])]
+            : undefined,
         flightIds: [...prev.flightIds, ...curr.flightIds],
         scheduleEntryIds: [...prev.scheduleEntryIds, ...curr.scheduleEntryIds],
         source: prev.source !== curr.source ? "merged" : prev.source,
@@ -568,6 +725,16 @@ export interface FdpCalculationParams {
   sectorMinutes?: number[]
   /** Just the longest sector, for callers that have nothing better. */
   longestSectorMinutes?: number
+  /**
+   * The zone the crew member is ACCLIMATED to, in hours from UTC.
+   *
+   * Para 14(1)(a) compares the local time where the FDP commences against the
+   * crew member's acclimated time — which the First Schedule defines as the
+   * zone they have spent three consecutive local nights free of duty in, not
+   * home base. Defaults to home base for a caller with no history to derive it
+   * from.
+   */
+  acclimatedOffset?: number
   /**
    * Whether appropriate in-flight rest facilities are confirmed available.
    * Para 15(1)(b) makes them a condition of any augmented-crew extension and
@@ -613,6 +780,7 @@ function calculateMaxFDPFull(params: FdpCalculationParams): FdpCalculationResult
     crewConfig = "two-pilot",
     augmentedCrew = "none",
     departureTimezoneOffset = 8,
+    acclimatedOffset = 8,
     sectorMinutes,
     longestSectorMinutes = 0,
     inFlightRestFacilities,
@@ -624,7 +792,7 @@ function calculateMaxFDPFull(params: FdpCalculationParams): FdpCalculationResult
   let tableUsed: FdpTableUsed
   if (crewConfig === "single-pilot") {
     tableUsed = "C"
-  } else if (isAcclimated(departureTimezoneOffset)) {
+  } else if (isAcclimated(departureTimezoneOffset, acclimatedOffset)) {
     tableUsed = "A"
   } else {
     tableUsed = "B"
@@ -678,38 +846,39 @@ function calculateMaxFDPFull(params: FdpCalculationParams): FdpCalculationResult
 // ============================================
 
 /**
- * Check if a time interval (in UTC) includes a Singapore local night.
- * SGT local night = 22:00-06:00 SGT = 14:00-22:00 UTC.
- * Checks across multiple days if the rest spans more than 24h.
+ * Does a rest interval include a LOCAL NIGHT, as the First Schedule defines it?
+ *
+ * > "Local night" means a period of 8 hours falling between 2200 hours and
+ * > 0800 hours local time.
+ *
+ * Two things were wrong before the definition was to hand, and both made rest
+ * look better than it was:
+ *
+ * 1. The window was modelled as a fixed 22:00–06:00. It is 2200 **to 0800** —
+ *    a ten-hour envelope — and a local night is any eight contiguous hours
+ *    inside it. Rest running 00:30 → 08:30 local contains a full local night
+ *    and used to be reported as containing none.
+ * 2. ANY overlap counted. One minute inside the window satisfied it, so a rest
+ *    that clipped the edge of the night claimed the 10-hour rule of para 3(1)(a)
+ *    when the 12-hour rule of 3(1)(b) applied.
+ *
+ * @param tzOffsetMinutes the zone the rest is taken in — the ARRIVAL station of
+ *   the preceding duty, not home base, because "local time" means where the
+ *   crew member is.
  */
 export function includesLocalNight(
   debriefDate: string,
   debriefTime: string,
   reportDate: string,
-  reportTime: string
+  reportTime: string,
+  tzOffsetMinutes: number = HOME_BASE_OFFSET_MINUTES
 ): boolean {
-  // Convert to absolute UTC minutes from epoch-reference for comparison
-  const debriefDayOffset = dateToDays(debriefDate)
-  const reportDayOffset = dateToDays(reportDate)
+  const debriefMs =
+    (dateToDays(debriefDate) * 1440 + hhmmToMinutes(debriefTime)) * 60_000
+  const reportMs =
+    (dateToDays(reportDate) * 1440 + hhmmToMinutes(reportTime)) * 60_000
 
-  const debriefAbsolute = debriefDayOffset * 1440 + hhmmToMinutes(debriefTime)
-  const reportAbsolute = reportDayOffset * 1440 + hhmmToMinutes(reportTime)
-
-  // Check each day in the rest window for local night overlap
-  const startDay = debriefDayOffset
-  const endDay = reportDayOffset
-
-  for (let day = startDay; day <= endDay; day++) {
-    const nightStart = day * 1440 + LOCAL_NIGHT_UTC_START
-    const nightEnd = day * 1440 + LOCAL_NIGHT_UTC_END
-
-    // Check if rest interval overlaps this night window
-    if (debriefAbsolute < nightEnd && reportAbsolute > nightStart) {
-      return true
-    }
-  }
-
-  return false
+  return containsLocalNight(debriefMs, reportMs, tzOffsetMinutes)
 }
 
 /** Convert YYYY-MM-DD to days since a reference for absolute comparison */
@@ -735,10 +904,20 @@ function daysToDate(days: number): string {
  *   (b) rest includes no local night → ≥12h
  *   (c) preceding duty over 10h and ≤16h → ≥ that duty, rounded up to the hour
  *   (d) preceding duty over 16h → ≥24h AND inclusive of a local night
+ *
+ * Paragraph 4 then adds its own 24-hour requirement around duties that
+ * encompass an early start, a late finish, or a take-off or landing in the
+ * window of circadian low — see `priorDisruptiveRun`.
+ *
+ * @param priorDisruptiveRun how many consecutive disruptive flight duty
+ *   periods the crew member has completed since their last 24-hour circadian
+ *   rest. Only `calculateAllRestPeriods` can know this; a standalone call
+ *   treats a disruptive duty as the first of a series, which is para 4(1)(a).
  */
 export function calculateRestPeriod(
   current: DutyPeriod,
-  previous: DutyPeriod
+  previous: DutyPeriod,
+  priorDisruptiveRun: number = 0
 ): RestPeriodInfo {
   // Calculate actual rest in minutes
   const prevDebriefDay = dateToDays(previous.date)
@@ -755,10 +934,12 @@ export function calculateRestPeriod(
     }
   }
 
-  // Rest starts REST_START_BUFFER_MINUTES after gate-in (debrief), not at gate-in.
-  // This accounts for shutdown, debrief, and transit time that isn't duty but
-  // also isn't rest.
-  const restMinutes = currReportAbsolute - prevDebriefAbsolute - REST_START_BUFFER_MINUTES
+  // A "rest period" commences ONE HOUR after the individual is free of all
+  // duties (First Schedule). The duty already ends after its post-flight
+  // checks, so this hour sits on top of that — the code used to allow only 30
+  // minutes from gate-in for both, which over-counted rest by an hour.
+  const restMinutes =
+    currReportAbsolute - prevDebriefAbsolute - REST_STARTS_AFTER_DUTY_MIN
 
   // Check if rest includes local night. The debrief DATE must be the wrapped
   // one: a duty that crossed midnight debriefs on the following day, and
@@ -771,7 +952,11 @@ export function calculateRestPeriod(
     wrappedDebriefDate,
     wrappedDebriefTime,
     current.date,
-    current.reportTime
+    current.reportTime,
+    // Where the crew member actually is once the previous duty ends.
+    previous.arrivalTimezoneOffset != null
+      ? previous.arrivalTimezoneOffset * 60
+      : HOME_BASE_OFFSET_MINUTES
   )
 
   const precedingDutyMinutes = previous.dutyMinutes
@@ -788,6 +973,25 @@ export function calculateRestPeriod(
   // and ignored the 12 hours of 3(b). That under-states the requirement, which
   // is the dangerous direction.
   const candidates: Array<{ minutes: number; rule: RestPeriodInfo["rule"] }> = []
+
+  // ── Para 4: duties encompassing an early start, a late finish, or a
+  // take-off or landing in the window of circadian low ────────────────────
+  //
+  // 24 hours inclusive of a local night, before the FIRST such duty in a
+  // series (4(1)(a)) and again before the next one after two consecutive ones
+  // (4(2)). It is a requirement on the rest BEFORE the duty, so the CURRENT
+  // duty's classification decides it, not the preceding one's.
+  //
+  // Pushed FIRST so that it names itself on a tie with para 3(1)(d), which is
+  // also 24 hours: it is the rule a pilot would need to look up, and the same
+  // rest satisfies 3(1)(d) anyway.
+  const circadianRule = circadianRestRule(
+    priorDisruptiveRun,
+    current.circadian?.disruptive ?? false
+  )
+  if (circadianRule) {
+    candidates.push({ minutes: CIRCADIAN_REST_MIN, rule: circadianRule })
+  }
 
   // 3(1)(a) / 3(1)(b) — turns on whether the rest contains a local night.
   if (hasLocalNight) {
@@ -811,14 +1015,16 @@ export function calculateRestPeriod(
     candidates.push({ minutes: 24 * 60, rule: "3d" })
   }
 
-  // The governing rule is whichever demands the most.
+  // The governing rule is whichever demands the most; on a tie the first
+  // pushed wins, which is why para 4 goes in ahead of the para 3 candidates.
   const governing = candidates.reduce((a, b) => (b.minutes > a.minutes ? b : a))
   const requiredRestMinutes = governing.minutes
   const rule = governing.rule
 
-  // 3(1)(d) additionally requires the rest to include a local night, so a
+  // Both 3(1)(d) and para 4 require the rest to INCLUDE a local night, so a
   // 24-hour rest with none is still not compliant.
-  const localNightSatisfied = precedingDutyMinutes > 16 * 60 ? hasLocalNight : true
+  const localNightSatisfied =
+    precedingDutyMinutes > 16 * 60 || circadianRule !== null ? hasLocalNight : true
 
   return {
     restMinutes: Math.max(0, restMinutes),
@@ -833,18 +1039,63 @@ export function calculateRestPeriod(
 /**
  * Enrich sorted duty periods with rest period information.
  * Expects duty periods sorted chronologically (oldest first).
+ *
+ * Also carries paragraph 4's running count of consecutive DISRUPTIVE duties —
+ * ones encompassing an early start, a late finish, or a take-off or landing in
+ * the window of circadian low. It has to be tracked across the timeline because
+ * neither duty in a pair can see it: 4(2) reacts to the two duties BEFORE the
+ * one whose rest is being measured.
+ *
+ * The count is "since the last 24-hour circadian rest", not "since the last
+ * ordinary duty": once para 4 has required its 24 hours, the duty that follows
+ * begins a fresh series, so a run of disruptive duties asks for 24 hours before
+ * the first and again after every second one thereafter. A non-disruptive duty
+ * clears it outright.
  */
 export function calculateAllRestPeriods(sortedDPs: DutyPeriod[]): DutyPeriod[] {
   if (sortedDPs.length <= 1) return sortedDPs
 
+  let disruptiveRun = 0
+
   return sortedDPs.map((dp, index) => {
-    if (index === 0) return dp
-    const previous = sortedDPs[index - 1]
-    return {
-      ...dp,
-      restBefore: calculateRestPeriod(dp, previous),
-    }
+    const priorRun = disruptiveRun
+
+    const result =
+      index === 0
+        ? dp
+        : { ...dp, restBefore: calculateRestPeriod(dp, sortedDPs[index - 1], priorRun) }
+
+    disruptiveRun = advanceDisruptiveRun(priorRun, dp.circadian?.disruptive ?? false)
+    return result
   })
+}
+
+/**
+ * Step paragraph 4's run of consecutive disruptive duties past one more duty.
+ *
+ * A duty that is not disruptive clears the run. One that IS extends it — unless
+ * para 4 already required a 24-hour rest before it, in which case it is the
+ * first of a new series rather than the third of an old one.
+ */
+function advanceDisruptiveRun(run: number, disruptive: boolean): number {
+  if (!disruptive) return 0
+  return circadianRestRule(run, true) ? 1 : run + 1
+}
+
+/** The next duty period chronologically after `after`, if there is one. */
+function nextDutyAfter(
+  dutyPeriods: DutyPeriod[],
+  after: DutyPeriod
+): DutyPeriod | undefined {
+  const key = (dp: DutyPeriod) => `${dp.date} ${dp.reportTime}`
+  const afterKey = key(after)
+  let best: DutyPeriod | undefined
+  for (const dp of dutyPeriods) {
+    if (dp.id === after.id) continue
+    if (key(dp) <= afterKey) continue
+    if (!best || key(dp) < key(best)) best = dp
+  }
+  return best
 }
 
 // ============================================
@@ -1280,47 +1531,75 @@ export function calculateRestUntilLegal(
   }
 
   const debriefTimestamp = new Date(`${debriefDate}T${lastDP.debriefTime}:00Z`)
-  // Rest starts REST_START_BUFFER_MINUTES after gate-in, not at gate-in itself.
-  const restStartTimestamp = new Date(debriefTimestamp.getTime() + REST_START_BUFFER_MINUTES * 60000)
+  // Rest commences one hour after the crew member is free of all duties.
+  const restStartTimestamp = new Date(
+    debriefTimestamp.getTime() + REST_STARTS_AFTER_DUTY_MIN * 60000
+  )
   const restElapsedMs = now.getTime() - restStartTimestamp.getTime()
   const restElapsedMinutes = Math.max(0, Math.floor(restElapsedMs / 60000))
 
-  // Determine required rest based on preceding duty duration (Reg 3)
+  // ── The requirement, as a set of conditions rather than a chain ──────────
+  //
+  // Same rule as `calculateRestPeriod`: paragraph 3's sub-rules are joined by
+  // "and", so every applicable one must be met and the largest governs. This
+  // one was still an if/else chain, which under-stated the requirement by an
+  // hour for an 11-hour duty resting without a local night — the number a pilot
+  // reads off the dashboard to know when they may next report.
   const precedingDutyMinutes = lastDP.dutyMinutes
-  let requiredRestMinutes: number
-  let rule: RestPeriodInfo["rule"]
 
-  if (precedingDutyMinutes > 16 * 60) {
-    // Reg 3(1)(d): preceding duty > 16h → ≥24h + local night
-    requiredRestMinutes = 24 * 60
-    rule = "3d"
-  } else if (precedingDutyMinutes > 10 * 60) {
-    // Reg 3(1)(c): preceding duty > 10h but ≤ 16h → ≥ preceding duty rounded up
-    requiredRestMinutes = Math.ceil(precedingDutyMinutes / 60) * 60
-    rule = "3c"
-  } else {
-    // For rules 3a/3b we need to check if the rest window includes local night.
-    // Project the rest window from rest-start to rest-start + max(10h, 12h) to determine
-    // which rule applies — if rest includes local night, 10h applies; else 12h.
-    const legalAtForNight = new Date(restStartTimestamp.getTime() + 10 * 60 * 60000)
-    const restEndDate = legalAtForNight.toISOString().split("T")[0]
-    const restEndTime = legalAtForNight.toISOString().split("T")[1].slice(0, 5)
+  // Whether the rest contains a local night, projected over the shortest rest
+  // that could possibly satisfy it. Measured where the crew member actually is
+  // once that duty ended.
+  const legalAtForNight = new Date(restStartTimestamp.getTime() + 10 * 60 * 60000)
+  const restEndDate = legalAtForNight.toISOString().split("T")[0]
+  const restEndTime = legalAtForNight.toISOString().split("T")[1].slice(0, 5)
+  const hasLocalNight = includesLocalNight(
+    debriefDate,
+    lastDP.debriefTime,
+    restEndDate,
+    restEndTime,
+    lastDP.arrivalTimezoneOffset != null
+      ? lastDP.arrivalTimezoneOffset * 60
+      : HOME_BASE_OFFSET_MINUTES
+  )
 
-    const hasLocalNight = includesLocalNight(
-      debriefDate,
-      lastDP.debriefTime,
-      restEndDate,
-      restEndTime
-    )
+  const candidates: Array<{ minutes: number; rule: RestPeriodInfo["rule"] }> = []
 
-    if (hasLocalNight) {
-      requiredRestMinutes = 10 * 60
-      rule = "3a"
-    } else {
-      requiredRestMinutes = 12 * 60
-      rule = "3b"
-    }
+  // Para 4 — 24 hours inclusive of a local night around a duty encompassing an
+  // early start, a late finish, or a take-off or landing in the window of
+  // circadian low. Unlike paragraph 3 this turns on the duty AHEAD, so it can
+  // only be answered when the next one is known; with no roster loaded it
+  // simply does not apply. Pushed first so it names itself on a tie with 3(1)(d).
+  const nextDP = nextDutyAfter(dutyPeriods, lastDP)
+  const circadianRule = circadianRestRule(
+    completedDPs.reduce(
+      (run, dp) => advanceDisruptiveRun(run, dp.circadian?.disruptive ?? false),
+      0
+    ),
+    nextDP?.circadian?.disruptive ?? false
+  )
+  if (circadianRule) {
+    candidates.push({ minutes: CIRCADIAN_REST_MIN, rule: circadianRule })
   }
+
+  candidates.push(
+    hasLocalNight
+      ? { minutes: 10 * 60, rule: "3a" }
+      : { minutes: 12 * 60, rule: "3b" }
+  )
+  if (precedingDutyMinutes > 10 * 60 && precedingDutyMinutes <= 16 * 60) {
+    candidates.push({
+      minutes: Math.ceil(precedingDutyMinutes / 60) * 60,
+      rule: "3c",
+    })
+  }
+  if (precedingDutyMinutes > 16 * 60) {
+    candidates.push({ minutes: 24 * 60, rule: "3d" })
+  }
+
+  const governing = candidates.reduce((a, b) => (b.minutes > a.minutes ? b : a))
+  const requiredRestMinutes = governing.minutes
+  const rule = governing.rule
 
   const restNeededMinutes = Math.max(0, requiredRestMinutes - restElapsedMinutes)
   const legalAtMs = restStartTimestamp.getTime() + requiredRestMinutes * 60000
@@ -1685,4 +1964,92 @@ export function getComplianceStatus(utilizationPercent: number): {
   } else {
     return { status: "ok", color: "text-green-500", label: "OK" }
   }
+}
+
+
+// ============================================
+// Acclimatisation (First Schedule)
+// ============================================
+
+/**
+ * Re-derive each duty period's FDP maximum against the crew member's ACTUAL
+ * acclimatised zone.
+ *
+ * The duty periods are built one at a time, before anything knows the history
+ * that determines acclimatisation — so they are built against home base and
+ * corrected here, once the whole timeline is in hand.
+ *
+ * "Acclimated" means having spent at least 3 consecutive local nights free of
+ * duty within a particular time zone (First Schedule). A pilot who night-stops
+ * once in London is NOT acclimated to London, so their next duty out of there
+ * belongs on Table B — and a pilot who has been there a week IS, so theirs
+ * belongs on Table A. Reading it off home base alone got both wrong.
+ *
+ * @param sortedDPs duty periods, oldest first
+ * @param homeOffsetHours the crew member's home base offset, in hours
+ */
+export function applyAcclimatisation(
+  sortedDPs: DutyPeriod[],
+  homeOffsetHours: number = HOME_BASE_OFFSET_MINUTES / 60
+): DutyPeriod[] {
+  if (sortedDPs.length === 0) return sortedDPs
+
+  const intervals: DutyInterval[] = sortedDPs.map((dp) => {
+    const startDay = dateToDays(dp.date)
+    const reportMin = hhmmToMinutes(dp.reportTime)
+    let debriefMin = hhmmToMinutes(dp.debriefTime)
+    if (debriefMin < reportMin) debriefMin += 1440
+    return {
+      startMs: (startDay * 1440 + reportMin) * 60_000,
+      endMs: (startDay * 1440 + debriefMin) * 60_000,
+      endZoneOffsetMinutes:
+        (dp.arrivalTimezoneOffset ?? dp.departureTimezoneOffset ?? homeOffsetHours) * 60,
+    }
+  })
+
+  return sortedDPs.map((dp, i) => {
+    // What the crew member was acclimated to when THIS duty commenced — so the
+    // duty's own arrival zone cannot retroactively justify its own table.
+    const acclimatedMin = acclimatisedOffsetMinutes(
+      intervals.slice(0, i),
+      homeOffsetHours * 60,
+      intervals[i].startMs
+    )
+    const acclimatedHours = acclimatedMin / 60
+    const depTz = dp.departureTimezoneOffset ?? homeOffsetHours
+
+    let localReportMinutes = hhmmToMinutes(dp.reportTime) + depTz * 60
+    if (localReportMinutes < 0) localReportMinutes += 1440
+
+    const fdp = calculateMaxFDP({
+      reportTimeLocal: minutesToHHMM(localReportMinutes % 1440),
+      sectors: dp.sectorCount,
+      departureTimezoneOffset: depTz,
+      acclimatedOffset: acclimatedHours,
+      sectorMinutes: dp.sectorMinutes,
+      crewConfig: dp.crewConfig,
+      augmentedCrew: dp.augmentedCrew,
+    })
+
+    // Early start, late finish and the window of circadian low are all defined
+    // in ACCLIMATED time, so this is the only place that can answer them — the
+    // duty period was built before anything knew the history.
+    const circadian = classifyCircadian(
+      {
+        departureMs: dp.departureMs,
+        arrivalMs: dp.arrivalMs,
+        takeoffLandingMs: dp.takeoffLandingMs,
+      },
+      acclimatedMin
+    )
+
+    return {
+      ...dp,
+      maxFdpMinutes: fdp.maxFdpMinutes,
+      fdpTableUsed: fdp.tableUsed,
+      effectiveSectors: fdp.effectiveSectors,
+      acclimatedOffset: acclimatedHours,
+      circadian,
+    }
+  })
 }
