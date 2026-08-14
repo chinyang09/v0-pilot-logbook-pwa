@@ -1193,12 +1193,15 @@ area is the undo — see "Destructive Actions" below for why the countdown went.
 | crew | `crew.store` | yes |
 | currencies | `currencies.store` | yes |
 | aircraft | **`reference/aircraft.store`** — the aircraft PAGE lists the reference database, not `userDb.aircraft` | no (referenceDb has no sync queue, which is what deleting a custom aircraft has always meant) |
+| roster duties | `schedule.store` | yes |
 
-**Discrepancies and schedule entries stay HARD deletes.** They are import
-bookkeeping rather than records the pilot authored: a comparison is regenerated
-from the next report, and schedule rows are replaced wholesale by the next
-import. Putting them in Recently Deleted would fill it with rows nobody thinks
-of as things they deleted.
+**Discrepancies stay a HARD delete.** A comparison is import bookkeeping rather
+than a record the pilot authored — it is regenerated from the next report.
+
+**Schedule entries used to be, and no longer are.** That reasoning held while
+the roster was import-only; it stopped the moment duties became hand-editable,
+because a standby you typed in yourself is a record you authored and a mis-tap
+on it should be as recoverable as a mis-tap on a flight.
 
 `app/(app)/recently-deleted/page.tsx` sweeps every kind on load, then lists
 what's left GROUPED BY KIND with the days remaining. The per-kind
@@ -2211,10 +2214,42 @@ ordinary duty counts in full and only standby is discounted. Airport standby
 counts **zero** separately, because para 6(3) folds it into the rest period or
 the following FDP instead.
 
+**An un-called standby is REST.** The rest period runs straight through it: it
+takes no rest requirement of its own and does not become the duty the next one
+is measured against, so a flight after a standby rests from the last duty
+actually flown. `isRestingStandby` is the test; `calculateAllRestPeriods` and
+`calculateRestUntilLegal` are the two places that skip it. The 20% is unaffected
+— "did you rest" and "how many hours have you worked" are different questions
+and the schedule answers them in different paragraphs.
+
+> ⚠ **ASSUMED, pending confirmation.** Para 3(1)(c)/(d) are written against a
+> "duty period", not a flight duty period, so read literally a 12-hour standby
+> does demand 12 hours of rest after it. This is the operator's practice taken
+> over the literal text, and it is the PERMISSIVE direction.
+
 **Para 6(6) — activation.** A standby that is called out ceases at the moment of
 activation, so `truncateActivatedStandby` cuts it back to the following duty's
 report before the 20% is taken. Left whole, those hours are counted twice: once
 at 20% as standby and again in full as the duty they turned into.
+
+Two callers need "was this called out": the FDP pipeline works in duty periods,
+the roster page has schedule entries and flights. Both go through
+`findActivationMinute` — `standby-activation.ts` is the roster's half — so the
+rule cannot drift into two. It reads the ROSTERED report, so a pushback delay
+does not move the activation and credit duty hours as standby.
+
+**`mergeDutyPeriods` competes only on KIND.** It prefers the logbook for a date
+and marks that date consumed, which is right for a schedule FLIGHT duty — an
+alternative record of the same duty — and wrong for a standby, which is a
+different duty that happens to share the day. And the day it shares with a
+flight is exactly the day it was ACTIVATED on, so the one standby whose hours
+needed accounting for was the one being dropped, and `truncateActivatedStandby`
+never saw the pair.
+
+**The dashboard gives standby its own band** (`DutyStatus.standby`). Left in the
+flight-duty search it becomes the ACTIVE duty carrying `maxFdpMinutes: 0`, so
+the panel reads as a flight duty whose limit failed to compute — a dash where a
+pilot expects a number, on a duty paragraph 14 says nothing about.
 
 `standbyKind()` is a code→`home`/`airport` lookup that currently returns `home`
 for everything, which is what this operator rosters. It is a lookup rather than
@@ -2232,6 +2267,18 @@ page and its MongoDB sync were all intact. What was missing was a writer (all
 imports go to the logbook) and, before that, a parser stage: `schedule-parser`
 offered every non-flight row to `tryExtractSimDuty` and dropped whatever was
 not a simulator, so **standby had never been extracted at all**.
+
+**Duties are hand-editable.** `components/roster/duty-entry-dialog.tsx` adds and
+edits one; the card is swipe-to-delete. It is a full-screen DIALOG over the
+content region (`signature-dialog.tsx`'s bounds), not a detail panel — the
+roster is `hasDetailPanel: false` and populating detail panels on non-detail
+routes is owner-design work that must not be done piecemeal. The form re-seeds
+by a `key` on the component rather than a seeding effect, so there is no
+setState-in-effect and a sync write cannot clobber an edit in progress.
+Deleting is a **soft** delete into Recently Deleted, like everything else the
+pilot can delete — the old hard-delete rule held while these were import
+bookkeeping the next report regenerates, and stopped holding the moment the
+pilot could author them.
 
 It now holds standby / ground / leave / off — and nothing else. **Flights stay
 logbook-only.** The old roster was a parallel record of flights that had to be
@@ -3253,7 +3300,7 @@ When making changes, be aware of these high-impact files:
 - Do not give the drag lens's `-refract` layer a `backdrop-filter` instead of its background — the lens is portalled to `<body>` and carries its own `scale`, so it forms a backdrop root and a backdrop-filter there does not sample the pill at all (measured — `blur(10px)` leaves the label underneath perfectly sharp). The layer must paint over the pill it duplicates, or the copy and the original show at once. Cutting the pill out with a mask instead was tried and rejected on the look
 - Do not minify the drag lens's copy uniformly — the squeeze is `scaleY` ONLY, with the row counter-scaled so the labels keep their size and only the control gets shorter. And do not push `LENS_SQUASH` much below 0.84: the counter-scaled row has to fit the copy's box, and the mobile pill's 44px tab item in a 56px bar is what sets that floor (at 0.72 the icons and labels were clipped away entirely)
 - Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
-- Do not delete a user record outright — `deleteEntity` is a **soft delete** into Recently Deleted (30 days) and pushes an UPDATE; only `purgeEntity` writes a tombstone. Push a real delete when the user merely binned it and the row is gone on every device with nothing to restore. The two exceptions are discrepancies and schedule entries, which are import bookkeeping and stay hard
+- Do not delete a user record outright — `deleteEntity` is a **soft delete** into Recently Deleted (30 days) and pushes an UPDATE; only `purgeEntity` writes a tombstone. Push a real delete when the user merely binned it and the row is gone on every device with nothing to restore. The one exception is discrepancies, which are import bookkeeping regenerated by the next report and stay hard. Schedule entries USED to be — that reversed when duties became hand-editable
 - Do not merge the dashboard's two pages back into one. Legal and Summary want opposite layouts — an instrument read in two seconds versus a month's review — and one layout serving both is what makes a dashboard a spreadsheet. They get different containers: Legal is laid out TO the height (no scroll), Summary is an ordinary scrolling page
 - Do not change a figure in `fdp-tables.ts` without changing `fdp-tables.test.ts` FROM THE REGULATION first — that test transcribes the Fifth Schedule's own numbers, so it is the check ON the tables rather than a copy of them. Same for `rest-period.test.ts` and paragraph 3
 - Do not treat the rest sub-rules of para 3(1) as alternatives — they are joined by "and", so every applicable one must be met and the requirement is the LARGEST of them. As an if/else chain an 11-hour duty resting without a local night asked for 11 hours instead of 12. The same rule holds in `calculateRestUntilLegal`, which had the chain long after `calculateRestPeriod` lost it — that one is the countdown a pilot reads off the dashboard
@@ -3272,6 +3319,12 @@ When making changes, be aware of these high-impact files:
 - Do not derive a duty's report time from the ACTUAL gate-out. It defaults to the ROSTERED report (`scheduledOut − PRE_FLIGHT_CHECK_MIN`), because a late aircraft under a crew who reported on time is the ordinary case and does not move the report — deriving from the actual OUT slid the duty's start forward with the delay and made the duty look SHORTER than it was (23 minutes hidden on the owner's TR566 duty; three hours on a three-hour delay, with the panel then offering FDP that does not exist). `FlightLog.reportTime` is how a genuinely moved report is recorded
 - Do not treat para 10(b) as a variation on 10(a). Under 10(b) the FDP window opens **4 hours after the ORIGINAL report**, which is EARLIER than the actual one — so part of the FDP is already spent when the crew member walks in. `DutyPeriod.fdpElapsedAtReport` carries that, and `ActiveDuty` keeps two clocks (`elapsedMinutes` for the crew duty period, `fdpElapsedMinutes` for the FDP) because only that branch separates them
 - Do not give a standby an FDP maximum, and do not let one reach an FDP exceedance check — it is a DUTY period but not a FLIGHT duty period, so paragraph 14's tables never applied to it. `maxFdpMinutes: 0` read as a limit makes every standby a full-length exceedance. Its cap is para 6(2)(a)'s 18 hours. `applyAcclimatisation` skips it (a lookup on 0 sectors would hand it the one-sector figure) and `mergeAdjacentDutyPeriods` will not merge it with a flight duty
+- Do not treat an un-called standby as a duty to rest FROM — it is rest, and the rest period runs straight through it. `isRestingStandby` is the test and `calculateAllRestPeriods` / `calculateRestUntilLegal` are the two places that skip it; read literally, para 3(1)(c) would otherwise demand 12 hours of rest after a 12-hour standby spent at home. It still contributes its 20%, and the assumption carries a marker because it is the permissive direction
+- Do not let `mergeDutyPeriods` consume a date for a NON-FLIGHT duty. Only a schedule flight duty is an alternative record of a logbook duty; a standby is a different duty that happens to share the day — and the day it shares with a flight is the day it was ACTIVATED on, so consuming the date dropped the one standby whose hours needed accounting for and hid the pair from `truncateActivatedStandby`
+- Do not answer "was this standby called out" in two places — `findActivationMinute` is the rule, with `truncateActivatedStandby` (duty periods) and `standbyActivation` (schedule entries + flights, for the roster page) as its two callers. And read the ROSTERED report when finding it, or a pushback delay moves the activation later and credits duty hours as standby
+- Do not let a standby into the dashboard's active-duty search — it would become the ACTIVE duty carrying `maxFdpMinutes: 0`, so the panel reads as a flight duty whose limit failed to compute. `DutyStatus.standby` is its own band
+- Do not hard-delete a roster duty, and do not let a binned one be matched by `bulkUpsertScheduleEntries` — updating a deleted row silently resurrects a duty the user deleted, the same rule the flight reconciler follows. Every read filters `isLiveEntity`
+- Do not put the duty form in a detail panel — the roster is `hasDetailPanel: false` and populating detail panels on non-detail routes is owner-design work that must not be done piecemeal. It is a full-screen dialog over the CONTENT region, and it re-seeds by a `key` rather than a seeding effect (an effect there is a cascading render, and keying on the entry OBJECT clobbers an edit in progress on every sync write)
 - Do not count a standby's full length toward the 90h/180h limits — para 6(7) counts **20%** of home standby, and para 6(3) folds AIRPORT standby into the rest period or the following FDP so it contributes nothing separately. `countedDutyMinutes` carries the discount and `calculateRollingStats` reads `countedDutyMinutes ?? dutyMinutes`, so every ordinary duty is untouched
 - Do not leave an activated standby at its rostered length (para 6(6)) — `truncateActivatedStandby` cuts it back to the following duty's report before the 20% is taken, or the called-out hours are counted twice: once as standby and again in full as the duty they became
 - Do not put flights back into `scheduleEntries`. The roster holds NON-FLIGHT duties only — standby, ground, leave, off — precisely because they have no logbook counterpart and so nothing to reconcile. A parallel record of flights needing reconciliation against the logbook is what made the old roster heavy. And do not add standby as a `FlightLog.entryType` instead: it puts non-flight rows in the legal flight record and breaks the fixed-height card the virtualised list depends on

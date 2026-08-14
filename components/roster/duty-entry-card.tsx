@@ -50,12 +50,23 @@ interface DutyEntryCardProps {
   entry: ScheduleEntry
   onClick?: () => void
   compact?: boolean
+  /**
+   * Set when this standby was called out (para 6(6)) — the standby ceased at
+   * that moment, so the card shows what actually ran rather than what was
+   * rostered. Null for every standby nobody rang, which is most of them.
+   */
+  activation?: { at: string; standbyMinutes: number } | null
 }
 
 // Memoized — the roster list renders one of these per duty entry for the whole
 // imported history, so a stable card avoids re-rendering hundreds of rows on
 // every sync-driven data refresh.
-export const DutyEntryCard = memo(function DutyEntryCard({ entry, onClick, compact = false }: DutyEntryCardProps) {
+export const DutyEntryCard = memo(function DutyEntryCard({
+  entry,
+  onClick,
+  compact = false,
+  activation = null,
+}: DutyEntryCardProps) {
   const Icon = DUTY_TYPE_ICONS[entry.dutyType] || FileText
   const colors = DUTY_TYPE_COLORS[entry.dutyType] || DUTY_TYPE_COLORS.other
 
@@ -87,8 +98,15 @@ export const DutyEntryCard = memo(function DutyEntryCard({ entry, onClick, compa
           )}
         </div>
         {entry.reportTime && (
-          <span className="text-xs px-2 py-0.5 rounded-full border border-border bg-secondary/50">
-            {entry.reportTime}
+          <span
+            className={cn(
+              "text-xs px-2 py-0.5 rounded-full border",
+              activation
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                : "border-border bg-secondary/50"
+            )}
+          >
+            {activation ? `${entry.reportTime}–${activation.at}` : entry.reportTime}
           </span>
         )}
       </div>
@@ -147,9 +165,24 @@ export const DutyEntryCard = memo(function DutyEntryCard({ entry, onClick, compa
             {entry.debriefTime && (
               <div className="flex items-center gap-1.5 text-muted-foreground">
                 <Clock className="h-3.5 w-3.5" />
-                <span>Debrief: {entry.debriefTime}</span>
+                <span>
+                  {activation ? "Rostered to" : "Debrief"}: {entry.debriefTime}
+                </span>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Called out — para 6(6): the standby ceased at activation, and the
+            duty period began when the crew member reported for the flight. */}
+        {activation && (
+          <div className="mb-3 flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400">
+            <Clock className="h-3.5 w-3.5" />
+            <span>
+              Activated {activation.at} · stood by{" "}
+              {Math.floor(activation.standbyMinutes / 60)}h
+              {String(activation.standbyMinutes % 60).padStart(2, "0")}
+            </span>
           </div>
         )}
 

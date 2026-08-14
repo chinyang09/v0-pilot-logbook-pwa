@@ -23,7 +23,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react"
-import { Trash2, RotateCcw, Plane, Users, BadgeCheck } from "lucide-react"
+import { Trash2, RotateCcw, Plane, Users, BadgeCheck, CalendarClock } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 import { mutate } from "swr"
 import { PageContainer } from "@/components/page-container"
@@ -52,6 +52,10 @@ import {
   restoreAircraftInDatabase,
   permanentlyDeleteAircraftFromDatabase,
   purgeExpiredDeletedAircraftReferences,
+  getDeletedScheduleEntries,
+  restoreScheduleEntry,
+  purgeScheduleEntry,
+  purgeExpiredDeletedScheduleEntries,
   normalizeAircraft,
   type FlightLog,
 } from "@/lib/db"
@@ -74,7 +78,7 @@ function deletedAgo(at: number, now = Date.now()): string {
 /** One deleted thing, flattened so the page can treat all four the same. */
 type Binned = {
   id: string
-  kind: "flight" | "aircraft" | "crew" | "currency"
+  kind: "flight" | "aircraft" | "crew" | "currency" | "duty"
   deletedAt: number
   /** What the row shows. A flight gets the shared card body; the rest are text. */
   flight?: FlightLog
@@ -87,6 +91,7 @@ const SECTIONS = [
   { kind: "aircraft", label: "Aircraft", icon: Plane },
   { kind: "crew", label: "Crew", icon: Users },
   { kind: "currency", label: "Currencies", icon: BadgeCheck },
+  { kind: "duty", label: "Duties", icon: CalendarClock },
 ] as const
 
 /**
@@ -128,14 +133,23 @@ const OPS: Record<
     destroy: permanentlyDeleteCurrency,
     purgeExpired: purgeExpiredDeletedCurrency,
   },
+  // Roster duties — standby, ground, leave, off. These used to be HARD
+  // deletes on the reasoning that the next report regenerates them, which
+  // stopped being true once they became hand-editable.
+  duty: {
+    restore: restoreScheduleEntry,
+    destroy: purgeScheduleEntry,
+    purgeExpired: purgeExpiredDeletedScheduleEntries,
+  },
 }
 
 async function loadBinned(): Promise<Binned[]> {
-  const [flights, aircraft, crew, currencies] = await Promise.all([
+  const [flights, aircraft, crew, currencies, duties] = await Promise.all([
     getDeletedFlights(),
     getDeletedAircraftReferences(),
     getDeletedPersonnel(),
     getDeletedCurrency(),
+    getDeletedScheduleEntries(),
   ])
 
   return [
@@ -177,6 +191,18 @@ async function loadBinned(): Promise<Binned[]> {
       deletedAt: c.deletedAt ?? 0,
       title: c.description || c.code || "Currency",
       subtitle: c.expiryDate ? `Expires ${c.expiryDate}` : undefined,
+    })),
+    ...duties.map((d): Binned => ({
+      id: d.id,
+      kind: "duty",
+      deletedAt: d.deletedAt ?? 0,
+      title: d.dutyCode || d.dutyType,
+      subtitle: [
+        d.date,
+        d.reportTime && d.debriefTime ? `${d.reportTime} – ${d.debriefTime}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
     })),
   ]
 }
