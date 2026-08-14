@@ -20,10 +20,13 @@ vi.mock("@/lib/utils/parsers/shared/airport-enricher", () => ({
 import {
   applyAcclimatisation,
   calculateAllRestPeriods,
+  calculateRestUntilLegal,
   calculateRollingStats,
   getDutyPeriodsFromSchedule,
   isDutyExceedingLimits,
+  isRestingStandby,
   mergeAdjacentDutyPeriods,
+  mergeDutyPeriods,
   truncateActivatedStandby,
   HOME_STANDBY_DUTY_FRACTION,
   MAX_STANDBY_HOURS_FLIGHT_CREW,
@@ -261,18 +264,115 @@ describe("a standby that gets called out", () => {
   })
 })
 
-/* ── Rest before a standby ───────────────────────────────────────────────── */
+/* ── An un-activated standby is REST ─────────────────────────────────────── */
 
-describe("rest before a standby is checked", () => {
-  const flightDuty: DutyPeriod = {
-    id: "f",
+describe("a standby nobody called is rest, not a duty to rest from", () => {
+  const flightDuty = (over: Partial<DutyPeriod> = {}): DutyPeriod =>
+    ({
+      id: "f",
+      date: "2026-08-14",
+      reportTime: "06:00",
+      debriefTime: "18:00",
+      dutyMinutes: 12 * 60,
+      flightMinutes: 9 * 60,
+      sectorCount: 2,
+      maxFdpMinutes: 735,
+      fdpExtensionUsed: false,
+      source: "logbook",
+      isFuture: false,
+      scheduleEntryIds: [],
+      flightIds: [],
+      ...over,
+    }) as DutyPeriod
+
+  const standbyOn = (date: string, from = "06:00", to = "18:00") =>
+    getDutyPeriodsFromSchedule([
+      entry({ id: `sb-${date}`, date, reportTime: from, debriefTime: to }),
+    ])[0]
+
+  it("takes no rest requirement of its own", () => {
+    // Read literally, para 3(1)(c) would demand 12 hours of rest before this
+    // 12-hour standby. The crew member spent it at home; that IS rest.
+    const [, sb] = calculateAllRestPeriods([
+      flightDuty(),
+      standbyOn("2026-08-15", "00:00", "12:00"),
+    ])
+    expect(sb.restBefore).toBeUndefined()
+  })
+
+  it("lets the rest period run straight THROUGH it", () => {
+    // Duty debriefs 18:00 on the 14th. A standby fills the 15th. The duty on
+    // the 16th is measured against the FLIGHT duty, not against the standby —
+    // so its rest is the whole two days, not the few hours since the standby
+    // ended.
+    const timeline = [
+      flightDuty(),
+      standbyOn("2026-08-15"),
+      flightDuty({ id: "f2", date: "2026-08-16", reportTime: "02:00" }),
+    ]
+    const [, , next] = calculateAllRestPeriods(timeline)
+    expect(next.restBefore).toBeDefined()
+    expect(next.restBefore!.compliant).toBe(true)
+    // 18:00 on the 14th → 02:00 on the 16th is 32 hours, less the hour before
+    // a rest period commences. Measured from the standby's 18:00 debrief on
+    // the 15th it would have been 8 hours, and non-compliant.
+    expect(next.restBefore!.restMinutes).toBe(32 * 60 - 60)
+  })
+
+  it("does not restart the rest countdown", () => {
+    const r = calculateRestUntilLegal(
+      [flightDuty(), standbyOn("2026-08-15")],
+      new Date("2026-08-15T20:00:00Z"),
+    )
+    // The countdown belongs to the flight duty that debriefed on the 14th, not
+    // to the standby that had just ended two hours earlier.
+    expect(r?.lastDutyDate).toBe("2026-08-14")
+    expect(r?.isLegalNow).toBe(true)
+  })
+
+  it("still contributes its 20% to the cumulative limits", () => {
+    // Being rest for para 3 does not make it invisible to para 12 — 6(7)
+    // counts a fifth of it either way.
+    const stats = calculateRollingStats(
+      [standbyOn("2026-08-15")],
+      new Date("2026-08-15T23:59:59Z"),
+      14,
+      DEFAULT_FTL_LIMITS,
+    )
+    expect(stats.dutyHours).toBeCloseTo(12 * 0.2, 5)
+  })
+
+  it("but an ACTIVATED one is a duty the next flight rests from", () => {
+    const called = flightDuty({ id: "called", date: "2026-08-15", reportTime: "10:00" })
+    const timeline = truncateActivatedStandby([standbyOn("2026-08-15"), called])
+    const sb = timeline.find((dp) => dp.dutyKind === "standby")!
+    expect(sb.activatedAt).toBe("10:00")
+    expect(isRestingStandby(sb)).toBe(false)
+  })
+})
+
+/* ── The merge must not swallow it ───────────────────────────────────────── */
+
+describe("a standby survives the merge with the logbook", () => {
+  // `mergeDutyPeriods` prefers the logbook for a date and marks that date
+  // CONSUMED, which is right for a schedule FLIGHT — an alternative record of
+  // the same duty — and wrong for a standby, which is a different duty that
+  // happens to share the day. And the day it shares with a flight is exactly
+  // the day it was ACTIVATED on, so the one standby whose hours needed
+  // accounting for was the one being dropped.
+  const standby = getDutyPeriodsFromSchedule([
+    entry({ reportTime: "06:00", debriefTime: "18:00" }),
+  ])[0]
+
+  const flownThatDay: DutyPeriod = {
+    id: "flight",
     date: "2026-08-14",
-    reportTime: "06:00",
-    debriefTime: "18:00",
-    dutyMinutes: 12 * 60,
-    flightMinutes: 9 * 60,
+    reportTime: "10:00",
+    debriefTime: "20:00",
+    dutyMinutes: 10 * 60,
+    flightMinutes: 8 * 60,
     sectorCount: 2,
-    maxFdpMinutes: 735,
+    maxFdpMinutes: 780,
     fdpExtensionUsed: false,
     source: "logbook",
     isFuture: false,
@@ -280,24 +380,25 @@ describe("rest before a standby is checked", () => {
     flightIds: [],
   }
 
-  it("flags a standby that starts before the rest requirement is met", () => {
-    // The preceding duty ran 12 hours, so para 3(1)(c) asks for 12 hours of
-    // rest. This standby reports 6 hours later. Without standby in the
-    // timeline there was nothing here to check at all.
-    const [sbDp] = getDutyPeriodsFromSchedule([
-      entry({ date: "2026-08-15", reportTime: "00:00", debriefTime: "12:00" }),
-    ])
-    const [, standby] = calculateAllRestPeriods([flightDuty, sbDp])
-    expect(standby.restBefore).toBeDefined()
-    expect(standby.restBefore!.compliant).toBe(false)
+  it("keeps both duties on a day that was activated", () => {
+    const merged = mergeDutyPeriods([flownThatDay], [standby])
+    expect(merged).toHaveLength(2)
+    expect(merged.some((dp) => dp.dutyKind === "standby")).toBe(true)
   })
 
-  it("accepts one that starts after it", () => {
-    const [sbDp] = getDutyPeriodsFromSchedule([
-      entry({ date: "2026-08-15", reportTime: "08:00", debriefTime: "20:00" }),
-    ])
-    const [, standby] = calculateAllRestPeriods([flightDuty, sbDp])
-    expect(standby.restBefore!.compliant).toBe(true)
+  it("and the pair is then truncated rather than double-counted", () => {
+    const merged = truncateActivatedStandby(
+      mergeDutyPeriods([flownThatDay], [standby]),
+    )
+    const stats = calculateRollingStats(
+      merged,
+      new Date("2026-08-14T23:59:59Z"),
+      14,
+      DEFAULT_FTL_LIMITS,
+    )
+    // Standby 06:00 → 10:00 at 20% = 0.8h, plus the 10h flight duty. Dropped
+    // by the merge this was 10h flat; counted whole it would be 12.4h.
+    expect(stats.dutyHours).toBeCloseTo(10.8, 5)
   })
 })
 

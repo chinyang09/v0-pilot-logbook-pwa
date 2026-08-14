@@ -177,6 +177,28 @@ export interface NextDuty {
   inMinutes: number
 }
 
+/**
+ * A standby in progress right now.
+ *
+ * Its own field rather than an `ActiveDuty`, because a standby is a duty
+ * period but NOT a flight duty period: paragraph 14's tables never applied to
+ * it, so there is no FDP to gauge and nothing to count down to. What a pilot
+ * on standby wants is how long is left of the window — and, since an
+ * un-activated standby is rest, the rest countdown carries on beneath it.
+ */
+export interface StandbyState {
+  id: string
+  date: string
+  /** What to call it — "Standby" / "Airport standby". */
+  code: string
+  startMs: number
+  endMs: number
+  elapsedMinutes: number
+  remainingMinutes: number
+  /** True once a duty has reported inside the window (para 6(6)). */
+  activated: boolean
+}
+
 export interface DutyStatus {
   phase: DutyPhase
   /** Set while `phase === "on_duty"`. */
@@ -187,6 +209,9 @@ export interface DutyStatus {
   next: NextDuty | null
   /** `null` when there is no completed duty to rest from. */
   rest: RestState | null
+  /** Set while a standby window contains `now`. Independent of `phase` — a
+   *  standby that has been activated runs alongside the flight duty it became. */
+  standby: StandbyState | null
 }
 
 function toActive(
@@ -294,6 +319,7 @@ export function deriveDutyStatus(
   }
 
   let active: ActiveDuty | null = null
+  let standby: StandbyState | null = null
   let justFinished: ActiveDuty | null = null
   let lastEndMs = -Infinity
   let next: NextDuty | null = null
@@ -302,6 +328,27 @@ export function deriveDutyStatus(
   for (const dp of dutyPeriods) {
     const logged = dutyWindow(dp)
     if (!logged) continue
+
+    // A standby is not a flight duty period. Left in the flight-duty search it
+    // would become the ACTIVE duty carrying `maxFdpMinutes: 0`, so the panel
+    // would read as a flight duty whose limit failed to compute — a dash where
+    // a pilot expects a number, on a duty paragraph 14 says nothing about. It
+    // gets its own band instead.
+    if (dp.dutyKind === "standby") {
+      if (nowMs >= logged.startMs && nowMs <= logged.endMs) {
+        standby = {
+          id: dp.id,
+          date: dp.date,
+          code: dp.standbyKind === "airport" ? "Airport standby" : "Standby",
+          startMs: logged.startMs,
+          endMs: logged.endMs,
+          elapsedMinutes: Math.max(0, Math.floor((nowMs - logged.startMs) / 60_000)),
+          remainingMinutes: Math.max(0, Math.floor((logged.endMs - nowMs) / 60_000)),
+          activated: Boolean(dp.activatedAt),
+        }
+      }
+      continue
+    }
 
     // Where the roster runs later than the record, the duty is still in
     // progress and its PLANNED figures are the legal ones: under Reg 14 the
@@ -385,7 +432,7 @@ export function deriveDutyStatus(
     }
   }
 
-  if (active) return { phase: "on_duty", active, justFinished: null, next, rest }
+  if (active) return { phase: "on_duty", active, justFinished: null, next, rest, standby }
 
   const recentlyFinished =
     justFinished !== null && nowMs - justFinished.endMs <= POST_DUTY_WINDOW_MS
@@ -396,6 +443,7 @@ export function deriveDutyStatus(
     justFinished: recentlyFinished ? justFinished : null,
     next,
     rest,
+    standby,
   }
 }
 

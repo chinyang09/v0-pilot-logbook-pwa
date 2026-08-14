@@ -303,9 +303,61 @@ export function calculateStandbyDutyPeriod(entry: ScheduleEntry): DutyPeriod | n
  *
  * A standby the pilot was never called out on is untouched.
  */
+/**
+ * The rule itself: the earliest report falling INSIDE a standby window is the
+ * activation. Absolute minutes throughout, so a window crossing midnight and a
+ * duty reporting the next morning compare correctly.
+ *
+ * Shared, because two callers need the same answer from different data — the
+ * FDP pipeline works in duty periods, and the roster page has schedule entries
+ * and flights. Two copies of "was this standby called out" would drift.
+ *
+ * @returns the activation as absolute minutes, or null
+ */
+export function findActivationMinute(
+  standbyStartAbs: number,
+  standbyEndAbs: number,
+  reportAbsMinutes: number[]
+): number | null {
+  let earliest = Infinity
+  for (const reportAbs of reportAbsMinutes) {
+    if (reportAbs > standbyStartAbs && reportAbs < standbyEndAbs && reportAbs < earliest) {
+      earliest = reportAbs
+    }
+  }
+  return earliest === Infinity ? null : earliest
+}
+
+/**
+ * Is this standby one the crew member was never called out on?
+ *
+ * Such a standby is treated as REST: the rest period runs straight through it,
+ * so it neither requires rest after it nor resets the clock for the duty that
+ * follows. The crew member spent it at home, which is where rest is taken —
+ * the same reading para 6(3) already applies to airport standby served with
+ * adequate rest facilities.
+ *
+ * It still contributes para 6(7)'s 20% to the cumulative limits. "Did you
+ * rest" and "how many hours have you worked" are different questions and the
+ * schedule answers them in different paragraphs.
+ *
+ * ⚠ ASSUMED, PENDING CONFIRMATION. Para 3(1)(c)/(d) are written against a
+ * "duty period", not a flight duty period, so read literally a 12-hour standby
+ * does demand 12 hours of rest after it. This is the operator's practice taken
+ * over the literal text, and it is the PERMISSIVE direction — it should be
+ * re-checked against a real roster before it is settled.
+ */
+export function isRestingStandby(dp: DutyPeriod): boolean {
+  return dp.dutyKind === "standby" && !dp.activatedAt
+}
+
 export function truncateActivatedStandby(dutyPeriods: DutyPeriod[]): DutyPeriod[] {
   const flightDuties = dutyPeriods.filter((dp) => dp.dutyKind !== "standby")
   if (flightDuties.length === 0) return dutyPeriods
+
+  const reportAbsMinutes = flightDuties.map(
+    (duty) => dateToDays(duty.date) * 1440 + hhmmToMinutes(duty.reportTime)
+  )
 
   return dutyPeriods.map((dp) => {
     if (dp.dutyKind !== "standby") return dp
@@ -313,15 +365,8 @@ export function truncateActivatedStandby(dutyPeriods: DutyPeriod[]): DutyPeriod[
     const startAbs = dateToDays(dp.date) * 1440 + hhmmToMinutes(dp.reportTime)
     const endAbs = startAbs + dp.dutyMinutes
 
-    // The earliest duty reporting INSIDE the standby window is the activation.
-    let activationAbs = Infinity
-    for (const duty of flightDuties) {
-      const reportAbs = dateToDays(duty.date) * 1440 + hhmmToMinutes(duty.reportTime)
-      if (reportAbs > startAbs && reportAbs < endAbs && reportAbs < activationAbs) {
-        activationAbs = reportAbs
-      }
-    }
-    if (activationAbs === Infinity) return dp
+    const activationAbs = findActivationMinute(startAbs, endAbs, reportAbsMinutes)
+    if (activationAbs === null) return dp
 
     const dutyMinutes = activationAbs - startAbs
     return {
@@ -747,6 +792,18 @@ export function mergeDutyPeriods(
 
   // Process schedule entries
   for (const dp of scheduleDPs) {
+    // Only a schedule FLIGHT duty is an alternative record of a logbook duty,
+    // and only that competes for the date. A standby is a DIFFERENT duty that
+    // happens to fall on the same day — and the day it shares with a flight is
+    // precisely the day it was activated on, so consuming the date there threw
+    // away the one standby whose hours needed accounting for. It also hid the
+    // pair from `truncateActivatedStandby`, which is what para 6(6) needs to
+    // see to stop those hours being counted twice.
+    if (dp.dutyKind && dp.dutyKind !== "flight") {
+      result.push({ ...dp, isFuture: dp.date > today })
+      continue
+    }
+
     const logbookDPsForDate = logbookByDate.get(dp.date)
 
     if (dp.date > today) {
@@ -760,7 +817,7 @@ export function mergeDutyPeriods(
       }
       consumedDates.add(dp.date)
     } else if (!consumedDates.has(dp.date)) {
-      // Past schedule only (e.g., standby, training counted as duty)
+      // Past schedule only (e.g. training counted as duty)
       result.push({ ...dp, isFuture: false })
     }
   }
@@ -1314,15 +1371,22 @@ export function calculateAllRestPeriods(sortedDPs: DutyPeriod[]): DutyPeriod[] {
   if (sortedDPs.length <= 1) return sortedDPs
 
   let disruptiveRun = 0
+  // The last duty that actually ENDED a rest period. A standby the crew member
+  // was never called out on is rest, so it neither takes a rest requirement of
+  // its own nor becomes the duty the next one is measured against — the rest
+  // period runs straight through it. It stays in the timeline regardless,
+  // because its 20% still counts toward the cumulative limits.
+  let previousDuty: DutyPeriod | null = null
 
-  return sortedDPs.map((dp, index) => {
+  return sortedDPs.map((dp) => {
+    if (isRestingStandby(dp)) return dp
+
     const priorRun = disruptiveRun
+    const result = previousDuty
+      ? { ...dp, restBefore: calculateRestPeriod(dp, previousDuty, priorRun) }
+      : dp
 
-    const result =
-      index === 0
-        ? dp
-        : { ...dp, restBefore: calculateRestPeriod(dp, sortedDPs[index - 1], priorRun) }
-
+    previousDuty = dp
     disruptiveRun = advanceDisruptiveRun(priorRun, dp.circadian?.disruptive ?? false)
     return result
   })
@@ -1781,6 +1845,10 @@ export function calculateRestUntilLegal(
   const completedDPs = dutyPeriods
     .filter((dp) => {
       if (dp.isFuture) return false
+      // A standby that was never called out was rest, not a duty to rest from.
+      // Counting it here would restart the countdown from the end of a period
+      // the crew member spent at home.
+      if (isRestingStandby(dp)) return false
       // Compute debrief timestamp to check if it's in the past
       let dDate = dp.date
       const rMin = hhmmToMinutes(dp.reportTime)
