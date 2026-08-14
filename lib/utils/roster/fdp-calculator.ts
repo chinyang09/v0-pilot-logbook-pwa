@@ -112,13 +112,23 @@ export function calculateDutyPeriodFromSchedule(
     })
   }
 
-  // Convert report time to local departure time for table lookup
+  // Para 14 enters its tables on "the local time at the place of commencement
+  // of the flight duty period", so the report time has to be moved into the
+  // DEPARTURE station's clock — from whichever frame the report stated it in.
   let localReportMinutes: number
-  if (entry.timeReference === "UTC") {
-    localReportMinutes = reportMinutes + departureTimezoneOffset * 60
-  } else {
-    // LOCAL_BASE = SGT (UTC+8), convert to departure local
-    localReportMinutes = reportMinutes + (departureTimezoneOffset - 8) * 60
+  switch (entry.timeReference) {
+    case "UTC":
+      localReportMinutes = reportMinutes + departureTimezoneOffset * 60
+      break
+    case "LOCAL_STATION":
+      // Already the local time where the crew member reports. Shifting it
+      // again would double-count the offset — an eight-hour error on a
+      // long-haul departure.
+      localReportMinutes = reportMinutes
+      break
+    default:
+      // LOCAL_BASE = SGT (UTC+8), converted to departure local.
+      localReportMinutes = reportMinutes + (departureTimezoneOffset - 8) * 60
   }
   if (localReportMinutes < 0) localReportMinutes += 1440
   const localReportTime = minutesToHHMM(localReportMinutes % 1440)
@@ -133,11 +143,12 @@ export function calculateDutyPeriodFromSchedule(
       ].join("-").toUpperCase()
     : undefined
 
-  const fdpResult = calculateMaxFDP({
-    reportTimeLocal: localReportTime,
-    sectors: sectorCount,
-    departureTimezoneOffset,
+  const fdpResult = deriveMaxFDP({
+    reportTime: entry.reportTime,
+    fdpStartLocal: localReportTime,
+    sectorCount,
     sectorMinutes,
+    departureTimezoneOffset,
   })
 
   const today = new Date().toISOString().split("T")[0]
@@ -153,6 +164,7 @@ export function calculateDutyPeriodFromSchedule(
     maxFdpMinutes: fdpResult.maxFdpMinutes,
     fdpExtensionUsed: false,
     fdpTableUsed: fdpResult.tableUsed,
+    fdpStartLocal: localReportTime,
     departureTimezoneOffset,
     effectiveSectors: fdpResult.effectiveSectors,
     sectorMinutes,
@@ -352,16 +364,17 @@ function createDutyPeriodFromFlightGroup(
 
   const circadianInstants = collectCircadianInstants(date, groupFlights)
 
-  // Convert scheduled report time to local for FDP table lookup
-  let localReportMinutes = scheduledReportMinutes + depTzOffset * 60
-  if (localReportMinutes < 0) localReportMinutes += 1440
-  const localReportTime = minutesToHHMM(localReportMinutes % 1440)
+  // Para 14 enters its tables on the local time of start of the FDP, taken
+  // from the SCHEDULED report — para 10(a) keeps the maximum on the original
+  // reporting time when the actual one slips by less than 4 hours.
+  const localReportTime = toLocalClock(scheduledReportMinutes, depTzOffset)
 
-  const fdpResult = calculateMaxFDP({
-    reportTimeLocal: localReportTime,
-    sectors: groupFlights.length,
-    departureTimezoneOffset: depTzOffset,
+  const fdpResult = deriveMaxFDP({
+    reportTime,
+    fdpStartLocal: localReportTime,
+    sectorCount: groupFlights.length,
     sectorMinutes,
+    departureTimezoneOffset: depTzOffset,
   })
 
   // Use unique id when multiple duty periods exist on same date
@@ -386,6 +399,7 @@ function createDutyPeriodFromFlightGroup(
     maxFdpMinutes: fdpResult.maxFdpMinutes,
     fdpExtensionUsed: false,
     fdpTableUsed: fdpResult.tableUsed,
+    fdpStartLocal: localReportTime,
     departureTimezoneOffset: depTzOffset,
     arrivalTimezoneOffset: arrTzOffset,
     effectiveSectors: fdpResult.effectiveSectors,
@@ -642,12 +656,6 @@ export function mergeAdjacentDutyPeriods(dutyPeriods: DutyPeriod[]): DutyPeriod[
       const totalDutyMinutes = currDebriefAbs - prevReportAbs
       const totalSectors = prev.sectorCount + curr.sectorCount
 
-      // Recalculate max FDP with merged parameters
-      const depTzOffset = prev.departureTimezoneOffset ?? 8
-      let localReportMinutes = hhmmToMinutes(prev.reportTime) + depTzOffset * 60
-      if (localReportMinutes < 0) localReportMinutes += 1440
-      const localReportTime = minutesToHHMM(localReportMinutes % 1440)
-
       // The merged duty's sector lengths, so para 14(2) still applies. Without
       // them this recompute used the sector COUNT alone and silently dropped
       // the long sector adjustment, so an over-long merged overnight read as
@@ -657,10 +665,14 @@ export function mergeAdjacentDutyPeriods(dutyPeriods: DutyPeriod[]): DutyPeriod[
         ...(curr.sectorMinutes ?? []),
       ]
 
-      const fdpResult = calculateMaxFDP({
-        reportTimeLocal: localReportTime,
-        sectors: totalSectors,
-        departureTimezoneOffset: depTzOffset,
+      // The merged duty COMMENCES when the first one did, so it keeps the
+      // first one's table entry. This used to re-derive it from
+      // `prev.reportTime` — the actual report — which is the para 10(a)
+      // mistake, and on a duty reporting near 2200 it moved the lookup into
+      // the next band and lost an hour of FDP.
+      const fdpResult = deriveMaxFDP({
+        ...prev,
+        sectorCount: totalSectors,
         sectorMinutes: mergedSectorMinutes,
       })
 
@@ -839,6 +851,64 @@ function calculateMaxFDPFull(params: FdpCalculationParams): FdpCalculationResult
   }
 
   return { maxFdpMinutes, tableUsed, effectiveSectors }
+}
+
+/**
+ * **THE** way to get a duty period's FDP maximum. Every stage goes through
+ * this — the two producers, the overnight merge and the acclimatisation pass.
+ *
+ * It exists because the maximum used to be recomputed at each of those stages
+ * from whatever inputs that stage happened to have, and they disagreed. The
+ * producers correctly entered Table A on the SCHEDULED report time; the merge
+ * and the acclimatisation pass re-derived it from `reportTime`, which is the
+ * ACTUAL one. On a real duty reporting at 2150 local and pushing back 23
+ * minutes late, that moved the lookup from the 1500–2159 band to 2200–0559 and
+ * reported a maximum of 10:15 where the schedule allows 12:15.
+ *
+ * A later stage may know something the producer did not — so far only the
+ * acclimatised zone, which needs the whole timeline — and passes it as an
+ * override. Everything else is read off the duty period, so there is exactly
+ * one set of inputs and one answer.
+ */
+export type FdpInputs = Pick<
+  DutyPeriod,
+  | "reportTime"
+  | "sectorCount"
+  | "sectorMinutes"
+  | "departureTimezoneOffset"
+  | "crewConfig"
+  | "augmentedCrew"
+  | "inFlightRestFacilities"
+  | "acclimatedOffset"
+  | "fdpStartLocal"
+>
+
+export function deriveMaxFDP(
+  dp: FdpInputs,
+  overrides: { acclimatedOffset?: number } = {}
+): FdpCalculationResult {
+  const depTz = dp.departureTimezoneOffset ?? HOME_BASE_OFFSET_MINUTES / 60
+
+  return calculateMaxFDP({
+    // A duty period built before `fdpStartLocal` existed falls back to the
+    // actual report time, which is what every stage used to do — wrong only
+    // for a delayed report, and better than no figure at all.
+    reportTimeLocal:
+      dp.fdpStartLocal ?? toLocalClock(hhmmToMinutes(dp.reportTime), depTz),
+    sectors: dp.sectorCount,
+    sectorMinutes: dp.sectorMinutes,
+    departureTimezoneOffset: depTz,
+    crewConfig: dp.crewConfig,
+    augmentedCrew: dp.augmentedCrew,
+    inFlightRestFacilities: dp.inFlightRestFacilities,
+    acclimatedOffset: overrides.acclimatedOffset ?? dp.acclimatedOffset,
+  })
+}
+
+/** A UTC minute-of-day read as a wall clock in a zone, as HH:MM. */
+function toLocalClock(utcMinutes: number, tzOffsetHours: number): string {
+  const local = utcMinutes + tzOffsetHours * 60
+  return minutesToHHMM(((local % 1440) + 1440) % 1440)
 }
 
 // ============================================
@@ -1662,15 +1732,16 @@ export function simulateHypotheticalDuty(
 
   const dutyMinutes = debriefMin - reportMin
 
-  // Report time is in UTC — convert to local for FDP table lookup (default SGT)
+  // Report time is in UTC — convert to local for FDP table lookup (default
+  // SGT). A hypothetical duty has no delay to account for, so the stated
+  // report time IS the basis.
   const depTzOffset = 8
-  let localReportMin = reportMin + depTzOffset * 60
-  if (localReportMin < 0) localReportMin += 1440
-  const localReportTime = minutesToHHMM(localReportMin % 1440)
+  const localReportTime = toLocalClock(reportMin, depTzOffset)
 
-  const fdpResult = calculateMaxFDP({
-    reportTimeLocal: localReportTime,
-    sectors: hypothetical.sectorCount,
+  const fdpResult = deriveMaxFDP({
+    reportTime: hypothetical.reportTime,
+    fdpStartLocal: localReportTime,
+    sectorCount: hypothetical.sectorCount,
     departureTimezoneOffset: depTzOffset,
   })
 
@@ -1684,6 +1755,9 @@ export function simulateHypotheticalDuty(
     sectorCount: hypothetical.sectorCount,
     maxFdpMinutes: fdpResult.maxFdpMinutes,
     fdpExtensionUsed: false,
+    fdpTableUsed: fdpResult.tableUsed,
+    fdpStartLocal: localReportTime,
+    departureTimezoneOffset: depTzOffset,
     source: "schedule",
     isFuture: true,
     scheduleEntryIds: [],
@@ -1831,15 +1905,16 @@ export function simulateScenario(
       const dutyMinutes = debriefMin - reportMin
       const sectorCount = change.sectorCount ?? 1
 
-      // Report time is in UTC — convert to local for FDP table lookup (default SGT)
+      // Report time is in UTC — convert to local for FDP table lookup (default
+      // SGT). A hypothetical duty has no delay, so the stated report IS the
+      // basis.
       const depTzOffset = 8
-      let localRepMin = reportMin + depTzOffset * 60
-      if (localRepMin < 0) localRepMin += 1440
-      const localRepTime = minutesToHHMM(localRepMin % 1440)
+      const localRepTime = toLocalClock(reportMin, depTzOffset)
 
-      const fdpRes = calculateMaxFDP({
-        reportTimeLocal: localRepTime,
-        sectors: sectorCount,
+      const fdpRes = deriveMaxFDP({
+        reportTime: change.reportTime,
+        fdpStartLocal: localRepTime,
+        sectorCount,
         departureTimezoneOffset: depTzOffset,
       })
       const maxFdpMinutes = fdpRes.maxFdpMinutes
@@ -1854,6 +1929,9 @@ export function simulateScenario(
         sectorCount,
         maxFdpMinutes,
         fdpExtensionUsed: false,
+        fdpTableUsed: fdpRes.tableUsed,
+        fdpStartLocal: localRepTime,
+        departureTimezoneOffset: depTzOffset,
         source: "schedule",
         isFuture: true,
         scheduleEntryIds: [],
@@ -2016,20 +2094,14 @@ export function applyAcclimatisation(
       intervals[i].startMs
     )
     const acclimatedHours = acclimatedMin / 60
-    const depTz = dp.departureTimezoneOffset ?? homeOffsetHours
 
-    let localReportMinutes = hhmmToMinutes(dp.reportTime) + depTz * 60
-    if (localReportMinutes < 0) localReportMinutes += 1440
-
-    const fdp = calculateMaxFDP({
-      reportTimeLocal: minutesToHHMM(localReportMinutes % 1440),
-      sectors: dp.sectorCount,
-      departureTimezoneOffset: depTz,
-      acclimatedOffset: acclimatedHours,
-      sectorMinutes: dp.sectorMinutes,
-      crewConfig: dp.crewConfig,
-      augmentedCrew: dp.augmentedCrew,
-    })
+    // The acclimatised zone is the ONLY thing this pass knows that the
+    // producer did not, so it is the only thing overridden. Everything else —
+    // above all the local time the FDP commenced at — comes off the duty
+    // period through the one derivation. Re-deriving the table entry here from
+    // `dp.reportTime` is what reported 10:15 against a schedule allowing
+    // 12:15 on a duty that pushed back 23 minutes late.
+    const fdp = deriveMaxFDP(dp, { acclimatedOffset: acclimatedHours })
 
     // Early start, late finish and the window of circadian low are all defined
     // in ACCLIMATED time, so this is the only place that can answer them — the

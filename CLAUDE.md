@@ -2117,6 +2117,48 @@ those assumptions were **wrong**, all in the permissive direction:
   (Table A). It runs between `mergeDutyPeriods` and `calculateAllRestPeriods`,
   because the rest calculation reads the corrected figures.
 
+#### ONE derivation of the FDP maximum — `deriveMaxFDP`
+
+Every stage goes through it: both duty-period producers, the overnight merge,
+the acclimatisation pass, and the two hypothetical-duty builders. It exists
+because the maximum used to be recomputed at each of those from whatever inputs
+that stage happened to have, and they disagreed.
+
+**A duty period carries TWO report times and they do different jobs.**
+
+| | Field | Job |
+|---|---|---|
+| when the duty BEGAN | `reportTime` | `dutyMinutes`, the elapsed clock, the duty window |
+| what Table A is ENTERED on | `fdpStartLocal` | para 14(1)'s "local time of start", in the DEPARTURE station's clock |
+
+They differ whenever reporting slips, and para 10(a) is explicit about it:
+
+> where the delay is less than 4 hours, the maximum permitted flight duty
+> period is based on the **original** reporting time but the flight duty period
+> **starts at the actual** reporting time
+
+The reported bug was exactly this. TR566/567 on 12 Dec: scheduled out 14:50Z =
+22:50 local, so report 21:50 local — Table A's **1500–2159** band, two sectors,
+**12¼ hours**. The aircraft pushed back 23 minutes late, putting the ACTUAL
+report at 22:13 local. The producer got it right; `applyAcclimatisation` then
+re-derived the lookup from `reportTime`, landed in **2200–0559**, and reported a
+maximum of **10:15** — below the 10:57 actually flown, so the pilot was shown an
+exceedance they had not committed. `mergeAdjacentDutyPeriods` had the same
+defect.
+
+`deriveMaxFDP(dp, { acclimatedOffset })` takes the acclimatised zone as its ONLY
+override, because that is the only thing a later stage knows that the producer
+did not. Everything else — the band, the sectors, the sector lengths, the crew
+complement — is read off the duty period. A duty carrying no `fdpStartLocal`
+falls back to `reportTime`, which is the old behaviour and is wrong only for a
+delayed report.
+
+The report time also has to be moved into the **departure station's** clock from
+whichever frame the source stated it in — UTC shifts by the departure offset,
+LOCAL_BASE shifts from SGT to it, and **LOCAL_STATION is already there** and must
+not be shifted at all (it was, which is an eight-hour error on a UTC+0
+departure).
+
 #### Paragraph 4 — duties around the window of circadian low
 
 Three First Schedule terms, all defined in **acclimated time**:
@@ -2201,6 +2243,14 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
 - **Paragraph 4 was not implemented at all.** A roster of consecutive early
   starts asked only for paragraph 3's 10 or 12 hours where the schedule
   requires 24 inclusive of a local night.
+- **The FDP maximum was re-derived from the ACTUAL report time** by the merge
+  and the acclimatisation pass, against para 10(a). Reported by the owner:
+  10:15 shown on a duty entitled to 12:15, which also made a compliant 10:57
+  duty read as an exceedance. Now one derivation (`deriveMaxFDP`) over one
+  stored basis (`fdpStartLocal`).
+- **A LOCAL_STATION schedule report's time was shifted by the departure
+  offset**, double-counting it — eight hours, two bands of Table A, on a UTC+0
+  departure.
 - **`calculateRestUntilLegal` still had the if/else chain** the same pass fixed
   in `calculateRestPeriod` — so the countdown a pilot actually reads off the
   dashboard under-stated an 11-hour duty's rest by an hour, and measured the
@@ -3128,6 +3178,9 @@ When making changes, be aware of these high-impact files:
 - Do not apply the para 14(2) long-sector adjustment to an augmented crew or to Table C — it applies where the crew "only consists of 2 pilots", and an augmented crew's ceiling comes from para 15 instead
 - Do not grant the augmented-crew extension without `inFlightRestFacilities === true` — para 15(3)(b) forbids any extension without rest facilities, and UNKNOWN must withhold it rather than assume in favour of a longer duty
 - Do not swap `DEFAULT_FTL_LIMITS` for the cabin-crew figures. Para 12(1) gives FLIGHT crew 90h/14d and 180h/28d; 12(2) gives cabin crew 100h and 200h. This is a flight-crew logbook
+- Do not compute an FDP maximum anywhere but `deriveMaxFDP` — it is the ONE derivation, and every stage (both producers, the overnight merge, the acclimatisation pass, the hypothetical-duty builders) goes through it. Four sites recomputing it from whatever inputs each had is what put 10:15 on a duty the schedule allows 12:15 for
+- Do not enter Table A on `reportTime`. That is when the duty STARTED; the table is entered on `fdpStartLocal`, which is the **original** (scheduled) reporting time in the DEPARTURE station's clock. Para 10(a) is explicit — a delay under 4 hours keeps the maximum on the original report while the FDP starts at the actual one — and a 23-minute pushback on a 2150 report crosses into the 2200–0559 band and takes an hour and a half off the maximum, which then reads as an exceedance the pilot never committed
+- Do not shift a LOCAL_STATION report time by the departure offset — it is ALREADY the local time where the crew member reports, so shifting double-counts (eight hours, two bands of Table A, on a UTC+0 departure). UTC shifts by the departure offset; LOCAL_BASE shifts from SGT to it
 - Do not HARDCODE an FDP maximum, ever. Under CAAS Reg 14 it moves with report time, sectors, crew complement, acclimatisation and the long-sector adjustment; `DutyPeriod.maxFdpMinutes` already holds the figure `calculateMaxFDP` computed for THAT duty, and `fdpTableUsed` is printed beside it so it can be checked. A duty with no computed maximum shows a dash, not a default — a default is a number somebody might fly to
 - Do not add a 7-day duty figure to the dashboard. CAAS imposes 14-day and 28-day duty caps (Reg 12) and 28-day/12-month flight caps (Reg 107); a 7-day limit is not in the regulation and printing one is worse than printing none
 - Do not turn the legal page back into a stack of glass cards — six cards' borders, radii and margins cost ~120px of a phone's height, which is the difference between it fitting and not. One surface, hairline `divide-y` rules. And keep it `max-h-full`, not `h-full`: stretching makes the one `flex-1` section absorb every spare pixel and leaves a hole under the last requirement

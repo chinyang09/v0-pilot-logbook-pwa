@@ -279,6 +279,29 @@ export interface DutyPeriod {
   crewConfig?: CrewConfiguration          // defaults to "two-pilot"
   augmentedCrew?: AugmentedCrewLevel      // defaults to "none"
   fdpTableUsed?: FdpTableUsed             // which CAAS table was applied
+  /**
+   * Whether appropriate in-flight rest facilities are confirmed available.
+   * Para 15(3)(b) makes them a condition of any augmented-crew extension;
+   * unknown withholds it.
+   */
+  inFlightRestFacilities?: boolean
+  /**
+   * **The one input paragraph 14 enters its tables on** — the local time at the
+   * place of commencement of the FDP, HH:MM.
+   *
+   * It is NOT `reportTime` converted, and the difference is the whole reason
+   * this field exists. `reportTime` is when the duty ACTUALLY started; para
+   * 10(a) says that where reporting is delayed by less than 4 hours "the
+   * maximum permitted flight duty period is based on the ORIGINAL reporting
+   * time but the flight duty period starts at the actual reporting time". A
+   * 23-minute delay on a 2150 report pushed the recomputed lookup into the
+   * 2200–0559 band and took an hour off the maximum.
+   *
+   * Captured once, by whoever built the duty period and therefore knows the
+   * scheduled times. Every later stage re-derives the maximum through
+   * `deriveMaxFDP`, which reads this rather than re-deriving it.
+   */
+  fdpStartLocal?: string
   departureTimezoneOffset?: number        // UTC offset of departure airport
   /**
    * UTC offset of the ARRIVAL airport of the last sector — i.e. where the crew
