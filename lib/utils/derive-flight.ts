@@ -9,9 +9,11 @@ export type DeriveKind = "next-leg" | "return-trip" | "duplicate"
  * What every kind carries over is the stuff that does not change between two
  * legs flown back to back — the aircraft, the crew, the pilot's own role — and
  * what none of them carry is anything that is a record of a specific flight
- * having happened: the OOOI times, the takeoffs and landings, the signature,
- * the lock, and every import/sync stamp. Copying those forward would fabricate
- * a logbook entry, which is the one thing a logbook must never do.
+ * having happened: the OOOI times, the report time, the takeoffs and landings,
+ * the signature, the lock, and every import/sync stamp. Copying those forward
+ * would fabricate a logbook entry, which is the one thing a logbook must never
+ * do. (This is an allowlist rather than an omission list, so a new field is
+ * left behind by default — keep it that way.)
  *
  * - **next-leg** continues the trip: yesterday's arrival is today's departure,
  *   so the route is chained (arrival → new departure) and the far end is left

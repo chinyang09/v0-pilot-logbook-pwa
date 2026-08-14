@@ -87,12 +87,17 @@ describe("the maximum survives every stage of the pipeline", () => {
     expect(built[0].fdpTableUsed).toBe("A")
   })
 
-  it("starts the duty at the ACTUAL report time", () => {
-    // 15:13Z gate-out less the hour of pre-flight checks, through to 00:40Z
-    // plus the half hour of post-flight ones.
-    expect(built[0].reportTime).toBe("14:13")
+  it("starts the duty at the ROSTERED report, not an hour before pushback", () => {
+    // Nothing says the report moved, so the crew reported as rostered at
+    // 13:50Z and the aircraft went 23 minutes late underneath them. Duty runs
+    // 13:50Z to 00:40Z plus the half hour of post-flight checks: 11:20.
+    //
+    // Derived from the ACTUAL gate-out instead — which is what this did — the
+    // duty started at 14:13 and came to 10:57, hiding the 23 minutes the crew
+    // spent waiting. A three-hour technical delay hid three hours.
+    expect(built[0].reportTime).toBe("13:50")
     expect(built[0].debriefTime).toBe("01:10")
-    expect(built[0].dutyMinutes).toBe(10 * 60 + 57)
+    expect(built[0].dutyMinutes).toBe(11 * 60 + 20)
   })
 
   it("keeps 12:15 through the merge", () => {
@@ -109,7 +114,7 @@ describe("the maximum survives every stage of the pipeline", () => {
   })
 
   it("does not report the duty as exceeding its FDP", () => {
-    // 10:57 flown against a 12:15 maximum. Against the wrong 10:15 the pilot
+    // 11:20 on duty against a 12:15 maximum. Against the wrong 10:15 the pilot
     // was shown an exceedance they had not committed.
     expect(acclimatised[0].dutyMinutes).toBeLessThan(acclimatised[0].maxFdpMinutes)
   })

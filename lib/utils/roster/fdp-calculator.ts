@@ -67,6 +67,13 @@ const DEBRIEF_BUFFER_MINUTES = POST_FLIGHT_CHECK_MIN
 /** Home base offset, in minutes from UTC — Singapore. */
 const HOME_BASE_OFFSET_MINUTES = 8 * 60
 
+/**
+ * Para 10's threshold. A reporting delay below this keeps the FDP maximum on
+ * the original reporting time; at or above it, the maximum is re-based on the
+ * actual one and the FDP window opens 4 hours after the original.
+ */
+const DELAY_REBASE_MINUTES = 4 * 60
+
 // ============================================
 // DutyPeriod creation from schedule entries
 // ============================================
@@ -279,6 +286,7 @@ function createDutyPeriodFromFlightGroup(
   let totalFlightMinutes = 0
   let earliestOut = Infinity
   let earliestScheduledOut = Infinity
+  let earliestStatedReport = Infinity
   let latestIn = -Infinity
 
   for (const flight of groupFlights) {
@@ -291,6 +299,11 @@ function createDutyPeriodFromFlightGroup(
     // Track scheduled OUT for FDP table lookup (CAAS uses scheduled, not actual)
     if (flight.scheduledOut) {
       earliestScheduledOut = Math.min(earliestScheduledOut, hhmmToMinutes(flight.scheduledOut))
+    }
+    // An explicitly recorded report — only a duty's first sector normally
+    // carries one, but take the earliest so it does not matter which.
+    if (flight.reportTime) {
+      earliestStatedReport = Math.min(earliestStatedReport, hhmmToMinutes(flight.reportTime))
     }
     if (flight.inTime) {
       let inMin = hhmmToMinutes(flight.inTime)
@@ -331,17 +344,48 @@ function createDutyPeriodFromFlightGroup(
 
   if (earliestOut === Infinity || latestIn === -Infinity) return null
 
+  // ── When the duty period began ─────────────────────────────────────────
+  //
+  // The ORIGINAL (rostered) report is the SCHEDULED gate-out less the hour
+  // para 7(2) allows for pre-flight checks — and it is also the default for
+  // when the duty actually started. Deriving the report from the ACTUAL
+  // gate-out instead, which is what this did, is right only when the company
+  // moved the report by exactly the pushback delay; in the ordinary case of a
+  // late aircraft and an unchanged report it slid the duty's start forward
+  // with the delay and made the duty look shorter than it was.
+  //
+  // A stated `flight.reportTime` overrides it. That is the case para 10
+  // governs: informed of a delay before leaving the place of rest, so the
+  // report itself moves while the scheduled departure may not.
+  const originalReportMinutes = Math.max(
+    0,
+    (earliestScheduledOut !== Infinity ? earliestScheduledOut : earliestOut) -
+      REPORT_BUFFER_MINUTES
+  )
+  const reportMinutes =
+    earliestStatedReport !== Infinity ? earliestStatedReport : originalReportMinutes
+
   // A duty period "ends when that crew member is free from all duties", and
-  // para 7(2) puts at least 30 minutes of post-flight checks after gate-in. So
-  // the duty runs from one hour before gate-out to 30 minutes after gate-in;
-  // the rest period then commences an hour after THAT.
-  const reportMinutes = Math.max(0, earliestOut - REPORT_BUFFER_MINUTES)
+  // para 7(2) puts at least 30 minutes of post-flight checks after gate-in.
   const debriefMinutes = latestIn + DEBRIEF_BUFFER_MINUTES
 
-  // For FDP table lookup: use scheduled OUT when available, else actual OUT
-  const scheduledReportMinutes = earliestScheduledOut !== Infinity
-    ? Math.max(0, earliestScheduledOut - REPORT_BUFFER_MINUTES)
-    : reportMinutes
+  // ── Para 10 — delayed reporting ────────────────────────────────────────
+  //
+  //   (a) where the delay is less than 4 hours, the maximum permitted flight
+  //       duty period is based on the ORIGINAL reporting time but the flight
+  //       duty period starts at the ACTUAL reporting time;
+  //   (b) where the delay is 4 hours or more, the maximum permitted flight
+  //       duty period is based on the ACTUAL reporting time but the flight
+  //       duty period starts 4 HOURS AFTER the original reporting time.
+  //
+  // Under (b) the FDP window therefore opens BEFORE the crew member reports,
+  // so part of it is already spent by the time they do.
+  const reportDelayMinutes = Math.max(0, reportMinutes - originalReportMinutes)
+  const rebasedOnActual = reportDelayMinutes >= DELAY_REBASE_MINUTES
+  const scheduledReportMinutes = rebasedOnActual ? reportMinutes : originalReportMinutes
+  const fdpElapsedAtReport = rebasedOnActual
+    ? reportDelayMinutes - DELAY_REBASE_MINUTES
+    : 0
 
   // Normalize to within 24h for display
   const reportTime = minutesToHHMM(reportMinutes % 1440)
@@ -400,6 +444,7 @@ function createDutyPeriodFromFlightGroup(
     fdpExtensionUsed: false,
     fdpTableUsed: fdpResult.tableUsed,
     fdpStartLocal: localReportTime,
+    fdpElapsedAtReport,
     departureTimezoneOffset: depTzOffset,
     arrivalTimezoneOffset: arrTzOffset,
     effectiveSectors: fdpResult.effectiveSectors,

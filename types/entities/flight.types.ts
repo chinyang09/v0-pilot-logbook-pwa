@@ -116,6 +116,21 @@ export interface FlightLog {
   departureTimezone: number
   arrivalTimezone: number
   // Times in HH:MM UTC format
+  /**
+   * When the crew member ACTUALLY reported for the duty period this sector
+   * begins, UTC HH:MM. Only meaningful on a duty's first sector.
+   *
+   * Absent means the rostered report — scheduled OUT less the hour para 7(2)
+   * allows for pre-flight checks. It is recorded only when the company moved
+   * the report itself, which is the case para 10 of the Fifth Schedule
+   * governs: told to stay at the place of rest because the inbound aircraft is
+   * late, so the report slips while the scheduled departure may not.
+   *
+   * It is NOT derived from the actual OUT time. A late pushback with an
+   * unchanged report is the ordinary case, and deriving from OUT there makes
+   * the duty look shorter than it was.
+   */
+  reportTime?: string
   scheduledOut: string
   scheduledIn: string
   outTime: string

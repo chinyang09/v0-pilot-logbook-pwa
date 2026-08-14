@@ -109,8 +109,17 @@ export interface ActiveDuty {
   date: string
   route: string
   sectorCount: number
-  /** Minutes since report. */
+  /** Minutes since report — the CREW DUTY period's clock. */
   elapsedMinutes: number
+  /**
+   * Minutes since the FLIGHT duty period opened.
+   *
+   * Normally identical to `elapsedMinutes`: both clocks start at report. They
+   * separate only under para 10(b), where a reporting delay of 4 hours or more
+   * opens the FDP window 4 hours after the ORIGINAL report — earlier than the
+   * crew member actually reports — so some of it is already gone at report.
+   */
+  fdpElapsedMinutes: number
   /**
    * The CAAS Reg 14 maximum for THIS duty — report time, sectors, crew and
    * acclimatisation already applied. 0 when the duty period carries none.
@@ -189,6 +198,8 @@ function toActive(
   maxDutyMinutes: number,
 ): ActiveDuty {
   const elapsed = Math.max(0, Math.floor((nowMs - w.startMs) / 60_000))
+  // Para 10(b) can have the FDP window open before the crew member reports.
+  const fdpElapsed = elapsed + (dp.fdpElapsedAtReport ?? 0)
   const max = dp.maxFdpMinutes > 0 ? dp.maxFdpMinutes : 0
   const dutyMax = maxDutyMinutes > 0 ? maxDutyMinutes : 0
   return {
@@ -201,9 +212,10 @@ function toActive(
     route: dp.route || "",
     sectorCount: dp.sectorCount || 0,
     elapsedMinutes: elapsed,
+    fdpElapsedMinutes: fdpElapsed,
     maxFdpMinutes: max,
-    remainingMinutes: max > 0 ? Math.max(0, max - elapsed) : 0,
-    exceeded: max > 0 && elapsed > max,
+    remainingMinutes: max > 0 ? Math.max(0, max - fdpElapsed) : 0,
+    exceeded: max > 0 && fdpElapsed > max,
     fdpTable: dp.fdpTableUsed,
     augmented: Boolean(dp.augmentedCrew && dp.augmentedCrew !== "none"),
     flightMinutes: dp.flightMinutes || 0,
@@ -307,6 +319,12 @@ export function deriveDutyStatus(
           sectorCount: plan.sectorCount || dp.sectorCount,
           maxFdpMinutes: plan.maxFdpMinutes || dp.maxFdpMinutes,
           fdpTableUsed: plan.fdpTableUsed ?? dp.fdpTableUsed,
+          // Travels with the maximum: both come out of the same para 10
+          // evaluation, so taking one without the other would gauge the plan's
+          // limit against the record's clock.
+          fdpElapsedAtReport: plan.maxFdpMinutes
+            ? plan.fdpElapsedAtReport
+            : dp.fdpElapsedAtReport,
           route: plan.route || dp.route,
           // From the record: what has actually been flown.
           flightMinutes: dp.flightMinutes,

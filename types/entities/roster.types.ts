@@ -302,6 +302,15 @@ export interface DutyPeriod {
    * `deriveMaxFDP`, which reads this rather than re-deriving it.
    */
   fdpStartLocal?: string
+  /**
+   * Minutes of the FDP already spent when the crew member reported.
+   *
+   * Zero for every ordinary duty. Non-zero only under para 10(b): where a
+   * reporting delay is 4 hours or more the FDP "starts 4 hours after the
+   * original reporting time", which is EARLIER than the actual report, so the
+   * window is already partly gone at the moment the crew member walks in.
+   */
+  fdpElapsedAtReport?: number
   departureTimezoneOffset?: number        // UTC offset of departure airport
   /**
    * UTC offset of the ARRIVAL airport of the last sector — i.e. where the crew
