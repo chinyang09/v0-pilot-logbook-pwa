@@ -4,9 +4,9 @@ import { buildLegalityModel, type LegalityInput } from "../legality"
 import type { CurrencyWithStatus } from "@/types/entities/roster.types"
 
 /**
- * The legality panel is the one part of the dashboard a pilot could act on
- * wrongly, so the rules that decide a requirement's state are pinned here
- * rather than left to the component that renders them.
+ * The requirement model. This is the one part of the dashboard a pilot could
+ * act on wrongly, so the rules that decide a requirement's state are pinned
+ * here rather than left to the component that renders them.
  */
 
 function currency(over: Partial<CurrencyWithStatus>): CurrencyWithStatus {
@@ -27,7 +27,6 @@ function currency(over: Partial<CurrencyWithStatus>): CurrencyWithStatus {
 }
 
 const CLEAR: LegalityInput = {
-  rest: null,
   recency: { takeoffs: 6, landings: 6, current: true, lapseIso: "2026-11-01" },
   capacity: {
     duty14Days: { used: 20, limit: 90, remaining: 70 },
@@ -63,77 +62,46 @@ describe("buildLegalityModel — verdict", () => {
   })
 })
 
-describe("buildLegalityModel — rest", () => {
-  it("fails with the shortfall while rest is outstanding", () => {
+describe("buildLegalityModel — recency is ONE requirement", () => {
+  it("answers 'am I recent' as a single cell, with both halves in the detail", () => {
+    // Takeoffs and landings were two cells that said the same thing and, sorted
+    // by urgency, did not even sit beside each other. A pilot checks recency as
+    // one question.
     const model = buildLegalityModel({
       ...CLEAR,
-      rest: {
-        isLegalNow: false,
-        restElapsedMinutes: 240,
-        requiredRestMinutes: 720,
-        legalAtUtc: "2026-08-13T08:00:00Z",
-      },
+      recency: { takeoffs: 6, landings: 4, current: true, lapseIso: "2026-11-01" },
     })
 
-    const rest = model.requirements.find((r) => r.id === "rest")!
-    expect(rest.state).toBe("fail")
-    expect(rest.value).toBe("8h 0m")
-    expect(rest.progress).toBeCloseTo(240 / 720)
-    // The countdown target is published so the panel can tick it live.
-    expect(model.legalAtUtc).toBe("2026-08-13T08:00:00Z")
+    const rows = model.requirements.filter((r) => r.id.startsWith("recency"))
+    expect(rows).toHaveLength(1)
+    expect(rows[0].label).toBe("90-day recency")
+    expect(rows[0].detail).toContain("Takeoffs 6 / 3")
+    expect(rows[0].detail).toContain("Landings 4 / 3")
   })
 
-  it("publishes no countdown once the rest is served", () => {
+  it("fails on whichever half is short, and names both in the remedy", () => {
     const model = buildLegalityModel({
       ...CLEAR,
-      rest: {
-        isLegalNow: true,
-        restElapsedMinutes: 900,
-        requiredRestMinutes: 720,
-        legalAtUtc: "2026-08-12T08:00:00Z",
-      },
+      recency: { takeoffs: 1, landings: 2, current: false, lapseIso: null },
     })
 
-    expect(model.requirements.find((r) => r.id === "rest")!.state).toBe("ok")
-    expect(model.legalAtUtc).toBeNull()
-  })
-})
-
-describe("buildLegalityModel — recency", () => {
-  it("fails below three and reports the count against the requirement", () => {
-    const model = buildLegalityModel({
-      ...CLEAR,
-      recency: { takeoffs: 2, landings: 5, current: false, lapseIso: null },
-    })
-
-    const to = model.requirements.find((r) => r.id === "recency-to")!
-    const ldg = model.requirements.find((r) => r.id === "recency-ldg")!
-    expect(to.state).toBe("fail")
-    expect(to.value).toBe("2 / 3")
-    expect(ldg.state).toBe("ok")
+    const recency = model.requirements.find((r) => r.id === "recency")!
+    expect(recency.state).toBe("fail")
+    expect(recency.action).toBe("2 takeoffs and 1 landing required")
   })
 
-  it("cautions while recency is still met but about to lapse", () => {
-    // Met today, lapses in 6 days. This is the case a current/not-current chip
-    // cannot express, and the only one where a pilot can still do something
-    // about it.
+  it("cautions while still met but about to lapse", () => {
+    // Met today, lapses in 6 days — the case a current/not-current chip cannot
+    // express, and the only one where a pilot can still act.
     const model = buildLegalityModel({
       ...CLEAR,
       recency: { takeoffs: 3, landings: 3, current: true, lapseIso: "2026-08-19" },
     })
 
-    const to = model.requirements.find((r) => r.id === "recency-to")!
-    expect(to.state).toBe("caution")
-    expect(to.value).toBe("6d left")
+    const recency = model.requirements.find((r) => r.id === "recency")!
+    expect(recency.state).toBe("caution")
+    expect(recency.value).toBe("6d")
     expect(model.verdict).toBe("caution")
-  })
-
-  it("stays ok when the lapse is far out", () => {
-    const model = buildLegalityModel({
-      ...CLEAR,
-      recency: { takeoffs: 4, landings: 4, current: true, lapseIso: "2026-10-30" },
-    })
-    expect(model.requirements.find((r) => r.id === "recency-to")!.state).toBe("ok")
   })
 })
 
@@ -154,26 +122,11 @@ describe("buildLegalityModel — rolling limits", () => {
     expect(model.requirements.find((r) => r.id === "flight-28")!.state).toBe("ok")
   })
 
-  it("cautions a limit a future schedule is forecast to breach", () => {
-    // Under 80% today, but the roster already puts it over. The row a pilot
-    // must not read as clear.
-    const model = buildLegalityModel({
-      ...CLEAR,
-      forecastBreaches: ["28-day flight"],
-    })
-
-    expect(model.requirements.find((r) => r.id === "flight-28")!.state).toBe("caution")
-    expect(model.requirements.find((r) => r.id === "duty-14")!.state).toBe("ok")
-  })
-
   it("matches a forecast breach that carries its regulation reference", () => {
     // `forecastExceedances` names the limit "28-day flight (Reg 107a)" while
     // `calculateCapacity` calls it "28-day flight". An exact match binds the
     // breach to no row at all and the warning disappears.
-    const model = buildLegalityModel({
-      ...CLEAR,
-      forecastBreaches: ["28-day flight (Reg 107a)"],
-    })
+    const model = buildLegalityModel({ ...CLEAR, forecastBreaches: ["28-day flight (Reg 107a)"] })
     expect(model.requirements.find((r) => r.id === "flight-28")!.state).toBe("caution")
   })
 
@@ -183,6 +136,15 @@ describe("buildLegalityModel — rolling limits", () => {
       capacity: { ...CLEAR.capacity, duty14Days: { used: 0, limit: 0, remaining: 0 } },
     })
     expect(model.requirements.find((r) => r.id === "duty-14")!.state).toBe("unknown")
+  })
+
+  it("gives a rolling limit no expiry — it refills, it does not lapse", () => {
+    // This is what stops a 41%-full 12-month flight limit being reported as the
+    // tightest constraint on an otherwise clear pilot.
+    const model = buildLegalityModel(CLEAR)
+    for (const r of model.requirements.filter((x) => x.group === "limits")) {
+      expect(r.daysUntil).toBeUndefined()
+    }
   })
 })
 
@@ -203,10 +165,7 @@ describe("buildLegalityModel — documents", () => {
     expect(model.requirements.find((r) => r.id === "doc-CRM")!.state).toBe("ok")
   })
 
-  it("shows the nearest expiries and folds the remainder into a count", () => {
-    // A line pilot carries a dozen currencies. All of them as rows is what stops
-    // the panel being readable at a glance, so the tail is summarised — but it
-    // is never dropped.
+  it("shows the nearest expiries and folds the rest into an expandable cell", () => {
     const model = buildLegalityModel({
       ...CLEAR,
       currencies: [
@@ -214,21 +173,20 @@ describe("buildLegalityModel — documents", () => {
         currency({ code: "NEAR", daysRemaining: 5, status: "critical" }),
         currency({ code: "MID", daysRemaining: 60 }),
         currency({ code: "ALSO", daysRemaining: 280 }),
-        currency({ code: "MORE", daysRemaining: 290 }),
       ],
       documentRows: 2,
     })
 
-    const docIds = model.requirements.filter((r) => r.group === "documents").map((r) => r.id)
-    // Nearest first, then the fold.
-    expect(docIds).toEqual(["doc-NEAR", "doc-MID", "doc-rest"])
-    expect(model.requirements.find((r) => r.id === "doc-rest")!.value).toBe("3 valid")
+    const ids = model.requirements.filter((r) => r.group === "currency").map((r) => r.id)
+    expect(ids).toEqual(["recency", "doc-NEAR", "doc-MID", "doc-rest"])
+    // Nothing is hidden — the fold lists what it folded.
+    expect(model.requirements.find((r) => r.id === "doc-rest")!.detail).toEqual([
+      "ALSO 280d",
+      "FAR 300d",
+    ])
   })
 
   it("meters a document against its own warning window, not its whole validity", () => {
-    // Halfway into a 30-day warning window reads as half full. Against the
-    // validity period every document would sit near empty for a year and the
-    // meter would say nothing at all.
     const model = buildLegalityModel({
       ...CLEAR,
       currencies: [currency({ code: "OPC320", daysRemaining: 15, warningDays: 30 })],
@@ -238,35 +196,54 @@ describe("buildLegalityModel — documents", () => {
 })
 
 describe("buildLegalityModel — binding constraint", () => {
-  it("names the requirement standing between the pilot and the aircraft", () => {
+  it("names the most pressing flagged requirement", () => {
     const model = buildLegalityModel({
       ...CLEAR,
-      rest: {
-        isLegalNow: false,
-        restElapsedMinutes: 60,
-        requiredRestMinutes: 720,
-        legalAtUtc: "2026-08-13T12:00:00Z",
-      },
+      recency: { takeoffs: 1, landings: 6, current: false, lapseIso: null },
       currencies: [currency({ code: "OPC320", status: "warning", daysRemaining: 20 })],
     })
-
-    // Rest outstanding outranks a document three weeks out.
-    expect(model.binding?.id).toBe("rest")
+    expect(model.binding?.id).toBe("recency")
   })
 
-  it("falls back to the fullest limit when nothing is flagged", () => {
-    // Nothing wrong, so the useful answer is what runs out first.
+  it("falls back to the NEAREST EXPIRY, never the fullest rolling limit", () => {
+    // The original rule picked whichever limit was fullest by fraction, which
+    // on a clear pilot reported "Flight 1y 604 / 1000h" — 41% used and roughly
+    // six months of headroom — as the tightest constraint. It was the least
+    // urgent thing on the page. A limit refills; a currency expires.
     const model = buildLegalityModel({
       ...CLEAR,
       capacity: {
-        duty14Days: { used: 60, limit: 90, remaining: 30 }, // 67% — the fullest
+        duty14Days: { used: 60, limit: 90, remaining: 30 },
         duty28Days: { used: 40, limit: 180, remaining: 140 },
         flight28Days: { used: 30, limit: 100, remaining: 70 },
-        flight365Days: { used: 300, limit: 1000, remaining: 700 },
+        flight365Days: { used: 604, limit: 1000, remaining: 396 },
       },
+      recency: { takeoffs: 6, landings: 6, current: true, lapseIso: "2027-01-01" },
+      currencies: [
+        currency({ code: "MEDIC", daysRemaining: 190 }),
+        currency({ code: "OPC320", daysRemaining: 58 }),
+      ],
     })
 
     expect(model.verdict).toBe("ok")
-    expect(model.binding?.id).toBe("duty-14")
+    expect(model.binding?.id).toBe("doc-OPC320")
+    expect(model.binding?.value).toBe("58d")
+  })
+
+  it("never picks the fold cell as the binding one", () => {
+    // The fold stands for several documents at once, so naming it would tell
+    // the pilot nothing they could act on.
+    const model = buildLegalityModel({
+      ...CLEAR,
+      recency: { takeoffs: 6, landings: 6, current: true, lapseIso: "2027-06-01" },
+      currencies: [
+        currency({ code: "A", daysRemaining: 100 }),
+        currency({ code: "B", daysRemaining: 110 }),
+        currency({ code: "C", daysRemaining: 120 }),
+        currency({ code: "D", daysRemaining: 130 }),
+      ],
+      documentRows: 3,
+    })
+    expect(model.binding?.id).toBe("doc-A")
   })
 })

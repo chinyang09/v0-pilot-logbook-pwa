@@ -59,6 +59,51 @@ export function dutyWindow(dp: Pick<DutyPeriod, "date" | "reportTime" | "debrief
   return { startMs: start, endMs: end }
 }
 
+/**
+ * One leg of the duty, for the sector chain.
+ *
+ * A duty is not one route — it is up to four sectors across several airports —
+ * and "where am I in the pattern" is a question the panel could not answer
+ * while it was showing a generic list of recent flights instead.
+ */
+export interface SectorLeg {
+  from: string
+  to: string
+  status: "complete" | "active" | "scheduled"
+}
+
+/**
+ * The airport chain a duty period records ("WSSS-VVNB-WSSS") split into legs,
+ * with progress marked.
+ *
+ * `completed` is how many legs are already on blocks. Everything after the
+ * completed ones is scheduled; the one immediately after is `active` while the
+ * duty is in progress, so a four-sector day reads as a chain with the current
+ * leg lit rather than as a route string nobody can locate themselves in.
+ */
+export function deriveSectorLegs(
+  route: string | undefined,
+  completed: number,
+  inProgress: boolean,
+): SectorLeg[] {
+  const stops = (route || "")
+    .split("-")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (stops.length < 2) return []
+
+  const legs: SectorLeg[] = []
+  for (let i = 0; i < stops.length - 1; i++) {
+    legs.push({
+      from: stops[i],
+      to: stops[i + 1],
+      status:
+        i < completed ? "complete" : i === completed && inProgress ? "active" : "scheduled",
+    })
+  }
+  return legs
+}
+
 export interface ActiveDuty {
   id: string
   date: string
@@ -81,8 +126,24 @@ export interface ActiveDuty {
   augmented: boolean
   /** Block minutes flown in this duty so far. */
   flightMinutes: number
+  /** The duty's legs, with progress. Empty when the duty records no route. */
+  legs: SectorLeg[]
   startMs: number
   endMs: number
+}
+
+/**
+ * Rest since the last debrief, which belongs to the DUTY panel rather than the
+ * currency grid: it is a property of the duty just flown, not a standing
+ * qualification, and among a column of expiry dates a live countdown read as a
+ * different kind of thing entirely — because it is one.
+ */
+export interface RestState {
+  isLegalNow: boolean
+  elapsedMinutes: number
+  requiredMinutes: number
+  /** ISO instant the pilot becomes legal. Only meaningful while not legal. */
+  legalAtUtc: string
 }
 
 export interface NextDuty {
@@ -103,12 +164,21 @@ export interface DutyStatus {
   justFinished: ActiveDuty | null
   /** The next duty on the roster, whatever the phase. */
   next: NextDuty | null
+  /** `null` when there is no completed duty to rest from. */
+  rest: RestState | null
 }
 
-function toActive(dp: DutyPeriod, w: DutyWindow, nowMs: number): ActiveDuty {
+function toActive(
+  dp: DutyPeriod,
+  w: DutyWindow,
+  nowMs: number,
+  completedLegs: number,
+  inProgress: boolean,
+): ActiveDuty {
   const elapsed = Math.max(0, Math.floor((nowMs - w.startMs) / 60_000))
   const max = dp.maxFdpMinutes > 0 ? dp.maxFdpMinutes : 0
   return {
+    legs: deriveSectorLegs(dp.route, completedLegs, inProgress),
     id: dp.id,
     date: dp.date,
     route: dp.route || "",
@@ -136,8 +206,26 @@ function toActive(dp: DutyPeriod, w: DutyWindow, nowMs: number): ActiveDuty {
 export function deriveDutyStatus(
   dutyPeriods: DutyPeriod[],
   now: Date = new Date(),
+  /**
+   * Rest since the last debrief, from `calculateRestUntilLegal`. Passed in
+   * rather than recomputed: that calculation walks every duty period and the
+   * FDP pipeline has already done it.
+   */
+  rest: RestState | null = null,
+  /** Flight id → on-blocks instant, for marking sector progress. */
+  flightArrivals?: Map<string, number>,
 ): DutyStatus {
   const nowMs = now.getTime()
+
+  const completedLegsOf = (dp: DutyPeriod): number => {
+    if (!flightArrivals || !dp.flightIds?.length) return 0
+    let n = 0
+    for (const id of dp.flightIds) {
+      const at = flightArrivals.get(id)
+      if (at !== undefined && at <= nowMs) n += 1
+    }
+    return n
+  }
 
   let active: ActiveDuty | null = null
   let justFinished: ActiveDuty | null = null
@@ -152,13 +240,15 @@ export function deriveDutyStatus(
     if (nowMs >= w.startMs && nowMs <= w.endMs) {
       // Ties go to the LATER-starting duty: a merged overnight and the sector
       // inside it can both contain `now`, and the pilot is in the inner one.
-      if (!active || w.startMs > active.startMs) active = toActive(dp, w, nowMs)
+      if (!active || w.startMs > active.startMs) {
+        active = toActive(dp, w, nowMs, completedLegsOf(dp), true)
+      }
       continue
     }
 
     if (w.endMs < nowMs && w.endMs > lastEndMs) {
       lastEndMs = w.endMs
-      justFinished = toActive(dp, w, nowMs)
+      justFinished = toActive(dp, w, nowMs, dp.sectorCount || completedLegsOf(dp), false)
     }
 
     if (w.startMs > nowMs && w.startMs < nextReportMs) {
@@ -174,7 +264,7 @@ export function deriveDutyStatus(
     }
   }
 
-  if (active) return { phase: "on_duty", active, justFinished: null, next }
+  if (active) return { phase: "on_duty", active, justFinished: null, next, rest }
 
   const recentlyFinished =
     justFinished !== null && nowMs - justFinished.endMs <= POST_DUTY_WINDOW_MS
@@ -184,6 +274,7 @@ export function deriveDutyStatus(
     active: null,
     justFinished: recentlyFinished ? justFinished : null,
     next,
+    rest,
   }
 }
 

@@ -44,7 +44,8 @@ export interface PilotStatus {
   nextAction: NextAction
   duty: DutyStatus
   legality: LegalityModel
-  /** Live countdown target while rest is outstanding. */
+  /** Live countdown target while rest is outstanding. Read off the duty state,
+   *  which is where rest now lives. */
   legalAtUtc: string | null
 }
 
@@ -100,14 +101,15 @@ export function buildPilotStatus({
     : VERDICT_TO_STATE[legality.verdict]
 
   const governing = legality.binding
+  const restOutstanding = duty.rest !== null && !duty.rest.isLegalNow
 
   return {
-    state,
+    state: restOutstanding && state === "current" ? "warning" : state,
     governing,
     nextAction: deriveNextAction({ legality, duty, state, fdpExceeded, timeZone, now }),
     duty,
     legality,
-    legalAtUtc: legality.legalAtUtc,
+    legalAtUtc: restOutstanding ? (duty.rest?.legalAtUtc ?? null) : null,
   }
 }
 
@@ -142,8 +144,8 @@ function deriveNextAction({
     }
   }
 
-  if (legality.legalAtUtc) {
-    const at = Date.parse(legality.legalAtUtc)
+  if (duty.rest && !duty.rest.isLegalNow) {
+    const at = Date.parse(duty.rest.legalAtUtc)
     return {
       tone: "action_required",
       headline: `Rest until ${clock(at, timeZone)}`,

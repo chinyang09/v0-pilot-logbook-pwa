@@ -7,19 +7,21 @@
  * verdict and explain it afterwards: it computes the REQUIREMENTS, each with its
  * own state, and the verdict is nothing more than the worst one of them.
  *
- * Four groups, which together are everything the app knows about a pilot's
- * fitness to operate:
+ * **Two groups, because they are two different kinds of thing** and mixing them
+ * is what made the first version unreadable at a glance:
  *
- * | Group | Requirement | Source |
- * |---|---|---|
- * | Rest | rest since last debrief vs. the minimum | CAAS Reg 3, via `calculateRestUntilLegal` |
- * | Recency | 3 takeoffs + 3 landings in 90 days | the logbook |
- * | Limits | duty 14d/28d, flight 28d/365d | CAAS Reg 12 / 107, via `calculateCapacity` |
- * | Documents | medical, licence, OPC, IR, line check… | the currencies table |
+ * | Group | Question | Unit | Source |
+ * |---|---|---|---|
+ * | `currency` | am I qualified and recent | DAYS | the logbook (recency) + the currencies table |
+ * | `limits` | how much have I used up | HOURS | CAAS Reg 12 / 107, `calculateCapacity` |
  *
- * Every requirement reduces to the same four fields — a label, a state, one
- * readout and a fraction — so the UI renders one row shape for all of them and a
- * new requirement is a new entry rather than a new layout.
+ * Rest is deliberately NOT here. It is a property of the duty just flown, not a
+ * standing qualification, so it belongs to the duty panel — see `duty-status.ts`
+ * — and printing it in a currency grid put a countdown among a column of expiry
+ * dates.
+ *
+ * Every requirement reduces to the same handful of fields so one cell shape
+ * renders all of them and a new requirement is a new entry, not a new layout.
  *
  * Pure: no React, no Dexie, no clock of its own beyond the `now` handed in.
  */
@@ -29,34 +31,39 @@ import type { NinetyDayCurrency } from "@/lib/utils/dashboard-aggregate"
 
 export type RequirementState = "ok" | "caution" | "fail" | "unknown"
 
-export type RequirementGroup = "rest" | "recency" | "limits" | "documents"
+/**
+ * `currency` is measured in days and EXPIRES; `limits` are measured in hours
+ * and REFILL. That difference is why they are never sorted into one list.
+ */
+export type RequirementGroup = "currency" | "limits"
 
 export interface Requirement {
   id: string
   group: RequirementGroup
-  /** Two words at most — the row is read in a grid, not a sentence. */
+  /** Two words at most — the cell is read in a grid, not a sentence. */
   label: string
   state: RequirementState
-  /** The readout: "6 / 3", "68 / 90h", "142d". */
+  /** The readout: "8d", "68 / 100h", "Expired". */
   value: string
-  /** How full the requirement is, 0..1. `undefined` when nothing meaningful
-   *  can be metered (an unknown, or a fold row). Values above 1 are clamped by
-   *  the meter, not here — the overage is real and the state carries it. */
+  /** How full the requirement is, 0..1. `undefined` when nothing can be
+   *  meaningfully metered (an unknown, or a fold row). */
   progress?: number
-  /** Where tapping the row goes. */
-  href: string
   /**
-   * Set only when a requirement is not met or is close to it. The panel's
-   * headline is the single most pressing one of these, so a pilot reads the
-   * problem rather than hunting the grid for a red row.
+   * Days until this requirement stops being met. Set only for `currency` —
+   * a rolling hours limit does not expire, it refills, which is exactly why it
+   * must never win the "what runs out first" comparison.
    */
+  daysUntil?: number
+  /** The lines an expanded cell reveals. Never needed to read the cell. */
+  detail?: string[]
+  /** Where a deep link goes, for the cases a tap-to-expand cannot answer. */
+  href: string
+  /** Set only when not met or close to it; higher is more pressing. */
   urgency?: number
   /**
    * What to DO about it, when this requirement is the binding one — "2 landings
-   * required", not "landings 1 / 3". Phrased here rather than in the component
-   * because this is where the shortfall is actually in hand, and a dashboard
-   * that states the problem without the remedy has made the pilot do the last
-   * step themselves.
+   * required", not "landings 1 / 3". Phrased here because this is where the
+   * shortfall is actually in hand.
    */
   action?: string
 }
@@ -66,12 +73,16 @@ export interface LegalityModel {
   verdict: RequirementState
   requirements: Requirement[]
   /**
-   * The one requirement closest to stopping the pilot flying — the binding
-   * constraint. `null` only when there are no requirements at all.
+   * The one thing closest to stopping the pilot flying.
+   *
+   * When something is flagged this is the most pressing flagged requirement.
+   * When nothing is, it is whichever CURRENCY expires soonest — not the fullest
+   * rolling limit, which was the first version's answer and was simply wrong:
+   * 604 of 1000 flight hours over twelve months is 41% "full" and roughly six
+   * months of headroom, so calling it the tightest constraint on an otherwise
+   * clear pilot named the least urgent thing on the page.
    */
   binding: Requirement | null
-  /** ISO instant the pilot becomes legal, when rest is outstanding. */
-  legalAtUtc: string | null
   counts: { ok: number; caution: number; fail: number; total: number }
 }
 
@@ -92,16 +103,16 @@ function worst(states: RequirementState[]): RequirementState {
 /** Fraction of a rolling limit at which the row starts warning. */
 const LIMIT_CAUTION = 0.8
 
-/** Recency is worth flagging before it lapses, not on the day. */
+/** A currency is worth flagging before it lapses, not on the day. */
 const RECENCY_CAUTION_DAYS = 14
 
 /** Takeoffs (and landings) required inside the 90-day window. */
-const RECENCY_REQUIRED_EVENTS = 3
+const RECENCY_REQUIRED = 3
 
 function hours(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0"
   // A rolling total is read against a two- or three-figure limit, so one
-  // decimal is precision nobody uses and it costs the row its width.
+  // decimal is precision nobody uses and it costs the cell its width.
   return n >= 10 ? Math.round(n).toString() : n.toFixed(1)
 }
 
@@ -118,7 +129,7 @@ function toIsoDate(d: Date): string {
     .padStart(2, "0")}-${d.getUTCDate().toString().padStart(2, "0")}`
 }
 
-/** The four rolling limits, in the order a pilot reads them. */
+/** The four rolling limits. */
 export interface CapacityInput {
   duty14Days: { used: number; limit: number; remaining: number }
   duty28Days: { used: number; limit: number; remaining: number }
@@ -126,39 +137,29 @@ export interface CapacityInput {
   flight365Days: { used: number; limit: number; remaining: number }
 }
 
-export interface RestInput {
-  isLegalNow: boolean
-  restElapsedMinutes: number
-  requiredRestMinutes: number
-  legalAtUtc: string
-}
-
 export interface LegalityInput {
-  /** `null` when there is no completed duty to rest from. */
-  rest: RestInput | null
   recency: NinetyDayCurrency
   capacity: CapacityInput
   /** Rolling limits a future schedule is projected to breach, by limit name. */
   forecastBreaches?: string[]
   currencies: CurrencyWithStatus[]
-  /** How many documents get their own row before the rest are folded up. */
+  /** How many documents get their own cell before the rest are folded up. */
   documentRows?: number
   now?: Date
 }
 
 /**
- * How many document rows are shown individually.
+ * How many document cells are shown individually.
  *
- * A line pilot carries a dozen or more currencies, and a grid of twelve chips
- * that are all green is not information — it is the reason the panel would stop
- * being readable at a glance. The nearest few expiries are the ones that can
- * change state before the next look; the remainder are folded into one row that
- * states how many are clear, so nothing is hidden, only summarised.
+ * A line pilot carries a dozen or more currencies, and a grid of twelve cells
+ * that are all green is not information — it is why the panel would stop being
+ * readable at a glance. The nearest few expiries are the ones that can change
+ * state before the next look; the rest fold into one cell stating how many are
+ * clear, which the reader can expand.
  */
 const DEFAULT_DOCUMENT_ROWS = 3
 
 export function buildLegalityModel({
-  rest,
   recency,
   capacity,
   forecastBreaches = [],
@@ -169,85 +170,111 @@ export function buildLegalityModel({
   const requirements: Requirement[] = []
   const todayIso = toIsoDate(now)
 
-  // ── Rest ────────────────────────────────────────────────────────────────
-  // Urgency is the outstanding rest itself: a pilot who is 20 minutes short is
-  // closer to flying than one who is nine hours short, and the headline should
-  // say so.
-  if (!rest) {
+  // ── Recency: ONE requirement, not two ───────────────────────────────────
+  //
+  // Takeoffs and landings were separate cells and they read as two unrelated
+  // rows that happened to say the same thing — and, sorted by urgency, they did
+  // not even sit next to each other. A pilot checks "am I recent" as one
+  // question. The cell answers it with the binding half; expanding shows both.
+  const toShort = Math.max(0, RECENCY_REQUIRED - recency.takeoffs)
+  const ldgShort = Math.max(0, RECENCY_REQUIRED - recency.landings)
+  const recencyMet = toShort === 0 && ldgShort === 0
+  const daysToLapse = recency.lapseIso ? daysBetween(todayIso, recency.lapseIso) : undefined
+  const lapsingSoon =
+    recencyMet && daysToLapse !== undefined && daysToLapse <= RECENCY_CAUTION_DAYS
+
+  requirements.push({
+    id: "recency",
+    group: "currency",
+    label: "90-day recency",
+    state: !recencyMet ? "fail" : lapsingSoon ? "caution" : "ok",
+    value: !recencyMet
+      ? `${Math.min(recency.takeoffs, recency.landings)} / 3`
+      : daysToLapse !== undefined
+        ? `${daysToLapse}d`
+        : "Current",
+    progress: Math.min(1, Math.min(recency.takeoffs, recency.landings) / RECENCY_REQUIRED),
+    daysUntil: recencyMet ? daysToLapse : 0,
+    detail: [
+      `Takeoffs ${recency.takeoffs} / ${RECENCY_REQUIRED}`,
+      `Landings ${recency.landings} / ${RECENCY_REQUIRED}`,
+      recency.lapseIso ? `Lapses ${recency.lapseIso}` : "Not currently met",
+    ],
+    href: "/logbook",
+    urgency: !recencyMet ? 900 : lapsingSoon ? 400 - Math.min(399, daysToLapse ?? 0) : undefined,
+    action: !recencyMet
+      ? shortfallAction(toShort, ldgShort)
+      : lapsingSoon
+        ? `T/O + landing in ${daysToLapse}d`
+        : undefined,
+  })
+
+  // ── Documents ───────────────────────────────────────────────────────────
+  // Nearest expiry first. An EXPIRED document is a hard stop; one inside its own
+  // critical/warning window is still valid, so it cautions rather than fails —
+  // the distinction is the whole point of the two thresholds a currency carries.
+  const sortedDocs = [...currencies].sort((a, b) => a.daysRemaining - b.daysRemaining)
+  const shown = sortedDocs.slice(0, documentRows)
+  for (const doc of shown) {
+    const state: RequirementState =
+      doc.status === "expired"
+        ? "fail"
+        : doc.status === "critical" || doc.status === "warning"
+          ? "caution"
+          : "ok"
     requirements.push({
-      id: "rest",
-      group: "rest",
-      label: "Since duty",
-      state: "ok",
-      value: "Rested",
-      href: "/fdp",
-    })
-  } else if (rest.isLegalNow) {
-    requirements.push({
-      id: "rest",
-      group: "rest",
-      label: "Since duty",
-      state: "ok",
-      value: "Ready",
-      progress: 1,
-      href: "/fdp",
-    })
-  } else {
-    const short = Math.max(0, rest.requiredRestMinutes - rest.restElapsedMinutes)
-    requirements.push({
-      id: "rest",
-      group: "rest",
-      label: "Since duty",
-      state: "fail",
-      // The live countdown replaces this in the UI; the static form is what a
-      // non-ticking consumer (a test, a screenshot) reads.
-      value: `${Math.floor(short / 60)}h ${short % 60}m`,
+      id: `doc-${doc.id ?? doc.code}`,
+      group: "currency",
+      label: doc.code,
+      state,
+      value: doc.daysRemaining <= 0 ? "Expired" : `${doc.daysRemaining}d`,
+      // Metered against its own warning window: a document is "filling up" only
+      // once it enters the window its owner chose to be warned at. Against the
+      // whole validity period every document sits near full for a year and the
+      // meter says nothing.
       progress:
-        rest.requiredRestMinutes > 0
-          ? rest.restElapsedMinutes / rest.requiredRestMinutes
-          : 1,
-      href: "/fdp",
-      urgency: 1000 - Math.min(999, short),
-      action: "Rest before next duty",
+        doc.daysRemaining <= 0
+          ? 1
+          : doc.warningDays > 0
+            ? Math.max(0, 1 - doc.daysRemaining / doc.warningDays)
+            : 0,
+      daysUntil: doc.daysRemaining,
+      detail: [
+        doc.description || doc.code,
+        `Expires ${doc.expiryDate}`,
+        doc.issuingAuthority ? `Issued by ${doc.issuingAuthority}` : "",
+      ].filter(Boolean),
+      href: "/currencies",
+      urgency:
+        state === "fail"
+          ? 700
+          : state === "caution"
+            ? 300 - Math.min(299, Math.max(0, doc.daysRemaining))
+            : undefined,
+      action:
+        state === "fail"
+          ? `${doc.code} expired — renew`
+          : state === "caution"
+            ? `${doc.code} expires in ${doc.daysRemaining}d`
+            : undefined,
     })
   }
-
-  // ── Recency ─────────────────────────────────────────────────────────────
-  const recencyRows: Array<{ id: string; label: string; count: number; noun: string }> = [
-    { id: "recency-to", label: "T/O 90d", count: recency.takeoffs, noun: "takeoff" },
-    { id: "recency-ldg", label: "Ldg 90d", count: recency.landings, noun: "landing" },
-  ]
-  const daysToLapse = recency.lapseIso ? daysBetween(todayIso, recency.lapseIso) : null
-  for (const row of recencyRows) {
-    const met = row.count >= 3
-    const lapsingSoon =
-      met && daysToLapse !== null && daysToLapse <= RECENCY_CAUTION_DAYS
-    const shortfall = Math.max(0, RECENCY_REQUIRED_EVENTS - row.count)
+  const folded = sortedDocs.slice(shown.length)
+  if (folded.length > 0) {
     requirements.push({
-      id: row.id,
-      group: "recency",
-      label: row.label,
-      state: !met ? "fail" : lapsingSoon ? "caution" : "ok",
-      value: !met
-        ? `${row.count} / 3`
-        : lapsingSoon
-          ? `${daysToLapse}d left`
-          : `${row.count} / 3`,
-      progress: Math.min(1, row.count / 3),
-      href: "/logbook",
-      urgency: !met ? 900 : lapsingSoon ? 400 - Math.min(399, daysToLapse) : undefined,
-      action: !met
-        ? `${shortfall} ${row.noun}${shortfall === 1 ? "" : "s"} required`
-        : lapsingSoon
-          ? `${row.noun.charAt(0).toUpperCase()}${row.noun.slice(1)} within ${daysToLapse}d`
-          : undefined,
+      id: "doc-rest",
+      group: "currency",
+      label: `${folded.length} more`,
+      state: "ok",
+      value: `${folded[0].daysRemaining}d+`,
+      daysUntil: folded[0].daysRemaining,
+      detail: folded.map((d) => `${d.code} ${d.daysRemaining}d`),
+      href: "/currencies",
     })
   }
 
   // ── Rolling limits ──────────────────────────────────────────────────────
-  // The readout is used-of-limit and the meter is the same fraction, so the row
-  // reads the same way as every other: how full is this requirement.
-  const limitRows: Array<{ id: string; label: string; forecastName: string; cap: CapacityInput[keyof CapacityInput] }> = [
+  const limitRows = [
     { id: "duty-14", label: "Duty 14d", forecastName: "14-day duty", cap: capacity.duty14Days },
     { id: "duty-28", label: "Duty 28d", forecastName: "28-day duty", cap: capacity.duty28Days },
     { id: "flight-28", label: "Flight 28d", forecastName: "28-day flight", cap: capacity.flight28Days },
@@ -276,6 +303,10 @@ export function buildLegalityModel({
       state,
       value: `${hours(used)} / ${hours(limit)}h`,
       progress: fraction,
+      detail: [
+        `${hours(Math.max(0, limit - used))}h remaining`,
+        forecast ? "Forecast to breach on the current roster" : "",
+      ].filter(Boolean),
       href: "/fdp",
       urgency:
         state === "fail"
@@ -292,64 +323,6 @@ export function buildLegalityModel({
     })
   }
 
-  // ── Documents ───────────────────────────────────────────────────────────
-  // Nearest expiry first. An EXPIRED document is a hard stop; one inside its own
-  // critical/warning window is still valid, so it cautions rather than fails —
-  // the distinction is the whole point of the two thresholds a currency carries.
-  const sortedDocs = [...currencies].sort(
-    (a, b) => a.daysRemaining - b.daysRemaining,
-  )
-  const shown = sortedDocs.slice(0, documentRows)
-  for (const doc of shown) {
-    const state: RequirementState =
-      doc.status === "expired"
-        ? "fail"
-        : doc.status === "critical" || doc.status === "warning"
-          ? "caution"
-          : "ok"
-    requirements.push({
-      id: `doc-${doc.id ?? doc.code}`,
-      group: "documents",
-      label: doc.code,
-      state,
-      value: doc.daysRemaining <= 0 ? "Expired" : `${doc.daysRemaining}d`,
-      // Metered against its own warning window: a document is "filling up" only
-      // once it enters the window its owner chose to be warned at. Against the
-      // whole validity period every document would sit near full for a year and
-      // the meter would say nothing.
-      progress:
-        doc.daysRemaining <= 0
-          ? 1
-          : doc.warningDays > 0
-            ? Math.max(0, 1 - doc.daysRemaining / doc.warningDays)
-            : 0,
-      href: "/currencies",
-      urgency:
-        state === "fail"
-          ? 700
-          : state === "caution"
-            ? 300 - Math.min(299, Math.max(0, doc.daysRemaining))
-            : undefined,
-      action:
-        state === "fail"
-          ? `${doc.code} expired — renew`
-          : state === "caution"
-            ? `${doc.code} expires in ${doc.daysRemaining}d`
-            : undefined,
-    })
-  }
-  const folded = sortedDocs.length - shown.length
-  if (folded > 0) {
-    requirements.push({
-      id: "doc-rest",
-      group: "documents",
-      label: "Other docs",
-      state: "ok",
-      value: `${folded} valid`,
-      href: "/currencies",
-    })
-  }
-
   const counts = { ok: 0, caution: 0, fail: 0, total: requirements.length }
   for (const r of requirements) {
     if (r.state === "fail") counts.fail += 1
@@ -357,33 +330,27 @@ export function buildLegalityModel({
     else counts.ok += 1
   }
 
-  // The binding constraint: the most urgent flagged requirement, or — when
-  // nothing is flagged — whichever is fullest, because that is the one that will
-  // flag first.
   const flagged = requirements
     .filter((r) => r.urgency !== undefined)
     .sort((a, b) => (b.urgency ?? 0) - (a.urgency ?? 0))
-  const binding =
-    flagged[0] ??
-    [...requirements]
-      .filter((r) => r.progress !== undefined && r.group === "limits")
-      .sort((a, b) => (b.progress ?? 0) - (a.progress ?? 0))[0] ??
-    requirements[0] ??
-    null
+
+  // Nothing flagged → whichever CURRENCY expires soonest. Rolling limits are
+  // excluded by construction: they carry no `daysUntil` because they refill.
+  const nearestExpiry = requirements
+    .filter((r) => r.daysUntil !== undefined && r.id !== "doc-rest")
+    .sort((a, b) => (a.daysUntil ?? 0) - (b.daysUntil ?? 0))[0]
 
   return {
     verdict: worst(requirements.map((r) => r.state)),
     requirements,
-    binding,
-    legalAtUtc: rest && !rest.isLegalNow ? rest.legalAtUtc : null,
+    binding: flagged[0] ?? nearestExpiry ?? requirements[0] ?? null,
     counts,
   }
 }
 
-/** Display order + label for the four groups. */
-export const GROUP_LABELS: ReadonlyArray<{ group: RequirementGroup; label: string }> = [
-  { group: "rest", label: "Rest" },
-  { group: "recency", label: "Recency" },
-  { group: "limits", label: "Limits" },
-  { group: "documents", label: "Docs" },
-]
+function shortfallAction(toShort: number, ldgShort: number): string {
+  const parts: string[] = []
+  if (toShort > 0) parts.push(`${toShort} takeoff${toShort === 1 ? "" : "s"}`)
+  if (ldgShort > 0) parts.push(`${ldgShort} landing${ldgShort === 1 ? "" : "s"}`)
+  return `${parts.join(" and ")} required`
+}

@@ -31,8 +31,15 @@ import { cn } from "@/lib/utils"
  *
  * A year or an all-time period holds hundreds of flights, and mounting them all
  * costs real time on every dashboard visit for rows nobody scrolls to here.
+ * The list SCROLLS inside its own box rather than growing the page, so a long
+ * period cannot push the breakdown below it out of reach — and so the block
+ * keeps a predictable size whatever period is selected.
  */
-const MAX_ROWS = 40
+const MAX_ROWS = 60
+
+/** The list's own scroll box. About eight rows — enough to read a working week
+ *  without the block taking over the page. */
+const LIST_MAX_HEIGHT = 320
 
 export function PeriodFlights({
   flights,
@@ -49,13 +56,13 @@ export function PeriodFlights({
   return (
     <section
       className={cn(
-        "@container flex min-h-0 flex-col rounded-2xl border border-border/60 bg-card/70 p-3 shadow-sm",
+        "@container flex min-h-0 flex-col rounded-3xl border border-border/60 bg-card/70 p-4 shadow-sm",
         className,
       )}
       aria-label="Flights in period"
     >
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] font-medium text-muted-foreground">Flights</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Flights</p>
         <span className="text-[11px] tabular-nums text-muted-foreground">
           {flights.length}
         </span>
@@ -66,7 +73,10 @@ export function PeriodFlights({
           No flights in this period
         </p>
       ) : (
-        <ul className="mt-1">
+        <ul
+          className="mt-1 overflow-y-auto overscroll-contain scrollbar-hide"
+          style={{ maxHeight: LIST_MAX_HEIGHT }}
+        >
           {shown.map((f) => (
             <FlightRow
               key={f.id}

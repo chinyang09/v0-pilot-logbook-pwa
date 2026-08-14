@@ -629,60 +629,70 @@ states on the ECAM vocabulary the reader already has — `CURRENT` / `CAUTION` /
 `ACTION REQUIRED`, each with its own icon, never colour alone. An `unknown`
 requirement is a caution, not a fourth colour. **An exceeded FDP outranks every
 standing requirement** — it is the only thing on the page happening right now
-rather than being true today.
+rather than being true today. Outstanding REST also raises an otherwise-clear
+pilot to CAUTION: rest lives in the duty state, so it is not one of the
+requirements the verdict is drawn from and the annunciator has to fold it in.
+
+The state also tints the surface (`TONE.glow`) — a soft wash bled into the top
+of the panel, so it takes on the mood of its own state before a word is read.
 
 - **The governing constraint, not a count.** "12 / 12 current" is noise: a pilot
-  does not need telling about the eleven that are fine. The panel names the
-  tightest one, and when nothing is flagged falls back to the fullest rolling
-  limit, because "what runs out first" is the useful answer on a clear day.
+  does not need telling about the eleven that are fine. When something is
+  flagged this is the most pressing flagged requirement; when nothing is, it is
+  **the nearest EXPIRY**. It must NOT fall back to the fullest rolling limit —
+  that was the first version's rule and it reported "Flight 1y 604 / 1000h",
+  41% used with roughly six months of headroom, as the tightest constraint on an
+  otherwise clear pilot. A limit REFILLS; a currency EXPIRES. That is why only
+  `currency` requirements carry `daysUntil`.
 - **The next action states the REMEDY, not the reading** — "2 landings
   required", not "landings 1 / 3". Phrased in `legality.ts` where the shortfall
   is actually in hand (`Requirement.action`). Triage order: something wrong with
   the duty in progress → rest → the binding requirement → the next report →
   nothing required.
 
-#### Requirements are sorted, not grouped, on this page
+#### Nothing on this page navigates by default
 
-Most pressing first, so the top-left cell is always the thing closest to
-stopping the pilot — the same thing the annunciator names. Group headings would
-cost four rules and ~56px to impose an order nobody is reading for on a
-no-scroll page.
+A cell EXPANDS in place and a second tap closes it. The reader came to check a
+status; a route change loses the screen they came for and costs a
+back-navigation to recover it. The deep link lives INSIDE the expansion, where
+it is a deliberate second step rather than the accidental result of a tap.
 
-#### Legality is a LIST OF REQUIREMENTS, not a banner
+#### CURRENCY and LIMITS are separate bands
 
-`lib/utils/dashboard/legality.ts` is the model, and it is pure — no React, no
-Dexie, no clock beyond the `now` handed in. The verdict is **nothing more than
-the worst requirement** (`worst()`, ranked fail > caution > unknown > ok — never
-an average or a majority, or one expired medical reads as legal).
+They are two different kinds of thing and sorting them into one urgency-ordered
+grid is what made the first version unreadable:
 
-| Group | Requirement | Source |
-|---|---|---|
-| Rest | rest since last debrief vs. the minimum | CAAS Reg 3, `calculateRestUntilLegal` |
-| Recency | 3 takeoffs + 3 landings in 90 days | the logbook |
-| Limits | duty 14d/28d, flight 28d/365d | CAAS Reg 12 / 107, `calculateCapacity` |
-| Documents | medical, licence, OPC, IR, line check… | the currencies table |
+| Band | Question | Unit | Behaviour |
+|---|---|---|---|
+| Currency | am I qualified and recent | DAYS | expires |
+| Limits | how much have I used | HOURS | refills |
 
-Every requirement reduces to the same four fields — label, state, one readout,
-one fraction — so one cell shape renders all of them and a new requirement is a
-new entry rather than a new layout.
+- **Recency is ONE requirement, not two.** Takeoffs and landings are two halves
+  of one question, and as separate urgency-sorted cells they did not even end up
+  beside each other. The cell answers with the binding half; expanding shows
+  both counts and the lapse date.
+- **Limits are PAIRED by what they limit** — Duty over its 14d and 28d windows,
+  then Flight over 28d and 1y. That is how the regulation is written and how a
+  pilot holds it; four independent rows sorted by urgency scattered the pairs.
+- **Rest is NOT a currency.** It is a property of the duty just flown, so it
+  lives in the duty band (`DutyStatus.rest`). Among a column of expiry dates a
+  live countdown read as a different kind of thing — because it is one.
 
-Three rules that are easy to get wrong:
+#### The duty band and the sector chain
 
-- **Recency carries a LAPSE DATE** (`ninetyDayCurrency.lapseIso`), and it is 90
-  days after the flight supplying the THIRD event, not the newest one. A pilot
-  who flew three sectors in May and one yesterday is current until 90 days after
-  MAY. Takeoffs and landings lapse independently and the EARLIER wins — a sector
-  flown as PM lands without taking off. A "current / not current" chip cannot say
-  any of this, and the fortnight before it lapses is the only time a pilot can
-  still act on it.
-- **A document inside its warning window CAUTIONS; only an expired one FAILS.**
-  That distinction is the entire reason a currency carries two thresholds. Its
-  meter runs against its own `warningDays`, not its whole validity — against the
-  latter every document sits near empty for a year and the meter says nothing.
-- **The forecast names a limit differently from the capacity calculation**
-  ("28-day flight (Reg 107a)" vs "28-day flight"), so the match is by PREFIX. An
-  exact match binds every forecast breach to no row and drops the warning
-  silently.
+The band shows the FDP gauge, the figures, and the duty's LEGS as a chain of
+stops (`deriveSectorLegs`) — filled dot on blocks, ringed dot for the leg being
+flown, hollow still to come, with the airport codes beneath. A duty is up to
+four sectors across several airports, and "where am I in the pattern" is what a
+generic recent-flights list could never answer: it showed history, not this
+duty. That list is gone.
+
+**The gauge's tone is STATED, never derived from how full the arc is.** A nearly
+full FDP ring is a warning; a nearly full REST ring is good news. Deriving the
+colour from the fraction painted a fully-rested pilot amber.
+
+**The rolling limits are NOT repeated in the duty band.** They were printed
+there and again in the limits band — the duplication the rework removed.
 
 #### The live clock and hydration
 
@@ -726,9 +736,9 @@ The old dashboard printed several things twice. Each now has exactly one home:
 
 | | Was | Is |
 |---|---|---|
-| 90-day recency | a chip in the T/O card **and** the alerts bell | two requirement cells, legal page |
-| FDP utilisation | the limits stack **and** the bell | the duty band's rolling line + four requirement cells |
-| Rest until legal | a pill in the limits stack **and** the bell | one requirement cell + the annunciator countdown |
+| 90-day recency | a chip in the T/O card **and** the alerts bell | ONE requirement cell, legal page |
+| FDP utilisation | the limits stack **and** the bell | the limits band only — the duty band's copy was removed |
+| Rest until legal | a pill in the limits stack **and** the bell | the duty band's rest gauge + the annunciator countdown |
 | Currency expiries | the bell only | document requirement cells |
 | Night / Sim hours | the hero **and** again as rings in the auto-fill grid | the period summary only (`SHOWN_ELSEWHERE`) |
 | Recent T/O–LDG events | its own list under the flight list | gone — it was the flight list |
@@ -2493,7 +2503,7 @@ When making changes, be aware of these high-impact files:
 - `components/dashboard/legal-dashboard.tsx` — page 1: one screen, no scroll, one continuous surface
 - `lib/utils/dashboard/pilot-status.ts` — the annunciator, the governing constraint and the NEXT ACTION
 - `lib/utils/dashboard/duty-status.ts` — duty phase + the per-duty FDP maximum (read, never invented)
-- `lib/utils/dashboard/legality.ts` — the requirement model; the verdict is the worst requirement
+- `lib/utils/dashboard/legality.ts` — the requirement model (currency vs limits); the verdict is the worst requirement
 - `components/dashboard/summary-dashboard.tsx` — page 2: the three period blocks, one column
 - `lib/utils/dashboard-aggregate.ts` — period totals, the 90-day recency lapse, and the per-flight detail the list unfolds
 
@@ -2885,6 +2895,15 @@ When making changes, be aware of these high-impact files:
 - Do not HARDCODE an FDP maximum, ever. Under CAAS Reg 14 it moves with report time, sectors, crew complement, acclimatisation and the long-sector adjustment; `DutyPeriod.maxFdpMinutes` already holds the figure `calculateMaxFDP` computed for THAT duty, and `fdpTableUsed` is printed beside it so it can be checked. A duty with no computed maximum shows a dash, not a default — a default is a number somebody might fly to
 - Do not add a 7-day duty figure to the dashboard. CAAS imposes 14-day and 28-day duty caps (Reg 12) and 28-day/12-month flight caps (Reg 107); a 7-day limit is not in the regulation and printing one is worse than printing none
 - Do not turn the legal page back into a stack of glass cards — six cards' borders, radii and margins cost ~120px of a phone's height, which is the difference between it fitting and not. One surface, hairline `divide-y` rules. And keep it `max-h-full`, not `h-full`: stretching makes the one `flex-1` section absorb every spare pixel and leaves a hole under the last requirement
+- Do not fall back to the fullest rolling limit for the "tightest" constraint — a limit REFILLS, so 41% of a 12-month flight allowance is not tight, and reporting it named the least urgent thing on the page. With nothing flagged the answer is the nearest EXPIRY, which is why only `currency` requirements carry `daysUntil`
+- Do not sort currencies and rolling limits into one grid. They are different kinds of thing (days that expire vs hours that refill) and mixing them is what made the panel unreadable at a glance — separate bands, and keep the limits PAIRED (Duty 14d/28d, then Flight 28d/1y) rather than four rows sorted by urgency
+- Do not split 90-day recency back into separate takeoff and landing cells — they are two halves of one question, and urgency-sorted they did not even sit beside each other. One cell answers with the binding half; expanding shows both
+- Do not put rest back in the currency band — it is a property of the duty just flown, not a standing qualification, and a live countdown among expiry dates reads as a different kind of thing. It lives in the duty band, and the annunciator has to fold it into the verdict itself since it is no longer one of the requirements
+- Do not print the rolling limits in the duty band as well as the limits band — that was the duplication the rework removed. The duty band carries FDP and flight time for THIS duty only
+- Do not derive a gauge's colour from how full its arc is — state the tone. A nearly-full FDP ring is a warning and a nearly-full REST ring is good news; deriving it painted a fully-rested pilot amber
+- Do not make the legal page's cells navigate on tap — they EXPAND in place and a second tap closes them. The reader came to check a status, and a route change loses the screen they came for. The deep link belongs inside the expansion
+- Do not replace the sector chain with a list of recent flights — that list showed history, not THIS duty, and could not answer "where am I in a four-sector day". The chain comes from `deriveSectorLegs` off the duty's own route
+- Do not let the summary page's flight list grow the page — it scrolls in its own bounded box, so a year-long period cannot push the breakdown below it out of reach
 - Do not print "12 / 12 currencies current" — a pilot does not need telling about the eleven that are fine. The panel names the TIGHTEST constraint, and falls back to the fullest rolling limit only when nothing is flagged
 - Do not state a problem without its remedy on the legal page. The next-action line is the imperative ("2 landings required"), phrased in `legality.ts` where the shortfall is in hand — not the reading ("landings 1 / 3"), which the requirement cell already shows
 - Do not let a standing requirement outrank an exceeded FDP — that one is happening right now rather than being true today, and it is the only thing that overrides the legality verdict for the annunciator

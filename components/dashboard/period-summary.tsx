@@ -46,13 +46,13 @@ export function PeriodSummary({
   return (
     <section
       className={cn(
-        "@container rounded-2xl border border-border/60 bg-card/70 p-3 shadow-sm",
+        "@container rounded-3xl border border-border/60 bg-card/70 p-4 shadow-sm",
         className,
       )}
       aria-label="Period totals"
     >
       <div className="flex items-center justify-between gap-2">
-        <p className="truncate text-[11px] font-medium text-muted-foreground">
+        <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
           {resolved.rangeLabel}
         </p>
         <Link
@@ -64,13 +64,13 @@ export function PeriodSummary({
         </Link>
       </div>
 
-      <div className="mt-1 flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+      <div className="mt-2 flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
         {/* The hero figure. Proportional digits deliberately — `tabular-nums`
             gives every digit the width of a zero, which reads loose at display
             size. Tabular is for columns that must line up, and this is not in
             one. */}
         <div className="flex items-baseline gap-1.5">
-          <span className="text-[2.75rem] font-semibold leading-none tracking-tight text-foreground">
+          <span className="text-[3.25rem] font-semibold leading-[0.9] tracking-tight text-foreground">
             {formatDecimalHours(blockMinutes)}
           </span>
           <span className="text-sm font-medium text-muted-foreground">h block</span>

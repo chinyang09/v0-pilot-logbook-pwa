@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { deriveDutyStatus, dutyWindow, formatDutyClock } from "../duty-status"
+import { deriveDutyStatus, deriveSectorLegs, dutyWindow, formatDutyClock } from "../duty-status"
 import type { DutyPeriod } from "@/types/entities/roster.types"
 
 /**
@@ -160,5 +160,67 @@ describe("formatDutyClock", () => {
     expect(formatDutyClock(60)).toBe("1:00")
     expect(formatDutyClock(-5)).toBe("0:00")
     expect(formatDutyClock(780)).toBe("13:00")
+  })
+})
+
+describe("deriveSectorLegs", () => {
+  it("splits a chained route into legs and marks progress", () => {
+    // A duty is not one route — it is up to four sectors across several
+    // airports, and "where am I in the pattern" is the question the panel has
+    // to answer during a duty.
+    const legs = deriveSectorLegs("WSSS-VTBS-WSSS-WMKK", 1, true)
+
+    expect(legs.map((l) => `${l.from}-${l.to}`)).toEqual([
+      "WSSS-VTBS",
+      "VTBS-WSSS",
+      "WSSS-WMKK",
+    ])
+    expect(legs.map((l) => l.status)).toEqual(["complete", "active", "scheduled"])
+  })
+
+  it("marks nothing active when the duty is not in progress", () => {
+    const legs = deriveSectorLegs("WSSS-VTBS-WSSS", 2, false)
+    expect(legs.map((l) => l.status)).toEqual(["complete", "complete"])
+  })
+
+  it("returns nothing for a duty with no usable route", () => {
+    expect(deriveSectorLegs(undefined, 0, true)).toEqual([])
+    expect(deriveSectorLegs("WSSS", 0, true)).toEqual([])
+  })
+})
+
+describe("deriveDutyStatus — sectors and rest", () => {
+  it("marks a leg complete once its flight is on blocks", () => {
+    const arrivals = new Map([["f1", Date.parse("2026-08-14T09:30:00Z")]])
+    const s = deriveDutyStatus(
+      [duty({ route: "WSSS-VTBS-WSSS", flightIds: ["f1", "f2"], sectorCount: 2 })],
+      new Date("2026-08-14T11:42:00Z"),
+      null,
+      arrivals,
+    )
+    expect(s.active?.legs.map((l) => l.status)).toEqual(["complete", "active"])
+  })
+
+  it("does not count a flight that has not landed yet", () => {
+    const arrivals = new Map([["f1", Date.parse("2026-08-14T15:00:00Z")]])
+    const s = deriveDutyStatus(
+      [duty({ route: "WSSS-VTBS-WSSS", flightIds: ["f1", "f2"], sectorCount: 2 })],
+      new Date("2026-08-14T11:42:00Z"),
+      null,
+      arrivals,
+    )
+    expect(s.active?.legs.map((l) => l.status)).toEqual(["active", "scheduled"])
+  })
+
+  it("carries rest through as duty state rather than a standing requirement", () => {
+    const rest = {
+      isLegalNow: false,
+      elapsedMinutes: 120,
+      requiredMinutes: 720,
+      legalAtUtc: "2026-08-14T20:00:00Z",
+    }
+    const s = deriveDutyStatus([duty({})], new Date("2026-08-15T06:00:00Z"), rest)
+    expect(s.phase).toBe("off")
+    expect(s.rest).toEqual(rest)
   })
 })

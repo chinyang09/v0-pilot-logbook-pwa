@@ -50,7 +50,6 @@ function duty(over: Partial<DutyPeriod>): DutyPeriod {
 const NOW = new Date("2026-08-14T11:42:00Z")
 
 const CLEAR: LegalityInput = {
-  rest: null,
   recency: { takeoffs: 6, landings: 6, current: true, lapseIso: "2026-11-01" },
   capacity: {
     duty14Days: { used: 20, limit: 90, remaining: 70 },
@@ -62,10 +61,14 @@ const CLEAR: LegalityInput = {
   now: NOW,
 }
 
-function status(legalityOver: Partial<LegalityInput>, dps: DutyPeriod[] = []) {
+function status(
+  legalityOver: Partial<LegalityInput>,
+  dps: DutyPeriod[] = [],
+  rest: Parameters<typeof deriveDutyStatus>[2] = null,
+) {
   return buildPilotStatus({
     legality: buildLegalityModel({ ...CLEAR, ...legalityOver }),
-    duty: deriveDutyStatus(dps, NOW),
+    duty: deriveDutyStatus(dps, NOW, rest),
     timeZone: "UTC",
     now: NOW,
   })
@@ -108,8 +111,8 @@ describe("buildPilotStatus — governing constraint", () => {
     const s = status({
       recency: { takeoffs: 3, landings: 3, current: true, lapseIso: "2026-08-20" },
     })
-    expect(s.governing?.label).toBe("T/O 90d")
-    expect(s.governing?.value).toBe("6d left")
+    expect(s.governing?.label).toBe("90-day recency")
+    expect(s.governing?.value).toBe("6d")
   })
 })
 
@@ -132,17 +135,31 @@ describe("buildPilotStatus — next action", () => {
   it("leads with rest whenever rest is outstanding", () => {
     // Rest outranks a document three weeks out: it is the thing standing
     // between the pilot and the aircraft right now.
-    const s = status({
-      rest: {
+    const s = status(
+      { currencies: [currency({ code: "OPC320", status: "warning", daysRemaining: 20 })] },
+      [],
+      {
         isLegalNow: false,
-        restElapsedMinutes: 60,
-        requiredRestMinutes: 720,
+        elapsedMinutes: 60,
+        requiredMinutes: 720,
         legalAtUtc: "2026-08-14T22:42:00Z",
       },
-      currencies: [currency({ code: "OPC320", status: "warning", daysRemaining: 20 })],
-    })
+    )
     expect(s.nextAction.headline).toBe("Rest until 22:42")
     expect(s.legalAtUtc).toBe("2026-08-14T22:42:00Z")
+  })
+
+  it("raises an otherwise-clear pilot to CAUTION while rest is outstanding", () => {
+    // Rest lives in the duty state now, so it is not one of the requirements
+    // the verdict is drawn from — the annunciator has to fold it in itself or a
+    // resting pilot reads as CURRENT.
+    const s = status({}, [], {
+      isLegalNow: false,
+      elapsedMinutes: 60,
+      requiredMinutes: 720,
+      legalAtUtc: "2026-08-14T22:42:00Z",
+    })
+    expect(s.state).toBe("warning")
   })
 
   it("points at the next report when nothing is outstanding", () => {
@@ -154,6 +171,20 @@ describe("buildPilotStatus — next action", () => {
   it("says so plainly when there is nothing to do and nothing rostered", () => {
     const s = status({})
     expect(s.nextAction.headline).toBe("Nothing required")
+  })
+
+  it("names the nearest expiry, not the fullest limit, when nothing is flagged", () => {
+    // The first version answered "Flight 1y 604 / 1000h" here — 41% used, six
+    // months of headroom — which is the least urgent thing on the page.
+    const s = status({
+      recency: { takeoffs: 6, landings: 6, current: true, lapseIso: "2027-01-01" },
+      currencies: [
+        currency({ code: "MEDIC", daysRemaining: 190 }),
+        currency({ code: "OPC320", daysRemaining: 58 }),
+      ],
+    })
+    expect(s.state).toBe("current")
+    expect(s.governing?.label).toBe("OPC320")
   })
 
   it("names an expiring document with its remedy", () => {

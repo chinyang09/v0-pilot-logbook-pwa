@@ -4,6 +4,8 @@ import { useMemo } from "react"
 
 import { useFDPData } from "./use-fdp-data"
 import { useCurrencies } from "./use-currencies"
+import { useFlights } from "./use-flights"
+import { hhmmToMinutes } from "@/lib/utils/time"
 import { buildLegalityModel } from "@/lib/utils/dashboard/legality"
 import { deriveDutyStatus } from "@/lib/utils/dashboard/duty-status"
 import { buildPilotStatus, type PilotStatus } from "@/lib/utils/dashboard/pilot-status"
@@ -34,6 +36,25 @@ export function usePilotStatus(
     isLoading: fdpLoading,
   } = useFDPData()
   const { currencies, isLoading: currenciesLoading } = useCurrencies()
+  const { flights } = useFlights()
+
+  /**
+   * Flight id → on-blocks instant, so the sector chain can mark which legs of
+   * the current duty are already flown. Built from the flights already in
+   * cache; the in-time wraps to the next day when it is earlier than the out
+   * time, the same rule the duty windows use.
+   */
+  const flightArrivals = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const f of flights) {
+      if (!f.date || !f.inTime) continue
+      const base = Date.parse(`${f.date}T${f.inTime.slice(0, 5)}:00Z`)
+      if (!Number.isFinite(base)) continue
+      const wraps = f.outTime ? hhmmToMinutes(f.inTime) < hhmmToMinutes(f.outTime) : false
+      map.set(f.id, wraps ? base + 86_400_000 : base)
+    }
+    return map
+  }, [flights])
 
   const forecastBreaches = useMemo(
     () => forecast.exceedances.map((e) => e.limitName),
@@ -48,23 +69,26 @@ export function usePilotStatus(
 
   const status = useMemo(() => {
     const at = new Date(nowMinute * 60_000)
+    // Rest belongs to the DUTY state, not the currency grid — it is a property
+    // of the duty just flown rather than a standing qualification.
+    const rest = restUntilLegal
+      ? {
+          isLegalNow: restUntilLegal.isLegalNow,
+          elapsedMinutes: restUntilLegal.restElapsedMinutes,
+          requiredMinutes: restUntilLegal.requiredRestMinutes,
+          legalAtUtc: restUntilLegal.legalAtUtc,
+        }
+      : null
+
     return buildPilotStatus({
       legality: buildLegalityModel({
-        rest: restUntilLegal
-          ? {
-              isLegalNow: restUntilLegal.isLegalNow,
-              restElapsedMinutes: restUntilLegal.restElapsedMinutes,
-              requiredRestMinutes: restUntilLegal.requiredRestMinutes,
-              legalAtUtc: restUntilLegal.legalAtUtc,
-            }
-          : null,
         recency,
         capacity,
         forecastBreaches,
         currencies,
         now: at,
       }),
-      duty: deriveDutyStatus(allDutyPeriods, at),
+      duty: deriveDutyStatus(allDutyPeriods, at, rest, flightArrivals),
       now: at,
     })
   }, [
@@ -75,6 +99,7 @@ export function usePilotStatus(
     forecastBreaches,
     currencies,
     allDutyPeriods,
+    flightArrivals,
   ])
 
   return { status, isLoading: fdpLoading || currenciesLoading }
