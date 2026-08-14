@@ -54,8 +54,12 @@ export interface Requirement {
    * must never win the "what runs out first" comparison.
    */
   daysUntil?: number
-  /** The lines an expanded cell reveals. Never needed to read the cell. */
-  detail?: string[]
+  /**
+   * What an expanded cell reveals — label/value PAIRS, not sentences, so the
+   * values line up in a column instead of sitting wherever the label's length
+   * happens to leave them.
+   */
+  detail?: Array<{ label: string; value: string }>
   /** Where a deep link goes, for the cases a tap-to-expand cannot answer. */
   href: string
   /** Set only when not met or close to it; higher is more pressing. */
@@ -196,9 +200,11 @@ export function buildLegalityModel({
     progress: Math.min(1, Math.min(recency.takeoffs, recency.landings) / RECENCY_REQUIRED),
     daysUntil: recencyMet ? daysToLapse : 0,
     detail: [
-      `Takeoffs ${recency.takeoffs} / ${RECENCY_REQUIRED}`,
-      `Landings ${recency.landings} / ${RECENCY_REQUIRED}`,
-      recency.lapseIso ? `Lapses ${recency.lapseIso}` : "Not currently met",
+      { label: "Takeoffs", value: `${recency.takeoffs} / ${RECENCY_REQUIRED}` },
+      { label: "Landings", value: `${recency.landings} / ${RECENCY_REQUIRED}` },
+      recency.lapseIso
+        ? { label: "Lapses", value: formatExpiry(recency.lapseIso) }
+        : { label: "Status", value: "Not met" },
     ],
     href: "/logbook",
     urgency: !recencyMet ? 900 : lapsingSoon ? 400 - Math.min(399, daysToLapse ?? 0) : undefined,
@@ -240,10 +246,16 @@ export function buildLegalityModel({
             : 0,
       daysUntil: doc.daysRemaining,
       detail: [
-        doc.description || doc.code,
-        `Expires ${doc.expiryDate}`,
-        doc.issuingAuthority ? `Issued by ${doc.issuingAuthority}` : "",
-      ].filter(Boolean),
+        // The description is only worth a line when it SAYS something the code
+        // does not. "MEDIC / Medical" and "OPC320 / OPC 320" are the same word
+        // twice, and the row label is already the code.
+        ...(describesMoreThanCode(doc.description, doc.code)
+          ? [{ label: "Name", value: doc.description }]
+          : []),
+        { label: "Expires", value: formatExpiry(doc.expiryDate) },
+        ...(doc.issuedDate ? [{ label: "Issued", value: formatExpiry(doc.issuedDate) }] : []),
+        ...(doc.issuingAuthority ? [{ label: "Authority", value: doc.issuingAuthority }] : []),
+      ],
       href: "/currencies",
       urgency:
         state === "fail"
@@ -268,7 +280,7 @@ export function buildLegalityModel({
       state: "ok",
       value: `${folded[0].daysRemaining}d+`,
       daysUntil: folded[0].daysRemaining,
-      detail: folded.map((d) => `${d.code} ${d.daysRemaining}d`),
+      detail: folded.map((d) => ({ label: d.code, value: `${d.daysRemaining}d` })),
       href: "/currencies",
     })
   }
@@ -304,9 +316,12 @@ export function buildLegalityModel({
       value: `${hours(used)} / ${hours(limit)}h`,
       progress: fraction,
       detail: [
-        `${hours(Math.max(0, limit - used))}h remaining`,
-        forecast ? "Forecast to breach on the current roster" : "",
-      ].filter(Boolean),
+        { label: "Used", value: `${hours(used)}h` },
+        { label: "Remaining", value: `${hours(Math.max(0, limit - used))}h` },
+        ...(forecast
+          ? [{ label: "Forecast", value: "Breach on current roster" }]
+          : []),
+      ],
       href: "/fdp",
       urgency:
         state === "fail"
@@ -346,6 +361,32 @@ export function buildLegalityModel({
     binding: flagged[0] ?? nearestExpiry ?? requirements[0] ?? null,
     counts,
   }
+}
+
+/**
+ * A currency's own description earns a line only when it is not just the code
+ * spelled out. Compared on alphanumerics alone, so "OPC 320" and "OPC320" are
+ * recognised as the same thing, and either containing the other counts.
+ */
+function describesMoreThanCode(description: string | undefined, code: string): boolean {
+  if (!description) return false
+  const key = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "")
+  const d = key(description)
+  const c = key(code)
+  if (!d || !c) return false
+  return !d.includes(c) && !c.includes(d)
+}
+
+/** "12 Jan 27" — a date a pilot reads, not an ISO string. */
+function formatExpiry(iso: string): string {
+  const at = Date.parse(`${iso}T00:00:00Z`)
+  if (!Number.isFinite(at)) return iso
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "2-digit",
+    timeZone: "UTC",
+  }).format(new Date(at))
 }
 
 function shortfallAction(toShort: number, ldgShort: number): string {

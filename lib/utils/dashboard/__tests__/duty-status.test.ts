@@ -224,3 +224,101 @@ describe("deriveDutyStatus — sectors and rest", () => {
     expect(s.rest).toEqual(rest)
   })
 })
+
+describe("deriveDutyStatus — a part-flown duty is still a duty", () => {
+  /**
+   * The bug this pins: `mergeDutyPeriods` prefers the logbook for today, and
+   * mid-duty the logbook holds only the sectors already flown. A two-sector day
+   * with sector one in the book therefore produced a duty that "ended" on
+   * arrival, and the dashboard fell straight through to a rest countdown while
+   * the pilot was still in the cruise on sector two.
+   */
+  const NOW = new Date("2026-08-14T11:00:00Z")
+
+  /** What the logbook holds after sector 1 of 2 — it ended at 09:30. */
+  const flownSoFar = duty({
+    id: "log",
+    reportTime: "06:00",
+    debriefTime: "09:30",
+    sectorCount: 1,
+    maxFdpMinutes: 780,
+    route: "WSSS-VTBS",
+    flightIds: ["f1"],
+    flightMinutes: 131,
+  })
+
+  /** What the roster planned: two sectors, debrief 18:00. */
+  const planned = duty({
+    id: "sched",
+    source: "schedule",
+    reportTime: "06:00",
+    debriefTime: "18:00",
+    sectorCount: 2,
+    maxFdpMinutes: 720,
+    fdpTableUsed: "B",
+    route: "WSSS-VTBS-WSSS",
+  })
+
+  it("stays ON DUTY between sectors instead of counting down rest", () => {
+    const s = deriveDutyStatus([flownSoFar], NOW, null, undefined, [planned])
+    expect(s.phase).toBe("on_duty")
+    expect(s.active?.elapsedMinutes).toBe(300) // 5:00 since the 06:00 report
+  })
+
+  it("without the plan it wrongly reads as finished — which is the bug", () => {
+    const s = deriveDutyStatus([flownSoFar], NOW)
+    expect(s.phase).toBe("post_duty")
+  })
+
+  it("takes the FDP maximum from the PLAN, since Reg 14 counts planned sectors", () => {
+    // The logbook duty carries a one-sector maximum because one sector is all
+    // it knows about. Flying to that number would be flying to the wrong limit.
+    const s = deriveDutyStatus([flownSoFar], NOW, null, undefined, [planned])
+    expect(s.active?.maxFdpMinutes).toBe(720)
+    expect(s.active?.fdpTable).toBe("B")
+    expect(s.active?.remainingMinutes).toBe(420) // 12:00 max − 5:00 elapsed
+  })
+
+  it("shows every planned sector, with the flown ones marked", () => {
+    // "Not smart enough to detect 2 or 4 sector flights": the chain came off
+    // the logbook route, so it only ever showed what was already flown.
+    const arrivals = new Map([["f1", Date.parse("2026-08-14T09:20:00Z")]])
+    const s = deriveDutyStatus([flownSoFar], NOW, null, arrivals, [planned])
+    expect(s.active?.sectorCount).toBe(2)
+    expect(s.active?.legs.map((l) => `${l.from}-${l.to}:${l.status}`)).toEqual([
+      "WSSS-VTBS:complete",
+      "VTBS-WSSS:active",
+    ])
+  })
+
+  it("counts a four-sector day as four, not as however many are logged", () => {
+    const four = duty({
+      id: "sched4",
+      source: "schedule",
+      reportTime: "06:00",
+      debriefTime: "20:00",
+      sectorCount: 4,
+      route: "WSSS-VTBS-WSSS-WMKK-WSSS",
+    })
+    const s = deriveDutyStatus([flownSoFar], NOW, null, undefined, [four])
+    expect(s.active?.legs).toHaveLength(4)
+  })
+
+  it("reports a duty that has started with nothing logged yet", () => {
+    // Every duty's first hour: the pilot has reported, no sector has landed.
+    const s = deriveDutyStatus([], NOW, null, undefined, [planned])
+    expect(s.phase).toBe("on_duty")
+    expect(s.active?.id).toBe("sched")
+  })
+
+  it("still finishes the duty once the PLANNED debrief has passed", () => {
+    const s = deriveDutyStatus(
+      [flownSoFar],
+      new Date("2026-08-14T19:00:00Z"),
+      null,
+      undefined,
+      [planned],
+    )
+    expect(s.phase).toBe("post_duty")
+  })
+})

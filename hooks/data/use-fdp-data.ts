@@ -35,6 +35,17 @@ const EMPTY_CAPACITY = {
 
 const EMPTY_RESULT = {
   allDutyPeriods: [] as DutyPeriod[],
+  /**
+   * The roster's own view, BEFORE it is merged with the logbook.
+   *
+   * `mergeDutyPeriods` prefers the logbook for any date that is not in the
+   * future, which is right for the cumulative and rolling calculations — flown
+   * hours are the truth. It is wrong for "am I still on duty": mid-duty the
+   * logbook only holds the sectors already flown, so a two-sector day with one
+   * sector logged looks like a duty that finished at lunchtime. The dashboard
+   * needs the PLAN alongside the record to tell the difference.
+   */
+  scheduleDutyPeriods: [] as DutyPeriod[],
   pastDuties: [] as DutyPeriod[],
   futureDuties: [] as DutyPeriod[],
   cumulativeLimits: {
@@ -133,6 +144,7 @@ function computeFDPResult(
 
     const value: FDPResult = {
       allDutyPeriods: withRest,
+      scheduleDutyPeriods: scheduleDPs,
       pastDuties,
       futureDuties,
       cumulativeLimits,

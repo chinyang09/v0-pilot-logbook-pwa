@@ -33,6 +33,7 @@ export function usePilotStatus(
     restUntilLegal,
     forecast,
     allDutyPeriods,
+    scheduleDutyPeriods,
     isLoading: fdpLoading,
   } = useFDPData()
   const { currencies, isLoading: currenciesLoading } = useCurrencies()
@@ -88,7 +89,7 @@ export function usePilotStatus(
         currencies,
         now: at,
       }),
-      duty: deriveDutyStatus(allDutyPeriods, at, rest, flightArrivals),
+      duty: deriveDutyStatus(allDutyPeriods, at, rest, flightArrivals, scheduleDutyPeriods),
       now: at,
     })
   }, [
@@ -99,6 +100,7 @@ export function usePilotStatus(
     forecastBreaches,
     currencies,
     allDutyPeriods,
+    scheduleDutyPeriods,
     flightArrivals,
   ])
 

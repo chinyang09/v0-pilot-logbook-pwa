@@ -318,7 +318,7 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
   const fraction = onDuty && hasMax ? (elapsed ?? 0) / active.maxFdpMinutes : 0
 
   return (
-    <section className="px-4 py-3" aria-label="Duty">
+    <section className="px-4 py-2.5" aria-label="Duty">
       <div className="flex items-center gap-4">
         {onDuty && hasMax ? (
           <DutyGauge
@@ -625,13 +625,13 @@ function LimitsBand({ requirements }: { requirements: Requirement[] }) {
 
   return (
     <Band label="Limits" requirements={requirements}>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {pairs.map((pair) => (
           <div key={pair.label} className="flex items-start gap-3">
             <span className="w-10 shrink-0 pt-[3px] text-[11px] font-medium text-muted-foreground">
               {pair.label}
             </span>
-            <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="min-w-0 flex-1 space-y-1">
               {pair.rows.map((r) => (
                 <LimitRow key={r.id} requirement={r} />
               ))}
@@ -643,28 +643,63 @@ function LimitsBand({ requirements }: { requirements: Requirement[] }) {
   )
 }
 
+/**
+ * How much of the limit is gone, read straight off the bar.
+ *
+ * The bar is thick enough to hold its own number (h-5), so the hours used sit
+ * at the end of the FILL and the limit sits after the track — `[▓▓▓ 74 ░░░] 90h`
+ * — instead of the whole figure being a separate "74 / 90h" the eye has to
+ * pair up with a hairline.
+ *
+ * The label is placed INSIDE the fill only when the fill is wide enough to hold
+ * it with padding; below that it goes just outside the fill's end, so it can
+ * never be clipped by its own mark.
+ */
+const LABEL_FITS_INSIDE = 0.28
+
 function LimitRow({ requirement }: { requirement: Requirement }) {
   const tone = REQ_TONE[requirement.state]
   const Icon = STATE_ICON[requirement.state]
   // "Duty 14d" → "14d": the pair's label already says which measure it is.
   const window = requirement.label.split(" ").slice(-1)[0]
+  // "74 / 90h" → used "74", limit "90h".
+  const [used, limit] = requirement.value.split(" / ")
+  const fraction = Math.min(1, Math.max(0, requirement.progress ?? 0))
+  const inside = fraction >= LABEL_FITS_INSIDE
 
   return (
     <div className="flex items-center gap-2">
       <span className="w-7 shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground/70">
         {window}
       </span>
-      <span className={cn("h-1 min-w-0 flex-1 overflow-hidden rounded-full", tone.track)}>
+
+      <span className={cn("relative h-5 min-w-0 flex-1 overflow-hidden rounded-md", tone.track)}>
         <span
-          className={cn("block h-full rounded-full", tone.fill)}
-          style={{ width: `${Math.min(100, Math.max(0, (requirement.progress ?? 0) * 100))}%` }}
-        />
+          className={cn(
+            "absolute inset-y-0 left-0 flex items-center justify-end rounded-md px-1.5",
+            tone.fill,
+          )}
+          style={{ width: `${fraction * 100}%` }}
+        >
+          {inside && (
+            <span className="text-[10px] font-bold tabular-nums text-background">{used}</span>
+          )}
+        </span>
+        {!inside && (
+          <span
+            className="absolute inset-y-0 flex items-center pl-1.5 text-[10px] font-bold tabular-nums text-foreground"
+            style={{ left: `${fraction * 100}%` }}
+          >
+            {used}
+          </span>
+        )}
       </span>
+
       {requirement.state !== "ok" && (
         <Icon className={cn("h-3 w-3 shrink-0", tone.icon)} aria-hidden="true" />
       )}
-      <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground">
-        {requirement.value}
+      <span className="w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted-foreground">
+        {limit}
       </span>
     </div>
   )
@@ -690,7 +725,7 @@ function Band({
   return (
     <section
       className={cn(
-        "px-4 py-3",
+        "px-4 py-2.5",
         flexible && "min-h-0 flex-1 overflow-y-auto scrollbar-hide",
       )}
       aria-label={label}
@@ -788,20 +823,28 @@ function ExpandableRow({ requirement }: { requirement: Requirement }) {
             transition={EXPAND}
             className="overflow-hidden"
           >
-            <div className="flex flex-col gap-0.5 pb-2 pl-5.5 pt-0.5">
-              {detail?.map((line) => (
-                <span key={line} className="text-[11px] tabular-nums text-muted-foreground">
-                  {line}
-                </span>
+            {/* Indented under the row's own label (the icon's width plus its
+                gap), and a real two-column grid so every value lines up in a
+                column instead of landing wherever its label's length left it. */}
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 pb-2 pl-[1.375rem] pt-0.5">
+              {detail?.map((d) => (
+                <React.Fragment key={d.label}>
+                  <dt className="text-[11px] text-muted-foreground/70">{d.label}</dt>
+                  <dd className="text-[11px] font-medium tabular-nums text-foreground/90">
+                    {d.value}
+                  </dd>
+                </React.Fragment>
               ))}
-              <Link
-                href={href}
-                className="mt-1 inline-flex w-fit items-center gap-1 text-[11px] font-medium text-primary hover:underline"
-              >
-                Open
-                <ArrowUpRight className="h-3 w-3" />
-              </Link>
-            </div>
+              <dd className="col-span-2">
+                <Link
+                  href={href}
+                  className="mt-0.5 inline-flex w-fit items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                >
+                  Open
+                  <ArrowUpRight className="h-3 w-3" />
+                </Link>
+              </dd>
+            </dl>
           </motion.div>
         )}
       </AnimatePresence>

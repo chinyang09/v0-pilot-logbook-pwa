@@ -214,8 +214,42 @@ export function deriveDutyStatus(
   rest: RestState | null = null,
   /** Flight id → on-blocks instant, for marking sector progress. */
   flightArrivals?: Map<string, number>,
+  /**
+   * The roster's own duty periods, before the merge with the logbook.
+   *
+   * This is what makes a part-flown duty read correctly. See `planFor`.
+   */
+  scheduleDuties: DutyPeriod[] = [],
 ): DutyStatus {
   const nowMs = now.getTime()
+
+  /**
+   * The PLAN covering a duty period, when the roster has one.
+   *
+   * `mergeDutyPeriods` prefers the logbook for today, and mid-duty the logbook
+   * holds only the sectors already flown — so a two-sector day with sector one
+   * in the book produced a duty that "ended" on arrival, and the dashboard fell
+   * straight through to a rest countdown while the pilot was sitting in the
+   * cruise on sector two. Anyone flying a four-sector day saw it three times.
+   *
+   * The roster knows the whole shape. A schedule duty counts as the plan for a
+   * logbook duty when their windows overlap at all, which is enough: two duties
+   * on one date are separated by a rest period by construction.
+   */
+  const planFor = (dp: DutyPeriod, w: DutyWindow): DutyPeriod | null => {
+    let best: DutyPeriod | null = null
+    let bestEnd = w.endMs
+    for (const sched of scheduleDuties) {
+      const sw = dutyWindow(sched)
+      if (!sw) continue
+      if (sw.startMs > w.endMs || sw.endMs < w.startMs) continue
+      if (sw.endMs > bestEnd) {
+        bestEnd = sw.endMs
+        best = sched
+      }
+    }
+    return best
+  }
 
   const completedLegsOf = (dp: DutyPeriod): number => {
     if (!flightArrivals || !dp.flightIds?.length) return 0
@@ -234,32 +268,80 @@ export function deriveDutyStatus(
   let nextReportMs = Infinity
 
   for (const dp of dutyPeriods) {
-    const w = dutyWindow(dp)
-    if (!w) continue
+    const logged = dutyWindow(dp)
+    if (!logged) continue
+
+    // Where the roster runs later than the record, the duty is still in
+    // progress and its PLANNED figures are the legal ones: under Reg 14 the
+    // maximum FDP is set by the sectors PLANNED, not the sectors flown so far.
+    const plan = planFor(dp, logged)
+    const planWindow = plan ? dutyWindow(plan) : null
+    const w: DutyWindow = planWindow
+      ? { startMs: Math.min(logged.startMs, planWindow.startMs), endMs: planWindow.endMs }
+      : logged
+    const effective: DutyPeriod = plan
+      ? {
+          ...dp,
+          // From the plan: how big the duty is and what it is allowed to be.
+          debriefTime: plan.debriefTime,
+          sectorCount: plan.sectorCount || dp.sectorCount,
+          maxFdpMinutes: plan.maxFdpMinutes || dp.maxFdpMinutes,
+          fdpTableUsed: plan.fdpTableUsed ?? dp.fdpTableUsed,
+          route: plan.route || dp.route,
+          // From the record: what has actually been flown.
+          flightMinutes: dp.flightMinutes,
+          flightIds: dp.flightIds,
+        }
+      : dp
 
     if (nowMs >= w.startMs && nowMs <= w.endMs) {
       // Ties go to the LATER-starting duty: a merged overnight and the sector
       // inside it can both contain `now`, and the pilot is in the inner one.
       if (!active || w.startMs > active.startMs) {
-        active = toActive(dp, w, nowMs, completedLegsOf(dp), true)
+        active = toActive(effective, w, nowMs, completedLegsOf(dp), true)
       }
       continue
     }
 
     if (w.endMs < nowMs && w.endMs > lastEndMs) {
       lastEndMs = w.endMs
-      justFinished = toActive(dp, w, nowMs, dp.sectorCount || completedLegsOf(dp), false)
+      justFinished = toActive(
+        effective,
+        w,
+        nowMs,
+        effective.sectorCount || completedLegsOf(dp),
+        false,
+      )
     }
 
     if (w.startMs > nowMs && w.startMs < nextReportMs) {
       nextReportMs = w.startMs
       next = {
-        id: dp.id,
-        date: dp.date,
-        route: dp.route || "",
-        sectorCount: dp.sectorCount || 0,
+        id: effective.id,
+        date: effective.date,
+        route: effective.route || "",
+        sectorCount: effective.sectorCount || 0,
         reportMs: w.startMs,
         inMinutes: Math.round((w.startMs - nowMs) / 60_000),
+      }
+    }
+  }
+
+  // A roster duty the logbook has not touched at all — the pilot has reported
+  // but nothing is logged yet, which is every duty's first hour.
+  if (!active) {
+    for (const sched of scheduleDuties) {
+      const sw = dutyWindow(sched)
+      if (!sw) continue
+      if (nowMs < sw.startMs || nowMs > sw.endMs) continue
+      if (dutyPeriods.some((dp) => {
+        const w = dutyWindow(dp)
+        return w && w.startMs <= sw.endMs && w.endMs >= sw.startMs
+      })) {
+        continue
+      }
+      if (!active || sw.startMs > active.startMs) {
+        active = toActive(sched, sw, nowMs, 0, true)
       }
     }
   }

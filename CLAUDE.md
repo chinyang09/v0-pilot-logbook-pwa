@@ -617,10 +617,39 @@ answers a different question in each:
 | `post_duty` (≤3h after debrief) | the duty just flown, and time to next report |
 | `off` | not on duty, and time to next report |
 
-A SCHEDULED duty that has started counts as the one being flown — waiting for
-logbook entries would leave the panel blank for exactly the hours it is most
-wanted. When two windows contain the instant, the LATER-starting one wins (a
-merged overnight and a sector inside it; the pilot is in the inner one).
+When two windows contain the instant, the LATER-starting one wins (a merged
+overnight and a sector inside it; the pilot is in the inner one).
+
+#### A PART-FLOWN duty is still a duty — read the plan, not just the record
+
+This is the subtlest thing on the page and it was wrong. `mergeDutyPeriods`
+prefers the LOGBOOK for any date that is not in the future, which is right for
+the rolling and cumulative calculations — flown hours are the truth. It is wrong
+for "am I still on duty": mid-duty the logbook holds only the sectors already
+flown, so a two-sector day with sector one in the book produced a duty that
+"ended" on arrival, and the panel fell straight through to a rest countdown
+while the pilot was in the cruise on sector two. A four-sector day did it three
+times.
+
+So `deriveDutyStatus` takes the roster's own duty periods
+(`FDPResult.scheduleDutyPeriods`, exposed for this) ALONGSIDE the merged ones,
+and where a schedule duty overlaps a logbook duty and runs LATER, the duty is
+still in progress. The effective duty then takes:
+
+| From the PLAN | From the RECORD |
+|---|---|
+| debrief, `sectorCount`, `route` | `flightMinutes` (what has actually been flown) |
+| `maxFdpMinutes`, `fdpTableUsed` | `flightIds` (which legs are on blocks) |
+
+The maximum comes from the plan because **Reg 14 sets the FDP maximum by the
+sectors PLANNED, not the sectors flown so far** — a one-sector logbook duty
+carries a one-sector maximum, and flying to that number would be flying to the
+wrong limit. The sector chain comes from the plan for the same reason: it is
+what makes a four-sector day show four legs with one complete, instead of one
+leg and a finished duty.
+
+A roster duty with NO logbook counterpart at all is also picked up, which is
+every duty's first hour — the pilot has reported and nothing has landed yet.
 
 #### Annunciator, governing constraint, next action
 
@@ -2904,6 +2933,9 @@ When making changes, be aware of these high-impact files:
 - Do not make the legal page's cells navigate on tap — they EXPAND in place and a second tap closes them. The reader came to check a status, and a route change loses the screen they came for. The deep link belongs inside the expansion
 - Do not replace the sector chain with a list of recent flights — that list showed history, not THIS duty, and could not answer "where am I in a four-sector day". The chain comes from `deriveSectorLegs` off the duty's own route
 - Do not let the summary page's flight list grow the page — it scrolls in its own bounded box, so a year-long period cannot push the breakdown below it out of reach
+- Do not read an in-progress duty from the logbook alone. `mergeDutyPeriods` prefers the logbook for today, and mid-duty the logbook holds only the sectors already flown — so a two-sector day with one sector logged reads as a duty that ended at lunchtime and the panel falls through to a rest countdown. Pass `scheduleDutyPeriods` into `deriveDutyStatus`; where the roster runs later, the duty is still on
+- Do not take the FDP maximum, sector count or route from the logbook half of a part-flown duty — Reg 14 sets the maximum by the sectors PLANNED, so a one-sector logbook duty carries a one-sector limit that nobody should fly to. Plan supplies the shape and the limit; the record supplies what has been flown
+- Do not put a number inside a meter's fill without checking it fits — below `LABEL_FITS_INSIDE` it goes outside the fill instead. A figure clipped by its own bar is worse than no figure
 - Do not print "12 / 12 currencies current" — a pilot does not need telling about the eleven that are fine. The panel names the TIGHTEST constraint, and falls back to the fullest rolling limit only when nothing is flagged
 - Do not state a problem without its remedy on the legal page. The next-action line is the imperative ("2 landings required"), phrased in `legality.ts` where the shortfall is in hand — not the reading ("landings 1 / 3"), which the requirement cell already shows
 - Do not let a standing requirement outrank an exceeded FDP — that one is happening right now rather than being true today, and it is the only thing that overrides the legality verdict for the annunciator

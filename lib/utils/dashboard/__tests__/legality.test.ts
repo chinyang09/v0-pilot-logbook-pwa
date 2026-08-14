@@ -75,8 +75,8 @@ describe("buildLegalityModel — recency is ONE requirement", () => {
     const rows = model.requirements.filter((r) => r.id.startsWith("recency"))
     expect(rows).toHaveLength(1)
     expect(rows[0].label).toBe("90-day recency")
-    expect(rows[0].detail).toContain("Takeoffs 6 / 3")
-    expect(rows[0].detail).toContain("Landings 4 / 3")
+    expect(rows[0].detail).toContainEqual({ label: "Takeoffs", value: "6 / 3" })
+    expect(rows[0].detail).toContainEqual({ label: "Landings", value: "4 / 3" })
   })
 
   it("fails on whichever half is short, and names both in the remedy", () => {
@@ -181,9 +181,31 @@ describe("buildLegalityModel — documents", () => {
     expect(ids).toEqual(["recency", "doc-NEAR", "doc-MID", "doc-rest"])
     // Nothing is hidden — the fold lists what it folded.
     expect(model.requirements.find((r) => r.id === "doc-rest")!.detail).toEqual([
-      "ALSO 280d",
-      "FAR 300d",
+      { label: "ALSO", value: "280d" },
+      { label: "FAR", value: "300d" },
     ])
+  })
+
+  it("does not repeat the code as a description", () => {
+    // "MEDIC / Medical" and "OPC320 / OPC 320" are the same word twice, and the
+    // row label is already the code — so the expansion led with a line that
+    // said nothing.
+    const model = buildLegalityModel({
+      ...CLEAR,
+      currencies: [
+        currency({ code: "MEDIC", description: "Medical", daysRemaining: 100 }),
+        currency({ code: "OPC320", description: "OPC 320", daysRemaining: 110 }),
+        currency({ code: "LC", description: "Line Check A320", daysRemaining: 120 }),
+      ],
+    })
+
+    const labels = (id: string) =>
+      model.requirements.find((r) => r.id === id)!.detail!.map((d) => d.label)
+
+    expect(labels("doc-MEDIC")).not.toContain("Name")
+    expect(labels("doc-OPC320")).not.toContain("Name")
+    // A description that genuinely says more keeps its line.
+    expect(labels("doc-LC")).toContain("Name")
   })
 
   it("meters a document against its own warning window, not its whole validity", () => {
