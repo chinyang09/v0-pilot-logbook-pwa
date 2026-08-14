@@ -35,6 +35,7 @@ import {
   getCurrentUserPersonnel,
   getUserPreferences,
   getAllAircraft,
+  bulkUpsertScheduleEntries,
   addAircraft,
   updateAircraft,
   getAircraftType,
@@ -98,6 +99,9 @@ export interface ExecutionResult {
   simSessionsCreated: number;
   /** Duplicate sim rows an earlier build created, cleaned up on this import. */
   simDuplicatesRemoved: number;
+  /** Standby / leave / off / ground duties written to the roster table. */
+  groundDutiesCreated: number;
+  groundDutiesUpdated: number;
   personnelCreated: number;
   personnelUpdated: number;
   aircraftCreated: number;
@@ -651,6 +655,8 @@ export async function executeRosterImport(
     ignored: 0,
     staleSkipped: 0,
     simSessionsCreated: 0,
+    groundDutiesCreated: 0,
+    groundDutiesUpdated: 0,
     simDuplicatesRemoved: 0,
     personnelCreated: 0,
     personnelUpdated: 0,
@@ -941,6 +947,43 @@ export async function executeRosterImport(
       reportStamps,
       result,
     });
+  }
+
+  // ----- 3b. Standby / ground duties → the roster table -----
+  //
+  // The only rows the app keeps a roster for. They have no logbook
+  // counterpart, so unlike the old roster there is nothing to reconcile
+  // against the flight record — and without them standby is invisible, so
+  // neither the rest before a standby nor its contribution to the cumulative
+  // duty limits could be checked.
+  //
+  // `bulkUpsertScheduleEntries` keys on date + dutyCode and enqueues for sync,
+  // so re-importing the same report updates rather than duplicates.
+  const groundDuties = plan.groundDuties ?? [];
+  if (groundDuties.length > 0) {
+    try {
+      const { created, updated } = await bulkUpsertScheduleEntries(
+        groundDuties.map((duty) => ({
+          date: duty.date,
+          timeReference: "UTC" as const,
+          reportTime: duty.startTime,
+          debriefTime: duty.endTime,
+          dutyType: duty.dutyType,
+          dutyCode: duty.dutyCode,
+          dutyDescription: duty.description,
+          sectors: [],
+          crew: [],
+          importedAt: Date.now(),
+        }))
+      );
+      result.groundDutiesCreated += created;
+      result.groundDutiesUpdated += updated;
+    } catch (error) {
+      result.errors.push({
+        operation: "ground duties",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   }
 
   // ----- 4. Currencies (always applied) -----

@@ -3,7 +3,10 @@
 import { useMemo, useState, useEffect } from "react"
 import { useFlights } from "./use-flights"
 import { buildPlannedDuties } from "@/lib/utils/dashboard/planned-duties"
-import { applyAcclimatisation } from "@/lib/utils/roster/fdp-calculator"
+import {
+  applyAcclimatisation,
+  truncateActivatedStandby,
+} from "@/lib/utils/roster/fdp-calculator"
 import { useScheduleEntries } from "./use-schedule"
 import { useDBReady } from "./use-db"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
@@ -122,7 +125,11 @@ function computeFDPResult(
       getDutyPeriodsFromSchedule(scheduleEntries, airportTimezones)
     )
 
-    const merged = mergeDutyPeriods(logbookDPs, scheduleDPs)
+    // Para 6(6): a standby ends the moment the crew member is activated, so a
+    // standby that was called out is cut back to the following duty's report.
+    // Left whole, those hours are counted twice — once at 20% as standby and
+    // again in full as the duty they turned into.
+    const merged = truncateActivatedStandby(mergeDutyPeriods(logbookDPs, scheduleDPs))
     // Correct each duty's FDP table against the crew member's ACTUAL
     // acclimatised zone, which only the whole timeline can tell us — a duty
     // period is built before anything knows the three-nights history that

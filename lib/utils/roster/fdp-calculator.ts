@@ -194,14 +194,147 @@ export function getDutyPeriodsFromSchedule(
   airportTimezones?: Map<string, number>
 ): DutyPeriod[] {
   return entries
-    .filter((entry) => entry.dutyType === "flight" && entry.reportTime && entry.debriefTime)
+    .filter((entry) => entry.reportTime && entry.debriefTime)
     .map((entry) => {
+      if (entry.dutyType === "standby") return calculateStandbyDutyPeriod(entry)
+      if (entry.dutyType !== "flight") return null
       const depIata = entry.sectors?.[0]?.departureIata
       const tzOffset = depIata && airportTimezones ? airportTimezones.get(depIata) ?? 8 : 8
       return calculateDutyPeriodFromSchedule(entry, tzOffset)
     })
     .filter((dp): dp is DutyPeriod => dp !== null)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+}
+
+// ============================================
+// Standby (Fifth Schedule paragraph 6)
+// ============================================
+
+/**
+ * How a standby is served, which is what decides its treatment.
+ *
+ * Para 6(7): only **20%** of standby at home or in local accommodation counts
+ * toward the cumulative duty limits of para 12.
+ * Para 6(3): AIRPORT standby is part of the minimum rest period where adequate
+ * rest facilities are provided, and part of the following FDP where they are
+ * not — so it is never a separate contribution of its own.
+ */
+export type StandbyKind = "home" | "airport"
+
+/** Para 6(7). */
+export const HOME_STANDBY_DUTY_FRACTION = 0.2
+
+/** Para 6(2)(a) — the length of a flight crew member's standby duty. */
+export const MAX_STANDBY_HOURS_FLIGHT_CREW = 18
+
+/**
+ * Which kind of standby a company duty code names.
+ *
+ * Every code currently maps to `home`, which is what this operator rosters.
+ * It is a lookup rather than a constant so that the day airport standby
+ * appears it is an entry here, not a rewrite — and so the reading in force is
+ * written down rather than assumed.
+ */
+const STANDBY_KIND_BY_CODE: Record<string, StandbyKind> = {}
+
+export function standbyKind(dutyCode: string | undefined): StandbyKind {
+  return STANDBY_KIND_BY_CODE[(dutyCode || "").toUpperCase().trim()] ?? "home"
+}
+
+/**
+ * A standby as a duty period.
+ *
+ * It is a DUTY period but not a FLIGHT duty period, so it carries no FDP
+ * maximum — `maxFdpMinutes: 0` — and must never reach an FDP gauge or an FDP
+ * exceedance check. What it does carry:
+ *
+ * - `dutyMinutes`, the real length, which is what para 3's rest rules and para
+ *   6(2)(a)'s 18-hour cap are measured against, and what makes the rest BEFORE
+ *   a standby checkable at all;
+ * - `countedDutyMinutes`, the 20% of para 6(7) that reaches the cumulative
+ *   limits. Airport standby contributes nothing separately (para 6(3) folds it
+ *   into the rest period or the following FDP), so it counts zero here.
+ */
+export function calculateStandbyDutyPeriod(entry: ScheduleEntry): DutyPeriod | null {
+  if (!entry.reportTime || !entry.debriefTime) return null
+
+  const startMin = hhmmToMinutes(entry.reportTime)
+  let endMin = hhmmToMinutes(entry.debriefTime)
+  if (endMin <= startMin) endMin += 1440
+  const dutyMinutes = endMin - startMin
+  if (dutyMinutes <= 0) return null
+
+  const kind = standbyKind(entry.dutyCode)
+  const today = new Date().toISOString().split("T")[0]
+
+  return {
+    id: entry.id,
+    date: entry.date,
+    reportTime: entry.reportTime,
+    debriefTime: entry.debriefTime,
+    dutyMinutes,
+    countedDutyMinutes:
+      kind === "home" ? Math.round(dutyMinutes * HOME_STANDBY_DUTY_FRACTION) : 0,
+    flightMinutes: 0,
+    sectorCount: 0,
+    // Not a flight duty period. A dash on the panel, never a default.
+    maxFdpMinutes: 0,
+    fdpExtensionUsed: false,
+    dutyKind: "standby",
+    standbyKind: kind,
+    source: "schedule",
+    isFuture: entry.date > today,
+    scheduleEntryIds: [entry.id],
+    flightIds: [],
+  }
+}
+
+/**
+ * Para 6(6) — activation.
+ *
+ * > the standby duty ceases from the moment the crew member is activated for
+ * > duty; and the duty period commences from the moment that crew member
+ * > reports for duty at the designated reporting point.
+ *
+ * So a standby that is called out ends at the following duty's report, and its
+ * counted contribution is taken over the truncated window. Left whole, the
+ * called-out hours are counted twice — once at 20% as standby and again in
+ * full as the flight duty they turned into.
+ *
+ * A standby the pilot was never called out on is untouched.
+ */
+export function truncateActivatedStandby(dutyPeriods: DutyPeriod[]): DutyPeriod[] {
+  const flightDuties = dutyPeriods.filter((dp) => dp.dutyKind !== "standby")
+  if (flightDuties.length === 0) return dutyPeriods
+
+  return dutyPeriods.map((dp) => {
+    if (dp.dutyKind !== "standby") return dp
+
+    const startAbs = dateToDays(dp.date) * 1440 + hhmmToMinutes(dp.reportTime)
+    const endAbs = startAbs + dp.dutyMinutes
+
+    // The earliest duty reporting INSIDE the standby window is the activation.
+    let activationAbs = Infinity
+    for (const duty of flightDuties) {
+      const reportAbs = dateToDays(duty.date) * 1440 + hhmmToMinutes(duty.reportTime)
+      if (reportAbs > startAbs && reportAbs < endAbs && reportAbs < activationAbs) {
+        activationAbs = reportAbs
+      }
+    }
+    if (activationAbs === Infinity) return dp
+
+    const dutyMinutes = activationAbs - startAbs
+    return {
+      ...dp,
+      dutyMinutes,
+      countedDutyMinutes:
+        dp.standbyKind === "home"
+          ? Math.round(dutyMinutes * HOME_STANDBY_DUTY_FRACTION)
+          : 0,
+      debriefTime: minutesToHHMM(((activationAbs % 1440) + 1440) % 1440),
+      activatedAt: minutesToHHMM(((activationAbs % 1440) + 1440) % 1440),
+    }
+  })
 }
 
 // ============================================
@@ -676,6 +809,16 @@ export function mergeAdjacentDutyPeriods(dutyPeriods: DutyPeriod[]): DutyPeriod[
   for (let i = 1; i < sorted.length; i++) {
     const prev = result[result.length - 1]
     const curr = sorted[i]
+
+    // Only like merges with like. A standby that runs into a flight duty is
+    // two different kinds of duty period — one carries an FDP maximum and the
+    // other cannot — and merging them would give the pair a single maximum
+    // covering hours paragraph 14 never applied to. Para 6(6) handles that
+    // pairing instead, by ending the standby at activation.
+    if ((prev.dutyKind ?? "flight") !== (curr.dutyKind ?? "flight")) {
+      result.push(curr)
+      continue
+    }
 
     // Calculate absolute minutes for debrief and report
     const prevDayMinutes = dateToDays(prev.date) * 1440
@@ -1234,7 +1377,14 @@ export function calculateRollingStats(
     return dpDate <= fromDate && dpDate > toDate
   })
 
-  const dutyMinutes = periodsInRange.reduce((sum, dp) => sum + dp.dutyMinutes, 0)
+  // Para 12 counts duty hours — but para 6(7) counts only 20% of home standby
+  // toward them, and para 6(3) folds airport standby into the rest period or
+  // the following FDP rather than counting it at all. `countedDutyMinutes`
+  // carries that; every ordinary duty leaves it unset and counts in full.
+  const dutyMinutes = periodsInRange.reduce(
+    (sum, dp) => sum + (dp.countedDutyMinutes ?? dp.dutyMinutes),
+    0
+  )
   const flightMinutes = periodsInRange.reduce((sum, dp) => sum + dp.flightMinutes, 0)
 
   const dutyHours = dutyMinutes / 60
@@ -1443,7 +1593,23 @@ export function isDutyExceedingLimits(
   exceeds: boolean
 } {
   const dutyHours = dutyPeriod.dutyMinutes / 60
-  const exceedsFDP = dutyPeriod.dutyMinutes > dutyPeriod.maxFdpMinutes
+
+  // A standby is a duty period but not a FLIGHT duty period, so paragraph 14's
+  // tables never applied to it and there is no FDP to exceed. Its own cap is
+  // para 6(2)(a): 18 hours for a flight crew member.
+  if (dutyPeriod.dutyKind === "standby") {
+    const exceedsStandby = dutyHours > MAX_STANDBY_HOURS_FLIGHT_CREW
+    return {
+      exceedsFDP: false,
+      exceedsDuty: exceedsStandby,
+      exceeds: exceedsStandby,
+    }
+  }
+
+  // A duty carrying no computed maximum has nothing to be checked against —
+  // reading 0 as a limit would make every such duty an exceedance.
+  const exceedsFDP =
+    dutyPeriod.maxFdpMinutes > 0 && dutyPeriod.dutyMinutes > dutyPeriod.maxFdpMinutes
   const exceedsDuty = dutyHours > limits.maxSingleDutyHours
 
   return {
@@ -2131,6 +2297,12 @@ export function applyAcclimatisation(
   })
 
   return sortedDPs.map((dp, i) => {
+    // A standby is not a flight duty period, so paragraph 14's tables never
+    // applied to it — deriving a maximum here would hand it a one-sector FDP
+    // it has no business carrying. It still occupies the timeline, which is
+    // what matters for the acclimatisation of the duties around it.
+    if (dp.dutyKind === "standby") return dp
+
     // What the crew member was acclimated to when THIS duty commenced — so the
     // duty's own arrival zone cannot retroactively justify its own table.
     const acclimatedMin = acclimatisedOffsetMinutes(

@@ -24,6 +24,7 @@ import type {
   Currency,
   TimeReference,
   CrewRole,
+  DutyType,
 } from "@/types/entities/roster.types";
 import type { Personnel } from "@/types/entities/crew.types";
 import type { FlightLog } from "@/types/entities/flight.types";
@@ -70,6 +71,25 @@ import {
 // Public types
 // ============================================================
 
+/**
+ * A non-flight duty, with its window normalised to UTC.
+ *
+ * The times are UTC because everything downstream is: a schedule report states
+ * its frame in a header line and eCrew issues the same report in three of
+ * them, so a standby window read in the wrong frame is hours out — the same
+ * failure the sector times are normalised to avoid.
+ */
+export interface ParsedGroundDuty {
+  /** UTC date the duty starts on. */
+  date: string;
+  dutyType: DutyType;
+  dutyCode: string;
+  description: string;
+  /** UTC HH:MM. Absent for a day off or leave, which have no window. */
+  startTime?: string;
+  endTime?: string;
+}
+
 export interface PlannedImport {
   success: boolean;
   timeReference: TimeReference;
@@ -94,6 +114,17 @@ export interface PlannedImport {
    * dashboard's simulator totals. Applied outside the flight review modal.
    */
   simSessions: ParsedSimSession[];
+  /**
+   * Standby / leave / days off / ground duties, written to `scheduleEntries`.
+   *
+   * These are the only rows the app keeps a roster for: they have no logbook
+   * counterpart, so there is nothing to reconcile against the flight record.
+   * Standby is the one that carries regulatory weight — para 6 gives it its
+   * own rules and para 12 counts it toward the cumulative duty limits — and
+   * without it neither the rest before a standby nor those limits can be
+   * checked. Applied outside the flight review modal.
+   */
+  groundDuties: ParsedGroundDuty[];
   /** Currency updates — always executed, not user-reviewed. */
   currencies: Omit<Currency, "id" | "createdAt" | "syncStatus">[];
   /** New pilot crew discovered — always executed. */
@@ -675,6 +706,20 @@ interface RawSimDuty {
   sourceLine: number;
 }
 
+/** A minute count (which may be negative or past 1440) as a wall clock. */
+function minuteOfDayToHHMM(total: number): string {
+  const m = ((total % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+
+/** Shift a YYYY-MM-DD by whole days. */
+function shiftDate(date: string, days: number): string {
+  if (!days) return date;
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 /**
  * A non-flight duty row is a simulator / training session when its code or
  * description matches a known sim/check pattern. EBT (Evidence-Based
@@ -725,6 +770,97 @@ function tryExtractSimDuty(
 
   return {
     date,
+    dutyCode,
+    description: detailCell,
+    startLocal: range?.[1],
+    endLocal: range?.[2],
+    sourceLine: lineNumber,
+  };
+}
+
+// ============================================================
+// Ground / standby duty detection
+// ============================================================
+
+interface RawGroundDuty {
+  date: string; // YYYY-MM-DD
+  dutyType: DutyType;
+  dutyCode: string; // "SBYG", "BKUP", "LOFF"
+  description: string;
+  startLocal?: string; // HH:MM, in the report's time reference
+  endLocal?: string;
+  sourceLine: number;
+}
+
+/**
+ * What kind of duty a non-flight, non-simulator schedule row is.
+ *
+ * Only STANDBY carries duty time that matters to the regulation — para 6
+ * gives it its own rules and para 12 counts it toward the cumulative limits.
+ * Leave and days off are recorded because para 5 is written in terms of days
+ * free of all duties, so the day a rest calculation needs to know about is
+ * exactly the day this row describes; nothing computes against them yet.
+ *
+ * Returns null for a row that names no recognisable duty, which is left alone
+ * rather than filed as "ground" on a guess.
+ */
+export function classifyGroundDuty(
+  code: string,
+  description: string
+): DutyType | null {
+  const c = (code || "").toUpperCase().trim();
+  const d = (description || "").toLowerCase();
+  if (!c) return null;
+
+  // Standby: the company's codes are SBYG / SBYA / SBY… plus BKUP (backup).
+  if (/^(SBY|STBY|BKUP|RES)/.test(c) || d.includes("standby")) return "standby";
+  // Days off — LOFF (local day off), OOFF (off away from base).
+  if (/^[LO]?OFF$/.test(c) || /^(DO|RDO)$/.test(c) || d.includes("day off")) {
+    return "off";
+  }
+  // Leave — annual, compassionate, sick, parental.
+  if (/^(ALL|CCL|CSL|SIC|PTL|UPL|ML|LVE)$/.test(c) || d.includes("leave")) {
+    return "leave";
+  }
+  // Anything else with a duty window is a ground duty (office, meeting,
+  // medical, course).
+  return "ground";
+}
+
+/**
+ * Read a standby / leave / off / ground duty out of a NON-flight schedule row.
+ *
+ * These rows were previously dropped outright — the row fell through
+ * `tryExtractSimDuty`, which returns null for anything that is not a
+ * simulator, and was skipped. Standby has never been tracked as a result, so
+ * neither the rest before it nor its contribution to the cumulative duty
+ * limits could be checked.
+ */
+function tryExtractGroundDuty(
+  cols: string[],
+  header: ParsedHeader,
+  lineNumber: number
+): RawGroundDuty | null {
+  const date = parseDDMMYYYY(cols[header.columnIndices.date] || "");
+  if (!date) return null;
+
+  const dutyCell = (cols[header.columnIndices.duties] || "").trim();
+  const detailCell = (cols[header.columnIndices.details] || "").trim();
+  if (!dutyCell) return null;
+
+  const dutyCode = dutyCell.split(/[\s\n]+/)[0];
+  const dutyType = classifyGroundDuty(dutyCode, detailCell);
+  if (!dutyType) return null;
+
+  // The window ("06:15 - 18:15") lands in the report / actual columns
+  // depending on the export, so scan the row for the first HH:MM range — the
+  // same approach `tryExtractSimDuty` takes. A day off carries none, which is
+  // fine: it is a date, not a duty window.
+  const range = cols.join(" ").match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
+
+  return {
+    date,
+    dutyType,
     dutyCode,
     description: detailCell,
     startLocal: range?.[1],
@@ -791,6 +927,7 @@ export async function parseScheduleCSV(
     crewMember: { crewId: "", name: "", base: "", role: "", aircraftType: "" },
     operations: [],
     simSessions: [],
+    groundDuties: [],
     currencies: [],
     personnelToCreate: [],
     personnelToUpdate: [],
@@ -917,6 +1054,7 @@ export async function parseScheduleCSV(
     // Stage A: raw extraction per row
     const rawSectors: RawSector[] = [];
     const rawSimDuties: RawSimDuty[] = [];
+    const rawGroundDuties: RawGroundDuty[] = [];
     const currencyStartMarker = "Code,,,Description";
     let currencyStartIdx = -1;
 
@@ -931,9 +1069,17 @@ export async function parseScheduleCSV(
       const cols = cells;
       const duties = cols[header.columnIndices.duties] || "";
       if (!duties.match(/\d+\s*\[/)) {
-        // Not a flight — capture simulator / training duty rows (EBT etc.).
+        // Not a flight — capture simulator / training duty rows (EBT etc.),
+        // then standby / leave / off / ground. Everything that is not a
+        // simulator used to fall off the end here, which is why standby has
+        // never been tracked.
         const sim = tryExtractSimDuty(cols, header, i + 1);
-        if (sim) rawSimDuties.push(sim);
+        if (sim) {
+          rawSimDuties.push(sim);
+          continue;
+        }
+        const ground = tryExtractGroundDuty(cols, header, i + 1);
+        if (ground) rawGroundDuties.push(ground);
         continue;
       }
 
@@ -1139,6 +1285,59 @@ export async function parseScheduleCSV(
           component: td?.component,
           facility: td?.facility,
           instructorName: td?.instructorName,
+        });
+      }
+    }
+
+    // Standby / leave / off / ground duties → the roster table.
+    onProgress?.(89, "Parsing", "Reading standby and ground duties...");
+    if (rawGroundDuties.length > 0) {
+      // These sit at or around home base — a standby is served at home or in
+      // local accommodation — so Local Base and Local Station both convert
+      // through the base offset. A UTC report needs no shift.
+      const baseOffsetMin =
+        header.timeReference === "UTC"
+          ? 0
+          : baseTz
+            ? Math.round(getAirportTimeInfo(baseTz).offset * 60)
+            : 0;
+
+      for (const duty of rawGroundDuties) {
+        if (!duty.startLocal || !duty.endLocal) {
+          // Leave and days off carry no window — a date, not a duty period.
+          plan.groundDuties.push({
+            date: duty.date,
+            dutyType: duty.dutyType,
+            dutyCode: duty.dutyCode,
+            description: duty.description,
+          });
+          continue;
+        }
+
+        const [sh, sm] = duty.startLocal.split(":").map(Number);
+        const [eh, em] = duty.endLocal.split(":").map(Number);
+        if ([sh, sm, eh, em].some(Number.isNaN)) continue;
+
+        const startLocalMin = sh * 60 + sm;
+        let endLocalMin = eh * 60 + em;
+        if (endLocalMin <= startLocalMin) endLocalMin += 1440; // crosses midnight
+
+        // Converting to UTC can move the DATE — an 06:00 SGT standby is 22:00
+        // the previous day in UTC — and the app keys a duty on its UTC date.
+        const startUtcTotal = startLocalMin - baseOffsetMin;
+        const dayShift = Math.floor(startUtcTotal / 1440);
+        const endUtcTotal = endLocalMin - baseOffsetMin;
+
+        plan.groundDuties.push({
+          date: shiftDate(duty.date, dayShift),
+          dutyType: duty.dutyType,
+          dutyCode: duty.dutyCode,
+          description: duty.description,
+          startTime: minuteOfDayToHHMM(startUtcTotal),
+          // End is stated as a wall clock like every other duty boundary; an
+          // end earlier than the start means the next day, the same
+          // convention `ScheduleEntry.debriefTime` already carries.
+          endTime: minuteOfDayToHHMM(endUtcTotal),
         });
       }
     }

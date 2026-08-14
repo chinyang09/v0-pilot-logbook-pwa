@@ -263,7 +263,32 @@ export interface DutyPeriod {
 
   // Calculated durations (in minutes)
   dutyMinutes: number
+  /**
+   * What this duty contributes to the CUMULATIVE limits of para 12, when that
+   * differs from its real length. Absent means the whole of it.
+   *
+   * Only standby differs today: para 6(7) counts **20%** of standby served at
+   * home or in local accommodation, and para 6(3) folds AIRPORT standby into
+   * the rest period or the following FDP rather than counting it separately.
+   */
+  countedDutyMinutes?: number
   flightMinutes: number             // Total block time
+  /**
+   * What kind of duty period this is. Absent means a flight duty period, which
+   * is what every duty period was before standby was tracked.
+   *
+   * A standby is a DUTY period but not a FLIGHT duty period: paragraph 14's
+   * tables do not apply to it, so it carries no FDP maximum and must never
+   * reach an FDP gauge.
+   */
+  dutyKind?: "flight" | "standby"
+  /** How a standby is served — see para 6(3) and 6(7). */
+  standbyKind?: "home" | "airport"
+  /**
+   * When a standby was activated (para 6(6)), UTC HH:MM. Set only where a
+   * following duty reported inside the standby's window.
+   */
+  activatedAt?: string
 
   // Rest period (CAAS Reg 3)
   restBefore?: RestPeriodInfo       // Rest since last duty

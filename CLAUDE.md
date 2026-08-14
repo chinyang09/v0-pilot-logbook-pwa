@@ -2159,6 +2159,90 @@ LOCAL_BASE shifts from SGT to it, and **LOCAL_STATION is already there** and mus
 not be shifted at all (it was, which is an eight-hour error on a UTC+0
 departure).
 
+#### TWO report times, and paragraph 10
+
+`reportTime` is when the duty BEGAN. `fdpStartLocal` is what Table A is ENTERED
+on. They are different questions and para 10 is explicit about it:
+
+> (a) where the delay is less than 4 hours, the maximum permitted flight duty
+> period is based on the **original** reporting time but the flight duty period
+> **starts at the actual** reporting time;
+> (b) where the delay is 4 hours or more, the maximum … is based on the
+> **actual** reporting time but the flight duty period **starts 4 hours after**
+> the original reporting time
+
+**The report defaults to the ROSTERED time** — `scheduledOut − PRE_FLIGHT_CHECK_MIN`
+— not to `actualOut − 1h`, which is what it used to be. Deriving it from the
+actual gate-out is right only when the company moved the report by exactly the
+pushback delay; in the ordinary case of a late aircraft under a crew who
+reported on time it slid the duty's start forward with the delay and made the
+duty look SHORTER than it was. On the owner's TR566/567 duty that hid 23
+minutes (10:57 against 11:20 on duty); a three-hour technical delay hides three
+hours, and the panel then offers FDP remaining that does not exist.
+
+`FlightLog.reportTime` records an actual report when the company moved it —
+told to stay at the place of rest because the inbound is late. Precedence:
+
+1. an explicit `flight.reportTime` on any sector of the duty,
+2. `scheduledOut − 1h`,
+3. `actualOut − 1h` (a hand-entered flight with no schedule).
+
+Under 10(b) the FDP window opens BEFORE the crew member reports, so part of it
+is already spent when they walk in. `DutyPeriod.fdpElapsedAtReport` carries
+that, and `ActiveDuty` therefore has TWO clocks: `elapsedMinutes` (the crew duty
+period, from report) and `fdpElapsedMinutes` (the FDP). They are equal on every
+ordinary duty and only para 10(b) separates them.
+
+#### Standby (paragraph 6)
+
+**Standby is a DUTY period but not a FLIGHT duty period.** Paragraph 14's tables
+never applied to it, so it carries `maxFdpMinutes: 0` and must never reach an
+FDP gauge or an FDP exceedance check — read against a maximum of 0, a 12-hour
+standby is a 12-hour exceedance of a limit that does not exist. Its own cap is
+para 6(2)(a): **18 hours** for a flight crew member.
+
+| | Field | Rule |
+|---|---|---|
+| what it really was | `dutyMinutes` | drives para 3 rest and the 18h cap |
+| what reaches the limits | `countedDutyMinutes` | para 6(7) — **20%** of home standby |
+
+`calculateRollingStats` sums `countedDutyMinutes ?? dutyMinutes`, so every
+ordinary duty counts in full and only standby is discounted. Airport standby
+counts **zero** separately, because para 6(3) folds it into the rest period or
+the following FDP instead.
+
+**Para 6(6) — activation.** A standby that is called out ceases at the moment of
+activation, so `truncateActivatedStandby` cuts it back to the following duty's
+report before the 20% is taken. Left whole, those hours are counted twice: once
+at 20% as standby and again in full as the duty they turned into.
+
+`standbyKind()` is a code→`home`/`airport` lookup that currently returns `home`
+for everything, which is what this operator rosters. It is a lookup rather than
+a constant so the day airport standby appears it is a table entry, not a
+rewrite.
+
+Rest before a standby needs no special code: once the standby is a
+`DutyPeriod` in the merged timeline, `calculateAllRestPeriods` checks it like
+any other. That was the whole reason for tracking it.
+
+#### The roster holds NON-FLIGHT duties only
+
+`userDb.scheduleEntries` was never removed — the table, the store, the roster
+page and its MongoDB sync were all intact. What was missing was a writer (all
+imports go to the logbook) and, before that, a parser stage: `schedule-parser`
+offered every non-flight row to `tryExtractSimDuty` and dropped whatever was
+not a simulator, so **standby had never been extracted at all**.
+
+It now holds standby / ground / leave / off — and nothing else. **Flights stay
+logbook-only.** The old roster was a parallel record of flights that had to be
+reconciled against the logbook, and that reconciliation is what made it heavy;
+a standby has no logbook counterpart, so there is nothing to reconcile.
+`classifyGroundDuty` maps the company's codes, `ParsedGroundDuty` carries the
+window in UTC (converting can move the DATE — 06:00 SGT is 22:00 the previous
+day), and the executor writes them through the existing sync-aware
+`bulkUpsertScheduleEntries`, keyed on date + dutyCode so a re-import updates
+rather than duplicates.
+
 #### Paragraph 4 — duties around the window of circadian low
 
 Three First Schedule terms, all defined in **acclimated time**:
@@ -2259,17 +2343,15 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
 
 #### Known gaps — these need the OWNER's input, not a guess
 
-- **Standby is not counted as duty at all.** `getDutyPeriodsFromSchedule`
-  filters to `dutyType === "flight"`, so standby, training and ground duties
-  contribute nothing to the 90h/180h cumulative limits, which para 12 counts as
-  duty hours. Para 6(7) says only **20%** of standby at home or in local
-  accommodation counts, and para 6(3) says AIRPORT standby is part of the rest
-  period with adequate facilities or part of the FDP without. Implementing this
-  needs a mapping from the company's own standby codes (BKUP, SBYG, …) to
-  home / airport, which only the owner has. Until then the app UNDER-counts
-  duty hours.
-- **Para 6(2)(a): standby must not exceed 18 hours for flight crew.** Not
-  checked, same reason.
+- **Airport standby is written but inert.** Every code maps to `home`, which is
+  what this operator rosters. Para 6(3) — airport standby is part of the rest
+  period with adequate facilities and part of the following FDP without — is
+  implemented as far as "counts zero separately"; the FDP-absorption half needs
+  a real case to model against.
+- **Training and ground duties still contribute nothing to the cumulative
+  limits.** Only standby is discounted by rule; a ground duty is written to the
+  roster and counted at zero, where para 12 would count it in full. It needs
+  the owner's read on which of their ground codes are genuinely duty.
 - **Para 5: days off.** Not more than 7 consecutive days between days off; at
   least 2 days off every 2 weeks; 8 every 4 weeks (6 permissible with
   make-good); 82 hours at base after 7+ days away. None of this is computed.
@@ -2281,8 +2363,13 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
 - **Para 9: simulator then flying in the same duty.** Sim time counts in full
   toward the subsequent FDP but is not a sector. The dashboard's
   `buildPlannedDuties` skips simulators entirely.
-- **Para 10: delayed reporting.** A delay under 4h keeps the maximum based on
-  the ORIGINAL report time; 4h or more re-bases it on the actual. Not modelled.
+- **Para 3(1)(c)/(d) after a long standby.** Those sub-rules are written against
+  a "**duty period**", not a flight duty period, so read literally a 12-hour
+  home standby demands 12 hours of rest after it and an 18-hour one demands 24.
+  That sits oddly beside 6(7) counting only 20% of the same standby toward the
+  cumulative limits. The literal (conservative) reading is what is implemented;
+  if it proves punitive on a real roster the alternative is to drive
+  3(1)(c)/(d) from the COUNTED portion. Owner's call, against real data.
 - **Para 13 / 3(2): commander's discretion.** +3h FDP and −2h rest are not
   representable, so a duty legitimately extended reads as an exceedance.
 - **Acclimatisation is only as good as the roster's COVERAGE.**
@@ -2488,6 +2575,10 @@ app's look:
 | `scheduleEntries` | Roster schedule | id, date, dutyType |
 | `currencies` | Certificate tracking | id, code, expiryDate, syncStatus |
 | `discrepancies` | Comparisons + import notes (`holding`, `acceptedAt`) | id, type, resolved |
+
+`scheduleEntries` holds **non-flight duties only** — standby, ground, leave,
+off. Flights live in `flights` and nowhere else. It is server-synced like every
+other user collection.
 
 ### Reference Database (Dexie — `referenceDb`)
 
@@ -3178,6 +3269,13 @@ When making changes, be aware of these high-impact files:
 - Do not apply the para 14(2) long-sector adjustment to an augmented crew or to Table C — it applies where the crew "only consists of 2 pilots", and an augmented crew's ceiling comes from para 15 instead
 - Do not grant the augmented-crew extension without `inFlightRestFacilities === true` — para 15(3)(b) forbids any extension without rest facilities, and UNKNOWN must withhold it rather than assume in favour of a longer duty
 - Do not swap `DEFAULT_FTL_LIMITS` for the cabin-crew figures. Para 12(1) gives FLIGHT crew 90h/14d and 180h/28d; 12(2) gives cabin crew 100h and 200h. This is a flight-crew logbook
+- Do not derive a duty's report time from the ACTUAL gate-out. It defaults to the ROSTERED report (`scheduledOut − PRE_FLIGHT_CHECK_MIN`), because a late aircraft under a crew who reported on time is the ordinary case and does not move the report — deriving from the actual OUT slid the duty's start forward with the delay and made the duty look SHORTER than it was (23 minutes hidden on the owner's TR566 duty; three hours on a three-hour delay, with the panel then offering FDP that does not exist). `FlightLog.reportTime` is how a genuinely moved report is recorded
+- Do not treat para 10(b) as a variation on 10(a). Under 10(b) the FDP window opens **4 hours after the ORIGINAL report**, which is EARLIER than the actual one — so part of the FDP is already spent when the crew member walks in. `DutyPeriod.fdpElapsedAtReport` carries that, and `ActiveDuty` keeps two clocks (`elapsedMinutes` for the crew duty period, `fdpElapsedMinutes` for the FDP) because only that branch separates them
+- Do not give a standby an FDP maximum, and do not let one reach an FDP exceedance check — it is a DUTY period but not a FLIGHT duty period, so paragraph 14's tables never applied to it. `maxFdpMinutes: 0` read as a limit makes every standby a full-length exceedance. Its cap is para 6(2)(a)'s 18 hours. `applyAcclimatisation` skips it (a lookup on 0 sectors would hand it the one-sector figure) and `mergeAdjacentDutyPeriods` will not merge it with a flight duty
+- Do not count a standby's full length toward the 90h/180h limits — para 6(7) counts **20%** of home standby, and para 6(3) folds AIRPORT standby into the rest period or the following FDP so it contributes nothing separately. `countedDutyMinutes` carries the discount and `calculateRollingStats` reads `countedDutyMinutes ?? dutyMinutes`, so every ordinary duty is untouched
+- Do not leave an activated standby at its rostered length (para 6(6)) — `truncateActivatedStandby` cuts it back to the following duty's report before the 20% is taken, or the called-out hours are counted twice: once as standby and again in full as the duty they became
+- Do not put flights back into `scheduleEntries`. The roster holds NON-FLIGHT duties only — standby, ground, leave, off — precisely because they have no logbook counterpart and so nothing to reconcile. A parallel record of flights needing reconciliation against the logbook is what made the old roster heavy. And do not add standby as a `FlightLog.entryType` instead: it puts non-flight rows in the legal flight record and breaks the fixed-height card the virtualised list depends on
+- Do not drop a non-flight schedule row on the floor. `schedule-parser` used to offer every one to `tryExtractSimDuty` and skip whatever was not a simulator, which is why standby had NEVER been extracted; `tryExtractGroundDuty` runs after it. Normalise the window to UTC and remember the conversion can move the DATE — 06:00 SGT is 22:00 the previous day, and the app keys a duty on its UTC date
 - Do not compute an FDP maximum anywhere but `deriveMaxFDP` — it is the ONE derivation, and every stage (both producers, the overnight merge, the acclimatisation pass, the hypothetical-duty builders) goes through it. Four sites recomputing it from whatever inputs each had is what put 10:15 on a duty the schedule allows 12:15 for
 - Do not enter Table A on `reportTime`. That is when the duty STARTED; the table is entered on `fdpStartLocal`, which is the **original** (scheduled) reporting time in the DEPARTURE station's clock. Para 10(a) is explicit — a delay under 4 hours keeps the maximum on the original report while the FDP starts at the actual one — and a 23-minute pushback on a 2150 report crosses into the 2200–0559 band and takes an hour and a half off the maximum, which then reads as an exceedance the pilot never committed
 - Do not shift a LOCAL_STATION report time by the departure offset — it is ALREADY the local time where the crew member reports, so shifting double-counts (eight hours, two bands of Table A, on a UTC+0 departure). UTC shifts by the departure offset; LOCAL_BASE shifts from SGT to it
