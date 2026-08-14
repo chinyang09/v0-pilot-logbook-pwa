@@ -120,6 +120,18 @@ export interface ActiveDuty {
    *  `exceeded` rather than as a negative remaining. */
   remainingMinutes: number
   exceeded: boolean
+  /**
+   * The single-duty (crew duty period) cap, from the account's FTL preset —
+   * `FTLLimits.maxSingleDutyHours`, the same figure `isDutyExceedingLimits`
+   * checks against. 0 when none is configured.
+   *
+   * FDP and CDP are different clocks and a pilot can be limited by either: FDP
+   * runs report → last on-blocks, duty runs report → debrief. The panel shows
+   * both and gauges whichever is binding.
+   */
+  maxDutyMinutes: number
+  dutyRemainingMinutes: number
+  dutyExceeded: boolean
   /** Which CAAS table produced the maximum ("A" acclimatised, "B" not, "C"
    *  single-pilot) — so the number can be checked, not just trusted. */
   fdpTable?: string
@@ -174,10 +186,15 @@ function toActive(
   nowMs: number,
   completedLegs: number,
   inProgress: boolean,
+  maxDutyMinutes: number,
 ): ActiveDuty {
   const elapsed = Math.max(0, Math.floor((nowMs - w.startMs) / 60_000))
   const max = dp.maxFdpMinutes > 0 ? dp.maxFdpMinutes : 0
+  const dutyMax = maxDutyMinutes > 0 ? maxDutyMinutes : 0
   return {
+    maxDutyMinutes: dutyMax,
+    dutyRemainingMinutes: dutyMax > 0 ? Math.max(0, dutyMax - elapsed) : 0,
+    dutyExceeded: dutyMax > 0 && elapsed > dutyMax,
     legs: deriveSectorLegs(dp.route, completedLegs, inProgress),
     id: dp.id,
     date: dp.date,
@@ -215,11 +232,14 @@ export function deriveDutyStatus(
   /** Flight id → on-blocks instant, for marking sector progress. */
   flightArrivals?: Map<string, number>,
   /**
-   * The roster's own duty periods, before the merge with the logbook.
+   * Every source of a PLAN for the day — roster duty periods and duty periods
+   * projected from still-scheduled flight rows.
    *
    * This is what makes a part-flown duty read correctly. See `planFor`.
    */
   scheduleDuties: DutyPeriod[] = [],
+  /** `FTLLimits.maxSingleDutyHours`, in minutes. 0 when none is configured. */
+  maxDutyMinutes = 0,
 ): DutyStatus {
   const nowMs = now.getTime()
 
@@ -298,7 +318,7 @@ export function deriveDutyStatus(
       // Ties go to the LATER-starting duty: a merged overnight and the sector
       // inside it can both contain `now`, and the pilot is in the inner one.
       if (!active || w.startMs > active.startMs) {
-        active = toActive(effective, w, nowMs, completedLegsOf(dp), true)
+        active = toActive(effective, w, nowMs, completedLegsOf(dp), true, maxDutyMinutes)
       }
       continue
     }
@@ -311,6 +331,7 @@ export function deriveDutyStatus(
         nowMs,
         effective.sectorCount || completedLegsOf(dp),
         false,
+        maxDutyMinutes,
       )
     }
 
@@ -341,7 +362,7 @@ export function deriveDutyStatus(
         continue
       }
       if (!active || sw.startMs > active.startMs) {
-        active = toActive(sched, sw, nowMs, 0, true)
+        active = toActive(sched, sw, nowMs, 0, true, maxDutyMinutes)
       }
     }
   }

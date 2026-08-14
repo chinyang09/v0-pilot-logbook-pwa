@@ -312,21 +312,38 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
   const duty = active ?? justFinished
 
   const onDuty = phase === "on_duty" && active !== null
-  const elapsed = onDuty ? Math.max(0, Math.floor((now - active.startMs) / 60_000)) : null
-  const hasMax = (duty?.maxFdpMinutes ?? 0) > 0
-  const remaining = onDuty && hasMax ? Math.max(0, active.maxFdpMinutes - (elapsed ?? 0)) : 0
-  const fraction = onDuty && hasMax ? (elapsed ?? 0) / active.maxFdpMinutes : 0
+  const elapsed = onDuty ? Math.max(0, Math.floor((now - active.startMs) / 60_000)) : 0
+
+  // TWO clocks, and a pilot can be limited by either. FDP runs report → last
+  // on-blocks against the Reg 14 maximum computed for THIS duty; the crew duty
+  // period runs report → debrief against the account's single-duty cap. Showing
+  // only one is how a panel tells a pilot they have three hours left when they
+  // actually have one.
+  const hasFdp = onDuty && active.maxFdpMinutes > 0
+  const hasCdp = onDuty && active.maxDutyMinutes > 0
+  const fdpLeft = hasFdp ? Math.max(0, active.maxFdpMinutes - elapsed) : 0
+  const cdpLeft = hasCdp ? Math.max(0, active.maxDutyMinutes - elapsed) : 0
+
+  // The gauge shows whichever BINDS — the smaller remaining of the two.
+  const binding: "FDP" | "DUTY" | null =
+    hasFdp && hasCdp ? (fdpLeft <= cdpLeft ? "FDP" : "DUTY") : hasFdp ? "FDP" : hasCdp ? "DUTY" : null
+  const bindingMax = binding === "DUTY" ? active!.maxDutyMinutes : active?.maxFdpMinutes ?? 0
+  const bindingLeft = binding === "DUTY" ? cdpLeft : fdpLeft
+  const bindingExceeded = binding === "DUTY" ? active?.dutyExceeded : active?.exceeded
+  const fraction = bindingMax > 0 ? elapsed / bindingMax : 0
 
   return (
     <section className="px-4 py-2.5" aria-label="Duty">
       <div className="flex items-center gap-4">
-        {onDuty && hasMax ? (
+        {onDuty && binding ? (
           <DutyGauge
             fraction={fraction}
-            tone={active.exceeded ? "fail" : fraction >= 0.8 ? "caution" : "ok"}
-            value={formatDutyClock(remaining)}
-            caption="left"
+            tone={bindingExceeded ? "fail" : fraction >= 0.8 ? "caution" : "ok"}
+            value={formatDutyClock(bindingLeft)}
+            caption={`${binding} left`}
           />
+        ) : onDuty ? (
+          <DutyGauge fraction={0} tone="idle" value="—" caption="no limit" />
         ) : (
           <RestGauge status={status} now={now} rest={rest} />
         )}
@@ -334,19 +351,31 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
         <dl className="min-w-0 flex-1 space-y-1">
           {onDuty ? (
             <>
-              <Line label="Elapsed" value={formatDutyClock(elapsed ?? 0)} live />
+              {/* Both limits, always. The gauge only carries the binding one. */}
               <Line
-                label="Max FDP"
-                value={hasMax ? formatDutyClock(active.maxFdpMinutes) : "—"}
+                label="FDP left"
+                value={hasFdp ? formatDutyClock(fdpLeft) : "—"}
+                note={hasFdp ? `of ${formatDutyClock(active.maxFdpMinutes)}` : "not computed"}
+                live
+                emphasis={binding === "FDP"}
+              />
+              <Line
+                label="Duty left"
+                value={hasCdp ? formatDutyClock(cdpLeft) : "—"}
+                note={hasCdp ? `of ${formatDutyClock(active.maxDutyMinutes)}` : "no cap set"}
+                live
+                emphasis={binding === "DUTY"}
+              />
+              <Line label="Elapsed" value={formatDutyClock(elapsed)} live />
+              <Line
+                label="Flight"
+                value={formatDutyClock(active.flightMinutes)}
                 note={
-                  hasMax
-                    ? [active.fdpTable && `Table ${active.fdpTable}`, active.augmented && "Aug"]
-                        .filter(Boolean)
-                        .join(" · ")
-                    : "not computed"
+                  [active.fdpTable && `Table ${active.fdpTable}`, active.augmented && "Aug"]
+                    .filter(Boolean)
+                    .join(" · ") || undefined
                 }
               />
-              <Line label="Flight" value={formatDutyClock(active.flightMinutes)} />
             </>
           ) : (
             <>
@@ -490,15 +519,25 @@ function Line({
   value,
   note,
   live,
+  emphasis,
 }: {
   label: string
   value: string
   note?: string
   live?: boolean
+  /** The binding limit — the one the gauge is showing. */
+  emphasis?: boolean
 }) {
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <dt className="shrink-0 text-[11px] text-muted-foreground">{label}</dt>
+      <dt
+        className={cn(
+          "shrink-0 text-[11px]",
+          emphasis ? "font-medium text-foreground/80" : "text-muted-foreground",
+        )}
+      >
+        {label}
+      </dt>
       <dd className="flex min-w-0 items-baseline gap-1.5">
         {note && <span className="truncate text-[10px] text-muted-foreground/70">{note}</span>}
         <span

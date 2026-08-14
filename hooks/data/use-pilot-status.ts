@@ -10,6 +10,7 @@ import { buildLegalityModel } from "@/lib/utils/dashboard/legality"
 import { deriveDutyStatus } from "@/lib/utils/dashboard/duty-status"
 import { buildPilotStatus, type PilotStatus } from "@/lib/utils/dashboard/pilot-status"
 import type { NinetyDayCurrency } from "@/lib/utils/dashboard-aggregate"
+import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 
 /**
  * The legal dashboard's single derived model.
@@ -34,6 +35,7 @@ export function usePilotStatus(
     forecast,
     allDutyPeriods,
     scheduleDutyPeriods,
+    plannedDutyPeriods,
     isLoading: fdpLoading,
   } = useFDPData()
   const { currencies, isLoading: currenciesLoading } = useCurrencies()
@@ -56,6 +58,17 @@ export function usePilotStatus(
     }
     return map
   }, [flights])
+
+  /**
+   * Every source of a plan for the day, in one list: the roster's duty periods
+   * and the duty periods projected from still-scheduled flight rows. A pilot
+   * may have either, both, or (mid-trip, with the roster not imported) only the
+   * second.
+   */
+  const planDuties = useMemo(
+    () => [...scheduleDutyPeriods, ...plannedDutyPeriods],
+    [scheduleDutyPeriods, plannedDutyPeriods],
+  )
 
   const forecastBreaches = useMemo(
     () => forecast.exceedances.map((e) => e.limitName),
@@ -89,7 +102,14 @@ export function usePilotStatus(
         currencies,
         now: at,
       }),
-      duty: deriveDutyStatus(allDutyPeriods, at, rest, flightArrivals, scheduleDutyPeriods),
+      duty: deriveDutyStatus(
+        allDutyPeriods,
+        at,
+        rest,
+        flightArrivals,
+        planDuties,
+        DEFAULT_FTL_LIMITS.maxSingleDutyHours * 60,
+      ),
       now: at,
     })
   }, [
@@ -100,7 +120,7 @@ export function usePilotStatus(
     forecastBreaches,
     currencies,
     allDutyPeriods,
-    scheduleDutyPeriods,
+    planDuties,
     flightArrivals,
   ])
 

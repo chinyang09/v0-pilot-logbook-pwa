@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect } from "react"
 import { useFlights } from "./use-flights"
+import { buildPlannedDuties } from "@/lib/utils/dashboard/planned-duties"
 import { useScheduleEntries } from "./use-schedule"
 import { useDBReady } from "./use-db"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
@@ -46,6 +47,13 @@ const EMPTY_RESULT = {
    * needs the PLAN alongside the record to tell the difference.
    */
   scheduleDutyPeriods: [] as DutyPeriod[],
+  /**
+   * The day's shape taken from the FLIGHTS, with each sector falling back to
+   * its scheduled times. The pipeline's own duty periods are built from flown
+   * flights only, so on a part-flown day nothing else knows the duty continues.
+   * Used for duty shape and FDP only — never for cumulative limits.
+   */
+  plannedDutyPeriods: [] as DutyPeriod[],
   pastDuties: [] as DutyPeriod[],
   futureDuties: [] as DutyPeriod[],
   cumulativeLimits: {
@@ -145,6 +153,7 @@ function computeFDPResult(
     const value: FDPResult = {
       allDutyPeriods: withRest,
       scheduleDutyPeriods: scheduleDPs,
+      plannedDutyPeriods: buildPlannedDuties(flights),
       pastDuties,
       futureDuties,
       cumulativeLimits,

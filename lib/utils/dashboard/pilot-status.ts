@@ -164,6 +164,21 @@ function deriveNextAction({
     }
   }
 
+  // Nothing outstanding, but a duty IS in progress — so the useful line is
+  // where the pilot is in it. "Nothing required" is true and useless while
+  // sitting at the gate between sectors; the sector position is the thing they
+  // would otherwise have to count off the chain themselves.
+  if (duty.phase === "on_duty" && duty.active) {
+    const flown = duty.active.legs.filter((l) => l.status === "complete").length
+    const total = duty.active.legs.length || duty.active.sectorCount
+    return {
+      tone: "current",
+      headline: total > 0 ? `Sector ${Math.min(flown + 1, total)} of ${total}` : "On duty",
+      detail: duty.active.route || undefined,
+      href: "/roster",
+    }
+  }
+
   // Nothing outstanding. The useful answer is then how long that lasts, and the
   // binding requirement already IS "what runs out first".
   if (duty.next) {

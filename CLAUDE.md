@@ -631,10 +631,26 @@ flown, so a two-sector day with sector one in the book produced a duty that
 while the pilot was in the cruise on sector two. A four-sector day did it three
 times.
 
-So `deriveDutyStatus` takes the roster's own duty periods
-(`FDPResult.scheduleDutyPeriods`, exposed for this) ALONGSIDE the merged ones,
-and where a schedule duty overlaps a logbook duty and runs LATER, the duty is
-still in progress. The effective duty then takes:
+So `deriveDutyStatus` takes the PLAN alongside the merged duty periods, and
+where a plan duty overlaps a logbook duty and runs LATER, the duty is still in
+progress. There are TWO sources of a plan and a pilot may have either or both:
+
+| Source | Where it comes from |
+|---|---|
+| `FDPResult.scheduleDutyPeriods` | a roster import (`scheduleEntries`) |
+| `FDPResult.plannedDutyPeriods` | **the flight rows themselves** (`buildPlannedDuties`) |
+
+The second one is the load-bearing case and it was missed first time round.
+`computeFDPResult` filters to `isFlownFlight` before building duty periods — so
+unflown placeholders cannot inflate the cumulative totals, which is right — but
+that also means a sector sitting in the logbook as `scheduledOut`/`scheduledIn`
+with no OOOI contributes NOTHING. On a two-sector day with sector one flown and
+no roster imported, there was no plan anywhere: the panel read "Roster Clear"
+and counted down rest between sectors. `buildPlannedDuties` rebuilds the day
+from the flight rows with each sector falling back to its scheduled times, and
+it is used for duty shape and FDP only, never for cumulative limits.
+
+The effective duty then takes:
 
 | From the PLAN | From the RECORD |
 |---|---|
@@ -648,8 +664,26 @@ wrong limit. The sector chain comes from the plan for the same reason: it is
 what makes a four-sector day show four legs with one complete, instead of one
 leg and a finished duty.
 
-A roster duty with NO logbook counterpart at all is also picked up, which is
+A plan duty with NO logbook counterpart at all is also picked up, which is
 every duty's first hour — the pilot has reported and nothing has landed yet.
+
+#### TWO clocks: FDP and the crew duty period
+
+A pilot can be limited by either and they are different windows — FDP runs
+report → last on-blocks, duty runs report → debrief — so the band prints both
+and the gauge carries whichever BINDS (the smaller remaining). Showing only one
+is how a panel tells a pilot they have three hours left when they have one.
+
+| | Limit | Source |
+|---|---|---|
+| FDP | `DutyPeriod.maxFdpMinutes` | CAAS Reg 14, per duty, via `calculateMaxFDP` |
+| Duty (CDP) | `FTLLimits.maxSingleDutyHours` | the account's FTL preset, the same figure `isDutyExceedingLimits` uses |
+
+Neither is hardcoded, and a missing one reads as a dash rather than a default.
+
+While on duty with nothing flagged, the annunciator headline is the SECTOR
+POSITION ("Sector 2 of 2"). "Nothing required" is true and useless at the gate
+between sectors.
 
 #### Annunciator, governing constraint, next action
 
@@ -2934,6 +2968,8 @@ When making changes, be aware of these high-impact files:
 - Do not replace the sector chain with a list of recent flights — that list showed history, not THIS duty, and could not answer "where am I in a four-sector day". The chain comes from `deriveSectorLegs` off the duty's own route
 - Do not let the summary page's flight list grow the page — it scrolls in its own bounded box, so a year-long period cannot push the breakdown below it out of reach
 - Do not read an in-progress duty from the logbook alone. `mergeDutyPeriods` prefers the logbook for today, and mid-duty the logbook holds only the sectors already flown — so a two-sector day with one sector logged reads as a duty that ended at lunchtime and the panel falls through to a rest countdown. Pass `scheduleDutyPeriods` into `deriveDutyStatus`; where the roster runs later, the duty is still on
+- Do not treat the FDP pipeline's duty periods as the whole plan. `computeFDPResult` filters to `isFlownFlight`, so a sector sitting in the logbook as `scheduledOut`/`scheduledIn` contributes nothing — on a part-flown day with no roster imported there is no plan anywhere, and the panel reads "Roster Clear" and counts down rest between sectors. `buildPlannedDuties` rebuilds the day from the flight rows with scheduled fallbacks; it is for duty shape and FDP only, never cumulative limits
+- Do not show only ONE of FDP and duty remaining — they are different windows (report → last on-blocks vs report → debrief) and either can bind. Print both and gauge the smaller remaining, or the panel tells a pilot they have three hours left when they have one
 - Do not take the FDP maximum, sector count or route from the logbook half of a part-flown duty — Reg 14 sets the maximum by the sectors PLANNED, so a one-sector logbook duty carries a one-sector limit that nobody should fly to. Plan supplies the shape and the limit; the record supplies what has been flown
 - Do not put a number inside a meter's fill without checking it fits — below `LABEL_FITS_INSIDE` it goes outside the fill instead. A figure clipped by its own bar is worse than no figure
 - Do not print "12 / 12 currencies current" — a pilot does not need telling about the eleven that are fine. The panel names the TIGHTEST constraint, and falls back to the fullest rolling limit only when nothing is flagged

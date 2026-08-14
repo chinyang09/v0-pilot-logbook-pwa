@@ -162,6 +162,22 @@ describe("buildPilotStatus — next action", () => {
     expect(s.state).toBe("warning")
   })
 
+  it("says where the pilot is in the duty rather than 'nothing required'", () => {
+    // Mid-duty, everything clear. "Nothing required" is true and useless while
+    // sitting at the gate between sectors.
+    const s = status({}, [
+      duty({
+        reportTime: "06:00",
+        debriefTime: "18:00",
+        sectorCount: 2,
+        route: "WSSS-VTCC-WSSS",
+      }),
+    ])
+    expect(s.duty.phase).toBe("on_duty")
+    expect(s.nextAction.headline).toBe("Sector 1 of 2")
+    expect(s.nextAction.detail).toBe("WSSS-VTCC-WSSS")
+  })
+
   it("points at the next report when nothing is outstanding", () => {
     const s = status({}, [duty({ id: "next", date: "2026-08-15", reportTime: "07:30" })])
     expect(s.nextAction.headline).toBe("Report 07:30")
