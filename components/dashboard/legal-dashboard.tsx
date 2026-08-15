@@ -393,24 +393,22 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
                 live
               />
               {next ? (
-                <>
-                  <Line
-                    label="Next report"
-                    value={clockAt(next.reportMs)}
-                    note={`${dayAt(next.reportMs)} · ${next.sectorCount} sectors`}
-                  />
-                  <Line
-                    label={next.route || "Route"}
-                    value={
-                      next.legalAtReport === false
-                        ? `Short ${formatDutyClock(next.restShortfallMinutes)}`
-                        : next.legalAtReport === true
-                          ? "Rest OK"
-                          : "—"
-                    }
-                    emphasis={next.legalAtReport === false}
-                  />
-                </>
+                // ONE line for the next duty. Its route and its sector count
+                // are both drawn by the chain below — a line repeating them
+                // was the same thing said twice. What the chain cannot say is
+                // the date, and whether the rest reaches the report; that is
+                // what the note carries, and it names the shortfall only when
+                // there is one. A rest that clears it needs no words.
+                <Line
+                  label="Next report"
+                  value={clockAt(next.reportMs)}
+                  note={
+                    next.legalAtReport === false
+                      ? `${dayAt(next.reportMs)} · short ${formatDutyClock(next.restShortfallMinutes)}`
+                      : dayAt(next.reportMs)
+                  }
+                  emphasis={next.legalAtReport === false}
+                />
               ) : (
                 <Line label="Next duty" value="None scheduled" />
               )}
