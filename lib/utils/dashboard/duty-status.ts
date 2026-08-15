@@ -413,21 +413,45 @@ export function deriveDutyStatus(
     }
   }
 
-  // A roster duty the logbook has not touched at all — the pilot has reported
-  // but nothing is logged yet, which is every duty's first hour.
-  if (!active) {
-    for (const sched of scheduleDuties) {
-      const sw = dutyWindow(sched)
-      if (!sw) continue
-      if (nowMs < sw.startMs || nowMs > sw.endMs) continue
-      if (dutyPeriods.some((dp) => {
-        const w = dutyWindow(dp)
-        return w && w.startMs <= sw.endMs && w.endMs >= sw.startMs
-      })) {
-        continue
-      }
+  /** Does the pipeline already describe this window? */
+  const coveredByRecord = (sw: DutyWindow): boolean =>
+    dutyPeriods.some((dp) => {
+      const w = dutyWindow(dp)
+      return w && w.startMs <= sw.endMs && w.endMs >= sw.startMs
+    })
+
+  // A plan duty the logbook has not touched at all. There are two of these and
+  // both matter:
+  //
+  //   • the duty in progress whose first sector has not landed yet — every
+  //     duty's first hour;
+  //   • the duty still AHEAD. `computeFDPResult` filters to `isFlownFlight`,
+  //     so a day whose sectors are all still scheduled produces no duty period
+  //     at all — and with no roster imported there is nothing else. The next
+  //     duty was searched for only among the pipeline's duties, so a pilot
+  //     with a report half an hour away read "OFF DUTY · Roster Clear · Next
+  //     report —".
+  for (const sched of scheduleDuties) {
+    const sw = dutyWindow(sched)
+    if (!sw) continue
+    if (coveredByRecord(sw)) continue
+
+    if (nowMs >= sw.startMs && nowMs <= sw.endMs) {
       if (!active || sw.startMs > active.startMs) {
         active = toActive(sched, sw, nowMs, 0, true, maxDutyMinutes)
+      }
+      continue
+    }
+
+    if (sw.startMs > nowMs && sw.startMs < nextReportMs) {
+      nextReportMs = sw.startMs
+      next = {
+        id: sched.id,
+        date: sched.date,
+        route: sched.route || "",
+        sectorCount: sched.sectorCount || 0,
+        reportMs: sw.startMs,
+        inMinutes: Math.round((sw.startMs - nowMs) / 60_000),
       }
     }
   }

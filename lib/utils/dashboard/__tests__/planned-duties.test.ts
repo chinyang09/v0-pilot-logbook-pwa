@@ -153,3 +153,109 @@ describe("the reported case, through deriveDutyStatus", () => {
     expect(s.active?.dutyExceeded).toBe(false)
   })
 })
+
+/**
+ * The reported case, second round: a duty that is ENTIRELY still to come.
+ *
+ * Both sectors are scheduled rows with no OOOI. The pipeline drops them
+ * (`isFlownFlight`), and with no roster imported there is nothing else — so the
+ * only source of the duty is `buildPlannedDuties`. The dashboard consulted the
+ * plan for the ACTIVE case and never for the NEXT one, so a pilot with a
+ * report half an hour away was shown "OFF DUTY · Roster Clear · Next report —".
+ */
+describe("a duty that has not started yet", () => {
+  // TR644 WSSS→VTSP 04:10–06:15, then TR645 VTSP→WSSS 07:15–09:25, all
+  // scheduled. Report is an hour before the first gate-out: 03:10Z.
+  const scheduledDay = [
+    flight({
+      id: "tr644",
+      date: "2026-08-15",
+      flightNumber: "TR644",
+      departureIcao: "WSSS",
+      arrivalIcao: "VTSP",
+      outTime: "",
+      inTime: "",
+      scheduledOut: "04:10",
+      scheduledIn: "06:15",
+      blockTime: "",
+    }),
+    flight({
+      id: "tr645",
+      date: "2026-08-15",
+      flightNumber: "TR645",
+      departureIcao: "VTSP",
+      arrivalIcao: "WSSS",
+      outTime: "",
+      inTime: "",
+      scheduledOut: "07:15",
+      scheduledIn: "09:25",
+      blockTime: "",
+    }),
+  ]
+
+  const plan = buildPlannedDuties(scheduledDay)
+  /** 02:40Z — half an hour before report. */
+  const NOW = new Date("2026-08-15T02:40:00Z")
+
+  it("builds a plan for the day", () => {
+    expect(plan).toHaveLength(1)
+    expect(plan[0].reportTime).toBe("03:10")
+    expect(plan[0].sectorCount).toBe(2)
+  })
+
+  it("reports the next duty even though nothing is flown or rostered", () => {
+    // The pipeline has NOTHING — every sector is unflown, so `isFlownFlight`
+    // filtered them all out.
+    const s = deriveDutyStatus([], NOW, null, undefined, plan)
+    expect(s.next).not.toBeNull()
+    expect(s.next!.inMinutes).toBe(30)
+    expect(s.next!.sectorCount).toBe(2)
+    expect(s.next!.route).toBe("WSSS-VTSP-WSSS")
+  })
+
+  it("is still OFF duty until the report", () => {
+    const s = deriveDutyStatus([], NOW, null, undefined, plan)
+    expect(s.phase).toBe("off")
+  })
+
+  it("becomes the active duty once the report passes", () => {
+    const s = deriveDutyStatus(
+      [],
+      new Date("2026-08-15T04:00:00Z"),
+      null,
+      undefined,
+      plan,
+    )
+    expect(s.phase).toBe("on_duty")
+  })
+
+  it("does not double-count a plan that the pipeline already covers", () => {
+    // Once the day is flown, the pipeline duty and the plan describe the same
+    // duty. The next-duty search must not offer the plan's copy as a second
+    // one.
+    const tomorrow = deriveDutyStatus(
+      [
+        {
+          id: "logged",
+          date: "2026-08-15",
+          reportTime: "03:10",
+          debriefTime: "09:55",
+          dutyMinutes: 405,
+          flightMinutes: 255,
+          sectorCount: 2,
+          maxFdpMinutes: 735,
+          fdpExtensionUsed: false,
+          source: "logbook",
+          isFuture: false,
+          scheduleEntryIds: [],
+          flightIds: ["tr644", "tr645"],
+        },
+      ],
+      NOW,
+      null,
+      undefined,
+      plan,
+    )
+    expect(tomorrow.next!.id).toBe("logged")
+  })
+})
