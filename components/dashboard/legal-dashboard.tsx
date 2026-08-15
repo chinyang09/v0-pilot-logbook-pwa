@@ -180,54 +180,11 @@ export function LegalDashboardView({
       />
 
       <div className="relative flex min-h-0 flex-col divide-y divide-border/40">
-        <HeaderStrip status={status} now={now} />
         <Annunciator status={status} now={now} />
         <DutyBand status={status} now={now} />
         <CurrencyBand requirements={currency} />
         <LimitsBand requirements={limits} />
       </div>
-    </div>
-  )
-}
-
-/* ── Header ──────────────────────────────────────────────────────────────── */
-
-function HeaderStrip({ status, now }: { status: PilotStatus; now: number }) {
-  // The device's own zone: a pilot reads their watch, and the app has no better
-  // claim to know which base they are acclimatised to.
-  const zone = React.useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
-  const at = new Date(now)
-  const date = tzFormatter(zone, { day: "2-digit", month: "short" }, "daymon")
-    .format(at)
-    .toUpperCase()
-  const time = tzFormatter(zone, { hour: "2-digit", minute: "2-digit", hour12: false }, "hm").format(at)
-  const offset = tzOffsetName(zone, "shortOffset", at)
-
-  const phase =
-    status.duty.phase === "on_duty"
-      ? "ON DUTY"
-      : status.duty.phase === "post_duty"
-        ? "OFF BLOCKS"
-        : "OFF DUTY"
-
-  return (
-    <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-3">
-      <span
-        className="text-[11px] font-medium tabular-nums tracking-wide text-muted-foreground"
-        suppressHydrationWarning
-      >
-        {date}
-        <span className="mx-1.5 text-muted-foreground/40">·</span>
-        <span className="text-foreground" suppressHydrationWarning>
-          {time}
-        </span>
-        <span className="ml-1 text-muted-foreground/60" suppressHydrationWarning>
-          {offset}
-        </span>
-      </span>
-      <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
-        {phase}
-      </span>
     </div>
   )
 }
@@ -308,8 +265,7 @@ function formatCountdown(ms: number): string {
  * are gone from here — that was the duplication.
  */
 function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
-  const { phase, active, lastDuty, next, rest } = status.duty
-  const duty = active ?? lastDuty
+  const { phase, active, lastDuty, next, rest, standby } = status.duty
 
   const zone = React.useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
   const clockAt = (ms: number) =>
@@ -322,7 +278,13 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
       .toUpperCase()
 
   const onDuty = phase === "on_duty" && active !== null
+  // A standby IS a duty. It is not a FLIGHT duty period — paragraph 14's
+  // tables never applied to it, so there is no FDP to gauge — but reading it
+  // as "off duty" is worse than reading it as a flight duty: the pilot is
+  // committed, contactable and could be called at any moment.
+  const onStandby = !onDuty && standby !== null
   const elapsed = onDuty ? Math.max(0, Math.floor((now - active.startMs) / 60_000)) : 0
+  const standbyLeft = standby ? Math.max(0, Math.round((standby.endMs - now) / 60_000)) : 0
 
   // ONE clock: the FDP. The panel used to carry a second, the crew duty period,
   // gauged against the account preset's `maxSingleDutyHours` — and that figure
@@ -348,6 +310,19 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
           />
         ) : onDuty ? (
           <DutyGauge fraction={0} tone="idle" value="—" caption="no limit" />
+        ) : onStandby ? (
+          // Its own window, not an FDP. A standby gauged against a maximum of
+          // zero would read as a flight duty whose limit failed to compute.
+          <DutyGauge
+            fraction={
+              standby!.endMs > standby!.startMs
+                ? (now - standby!.startMs) / (standby!.endMs - standby!.startMs)
+                : 0
+            }
+            tone="caution"
+            value={formatDutyClock(standbyLeft)}
+            caption="standby left"
+          />
         ) : (
           <RestGauge status={status} now={now} rest={rest} />
         )}
@@ -375,10 +350,21 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
             </>
           ) : (
             <>
+              {/* On standby: the window in hand, and — because an un-called
+                  standby is rest — the rest clock still running beneath it, so
+                  "if they ring now, am I legal" is answerable. */}
+              {onStandby && (
+                <Line
+                  label={standby!.code}
+                  value={`${clockAt(standby!.startMs)}–${clockAt(standby!.endMs)}`}
+                  note={standby!.activated ? "activated" : undefined}
+                  emphasis
+                />
+              )}
               {/* Off duty the picture is three things: what was flown, the
                   earliest a duty could legally be planned, and what is next —
                   with the one question that joins them answered. */}
-              {lastDuty && (
+              {!onStandby && lastDuty && (
                 <Line
                   label="Last duty"
                   value={formatDutyClock(
@@ -436,7 +422,15 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
       {/* The sector chain. A duty is up to four legs across several airports, and
           "where am I in the pattern" is what the old recent-flights list could
           never answer — it showed history, not this duty. */}
-      <SectorChain legs={duty?.legs ?? []} nextRoute={!duty ? next?.route : undefined} />
+      {/* On duty the chain is THIS duty's progress. Otherwise it is the NEXT
+          duty's shape — that is what the reader is looking ahead to, and a
+          route squeezed into a label is four small words where a chain is a
+          picture. The last duty stays a line above: it is context, not the
+          question being asked. */}
+      <SectorChain
+        legs={onDuty ? active.legs : []}
+        nextRoute={onDuty ? undefined : next?.route}
+      />
     </section>
   )
 }

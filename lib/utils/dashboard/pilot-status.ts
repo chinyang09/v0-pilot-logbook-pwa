@@ -212,6 +212,18 @@ function deriveNextAction({
     }
   }
 
+  // On standby with nothing flagged. "Nothing required" is wrong in the way
+  // that matters: the crew member is committed and contactable, and the useful
+  // line is how long that lasts.
+  if (duty.standby) {
+    return {
+      tone: "current",
+      headline: `On standby to ${clock(duty.standby.endMs, timeZone)}`,
+      detail: duty.standby.activated ? "Activated" : "Not called",
+      href: "/roster",
+    }
+  }
+
   // Nothing outstanding. The useful answer is then how long that lasts, and the
   // binding requirement already IS "what runs out first".
   if (duty.next) {

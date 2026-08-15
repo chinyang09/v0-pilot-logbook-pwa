@@ -76,6 +76,47 @@ export function containsLocalNight(
   return false
 }
 
+/**
+ * The earliest instant at which a rest period beginning at `startMs` will
+ * CONTAIN a local night.
+ *
+ * `containsLocalNight` answers the question for a rest period already fixed at
+ * both ends. This answers it forwards, which is what "when am I legal" needs:
+ * whether the rest includes a local night is a property of the period as
+ * actually PROVIDED, and it grows as the crew member waits.
+ *
+ * That distinction is the whole reason this exists. Testing for a local night
+ * once, over a hypothetical 10-hour rest, and falling to 12 hours when it fails
+ * misses every case in between — rest that starts in the evening reaches its
+ * eighth hour inside the 2200–0800 window somewhere around the eleventh hour of
+ * rest, and para 3(1)(a) then asks for only 10. Reporting 12 hours there keeps
+ * a legally rested pilot on the ground.
+ *
+ * @returns the instant, or null if no window in the next few days can hold a
+ *   full eight hours from this start (which cannot happen in practice).
+ */
+export function earliestLocalNightCompletion(
+  startMs: number,
+  tzOffsetMinutes: number,
+): number | null {
+  const localStart = startMs + tzOffsetMinutes * MIN_MS
+  const firstDay = Math.floor(localStart / DAY_MS) - 1
+
+  let best = Infinity
+  for (let day = firstDay; day <= firstDay + 3; day++) {
+    const windowStart = day * DAY_MS + LOCAL_NIGHT_WINDOW_START_MIN * MIN_MS
+    const windowEnd = day * DAY_MS + LOCAL_NIGHT_WINDOW_END_MIN * MIN_MS
+    // The night can only start once the rest has.
+    const from = Math.max(localStart, windowStart)
+    const completesAt = from + LOCAL_NIGHT_DURATION_MIN * MIN_MS
+    // A window entered too late cannot hold eight hours before 0800.
+    if (completesAt > windowEnd) continue
+    if (completesAt < best) best = completesAt
+  }
+
+  return best === Infinity ? null : best - tzOffsetMinutes * MIN_MS
+}
+
 /* ── Rest period ─────────────────────────────────────────────────────────── */
 
 /**

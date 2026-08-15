@@ -267,3 +267,51 @@ describe("buildPilotStatus — a duty rostered inside the rest period", () => {
     expect(s.nextAction.headline).toBe("Rest until 21:00")
   })
 })
+
+/**
+ * Standby is a DUTY. It is not a flight duty period — paragraph 14's tables
+ * never applied to it — but reading it as "off duty" is the worse error: the
+ * crew member is committed, contactable, and could be called at any moment.
+ */
+describe("buildPilotStatus — on standby", () => {
+  const standbyDay: DutyPeriod[] = [
+    duty({
+      id: "sb",
+      date: "2026-08-14",
+      reportTime: "06:00",
+      debriefTime: "18:00",
+      dutyMinutes: 12 * 60,
+      flightMinutes: 0,
+      sectorCount: 0,
+      maxFdpMinutes: 0,
+      dutyKind: "standby",
+      standbyKind: "home",
+      countedDutyMinutes: 144,
+    }),
+  ]
+
+  it("does not say 'nothing required' to somebody on standby", () => {
+    const s = buildPilotStatus({
+      legality: buildLegalityModel({ ...CLEAR }),
+      duty: deriveDutyStatus(standbyDay, NOW),
+      timeZone: "UTC",
+      now: NOW,
+    })
+    expect(s.duty.standby).not.toBeNull()
+    expect(s.nextAction.headline).toBe("On standby to 18:00")
+    expect(s.nextAction.detail).toBe("Not called")
+  })
+
+  it("does not read the standby as a flight duty whose limit failed", () => {
+    const s = buildPilotStatus({
+      legality: buildLegalityModel({ ...CLEAR }),
+      duty: deriveDutyStatus(standbyDay, NOW),
+      timeZone: "UTC",
+      now: NOW,
+    })
+    // Left in the flight-duty search it would be the ACTIVE duty carrying a
+    // maximum of zero — a dash where a pilot expects a number.
+    expect(s.duty.active).toBeNull()
+    expect(s.duty.phase).not.toBe("on_duty")
+  })
+})

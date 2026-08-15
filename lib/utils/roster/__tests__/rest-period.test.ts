@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { calculateRestPeriod } from "../fdp-calculator"
+import { calculateRestPeriod, calculateRestUntilLegal } from "../fdp-calculator"
 import type { DutyPeriod } from "@/types/entities/roster.types"
 
 /**
@@ -226,5 +226,97 @@ describe("the local night is the DEFINED one, not a fixed 2200–0600 band", () 
       }),
     )
     expect(home.includesLocalNight).toBe(false)
+  })
+})
+
+/**
+ * `calculateRestUntilLegal` — the EARLIEST a duty may be planned.
+ *
+ * Paragraph 3(1)(a) and (b) are conditions on the rest period AS PROVIDED, and
+ * whether it includes a local night grows as the crew member waits. So the
+ * answer is a search for the earliest end, not a single lookup:
+ *
+ *   • wait for a local night → 10 hours suffices, but not before the night
+ *     itself completes;
+ *   • do not → 12 hours.
+ *
+ * Whichever comes first. Testing once over a hypothetical 10-hour rest and
+ * falling to 12 hours when that failed missed everything in between.
+ */
+describe("the earliest a duty may be planned", () => {
+  const flown = (over: Partial<DutyPeriod>) =>
+    duty({ arrivalTimezoneOffset: 8, ...over })
+
+  /** Local clock at UTC+8, for readable expectations. */
+  const sgt = (iso: string) =>
+    new Date(Date.parse(iso) + 8 * 3_600_000).toISOString().slice(11, 16)
+
+  it("waits for the local night rather than jumping to 12 hours", () => {
+    // The reported case. Debrief 09:26Z = 17:26 SGT, so rest commences 18:26
+    // SGT. Ten hours of rest ends 04:26, which has only 6h26m inside the
+    // 2200–0800 window — no local night, and the old code therefore reported
+    // 12 hours and 06:26.
+    //
+    // But by 06:00 the rest contains a full 22:00–06:00 night, and 11h34m is
+    // comfortably more than the 10 hours para 3(1)(a) then asks for. 06:00 is
+    // the honest answer and it is 26 minutes earlier.
+    const r = calculateRestUntilLegal(
+      [flown({ date: "2026-08-15", reportTime: "03:10", debriefTime: "09:26", dutyMinutes: 6 * 60 + 16 })],
+      new Date("2026-08-15T10:14:00Z"),
+    )
+    expect(r).not.toBeNull()
+    expect(r!.rule).toBe("3a")
+    expect(sgt(r!.legalAtUtc)).toBe("06:00")
+    expect(r!.requiredRestMinutes).toBe(11 * 60 + 34)
+  })
+
+  it("gives the plain 10 hours when the night is already covered by them", () => {
+    // Debrief 13:00Z = 21:00 SGT, rest from 22:00 SGT. Ten hours ends 08:00 —
+    // exactly the full window, so there is nothing to wait for.
+    const r = calculateRestUntilLegal(
+      [flown({ date: "2026-08-15", reportTime: "05:00", debriefTime: "13:00", dutyMinutes: 8 * 60 })],
+      new Date("2026-08-15T14:00:00Z"),
+    )
+    expect(r!.rule).toBe("3a")
+    expect(r!.requiredRestMinutes).toBe(10 * 60)
+    expect(sgt(r!.legalAtUtc)).toBe("08:00")
+  })
+
+  it("falls to 12 hours when waiting for a night would take longer", () => {
+    // Debrief 22:30Z = 06:30 SGT: rest commences 07:30, and the next window
+    // does not open until 22:00. Waiting for the night would mean resting
+    // until 06:00 the following morning — 22h30m — where 3(1)(b)'s 12 hours
+    // ends at 19:30 the same day. The shorter of the two governs.
+    const r = calculateRestUntilLegal(
+      [flown({ date: "2026-08-15", reportTime: "14:30", debriefTime: "22:30", dutyMinutes: 8 * 60 })],
+      new Date("2026-08-15T23:00:00Z"),
+    )
+    expect(r!.rule).toBe("3b")
+    expect(r!.requiredRestMinutes).toBe(12 * 60)
+    expect(sgt(r!.legalAtUtc)).toBe("19:30")
+  })
+
+  it("still honours a longer floor from 3(1)(c)", () => {
+    // A 13-hour duty asks for 13 hours under 3(1)(c) whichever way the night
+    // falls, so the night branch cannot undercut it.
+    const r = calculateRestUntilLegal(
+      // Reports 20:26 on the 14th and debriefs 09:26 on the 15th.
+      [flown({ date: "2026-08-14", reportTime: "20:26", debriefTime: "09:26", dutyMinutes: 13 * 60 })],
+      new Date("2026-08-15T10:14:00Z"),
+    )
+    expect(r!.requiredRestMinutes).toBeGreaterThanOrEqual(13 * 60)
+    expect(r!.rule).toBe("3c")
+  })
+
+  it("measures the night where the crew member actually is", () => {
+    // The same absolute rest, taken at a UTC+0 station. 18:26 SGT is 10:26
+    // there — the middle of the morning — so the night is a long way off and
+    // the 12-hour rule governs instead.
+    const r = calculateRestUntilLegal(
+      [flown({ date: "2026-08-15", reportTime: "03:10", debriefTime: "09:26", dutyMinutes: 6 * 60 + 16, arrivalTimezoneOffset: 0 })],
+      new Date("2026-08-15T10:14:00Z"),
+    )
+    expect(r!.rule).toBe("3b")
+    expect(r!.requiredRestMinutes).toBe(12 * 60)
   })
 })
