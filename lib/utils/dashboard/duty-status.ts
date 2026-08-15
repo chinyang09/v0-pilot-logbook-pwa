@@ -129,18 +129,6 @@ export interface ActiveDuty {
    *  `exceeded` rather than as a negative remaining. */
   remainingMinutes: number
   exceeded: boolean
-  /**
-   * The single-duty (crew duty period) cap, from the account's FTL preset —
-   * `FTLLimits.maxSingleDutyHours`, the same figure `isDutyExceedingLimits`
-   * checks against. 0 when none is configured.
-   *
-   * FDP and CDP are different clocks and a pilot can be limited by either: FDP
-   * runs report → last on-blocks, duty runs report → debrief. The panel shows
-   * both and gauges whichever is binding.
-   */
-  maxDutyMinutes: number
-  dutyRemainingMinutes: number
-  dutyExceeded: boolean
   /** Which CAAS table produced the maximum ("A" acclimatised, "B" not, "C"
    *  single-pilot) — so the number can be checked, not just trusted. */
   fdpTable?: string
@@ -175,6 +163,20 @@ export interface NextDuty {
   reportMs: number
   /** Minutes from `now` until report. Negative if report has passed. */
   inMinutes: number
+  /**
+   * Whether the outstanding rest requirement is satisfied BY this duty's
+   * report time.
+   *
+   * The question a pilot asks on the way home is not "when is my next duty" —
+   * it is "will I be legal for it". A roster can be wrong, and the pilot is
+   * the one who has to notice: if the answer is no, the company needs telling,
+   * and there is nothing else on the screen that would say so.
+   *
+   * `null` when there is no rest requirement to check it against.
+   */
+  legalAtReport: boolean | null
+  /** Minutes of rest still owed at that report time. 0 when legal. */
+  restShortfallMinutes: number
 }
 
 /**
@@ -203,8 +205,17 @@ export interface DutyStatus {
   phase: DutyPhase
   /** Set while `phase === "on_duty"`. */
   active: ActiveDuty | null
-  /** The duty just finished, while `phase === "post_duty"`. */
+  /** The duty just finished, while `phase === "post_duty"`. Drives the phase. */
   justFinished: ActiveDuty | null
+  /**
+   * The most recent COMPLETED duty, however long ago.
+   *
+   * `justFinished` is nulled once the post-duty window closes, because it is
+   * what decides the phase. This one is not: off duty, "what did I last fly"
+   * is half of the picture, the other halves being what is next and whether
+   * the rest between them is enough.
+   */
+  lastDuty: ActiveDuty | null
   /** The next duty on the roster, whatever the phase. */
   next: NextDuty | null
   /** `null` when there is no completed duty to rest from. */
@@ -220,17 +231,12 @@ function toActive(
   nowMs: number,
   completedLegs: number,
   inProgress: boolean,
-  maxDutyMinutes: number,
 ): ActiveDuty {
   const elapsed = Math.max(0, Math.floor((nowMs - w.startMs) / 60_000))
   // Para 10(b) can have the FDP window open before the crew member reports.
   const fdpElapsed = elapsed + (dp.fdpElapsedAtReport ?? 0)
   const max = dp.maxFdpMinutes > 0 ? dp.maxFdpMinutes : 0
-  const dutyMax = maxDutyMinutes > 0 ? maxDutyMinutes : 0
   return {
-    maxDutyMinutes: dutyMax,
-    dutyRemainingMinutes: dutyMax > 0 ? Math.max(0, dutyMax - elapsed) : 0,
-    dutyExceeded: dutyMax > 0 && elapsed > dutyMax,
     legs: deriveSectorLegs(dp.route, completedLegs, inProgress),
     id: dp.id,
     date: dp.date,
@@ -275,8 +281,6 @@ export function deriveDutyStatus(
    * This is what makes a part-flown duty read correctly. See `planFor`.
    */
   scheduleDuties: DutyPeriod[] = [],
-  /** `FTLLimits.maxSingleDutyHours`, in minutes. 0 when none is configured. */
-  maxDutyMinutes = 0,
 ): DutyStatus {
   const nowMs = now.getTime()
 
@@ -383,7 +387,7 @@ export function deriveDutyStatus(
       // Ties go to the LATER-starting duty: a merged overnight and the sector
       // inside it can both contain `now`, and the pilot is in the inner one.
       if (!active || w.startMs > active.startMs) {
-        active = toActive(effective, w, nowMs, completedLegsOf(dp), true, maxDutyMinutes)
+        active = toActive(effective, w, nowMs, completedLegsOf(dp), true)
       }
       continue
     }
@@ -396,20 +400,12 @@ export function deriveDutyStatus(
         nowMs,
         effective.sectorCount || completedLegsOf(dp),
         false,
-        maxDutyMinutes,
       )
     }
 
     if (w.startMs > nowMs && w.startMs < nextReportMs) {
       nextReportMs = w.startMs
-      next = {
-        id: effective.id,
-        date: effective.date,
-        route: effective.route || "",
-        sectorCount: effective.sectorCount || 0,
-        reportMs: w.startMs,
-        inMinutes: Math.round((w.startMs - nowMs) / 60_000),
-      }
+      next = toNextDuty(effective, w.startMs, nowMs, rest)
     }
   }
 
@@ -438,25 +434,28 @@ export function deriveDutyStatus(
 
     if (nowMs >= sw.startMs && nowMs <= sw.endMs) {
       if (!active || sw.startMs > active.startMs) {
-        active = toActive(sched, sw, nowMs, 0, true, maxDutyMinutes)
+        active = toActive(sched, sw, nowMs, 0, true)
       }
       continue
     }
 
     if (sw.startMs > nowMs && sw.startMs < nextReportMs) {
       nextReportMs = sw.startMs
-      next = {
-        id: sched.id,
-        date: sched.date,
-        route: sched.route || "",
-        sectorCount: sched.sectorCount || 0,
-        reportMs: sw.startMs,
-        inMinutes: Math.round((sw.startMs - nowMs) / 60_000),
-      }
+      next = toNextDuty(sched, sw.startMs, nowMs, rest)
     }
   }
 
-  if (active) return { phase: "on_duty", active, justFinished: null, next, rest, standby }
+  if (active) {
+    return {
+      phase: "on_duty",
+      active,
+      justFinished: null,
+      lastDuty: justFinished,
+      next,
+      rest,
+      standby,
+    }
+  }
 
   const recentlyFinished =
     justFinished !== null && nowMs - justFinished.endMs <= POST_DUTY_WINDOW_MS
@@ -465,9 +464,42 @@ export function deriveDutyStatus(
     phase: recentlyFinished ? "post_duty" : "off",
     active: null,
     justFinished: recentlyFinished ? justFinished : null,
+    // Not gated on the post-duty window: off duty, "what did I last fly" is a
+    // third of the picture, alongside what is next and whether the rest
+    // between them is enough.
+    lastDuty: justFinished,
     next,
     rest,
     standby,
+  }
+}
+
+/**
+ * The next duty, with the one question that matters about it answered.
+ *
+ * A roster can be wrong, and a rest period that falls short of the regulation
+ * is the pilot's to notice — nothing else on the screen would say so, and the
+ * company needs telling while there is still time to move the duty.
+ */
+function toNextDuty(
+  dp: DutyPeriod,
+  reportMs: number,
+  nowMs: number,
+  rest: RestState | null,
+): NextDuty {
+  const legalAtMs = rest ? Date.parse(rest.legalAtUtc) : NaN
+  const known = Number.isFinite(legalAtMs)
+  const shortfall = known ? Math.max(0, Math.round((legalAtMs - reportMs) / 60_000)) : 0
+
+  return {
+    id: dp.id,
+    date: dp.date,
+    route: dp.route || "",
+    sectorCount: dp.sectorCount || 0,
+    reportMs,
+    inMinutes: Math.round((reportMs - nowMs) / 60_000),
+    legalAtReport: known ? shortfall === 0 : null,
+    restShortfallMinutes: shortfall,
   }
 }
 

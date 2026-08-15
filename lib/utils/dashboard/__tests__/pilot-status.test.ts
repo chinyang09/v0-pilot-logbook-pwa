@@ -211,3 +211,59 @@ describe("buildPilotStatus — next action", () => {
     expect(s.nextAction.tone).toBe("warning")
   })
 })
+
+/**
+ * A next duty the rest requirement does not reach.
+ *
+ * This is the one thing on the panel whose remedy is EXTERNAL — the duty is
+ * rostered inside the rest period and only the company can move it — so it
+ * outranks the rest countdown itself, which the pilot can do nothing about
+ * except wait.
+ */
+describe("buildPilotStatus — a duty rostered inside the rest period", () => {
+  const flownAndNext = (nextReport: string): DutyPeriod[] => [
+    duty({ id: "flown", date: "2026-08-14", reportTime: "00:00", debriefTime: "10:00" }),
+    duty({ id: "next", date: "2026-08-14", reportTime: nextReport, debriefTime: "23:00" }),
+  ]
+
+  /** Rest complete at 21:00Z; NOW is 12:00Z on the 14th. */
+  const rest = {
+    isLegalNow: false,
+    elapsedMinutes: 60,
+    requiredMinutes: 11 * 60,
+    legalAtUtc: "2026-08-14T21:00:00Z",
+  }
+
+  it("raises ACTION REQUIRED even when every standing requirement is met", () => {
+    const s = buildPilotStatus({
+      legality: buildLegalityModel({ ...CLEAR }),
+      duty: deriveDutyStatus(flownAndNext("18:00"), NOW, rest),
+      timeZone: "UTC",
+      now: NOW,
+    })
+    expect(s.state).toBe("action_required")
+  })
+
+  it("names the shortfall and the remedy", () => {
+    const s = buildPilotStatus({
+      legality: buildLegalityModel({ ...CLEAR }),
+      duty: deriveDutyStatus(flownAndNext("18:00"), NOW, rest),
+      timeZone: "UTC",
+      now: NOW,
+    })
+    // Reports 18:00, legal at 21:00 — three hours short.
+    expect(s.nextAction.headline).toBe("Rest short by 3:00")
+    expect(s.nextAction.detail).toContain("notify company")
+  })
+
+  it("falls back to the plain rest countdown when the next duty clears it", () => {
+    const s = buildPilotStatus({
+      legality: buildLegalityModel({ ...CLEAR }),
+      duty: deriveDutyStatus(flownAndNext("22:00"), NOW, rest),
+      timeZone: "UTC",
+      now: NOW,
+    })
+    expect(s.state).toBe("warning")
+    expect(s.nextAction.headline).toBe("Rest until 21:00")
+  })
+})

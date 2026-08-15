@@ -10,7 +10,6 @@ import { buildLegalityModel } from "@/lib/utils/dashboard/legality"
 import { deriveDutyStatus } from "@/lib/utils/dashboard/duty-status"
 import { buildPilotStatus, type PilotStatus } from "@/lib/utils/dashboard/pilot-status"
 import type { NinetyDayCurrency } from "@/lib/utils/dashboard-aggregate"
-import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 
 /**
  * The legal dashboard's single derived model.
@@ -108,7 +107,6 @@ export function usePilotStatus(
         rest,
         flightArrivals,
         planDuties,
-        DEFAULT_FTL_LIMITS.maxSingleDutyHours * 60,
       ),
       now: at,
     })

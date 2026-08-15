@@ -107,7 +107,6 @@ describe("the reported case, through deriveDutyStatus", () => {
       null,
       arrivals,
       buildPlannedDuties([flown, scheduled]),
-      13 * 60,
     )
 
     expect(s.phase).toBe("on_duty")
@@ -121,7 +120,7 @@ describe("the reported case, through deriveDutyStatus", () => {
     expect(s.phase).not.toBe("on_duty")
   })
 
-  it("advises on BOTH the FDP and the crew duty period remaining", () => {
+  it("advises on the FDP remaining", () => {
     const at = new Date("2026-08-14T08:46:00Z")
     const s = deriveDutyStatus(
       pipelineDuties,
@@ -129,28 +128,18 @@ describe("the reported case, through deriveDutyStatus", () => {
       null,
       undefined,
       buildPlannedDuties([flown, scheduled]),
-      13 * 60,
     )
 
     // Report 02:35, now 08:46 → 6h11m elapsed.
     expect(s.active?.elapsedMinutes).toBe(371)
-    expect(s.active?.maxDutyMinutes).toBe(780)
-    expect(s.active?.dutyRemainingMinutes).toBe(409) // 13:00 − 6:11
     expect(s.active?.maxFdpMinutes).toBeGreaterThan(0)
     expect(s.active?.remainingMinutes).toBeGreaterThan(0)
-  })
-
-  it("reports no duty cap rather than inventing one when none is configured", () => {
-    const at = new Date("2026-08-14T08:46:00Z")
-    const s = deriveDutyStatus(
-      pipelineDuties,
-      at,
-      null,
-      undefined,
-      buildPlannedDuties([flown, scheduled]),
-    )
-    expect(s.active?.maxDutyMinutes).toBe(0)
-    expect(s.active?.dutyExceeded).toBe(false)
+    // The FDP is the ONLY per-duty ceiling. There used to be a second clock
+    // here gauged against a 13-hour "crew duty period" from the account
+    // preset — a figure the regulation does not contain. CAAS caps duty over
+    // 14 and 28 days and flight time over 28 days and 12 months; per duty
+    // there is Reg 14 and nothing else.
+    expect(s.active).not.toHaveProperty("maxDutyMinutes")
   })
 })
 
@@ -257,5 +246,106 @@ describe("a duty that has not started yet", () => {
       plan,
     )
     expect(tomorrow.next!.id).toBe("logged")
+  })
+})
+
+/**
+ * Just landed: the three things a pilot wants, and the one question that joins
+ * them.
+ *
+ * "When is my next duty" is not the question — a roster already answers that.
+ * The question is whether the rest between the duty just flown and the one
+ * rostered next is enough, because a roster can be wrong and the pilot is the
+ * only party who will notice in time to say so.
+ */
+describe("off duty, looking ahead", () => {
+  /** Flown 14 Aug, report 02:35, debrief 07:00. */
+  const flownDuty = buildPlannedDuties([
+    flight({
+      id: "done",
+      date: "2026-08-14",
+      departureIcao: "WSSS",
+      arrivalIcao: "VTCC",
+      outTime: "03:35",
+      inTime: "06:30",
+      scheduledOut: "03:35",
+      scheduledIn: "06:30",
+    }),
+  ])
+
+  /** Next duty reports at `reportUtc` on the 15th. */
+  const nextDay = (scheduledOut: string) =>
+    buildPlannedDuties([
+      flight({
+        id: "nxt",
+        date: "2026-08-15",
+        departureIcao: "WSSS",
+        arrivalIcao: "VTSP",
+        outTime: "",
+        inTime: "",
+        scheduledOut,
+        scheduledIn: "12:00",
+        blockTime: "",
+      }),
+    ])
+
+  /** 08:00Z on the 14th — an hour after debrief. */
+  const NOW = new Date("2026-08-14T08:00:00Z")
+
+  /** Rest complete at 18:00Z on the 14th. */
+  const rest = {
+    isLegalNow: false,
+    elapsedMinutes: 60,
+    requiredMinutes: 11 * 60,
+    legalAtUtc: "2026-08-14T18:00:00Z",
+  }
+
+  it("keeps the last duty in view after the post-duty window closes", () => {
+    // `justFinished` is nulled after three hours because it decides the phase.
+    // What was last flown is still half the picture.
+    const late = deriveDutyStatus(flownDuty, new Date("2026-08-14T20:00:00Z"), rest)
+    expect(late.phase).toBe("off")
+    expect(late.justFinished).toBeNull()
+    expect(late.lastDuty).not.toBeNull()
+    expect(late.lastDuty!.route).toBe("WSSS-VTCC")
+  })
+
+  it("passes a next duty that reports after the rest is complete", () => {
+    // Report 03:10 on the 15th, well clear of 18:00 on the 14th.
+    const s = deriveDutyStatus(flownDuty, NOW, rest, undefined, nextDay("04:10"))
+    expect(s.next!.legalAtReport).toBe(true)
+    expect(s.next!.restShortfallMinutes).toBe(0)
+  })
+
+  it("flags one that reports INSIDE the rest period, with the shortfall", () => {
+    // Scheduled out 16:00 on the 14th → report 15:00, three hours before the
+    // rest requirement is met. Nothing else on the panel would say so.
+    const s = deriveDutyStatus(
+      flownDuty,
+      NOW,
+      rest,
+      undefined,
+      buildPlannedDuties([
+        flight({
+          id: "tooSoon",
+          date: "2026-08-14",
+          departureIcao: "WSSS",
+          arrivalIcao: "VTSP",
+          outTime: "",
+          inTime: "",
+          scheduledOut: "16:00",
+          scheduledIn: "18:00",
+          blockTime: "",
+        }),
+      ]),
+    )
+    expect(s.next!.legalAtReport).toBe(false)
+    expect(s.next!.restShortfallMinutes).toBe(3 * 60)
+  })
+
+  it("says nothing either way when there is no rest requirement to check", () => {
+    const s = deriveDutyStatus(flownDuty, NOW, null, undefined, nextDay("04:10"))
+    expect(s.next!.legalAtReport).toBeNull()
+    expect(s.next!.restShortfallMinutes).toBe(0)
   })
 })

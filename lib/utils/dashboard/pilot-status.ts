@@ -66,6 +66,12 @@ export const ANNUNCIATOR_WORD: Record<AnnunciatorState, string> = {
   action_required: "ACTION REQUIRED",
 }
 
+/** "1:20" — a duration, for a shortfall the reader has to act on. */
+function hoursMinutes(minutes: number): string {
+  const safe = Math.max(0, Math.round(minutes))
+  return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`
+}
+
 function clock(ms: number, tz?: string): string {
   const d = new Date(ms)
   try {
@@ -103,8 +109,18 @@ export function buildPilotStatus({
   const governing = legality.binding
   const restOutstanding = duty.rest !== null && !duty.rest.isLegalNow
 
+  // A next duty the rest requirement does not reach. This is the pilot's to
+  // catch — a roster can be wrong, and nothing else on the screen would say so
+  // — and it is an ACTION because the fix is to tell the company, now, while
+  // there is still time to move the duty.
+  const nextDutyIllegal = duty.next?.legalAtReport === false
+
   return {
-    state: restOutstanding && state === "current" ? "warning" : state,
+    state: nextDutyIllegal
+      ? "action_required"
+      : restOutstanding && state === "current"
+        ? "warning"
+        : state,
     governing,
     nextAction: deriveNextAction({ legality, duty, state, fdpExceeded, timeZone, now }),
     duty,
@@ -144,12 +160,29 @@ function deriveNextAction({
     }
   }
 
+  // Ahead of rest itself, because it is the one thing here with an external
+  // remedy and a deadline: the duty is rostered inside the rest period, and
+  // the company is the only party who can move it.
+  if (duty.next?.legalAtReport === false && duty.rest) {
+    return {
+      tone: "action_required",
+      headline: `Rest short by ${hoursMinutes(duty.next.restShortfallMinutes)}`,
+      detail: `${duty.next.route || "Next duty"} reports before ${clock(
+        Date.parse(duty.rest.legalAtUtc),
+        timeZone,
+      )} — notify company`,
+      href: "/fdp",
+    }
+  }
+
   if (duty.rest && !duty.rest.isLegalNow) {
     const at = Date.parse(duty.rest.legalAtUtc)
     return {
       tone: "action_required",
       headline: `Rest until ${clock(at, timeZone)}`,
-      detail: "Not yet legal for next duty",
+      detail: duty.next
+        ? "Legal for the next duty"
+        : "Earliest a duty may be planned",
       href: "/fdp",
     }
   }

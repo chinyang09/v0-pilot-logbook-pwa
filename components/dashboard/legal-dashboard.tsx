@@ -308,39 +308,43 @@ function formatCountdown(ms: number): string {
  * are gone from here — that was the duplication.
  */
 function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
-  const { phase, active, justFinished, next, rest } = status.duty
-  const duty = active ?? justFinished
+  const { phase, active, lastDuty, next, rest } = status.duty
+  const duty = active ?? lastDuty
+
+  const zone = React.useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
+  const clockAt = (ms: number) =>
+    tzFormatter(zone, { hour: "2-digit", minute: "2-digit", hour12: false }, "hm").format(
+      new Date(ms),
+    )
+  const dayAt = (ms: number) =>
+    tzFormatter(zone, { day: "2-digit", month: "short" }, "daymon")
+      .format(new Date(ms))
+      .toUpperCase()
 
   const onDuty = phase === "on_duty" && active !== null
   const elapsed = onDuty ? Math.max(0, Math.floor((now - active.startMs) / 60_000)) : 0
 
-  // TWO clocks, and a pilot can be limited by either. FDP runs report → last
-  // on-blocks against the Reg 14 maximum computed for THIS duty; the crew duty
-  // period runs report → debrief against the account's single-duty cap. Showing
-  // only one is how a panel tells a pilot they have three hours left when they
-  // actually have one.
+  // ONE clock: the FDP. The panel used to carry a second, the crew duty period,
+  // gauged against the account preset's `maxSingleDutyHours` — and that figure
+  // is not in the regulation. CAAS caps duty over 14 and 28 days (Reg 12) and
+  // flight time over 28 days and 12 months (Reg 107); the only per-duty ceiling
+  // is Reg 14's FDP maximum, which is computed for THIS duty. A 13-hour "duty
+  // limit" was exactly the kind of invented number this panel refuses to print
+  // for the FDP itself.
   const hasFdp = onDuty && active.maxFdpMinutes > 0
-  const hasCdp = onDuty && active.maxDutyMinutes > 0
-  const fdpLeft = hasFdp ? Math.max(0, active.maxFdpMinutes - elapsed) : 0
-  const cdpLeft = hasCdp ? Math.max(0, active.maxDutyMinutes - elapsed) : 0
-
-  // The gauge shows whichever BINDS — the smaller remaining of the two.
-  const binding: "FDP" | "DUTY" | null =
-    hasFdp && hasCdp ? (fdpLeft <= cdpLeft ? "FDP" : "DUTY") : hasFdp ? "FDP" : hasCdp ? "DUTY" : null
-  const bindingMax = binding === "DUTY" ? active!.maxDutyMinutes : active?.maxFdpMinutes ?? 0
-  const bindingLeft = binding === "DUTY" ? cdpLeft : fdpLeft
-  const bindingExceeded = binding === "DUTY" ? active?.dutyExceeded : active?.exceeded
-  const fraction = bindingMax > 0 ? elapsed / bindingMax : 0
+  const fdpElapsed = onDuty ? active.fdpElapsedMinutes : 0
+  const fdpLeft = hasFdp ? Math.max(0, active.maxFdpMinutes - fdpElapsed) : 0
+  const fraction = hasFdp ? fdpElapsed / active.maxFdpMinutes : 0
 
   return (
     <section className="px-4 py-2.5" aria-label="Duty">
       <div className="flex items-center gap-4">
-        {onDuty && binding ? (
+        {onDuty && hasFdp ? (
           <DutyGauge
             fraction={fraction}
-            tone={bindingExceeded ? "fail" : fraction >= 0.8 ? "caution" : "ok"}
-            value={formatDutyClock(bindingLeft)}
-            caption={`${binding} left`}
+            tone={active.exceeded ? "fail" : fraction >= 0.8 ? "caution" : "ok"}
+            value={formatDutyClock(fdpLeft)}
+            caption="FDP left"
           />
         ) : onDuty ? (
           <DutyGauge fraction={0} tone="idle" value="—" caption="no limit" />
@@ -351,20 +355,12 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
         <dl className="min-w-0 flex-1 space-y-1">
           {onDuty ? (
             <>
-              {/* Both limits, always. The gauge only carries the binding one. */}
               <Line
                 label="FDP left"
                 value={hasFdp ? formatDutyClock(fdpLeft) : "—"}
                 note={hasFdp ? `of ${formatDutyClock(active.maxFdpMinutes)}` : "not computed"}
                 live
-                emphasis={binding === "FDP"}
-              />
-              <Line
-                label="Duty left"
-                value={hasCdp ? formatDutyClock(cdpLeft) : "—"}
-                note={hasCdp ? `of ${formatDutyClock(active.maxDutyMinutes)}` : "no cap set"}
-                live
-                emphasis={binding === "DUTY"}
+                emphasis
               />
               <Line label="Elapsed" value={formatDutyClock(elapsed)} live />
               <Line
@@ -379,30 +375,58 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
             </>
           ) : (
             <>
+              {/* Off duty the picture is three things: what was flown, the
+                  earliest a duty could legally be planned, and what is next —
+                  with the one question that joins them answered. */}
+              {lastDuty && (
+                <Line
+                  label="Last duty"
+                  value={formatDutyClock(
+                    Math.max(0, Math.floor((lastDuty.endMs - lastDuty.startMs) / 60_000)),
+                  )}
+                  note={lastDuty.route || dayAt(lastDuty.startMs)}
+                />
+              )}
+              {/* Not a countdown to the next duty — the earliest a duty may be
+                  PLANNED for. That is the figure a pilot needs to check a
+                  roster against, and it exists whether or not one is rostered. */}
               <Line
-                label={phase === "post_duty" ? "Last duty" : "Next report"}
+                label="Legal from"
                 value={
-                  phase === "post_duty" && justFinished
-                    ? formatDutyClock(
-                        Math.max(0, Math.floor((justFinished.endMs - justFinished.startMs) / 60_000)),
-                      )
-                    : next
-                      ? formatDutyClock(Math.max(0, Math.round((next.reportMs - now) / 60_000)))
-                      : "—"
+                  !rest
+                    ? "—"
+                    : rest.isLegalNow
+                      ? "Now"
+                      : clockAt(Date.parse(rest.legalAtUtc))
+                }
+                note={
+                  rest && !rest.isLegalNow
+                    ? `${formatDutyClock(Math.max(0, rest.requiredMinutes - rest.elapsedMinutes))} to go`
+                    : undefined
                 }
                 live
               />
               {next ? (
-                <Line label="Then" value={`${next.sectorCount} sectors`} note={next.route} />
+                <>
+                  <Line
+                    label="Next report"
+                    value={clockAt(next.reportMs)}
+                    note={`${dayAt(next.reportMs)} · ${next.sectorCount} sectors`}
+                  />
+                  <Line
+                    label={next.route || "Route"}
+                    value={
+                      next.legalAtReport === false
+                        ? `Short ${formatDutyClock(next.restShortfallMinutes)}`
+                        : next.legalAtReport === true
+                          ? "Rest OK"
+                          : "—"
+                    }
+                    emphasis={next.legalAtReport === false}
+                  />
+                </>
               ) : (
-                <Line label="Roster" value="Clear" />
-              )}
-              {rest && (
-                <Line
-                  label="Rest"
-                  value={rest.isLegalNow ? "Complete" : formatDutyClock(Math.max(0, rest.requiredMinutes - rest.elapsedMinutes))}
-                  note={rest.isLegalNow ? undefined : "to go"}
-                />
+                <Line label="Next duty" value="None scheduled" />
               )}
             </>
           )}
