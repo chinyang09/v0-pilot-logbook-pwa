@@ -12,8 +12,7 @@ import { formatDutyClock, type SectorLeg } from "@/lib/utils/dashboard/duty-stat
 import { ANNUNCIATOR_WORD, type AnnunciatorState } from "@/lib/utils/dashboard/pilot-status"
 import type { PilotStatus } from "@/lib/utils/dashboard/pilot-status"
 import type { Requirement, RequirementState } from "@/lib/utils/dashboard/legality"
-import { tzFormatter } from "@/lib/utils/tz-format"
-import { formatClockDisplay } from "@/lib/utils/time"
+import { formatInstant, tzFormatter } from "@/lib/utils/tz-format"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import type { DisplayPreferences } from "@/types/db/stores.types"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -95,7 +94,7 @@ const REQ_TONE: Record<RequirementState, { icon: string; fill: string; track: st
 const EXPAND = { duration: 0.24, ease: [0.4, 0, 0.2, 1] as const }
 
 /**
- * A 1Hz clock, gated on this being the tab on screen.
+ * A clock that ticks on the MINUTE, gated on this being the tab on screen.
  *
  * The dashboard is keep-alive — mounted on first visit and never unmounted — so
  * an ungated interval re-renders this panel every second for the rest of the
@@ -113,12 +112,23 @@ function useTick(active: boolean): number {
   const [now, setNow] = React.useState(() => Date.now())
   React.useEffect(() => {
     if (!active) return
-    const tick = () => setNow(Date.now())
-    const first = window.setTimeout(tick, 0)
-    const id = window.setInterval(tick, 1000)
+    let interval = 0
+    // Catch up first — the tab may have been away for hours — then align to
+    // the next minute boundary and hold to it. Nothing on this page is shown
+    // to the second, so a 1Hz tick re-rendered the whole panel sixty times for
+    // every change a reader could actually see.
+    //
+    // Both are timeout CALLBACKS rather than a synchronous write, which is
+    // what keeps this out of the compiler's set-state-in-effect rule.
+    const catchUp = window.setTimeout(() => setNow(Date.now()), 0)
+    const align = window.setTimeout(() => {
+      setNow(Date.now())
+      interval = window.setInterval(() => setNow(Date.now()), 60_000)
+    }, 60_000 - (Date.now() % 60_000))
     return () => {
-      window.clearTimeout(first)
-      window.clearInterval(id)
+      window.clearTimeout(catchUp)
+      window.clearTimeout(align)
+      if (interval) window.clearInterval(interval)
     }
   }, [active])
   return now
@@ -149,7 +159,7 @@ export function LegalDashboard({ className }: { className?: string }) {
     <LegalDashboardView
       status={status}
       now={now}
-      clockSeparator={preferences?.display?.clockSeparator}
+      display={preferences?.display}
       className={className}
     />
   )
@@ -159,14 +169,17 @@ export function LegalDashboard({ className }: { className?: string }) {
 export function LegalDashboardView({
   status,
   now,
-  clockSeparator,
+  display,
   className,
 }: {
   status: PilotStatus
   now: number
-  /** How a point in time is punctuated — `02:30` vs `0230`. One app setting
-   *  governs every clock, and this page is not exempt. */
-  clockSeparator?: DisplayPreferences["clockSeparator"]
+  /**
+   * The app's display settings. Every point in time on this page goes through
+   * them — Zulu or local, 12 or 24 hour, colon or bare — so the page cannot
+   * disagree with the rest of the app about what time it is.
+   */
+  display?: DisplayPreferences
   className?: string
 }) {
   const tone = TONE[status.state]
@@ -196,7 +209,7 @@ export function LegalDashboardView({
 
       <div className="relative flex min-h-0 flex-col divide-y divide-border/40">
         <Annunciator status={status} now={now} />
-        <DutyBand status={status} now={now} clockSeparator={clockSeparator} />
+        <DutyBand status={status} now={now} display={display} />
         <CurrencyBand requirements={currency} />
         <LimitsBand requirements={limits} />
       </div>
@@ -256,12 +269,14 @@ function Annunciator({ status, now }: { status: PilotStatus; now: number }) {
   )
 }
 
+/**
+ * A countdown to the MINUTE. Seconds on a rest clock that has hours to run are
+ * motion for its own sake — nothing a pilot does turns on them, and they cost
+ * a re-render of the whole panel every second to show.
+ */
 function formatCountdown(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000))
-  const h = Math.floor(total / 3600)
-  const m = Math.floor((total % 3600) / 60)
-  const s = total % 60
-  return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`
+  const total = Math.max(0, Math.round(ms / 60_000))
+  return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, "0")}`
 }
 
 /* ── Duty ────────────────────────────────────────────────────────────────── */
@@ -282,24 +297,21 @@ function formatCountdown(ms: number): string {
 function DutyBand({
   status,
   now,
-  clockSeparator,
+  display,
 }: {
   status: PilotStatus
   now: number
-  clockSeparator?: DisplayPreferences["clockSeparator"]
+  display?: DisplayPreferences
 }) {
   const { phase, active, lastDuty, next, rest, standby } = status.duty
 
   const zone = React.useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
-  const clockAt = (ms: number) =>
-    formatClockDisplay(
-      tzFormatter(zone, { hour: "2-digit", minute: "2-digit", hour12: false }, "hm").format(
-        new Date(ms),
-      ),
-      clockSeparator,
-    )
+  const clockAt = (ms: number) => formatInstant(ms, display, zone)
   const dayAt = (ms: number) =>
-    tzFormatter(zone, { day: "2-digit", month: "short" }, "daymon")
+    tzFormatter(display?.useZuluTime === false ? zone : "UTC", {
+      day: "2-digit",
+      month: "short",
+    }, "daymon")
       .format(new Date(ms))
       .toUpperCase()
 
@@ -390,23 +402,9 @@ function DutyBand({
                 <Line
                   label="Last duty"
                   value={lastDuty.route || "—"}
-                  note={dayAt(lastDuty.startMs)}
+                  note={`ended ${clockAt(lastDuty.debriefMs)}`}
                 />
               )}
-              {/* Not a countdown to the next duty — the earliest a duty may be
-                  PLANNED for. That is the figure a pilot needs to check a
-                  roster against, and it exists whether or not one is rostered. */}
-              <Line
-                label="Legal from"
-                value={
-                  !rest
-                    ? "—"
-                    : rest.isLegalNow
-                      ? "Now"
-                      : clockAt(Date.parse(rest.legalAtUtc))
-                }
-                live
-              />
               {next ? (
                 // ONE line for the next duty. Its route and its sector count
                 // are both drawn by the chain below — a line repeating them
@@ -418,20 +416,16 @@ function DutyBand({
                   <Line
                     label="Next report"
                     value={clockAt(next.reportMs)}
-                    note={
-                      next.legalAtReport === false
-                        ? `${dayAt(next.reportMs)} · short ${formatDutyClock(next.restShortfallMinutes)}`
-                        : dayAt(next.reportMs)
-                    }
-                    emphasis={next.legalAtReport === false}
+                    note={dayAt(next.reportMs)}
                   />
-                  {/* What that duty ASKS of you — planned length against its own
-                      Reg 14 maximum. A next report time says when to turn up;
-                      this says what turning up commits you to. */}
-                  {next.plannedDutyMinutes > 0 && (
+                  {/* What that duty ASKS of you — its FLIGHT duty period,
+                      report to last on-blocks, against its own Reg 14 maximum.
+                      A report time says when to turn up; this says what
+                      turning up commits you to. */}
+                  {next.plannedFdpMinutes > 0 && (
                     <Line
                       label="Next FDP"
-                      value={formatDutyClock(next.plannedDutyMinutes)}
+                      value={formatDutyClock(next.plannedFdpMinutes)}
                       note={
                         next.maxFdpMinutes > 0
                           ? `of ${formatDutyClock(next.maxFdpMinutes)}`
@@ -439,13 +433,44 @@ function DutyBand({
                       }
                       emphasis={
                         next.maxFdpMinutes > 0 &&
-                        next.plannedDutyMinutes > next.maxFdpMinutes
+                        next.plannedFdpMinutes > next.maxFdpMinutes
                       }
+                    />
+                  )}
+                  {/* Rest, worked BACKWARDS from the duty it precedes. "Legal
+                      from 04:36" on its own says nothing — what a rest period
+                      has to be depends on the duty ahead as much as the one
+                      behind, since para 4 asks for 24 hours inclusive of a
+                      local night before a duty touching the window of
+                      circadian low. So the comparison is what this rest IS
+                      against what THIS duty needs. */}
+                  {next.restRequiredMinutes > 0 && (
+                    <Line
+                      label="Rest"
+                      value={formatDutyClock(next.restAvailableMinutes)}
+                      note={
+                        next.legalAtReport === false
+                          ? `short ${formatDutyClock(next.restShortfallMinutes)}`
+                          : `of ${formatDutyClock(next.restRequiredMinutes)}`
+                      }
+                      emphasis={next.legalAtReport === false}
                     />
                   )}
                 </>
               ) : (
-                <Line label="Next duty" value="None scheduled" />
+                <>
+                  <Line label="Next duty" value="None scheduled" />
+                  {/* Nothing to work backwards from, so the only thing that can
+                      be said is the earliest a duty could be planned — the
+                      requirement from the duty just flown alone. */}
+                  <Line
+                    label="Legal from"
+                    value={
+                      !rest ? "—" : rest.isLegalNow ? "Now" : clockAt(Date.parse(rest.legalAtUtc))
+                    }
+                    live
+                  />
+                </>
               )}
             </>
           )}

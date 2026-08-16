@@ -138,7 +138,14 @@ export interface ActiveDuty {
   /** The duty's legs, with progress. Empty when the duty records no route. */
   legs: SectorLeg[]
   startMs: number
+  /** The FDP end — the last on-blocks once every sector is logged. */
   endMs: number
+  /**
+   * When the crew member was free of ALL duties: `endMs` plus para 7(2)'s
+   * post-flight checks. This is what a rest period is measured from, and what
+   * "when did the duty end" means.
+   */
+  debriefMs: number
 }
 
 /**
@@ -177,10 +184,28 @@ export interface NextDuty {
   legalAtReport: boolean | null
   /** Minutes of rest still owed at that report time. 0 when legal. */
   restShortfallMinutes: number
-  /** How long the duty is PLANNED to run, report to debrief. */
-  plannedDutyMinutes: number
+  /**
+   * How long the FLIGHT duty period is planned to run — report to the last
+   * on-blocks, NOT to the debrief. The debrief carries para 7(2)'s 30 minutes
+   * of post-flight checks, which are duty but not FDP; measuring to it
+   * overstates the figure the Reg 14 maximum is compared against.
+   */
+  plannedFdpMinutes: number
   /** Its own Reg 14 maximum. 0 when the duty period carries none. */
   maxFdpMinutes: number
+  /**
+   * Rest available before this duty reports, from the moment the rest period
+   * commenced.
+   *
+   * "Legal from" on its own says little: what a rest period has to be depends
+   * on the duty it precedes as well as the one it follows — para 4 asks for 24
+   * hours inclusive of a local night before a duty that touches the window of
+   * circadian low. So the useful comparison is worked BACKWARDS from the next
+   * duty: this much rest against that much required.
+   */
+  restAvailableMinutes: number
+  /** What that rest has to be, for THIS duty. 0 when unknown. */
+  restRequiredMinutes: number
 }
 
 /**
@@ -235,6 +260,7 @@ function toActive(
   nowMs: number,
   completedLegs: number,
   inProgress: boolean,
+  debriefMs?: number,
 ): ActiveDuty {
   const elapsed = Math.max(0, Math.floor((nowMs - w.startMs) / 60_000))
   // Para 10(b) can have the FDP window open before the crew member reports.
@@ -256,6 +282,7 @@ function toActive(
     flightMinutes: dp.flightMinutes || 0,
     startMs: w.startMs,
     endMs: w.endMs,
+    debriefMs: debriefMs ?? w.endMs,
   }
 }
 
@@ -423,7 +450,7 @@ export function deriveDutyStatus(
       // Ties go to the LATER-starting duty: a merged overnight and the sector
       // inside it can both contain `now`, and the pilot is in the inner one.
       if (!active || w.startMs > active.startMs) {
-        active = toActive(effective, inProgress, nowMs, completedLegsOf(dp), true)
+        active = toActive(effective, inProgress, nowMs, completedLegsOf(dp), true, w.endMs)
       }
       continue
     }
@@ -436,6 +463,7 @@ export function deriveDutyStatus(
         nowMs,
         effective.sectorCount || completedLegsOf(dp),
         false,
+        w.endMs,
       )
     }
 
@@ -470,7 +498,7 @@ export function deriveDutyStatus(
 
     if (nowMs >= sw.startMs && nowMs <= sw.endMs) {
       if (!active || sw.startMs > active.startMs) {
-        active = toActive(sched, sw, nowMs, 0, true)
+        active = toActive(sched, sw, nowMs, 0, true, sw.endMs)
       }
       continue
     }
@@ -528,6 +556,18 @@ function toNextDuty(
   const shortfall = known ? Math.max(0, Math.round((legalAtMs - reportMs) / 60_000)) : 0
   const w = dutyWindow(dp)
 
+  // The FDP runs report → last on-blocks. `fdpEndTime` is that instant; a duty
+  // period that predates the field falls back to the window, which is the old
+  // behaviour and half an hour long.
+  const fdpEndMs = dp.fdpEndTime
+    ? (dutyWindow({ date: dp.date, reportTime: dp.reportTime, debriefTime: dp.fdpEndTime })
+        ?.endMs ?? w?.endMs)
+    : w?.endMs
+
+  // Rest commenced `requiredMinutes` before the instant it becomes legal, so
+  // the span available to this duty follows without extra plumbing.
+  const restStartMs = rest ? legalAtMs - rest.requiredMinutes * 60_000 : NaN
+
   return {
     id: dp.id,
     date: dp.date,
@@ -537,8 +577,13 @@ function toNextDuty(
     inMinutes: Math.round((reportMs - nowMs) / 60_000),
     legalAtReport: known ? shortfall === 0 : null,
     restShortfallMinutes: shortfall,
-    plannedDutyMinutes: w ? Math.round((w.endMs - w.startMs) / 60_000) : dp.dutyMinutes || 0,
+    plannedFdpMinutes:
+      fdpEndMs !== undefined && w ? Math.max(0, Math.round((fdpEndMs - w.startMs) / 60_000)) : 0,
     maxFdpMinutes: dp.maxFdpMinutes || 0,
+    restAvailableMinutes: Number.isFinite(restStartMs)
+      ? Math.max(0, Math.round((reportMs - restStartMs) / 60_000))
+      : 0,
+    restRequiredMinutes: rest?.requiredMinutes ?? 0,
   }
 }
 

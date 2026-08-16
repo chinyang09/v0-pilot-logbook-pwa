@@ -173,6 +173,10 @@ export function calculateDutyPeriodFromSchedule(
     fdpExtensionUsed: false,
     fdpTableUsed: fdpResult.tableUsed,
     fdpStartLocal: localReportTime,
+    fdpEndTime: (() => {
+      const last = entry.sectors?.[entry.sectors.length - 1]
+      return last ? last.actualIn || last.scheduledIn || undefined : undefined
+    })(),
     departureTimezoneOffset,
     effectiveSectors: fdpResult.effectiveSectors,
     sectorMinutes,
@@ -624,6 +628,7 @@ function createDutyPeriodFromFlightGroup(
     fdpTableUsed: fdpResult.tableUsed,
     fdpStartLocal: localReportTime,
     fdpElapsedAtReport,
+    fdpEndTime: minutesToHHMM(((latestIn % 1440) + 1440) % 1440),
     departureTimezoneOffset: depTzOffset,
     arrivalTimezoneOffset: arrTzOffset,
     effectiveSectors: fdpResult.effectiveSectors,
@@ -937,6 +942,7 @@ export function mergeAdjacentDutyPeriods(dutyPeriods: DutyPeriod[]): DutyPeriod[
         // a merged overnight would be classified against half of itself — and
         // an overnight is precisely the shape that lands in the window of
         // circadian low.
+        fdpEndTime: curr.fdpEndTime ?? prev.fdpEndTime,
         departureMs: prev.departureMs ?? curr.departureMs,
         arrivalMs: curr.arrivalMs ?? prev.arrivalMs,
         takeoffLandingMs:

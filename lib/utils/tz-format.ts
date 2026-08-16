@@ -56,3 +56,48 @@ export function tzOffsetName(
       .find((p) => p.type === "timeZoneName")?.value || ""
   );
 }
+
+
+/**
+ * An absolute instant as a clock reading, per the user's DISPLAY settings.
+ *
+ * The one place that joins the four preferences governing a point in time, so
+ * every clock in the app can agree:
+ *
+ * | | setting |
+ * |---|---|
+ * | which zone | `useZuluTime` — UTC, or the device's own |
+ * | 12 or 24 hour | `timeFormat` |
+ * | punctuation | `clockSeparator` — `02:30` vs `0230` |
+ *
+ * The separator preference applies only to the 24-hour forms. "0230 PM" is not
+ * a thing anybody writes, and the four-figure form is a 24-hour convention.
+ *
+ * Zulu readings carry the `Z`, which is the whole point of asking for them.
+ */
+export function formatInstant(
+  atMs: number,
+  display?: {
+    useZuluTime?: boolean
+    timeFormat?: "24h" | "24h-padded" | "12h"
+    clockSeparator?: "colon" | "none"
+  },
+  /** Where "local" means, when not showing Zulu. Defaults to the device. */
+  localZone?: string,
+): string {
+  const zulu = display?.useZuluTime ?? true
+  const twelve = display?.timeFormat === "12h"
+  const zone = zulu ? "UTC" : localZone || Intl.DateTimeFormat().resolvedOptions().timeZone
+
+  const shape = twelve ? "hm12" : "hm";
+  const text = tzFormatter(
+    zone,
+    { hour: "2-digit", minute: "2-digit", hour12: twelve },
+    shape,
+  ).format(new Date(atMs));
+
+  if (twelve) return text
+  const bare =
+    display?.clockSeparator === "none" ? text.replace(":", "") : text
+  return zulu ? `${bare}Z` : bare
+}

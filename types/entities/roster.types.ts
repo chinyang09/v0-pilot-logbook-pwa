@@ -336,6 +336,15 @@ export interface DutyPeriod {
    * window is already partly gone at the moment the crew member walks in.
    */
   fdpElapsedAtReport?: number
+  /**
+   * When the FLIGHT duty period ends, UTC HH:MM — the last on-blocks.
+   *
+   * NOT the debrief. A duty period runs to being free of all duties, so
+   * `debriefTime` carries para 7(2)'s 30 minutes of post-flight checks; the FDP
+   * stops when the aeroplane parks. Measuring a duty's FDP from report to
+   * debrief overstates it by that half hour.
+   */
+  fdpEndTime?: string
   departureTimezoneOffset?: number        // UTC offset of departure airport
   /**
    * UTC offset of the ARRIVAL airport of the last sector — i.e. where the crew

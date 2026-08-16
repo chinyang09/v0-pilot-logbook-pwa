@@ -697,9 +697,29 @@ Three readouts were removed for saying something already on screen:
 - **The last duty's LENGTH.** How long yesterday ran says nothing about whether
   today is legal. Its ROUTE is worth a glance; its duration is not.
 
-**Next FDP** is what the next duty ASKS of you — its planned length against its
-own Reg 14 maximum. A report time says when to turn up; this says what turning
-up commits you to, and it is emphasised when the plan exceeds the maximum.
+**Next FDP** is what the next duty ASKS of you — its FLIGHT duty period, report
+to last on-blocks, against its own Reg 14 maximum. Measured to the DEBRIEF it
+would carry para 7(2)'s 30 minutes of post-flight checks and overstate the very
+figure the maximum is compared against, so `DutyPeriod.fdpEndTime` records the
+last on-blocks and `plannedFdpMinutes` is measured to it.
+
+**Rest is worked BACKWARDS from the next duty.** "Legal from 04:36" on its own
+says little: what a rest period has to be depends on the duty AHEAD as much as
+the one behind — para 4 asks for 24 hours inclusive of a local night before a
+duty that touches the window of circadian low, and 3(1)(c)/(d) scale it with the
+duty just flown. So the comparison shown is the rest AVAILABLE before that duty
+against what THAT duty needs. "Legal from" survives only for the case with no
+next duty, where there is nothing to work backwards from.
+
+**Every point in time goes through `formatInstant`** (`lib/utils/tz-format.ts`),
+which joins the display settings that govern a clock: `useZuluTime`,
+`timeFormat` and `clockSeparator`. The page cannot disagree with the rest of the
+app about what time it is.
+
+**Nothing is shown to the second.** The tick aligns to the minute boundary and
+holds there — a 1Hz clock re-rendered the whole panel sixty times for every
+change a reader could see, and seconds on a rest clock with hours to run are
+motion for its own sake.
 
 **A STANDBY gets the off-duty card, not its own.** It is a duty, so it must
 never read as off duty — but the question it raises is the same one off duty
@@ -3391,6 +3411,10 @@ When making changes, be aware of these high-impact files:
 - Do not read an in-progress duty from the logbook alone. `mergeDutyPeriods` prefers the logbook for today, and mid-duty the logbook holds only the sectors already flown — so a two-sector day with one sector logged reads as a duty that ended at lunchtime and the panel falls through to a rest countdown. Pass `scheduleDutyPeriods` into `deriveDutyStatus`; where the roster runs later, the duty is still on
 - Do not treat the FDP pipeline's duty periods as the whole plan. `computeFDPResult` filters to `isFlownFlight`, so a sector sitting in the logbook as `scheduledOut`/`scheduledIn` contributes nothing — on a part-flown day with no roster imported there is no plan anywhere, and the panel reads "Roster Clear" and counts down rest between sectors. `buildPlannedDuties` rebuilds the day from the flight rows with scheduled fallbacks; it is for duty shape and FDP only, never cumulative limits
 - Do not end the ACTIVE duty at the debrief — the FDP ends at the last ON-BLOCKS, and the duty window carries para 7(2)'s 30 minutes of post-flight checks after it. Keyed off the window the panel kept counting an FDP down for half an hour after the aeroplane was parked. `fdpEndOf` closes it at the last arrival once EVERY sector is on blocks, and not before: an unlogged sector is not a finished one
+- Do not measure a duty's FDP to the DEBRIEF — that carries para 7(2)'s 30 minutes of post-flight checks, which are duty but not FLIGHT duty. `DutyPeriod.fdpEndTime` is the last on-blocks and every FDP figure is measured to it
+- Do not show "legal from" as the whole answer when a next duty is known. What a rest period has to be depends on the duty AHEAD as much as the one behind (para 4's 24 hours before a duty touching the window of circadian low), so the useful comparison is the rest AVAILABLE before that duty against what THAT duty needs. "Legal from" is the fallback for when nothing is rostered
+- Do not format a point in time on the legal page by hand — `formatInstant` joins `useZuluTime`, `timeFormat` and `clockSeparator`, and a page that formats its own clocks disagrees with the rest of the app about what time it is
+- Do not tick this page at 1Hz. Nothing on it is shown to the second, so the clock aligns to the minute boundary and holds there; a per-second tick re-rendered the whole panel sixty times for every visible change. Keep the immediate catch-up in a timeout CALLBACK, not a synchronous effect write
 - Do not print a figure the gauge already draws, or a countdown the annunciator already runs. "Elapsed" had no denominator beside an FDP line carrying one; "N to go" beside "Legal from" was the third copy of the same number. And the last duty's LENGTH says nothing about whether the next one is legal — its route does
 - Do not give a standby its own card shape. It is a duty and must never read as off duty, but the question it raises is the off-duty question — am I legal, and for what — so it takes the same rest gauge and lines with its window added
 - Do not format a clock on the legal page without `clockSeparator` — `formatClockDisplay` governs every point in time in the app and this page is not exempt. The view takes it as a prop so the presentational half stays free of the database

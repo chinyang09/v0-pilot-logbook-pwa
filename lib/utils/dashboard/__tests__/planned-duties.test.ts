@@ -437,8 +437,95 @@ describe("when the duty stops being ON DUTY", () => {
       arrivals,
       [...duties, ...nextDay],
     )
-    // Report 11:30, debrief 17:20 — 5h50m planned, against its Reg 14 maximum.
-    expect(s.next!.plannedDutyMinutes).toBe(5 * 60 + 50)
+    // Report 11:30, last on-blocks 16:50 — 5h20m of FDP, against its Reg 14
+    // maximum. NOT 5h50m: the debrief at 17:20 carries para 7(2)'s 30 minutes
+    // of post-flight checks, which are duty but not flight duty.
+    expect(s.next!.plannedFdpMinutes).toBe(5 * 60 + 20)
     expect(s.next!.maxFdpMinutes).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * Rest, worked BACKWARDS from the duty it precedes.
+ *
+ * "Legal from 04:36" on its own says little: what a rest period has to be
+ * depends on the duty AHEAD as much as the one behind — para 4 asks for 24
+ * hours inclusive of a local night before a duty that touches the window of
+ * circadian low, and para 3(1)(c)/(d) scale it with the duty just flown. So the
+ * useful comparison is this much rest against what THIS duty needs.
+ */
+describe("the next duty carries its own rest arithmetic", () => {
+  const flownDay = buildPlannedDuties([
+    flight({
+      id: "done",
+      // Departs 23:07 on the 15th and lands 02:36 on the 16th.
+      date: "2026-08-15",
+      departureIcao: "WSSS",
+      arrivalIcao: "ZJHK",
+      outTime: "23:07",
+      inTime: "02:36",
+      scheduledOut: "23:07",
+      scheduledIn: "02:36",
+      blockTime: "03:29",
+    }),
+  ])
+
+  const nextDay = buildPlannedDuties([
+    flight({
+      id: "nxt",
+      date: "2026-08-17",
+      departureIcao: "WSSS",
+      arrivalIcao: "VOCB",
+      outTime: "",
+      inTime: "",
+      scheduledOut: "12:30",
+      scheduledIn: "16:50",
+      blockTime: "",
+    }),
+  ])
+
+  /** Rest commenced 04:06 (debrief 03:06 + 1h); 11 hours required. */
+  const rest = {
+    isLegalNow: false,
+    elapsedMinutes: 60,
+    requiredMinutes: 11 * 60,
+    legalAtUtc: "2026-08-16T15:06:00Z",
+  }
+
+  // Which leg is on blocks — without this the FDP end falls back to the duty
+  // window, which is the documented behaviour for a duty period that records
+  // no arrivals.
+  const arrivals = new Map([["done", Date.parse("2026-08-16T02:36:00Z")]])
+
+  const s = deriveDutyStatus(
+    flownDay,
+    new Date("2026-08-16T05:06:00Z"),
+    rest,
+    arrivals,
+    [...flownDay, ...nextDay],
+  )
+
+  it("reports the rest AVAILABLE before that duty, not just when legality starts", () => {
+    // Rest from 04:06 on the 16th to the 11:30 report on the 17th.
+    expect(s.next!.restAvailableMinutes).toBe(31 * 60 + 24)
+  })
+
+  it("reports what that rest has to be", () => {
+    expect(s.next!.restRequiredMinutes).toBe(11 * 60)
+    expect(s.next!.legalAtReport).toBe(true)
+  })
+
+  it("measures the next duty's FDP to on-blocks, not to the debrief", () => {
+    // Report 11:30, last on-blocks 16:50. The 17:20 debrief carries para 7(2)'s
+    // post-flight checks, which are duty but not FLIGHT duty — counting to it
+    // would overstate the figure the Reg 14 maximum is compared against.
+    expect(s.next!.plannedFdpMinutes).toBe(5 * 60 + 20)
+  })
+
+  it("gives the last duty its true END, which is the debrief", () => {
+    // The FDP stopped at the 02:36 on-blocks; the crew member was free of all
+    // duties at 03:06. Rest is measured from the latter.
+    expect(s.lastDuty!.endMs).toBe(Date.parse("2026-08-16T02:36:00Z"))
+    expect(s.lastDuty!.debriefMs).toBe(Date.parse("2026-08-16T03:06:00Z"))
   })
 })
