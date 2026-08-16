@@ -90,12 +90,24 @@ export function buildPilotStatus({
   legality,
   duty,
   timeZone,
+  formatClock,
   now = new Date(),
 }: {
   legality: LegalityModel
   duty: DutyStatus
   /** IANA zone for any time the action line names. Defaults to the device's. */
   timeZone?: string
+  /**
+   * How to write a point in time.
+   *
+   * The action line names clocks ("Rest until 04:36", "Report 21:50"), and the
+   * app's display settings govern every one of them — Zulu or local, 12 or 24
+   * hour, colon or bare. This module is pure, so the formatter is INJECTED
+   * rather than the settings being read here; `usePilotStatus` builds it from
+   * `formatInstant`, the same function the panel formats its own clocks with,
+   * so the annunciator cannot disagree with the band beneath it.
+   */
+  formatClock?: (ms: number) => string
   now?: Date
 }): PilotStatus {
   // An exceeded FDP outranks every standing requirement: it is the only thing
@@ -122,7 +134,14 @@ export function buildPilotStatus({
         ? "warning"
         : state,
     governing,
-    nextAction: deriveNextAction({ legality, duty, state, fdpExceeded, timeZone, now }),
+    nextAction: deriveNextAction({
+      legality,
+      duty,
+      state,
+      fdpExceeded,
+      clock: formatClock ?? ((ms: number) => clock(ms, timeZone)),
+      now,
+    }),
     duty,
     legality,
     legalAtUtc: restOutstanding ? (duty.rest?.legalAtUtc ?? null) : null,
@@ -141,14 +160,15 @@ function deriveNextAction({
   duty,
   state,
   fdpExceeded,
-  timeZone,
+  clock,
   now,
 }: {
   legality: LegalityModel
   duty: DutyStatus
   state: AnnunciatorState
   fdpExceeded: boolean
-  timeZone?: string
+  /** How to write a point in time — the app's display settings, injected. */
+  clock: (ms: number) => string
   now: Date
 }): NextAction {
   if (fdpExceeded && duty.active) {
@@ -169,7 +189,6 @@ function deriveNextAction({
       headline: `Rest short by ${hoursMinutes(duty.next.restShortfallMinutes)}`,
       detail: `${duty.next.route || "Next duty"} reports before ${clock(
         Date.parse(duty.rest.legalAtUtc),
-        timeZone,
       )} — notify company`,
       href: "/fdp",
     }
@@ -179,7 +198,7 @@ function deriveNextAction({
     const at = Date.parse(duty.rest.legalAtUtc)
     return {
       tone: "action_required",
-      headline: `Rest until ${clock(at, timeZone)}`,
+      headline: `Rest until ${clock(at)}`,
       detail: duty.next
         ? "Legal for the next duty"
         : "Earliest a duty may be planned",
@@ -218,7 +237,7 @@ function deriveNextAction({
   if (duty.standby) {
     return {
       tone: "current",
-      headline: `On standby to ${clock(duty.standby.endMs, timeZone)}`,
+      headline: `On standby to ${clock(duty.standby.endMs)}`,
       detail: duty.standby.activated ? "Activated" : "Not called",
       href: "/roster",
     }
@@ -229,7 +248,7 @@ function deriveNextAction({
   if (duty.next) {
     return {
       tone: "current",
-      headline: `Report ${clock(duty.next.reportMs, timeZone)}`,
+      headline: `Report ${clock(duty.next.reportMs)}`,
       detail: duty.next.route || `${duty.next.sectorCount} sectors`,
       href: "/roster",
     }

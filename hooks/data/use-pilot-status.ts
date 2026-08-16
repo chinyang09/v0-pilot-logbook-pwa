@@ -9,7 +9,9 @@ import { hhmmToMinutes } from "@/lib/utils/time"
 import { buildLegalityModel } from "@/lib/utils/dashboard/legality"
 import { deriveDutyStatus } from "@/lib/utils/dashboard/duty-status"
 import { buildPilotStatus, type PilotStatus } from "@/lib/utils/dashboard/pilot-status"
+import { formatInstant } from "@/lib/utils/tz-format"
 import type { NinetyDayCurrency } from "@/lib/utils/dashboard-aggregate"
+import type { DisplayPreferences } from "@/types/db/stores.types"
 
 /**
  * The legal dashboard's single derived model.
@@ -27,6 +29,12 @@ import type { NinetyDayCurrency } from "@/lib/utils/dashboard-aggregate"
 export function usePilotStatus(
   recency: NinetyDayCurrency,
   now: number,
+  /**
+   * The app's display settings. The action line names clock times, and they go
+   * through the same `formatInstant` the panel formats its own with — so the
+   * annunciator cannot disagree with the band beneath it about what time it is.
+   */
+  display?: DisplayPreferences,
 ): { status: PilotStatus; isLoading: boolean } {
   const {
     capacity,
@@ -80,6 +88,12 @@ export function usePilotStatus(
   // ticking in the countdown are read straight off `now` by the component.
   const nowMinute = Math.floor(now / 60_000)
 
+  const zone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
+  const formatClock = useMemo(
+    () => (ms: number) => formatInstant(ms, display, zone),
+    [display, zone],
+  )
+
   const status = useMemo(() => {
     const at = new Date(nowMinute * 60_000)
     // Rest belongs to the DUTY state, not the currency grid — it is a property
@@ -108,10 +122,12 @@ export function usePilotStatus(
         flightArrivals,
         planDuties,
       ),
+      formatClock,
       now: at,
     })
   }, [
     nowMinute,
+    formatClock,
     restUntilLegal,
     recency,
     capacity,

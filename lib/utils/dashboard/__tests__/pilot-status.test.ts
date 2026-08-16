@@ -315,3 +315,48 @@ describe("buildPilotStatus — on standby", () => {
     expect(s.duty.phase).not.toBe("on_duty")
   })
 })
+
+/**
+ * The action line names clock times, and the app's display settings govern
+ * every one of them — Zulu or local, 12 or 24 hour, colon or bare. This module
+ * is pure, so the formatter is injected rather than the settings being read
+ * here; the panel passes the same `formatInstant` it formats its own clocks
+ * with, so the hero line cannot use one convention while the band two lines
+ * below it uses another.
+ */
+describe("buildPilotStatus — the clock is injected, not assumed", () => {
+  const standbyDay: DutyPeriod[] = [
+    duty({
+      id: "sby",
+      date: "2026-08-14",
+      reportTime: "06:00",
+      debriefTime: "18:00",
+      dutyKind: "standby",
+      standbyKind: "home",
+      maxFdpMinutes: 0,
+      sectorCount: 0,
+      countedDutyMinutes: 144,
+    }),
+  ]
+
+  it("writes the standby's end with the supplied formatter", () => {
+    const s = buildPilotStatus({
+      legality: buildLegalityModel({ ...CLEAR }),
+      duty: deriveDutyStatus(standbyDay, NOW),
+      // The bare-separator Zulu form the display settings can select.
+      formatClock: (ms) => `${new Date(ms).toISOString().slice(11, 13)}${new Date(ms).toISOString().slice(14, 16)}Z`,
+      now: NOW,
+    })
+    expect(s.nextAction.headline).toBe("On standby to 1800Z")
+  })
+
+  it("falls back to the device clock when none is supplied", () => {
+    const s = buildPilotStatus({
+      legality: buildLegalityModel({ ...CLEAR }),
+      duty: deriveDutyStatus(standbyDay, NOW),
+      timeZone: "UTC",
+      now: NOW,
+    })
+    expect(s.nextAction.headline).toBe("On standby to 18:00")
+  })
+})

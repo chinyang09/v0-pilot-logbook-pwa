@@ -568,24 +568,29 @@ Measured, with zero page scroll and zero internal overflow: **390×844 phone,
 stretching it makes the one `flex-1` section absorb every spare pixel, which
 left ~200px of empty grid under the last requirement on a tall phone.
 
+The timeline redesign that replaced the ring gauge is **strictly shorter** than
+what was measured (duty band ~152px → ~146px; the annunciator lost 2px of
+padding), so the fit holds by construction. Any change that ADDS a row to the
+duty band has to be re-measured on a 360×780 phone before it lands.
+
 Four bands, in the order a pilot asks. There was a fifth — a header strip
 carrying the date, a live clock and the phase word — and it is gone: a pilot has
 a watch, and the annunciator below already carries the state.
 
 ```
 ⚠ CAUTION                                               ← master annunciator
-  Takeoff within 8d                                     ← what to DO
-  Tightest: T/O 90d 8d left                             ← the governing constraint
-DUTY  [Table A] [3 sectors]
-  5:42                              7:18                ← elapsed / FDP left
-  ELAPSED             FDP LEFT · MAX 13:00
-  ▬▬▬▬▬▬▬▬░░░░░░░░
-  FT 2:11  ⚠ Duty 14d 74/90h  Duty 28d 121/180h  …      ← rolling statutory caps
-CURRENCY & LIMITS                                       ← every requirement, urgent first
-  ⚠ T/O 90d  8d left    ⚠ Ldg 90d  8d left
-  ✓ Since duty Rested   ✓ Duty 28d 121/180h   …
-RECENT ›
-  Aug 14  SIN → BKK  2.2h
+  Rest short by 3:00                                    ← what to DO (the imperative)
+  Tightest T/O 90d · 8d left                            ← the governing constraint
+OFF DUTY                            Last WSSS-VVNB-WSSS ← the duty band's eyebrow
+  ▬▬▬▬▬▬▬▬▬▬▬▬▬▮░░░░░░▓▓▓▓▓                            ← ONE picture, a scale in TIME
+  09:26          9:24            21:50                    (▮ = report, ▓ = rest still owed)
+  ENDED 08:56    SHORT 3:00      REPORT 17 AUG
+  Next duty · FDP 10:35 of 12:15
+  ●━━━━●━━━━○   WSSS   VVNB   WSSS                      ← the chain: this duty, or the next
+CURRENCY                                                ← days that EXPIRE, urgent first
+  ⚠ T/O + Ldg 90d  8d left    ✓ Medical  14 Mar
+LIMITS                                                  ← hours that REFILL, paired
+  Duty  14d [▓▓▓ 74 ░░] 90h   28d [▓▓ 121 ░░] 180h
 ```
 
 #### The FDP maximum is NEVER hardcoded
@@ -682,20 +687,49 @@ is what keeps a delayed duty from falling out of the panel early.
 
 #### What the duty band says, and what it does not
 
-| | On duty | Off duty, standby, post-duty |
-|---|---|---|
-| gauge | FDP remaining | rest to legal |
-| lines | FDP left of max, flight time + table, reported at | last duty's ROUTE, legal from, next report, next FDP |
-| chain | THIS duty's progress | the NEXT duty's shape |
+The band is ONE INSTRUMENT reading a different scale per phase — eyebrow,
+timeline, three captions, footnote, chain — not four layouts. `DutyBand` decides
+the whole thing once into a `view` object; the JSX below it is flat.
 
-Three readouts were removed for saying something already on screen:
+| Phase | The question | The bar runs from … to | Caret |
+|---|---|---|---|
+| on duty | how much FDP is left | FDP window open → its Reg 14 maximum | — |
+| off duty, duty ahead | will the rest reach the report | rest commenced → the later of legal / report | the REPORT |
+| off duty, nothing ahead | when may I go again | rest commenced → legal | — |
+| standby | how long am I committed for | window start → window end | — |
+
+| | eyebrow (right) | the three captions | footnote | chain |
+|---|---|---|---|---|
+| on duty | `Table A · Max 12:15` | reported / flight / **FDP left** | — | THIS duty |
+| off duty | `Last WSSS-VVNB` | ended / **rest of required** / report + date | next duty's FDP of max | the NEXT duty |
+| standby | activated or not | from / **left** / until | the rest clock, still running | the next duty |
+
+**The second row is the one that needed a picture.** The off-duty question is a
+COMPARISON between two instants on one axis — when the rest becomes legal and
+when the next duty reports — and a ring has nowhere to put the second one. On a
+line they are two marks, and a report landing inside the rest still owed is a
+red band you see before reading a word. That is why the ring is gone.
+
+**The gauges' hero number went with them.** `DutyGauge`/`RestGauge` printed the
+rest countdown inside the ring while the annunciator printed it as the hero and
+the lines printed "N to go" — three copies. The annunciator owns the one hero
+line now, and it is `nextAction.headline`, which is the CONTEXTUAL form ("Rest
+short by 3:00", "Rest until 04:36") rather than a bare countdown. Do not put a
+raw countdown back in the annunciator.
+
+Three readouts were removed earlier for the same reason and stay removed:
 
 - **Elapsed** — a bare figure with no denominator, next to an FDP line that
-  carries `of 12:15` and a gauge drawing the same ratio.
-- **"N to go"** beside "Legal from" — the annunciator's countdown and the ring
-  both already say it. Three copies of one number.
+  carries `of 12:15` and a bar drawing the same ratio.
+- **"N to go"** beside "Legal from" — see above.
 - **The last duty's LENGTH.** How long yesterday ran says nothing about whether
-  today is legal. Its ROUTE is worth a glance; its duration is not.
+  today is legal. Its ROUTE is worth a glance (the eyebrow) and its END TIME is
+  (the first caption); its duration is not.
+
+**`RAMP.info` is not on the status ramp, deliberately.** A standby window
+filling up is a magnitude, not a verdict — amber there would teach the reader
+that the colour means the same thing as on a requirement cell, where it means
+whether they can legally fly. `idle` is "there is no limit to draw".
 
 **Next FDP** is what the next duty ASKS of you — its FLIGHT duty period, report
 to last on-blocks, against its own Reg 14 maximum. Measured to the DEBRIEF it
@@ -714,7 +748,13 @@ next duty, where there is nothing to work backwards from.
 **Every point in time goes through `formatInstant`** (`lib/utils/tz-format.ts`),
 which joins the display settings that govern a clock: `useZuluTime`,
 `timeFormat` and `clockSeparator`. The page cannot disagree with the rest of the
-app about what time it is.
+app about what time it is — **including the annunciator**, whose headlines name
+clocks ("Rest until 04:36", "Report 21:50", "On standby to 18:00"). Those are
+built in `pilot-status.ts`, which is PURE, so the formatter is **injected**:
+`buildPilotStatus({ formatClock })`, wired by `usePilotStatus(recency, now,
+display)`. It used to build its own `Intl.DateTimeFormat` in device-local
+24-hour with a colon, so a Zulu-configured pilot read one convention in the hero
+line and another two lines below it.
 
 **Nothing is shown to the second.** The tick aligns to the minute boundary and
 holds there — a 1Hz clock re-rendered the whole panel sixty times for every
@@ -723,9 +763,10 @@ motion for its own sake.
 
 **A STANDBY gets the off-duty card, not its own.** It is a duty, so it must
 never read as off duty — but the question it raises is the same one off duty
-raises, "am I legal and for what", so it takes the same rest gauge and the same
-lines with its window added. Gauging the standby's own window instead answered
-a question nobody was asking.
+raises, "am I legal and for what", so it keeps the rest clock running beneath
+it as the band's footnote. Its own window IS what the bar draws — the standby is
+the thing in progress — but on `RAMP.info` rather than the status ramp, because
+how full a standby window is says nothing about whether the pilot is legal.
 
 #### Annunciator, governing constraint, next action
 
@@ -785,7 +826,7 @@ grid is what made the first version unreadable:
 
 #### The duty band and the sector chain
 
-The band shows the FDP gauge, the figures, and a chain of stops
+The band shows the timeline, its three captions, and a chain of stops
 (`deriveSectorLegs`) — filled dot on blocks, ringed dot for the leg being
 flown, hollow still to come, with the airport codes beneath.
 
@@ -797,9 +838,9 @@ four sectors across several airports, and "where am I in the pattern" is what a
 generic recent-flights list could never answer: it showed history, not this
 duty. That list is gone.
 
-**The gauge's tone is STATED, never derived from how full the arc is.** A nearly
-full FDP ring is a warning; a nearly full REST ring is good news. Deriving the
-colour from the fraction painted a fully-rested pilot amber.
+**The bar's tone is STATED by the caller, never derived from how full it is.** A
+nearly full FDP bar is a warning; a nearly full REST bar is good news. Deriving
+the colour from the fraction painted a fully-rested pilot amber.
 
 **The rolling limits are NOT repeated in the duty band.** They were printed
 there and again in the limits band — the duplication the rework removed.
@@ -848,7 +889,7 @@ The old dashboard printed several things twice. Each now has exactly one home:
 |---|---|---|
 | 90-day recency | a chip in the T/O card **and** the alerts bell | ONE requirement cell, legal page |
 | FDP utilisation | the limits stack **and** the bell | the limits band only — the duty band's copy was removed |
-| Rest until legal | a pill in the limits stack **and** the bell | the duty band's rest gauge + the annunciator countdown |
+| Rest until legal | a pill in the limits stack **and** the bell | the duty band's timeline; the annunciator states the imperative, not a second copy of the figure |
 | Currency expiries | the bell only | document requirement cells |
 | Night / Sim hours | the hero **and** again as rings in the auto-fill grid | the period summary only (`SHOWN_ELSEWHERE`) |
 | Recent T/O–LDG events | its own list under the flight list | gone — it was the flight list |
@@ -3404,7 +3445,10 @@ When making changes, be aware of these high-impact files:
 - Do not split 90-day recency back into separate takeoff and landing cells — they are two halves of one question, and urgency-sorted they did not even sit beside each other. One cell answers with the binding half; expanding shows both
 - Do not put rest back in the currency band — it is a property of the duty just flown, not a standing qualification, and a live countdown among expiry dates reads as a different kind of thing. It lives in the duty band, and the annunciator has to fold it into the verdict itself since it is no longer one of the requirements
 - Do not print the rolling limits in the duty band as well as the limits band — that was the duplication the rework removed. The duty band carries FDP and flight time for THIS duty only
-- Do not derive a gauge's colour from how full its arc is — state the tone. A nearly-full FDP ring is a warning and a nearly-full REST ring is good news; deriving it painted a fully-rested pilot amber
+- Do not derive the duty band's bar colour from how full it is — state the tone. A nearly-full FDP bar is a warning and a nearly-full REST bar is good news; deriving it painted a fully-rested pilot amber. And do not put a standby's window on the status ramp: how full it is is a magnitude, not a verdict (`RAMP.info`)
+- Do not put the duty band's ring back. The off-duty question is a COMPARISON of two instants on one axis — when the rest becomes legal, and when the next duty reports — and an arc has nowhere to put the second one. It is a timeline with the report as a CARET and the rest still owed as a red band, so a duty rostered inside the rest period is visible before a word is read
+- Do not print a bare rest countdown in the annunciator. The hero is `nextAction.headline`, which is the CONTEXTUAL form of the same fact ("Rest short by 3:00", "Rest until 04:36"); a raw countdown there, a copy inside the ring and an "N to go" line beside "Legal from" were three printings of one number
+- Do not let `pilot-status.ts` format its own clocks — it is pure, so the formatter is INJECTED (`buildPilotStatus({ formatClock })`, wired by `usePilotStatus(recency, now, display)`). Its own `Intl.DateTimeFormat` was device-local 24-hour with a colon, so a Zulu-configured pilot read one convention in the hero line and another two lines below it
 - Do not make the legal page's cells navigate on tap — they EXPAND in place and a second tap closes them. The reader came to check a status, and a route change loses the screen they came for. The deep link belongs inside the expansion
 - Do not replace the sector chain with a list of recent flights — that list showed history, not THIS duty, and could not answer "where am I in a four-sector day". The chain comes from `deriveSectorLegs` off the duty's own route
 - Do not let the summary page's flight list grow the page — it scrolls in its own bounded box, so a year-long period cannot push the breakdown below it out of reach

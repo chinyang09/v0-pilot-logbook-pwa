@@ -149,6 +149,7 @@ export function LegalDashboard({ className }: { className?: string }) {
   const { status, isLoading: statusLoading } = usePilotStatus(
     aggregates.ninetyDayCurrency,
     now,
+    preferences?.display,
   )
 
   if (aggLoading || statusLoading) {
@@ -208,7 +209,7 @@ export function LegalDashboardView({
       />
 
       <div className="relative flex min-h-0 flex-col divide-y divide-border/40">
-        <Annunciator status={status} now={now} />
+        <Annunciator status={status} />
         <DutyBand status={status} now={now} display={display} />
         <CurrencyBand requirements={currency} />
         <LimitsBand requirements={limits} />
@@ -219,17 +220,24 @@ export function LegalDashboardView({
 
 /* ── Master annunciator ──────────────────────────────────────────────────── */
 
-function Annunciator({ status, now }: { status: PilotStatus; now: number }) {
+/**
+ * State, imperative, governing constraint. Three lines, and the hero is the
+ * IMPERATIVE — never a bare figure.
+ *
+ * It used to print a raw rest countdown here whenever rest was outstanding,
+ * which is the thing the owner called out: "legal from gives earliest window
+ * for accepting a duty however without context". `nextAction.headline` already
+ * carries the contextual form of the same fact — "Rest short by 3:00" when a
+ * rostered duty reports inside the rest period, "Rest until 04:36" when there
+ * is nothing to work backwards from — and the duty band below draws it. A
+ * countdown on top of both was the same number three times.
+ */
+function Annunciator({ status }: { status: PilotStatus }) {
   const tone = TONE[status.state]
   const StateIcon = tone.icon
 
-  // While rest is outstanding the headline IS the countdown — the one thing on
-  // the page changing second to second, and the thing being waited on.
-  const restMs = status.legalAtUtc ? Date.parse(status.legalAtUtc) - now : 0
-  const counting = restMs > 0
-
   return (
-    <div className="px-4 pb-3.5 pt-1">
+    <div className="px-4 pb-3 pt-1">
       <div className="flex items-center gap-2">
         <StateIcon className={cn("h-3.5 w-3.5 shrink-0", tone.text)} aria-hidden="true" />
         <span
@@ -248,7 +256,7 @@ function Annunciator({ status, now }: { status: PilotStatus; now: number }) {
         className="mt-1.5 text-[26px] font-semibold leading-[1.1] tracking-tight text-foreground"
         suppressHydrationWarning
       >
-        {counting ? formatCountdown(restMs) : status.nextAction.headline}
+        {status.nextAction.headline}
       </p>
 
       {/* The tightest constraint — never "12 / 12 current". When nothing is
@@ -256,7 +264,6 @@ function Annunciator({ status, now }: { status: PilotStatus; now: number }) {
           limit refills, so 41% of a 12-month allowance is not "tight". */}
       {status.governing && (
         <p className="mt-1 text-xs leading-tight text-muted-foreground">
-          {counting ? "rest remaining · " : ""}
           <span className="text-muted-foreground/70">Tightest</span>{" "}
           {status.governing.label}
           <span className="mx-1 text-muted-foreground/40">·</span>
@@ -269,30 +276,61 @@ function Annunciator({ status, now }: { status: PilotStatus; now: number }) {
   )
 }
 
-/**
- * A countdown to the MINUTE. Seconds on a rest clock that has hours to run are
- * motion for its own sake — nothing a pilot does turns on them, and they cost
- * a re-render of the whole panel every second to show.
- */
-function formatCountdown(ms: number): string {
-  const total = Math.max(0, Math.round(ms / 60_000))
-  return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, "0")}`
-}
-
 /* ── Duty ────────────────────────────────────────────────────────────────── */
+
+/**
+ * The ramp the duty band draws with.
+ *
+ * `ok`/`caution`/`fail` are the status ramp and mean what they mean everywhere
+ * else on this page — met, close, not met. `info` is deliberately NOT on that
+ * ramp: a standby window filling up is a magnitude, not a verdict, and painting
+ * it amber would teach the reader that the colour means the same thing there as
+ * it does on a requirement cell. `idle` is "there is no limit to draw".
+ */
+const RAMP = {
+  ok: { fill: "bg-chart-2", text: "text-chart-2" },
+  caution: { fill: "bg-chart-4", text: "text-chart-4" },
+  fail: { fill: "bg-destructive", text: "text-destructive" },
+  info: { fill: "bg-primary", text: "text-primary" },
+  idle: { fill: "bg-muted-foreground/40", text: "text-muted-foreground" },
+} as const
+
+type Ramp = keyof typeof RAMP
+
+/** One slot of the scale beneath the timeline. */
+interface Slot {
+  value: string
+  label: string
+  /** A clock read off the live tick, so it cannot match the server render. */
+  live?: boolean
+  tone?: Ramp
+}
 
 /**
  * The duty band, and the one place the regulatory nuance shows.
  *
+ * It answers ONE question, in whichever form the phase demands, and it answers
+ * it as a PICTURE with three captions beneath rather than as a column of
+ * label/value pairs:
+ *
+ * | Phase | The question | The bar runs |
+ * |---|---|---|
+ * | on duty | how much FDP is left | FDP window open → its Reg 14 maximum |
+ * | off duty, duty ahead | will the rest reach the report | rest commenced → the later of legal / report |
+ * | off duty, nothing ahead | when may I go again | rest commenced → legal |
+ * | standby | how long am I committed for | window start → window end |
+ *
+ * The second row is the one that needed a picture. "Legal from 04:36" says
+ * nothing on its own — what a rest period has to be depends on the duty AHEAD
+ * as much as the one behind (para 4 wants 24 hours inclusive of a local night
+ * before a duty touching the window of circadian low) — so the report time is a
+ * CARET on the same scale as the rest, and a report that lands inside the rest
+ * still owed is a red band you can see before you have read a word.
+ *
  * The maximum is whatever CAAS Reg 14 produced for THIS duty — report time,
  * sectors, crew complement and acclimatisation already applied — and the table
- * that produced it is printed beside it. A fixed "/ 13:00" would be wrong for
- * most duties: an 04:00 report on four sectors and a 10:00 report on two do not
- * share a limit. With no computed maximum the band says so rather than
- * inventing one; a default is a number somebody might fly to.
- *
- * The ROLLING limits used to be printed here as well as in their own band. They
- * are gone from here — that was the duplication.
+ * that produced it is printed beside it. With no computed maximum the band says
+ * so rather than inventing one; a default is a number somebody might fly to.
  */
 function DutyBand({
   status,
@@ -321,311 +359,348 @@ function DutyBand({
   // as "off duty" is worse than reading it as a flight duty: the pilot is
   // committed, contactable and could be called at any moment.
   const onStandby = !onDuty && standby !== null
-  const standbyLeft = standby ? Math.max(0, Math.round((standby.endMs - now) / 60_000)) : 0
 
-  // ONE clock: the FDP. The panel used to carry a second, the crew duty period,
-  // gauged against the account preset's `maxSingleDutyHours` — and that figure
-  // is not in the regulation. CAAS caps duty over 14 and 28 days (Reg 12) and
-  // flight time over 28 days and 12 months (Reg 107); the only per-duty ceiling
-  // is Reg 14's FDP maximum, which is computed for THIS duty. A 13-hour "duty
-  // limit" was exactly the kind of invented number this panel refuses to print
-  // for the FDP itself.
-  const hasFdp = onDuty && active.maxFdpMinutes > 0
-  const fdpElapsed = onDuty ? active.fdpElapsedMinutes : 0
-  const fdpLeft = hasFdp ? Math.max(0, active.maxFdpMinutes - fdpElapsed) : 0
-  const fraction = hasFdp ? fdpElapsed / active.maxFdpMinutes : 0
+  /**
+   * Everything the band renders, decided once. Assembling it here rather than
+   * branching through the JSX is what keeps the four phases visibly parallel —
+   * they are the same instrument reading a different scale, not four layouts.
+   */
+  const view = ((): {
+    state: string
+    chip?: string
+    chipTone?: Ramp
+    bar: { fromMs: number; toMs: number; tone: Ramp; caretMs?: number; deficitFromMs?: number } | null
+    scale: Slot[]
+    footnote?: { text: string; tone?: Ramp }
+    legs: SectorLeg[]
+    nextRoute?: string
+  } => {
+    /* ── On duty ─────────────────────────────────────────────────────────── */
+    if (onDuty) {
+      const hasFdp = active.maxFdpMinutes > 0
+      // Para 10(b) can open the FDP window BEFORE the crew member reports, so
+      // the bar starts where the FDP started, not where the duty did.
+      const fdpOpenMs =
+        active.startMs - (active.fdpElapsedMinutes - active.elapsedMinutes) * 60_000
+      const left = Math.max(0, active.maxFdpMinutes - active.fdpElapsedMinutes)
+      const fraction = hasFdp ? active.fdpElapsedMinutes / active.maxFdpMinutes : 0
+
+      return {
+        state: "On duty",
+        chip: hasFdp
+          ? [
+              active.fdpTable && `Table ${active.fdpTable}`,
+              `Max ${formatDutyClock(active.maxFdpMinutes)}`,
+              active.augmented && "Aug",
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          : "No FDP limit computed",
+        chipTone: hasFdp ? undefined : "idle",
+        bar: hasFdp
+          ? {
+              fromMs: fdpOpenMs,
+              toMs: fdpOpenMs + active.maxFdpMinutes * 60_000,
+              tone: active.exceeded ? "fail" : fraction >= 0.8 ? "caution" : "ok",
+            }
+          : null,
+        scale: [
+          { value: clockAt(active.startMs), label: "Reported" },
+          { value: formatDutyClock(active.flightMinutes), label: "Flight" },
+          {
+            value: hasFdp ? formatDutyClock(left) : "—",
+            label: active.exceeded ? "FDP exceeded" : "FDP left",
+            live: true,
+            tone: active.exceeded ? "fail" : undefined,
+          },
+        ],
+        legs: active.legs,
+      }
+    }
+
+    /* ── Standby ─────────────────────────────────────────────────────────── */
+    if (onStandby) {
+      const left = Math.max(0, standby.remainingMinutes)
+      return {
+        state: standby.code,
+        chip: standby.activated ? "Activated" : "Not called",
+        chipTone: standby.activated ? "info" : undefined,
+        // The standby's OWN window. It is a magnitude, not a verdict, so it is
+        // never on the status ramp — see `RAMP`.
+        bar: { fromMs: standby.startMs, toMs: standby.endMs, tone: "info" },
+        scale: [
+          { value: clockAt(standby.startMs), label: "From" },
+          { value: formatDutyClock(left), label: "Left", live: true },
+          { value: clockAt(standby.endMs), label: "Until" },
+        ],
+        // An un-called standby is rest, so the rest clock keeps running
+        // beneath it — "if they ring now, am I legal" has to be answerable.
+        footnote: rest
+          ? rest.isLegalNow
+            ? { text: "Rested — legal now", tone: "ok" }
+            : {
+                text: `Rest to ${clockAt(Date.parse(rest.legalAtUtc))}`,
+                tone: "caution",
+              }
+          : undefined,
+        legs: [],
+        nextRoute: next?.route,
+      }
+    }
+
+    /* ── Off duty, with a duty ahead ─────────────────────────────────────── */
+    // The load-bearing case: rest worked BACKWARDS from the next duty, so the
+    // comparison is what this rest IS against what THAT duty needs.
+    if (next && next.restRequiredMinutes > 0) {
+      const restStartMs = next.reportMs - next.restAvailableMinutes * 60_000
+      const legalAtMs = restStartMs + next.restRequiredMinutes * 60_000
+      const short = next.legalAtReport === false
+
+      return {
+        state: phase === "post_duty" ? "Duty complete" : "Off duty",
+        chip: lastDuty?.route ? `Last ${lastDuty.route}` : undefined,
+        bar: {
+          fromMs: restStartMs,
+          toMs: Math.max(next.reportMs, legalAtMs),
+          tone: short ? "fail" : rest?.isLegalNow ? "ok" : "caution",
+          caretMs: next.reportMs,
+          // The rest still owed at the moment of report — the shortfall, drawn
+          // where it happens rather than stated as a number somewhere else.
+          deficitFromMs: short ? next.reportMs : undefined,
+        },
+        scale: [
+          {
+            value: clockAt(restStartMs),
+            label: lastDuty ? `Ended ${clockAt(lastDuty.debriefMs)}` : "Rest from",
+          },
+          {
+            value: formatDutyClock(next.restAvailableMinutes),
+            label: short
+              ? `Short ${formatDutyClock(next.restShortfallMinutes)}`
+              : `Of ${formatDutyClock(next.restRequiredMinutes)}`,
+            tone: short ? "fail" : undefined,
+          },
+          {
+            value: clockAt(next.reportMs),
+            label: `Report ${dayAt(next.reportMs)}`,
+          },
+        ],
+        // What that duty ASKS of you — its FLIGHT duty period, report to last
+        // on-blocks, against its own Reg 14 maximum. A report time says when to
+        // turn up; this says what turning up commits you to.
+        footnote:
+          next.plannedFdpMinutes > 0
+            ? {
+                text:
+                  next.maxFdpMinutes > 0
+                    ? `Next duty · FDP ${formatDutyClock(next.plannedFdpMinutes)} of ${formatDutyClock(next.maxFdpMinutes)}`
+                    : `Next duty · FDP ${formatDutyClock(next.plannedFdpMinutes)}, no limit computed`,
+                tone:
+                  next.maxFdpMinutes > 0 && next.plannedFdpMinutes > next.maxFdpMinutes
+                    ? "fail"
+                    : undefined,
+              }
+            : { text: "Next duty" },
+        legs: [],
+        nextRoute: next.route,
+      }
+    }
+
+    /* ── Off duty, nothing ahead ─────────────────────────────────────────── */
+    // Nothing to work backwards from, so the only thing that can be said is the
+    // earliest a duty could be planned — the requirement from the duty just
+    // flown alone.
+    if (rest) {
+      const restStartMs = now - rest.elapsedMinutes * 60_000
+      const legalAtMs = Date.parse(rest.legalAtUtc)
+      return {
+        state: phase === "post_duty" ? "Duty complete" : "Off duty",
+        chip: lastDuty?.route ? `Last ${lastDuty.route}` : undefined,
+        bar: {
+          fromMs: restStartMs,
+          toMs: Number.isFinite(legalAtMs) && legalAtMs > restStartMs ? legalAtMs : now,
+          tone: rest.isLegalNow ? "ok" : "caution",
+        },
+        scale: [
+          {
+            value: clockAt(restStartMs),
+            label: lastDuty ? `Ended ${clockAt(lastDuty.debriefMs)}` : "Rest from",
+          },
+          {
+            value: formatDutyClock(rest.elapsedMinutes),
+            label: `Of ${formatDutyClock(rest.requiredMinutes)}`,
+            live: true,
+          },
+          {
+            value: rest.isLegalNow ? "Now" : clockAt(legalAtMs),
+            label: "Legal from",
+            tone: rest.isLegalNow ? "ok" : undefined,
+          },
+        ],
+        footnote: { text: "No duty rostered", tone: "idle" },
+        legs: [],
+      }
+    }
+
+    /* ── Nothing known ───────────────────────────────────────────────────── */
+    return {
+      state: "Off duty",
+      chip: lastDuty?.route ? `Last ${lastDuty.route}` : undefined,
+      bar: null,
+      scale: lastDuty
+        ? [{ value: clockAt(lastDuty.debriefMs), label: "Last duty ended" }]
+        : [],
+      footnote: { text: "No duty rostered", tone: "idle" },
+      legs: [],
+      nextRoute: next?.route,
+    }
+  })()
 
   return (
     <section className="px-4 py-2.5" aria-label="Duty">
-      <div className="flex items-center gap-4">
-        {onDuty && hasFdp ? (
-          <DutyGauge
-            fraction={fraction}
-            tone={active.exceeded ? "fail" : fraction >= 0.8 ? "caution" : "ok"}
-            value={formatDutyClock(fdpLeft)}
-            caption="FDP left"
-          />
-        ) : onDuty ? (
-          <DutyGauge fraction={0} tone="idle" value="—" caption="no limit" />
-        ) : (
-          // Standby included. A standby is a duty, but the question it raises
-          // is the same one off duty raises — am I legal, and for what — so it
-          // gets the same gauge and the same card, plus its own window as a
-          // line. Gauging the standby's own window instead answered a question
-          // nobody was asking.
-          <RestGauge status={status} now={now} rest={rest} />
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+          {view.state}
+        </p>
+        {view.chip && (
+          <p
+            className={cn(
+              "min-w-0 truncate text-[10px] font-medium tabular-nums",
+              view.chipTone ? RAMP[view.chipTone].text : "text-muted-foreground",
+            )}
+          >
+            {view.chip}
+          </p>
         )}
-
-        <dl className="min-w-0 flex-1 space-y-1">
-          {onDuty ? (
-            <>
-              <Line
-                label="FDP left"
-                value={hasFdp ? formatDutyClock(fdpLeft) : "—"}
-                note={hasFdp ? `of ${formatDutyClock(active.maxFdpMinutes)}` : "not computed"}
-                live
-                emphasis
-              />
-              <Line
-                label="Flight"
-                value={formatDutyClock(active.flightMinutes)}
-                note={
-                  [active.fdpTable && `Table ${active.fdpTable}`, active.augmented && "Aug"]
-                    .filter(Boolean)
-                    .join(" · ") || undefined
-                }
-              />
-              <Line label="Reported" value={clockAt(active.startMs)} />
-            </>
-          ) : (
-            <>
-              {/* On standby: the window in hand, and — because an un-called
-                  standby is rest — the rest clock still running beneath it, so
-                  "if they ring now, am I legal" is answerable. */}
-              {onStandby && (
-                <Line
-                  label={standby!.code}
-                  value={`${clockAt(standby!.startMs)}–${clockAt(standby!.endMs)}`}
-                  note={
-                    standby!.activated
-                      ? "activated"
-                      : `${formatDutyClock(standbyLeft)} left`
-                  }
-                  live
-                  emphasis
-                />
-              )}
-              {/* Off duty the picture is three things: what was flown, the
-                  earliest a duty could legally be planned, and what is next —
-                  with the one question that joins them answered. */}
-              {lastDuty && (
-                <Line
-                  label="Last duty"
-                  value={lastDuty.route || "—"}
-                  note={`ended ${clockAt(lastDuty.debriefMs)}`}
-                />
-              )}
-              {next ? (
-                // ONE line for the next duty. Its route and its sector count
-                // are both drawn by the chain below — a line repeating them
-                // was the same thing said twice. What the chain cannot say is
-                // the date, and whether the rest reaches the report; that is
-                // what the note carries, and it names the shortfall only when
-                // there is one. A rest that clears it needs no words.
-                <>
-                  <Line
-                    label="Next report"
-                    value={clockAt(next.reportMs)}
-                    note={dayAt(next.reportMs)}
-                  />
-                  {/* What that duty ASKS of you — its FLIGHT duty period,
-                      report to last on-blocks, against its own Reg 14 maximum.
-                      A report time says when to turn up; this says what
-                      turning up commits you to. */}
-                  {next.plannedFdpMinutes > 0 && (
-                    <Line
-                      label="Next FDP"
-                      value={formatDutyClock(next.plannedFdpMinutes)}
-                      note={
-                        next.maxFdpMinutes > 0
-                          ? `of ${formatDutyClock(next.maxFdpMinutes)}`
-                          : "not computed"
-                      }
-                      emphasis={
-                        next.maxFdpMinutes > 0 &&
-                        next.plannedFdpMinutes > next.maxFdpMinutes
-                      }
-                    />
-                  )}
-                  {/* Rest, worked BACKWARDS from the duty it precedes. "Legal
-                      from 04:36" on its own says nothing — what a rest period
-                      has to be depends on the duty ahead as much as the one
-                      behind, since para 4 asks for 24 hours inclusive of a
-                      local night before a duty touching the window of
-                      circadian low. So the comparison is what this rest IS
-                      against what THIS duty needs. */}
-                  {next.restRequiredMinutes > 0 && (
-                    <Line
-                      label="Rest"
-                      value={formatDutyClock(next.restAvailableMinutes)}
-                      note={
-                        next.legalAtReport === false
-                          ? `short ${formatDutyClock(next.restShortfallMinutes)}`
-                          : `of ${formatDutyClock(next.restRequiredMinutes)}`
-                      }
-                      emphasis={next.legalAtReport === false}
-                    />
-                  )}
-                </>
-              ) : (
-                <>
-                  <Line label="Next duty" value="None scheduled" />
-                  {/* Nothing to work backwards from, so the only thing that can
-                      be said is the earliest a duty could be planned — the
-                      requirement from the duty just flown alone. */}
-                  <Line
-                    label="Legal from"
-                    value={
-                      !rest ? "—" : rest.isLegalNow ? "Now" : clockAt(Date.parse(rest.legalAtUtc))
-                    }
-                    live
-                  />
-                </>
-              )}
-            </>
-          )}
-        </dl>
       </div>
 
-      {/* The sector chain. A duty is up to four legs across several airports, and
-          "where am I in the pattern" is what the old recent-flights list could
-          never answer — it showed history, not this duty. */}
-      {/* On duty the chain is THIS duty's progress. Otherwise it is the NEXT
-          duty's shape — that is what the reader is looking ahead to, and a
-          route squeezed into a label is four small words where a chain is a
-          picture. The last duty stays a line above: it is context, not the
-          question being asked. */}
-      <SectorChain
-        legs={onDuty ? active.legs : []}
-        nextRoute={onDuty ? undefined : next?.route}
-      />
+      {view.bar && <Timeline {...view.bar} nowMs={now} />}
+
+      {view.scale.length > 0 && <Scale slots={view.scale} />}
+
+      {view.footnote && (
+        <p
+          className={cn(
+            "mt-1.5 text-[11px] leading-tight",
+            view.footnote.tone ? RAMP[view.footnote.tone].text : "text-muted-foreground",
+          )}
+          suppressHydrationWarning
+        >
+          {view.footnote.text}
+        </p>
+      )}
+
+      {/* The sector chain. A duty is up to four legs across several airports,
+          and "where am I in the pattern" is what the old recent-flights list
+          could never answer — it showed history, not this duty. On duty it is
+          THIS duty's progress; otherwise it is the NEXT duty's shape, which is
+          what the footnote above it has just named. */}
+      <SectorChain legs={view.legs} nextRoute={view.nextRoute} />
     </section>
   )
 }
 
 /**
- * The FDP gauge. This is a genuine ratio against a genuine limit — elapsed
- * against the maximum computed for this duty — which is precisely the case an
- * arc is for, and why the period-hours ring on the summary page is not one.
+ * The band's one picture: a scale in TIME, with now as the fill's leading edge.
+ *
+ * A ring was here before and it could only ever draw one quantity. The whole
+ * off-duty question is a COMPARISON between two instants on the same axis —
+ * when the rest becomes legal and when the next duty reports — and an arc has
+ * nowhere to put the second one. On a line they are simply two marks, and a
+ * report that lands inside the rest still owed is a red band.
+ *
+ * The tone is STATED by the caller, never derived from how full the bar is: a
+ * nearly-full FDP bar is a warning and a nearly-full REST bar is good news.
  */
-const GAUGE_TONE = {
-  ok: { arc: "stroke-chart-2", track: "stroke-chart-2/15" },
-  caution: { arc: "stroke-chart-4", track: "stroke-chart-4/15" },
-  fail: { arc: "stroke-destructive", track: "stroke-destructive/15" },
-  idle: { arc: "stroke-muted-foreground/40", track: "stroke-muted" },
-} as const
-
-function DutyGauge({
-  fraction,
+function Timeline({
+  fromMs,
+  toMs,
+  nowMs,
   tone,
-  value,
-  caption,
+  caretMs,
+  deficitFromMs,
 }: {
-  fraction: number
-  /**
-   * Stated, never derived from the fraction. A nearly-full FDP ring is a
-   * warning; a nearly-full REST ring is good news — deriving the colour from
-   * how full the arc is painted a fully-rested pilot amber.
-   */
-  tone: keyof typeof GAUGE_TONE
-  value: string
-  caption: string
+  fromMs: number
+  toMs: number
+  nowMs: number
+  tone: Ramp
+  /** A second instant on the same axis — the next duty's report time. */
+  caretMs?: number
+  /** Painted from here to the end: time that is owed and is not available. */
+  deficitFromMs?: number
 }) {
-  const size = 92
-  const stroke = 7
-  const r = (size - stroke) / 2
-  const c = 2 * Math.PI * r
-  const clamped = Math.min(1, Math.max(0, fraction))
-  const { arc: color, track } = GAUGE_TONE[tone]
+  const span = Math.max(1, toMs - fromMs)
+  const pct = (ms: number) => Math.min(100, Math.max(0, ((ms - fromMs) / span) * 100))
 
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" aria-hidden="true">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} className={track} />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={c}
-          strokeDashoffset={c * (1 - clamped)}
-          className={cn(color, "transition-[stroke-dashoffset] duration-700 motion-reduce:transition-none")}
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span
-          className="text-xl font-semibold leading-none tabular-nums text-foreground"
-          suppressHydrationWarning
-        >
-          {value}
-        </span>
-        <span className="mt-0.5 text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
-          {caption}
-        </span>
-      </div>
-    </div>
-  )
-}
-
-/** Off duty, the gauge measures rest served rather than FDP burned. */
-function RestGauge({
-  status,
-  now,
-  rest,
-}: {
-  status: PilotStatus
-  now: number
-  rest: PilotStatus["duty"]["rest"]
-}) {
-  if (!rest) {
-    return <DutyGauge fraction={0} tone="idle" value="—" caption="off duty" />
-  }
-  const restMs = status.legalAtUtc ? Date.parse(status.legalAtUtc) - now : 0
-  const legal = restMs <= 0
-  const served = rest.requiredMinutes > 0 ? rest.elapsedMinutes / rest.requiredMinutes : 1
-
-  return (
-    <DutyGauge
-      fraction={legal ? 1 : served}
-      // Rest served is progress TOWARD legality, so a full ring is green and a
-      // partial one is the amber of something still outstanding.
-      tone={legal ? "ok" : "caution"}
-      // Hours and minutes only. Slicing the h:mm:ss countdown to fit left
-      // "9:00:" on the gauge — a trailing colon reads as a truncation bug.
-      value={legal ? "Ready" : formatDutyClock(Math.round(restMs / 60_000))}
-      caption={legal ? "rested" : "to go"}
-    />
-  )
-}
-
-function Line({
-  label,
-  value,
-  note,
-  live,
-  emphasis,
-}: {
-  label: string
-  value: string
-  note?: string
-  live?: boolean
-  /** The binding limit — the one the gauge is showing. */
-  emphasis?: boolean
-}) {
-  return (
-    <div className="flex items-baseline justify-between gap-2">
-      <dt
-        className={cn(
-          "shrink-0 text-[11px]",
-          emphasis ? "font-medium text-foreground/80" : "text-muted-foreground",
+    <div className="relative mt-2 h-2.5">
+      <div className="absolute inset-0 overflow-hidden rounded-full bg-muted">
+        {deficitFromMs !== undefined && (
+          <span
+            className="absolute inset-y-0 right-0 bg-destructive/25"
+            style={{ left: `${pct(deficitFromMs)}%` }}
+            aria-hidden="true"
+          />
         )}
-      >
-        {label}
-      </dt>
-      <dd className="flex min-w-0 items-baseline gap-1.5">
-        {note && <span className="truncate text-[10px] text-muted-foreground/70">{note}</span>}
         <span
-          className="text-sm font-semibold tabular-nums text-foreground"
-          suppressHydrationWarning={live}
-        >
-          {value}
-        </span>
-      </dd>
+          className={cn(
+            "absolute inset-y-0 left-0 rounded-full transition-[width] duration-700 motion-reduce:transition-none",
+            RAMP[tone].fill,
+          )}
+          style={{ width: `${pct(nowMs)}%` }}
+          aria-hidden="true"
+        />
+      </div>
+      {caretMs !== undefined && (
+        <span
+          className="absolute -top-1 h-[18px] w-[2px] -translate-x-1/2 rounded-full bg-foreground"
+          style={{ left: `${pct(caretMs)}%` }}
+          aria-hidden="true"
+        />
+      )}
     </div>
   )
 }
+
+/**
+ * Three figures under the bar, in reading order: where this started, what it
+ * comes to, and where it ends.
+ *
+ * They are the band's whole text. The stack of right-aligned label/value rows
+ * they replaced said the same things in a column, which is the shape of a
+ * spreadsheet rather than of an instrument — and it left no room for the bar to
+ * be wide enough to read.
+ */
+function Scale({ slots }: { slots: Slot[] }) {
+  return (
+    <div className="mt-1.5 flex items-start gap-2">
+      {slots.map((slot, i) => (
+        <div
+          key={slot.label}
+          className={cn(
+            "min-w-0 flex-1",
+            slots.length > 1 && i === 1 && "text-center",
+            slots.length > 1 && i === slots.length - 1 && "text-right",
+          )}
+        >
+          <span
+            className={cn(
+              "block truncate text-sm font-semibold leading-tight tabular-nums",
+              slot.tone ? RAMP[slot.tone].text : "text-foreground",
+            )}
+            suppressHydrationWarning={slot.live}
+          >
+            {slot.value}
+          </span>
+          <span className="block truncate text-[9px] font-medium uppercase leading-tight tracking-wider text-muted-foreground">
+            {slot.label}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 
 /**
  * The duty's legs as a chain of stops.
