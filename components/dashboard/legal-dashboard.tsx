@@ -12,7 +12,10 @@ import { formatDutyClock, type SectorLeg } from "@/lib/utils/dashboard/duty-stat
 import { ANNUNCIATOR_WORD, type AnnunciatorState } from "@/lib/utils/dashboard/pilot-status"
 import type { PilotStatus } from "@/lib/utils/dashboard/pilot-status"
 import type { Requirement, RequirementState } from "@/lib/utils/dashboard/legality"
-import { tzFormatter, tzOffsetName } from "@/lib/utils/tz-format"
+import { tzFormatter } from "@/lib/utils/tz-format"
+import { formatClockDisplay } from "@/lib/utils/time"
+import { usePreferences } from "@/components/providers/preferences-provider"
+import type { DisplayPreferences } from "@/types/db/stores.types"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 
@@ -124,6 +127,7 @@ function useTick(active: boolean): number {
 export function LegalDashboard({ className }: { className?: string }) {
   const isActive = usePageActive("/")
   const now = useTick(isActive)
+  const { preferences } = usePreferences()
 
   // Recency comes off the dashboard aggregate rather than a second walk of the
   // flight history. The range is irrelevant to it — recency is always computed
@@ -141,17 +145,28 @@ export function LegalDashboard({ className }: { className?: string }) {
     return <Skeleton className={cn("h-full min-h-[24rem] rounded-3xl", className)} />
   }
 
-  return <LegalDashboardView status={status} now={now} className={className} />
+  return (
+    <LegalDashboardView
+      status={status}
+      now={now}
+      clockSeparator={preferences?.display?.clockSeparator}
+      className={className}
+    />
+  )
 }
 
 /** The presentational half — pure props, so it renders without the database. */
 export function LegalDashboardView({
   status,
   now,
+  clockSeparator,
   className,
 }: {
   status: PilotStatus
   now: number
+  /** How a point in time is punctuated — `02:30` vs `0230`. One app setting
+   *  governs every clock, and this page is not exempt. */
+  clockSeparator?: DisplayPreferences["clockSeparator"]
   className?: string
 }) {
   const tone = TONE[status.state]
@@ -181,7 +196,7 @@ export function LegalDashboardView({
 
       <div className="relative flex min-h-0 flex-col divide-y divide-border/40">
         <Annunciator status={status} now={now} />
-        <DutyBand status={status} now={now} />
+        <DutyBand status={status} now={now} clockSeparator={clockSeparator} />
         <CurrencyBand requirements={currency} />
         <LimitsBand requirements={limits} />
       </div>
@@ -264,13 +279,24 @@ function formatCountdown(ms: number): string {
  * The ROLLING limits used to be printed here as well as in their own band. They
  * are gone from here — that was the duplication.
  */
-function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
+function DutyBand({
+  status,
+  now,
+  clockSeparator,
+}: {
+  status: PilotStatus
+  now: number
+  clockSeparator?: DisplayPreferences["clockSeparator"]
+}) {
   const { phase, active, lastDuty, next, rest, standby } = status.duty
 
   const zone = React.useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
   const clockAt = (ms: number) =>
-    tzFormatter(zone, { hour: "2-digit", minute: "2-digit", hour12: false }, "hm").format(
-      new Date(ms),
+    formatClockDisplay(
+      tzFormatter(zone, { hour: "2-digit", minute: "2-digit", hour12: false }, "hm").format(
+        new Date(ms),
+      ),
+      clockSeparator,
     )
   const dayAt = (ms: number) =>
     tzFormatter(zone, { day: "2-digit", month: "short" }, "daymon")
@@ -283,7 +309,6 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
   // as "off duty" is worse than reading it as a flight duty: the pilot is
   // committed, contactable and could be called at any moment.
   const onStandby = !onDuty && standby !== null
-  const elapsed = onDuty ? Math.max(0, Math.floor((now - active.startMs) / 60_000)) : 0
   const standbyLeft = standby ? Math.max(0, Math.round((standby.endMs - now) / 60_000)) : 0
 
   // ONE clock: the FDP. The panel used to carry a second, the crew duty period,
@@ -310,20 +335,12 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
           />
         ) : onDuty ? (
           <DutyGauge fraction={0} tone="idle" value="—" caption="no limit" />
-        ) : onStandby ? (
-          // Its own window, not an FDP. A standby gauged against a maximum of
-          // zero would read as a flight duty whose limit failed to compute.
-          <DutyGauge
-            fraction={
-              standby!.endMs > standby!.startMs
-                ? (now - standby!.startMs) / (standby!.endMs - standby!.startMs)
-                : 0
-            }
-            tone="caution"
-            value={formatDutyClock(standbyLeft)}
-            caption="standby left"
-          />
         ) : (
+          // Standby included. A standby is a duty, but the question it raises
+          // is the same one off duty raises — am I legal, and for what — so it
+          // gets the same gauge and the same card, plus its own window as a
+          // line. Gauging the standby's own window instead answered a question
+          // nobody was asking.
           <RestGauge status={status} now={now} rest={rest} />
         )}
 
@@ -337,7 +354,6 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
                 live
                 emphasis
               />
-              <Line label="Elapsed" value={formatDutyClock(elapsed)} live />
               <Line
                 label="Flight"
                 value={formatDutyClock(active.flightMinutes)}
@@ -347,6 +363,7 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
                     .join(" · ") || undefined
                 }
               />
+              <Line label="Reported" value={clockAt(active.startMs)} />
             </>
           ) : (
             <>
@@ -357,20 +374,23 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
                 <Line
                   label={standby!.code}
                   value={`${clockAt(standby!.startMs)}–${clockAt(standby!.endMs)}`}
-                  note={standby!.activated ? "activated" : undefined}
+                  note={
+                    standby!.activated
+                      ? "activated"
+                      : `${formatDutyClock(standbyLeft)} left`
+                  }
+                  live
                   emphasis
                 />
               )}
               {/* Off duty the picture is three things: what was flown, the
                   earliest a duty could legally be planned, and what is next —
                   with the one question that joins them answered. */}
-              {!onStandby && lastDuty && (
+              {lastDuty && (
                 <Line
                   label="Last duty"
-                  value={formatDutyClock(
-                    Math.max(0, Math.floor((lastDuty.endMs - lastDuty.startMs) / 60_000)),
-                  )}
-                  note={lastDuty.route || dayAt(lastDuty.startMs)}
+                  value={lastDuty.route || "—"}
+                  note={dayAt(lastDuty.startMs)}
                 />
               )}
               {/* Not a countdown to the next duty — the earliest a duty may be
@@ -385,11 +405,6 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
                       ? "Now"
                       : clockAt(Date.parse(rest.legalAtUtc))
                 }
-                note={
-                  rest && !rest.isLegalNow
-                    ? `${formatDutyClock(Math.max(0, rest.requiredMinutes - rest.elapsedMinutes))} to go`
-                    : undefined
-                }
                 live
               />
               {next ? (
@@ -399,16 +414,36 @@ function DutyBand({ status, now }: { status: PilotStatus; now: number }) {
                 // the date, and whether the rest reaches the report; that is
                 // what the note carries, and it names the shortfall only when
                 // there is one. A rest that clears it needs no words.
-                <Line
-                  label="Next report"
-                  value={clockAt(next.reportMs)}
-                  note={
-                    next.legalAtReport === false
-                      ? `${dayAt(next.reportMs)} · short ${formatDutyClock(next.restShortfallMinutes)}`
-                      : dayAt(next.reportMs)
-                  }
-                  emphasis={next.legalAtReport === false}
-                />
+                <>
+                  <Line
+                    label="Next report"
+                    value={clockAt(next.reportMs)}
+                    note={
+                      next.legalAtReport === false
+                        ? `${dayAt(next.reportMs)} · short ${formatDutyClock(next.restShortfallMinutes)}`
+                        : dayAt(next.reportMs)
+                    }
+                    emphasis={next.legalAtReport === false}
+                  />
+                  {/* What that duty ASKS of you — planned length against its own
+                      Reg 14 maximum. A next report time says when to turn up;
+                      this says what turning up commits you to. */}
+                  {next.plannedDutyMinutes > 0 && (
+                    <Line
+                      label="Next FDP"
+                      value={formatDutyClock(next.plannedDutyMinutes)}
+                      note={
+                        next.maxFdpMinutes > 0
+                          ? `of ${formatDutyClock(next.maxFdpMinutes)}`
+                          : "not computed"
+                      }
+                      emphasis={
+                        next.maxFdpMinutes > 0 &&
+                        next.plannedDutyMinutes > next.maxFdpMinutes
+                      }
+                    />
+                  )}
+                </>
               ) : (
                 <Line label="Next duty" value="None scheduled" />
               )}

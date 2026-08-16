@@ -177,6 +177,10 @@ export interface NextDuty {
   legalAtReport: boolean | null
   /** Minutes of rest still owed at that report time. 0 when legal. */
   restShortfallMinutes: number
+  /** How long the duty is PLANNED to run, report to debrief. */
+  plannedDutyMinutes: number
+  /** Its own Reg 14 maximum. 0 when the duty period carries none. */
+  maxFdpMinutes: number
 }
 
 /**
@@ -322,6 +326,34 @@ export function deriveDutyStatus(
     return n
   }
 
+  /**
+   * When the FLIGHT duty period ended — which is not when the duty period did.
+   *
+   * A duty period runs to being free of all duties, so `dutyWindow` carries the
+   * 30 minutes of post-flight checks para 7(2) requires. The FDP does not: it
+   * ends at the last on-blocks. Keying the panel off the duty window therefore
+   * left it reading "Sector 2 of 2 · 2:58 FDP left" for half an hour after the
+   * aeroplane was parked and the flight logged — an FDP counting down that had
+   * already finished.
+   *
+   * Once every sector of the duty is on blocks, that instant is the end. Until
+   * then the duty is still running, however far past its planned debrief it
+   * goes — an unlogged sector is not a finished one.
+   */
+  const fdpEndOf = (dp: DutyPeriod, planned: DutyWindow, sectors: number): number => {
+    if (!flightArrivals || !dp.flightIds?.length) return planned.endMs
+    let latest = -Infinity
+    for (const id of dp.flightIds) {
+      const at = flightArrivals.get(id)
+      if (at === undefined) return planned.endMs
+      if (at > latest) latest = at
+    }
+    // Every sector the PLAN knows about has to be accounted for, or a
+    // part-flown duty would look finished at the first arrival.
+    if (dp.flightIds.length < sectors) return planned.endMs
+    return latest
+  }
+
   let active: ActiveDuty | null = null
   let standby: StandbyState | null = null
   let justFinished: ActiveDuty | null = null
@@ -383,20 +415,24 @@ export function deriveDutyStatus(
         }
       : dp
 
-    if (nowMs >= w.startMs && nowMs <= w.endMs) {
+    // The FDP ends at the last on-blocks, not at the debrief.
+    const fdpEnd = fdpEndOf(dp, w, effective.sectorCount || dp.sectorCount)
+    const inProgress: DutyWindow = { startMs: w.startMs, endMs: fdpEnd }
+
+    if (nowMs >= inProgress.startMs && nowMs <= inProgress.endMs) {
       // Ties go to the LATER-starting duty: a merged overnight and the sector
       // inside it can both contain `now`, and the pilot is in the inner one.
       if (!active || w.startMs > active.startMs) {
-        active = toActive(effective, w, nowMs, completedLegsOf(dp), true)
+        active = toActive(effective, inProgress, nowMs, completedLegsOf(dp), true)
       }
       continue
     }
 
-    if (w.endMs < nowMs && w.endMs > lastEndMs) {
-      lastEndMs = w.endMs
+    if (fdpEnd < nowMs && fdpEnd > lastEndMs) {
+      lastEndMs = fdpEnd
       justFinished = toActive(
         effective,
-        w,
+        inProgress,
         nowMs,
         effective.sectorCount || completedLegsOf(dp),
         false,
@@ -490,6 +526,7 @@ function toNextDuty(
   const legalAtMs = rest ? Date.parse(rest.legalAtUtc) : NaN
   const known = Number.isFinite(legalAtMs)
   const shortfall = known ? Math.max(0, Math.round((legalAtMs - reportMs) / 60_000)) : 0
+  const w = dutyWindow(dp)
 
   return {
     id: dp.id,
@@ -500,6 +537,8 @@ function toNextDuty(
     inMinutes: Math.round((reportMs - nowMs) / 60_000),
     legalAtReport: known ? shortfall === 0 : null,
     restShortfallMinutes: shortfall,
+    plannedDutyMinutes: w ? Math.round((w.endMs - w.startMs) / 60_000) : dp.dutyMinutes || 0,
+    maxFdpMinutes: dp.maxFdpMinutes || 0,
   }
 }
 

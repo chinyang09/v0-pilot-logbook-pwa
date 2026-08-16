@@ -668,23 +668,44 @@ leg and a finished duty.
 A plan duty with NO logbook counterpart at all is also picked up, which is
 every duty's first hour — the pilot has reported and nothing has landed yet.
 
-#### TWO clocks: FDP and the crew duty period
+#### The FDP ends at the last ON-BLOCKS, not at the debrief
 
-A pilot can be limited by either and they are different windows — FDP runs
-report → last on-blocks, duty runs report → debrief — so the band prints both
-and the gauge carries whichever BINDS (the smaller remaining). Showing only one
-is how a panel tells a pilot they have three hours left when they have one.
+A duty period runs to being free of all duties, so its window carries para
+7(2)'s 30 minutes of post-flight checks. The FDP does not. Keying the panel off
+the duty window left it reading "Sector 2 of 2 · 2:58 FDP left" for half an
+hour after the aeroplane was parked and both sectors logged.
 
-| | Limit | Source |
+`fdpEndOf` closes the active window at the last arrival once EVERY sector of
+the duty is on blocks. Until then the duty is still running however far past
+its planned debrief it goes — an unlogged sector is not a finished one, which
+is what keeps a delayed duty from falling out of the panel early.
+
+#### What the duty band says, and what it does not
+
+| | On duty | Off duty, standby, post-duty |
 |---|---|---|
-| FDP | `DutyPeriod.maxFdpMinutes` | CAAS Reg 14, per duty, via `calculateMaxFDP` |
-| Duty (CDP) | `FTLLimits.maxSingleDutyHours` | the account's FTL preset, the same figure `isDutyExceedingLimits` uses |
+| gauge | FDP remaining | rest to legal |
+| lines | FDP left of max, flight time + table, reported at | last duty's ROUTE, legal from, next report, next FDP |
+| chain | THIS duty's progress | the NEXT duty's shape |
 
-Neither is hardcoded, and a missing one reads as a dash rather than a default.
+Three readouts were removed for saying something already on screen:
 
-While on duty with nothing flagged, the annunciator headline is the SECTOR
-POSITION ("Sector 2 of 2"). "Nothing required" is true and useless at the gate
-between sectors.
+- **Elapsed** — a bare figure with no denominator, next to an FDP line that
+  carries `of 12:15` and a gauge drawing the same ratio.
+- **"N to go"** beside "Legal from" — the annunciator's countdown and the ring
+  both already say it. Three copies of one number.
+- **The last duty's LENGTH.** How long yesterday ran says nothing about whether
+  today is legal. Its ROUTE is worth a glance; its duration is not.
+
+**Next FDP** is what the next duty ASKS of you — its planned length against its
+own Reg 14 maximum. A report time says when to turn up; this says what turning
+up commits you to, and it is emphasised when the plan exceeds the maximum.
+
+**A STANDBY gets the off-duty card, not its own.** It is a duty, so it must
+never read as off duty — but the question it raises is the same one off duty
+raises, "am I legal and for what", so it takes the same rest gauge and the same
+lines with its window added. Gauging the standby's own window instead answered
+a question nobody was asking.
 
 #### Annunciator, governing constraint, next action
 
@@ -3369,7 +3390,10 @@ When making changes, be aware of these high-impact files:
 - Do not let the summary page's flight list grow the page — it scrolls in its own bounded box, so a year-long period cannot push the breakdown below it out of reach
 - Do not read an in-progress duty from the logbook alone. `mergeDutyPeriods` prefers the logbook for today, and mid-duty the logbook holds only the sectors already flown — so a two-sector day with one sector logged reads as a duty that ended at lunchtime and the panel falls through to a rest countdown. Pass `scheduleDutyPeriods` into `deriveDutyStatus`; where the roster runs later, the duty is still on
 - Do not treat the FDP pipeline's duty periods as the whole plan. `computeFDPResult` filters to `isFlownFlight`, so a sector sitting in the logbook as `scheduledOut`/`scheduledIn` contributes nothing — on a part-flown day with no roster imported there is no plan anywhere, and the panel reads "Roster Clear" and counts down rest between sectors. `buildPlannedDuties` rebuilds the day from the flight rows with scheduled fallbacks; it is for duty shape and FDP only, never cumulative limits
-- Do not show only ONE of FDP and duty remaining — they are different windows (report → last on-blocks vs report → debrief) and either can bind. Print both and gauge the smaller remaining, or the panel tells a pilot they have three hours left when they have one
+- Do not end the ACTIVE duty at the debrief — the FDP ends at the last ON-BLOCKS, and the duty window carries para 7(2)'s 30 minutes of post-flight checks after it. Keyed off the window the panel kept counting an FDP down for half an hour after the aeroplane was parked. `fdpEndOf` closes it at the last arrival once EVERY sector is on blocks, and not before: an unlogged sector is not a finished one
+- Do not print a figure the gauge already draws, or a countdown the annunciator already runs. "Elapsed" had no denominator beside an FDP line carrying one; "N to go" beside "Legal from" was the third copy of the same number. And the last duty's LENGTH says nothing about whether the next one is legal — its route does
+- Do not give a standby its own card shape. It is a duty and must never read as off duty, but the question it raises is the off-duty question — am I legal, and for what — so it takes the same rest gauge and lines with its window added
+- Do not format a clock on the legal page without `clockSeparator` — `formatClockDisplay` governs every point in time in the app and this page is not exempt. The view takes it as a prop so the presentational half stays free of the database
 - Do not take the FDP maximum, sector count or route from the logbook half of a part-flown duty — Reg 14 sets the maximum by the sectors PLANNED, so a one-sector logbook duty carries a one-sector limit that nobody should fly to. Plan supplies the shape and the limit; the record supplies what has been flown
 - Do not put a number inside a meter's fill without checking it fits — below `LABEL_FITS_INSIDE` it goes outside the fill instead. A figure clipped by its own bar is worse than no figure
 - Do not print "12 / 12 currencies current" — a pilot does not need telling about the eleven that are fine. The panel names the TIGHTEST constraint, and falls back to the fullest rolling limit only when nothing is flagged

@@ -349,3 +349,96 @@ describe("off duty, looking ahead", () => {
     expect(s.next!.restShortfallMinutes).toBe(0)
   })
 })
+
+/**
+ * The FDP ends at the last ON-BLOCKS, not at the debrief.
+ *
+ * A duty period runs to being free of all duties, so its window carries the 30
+ * minutes of post-flight checks para 7(2) requires. The FDP does not. Keying
+ * the panel off the duty window left it reading "Sector 2 of 2 · 2:58 FDP
+ * left" for half an hour after the aeroplane was parked and both sectors
+ * logged — an FDP counting down that had already stopped.
+ */
+describe("when the duty stops being ON DUTY", () => {
+  const day = [
+    flight({
+      id: "s1",
+      date: "2026-08-15",
+      departureIcao: "WSSS",
+      arrivalIcao: "ZJHK",
+      scheduledOut: "23:07",
+      scheduledIn: "02:36",
+      outTime: "23:07",
+      inTime: "02:36",
+      blockTime: "03:29",
+    }),
+    flight({
+      id: "s2",
+      date: "2026-08-16",
+      departureIcao: "ZJHK",
+      arrivalIcao: "WSSS",
+      scheduledOut: "03:47",
+      scheduledIn: "07:06",
+      outTime: "03:47",
+      inTime: "07:06",
+      blockTime: "03:19",
+    }),
+  ]
+
+  // The pipeline merges the overnight into one duty; both sectors are on
+  // blocks, the last at 07:06Z on the 16th.
+  const duties = buildPlannedDuties(day)
+  const arrivals = new Map([
+    ["s1", Date.parse("2026-08-16T02:36:00Z")],
+    ["s2", Date.parse("2026-08-16T07:06:00Z")],
+  ])
+
+  it("is on duty right up to the last on-blocks", () => {
+    const s = deriveDutyStatus(duties, new Date("2026-08-16T07:00:00Z"), null, arrivals)
+    expect(s.phase).toBe("on_duty")
+  })
+
+  it("is NOT on duty in the post-flight half hour", () => {
+    // 07:17Z — eleven minutes after the last arrival, and inside the duty
+    // window, which runs to the 07:36 debrief. This is the reported case.
+    const s = deriveDutyStatus(duties, new Date("2026-08-16T07:17:00Z"), null, arrivals)
+    expect(s.phase).not.toBe("on_duty")
+    expect(s.active).toBeNull()
+    expect(s.lastDuty).not.toBeNull()
+  })
+
+  it("stays on duty while a sector is still unlogged", () => {
+    // Only the first sector has landed. The second has not, so the duty is
+    // still running however far past its planned debrief it goes — an unlogged
+    // sector is not a finished one.
+    const partial = new Map([["s1", Date.parse("2026-08-16T02:36:00Z")]])
+    const s = deriveDutyStatus(duties, new Date("2026-08-16T07:17:00Z"), null, partial)
+    expect(s.phase).toBe("on_duty")
+  })
+
+  it("carries the next duty's own length and maximum", () => {
+    const nextDay = buildPlannedDuties([
+      flight({
+        id: "n1",
+        date: "2026-08-17",
+        departureIcao: "WSSS",
+        arrivalIcao: "VOCB",
+        outTime: "",
+        inTime: "",
+        scheduledOut: "12:30",
+        scheduledIn: "16:50",
+        blockTime: "",
+      }),
+    ])
+    const s = deriveDutyStatus(
+      duties,
+      new Date("2026-08-16T09:00:00Z"),
+      null,
+      arrivals,
+      [...duties, ...nextDay],
+    )
+    // Report 11:30, debrief 17:20 — 5h50m planned, against its Reg 14 maximum.
+    expect(s.next!.plannedDutyMinutes).toBe(5 * 60 + 50)
+    expect(s.next!.maxFdpMinutes).toBeGreaterThan(0)
+  })
+})
