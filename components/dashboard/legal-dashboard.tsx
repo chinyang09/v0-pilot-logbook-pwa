@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
-import { Check, TriangleAlert, OctagonAlert, ChevronRight, ArrowUpRight } from "lucide-react"
+import { Check, TriangleAlert, OctagonAlert, ArrowUpRight } from "lucide-react"
 
 import { usePilotStatus } from "@/hooks/data/use-pilot-status"
 import { usePageActive } from "@/hooks/use-page-active"
@@ -22,8 +22,8 @@ import { cn } from "@/lib/utils"
  * The legal dashboard — one screen, no scroll, read like an instrument.
  *
  * Four bands, in the order a pilot asks: what is my state and what must I do
- * (the annunciator), where am I in this duty (the gauge and the sector chain),
- * am I qualified (currency), and how much have I used (limits).
+ * (the annunciator), where am I in my duty day (the timeline and the sector
+ * chain), am I qualified (currency), and how much have I used (limits).
  *
  * **ONE CONTINUOUS SURFACE, not a stack of cards.** Six glass cards with their
  * own borders, radii and 12px margins spend roughly 120px of a phone's height
@@ -41,6 +41,11 @@ import { cn } from "@/lib/utils"
  * across the grid — which is exactly the "jumbled" complaint. Now each band
  * holds one kind of thing, and within the duty band the rolling limits are
  * gone entirely: they were printed twice.
+ *
+ * They also take the SHAPE their content asks for. A currency is a name and a
+ * number of days, so the band is a grid of small cells read at a glance; a
+ * limit is a fraction of something, so it stays a bar with its figure on it.
+ * Forcing one form on both is what the separation exists to avoid.
  */
 
 const STATE_ICON: Record<RequirementState, React.ComponentType<{ className?: string }>> = {
@@ -770,20 +775,59 @@ function SectorChain({ legs, nextRoute }: { legs: SectorLeg[]; nextRoute?: strin
 /**
  * Everything measured in DAYS — recency and documents, nearest expiry first.
  *
- * Recency is ONE row, not two: takeoffs and landings are two halves of one
+ * It is a GRID of cells, not a column of rows. Each currency is one small fact
+ * of the same kind — a name and a number of days — so a set is what they are,
+ * and a set laid out two-up reads as one glance rather than as a list with an
+ * implied sequence. It is also half the height, which matters: this is the one
+ * band that absorbs the squeeze (`flexible`), so every row it does not spend is
+ * headroom on a short phone.
+ *
+ * Sorted most-pressing-first with no headings, so **the top-left cell is always
+ * the thing closest to stopping the pilot**. Headings would cost four rules and
+ * ~56px to impose an order nobody is reading for.
+ *
+ * Recency is ONE cell, not two: takeoffs and landings are two halves of one
  * question, and as separate urgency-sorted cells they did not even end up next
- * to each other. Expanding the row shows both counts.
+ * to each other. Opening the cell shows both counts.
  */
 function CurrencyBand({ requirements }: { requirements: Requirement[] }) {
   const ordered = React.useMemo(
     () => [...requirements].sort((a, b) => (a.daysUntil ?? 9e9) - (b.daysUntil ?? 9e9)),
     [requirements],
   )
+
+  /**
+   * ONE open cell at a time, and its detail opens BELOW the whole grid rather
+   * than inside the cell.
+   *
+   * A cell that grew in place would stretch its grid row and leave a hole
+   * beside it, and the detail is a two-column `dl` that has no room in half a
+   * phone's width. Full width under the grid gives it that room, and the open
+   * cell keeps a ring so it is never ambiguous which one is being described.
+   *
+   * The id is held rather than the requirement, so a background refresh that
+   * rebuilds the model keeps the same cell open instead of closing it. A cell
+   * that disappears simply closes — no effect, nothing to clean up.
+   */
+  const [openId, setOpenId] = React.useState<string | null>(null)
+  const open = ordered.find((r) => r.id === openId) ?? null
+
   return (
     <Band label="Currency" requirements={ordered} flexible>
-      {ordered.map((r) => (
-        <ExpandableRow key={r.id} requirement={r} />
-      ))}
+      <div className="grid grid-cols-2 gap-1.5 @[26rem]:grid-cols-3 @[44rem]:grid-cols-4">
+        {ordered.map((r) => (
+          <CurrencyCell
+            key={r.id}
+            requirement={r}
+            open={r.id === openId}
+            onToggle={() => setOpenId((v) => (v === r.id ? null : r.id))}
+          />
+        ))}
+      </div>
+
+      <AnimatePresence initial={false}>
+        {open && <CurrencyDetail key={open.id} requirement={open} />}
+      </AnimatePresence>
     </Band>
   )
 }
@@ -948,96 +992,129 @@ function Band({
 }
 
 /**
- * A currency row that opens in place.
+ * One currency, as a cell.
  *
- * Tap to reveal the detail, tap again to close. Nothing navigates: the reader
- * came to this screen to check a status, and a route change loses it. The deep
- * link lives INSIDE the expansion, where it is a deliberate second step rather
- * than the accidental result of a tap.
+ * The figure sits above its caption, which is the duty band's `Scale`
+ * vocabulary — the two bands are then reading the same way, a number over the
+ * word for what it is, rather than each inventing its own arrangement.
+ *
+ * **Only a FLAGGED cell is tinted.** The status ramp means met / close / not
+ * met, and tinting the met ones green as well would paint the whole band and
+ * leave the one thing that needs attention with nothing to stand out against.
+ * Colour is never the only carrier either: every state ships its own icon.
  */
-function ExpandableRow({ requirement }: { requirement: Requirement }) {
-  const [open, setOpen] = React.useState(false)
-  const { label, state, value, progress, detail, href } = requirement
+function CurrencyCell({
+  requirement,
+  open,
+  onToggle,
+}: {
+  requirement: Requirement
+  open: boolean
+  onToggle: () => void
+}) {
+  const { label, state, value, progress, detail } = requirement
   const tone = REQ_TONE[state]
   const Icon = STATE_ICON[state]
   const hasDetail = (detail?.length ?? 0) > 0
+  const flagged = state !== "ok"
 
   return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={hasDetail ? open : undefined}
-        disabled={!hasDetail}
-        className={cn(
-          "flex w-full items-center gap-2 rounded-lg py-1.5 text-left transition-colors",
-          hasDetail && "hover:bg-[var(--on-glass-fill-soft)]",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        )}
-      >
-        <Icon className={cn("h-3.5 w-3.5 shrink-0", tone.icon)} aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-xs text-foreground">{label}</span>
-        {/* Only where it says something. An `ok` document sits at nearly zero
-            against its warning window, so its meter is an empty track next to a
-            day count that already answered the question — four of those in a
-            column is just noise. */}
-        {progress !== undefined && state !== "ok" && (
-          <span className={cn("h-1 w-10 shrink-0 overflow-hidden rounded-full", tone.track)}>
-            <span
-              className={cn("block h-full rounded-full", tone.fill)}
-              style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
-            />
-          </span>
-        )}
-        <span className="w-12 shrink-0 text-right text-xs font-semibold tabular-nums text-foreground">
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={hasDetail ? open : undefined}
+      disabled={!hasDetail}
+      className={cn(
+        "flex min-w-0 flex-col rounded-lg px-2 py-1.5 text-left transition-colors",
+        flagged ? tone.track : "bg-muted/40",
+        hasDetail && !open && "hover:brightness-110",
+        open && "ring-1 ring-inset ring-foreground/25",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+      )}
+    >
+      <span className="flex min-w-0 items-center gap-1">
+        <Icon className={cn("h-3 w-3 shrink-0", tone.icon)} aria-hidden="true" />
+        <span
+          className={cn(
+            "min-w-0 truncate text-sm font-semibold leading-tight tabular-nums",
+            flagged ? tone.icon : "text-foreground",
+          )}
+        >
           {value}
         </span>
-        {hasDetail && (
-          <ChevronRight
-            className={cn(
-              "h-3 w-3 shrink-0 text-muted-foreground/50 transition-transform duration-200 motion-reduce:transition-none",
-              open && "rotate-90",
-            )}
-            aria-hidden="true"
-          />
-        )}
-      </button>
+      </span>
 
-      <AnimatePresence initial={false}>
-        {open && hasDetail && (
-          <motion.div
-            key="detail"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={EXPAND}
-            className="overflow-hidden"
-          >
-            {/* Indented under the row's own label (the icon's width plus its
-                gap), and a real two-column grid so every value lines up in a
-                column instead of landing wherever its label's length left it. */}
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 pb-2 pl-[1.375rem] pt-0.5">
-              {detail?.map((d) => (
-                <React.Fragment key={d.label}>
-                  <dt className="text-[11px] text-muted-foreground/70">{d.label}</dt>
-                  <dd className="text-[11px] font-medium tabular-nums text-foreground/90">
-                    {d.value}
-                  </dd>
-                </React.Fragment>
-              ))}
-              <dd className="col-span-2">
-                <Link
-                  href={href}
-                  className="mt-0.5 inline-flex w-fit items-center gap-1 text-[11px] font-medium text-primary hover:underline"
-                >
-                  Open
-                  <ArrowUpRight className="h-3 w-3" />
-                </Link>
+      <span className="mt-0.5 block truncate text-[9px] font-medium uppercase leading-tight tracking-wider text-muted-foreground">
+        {label}
+      </span>
+
+      {/* A meter only where it says something. An `ok` document sits at nearly
+          zero against its warning window, so its bar is an empty track beside a
+          day count that already answered the question — four of those is noise.
+          `mt-auto` keeps the metered and un-metered cells the same height. */}
+      {flagged && progress !== undefined && (
+        <span className="mt-auto block h-[3px] w-full overflow-hidden rounded-full bg-foreground/10">
+          <span
+            className={cn("block h-full rounded-full", tone.fill)}
+            style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
+          />
+        </span>
+      )}
+    </button>
+  )
+}
+
+/**
+ * The open cell's detail, under the grid.
+ *
+ * Nothing here navigates by default — the reader came to check a status, and a
+ * route change loses the screen they came for and costs a back-navigation to
+ * recover it. The deep link lives INSIDE the expansion, where it is a
+ * deliberate second step rather than the accidental result of a tap.
+ */
+function CurrencyDetail({ requirement }: { requirement: Requirement }) {
+  const { label, state, detail, href } = requirement
+  const tone = REQ_TONE[state]
+
+  return (
+    <motion.div
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: "auto", opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      transition={EXPAND}
+      className="overflow-hidden"
+    >
+      <div className="mt-1.5 rounded-lg bg-muted/40 px-2.5 py-2">
+        <p
+          className={cn(
+            "mb-1 text-[9px] font-semibold uppercase tracking-wider",
+            state === "ok" ? "text-muted-foreground" : tone.icon,
+          )}
+        >
+          {label}
+        </p>
+        {/* A real two-column grid, so every value lines up in a column instead
+            of landing wherever its label's length left it. */}
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+          {detail?.map((d) => (
+            <React.Fragment key={d.label}>
+              <dt className="text-[11px] text-muted-foreground/70">{d.label}</dt>
+              <dd className="text-[11px] font-medium tabular-nums text-foreground/90">
+                {d.value}
               </dd>
-            </dl>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+            </React.Fragment>
+          ))}
+          <dd className="col-span-2">
+            <Link
+              href={href}
+              className="mt-0.5 inline-flex w-fit items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+            >
+              Open
+              <ArrowUpRight className="h-3 w-3" />
+            </Link>
+          </dd>
+        </dl>
+      </div>
+    </motion.div>
   )
 }

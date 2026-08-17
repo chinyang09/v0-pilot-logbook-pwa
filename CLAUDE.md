@@ -588,7 +588,10 @@ OFF DUTY                            Last WSSS-VVNB-WSSS ← the duty band's eyeb
   Next duty · FDP 10:35 of 12:15
   ●━━━━●━━━━○   WSSS   VVNB   WSSS                      ← the chain: this duty, or the next
 CURRENCY                                                ← days that EXPIRE, urgent first
-  ⚠ T/O + Ldg 90d  8d left    ✓ Medical  14 Mar
+  ┌ ⚠ 8d ──────────┐ ┌ ✓ 118d ────────┐                  a GRID: figure over caption,
+  │ T/O + LDG 90D  │ │ MEDICAL        │                  tinted only when flagged
+  │ ▓▓▓▓▓▓░░░░░░   │ │                │
+  └────────────────┘ └────────────────┘
 LIMITS                                                  ← hours that REFILL, paired
   Duty  14d [▓▓▓ 74 ░░] 90h   28d [▓▓ 121 ░░] 180h
 ```
@@ -808,15 +811,35 @@ it is a deliberate second step rather than the accidental result of a tap.
 They are two different kinds of thing and sorting them into one urgency-ordered
 grid is what made the first version unreadable:
 
-| Band | Question | Unit | Behaviour |
-|---|---|---|---|
-| Currency | am I qualified and recent | DAYS | expires |
-| Limits | how much have I used | HOURS | refills |
+| Band | Question | Unit | Behaviour | Form |
+|---|---|---|---|---|
+| Currency | am I qualified and recent | DAYS | expires | a GRID of cells |
+| Limits | how much have I used | HOURS | refills | a BAR per window |
+
+They take the shape their content asks for. A currency is a name and a number
+of days — one small fact, so a set of them reads as a grid at a glance. A limit
+is a fraction of something, which is a bar. Forcing one form on both is what the
+separation exists to avoid.
 
 - **Recency is ONE requirement, not two.** Takeoffs and landings are two halves
   of one question, and as separate urgency-sorted cells they did not even end up
   beside each other. The cell answers with the binding half; expanding shows
   both counts and the lapse date.
+- **A currency cell is a FIGURE over its CAPTION** — the duty band's `Scale`
+  vocabulary, so the two bands read the same way instead of each inventing an
+  arrangement. Two-up on a phone, three at 26rem, four at 44rem: this is the one
+  `flexible` band, so every row it does not spend is headroom on a short phone
+  (measured: ~92px against the old column of rows' ~104px, and far more legible).
+- **Only a FLAGGED cell is tinted.** The ramp means met / close / not met, so
+  tinting the met ones green too paints the whole band and leaves the one thing
+  needing attention nothing to stand out against. The icon still carries the
+  state — colour is never the only carrier.
+- **ONE cell opens at a time, and its detail opens BELOW the grid**, full width,
+  with a ring left on the cell it belongs to. A cell growing in place would
+  stretch its grid row and leave a hole beside it, and the detail is a
+  two-column `dl` with no room in half a phone's width. The open CELL ID is
+  held, not the requirement, so a background refresh that rebuilds the model
+  keeps the same cell open rather than closing it.
 - **Limits are PAIRED by what they limit** — Duty over its 14d and 28d windows,
   then Flight over 28d and 1y. That is how the regulation is written and how a
   pilot holds it; four independent rows sorted by urgency scattered the pairs.
@@ -3443,6 +3466,8 @@ When making changes, be aware of these high-impact files:
 - Do not fall back to the fullest rolling limit for the "tightest" constraint — a limit REFILLS, so 41% of a 12-month flight allowance is not tight, and reporting it named the least urgent thing on the page. With nothing flagged the answer is the nearest EXPIRY, which is why only `currency` requirements carry `daysUntil`
 - Do not sort currencies and rolling limits into one grid. They are different kinds of thing (days that expire vs hours that refill) and mixing them is what made the panel unreadable at a glance — separate bands, and keep the limits PAIRED (Duty 14d/28d, then Flight 28d/1y) rather than four rows sorted by urgency
 - Do not split 90-day recency back into separate takeoff and landing cells — they are two halves of one question, and urgency-sorted they did not even sit beside each other. One cell answers with the binding half; expanding shows both
+- Do not turn the currency band back into a column of full-width rows, and do not give a currency cell a bar. A currency is a name and a number of DAYS — one small fact — so it is a figure over a caption in a grid read at a glance; a bar belongs to the limits band, where the number really is a fraction of something. And do not expand a cell IN PLACE: in a grid that stretches its row and leaves a hole beside it, so one cell opens at a time into a full-width block under the grid, with a ring left on the cell it describes
+- Do not tint the currency cells that are MET. The status ramp means met / close / not met, so tinting all of them paints the whole band and leaves the one flagged cell nothing to stand out against
 - Do not put rest back in the currency band — it is a property of the duty just flown, not a standing qualification, and a live countdown among expiry dates reads as a different kind of thing. It lives in the duty band, and the annunciator has to fold it into the verdict itself since it is no longer one of the requirements
 - Do not print the rolling limits in the duty band as well as the limits band — that was the duplication the rework removed. The duty band carries FDP and flight time for THIS duty only
 - Do not derive the duty band's bar colour from how full it is — state the tone. A nearly-full FDP bar is a warning and a nearly-full REST bar is good news; deriving it painted a fully-rested pilot amber. And do not put a standby's window on the status ramp: how full it is is a magnitude, not a verdict (`RAMP.info`)
