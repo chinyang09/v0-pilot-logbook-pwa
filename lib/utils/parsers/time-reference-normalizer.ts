@@ -86,7 +86,12 @@ export interface NormalizedTime {
 //   ⁺¹  = next day (most common — late-night departure rolls over)
 //   ⁻¹  = previous day (early-morning sector shown under the next day's row)
 //   "+1" / "-1" ASCII fallbacks for CSV exports that strip the superscripts.
-const TIME_TOKEN_RE = /^A?(\d{1,2}):(\d{2})(⁺¹|⁻¹|\+1|-1)?$/;
+//   ¹   = next day, as the PDF report prints it: a bare superscript one, set
+//         apart from the time by a space ("02:05 ¹"). It means exactly what ⁺¹
+//         means in the CSV. Unrecognised, the whole token failed to parse, and
+//         a sector whose DEPARTURE carried it had no OUT time and was dropped —
+//         the return leg of every overnight turnaround.
+const TIME_TOKEN_RE = /^A?(\d{1,2}):(\d{2})(?:\s*(⁺¹|⁻¹|¹)|(\+1|-1))?$/;
 
 /**
  * Parse a raw CSV time token into its components.
@@ -109,9 +114,9 @@ export function parseTimeToken(raw: string): ParsedTimeToken | null {
     return null;
   }
 
-  const marker = match[3];
+  const marker = match[3] ?? match[4];
   const dayDelta =
-    marker === "⁺¹" || marker === "+1"
+    marker === "⁺¹" || marker === "¹" || marker === "+1"
       ? 1
       : marker === "⁻¹" || marker === "-1"
         ? -1

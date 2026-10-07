@@ -232,6 +232,7 @@ export {
   getFavoriteAirports,
   getAirportLocalTime,
   getAirportDatabase,
+  ensureAirportDatabase,
   searchAirports,
   hasExactAirportCodeMatch,
   getAirportTimeInfo,

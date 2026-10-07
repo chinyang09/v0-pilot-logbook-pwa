@@ -76,6 +76,21 @@ describe("parseTimeToken", () => {
     });
   });
 
+  it("accepts the PDF's bare, space-separated ¹ as next day", () => {
+    expect(parseTimeToken("02:05 ¹")).toEqual({
+      time: "02:05",
+      isActual: false,
+      dayDelta: 1,
+      nextDay: true,
+    });
+    expect(parseTimeToken("A01:27¹")).toEqual({
+      time: "01:27",
+      isActual: true,
+      dayDelta: 1,
+      nextDay: true,
+    });
+  });
+
   it("returns null for an invalid token", () => {
     expect(parseTimeToken("")).toBeNull();
     expect(parseTimeToken("garbage")).toBeNull();
