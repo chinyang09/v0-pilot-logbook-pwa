@@ -59,6 +59,8 @@ import {
   formatTimezoneOffset,
   getCurrentTimeUTC,
   isValidHHMM,
+  hhmmToMinutes,
+  minutesToHHMM,
 } from "@/lib/utils/time";
 import { usePersonnel } from "@/hooks/data";
 import { usePreferences } from "@/components/providers/preferences-provider";
@@ -166,6 +168,7 @@ function TimeRow({
   onNow,
   showNow = true,
   clockSeparator = "colon",
+  derivedValue,
 }: {
   label: string;
   utcValue: string;
@@ -174,10 +177,17 @@ function TimeRow({
   onNow?: () => void;
   showNow?: boolean;
   clockSeparator?: DisplayPreferences["clockSeparator"];
+  /**
+   * What the row falls back to when nothing has been entered — shown muted, in
+   * place of `--:--`, so the value actually in force is visible rather than
+   * looking like a blank the pilot has to fill.
+   */
+  derivedValue?: string;
 }) {
   const localValue = utcToLocal(utcValue, timezoneOffset);
   const tzLabel = formatTimezoneOffset(timezoneOffset);
   const hasValue = isValidHHMM(utcValue);
+  const hasDerived = !hasValue && isValidHHMM(derivedValue || "");
 
   return (
     <div className="flex items-center justify-between py-3.5 px-4 row-divider">
@@ -191,7 +201,9 @@ function TimeRow({
           >
             {hasValue
               ? formatClockDisplay(utcValue, clockSeparator)
-              : formatClockDisplay("--:--", clockSeparator, "--:--")}
+              : hasDerived
+                ? formatClockDisplay(derivedValue!, clockSeparator)
+                : formatClockDisplay("--:--", clockSeparator, "--:--")}
           </span>
           <span className="text-xs text-muted-foreground">UTC</span>
         </div>
@@ -1392,12 +1404,24 @@ export function FlightForm({
     if (
       activeTimePicker === "outTime" ||
       activeTimePicker === "offTime" ||
-      activeTimePicker === "scheduledOut"
+      activeTimePicker === "scheduledOut" ||
+      activeTimePicker === "reportTime"
     ) {
       return depTimezone;
     }
     return arrTimezone;
   }, [activeTimePicker, depTimezone, arrTimezone]);
+
+  // The ROSTERED report — scheduled gate-out less the hour para 7(2) allows
+  // for pre-flight checks. Shown muted when nothing has been entered, because
+  // it is the time actually in force, not a blank waiting to be filled. An
+  // entered value only ever means the company MOVED the report (para 10); a
+  // late pushback does not.
+  const rosteredReport = useMemo(() => {
+    const basis = formData.scheduledOut || formData.outTime;
+    if (!isValidHHMM(basis || "")) return "";
+    return minutesToHHMM((hhmmToMinutes(basis!) - 60 + 1440) % 1440);
+  }, [formData.scheduledOut, formData.outTime]);
 
   // Register detail panel actions for the desktop floating glass bar
   const detailActions = useMemo(() => {
@@ -1549,6 +1573,18 @@ export function FlightForm({
               onClick={() => openAirportPicker("arrivalIcao")}
               showChevron
               icon={<PlaneLanding className="h-4 w-4" />}
+            />
+          </SwipeableRow>
+
+          <SwipeableRow onClear={() => clearField("reportTime")}>
+            <TimeRow
+              label="Report"
+              utcValue={formData.reportTime || ""}
+              derivedValue={rosteredReport}
+              timezoneOffset={depTimezone}
+              onTap={() => setActiveTimePicker("reportTime")}
+              onNow={() => setNowTime("reportTime")}
+              clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 

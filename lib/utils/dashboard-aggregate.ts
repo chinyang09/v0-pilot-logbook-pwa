@@ -14,6 +14,7 @@ import type { Aircraft } from "@/types/entities/aircraft.types"
 import type { AutoFillPreferences } from "@/types/db/stores.types"
 import { hhmmToMinutes } from "./time"
 import { isFlownFlight } from "./flight-calculations"
+import { sortFlights } from "./flight-sort"
 import { normalizeRegistration } from "./string"
 import { normalizeAircraftType } from "./parsers/shared/aircraft-type-map"
 
@@ -102,17 +103,22 @@ export interface DashboardAggregates {
   }
   byAutoFillField: AutoFillMinutes
   topTypes: Array<{ type: string; minutes: number }>
-  /** Most recent (up to 3) flown flights with non-zero T/O or LDG counts.
-   *  Always computed against the full flight history, NOT the period filter,
-   *  because the dashboard uses these for currency tracking. */
-  recentTLEvents: TLEvent[]
-  /** Rolling 90-day takeoff + landing currency status per FAA 14 CFR 61.57.
-   *  Always computed against the full flight history. */
+  /** Rolling 90-day takeoff + landing recency (3 of each).
+   *  Always computed against the full flight history, NOT the period filter. */
   ninetyDayCurrency: NinetyDayCurrency
   /** Flown flights inside the period filter, newest first. */
   periodFlights: PeriodFlight[]
 }
 
+/**
+ * A flight in the period, carrying enough to answer "what was this flight?"
+ * without leaving the dashboard.
+ *
+ * The dashboard row shows date / number / route / block; expanding it shows the
+ * rest. Everything here is already in hand while the aggregator walks the
+ * flights, so the detail costs a few field copies rather than a second pass or
+ * a per-row read when a row opens.
+ */
 export interface PeriodFlight {
   id: string
   date: string
@@ -122,13 +128,18 @@ export interface PeriodFlight {
   departureIata: string
   arrivalIata: string
   blockMinutes: number
-}
-
-export interface TLEvent {
-  flightId: string
-  date: string
-  flightNumber: string
+  /** OOOI, verbatim — formatted by the consumer through `formatClockDisplay`
+   *  so the user's `clockSeparator` governs them. */
+  outTime: string
+  offTime: string
+  onTime: string
+  inTime: string
+  flightMinutes: number
+  nightMinutes: number
   aircraftReg: string
+  aircraftType: string
+  pilotRole: string
+  pilotFlying: boolean
   takeoffs: number
   landings: number
 }
@@ -137,6 +148,16 @@ export interface NinetyDayCurrency {
   takeoffs: number
   landings: number
   current: boolean
+  /**
+   * The date the count first drops below 3 — i.e. 90 days after the flight
+   * that currently supplies the third-newest event, whichever of takeoffs or
+   * landings lapses first. `null` when already below 3 (nothing to lapse).
+   *
+   * This is the half of recency a bare "current / not current" chip cannot
+   * say: a pilot sitting on exactly three landings is legal today and illegal
+   * next week, and that is the thing worth knowing before it happens.
+   */
+  lapseIso: string | null
 }
 
 const EMPTY: DashboardAggregates = {
@@ -156,9 +177,19 @@ const EMPTY: DashboardAggregates = {
   byEngine: { se: 0, me: 0, jet: 0 },
   byAutoFillField: emptyAutoFillMinutes(),
   topTypes: [],
-  recentTLEvents: [],
-  ninetyDayCurrency: { takeoffs: 0, landings: 0, current: false },
+  ninetyDayCurrency: { takeoffs: 0, landings: 0, current: false, lapseIso: null },
   periodFlights: [],
+}
+
+/** Days a takeoff/landing counts toward recency. */
+const RECENCY_DAYS = 90
+/** Takeoffs (and landings) required inside that window. */
+const RECENCY_REQUIRED = 3
+
+function isoPlusDays(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
 }
 
 function classifyCategory(category: string | undefined): keyof DashboardAggregates["byCategory"] {
@@ -272,44 +303,57 @@ export function aggregateDashboard({
     byEngine: { se: 0, me: 0, jet: 0 },
     byAutoFillField: emptyAutoFillMinutes(),
     topTypes: [],
-    recentTLEvents: [],
-    ninetyDayCurrency: { takeoffs: 0, landings: 0, current: false },
+    ninetyDayCurrency: { takeoffs: 0, landings: 0, current: false, lapseIso: null },
     periodFlights: [],
   }
 
-  // Compute 90-day currency + last-3 T/O+LDG events from the full flown
-  // history (independent of the period filter).
+  // Recency is computed against the full flown history, independent of the
+  // period filter — a 7-day period does not make a pilot un-current.
   const ninetyDaysAgo = new Date(now)
-  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - RECENCY_DAYS)
   const ninetyAgoIso = `${ninetyDaysAgo.getFullYear()}-${(ninetyDaysAgo.getMonth() + 1)
     .toString()
     .padStart(2, "0")}-${ninetyDaysAgo.getDate().toString().padStart(2, "0")}`
 
-  const tlCandidates: TLEvent[] = []
+  // Newest first, so the walk below meets the third event in recency order.
+  const recentEvents: Array<{ date: string; takeoffs: number; landings: number }> = []
   for (const flight of flights) {
-    if (!flight.date) continue
+    if (!flight.date || flight.date < ninetyAgoIso) continue
     if (!isFlownFlight(flight)) continue
     const to = (flight.dayTakeoffs || 0) + (flight.nightTakeoffs || 0)
     const ldg = (flight.dayLandings || 0) + (flight.nightLandings || 0)
     if (to === 0 && ldg === 0) continue
-    tlCandidates.push({
-      flightId: flight.id,
-      date: flight.date,
-      flightNumber: flight.flightNumber || "",
-      aircraftReg: flight.aircraftReg || "",
-      takeoffs: to,
-      landings: ldg,
-    })
-    if (flight.date >= ninetyAgoIso) {
-      result.ninetyDayCurrency.takeoffs += to
-      result.ninetyDayCurrency.landings += ldg
-    }
+    recentEvents.push({ date: flight.date, takeoffs: to, landings: ldg })
+    result.ninetyDayCurrency.takeoffs += to
+    result.ninetyDayCurrency.landings += ldg
   }
+  recentEvents.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+
   result.ninetyDayCurrency.current =
-    result.ninetyDayCurrency.takeoffs >= 3 && result.ninetyDayCurrency.landings >= 3
-  result.recentTLEvents = tlCandidates
-    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
-    .slice(0, 3)
+    result.ninetyDayCurrency.takeoffs >= RECENCY_REQUIRED &&
+    result.ninetyDayCurrency.landings >= RECENCY_REQUIRED
+
+  // When the count is met, the flight that supplies the THIRD event is what
+  // holds it up — recency lapses 90 days after that flight's date, not after
+  // the most recent one. Takeoffs and landings lapse independently; the earlier
+  // of the two is when the pilot stops being current.
+  if (result.ninetyDayCurrency.current) {
+    const bindingDate = (pick: (e: (typeof recentEvents)[number]) => number): string | null => {
+      let count = 0
+      for (const e of recentEvents) {
+        count += pick(e)
+        if (count >= RECENCY_REQUIRED) return e.date
+      }
+      return null
+    }
+    const toDate = bindingDate((e) => e.takeoffs)
+    const ldgDate = bindingDate((e) => e.landings)
+    const earliest =
+      toDate && ldgDate ? (toDate < ldgDate ? toDate : ldgDate) : (toDate ?? ldgDate)
+    result.ninetyDayCurrency.lapseIso = earliest
+      ? isoPlusDays(earliest, RECENCY_DAYS)
+      : null
+  }
 
   const typeMinutes = new Map<string, number>()
 
@@ -365,6 +409,18 @@ export function aggregateDashboard({
       departureIata: flight.departureIata || "",
       arrivalIata: flight.arrivalIata || "",
       blockMinutes: blockM,
+      outTime: flight.outTime || "",
+      offTime: flight.offTime || "",
+      onTime: flight.onTime || "",
+      inTime: flight.inTime || "",
+      flightMinutes: flightM,
+      nightMinutes: hhmmToMinutes(flight.nightTime),
+      aircraftReg: flight.aircraftReg || "",
+      aircraftType: flight.aircraftType || "",
+      pilotRole: flight.pilotRole || "",
+      pilotFlying: Boolean(flight.pilotFlying),
+      takeoffs: (flight.dayTakeoffs || 0) + (flight.nightTakeoffs || 0),
+      landings: (flight.dayLandings || 0) + (flight.nightLandings || 0),
     })
 
     for (const key of Object.keys(AUTO_FILL_FIELD_MAP) as AutoFillKey[]) {
@@ -426,10 +482,11 @@ export function aggregateDashboard({
     .sort((a, b) => b.minutes - a.minutes)
     .slice(0, 3)
 
-  // Newest first; tie-break is undefined but stable enough for display.
-  result.periodFlights.sort((a, b) =>
-    a.date < b.date ? 1 : a.date > b.date ? -1 : 0,
-  )
+  // The ONE list order (date, out time, departure, id) — the same comparator the
+  // logbook uses. Sorting on the date alone left same-day sectors in whatever
+  // order the table returned them, so a day's legs could swap places between
+  // renders and read in a different order here than in the logbook.
+  result.periodFlights = sortFlights(result.periodFlights)
 
   return result
 }

@@ -215,13 +215,43 @@ export interface CurrencyWithStatus extends Currency {
 export interface RestPeriodInfo {
   restMinutes: number               // Actual rest between duties
   requiredRestMinutes: number       // Minimum required per Reg 3
-  includesLocalNight: boolean       // Rest overlaps 22:00-06:00 SGT
+  /**
+   * Whether the rest contains a LOCAL NIGHT as the First Schedule defines it —
+   * 8 hours falling between 2200 and 0800 local time, measured where the crew
+   * member actually is. Not a fixed 22:00–06:00 home-base band.
+   */
+  includesLocalNight: boolean
   precedingDutyMinutes: number      // Duration of preceding duty
   compliant: boolean                // restMinutes >= requiredRestMinutes
-  rule: "3a" | "3b" | "3c" | "3d"  // Which Reg 3 sub-rule applies
+  /**
+   * Which sub-rule governs — the one demanding the most rest.
+   *
+   * `3a`–`3d` are the minimum rest periods of paragraph 3. `4a` and `4b` are
+   * paragraph 4's 24-hour requirement around duties that encompass an early
+   * start, a late finish, or a take-off or landing in the window of circadian
+   * low: `4a` before the FIRST of such a series, `4b` after two consecutive
+   * ones.
+   */
+  rule: "3a" | "3b" | "3c" | "3d" | "4a" | "4b"
 }
 
 export type DutyPeriodSource = "logbook" | "schedule" | "merged"
+
+/**
+ * The three things paragraph 4 of the Fifth Schedule reacts to, each defined in
+ * the First Schedule in ACCLIMATED time:
+ *
+ * - **early start** — a scheduled departure commencing 0500–0659
+ * - **late finish** — a scheduled arrival ending 0100–0159
+ * - **window of circadian low** — a take-off or landing in 0200–0459
+ */
+export interface CircadianFlags {
+  earlyStart: boolean
+  lateFinish: boolean
+  woclOperation: boolean
+  /** Any of the three — what para 4 calls a duty that "encompasses" one. */
+  disruptive: boolean
+}
 
 export interface DutyPeriod {
   id: string
@@ -233,7 +263,32 @@ export interface DutyPeriod {
 
   // Calculated durations (in minutes)
   dutyMinutes: number
+  /**
+   * What this duty contributes to the CUMULATIVE limits of para 12, when that
+   * differs from its real length. Absent means the whole of it.
+   *
+   * Only standby differs today: para 6(7) counts **20%** of standby served at
+   * home or in local accommodation, and para 6(3) folds AIRPORT standby into
+   * the rest period or the following FDP rather than counting it separately.
+   */
+  countedDutyMinutes?: number
   flightMinutes: number             // Total block time
+  /**
+   * What kind of duty period this is. Absent means a flight duty period, which
+   * is what every duty period was before standby was tracked.
+   *
+   * A standby is a DUTY period but not a FLIGHT duty period: paragraph 14's
+   * tables do not apply to it, so it carries no FDP maximum and must never
+   * reach an FDP gauge.
+   */
+  dutyKind?: "flight" | "standby"
+  /** How a standby is served — see para 6(3) and 6(7). */
+  standbyKind?: "home" | "airport"
+  /**
+   * When a standby was activated (para 6(6)), UTC HH:MM. Set only where a
+   * following duty reported inside the standby's window.
+   */
+  activatedAt?: string
 
   // Rest period (CAAS Reg 3)
   restBefore?: RestPeriodInfo       // Rest since last duty
@@ -249,8 +304,87 @@ export interface DutyPeriod {
   crewConfig?: CrewConfiguration          // defaults to "two-pilot"
   augmentedCrew?: AugmentedCrewLevel      // defaults to "none"
   fdpTableUsed?: FdpTableUsed             // which CAAS table was applied
+  /**
+   * Whether appropriate in-flight rest facilities are confirmed available.
+   * Para 15(3)(b) makes them a condition of any augmented-crew extension;
+   * unknown withholds it.
+   */
+  inFlightRestFacilities?: boolean
+  /**
+   * **The one input paragraph 14 enters its tables on** — the local time at the
+   * place of commencement of the FDP, HH:MM.
+   *
+   * It is NOT `reportTime` converted, and the difference is the whole reason
+   * this field exists. `reportTime` is when the duty ACTUALLY started; para
+   * 10(a) says that where reporting is delayed by less than 4 hours "the
+   * maximum permitted flight duty period is based on the ORIGINAL reporting
+   * time but the flight duty period starts at the actual reporting time". A
+   * 23-minute delay on a 2150 report pushed the recomputed lookup into the
+   * 2200–0559 band and took an hour off the maximum.
+   *
+   * Captured once, by whoever built the duty period and therefore knows the
+   * scheduled times. Every later stage re-derives the maximum through
+   * `deriveMaxFDP`, which reads this rather than re-deriving it.
+   */
+  fdpStartLocal?: string
+  /**
+   * Minutes of the FDP already spent when the crew member reported.
+   *
+   * Zero for every ordinary duty. Non-zero only under para 10(b): where a
+   * reporting delay is 4 hours or more the FDP "starts 4 hours after the
+   * original reporting time", which is EARLIER than the actual report, so the
+   * window is already partly gone at the moment the crew member walks in.
+   */
+  fdpElapsedAtReport?: number
+  /**
+   * When the FLIGHT duty period ends, UTC HH:MM — the last on-blocks.
+   *
+   * NOT the debrief. A duty period runs to being free of all duties, so
+   * `debriefTime` carries para 7(2)'s 30 minutes of post-flight checks; the FDP
+   * stops when the aeroplane parks. Measuring a duty's FDP from report to
+   * debrief overstates it by that half hour.
+   */
+  fdpEndTime?: string
   departureTimezoneOffset?: number        // UTC offset of departure airport
+  /**
+   * UTC offset of the ARRIVAL airport of the last sector — i.e. where the crew
+   * member actually is once the duty ends.
+   *
+   * "Local night" is defined in local time, and the local time that matters for
+   * the rest after a duty is the one where the rest is taken. Assuming home
+   * base put a Singapore night against a rest period spent in London.
+   */
+  arrivalTimezoneOffset?: number
+  /**
+   * The zone the crew member was ACCLIMATED to when this duty commenced, in
+   * hours from UTC — the state defined in the First Schedule, not home base.
+   * Set by `applyAcclimatisation` once the whole timeline is known.
+   */
+  acclimatedOffset?: number
+  /**
+   * Absolute UTC instants the circadian classification of para 4 needs:
+   * the first scheduled gate-out, the last scheduled gate-in, and every
+   * take-off and landing.
+   *
+   * Stored rather than classified at construction because "early start",
+   * "late finish" and "window of circadian low" are all defined in ACCLIMATED
+   * time, and acclimatisation is only known once the whole timeline is in hand.
+   */
+  departureMs?: number
+  arrivalMs?: number
+  takeoffLandingMs?: number[]
+  /** Set by `applyAcclimatisation`, against the acclimated time. */
+  circadian?: CircadianFlags
   effectiveSectors?: number               // after long sector adjustment
+  /**
+   * Every sector's block time, in minutes.
+   *
+   * Carried on the duty period so that a MERGE can re-apply the long sector
+   * adjustment of para 14(2). Without it, merging an overnight duty recomputed
+   * the FDP maximum from the sector COUNT alone and silently dropped the
+   * adjustment — so an over-long merged duty read as compliant.
+   */
+  sectorMinutes?: number[]
 
   // Data origin
   source: DutyPeriodSource

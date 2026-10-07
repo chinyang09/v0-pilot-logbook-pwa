@@ -528,6 +528,435 @@ A simulator carries its duration in `simulatedInstrumentTime`, NOT `blockTime`
 `entryDuration()` is what a card should display. The flight form's **Type** row
 sits above the date and moves the duration across when the type changes.
 
+### The Dashboard — TWO pages, one toggle
+
+The dashboard is two screens behind a segmented control in the header, because
+it was being asked two questions that want opposite layouts:
+
+| | Answers | Shape |
+|---|---|---|
+| **Legal** (default) | am I current, what must I do, where am I in my duty | ONE SCREEN, NO SCROLL |
+| **Summary** | what have I flown and how does it add up | period-scoped, scrolls |
+
+Serving both from one layout is what turns a dashboard into a spreadsheet. A
+pilot about to report wants an instrument they can read in two seconds; a pilot
+reviewing a month wants depth and is happy to scroll for it. They get different
+containers: the legal page is laid out TO the available height
+(`px-panel pt-chrome pb-chrome` on a full-height flex column), the summary page
+is an ordinary `PageContainer`.
+
+`useDashboardView` is a MODULE STORE read through `useSyncExternalStore` — the
+same shape as `useDBReady`/`useIsDesktop` — persisted to `localStorage` and
+hydrated inside `subscribe` (which React calls in an effect), so there is no
+setState-in-effect and no first render with the wrong page.
+
+**The period controls belong to the summary page only.** The calendar button and
+the expanding period pills are meaningless on the legal page, and the action bar
+is the one thing that can push a button under the centred nav pill — so they are
+not rendered there at all.
+
+#### The legal page is ONE CONTINUOUS SURFACE
+
+Not a stack of cards. Six glass cards with their own borders, radii and 12px
+margins spend roughly 120px of a phone's height on separation alone, which is
+the difference between this fitting and not. Sections are hairline `divide-y`
+rules inside one surface — what an EFB page does, and why it can be dense
+without being noisy.
+
+Measured, with zero page scroll and zero internal overflow: **390×844 phone,
+360×780 phone, and a 1180 desktop.** The surface is `max-h-full`, NOT `h-full` —
+stretching it makes the one `flex-1` section absorb every spare pixel, which
+left ~200px of empty grid under the last requirement on a tall phone.
+
+The timeline redesign that replaced the ring gauge is **strictly shorter** than
+what was measured (duty band ~152px → ~146px; the annunciator lost 2px of
+padding), so the fit holds by construction. Any change that ADDS a row to the
+duty band has to be re-measured on a 360×780 phone before it lands.
+
+Four bands, in the order a pilot asks. There was a fifth — a header strip
+carrying the date, a live clock and the phase word — and it is gone: a pilot has
+a watch, and the annunciator below already carries the state.
+
+```
+⚠ CAUTION                                               ← master annunciator
+  Rest short by 3:00                                    ← what to DO (the imperative)
+  Tightest T/O 90d · 8d left                            ← the governing constraint
+OFF DUTY                            Last WSSS-VVNB-WSSS ← the duty band's eyebrow
+  ▬▬▬▬▬▬▬▬▬▬▬▬▬▮░░░░░░▓▓▓▓▓                            ← ONE picture, a scale in TIME
+  09:26          9:24            21:50                    (▮ = report, ▓ = rest still owed)
+  ENDED 08:56    SHORT 3:00      REPORT 17 AUG
+  Next duty · FDP 10:35 of 12:15
+  ●━━━━●━━━━○   WSSS   VVNB   WSSS                      ← the chain: this duty, or the next
+CURRENCY                                                ← days that EXPIRE, urgent first
+  ┌ ⚠ 8d ──────────┐ ┌ ✓ 118d ────────┐                  a GRID: figure over caption,
+  │ T/O + LDG 90D  │ │ MEDICAL        │                  tinted only when flagged
+  │ ▓▓▓▓▓▓░░░░░░   │ │                │
+  └────────────────┘ └────────────────┘
+LIMITS                                                  ← hours that REFILL, paired
+  Duty  14d [▓▓▓ 74 ░░] 90h   28d [▓▓ 121 ░░] 180h
+```
+
+#### The FDP maximum is NEVER hardcoded
+
+This is the one number on that screen where a wrong answer could put someone
+over a limit. Under CAAS Reg 14 (Fifth Schedule) the maximum daily FDP moves
+with report time, sector count, crew complement, acclimatisation and the
+long-sector adjustment — a fixed "13:00" is wrong for most duties.
+
+`DutyPeriod` **already carries** `maxFdpMinutes` and the `fdpTableUsed` that
+produced it, computed by `calculateMaxFDP` when the duty period was built.
+`duty-status.ts` READS that number; it does not invent one, and the panel prints
+the table beside it so the figure can be checked rather than trusted. A duty
+carrying no computed maximum shows a dash and "No FDP limit computed" — a
+default is a number somebody might fly to.
+
+**There is deliberately no 7-day duty figure.** CAAS imposes 14-day and 28-day
+duty caps (Reg 12) and 28-day/12-month flight caps (Reg 107). Printing a 7-day
+limit the regulation does not contain is worse than printing none.
+
+#### Adaptive: the panel changes with the duty phase
+
+`deriveDutyStatus` classifies `off` / `on_duty` / `post_duty` from the duty
+periods' absolute UTC windows (with the past-midnight wrap), and the duty band
+answers a different question in each:
+
+| Phase | Leads with |
+|---|---|
+| `on_duty` | elapsed, FDP remaining against this duty's max, the meter |
+| `post_duty` (≤3h after debrief) | the duty just flown, and time to next report |
+| `off` | not on duty, and time to next report |
+
+When two windows contain the instant, the LATER-starting one wins (a merged
+overnight and a sector inside it; the pilot is in the inner one).
+
+#### A PART-FLOWN duty is still a duty — read the plan, not just the record
+
+This is the subtlest thing on the page and it was wrong. `mergeDutyPeriods`
+prefers the LOGBOOK for any date that is not in the future, which is right for
+the rolling and cumulative calculations — flown hours are the truth. It is wrong
+for "am I still on duty": mid-duty the logbook holds only the sectors already
+flown, so a two-sector day with sector one in the book produced a duty that
+"ended" on arrival, and the panel fell straight through to a rest countdown
+while the pilot was in the cruise on sector two. A four-sector day did it three
+times.
+
+So `deriveDutyStatus` takes the PLAN alongside the merged duty periods, and
+where a plan duty overlaps a logbook duty and runs LATER, the duty is still in
+progress. There are TWO sources of a plan and a pilot may have either or both:
+
+| Source | Where it comes from |
+|---|---|
+| `FDPResult.scheduleDutyPeriods` | a roster import (`scheduleEntries`) |
+| `FDPResult.plannedDutyPeriods` | **the flight rows themselves** (`buildPlannedDuties`) |
+
+The second one is the load-bearing case and it was missed first time round.
+`computeFDPResult` filters to `isFlownFlight` before building duty periods — so
+unflown placeholders cannot inflate the cumulative totals, which is right — but
+that also means a sector sitting in the logbook as `scheduledOut`/`scheduledIn`
+with no OOOI contributes NOTHING. On a two-sector day with sector one flown and
+no roster imported, there was no plan anywhere: the panel read "Roster Clear"
+and counted down rest between sectors. `buildPlannedDuties` rebuilds the day
+from the flight rows with each sector falling back to its scheduled times, and
+it is used for duty shape and FDP only, never for cumulative limits.
+
+The effective duty then takes:
+
+| From the PLAN | From the RECORD |
+|---|---|
+| debrief, `sectorCount`, `route` | `flightMinutes` (what has actually been flown) |
+| `maxFdpMinutes`, `fdpTableUsed` | `flightIds` (which legs are on blocks) |
+
+The maximum comes from the plan because **Reg 14 sets the FDP maximum by the
+sectors PLANNED, not the sectors flown so far** — a one-sector logbook duty
+carries a one-sector maximum, and flying to that number would be flying to the
+wrong limit. The sector chain comes from the plan for the same reason: it is
+what makes a four-sector day show four legs with one complete, instead of one
+leg and a finished duty.
+
+A plan duty with NO logbook counterpart at all is also picked up, which is
+every duty's first hour — the pilot has reported and nothing has landed yet.
+
+#### The FDP ends at the last ON-BLOCKS, not at the debrief
+
+A duty period runs to being free of all duties, so its window carries para
+7(2)'s 30 minutes of post-flight checks. The FDP does not. Keying the panel off
+the duty window left it reading "Sector 2 of 2 · 2:58 FDP left" for half an
+hour after the aeroplane was parked and both sectors logged.
+
+`fdpEndOf` closes the active window at the last arrival once EVERY sector of
+the duty is on blocks. Until then the duty is still running however far past
+its planned debrief it goes — an unlogged sector is not a finished one, which
+is what keeps a delayed duty from falling out of the panel early.
+
+#### What the duty band says, and what it does not
+
+The band is ONE INSTRUMENT reading a different scale per phase — eyebrow,
+timeline, three captions, footnote, chain — not four layouts. `DutyBand` decides
+the whole thing once into a `view` object; the JSX below it is flat.
+
+| Phase | The question | The bar runs from … to | Caret |
+|---|---|---|---|
+| on duty | how much FDP is left | FDP window open → its Reg 14 maximum | — |
+| off duty, duty ahead | will the rest reach the report | rest commenced → the later of legal / report | the REPORT |
+| off duty, nothing ahead | when may I go again | rest commenced → legal | — |
+| standby | how long am I committed for | window start → window end | — |
+
+| | eyebrow (right) | the three captions | footnote | chain |
+|---|---|---|---|---|
+| on duty | `Table A · Max 12:15` | reported / flight / **FDP left** | — | THIS duty |
+| off duty | `Last WSSS-VVNB` | ended / **rest of required** / report + date | next duty's FDP of max | the NEXT duty |
+| standby | activated or not | from / **left** / until | the rest clock, still running | the next duty |
+
+**The second row is the one that needed a picture.** The off-duty question is a
+COMPARISON between two instants on one axis — when the rest becomes legal and
+when the next duty reports — and a ring has nowhere to put the second one. On a
+line they are two marks, and a report landing inside the rest still owed is a
+red band you see before reading a word. That is why the ring is gone.
+
+**The gauges' hero number went with them.** `DutyGauge`/`RestGauge` printed the
+rest countdown inside the ring while the annunciator printed it as the hero and
+the lines printed "N to go" — three copies. The annunciator owns the one hero
+line now, and it is `nextAction.headline`, which is the CONTEXTUAL form ("Rest
+short by 3:00", "Rest until 04:36") rather than a bare countdown. Do not put a
+raw countdown back in the annunciator.
+
+Three readouts were removed earlier for the same reason and stay removed:
+
+- **Elapsed** — a bare figure with no denominator, next to an FDP line that
+  carries `of 12:15` and a bar drawing the same ratio.
+- **"N to go"** beside "Legal from" — see above.
+- **The last duty's LENGTH.** How long yesterday ran says nothing about whether
+  today is legal. Its ROUTE is worth a glance (the eyebrow) and its END TIME is
+  (the first caption); its duration is not.
+
+**`RAMP.info` is not on the status ramp, deliberately.** A standby window
+filling up is a magnitude, not a verdict — amber there would teach the reader
+that the colour means the same thing as on a requirement cell, where it means
+whether they can legally fly. `idle` is "there is no limit to draw".
+
+**Next FDP** is what the next duty ASKS of you — its FLIGHT duty period, report
+to last on-blocks, against its own Reg 14 maximum. Measured to the DEBRIEF it
+would carry para 7(2)'s 30 minutes of post-flight checks and overstate the very
+figure the maximum is compared against, so `DutyPeriod.fdpEndTime` records the
+last on-blocks and `plannedFdpMinutes` is measured to it.
+
+**Rest is worked BACKWARDS from the next duty.** "Legal from 04:36" on its own
+says little: what a rest period has to be depends on the duty AHEAD as much as
+the one behind — para 4 asks for 24 hours inclusive of a local night before a
+duty that touches the window of circadian low, and 3(1)(c)/(d) scale it with the
+duty just flown. So the comparison shown is the rest AVAILABLE before that duty
+against what THAT duty needs. "Legal from" survives only for the case with no
+next duty, where there is nothing to work backwards from.
+
+**Every point in time goes through `formatInstant`** (`lib/utils/tz-format.ts`),
+which joins the display settings that govern a clock: `useZuluTime`,
+`timeFormat` and `clockSeparator`. The page cannot disagree with the rest of the
+app about what time it is — **including the annunciator**, whose headlines name
+clocks ("Rest until 04:36", "Report 21:50", "On standby to 18:00"). Those are
+built in `pilot-status.ts`, which is PURE, so the formatter is **injected**:
+`buildPilotStatus({ formatClock })`, wired by `usePilotStatus(recency, now,
+display)`. It used to build its own `Intl.DateTimeFormat` in device-local
+24-hour with a colon, so a Zulu-configured pilot read one convention in the hero
+line and another two lines below it.
+
+**Nothing is shown to the second.** The tick aligns to the minute boundary and
+holds there — a 1Hz clock re-rendered the whole panel sixty times for every
+change a reader could see, and seconds on a rest clock with hours to run are
+motion for its own sake.
+
+**A STANDBY gets the off-duty card, not its own.** It is a duty, so it must
+never read as off duty — but the question it raises is the same one off duty
+raises, "am I legal and for what", so it keeps the rest clock running beneath
+it as the band's footnote. Its own window IS what the bar draws — the standby is
+the thing in progress — but on `RAMP.info` rather than the status ramp, because
+how full a standby window is says nothing about whether the pilot is legal.
+
+#### Annunciator, governing constraint, next action
+
+`pilot-status.ts` joins the standing requirements with the duty phase. Three
+states on the ECAM vocabulary the reader already has — `CURRENT` / `CAUTION` /
+`ACTION REQUIRED`, each with its own icon, never colour alone. An `unknown`
+requirement is a caution, not a fourth colour. **An exceeded FDP outranks every
+standing requirement** — it is the only thing on the page happening right now
+rather than being true today. Outstanding REST also raises an otherwise-clear
+pilot to CAUTION: rest lives in the duty state, so it is not one of the
+requirements the verdict is drawn from and the annunciator has to fold it in.
+
+The state also tints the surface (`TONE.glow`) — a soft wash bled into the top
+of the panel, so it takes on the mood of its own state before a word is read.
+
+- **The governing constraint, not a count.** "12 / 12 current" is noise: a pilot
+  does not need telling about the eleven that are fine. When something is
+  flagged this is the most pressing flagged requirement; when nothing is, it is
+  **the nearest EXPIRY**. It must NOT fall back to the fullest rolling limit —
+  that was the first version's rule and it reported "Flight 1y 604 / 1000h",
+  41% used with roughly six months of headroom, as the tightest constraint on an
+  otherwise clear pilot. A limit REFILLS; a currency EXPIRES. That is why only
+  `currency` requirements carry `daysUntil`.
+- **The next action states the REMEDY, not the reading** — "2 landings
+  required", not "landings 1 / 3". Phrased in `legality.ts` where the shortfall
+  is actually in hand (`Requirement.action`). Triage order: something wrong with
+  the duty in progress → rest → the binding requirement → the next report →
+  nothing required.
+
+#### Nothing on this page navigates by default
+
+A cell EXPANDS in place and a second tap closes it. The reader came to check a
+status; a route change loses the screen they came for and costs a
+back-navigation to recover it. The deep link lives INSIDE the expansion, where
+it is a deliberate second step rather than the accidental result of a tap.
+
+#### CURRENCY and LIMITS are separate bands
+
+They are two different kinds of thing and sorting them into one urgency-ordered
+grid is what made the first version unreadable:
+
+| Band | Question | Unit | Behaviour | Form |
+|---|---|---|---|---|
+| Currency | am I qualified and recent | DAYS | expires | a GRID of cells |
+| Limits | how much have I used | HOURS | refills | a BAR per window |
+
+They take the shape their content asks for. A currency is a name and a number
+of days — one small fact, so a set of them reads as a grid at a glance. A limit
+is a fraction of something, which is a bar. Forcing one form on both is what the
+separation exists to avoid.
+
+- **Recency is ONE requirement, not two.** Takeoffs and landings are two halves
+  of one question, and as separate urgency-sorted cells they did not even end up
+  beside each other. The cell answers with the binding half; expanding shows
+  both counts and the lapse date.
+- **A currency cell is a FIGURE over its CAPTION** — the duty band's `Scale`
+  vocabulary, so the two bands read the same way instead of each inventing an
+  arrangement. Two-up on a phone, three at 26rem, four at 44rem: this is the one
+  `flexible` band, so every row it does not spend is headroom on a short phone
+  (measured: ~92px against the old column of rows' ~104px, and far more legible).
+- **Only a FLAGGED cell is tinted.** The ramp means met / close / not met, so
+  tinting the met ones green too paints the whole band and leaves the one thing
+  needing attention nothing to stand out against. The icon still carries the
+  state — colour is never the only carrier.
+- **ONE cell opens at a time, and its detail opens BELOW the grid**, full width,
+  with a ring left on the cell it belongs to. A cell growing in place would
+  stretch its grid row and leave a hole beside it, and the detail is a
+  two-column `dl` with no room in half a phone's width. The open CELL ID is
+  held, not the requirement, so a background refresh that rebuilds the model
+  keeps the same cell open rather than closing it.
+- **Limits are PAIRED by what they limit** — Duty over its 14d and 28d windows,
+  then Flight over 28d and 1y. That is how the regulation is written and how a
+  pilot holds it; four independent rows sorted by urgency scattered the pairs.
+- **Rest is NOT a currency.** It is a property of the duty just flown, so it
+  lives in the duty band (`DutyStatus.rest`). Among a column of expiry dates a
+  live countdown read as a different kind of thing — because it is one.
+
+#### The duty band and the sector chain
+
+The band shows the timeline, its three captions, and a chain of stops
+(`deriveSectorLegs`) — filled dot on blocks, ringed dot for the leg being
+flown, hollow still to come, with the airport codes beneath.
+
+**The chain shows THIS duty on duty, and the NEXT duty otherwise.** Off duty the
+reader is looking ahead, and a route squeezed into a label is four small words
+where a chain is a picture. The last duty stays a line above it: context, not
+the question being asked. A duty is up to
+four sectors across several airports, and "where am I in the pattern" is what a
+generic recent-flights list could never answer: it showed history, not this
+duty. That list is gone.
+
+**The bar's tone is STATED by the caller, never derived from how full it is.** A
+nearly full FDP bar is a warning; a nearly full REST bar is good news. Deriving
+the colour from the fraction painted a fully-rested pilot amber.
+
+**The rolling limits are NOT repeated in the duty band.** They were printed
+there and again in the limits band — the duplication the rework removed.
+
+#### The live clock and hydration
+
+Everything the 1Hz tick drives — the header clock, the rest countdown, the duty
+figures — is marked `suppressHydrationWarning`, **on every text-bearing node,
+because the attribute does not inherit.** The offset name is the one that
+actually bites: Node's ICU renders `GMT` where the browser renders `GMT+0` for
+the same zone, so it mismatches in production even when the clock value agrees.
+The tick is gated on `usePageActive` — the dashboard is keep-alive, so an
+ungated interval re-renders this panel every second for the rest of the session
+while the user is somewhere else.
+
+`usePilotStatus` buckets `now` to the MINUTE before rebuilding the model: the
+model changes state on minute boundaries, so rebuilding it 60 times a minute
+computes an identical answer 59 times, while the seconds are read straight off
+the clock by the component.
+
+### The Summary Page
+
+Three blocks, one column, in the order the questions get asked:
+
+| | Block | Answers |
+|---|---|---|
+| 1 | `PeriodSummary` | what the selected period came to |
+| 2 | `PeriodFlights` | which flights those were, and what each one was |
+| 3 | `BreakdownPanel` | how the hours split by role and by fleet |
+
+**ONE COLUMN AT EVERY WIDTH.** The blocks stack in that order on a 390px phone
+and in the same order on a 1400px desktop: nothing moves, nothing is reordered.
+What a wider screen buys is DENSITY INSIDE each block — a flight's detail goes
+4 → 8 fields per row, the breakdown stacked → side by side.
+
+Every one of those steps is a **container query, never a viewport breakpoint**.
+The page renders inside a resizable split panel, so the window's width says
+nothing about the room a block actually has; a panel dragged to 360px is a phone
+and lays out like one.
+
+#### No repetition — what was removed and where it went
+
+The old dashboard printed several things twice. Each now has exactly one home:
+
+| | Was | Is |
+|---|---|---|
+| 90-day recency | a chip in the T/O card **and** the alerts bell | ONE requirement cell, legal page |
+| FDP utilisation | the limits stack **and** the bell | the limits band only — the duty band's copy was removed |
+| Rest until legal | a pill in the limits stack **and** the bell | the duty band's timeline; the annunciator states the imperative, not a second copy of the figure |
+| Currency expiries | the bell only | document requirement cells |
+| Night / Sim hours | the hero **and** again as rings in the auto-fill grid | the period summary only (`SHOWN_ELSEWHERE`) |
+| Recent T/O–LDG events | its own list under the flight list | gone — it was the flight list |
+
+The bell (`AlertsDropdown`) is therefore scoped to **import notes only** — the
+one alert class neither page otherwise shows, and not a legality question.
+
+#### Charts: only where there is something to plot
+
+- The hero is a **figure, not a ring**. The ring it replaced was metered against
+  a hardcoded 100-hour maximum, so 48 hours in a week and 48 hours in a year drew
+  the same arc. A ratio needs a real denominator; period block hours have none.
+  It uses **proportional figures** — `tabular-nums` gives every digit the width
+  of a zero, which reads loose at display size. Tabular is for columns, and for
+  the legal page's CLOCKS, which would otherwise shift sideways every tick.
+- **Day/night IS drawn** — it partitions the block time, so it has a
+  denominator. Two fills with a **2px surface gap** between them; no stroke is
+  drawn around either, and the two keys beside it are the legend (identity is
+  never colour alone).
+- **The engine split is drawn only when there is a split** (`showEngineSplit`,
+  ≥2 non-zero classes). An airline pilot flies one class, and a single-series
+  "part-to-whole" bar is a full-width fill at 100% under a one-item legend,
+  restating the hero figure.
+- **The status ramp is RESERVED.** Requirement cells use green/amber/red because
+  the colour means met/close/not-met. Role and type meters are magnitudes —
+  forty hours of SIC is neither good nor bad — so they use ONE hue
+  (`MagnitudeRow`, primary on a lighter step of itself). Painting them with the
+  status ramp would teach the reader that the colour means the same thing there
+  as on the legal page, where it means whether they can legally fly.
+
+#### The flight list opens IN PLACE
+
+A row unfolds under itself rather than navigating. The list exists because the
+pilot is reading the period as a whole; a full flight page loses that period and
+costs a back-navigation to get it back. `PeriodFlight` carries the detail
+(OOOI, air, night, T/O–LDG, reg, type, role, PF/PM) — the aggregator already has
+all of it in hand, so it costs field copies rather than a per-row read when a row
+opens. The row still offers the full page for anything beyond that.
+
+`periodFlights` is ordered by **`sortFlights`**, the one comparator — sorting on
+the date alone left same-day sectors in table order, so they could read in a
+different order here than in the logbook. `SortableFlight`'s `scheduledOut` is
+optional so a projection of a flown flight can use it.
+
 ### The Logbook's Virtualized List
 
 `components/flight-list.tsx` uses `@tanstack/react-virtual` with dynamic
@@ -875,12 +1304,15 @@ area is the undo — see "Destructive Actions" below for why the countdown went.
 | crew | `crew.store` | yes |
 | currencies | `currencies.store` | yes |
 | aircraft | **`reference/aircraft.store`** — the aircraft PAGE lists the reference database, not `userDb.aircraft` | no (referenceDb has no sync queue, which is what deleting a custom aircraft has always meant) |
+| roster duties | `schedule.store` | yes |
 
-**Discrepancies and schedule entries stay HARD deletes.** They are import
-bookkeeping rather than records the pilot authored: a comparison is regenerated
-from the next report, and schedule rows are replaced wholesale by the next
-import. Putting them in Recently Deleted would fill it with rows nobody thinks
-of as things they deleted.
+**Discrepancies stay a HARD delete.** A comparison is import bookkeeping rather
+than a record the pilot authored — it is regenerated from the next report.
+
+**Schedule entries used to be, and no longer are.** That reasoning held while
+the roster was import-only; it stopped the moment duties became hand-editable,
+because a standby you typed in yourself is a record you authored and a mis-tap
+on it should be as recoverable as a mis-tap on a flight.
 
 `app/(app)/recently-deleted/page.tsx` sweeps every kind on load, then lists
 what's left GROUPED BY KIND with the days remaining. The per-kind
@@ -1750,33 +2182,388 @@ instead of effect-then-setState, and avoid `useLiveQuery` in new components
 
 ## Known Issues & Deferred Work
 
-### FDP / roster legality calculations (DEFERRED — needs domain review before changing)
+### FDP / roster legality — audited against the regulation (14 Aug 2026)
 
-A subsystem audit surfaced three issues in `lib/utils/roster/fdp-calculator.ts`.
-These drive the **legality/limits dashboard**, so they are intentionally left
-untouched until reviewed with the user — a wrong "fix" to regulatory math is
-worse than the current behavior. Do **not** change these casually.
+The source is the **Air Navigation (121 — Commercial Air Transport by Large
+Aeroplanes) Regulations**: the **FIFTH SCHEDULE (Regulation 178)** for the
+limits, and the **FIRST SCHEDULE (Regulation 2)** for the words those limits
+are written in. Everything below was checked cell by cell against those
+documents.
 
-1. **Rolling-limit windows mix UTC and local date parsing** (`~:787`).
-   `calculateRollingStats` parses duty dates with `new Date(dp.date +
-   "T00:00:00")` (runtime-local TZ), but callers build the as-of date in UTC
-   (`generateTimelineData ~:1080`, `simulateScenario ~:1560`,
-   `simulateHypotheticalDuty ~:1354` all use `…T23:59:59Z`), while
-   `forecastExceedances ~:928` uses local `…T23:59:59`. For a non-UTC user
-   (the app targets SGT/UTC+8) a duty period on the inclusive/exclusive window
-   boundary can be silently included or excluded. Fix is to settle on one date
-   convention end-to-end.
-2. **`includesLocalNight` ignores a past-midnight debrief** (`~:641-668`, called
-   from `calculateRestPeriod ~:711`). The raw `previous.debriefTime` + un-wrapped
-   `previous.date` are passed even when the prior duty crossed midnight, so the
-   rest-window night test runs against the wrong day → wrong rest rule (3a vs 3b).
-   `calculateRestPeriod` already wraps `prevDebriefAbsolute` for the rest-minutes
-   math but not before this call.
-3. **`mergeAdjacentDutyPeriods` drops the long-sector FDP adjustment**
-   (`~:499-503`). The merged-duty max-FDP recompute omits `longestSectorMinutes`
-   (the `DutyPeriod` type doesn't even carry it), so `applyLongSectorAdjustment`
-   never runs on a merged overnight duty — an over-long merged duty can read as
-   compliant.
+**`lib/utils/roster/__tests__/fdp-tables.test.ts` transcribes the schedule's
+own figures**, not the implementation's — it is the check ON the tables rather
+than a copy of them. `rest-period.test.ts` does the same for paragraph 3,
+`regulation-definitions.test.ts` for the First Schedule and
+`circadian-rest.test.ts` for paragraph 4. If a table ever needs to change,
+change the test from the regulation first.
+
+#### The FIRST SCHEDULE definitions are code, not assumptions
+
+`lib/utils/roster/regulation-definitions.ts` holds them. They are not helper
+utilities — they are the vocabulary the Fifth Schedule is written in, and every
+one of them used to be an assumption scattered through the calculator. Three of
+those assumptions were **wrong**, all in the permissive direction:
+
+| Term | What the code assumed | What the schedule says |
+|---|---|---|
+| local night | a fixed 22:00–06:00 SGT band | an 8-hour period falling between **2200 and 0800** local |
+| rest start | 30 minutes after gate-in | **one hour after the crew member is free of all duties** |
+| acclimated | within 2 hours of home base | **3 consecutive local nights free of duty in a time zone** |
+
+- **"When am I legal" is a SEARCH, not a lookup.** Para 3(1)(a)/(b) are
+  conditions on the rest period AS PROVIDED, and whether it includes a local
+  night grows as the crew member waits. `calculateRestUntilLegal` therefore
+  takes the earlier of two ends: wait for the local night to complete and 10
+  hours suffices, or don't and it is 12. Testing for a night ONCE over a
+  hypothetical 10-hour rest and falling to 12 when that failed missed every
+  case in between — rest starting in the evening reaches its eighth hour inside
+  the 2200–0800 window around the eleventh hour of rest, and 3(1)(a) then asks
+  for 10. Reported by the owner: 06:26 shown where 06:00 was legal.
+  `earliestLocalNightCompletion` is the forward half of `containsLocalNight`.
+- **A local night is any 8 contiguous hours inside a TEN-hour window.** Rest
+  running 00:30 → 08:30 is a full local night and used to read as none, taking
+  the requirement from 10 hours to 12. In the other direction, ANY overlap used
+  to count, so rest that merely clipped 22:00 claimed 3(1)(a)'s 10 hours when
+  3(1)(b)'s 12 applied. And it is measured **where the crew member actually
+  is** (`DutyPeriod.arrivalTimezoneOffset`), not at home base — a Singapore
+  night was being tested against a rest period spent in London.
+- **A duty period ends when the crew member is free of ALL duties.** Para 7(2)
+  puts 90 minutes of checks around the flying with at least 60 before it, so at
+  least 30 minutes of post-flight checks are still duty — and the rest period
+  then commences an hour after THAT. The old model ended the duty at gate-in
+  and let 30 minutes stand for both, over-counting rest by an hour.
+- **Acclimatisation is a STATE built from history, not a property of the
+  airport a duty starts at.** `applyAcclimatisation` walks the whole timeline,
+  and each duty's FDP table is re-derived against the zone the crew member was
+  acclimated to **as at that duty's report time** — so landing somewhere cannot
+  retroactively justify its own table. A pilot who night-stops once in London
+  is not acclimated to London (Table B); one who has been there a week is
+  (Table A). It runs between `mergeDutyPeriods` and `calculateAllRestPeriods`,
+  because the rest calculation reads the corrected figures.
+
+#### ONE derivation of the FDP maximum — `deriveMaxFDP`
+
+Every stage goes through it: both duty-period producers, the overnight merge,
+the acclimatisation pass, and the two hypothetical-duty builders. It exists
+because the maximum used to be recomputed at each of those from whatever inputs
+that stage happened to have, and they disagreed.
+
+**A duty period carries TWO report times and they do different jobs.**
+
+| | Field | Job |
+|---|---|---|
+| when the duty BEGAN | `reportTime` | `dutyMinutes`, the elapsed clock, the duty window |
+| what Table A is ENTERED on | `fdpStartLocal` | para 14(1)'s "local time of start", in the DEPARTURE station's clock |
+
+They differ whenever reporting slips, and para 10(a) is explicit about it:
+
+> where the delay is less than 4 hours, the maximum permitted flight duty
+> period is based on the **original** reporting time but the flight duty period
+> **starts at the actual** reporting time
+
+The reported bug was exactly this. TR566/567 on 12 Dec: scheduled out 14:50Z =
+22:50 local, so report 21:50 local — Table A's **1500–2159** band, two sectors,
+**12¼ hours**. The aircraft pushed back 23 minutes late, putting the ACTUAL
+report at 22:13 local. The producer got it right; `applyAcclimatisation` then
+re-derived the lookup from `reportTime`, landed in **2200–0559**, and reported a
+maximum of **10:15** — below the 10:57 actually flown, so the pilot was shown an
+exceedance they had not committed. `mergeAdjacentDutyPeriods` had the same
+defect.
+
+`deriveMaxFDP(dp, { acclimatedOffset })` takes the acclimatised zone as its ONLY
+override, because that is the only thing a later stage knows that the producer
+did not. Everything else — the band, the sectors, the sector lengths, the crew
+complement — is read off the duty period. A duty carrying no `fdpStartLocal`
+falls back to `reportTime`, which is the old behaviour and is wrong only for a
+delayed report.
+
+The report time also has to be moved into the **departure station's** clock from
+whichever frame the source stated it in — UTC shifts by the departure offset,
+LOCAL_BASE shifts from SGT to it, and **LOCAL_STATION is already there** and must
+not be shifted at all (it was, which is an eight-hour error on a UTC+0
+departure).
+
+#### TWO report times, and paragraph 10
+
+`reportTime` is when the duty BEGAN. `fdpStartLocal` is what Table A is ENTERED
+on. They are different questions and para 10 is explicit about it:
+
+> (a) where the delay is less than 4 hours, the maximum permitted flight duty
+> period is based on the **original** reporting time but the flight duty period
+> **starts at the actual** reporting time;
+> (b) where the delay is 4 hours or more, the maximum … is based on the
+> **actual** reporting time but the flight duty period **starts 4 hours after**
+> the original reporting time
+
+**The report defaults to the ROSTERED time** — `scheduledOut − PRE_FLIGHT_CHECK_MIN`
+— not to `actualOut − 1h`, which is what it used to be. Deriving it from the
+actual gate-out is right only when the company moved the report by exactly the
+pushback delay; in the ordinary case of a late aircraft under a crew who
+reported on time it slid the duty's start forward with the delay and made the
+duty look SHORTER than it was. On the owner's TR566/567 duty that hid 23
+minutes (10:57 against 11:20 on duty); a three-hour technical delay hides three
+hours, and the panel then offers FDP remaining that does not exist.
+
+`FlightLog.reportTime` records an actual report when the company moved it —
+told to stay at the place of rest because the inbound is late. Precedence:
+
+1. an explicit `flight.reportTime` on any sector of the duty,
+2. `scheduledOut − 1h`,
+3. `actualOut − 1h` (a hand-entered flight with no schedule).
+
+Under 10(b) the FDP window opens BEFORE the crew member reports, so part of it
+is already spent when they walk in. `DutyPeriod.fdpElapsedAtReport` carries
+that, and `ActiveDuty` therefore has TWO clocks: `elapsedMinutes` (the crew duty
+period, from report) and `fdpElapsedMinutes` (the FDP). They are equal on every
+ordinary duty and only para 10(b) separates them.
+
+#### Standby (paragraph 6)
+
+**Standby is a DUTY period but not a FLIGHT duty period.** Paragraph 14's tables
+never applied to it, so it carries `maxFdpMinutes: 0` and must never reach an
+FDP gauge or an FDP exceedance check — read against a maximum of 0, a 12-hour
+standby is a 12-hour exceedance of a limit that does not exist. Its own cap is
+para 6(2)(a): **18 hours** for a flight crew member.
+
+| | Field | Rule |
+|---|---|---|
+| what it really was | `dutyMinutes` | drives para 3 rest and the 18h cap |
+| what reaches the limits | `countedDutyMinutes` | para 6(7) — **20%** of home standby |
+
+`calculateRollingStats` sums `countedDutyMinutes ?? dutyMinutes`, so every
+ordinary duty counts in full and only standby is discounted. Airport standby
+counts **zero** separately, because para 6(3) folds it into the rest period or
+the following FDP instead.
+
+**An un-called standby is REST.** The rest period runs straight through it: it
+takes no rest requirement of its own and does not become the duty the next one
+is measured against, so a flight after a standby rests from the last duty
+actually flown. `isRestingStandby` is the test; `calculateAllRestPeriods` and
+`calculateRestUntilLegal` are the two places that skip it. The 20% is unaffected
+— "did you rest" and "how many hours have you worked" are different questions
+and the schedule answers them in different paragraphs.
+
+> ⚠ **ASSUMED, pending confirmation.** Para 3(1)(c)/(d) are written against a
+> "duty period", not a flight duty period, so read literally a 12-hour standby
+> does demand 12 hours of rest after it. This is the operator's practice taken
+> over the literal text, and it is the PERMISSIVE direction.
+
+**Para 6(6) — activation.** A standby that is called out ceases at the moment of
+activation, so `truncateActivatedStandby` cuts it back to the following duty's
+report before the 20% is taken. Left whole, those hours are counted twice: once
+at 20% as standby and again in full as the duty they turned into.
+
+Two callers need "was this called out": the FDP pipeline works in duty periods,
+the roster page has schedule entries and flights. Both go through
+`findActivationMinute` — `standby-activation.ts` is the roster's half — so the
+rule cannot drift into two. It reads the ROSTERED report, so a pushback delay
+does not move the activation and credit duty hours as standby.
+
+**`mergeDutyPeriods` competes only on KIND.** It prefers the logbook for a date
+and marks that date consumed, which is right for a schedule FLIGHT duty — an
+alternative record of the same duty — and wrong for a standby, which is a
+different duty that happens to share the day. And the day it shares with a
+flight is exactly the day it was ACTIVATED on, so the one standby whose hours
+needed accounting for was the one being dropped, and `truncateActivatedStandby`
+never saw the pair.
+
+**The dashboard gives standby its own band** (`DutyStatus.standby`), and RENDERS
+it. Left in the flight-duty search it becomes the ACTIVE duty carrying
+`maxFdpMinutes: 0`, so the panel reads as a flight duty whose limit failed to
+compute — a dash where a pilot expects a number, on a duty paragraph 14 says
+nothing about. But reading it as OFF DUTY is the worse error in the other
+direction: the crew member is committed and contactable. The band gauges the
+standby's own window, the rest clock keeps running beneath it (an un-called
+standby is rest), and the annunciator says "On standby to HH:MM" rather than
+"Nothing required".
+
+`standbyKind()` is a code→`home`/`airport` lookup that currently returns `home`
+for everything, which is what this operator rosters. It is a lookup rather than
+a constant so the day airport standby appears it is a table entry, not a
+rewrite.
+
+Rest before a standby needs no special code: once the standby is a
+`DutyPeriod` in the merged timeline, `calculateAllRestPeriods` checks it like
+any other. That was the whole reason for tracking it.
+
+#### The roster holds NON-FLIGHT duties only
+
+`userDb.scheduleEntries` was never removed — the table, the store, the roster
+page and its MongoDB sync were all intact. What was missing was a writer (all
+imports go to the logbook) and, before that, a parser stage: `schedule-parser`
+offered every non-flight row to `tryExtractSimDuty` and dropped whatever was
+not a simulator, so **standby had never been extracted at all**.
+
+**Duties are hand-editable.** `components/roster/duty-entry-dialog.tsx` adds and
+edits one; the card is swipe-to-delete. It is a full-screen DIALOG over the
+content region (`signature-dialog.tsx`'s bounds), not a detail panel — the
+roster is `hasDetailPanel: false` and populating detail panels on non-detail
+routes is owner-design work that must not be done piecemeal. The form re-seeds
+by a `key` on the component rather than a seeding effect, so there is no
+setState-in-effect and a sync write cannot clobber an edit in progress.
+Deleting is a **soft** delete into Recently Deleted, like everything else the
+pilot can delete — the old hard-delete rule held while these were import
+bookkeeping the next report regenerates, and stopped holding the moment the
+pilot could author them.
+
+It now holds standby / ground / leave / off — and nothing else. **Flights stay
+logbook-only.** The old roster was a parallel record of flights that had to be
+reconciled against the logbook, and that reconciliation is what made it heavy;
+a standby has no logbook counterpart, so there is nothing to reconcile.
+`classifyGroundDuty` maps the company's codes, `ParsedGroundDuty` carries the
+window in UTC (converting can move the DATE — 06:00 SGT is 22:00 the previous
+day), and the executor writes them through the existing sync-aware
+`bulkUpsertScheduleEntries`, keyed on date + dutyCode so a re-import updates
+rather than duplicates.
+
+#### Paragraph 4 — duties around the window of circadian low
+
+Three First Schedule terms, all defined in **acclimated time**:
+
+| | Definition |
+|---|---|
+| early start | a scheduled DEPARTURE commencing 0500–0659 |
+| late finish | a scheduled ARRIVAL ending 0100–0159 |
+| window of circadian low | a TAKE-OFF or LANDING in 0200–0459 |
+
+The last one is defined *in relation to a take-off or landing* — not to a duty
+period and not to the cruise. A sector airborne at 2310 and landing at 0650 is
+over the window for its whole middle and touches neither end of it.
+
+A duty encompassing any of the three is **disruptive**, and para 4 then asks for
+a rest period of **24 hours inclusive of a local night**: 4(1)(a) before the
+FIRST of a series, and 4(2) again once two consecutive ones are complete.
+Between them, 4(1)(b) hands it back to paragraph 3.
+
+- **The classification happens in `applyAcclimatisation`, not at construction.**
+  The duty period producers store the raw instants (`departureMs`, `arrivalMs`,
+  `takeoffLandingMs`); only the whole timeline knows what clock to read them in.
+- **The run of consecutive disruptive duties is tracked across the timeline**
+  (`calculateAllRestPeriods`), because neither duty in a pair can see it — 4(2)
+  reacts to the two duties BEFORE the one whose rest is being measured. The
+  count is "since the last 24-hour circadian rest": once para 4 has required its
+  24 hours, the duty that follows opens a fresh series. An ordinary duty clears
+  it outright.
+- **Gate times stand in for wheels times when a flight records none.** Every
+  planned sector and older logbook rows carry out/in only; treating those as "no
+  take-off or landing" would classify all of them as never touching the window.
+- **A LOCAL_STATION schedule report supplies no instants at all.** Its
+  departure-side and arrival-side times are in different zones and the entry
+  does not carry the arrival's offset, so it is left unclassified rather than
+  read against a clock that could be a whole timezone out.
+
+#### Verified correct
+
+| | Source |
+|---|---|
+| Table A, all 32 cells | para 14(1)(a) |
+| Table B, all 6 cells | para 14(1)(b) |
+| Table C, all 20 cells | para 14(1A) |
+| Long-sector count-as values | para 14(2) |
+| Duty 90h/14d, 180h/28d — the FLIGHT crew figures | para 12(1) |
+| Flight 100h/28d, 1000h/12mo | Reg 107 |
+| 60 min pre-flight, 90 min pre+post | para 7(2) |
+| Rest 10h / 12h / round-up / 24h and the ordering | para 3(1) |
+
+Note para 12(2) gives CABIN crew 100h/14d and 200h/28d. The app is a FLIGHT
+crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
+"correct" them to the cabin numbers.
+
+#### Fixed in this pass (all were wrong in the permissive direction)
+
+- **Rest sub-rules are CUMULATIVE, not alternatives.** Para 3(1) joins (a)–(d)
+  with "and", so every applicable one must be met and the requirement is the
+  LARGEST. Read as an if/else chain, an 11-hour duty followed by rest with no
+  local night required only 3(c)'s 11 hours and ignored 3(b)'s 12.
+- **Para 14(2) counts long sectorS, plural.** Only the longest was counted up,
+  so a duty of two 8-hour sectors read as 3 effective sectors instead of 4 —
+  an hour and a half of FDP the schedule does not allow. `calculateMaxFDP` now
+  takes `sectorMinutes: number[]`; `longestSectorMinutes` remains for old
+  callers.
+- **Para 14(2) applies only to a crew that "only consists of 2 pilots".** The
+  adjustment was being applied to augmented crews too (their ceiling comes from
+  para 15) and is not named for Table C at all.
+- **Para 15(3)(b): no extension without rest facilities.** The augmented
+  extension was granted unconditionally. It now requires
+  `inFlightRestFacilities === true` — unknown withholds it, because guessing in
+  favour of a longer duty is the wrong way to be wrong. Nothing currently sets
+  `augmentedCrew`, so this changes no existing figure.
+- **A merged overnight duty dropped the long-sector adjustment.** The recompute
+  in `mergeAdjacentDutyPeriods` had only the sector COUNT, so an over-long
+  merged duty read as compliant. `DutyPeriod.sectorMinutes` now carries the
+  lengths through the merge.
+- **`includesLocalNight` was given the un-wrapped debrief date.** A duty
+  crossing midnight debriefs the following day, and testing the night window
+  against the wrong day picked the wrong rest rule (3a vs 3b).
+- **The three First Schedule definitions above**, each of which shortened a
+  required rest or raised an FDP maximum.
+- **Paragraph 4 was not implemented at all.** A roster of consecutive early
+  starts asked only for paragraph 3's 10 or 12 hours where the schedule
+  requires 24 inclusive of a local night.
+- **The FDP maximum was re-derived from the ACTUAL report time** by the merge
+  and the acclimatisation pass, against para 10(a). Reported by the owner:
+  10:15 shown on a duty entitled to 12:15, which also made a compliant 10:57
+  duty read as an exceedance. Now one derivation (`deriveMaxFDP`) over one
+  stored basis (`fdpStartLocal`).
+- **A LOCAL_STATION schedule report's time was shifted by the departure
+  offset**, double-counting it — eight hours, two bands of Table A, on a UTC+0
+  departure.
+- **`calculateRestUntilLegal` still had the if/else chain** the same pass fixed
+  in `calculateRestPeriod` — so the countdown a pilot actually reads off the
+  dashboard under-stated an 11-hour duty's rest by an hour, and measured the
+  local night at home base rather than where the crew member was. It now builds
+  the same candidate set, and folds in para 4 when the NEXT duty is known.
+
+#### Known gaps — these need the OWNER's input, not a guess
+
+- **Airport standby is written but inert.** Every code maps to `home`, which is
+  what this operator rosters. Para 6(3) — airport standby is part of the rest
+  period with adequate facilities and part of the following FDP without — is
+  implemented as far as "counts zero separately"; the FDP-absorption half needs
+  a real case to model against.
+- **Training and ground duties still contribute nothing to the cumulative
+  limits.** Only standby is discounted by rule; a ground duty is written to the
+  roster and counted at zero, where para 12 would count it in full. It needs
+  the owner's read on which of their ground codes are genuinely duty.
+- **Para 5: days off.** Not more than 7 consecutive days between days off; at
+  least 2 days off every 2 weeks; 8 every 4 weeks (6 permissible with
+  make-good); 82 hours at base after 7+ days away. None of this is computed.
+  It needs COMPLETE roster coverage to tell a day off from a day with no data,
+  and a false "you have worked 8 days straight" is worse than silence.
+- **Para 8: positioning is not an operating sector.** A positioning leg
+  imported as an ordinary flight row inflates the sector count. `ScheduleEntry`
+  has `dutyType: "positioning"` but `FlightLog` carries no equivalent flag.
+- **Para 9: simulator then flying in the same duty.** Sim time counts in full
+  toward the subsequent FDP but is not a sector. The dashboard's
+  `buildPlannedDuties` skips simulators entirely.
+- **Para 3(1)(c)/(d) after a long standby.** Those sub-rules are written against
+  a "**duty period**", not a flight duty period, so read literally a 12-hour
+  home standby demands 12 hours of rest after it and an 18-hour one demands 24.
+  That sits oddly beside 6(7) counting only 20% of the same standby toward the
+  cumulative limits. The literal (conservative) reading is what is implemented;
+  if it proves punitive on a real roster the alternative is to drive
+  3(1)(c)/(d) from the COUNTED portion. Owner's call, against real data.
+- **Para 13 / 3(2): commander's discretion.** +3h FDP and −2h rest are not
+  representable, so a duty legitimately extended reads as an exceedance.
+- **Acclimatisation is only as good as the roster's COVERAGE.**
+  `acclimatisedOffsetMinutes` now walks the real duty history rather than
+  assuming home base, but it reads a gap between two known duties as "free of
+  duty" — so a period the app simply has no data for looks like three nights
+  somewhere. With a complete roster loaded it is exact; with a partial one it
+  can move a duty to Table A, which raises the maximum. It cannot be fixed
+  without knowing where roster coverage begins and ends.
+- **A rest period away from base may be over-reported.** The First Schedule's
+  rest definition takes the SHORTER of "one hour after free of all duties" and
+  "on reaching the designated accommodation". The app has no idea when a crew
+  member reached their hotel, so it models the first limb only.
+
+#### Still deferred — rolling-window date handling
+
+`calculateRollingStats` parses duty dates with `new Date(dp.date + "T00:00:00")`
+(runtime-local), while callers build the as-of date in UTC
+(`generateTimelineData`, `simulateScenario`, `simulateHypotheticalDuty`) or in
+local (`forecastExceedances`). For a non-UTC user a duty on the window boundary
+can be silently included or excluded. Settle on one date convention end to end.
 
 ### OCR engine (owner is weighing a change)
 
@@ -1961,6 +2748,10 @@ app's look:
 | `scheduleEntries` | Roster schedule | id, date, dutyType |
 | `currencies` | Certificate tracking | id, code, expiryDate, syncStatus |
 | `discrepancies` | Comparisons + import notes (`holding`, `acceptedAt`) | id, type, resolved |
+
+`scheduleEntries` holds **non-flight duties only** — standby, ground, leave,
+off. Flights live in `flights` and nowhere else. It is server-synced like every
+other user collection.
 
 ### Reference Database (Dexie — `referenceDb`)
 
@@ -2242,6 +3033,15 @@ When making changes, be aware of these high-impact files:
     now only drops the bloom/pull (scaling a scrolling surface janks) and
     `touchmove` keeps feeding the spotlight position until the real lift. The
     fade lives on `.GlassContent::after`'s `transition`.
+
+**Dashboard (two pages, one toggle):**
+- `hooks/use-dashboard-view.ts` — which page is showing; a module store, persisted, hydrated in `subscribe`
+- `components/dashboard/legal-dashboard.tsx` — page 1: one screen, no scroll, one continuous surface
+- `lib/utils/dashboard/pilot-status.ts` — the annunciator, the governing constraint and the NEXT ACTION
+- `lib/utils/dashboard/duty-status.ts` — duty phase + the per-duty FDP maximum (read, never invented)
+- `lib/utils/dashboard/legality.ts` — the requirement model (currency vs limits); the verdict is the worst requirement
+- `components/dashboard/summary-dashboard.tsx` — page 2: the three period blocks, one column
+- `lib/utils/dashboard-aggregate.ts` — period totals, the 90-day recency lapse, and the per-flight detail the list unfolds
 
 **Report Import:**
 - `lib/utils/roster/reconciler.ts` — classification + the global match assignment
@@ -2626,7 +3426,86 @@ When making changes, be aware of these high-impact files:
 - Do not give the drag lens's `-refract` layer a `backdrop-filter` instead of its background — the lens is portalled to `<body>` and carries its own `scale`, so it forms a backdrop root and a backdrop-filter there does not sample the pill at all (measured — `blur(10px)` leaves the label underneath perfectly sharp). The layer must paint over the pill it duplicates, or the copy and the original show at once. Cutting the pill out with a mask instead was tried and rejected on the look
 - Do not minify the drag lens's copy uniformly — the squeeze is `scaleY` ONLY, with the row counter-scaled so the labels keep their size and only the control gets shorter. And do not push `LENS_SQUASH` much below 0.84: the counter-scaled row has to fit the copy's box, and the mobile pill's 44px tab item in a 56px bar is what sets that floor (at 0.72 the icons and labels were clipped away entirely)
 - Do not reintroduce an SVG-displacement glass lens (`backdrop-filter: url(#…)`), or any other material that only one engine gets. It was removed on purpose: an SVG backdrop-filter re-rasterises every frame the element resizes or scales, every surface had to raster and PNG-encode megapixel maps on the main thread behind a cache/debounce/stand-in, and Android ended up looking unlike iOS. The owner's verdict was that it made the PWA feel laggy rather than crisp. One ring material, every platform — if the rim needs more presence, change the ring stack
-- Do not delete a user record outright — `deleteEntity` is a **soft delete** into Recently Deleted (30 days) and pushes an UPDATE; only `purgeEntity` writes a tombstone. Push a real delete when the user merely binned it and the row is gone on every device with nothing to restore. The two exceptions are discrepancies and schedule entries, which are import bookkeeping and stay hard
+- Do not delete a user record outright — `deleteEntity` is a **soft delete** into Recently Deleted (30 days) and pushes an UPDATE; only `purgeEntity` writes a tombstone. Push a real delete when the user merely binned it and the row is gone on every device with nothing to restore. The one exception is discrepancies, which are import bookkeeping regenerated by the next report and stay hard. Schedule entries USED to be — that reversed when duties became hand-editable
+- Do not merge the dashboard's two pages back into one. Legal and Summary want opposite layouts — an instrument read in two seconds versus a month's review — and one layout serving both is what makes a dashboard a spreadsheet. They get different containers: Legal is laid out TO the height (no scroll), Summary is an ordinary scrolling page
+- Do not change a figure in `fdp-tables.ts` without changing `fdp-tables.test.ts` FROM THE REGULATION first — that test transcribes the Fifth Schedule's own numbers, so it is the check ON the tables rather than a copy of them. Same for `rest-period.test.ts` and paragraph 3
+- Do not answer "when am I legal" with a single rest-rule lookup — para 3(1)(a)/(b) turn on whether the rest period AS PROVIDED includes a local night, and that grows as the crew member waits. `calculateRestUntilLegal` takes the earlier of "wait for the night, then 10 hours" and "don't, so 12"; a one-shot test at the 10-hour mark reported 12 hours for rest that was legal at 11½ (06:26 shown where 06:00 was legal)
+- Do not present a standby as OFF DUTY. It is not a flight duty period and must never reach an FDP gauge, but the crew member is committed and contactable — the panel gauges the standby's own window with the rest clock running beneath it, and the annunciator names it
+- Do not treat the rest sub-rules of para 3(1) as alternatives — they are joined by "and", so every applicable one must be met and the requirement is the LARGEST of them. As an if/else chain an 11-hour duty resting without a local night asked for 11 hours instead of 12. The same rule holds in `calculateRestUntilLegal`, which had the chain long after `calculateRestPeriod` lost it — that one is the countdown a pilot reads off the dashboard
+- Do not reintroduce a definition the FIRST SCHEDULE already gives. `lib/utils/roster/regulation-definitions.ts` is the vocabulary the Fifth Schedule is written in, and the three terms that were assumed were all assumed WRONG: a local night is any 8 contiguous hours in the **2200–0800** window (not a fixed 22:00–06:00 band, and not any overlap with one), a rest period commences **one hour after free of all duties** (not 30 minutes after gate-in), and "acclimated" is **3 consecutive local nights free of duty in a zone** (not proximity to home base)
+- Do not measure a local night at home base — it is local time **where the crew member actually is**, which is the preceding duty's `arrivalTimezoneOffset`. Testing a Singapore night against a rest period spent in London picks the wrong rest rule in whichever direction the zones happen to fall
+- Do not end a duty period at gate-in. Para 7(2) requires 90 minutes of checks around the flying with at least 60 before it, so at least 30 minutes of post-flight checks are still DUTY — and the rest period commences an hour after that, not 30 minutes after the aeroplane parks
+- Do not decide an FDP table from the departure airport's offset alone. `applyAcclimatisation` re-derives each duty against the zone the crew member was acclimated to **as at that duty's report time**, from the duties before it — reading the duty's own arrival zone would let landing somewhere instantly justify its own table. It must run between `mergeDutyPeriods` and `calculateAllRestPeriods`, because the rest calculation reads the corrected figures
+- Do not classify a duty's circadian state where the duty period is BUILT — early start, late finish and the window of circadian low are all defined in ACCLIMATED time, and acclimatisation is a property of the whole timeline. The producers store the raw instants (`departureMs`/`arrivalMs`/`takeoffLandingMs`) and `applyAcclimatisation` does the classifying. Carry all three through `mergeAdjacentDutyPeriods` too, or a merged overnight — precisely the shape that lands in the window — is classified against half of itself
+- Do not read the window of circadian low against a duty period or a cruise — it is defined "in relation to a **take-off or landing**", 0200–0459. A sector airborne at 2310 and landing at 0650 is over the window for its whole middle and touches neither end of it
+- Do not track paragraph 4's disruptive run inside `calculateRestPeriod` — 4(2) reacts to the two duties BEFORE the one whose rest is being measured, so neither duty in a pair can see it. `calculateAllRestPeriods` carries the count, and it is "since the last 24-hour circadian rest": a duty that para 4 already demanded 24 hours before opens a NEW series rather than extending the old one, and an ordinary duty clears it
+- Do not treat a flight with no wheels times as never touching the window of circadian low — every PLANNED sector and older logbook rows carry out/in only, so the gate times stand in for them. Silence there is the permissive way to be wrong. A LOCAL_STATION schedule report is the opposite case and is left unclassified on purpose: its departure-side and arrival-side times are in different zones the entry cannot resolve
+- Do not count only the LONGEST sector for the para 14(2) adjustment — the schedule says long sectorS. Two 8-hour sectors are 4 effective sectors under Table A, not 3, and under-counting raises the FDP maximum. Pass `sectorMinutes: number[]`, and carry `DutyPeriod.sectorMinutes` through `mergeAdjacentDutyPeriods` or a merged overnight silently loses the adjustment
+- Do not apply the para 14(2) long-sector adjustment to an augmented crew or to Table C — it applies where the crew "only consists of 2 pilots", and an augmented crew's ceiling comes from para 15 instead
+- Do not grant the augmented-crew extension without `inFlightRestFacilities === true` — para 15(3)(b) forbids any extension without rest facilities, and UNKNOWN must withhold it rather than assume in favour of a longer duty
+- Do not swap `DEFAULT_FTL_LIMITS` for the cabin-crew figures. Para 12(1) gives FLIGHT crew 90h/14d and 180h/28d; 12(2) gives cabin crew 100h and 200h. This is a flight-crew logbook
+- Do not derive a duty's report time from the ACTUAL gate-out. It defaults to the ROSTERED report (`scheduledOut − PRE_FLIGHT_CHECK_MIN`), because a late aircraft under a crew who reported on time is the ordinary case and does not move the report — deriving from the actual OUT slid the duty's start forward with the delay and made the duty look SHORTER than it was (23 minutes hidden on the owner's TR566 duty; three hours on a three-hour delay, with the panel then offering FDP that does not exist). `FlightLog.reportTime` is how a genuinely moved report is recorded
+- Do not treat para 10(b) as a variation on 10(a). Under 10(b) the FDP window opens **4 hours after the ORIGINAL report**, which is EARLIER than the actual one — so part of the FDP is already spent when the crew member walks in. `DutyPeriod.fdpElapsedAtReport` carries that, and `ActiveDuty` keeps two clocks (`elapsedMinutes` for the crew duty period, `fdpElapsedMinutes` for the FDP) because only that branch separates them
+- Do not give a standby an FDP maximum, and do not let one reach an FDP exceedance check — it is a DUTY period but not a FLIGHT duty period, so paragraph 14's tables never applied to it. `maxFdpMinutes: 0` read as a limit makes every standby a full-length exceedance. Its cap is para 6(2)(a)'s 18 hours. `applyAcclimatisation` skips it (a lookup on 0 sectors would hand it the one-sector figure) and `mergeAdjacentDutyPeriods` will not merge it with a flight duty
+- Do not treat an un-called standby as a duty to rest FROM — it is rest, and the rest period runs straight through it. `isRestingStandby` is the test and `calculateAllRestPeriods` / `calculateRestUntilLegal` are the two places that skip it; read literally, para 3(1)(c) would otherwise demand 12 hours of rest after a 12-hour standby spent at home. It still contributes its 20%, and the assumption carries a marker because it is the permissive direction
+- Do not let `mergeDutyPeriods` consume a date for a NON-FLIGHT duty. Only a schedule flight duty is an alternative record of a logbook duty; a standby is a different duty that happens to share the day — and the day it shares with a flight is the day it was ACTIVATED on, so consuming the date dropped the one standby whose hours needed accounting for and hid the pair from `truncateActivatedStandby`
+- Do not answer "was this standby called out" in two places — `findActivationMinute` is the rule, with `truncateActivatedStandby` (duty periods) and `standbyActivation` (schedule entries + flights, for the roster page) as its two callers. And read the ROSTERED report when finding it, or a pushback delay moves the activation later and credits duty hours as standby
+- Do not let a standby into the dashboard's active-duty search — it would become the ACTIVE duty carrying `maxFdpMinutes: 0`, so the panel reads as a flight duty whose limit failed to compute. `DutyStatus.standby` is its own band
+- Do not hard-delete a roster duty, and do not let a binned one be matched by `bulkUpsertScheduleEntries` — updating a deleted row silently resurrects a duty the user deleted, the same rule the flight reconciler follows. Every read filters `isLiveEntity`
+- Do not put the duty form in a detail panel — the roster is `hasDetailPanel: false` and populating detail panels on non-detail routes is owner-design work that must not be done piecemeal. It is a full-screen dialog over the CONTENT region, and it re-seeds by a `key` rather than a seeding effect (an effect there is a cascading render, and keying on the entry OBJECT clobbers an edit in progress on every sync write)
+- Do not count a standby's full length toward the 90h/180h limits — para 6(7) counts **20%** of home standby, and para 6(3) folds AIRPORT standby into the rest period or the following FDP so it contributes nothing separately. `countedDutyMinutes` carries the discount and `calculateRollingStats` reads `countedDutyMinutes ?? dutyMinutes`, so every ordinary duty is untouched
+- Do not leave an activated standby at its rostered length (para 6(6)) — `truncateActivatedStandby` cuts it back to the following duty's report before the 20% is taken, or the called-out hours are counted twice: once as standby and again in full as the duty they became
+- Do not put flights back into `scheduleEntries`. The roster holds NON-FLIGHT duties only — standby, ground, leave, off — precisely because they have no logbook counterpart and so nothing to reconcile. A parallel record of flights needing reconciliation against the logbook is what made the old roster heavy. And do not add standby as a `FlightLog.entryType` instead: it puts non-flight rows in the legal flight record and breaks the fixed-height card the virtualised list depends on
+- Do not drop a non-flight schedule row on the floor. `schedule-parser` used to offer every one to `tryExtractSimDuty` and skip whatever was not a simulator, which is why standby had NEVER been extracted; `tryExtractGroundDuty` runs after it. Normalise the window to UTC and remember the conversion can move the DATE — 06:00 SGT is 22:00 the previous day, and the app keys a duty on its UTC date
+- Do not compute an FDP maximum anywhere but `deriveMaxFDP` — it is the ONE derivation, and every stage (both producers, the overnight merge, the acclimatisation pass, the hypothetical-duty builders) goes through it. Four sites recomputing it from whatever inputs each had is what put 10:15 on a duty the schedule allows 12:15 for
+- Do not enter Table A on `reportTime`. That is when the duty STARTED; the table is entered on `fdpStartLocal`, which is the **original** (scheduled) reporting time in the DEPARTURE station's clock. Para 10(a) is explicit — a delay under 4 hours keeps the maximum on the original report while the FDP starts at the actual one — and a 23-minute pushback on a 2150 report crosses into the 2200–0559 band and takes an hour and a half off the maximum, which then reads as an exceedance the pilot never committed
+- Do not shift a LOCAL_STATION report time by the departure offset — it is ALREADY the local time where the crew member reports, so shifting double-counts (eight hours, two bands of Table A, on a UTC+0 departure). UTC shifts by the departure offset; LOCAL_BASE shifts from SGT to it
+- Do not HARDCODE an FDP maximum, ever. Under CAAS Reg 14 it moves with report time, sectors, crew complement, acclimatisation and the long-sector adjustment; `DutyPeriod.maxFdpMinutes` already holds the figure `calculateMaxFDP` computed for THAT duty, and `fdpTableUsed` is printed beside it so it can be checked. A duty with no computed maximum shows a dash, not a default — a default is a number somebody might fly to
+- Do not add a 7-day duty figure to the dashboard. CAAS imposes 14-day and 28-day duty caps (Reg 12) and 28-day/12-month flight caps (Reg 107); a 7-day limit is not in the regulation and printing one is worse than printing none
+- Do not turn the legal page back into a stack of glass cards — six cards' borders, radii and margins cost ~120px of a phone's height, which is the difference between it fitting and not. One surface, hairline `divide-y` rules. And keep it `max-h-full`, not `h-full`: stretching makes the one `flex-1` section absorb every spare pixel and leaves a hole under the last requirement
+- Do not fall back to the fullest rolling limit for the "tightest" constraint — a limit REFILLS, so 41% of a 12-month flight allowance is not tight, and reporting it named the least urgent thing on the page. With nothing flagged the answer is the nearest EXPIRY, which is why only `currency` requirements carry `daysUntil`
+- Do not sort currencies and rolling limits into one grid. They are different kinds of thing (days that expire vs hours that refill) and mixing them is what made the panel unreadable at a glance — separate bands, and keep the limits PAIRED (Duty 14d/28d, then Flight 28d/1y) rather than four rows sorted by urgency
+- Do not split 90-day recency back into separate takeoff and landing cells — they are two halves of one question, and urgency-sorted they did not even sit beside each other. One cell answers with the binding half; expanding shows both
+- Do not turn the currency band back into a column of full-width rows, and do not give a currency cell a bar. A currency is a name and a number of DAYS — one small fact — so it is a figure over a caption in a grid read at a glance; a bar belongs to the limits band, where the number really is a fraction of something. And do not expand a cell IN PLACE: in a grid that stretches its row and leaves a hole beside it, so one cell opens at a time into a full-width block under the grid, with a ring left on the cell it describes
+- Do not tint the currency cells that are MET. The status ramp means met / close / not met, so tinting all of them paints the whole band and leaves the one flagged cell nothing to stand out against
+- Do not put rest back in the currency band — it is a property of the duty just flown, not a standing qualification, and a live countdown among expiry dates reads as a different kind of thing. It lives in the duty band, and the annunciator has to fold it into the verdict itself since it is no longer one of the requirements
+- Do not print the rolling limits in the duty band as well as the limits band — that was the duplication the rework removed. The duty band carries FDP and flight time for THIS duty only
+- Do not derive the duty band's bar colour from how full it is — state the tone. A nearly-full FDP bar is a warning and a nearly-full REST bar is good news; deriving it painted a fully-rested pilot amber. And do not put a standby's window on the status ramp: how full it is is a magnitude, not a verdict (`RAMP.info`)
+- Do not put the duty band's ring back. The off-duty question is a COMPARISON of two instants on one axis — when the rest becomes legal, and when the next duty reports — and an arc has nowhere to put the second one. It is a timeline with the report as a CARET and the rest still owed as a red band, so a duty rostered inside the rest period is visible before a word is read
+- Do not print a bare rest countdown in the annunciator. The hero is `nextAction.headline`, which is the CONTEXTUAL form of the same fact ("Rest short by 3:00", "Rest until 04:36"); a raw countdown there, a copy inside the ring and an "N to go" line beside "Legal from" were three printings of one number
+- Do not let `pilot-status.ts` format its own clocks — it is pure, so the formatter is INJECTED (`buildPilotStatus({ formatClock })`, wired by `usePilotStatus(recency, now, display)`). Its own `Intl.DateTimeFormat` was device-local 24-hour with a colon, so a Zulu-configured pilot read one convention in the hero line and another two lines below it
+- Do not make the legal page's cells navigate on tap — they EXPAND in place and a second tap closes them. The reader came to check a status, and a route change loses the screen they came for. The deep link belongs inside the expansion
+- Do not replace the sector chain with a list of recent flights — that list showed history, not THIS duty, and could not answer "where am I in a four-sector day". The chain comes from `deriveSectorLegs` off the duty's own route
+- Do not let the summary page's flight list grow the page — it scrolls in its own bounded box, so a year-long period cannot push the breakdown below it out of reach
+- Do not read an in-progress duty from the logbook alone. `mergeDutyPeriods` prefers the logbook for today, and mid-duty the logbook holds only the sectors already flown — so a two-sector day with one sector logged reads as a duty that ended at lunchtime and the panel falls through to a rest countdown. Pass `scheduleDutyPeriods` into `deriveDutyStatus`; where the roster runs later, the duty is still on
+- Do not treat the FDP pipeline's duty periods as the whole plan. `computeFDPResult` filters to `isFlownFlight`, so a sector sitting in the logbook as `scheduledOut`/`scheduledIn` contributes nothing — on a part-flown day with no roster imported there is no plan anywhere, and the panel reads "Roster Clear" and counts down rest between sectors. `buildPlannedDuties` rebuilds the day from the flight rows with scheduled fallbacks; it is for duty shape and FDP only, never cumulative limits
+- Do not end the ACTIVE duty at the debrief — the FDP ends at the last ON-BLOCKS, and the duty window carries para 7(2)'s 30 minutes of post-flight checks after it. Keyed off the window the panel kept counting an FDP down for half an hour after the aeroplane was parked. `fdpEndOf` closes it at the last arrival once EVERY sector is on blocks, and not before: an unlogged sector is not a finished one
+- Do not measure a duty's FDP to the DEBRIEF — that carries para 7(2)'s 30 minutes of post-flight checks, which are duty but not FLIGHT duty. `DutyPeriod.fdpEndTime` is the last on-blocks and every FDP figure is measured to it
+- Do not show "legal from" as the whole answer when a next duty is known. What a rest period has to be depends on the duty AHEAD as much as the one behind (para 4's 24 hours before a duty touching the window of circadian low), so the useful comparison is the rest AVAILABLE before that duty against what THAT duty needs. "Legal from" is the fallback for when nothing is rostered
+- Do not format a point in time on the legal page by hand — `formatInstant` joins `useZuluTime`, `timeFormat` and `clockSeparator`, and a page that formats its own clocks disagrees with the rest of the app about what time it is
+- Do not tick this page at 1Hz. Nothing on it is shown to the second, so the clock aligns to the minute boundary and holds there; a per-second tick re-rendered the whole panel sixty times for every visible change. Keep the immediate catch-up in a timeout CALLBACK, not a synchronous effect write
+- Do not print a figure the gauge already draws, or a countdown the annunciator already runs. "Elapsed" had no denominator beside an FDP line carrying one; "N to go" beside "Legal from" was the third copy of the same number. And the last duty's LENGTH says nothing about whether the next one is legal — its route does
+- Do not give a standby its own card shape. It is a duty and must never read as off duty, but the question it raises is the off-duty question — am I legal, and for what — so it takes the same rest gauge and lines with its window added
+- Do not format a clock on the legal page without `clockSeparator` — `formatClockDisplay` governs every point in time in the app and this page is not exempt. The view takes it as a prop so the presentational half stays free of the database
+- Do not take the FDP maximum, sector count or route from the logbook half of a part-flown duty — Reg 14 sets the maximum by the sectors PLANNED, so a one-sector logbook duty carries a one-sector limit that nobody should fly to. Plan supplies the shape and the limit; the record supplies what has been flown
+- Do not put a number inside a meter's fill without checking it fits — below `LABEL_FITS_INSIDE` it goes outside the fill instead. A figure clipped by its own bar is worse than no figure
+- Do not print "12 / 12 currencies current" — a pilot does not need telling about the eleven that are fine. The panel names the TIGHTEST constraint, and falls back to the fullest rolling limit only when nothing is flagged
+- Do not state a problem without its remedy on the legal page. The next-action line is the imperative ("2 landings required"), phrased in `legality.ts` where the shortfall is in hand — not the reading ("landings 1 / 3"), which the requirement cell already shows
+- Do not let a standing requirement outrank an exceeded FDP — that one is happening right now rather than being true today, and it is the only thing that overrides the legality verdict for the annunciator
+- Do not group the legal page's requirements under headings — they are sorted most-pressing-first so the top-left cell is always the thing closest to stopping the pilot. Headings cost four rules and ~56px to impose an order nobody is reading for on a no-scroll page
+- Do not put the period controls (calendar, period pills) on the legal page — they do nothing there, and the action bar is the one thing that can push a button under the centred nav pill
+- Do not drop `suppressHydrationWarning` from the legal page's clock nodes, and do not assume it inherits — it applies only to the element it is on. Node's ICU renders `GMT` where the browser renders `GMT+0` for the same zone, so the offset mismatches in production even when the clock value agrees
+- Do not rebuild the pilot-status model on every clock tick — `usePilotStatus` buckets `now` to the MINUTE, because the model changes state on minute boundaries and the seconds are read straight off the clock by the component
+- Do not reduce the legal page's requirement grid to a banner, and do not compute its verdict any way but the WORST requirement — an average or a majority reads one expired medical as legal. The requirements are the content; the verdict is derived from them and they stay visible
+- Do not answer recency with a current/not-current chip — it must carry the LAPSE DATE, and that is 90 days after the flight supplying the THIRD event, not the newest. Takeoffs and landings lapse independently and the EARLIER one wins (a sector flown as PM lands without taking off). The fortnight before it lapses is the only window in which a pilot can still do something about it
+- Do not fail a document that is merely inside its warning window — expired FAILS, warning/critical CAUTION. That is the whole reason a currency carries two thresholds. Meter it against its own `warningDays`, never its full validity, or every document sits near empty for a year and the meter says nothing
+- Do not match a forecast breach to a limit row by exact string — `forecastExceedances` appends the regulation ("28-day flight (Reg 107a)") where `calculateCapacity` does not. The match is by PREFIX; exact binds every breach to no row and drops the warning silently
+- Do not paint a magnitude with the status ramp. Green/amber/red is RESERVED for requirement state (met / close / not met); role hours and type hours are quantities with no status, and they use one hue (`MagnitudeRow`). Sharing the ramp teaches the reader that a colour means the same thing in the breakdown as on the legal page, where it means whether they can legally fly. And never let a state be carried by colour alone — every state has its own icon, in the rows and in the header tally
+- Do not give the SUMMARY page a second layout at a breakpoint. It is ONE COLUMN at every width, same blocks in the same order; a wider container buys DENSITY INSIDE a block (2→6 requirement columns, 4→8 detail fields, stacked→side-by-side), never a rearrangement. Every step is a CONTAINER query — the page renders in a resizable split panel, so the viewport's width says nothing about the room a block has
+- Do not re-add a ring for the dashboard's period hours — the one it replaced was metered against a hardcoded 100-hour max, so a week and a year drew the same arc. A ratio needs a real denominator; period block hours have none, so the form is a hero figure (with PROPORTIONAL figures — `tabular-nums` reads loose at display size). Day/night does have one and is drawn
+- Do not draw the engine split with a single class present — a one-segment part-to-whole bar is a 100% fill under a one-item legend, restating the hero figure. Gate it on ≥2 non-zero classes
+- Do not put a number on the dashboard twice. Night and sim live in the period summary (`SHOWN_ELSEWHERE` keeps them out of the breakdown), recency/limits/rest/expiries live in the legality panel, and the alerts bell is scoped to import notes — the one alert class the page does not otherwise show. Every one of those was printed in two places before
+- Do not send the dashboard's flight rows to a full page to show their detail — they open IN PLACE, because the reader is looking at the period as a whole and navigating away loses it. `PeriodFlight` already carries the detail off the aggregator's existing walk
 - Do not order flights anywhere but `lib/utils/flight-sort.ts` — the order must be TOTAL (date, then actual-or-SCHEDULED out time, then departure, then id) or rows move on their own: a new flight sat at the top of the logbook until the next refetch and then jumped, and reading `outTime` alone treated every unflown sector as 00:00 so scheduled flights sank below completed ones on the same day. An optimistic cache write inserts with `insertFlightSorted`, never by prepending
 - Do not read a user table for a list, a total or an import match without filtering deleted rows (`isLiveFlight` for flights, `isLiveEntity` for the rest) — a binned row reaching the reconciler silently updates, and so resurrects, something the user deleted. The store's own `getAllX` already filters; go through it rather than hitting the table
 - Do not use `RETENTION_MS` for a deletion sweep or `DELETED_RETENTION_MS` for a decision — they are 90 and 30 days and the helpers take the window as an argument precisely so a caller has to say which
@@ -2650,7 +3529,7 @@ When making changes, be aware of these high-impact files:
 - Do not give the drag lens its own copy of the highlight to land on — it is portalled to `<body>`, so an opaque fill there covers the tab's icon and label and the landing flashes a solid pill with nothing in it. The REAL blob is revealed instead (it lives behind the row) and the glass dissolves off it; the lens stays translucent the whole way, so the content is never covered
 - Do not collapse `FADE_TAIL` and `--chrome-clear` into one number — the first is how far the DARKENING reaches (41px, i.e. 45 below the buttons), the second is where the quick-scroll rail PARKS a row (60 below, ~15px clear of the band). Equalising them is wrong in both directions: the band ends up far down the screen, or the scrolled-to row ends up inside the treatment
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
-- Do not re-gate the dashboard rings / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so the charts can animate freely
+- Do not re-gate the dashboard's meters / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so they can animate freely
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`
 - Do not give `register/complete`, `add-passkey`, the callsign change, or the TOTP-reveal routes a path that skips `verifyAuthenticationResponse`/`verifyStepUpAssertion` — the TOTP seed must never be revealed without a fresh passkey step-up
 - Do not give `SwipeableCard` action panels horizontal padding — the panel must collapse to 0 width when closed (the left gap comes from `openWidth`/`justify-end`), otherwise a sliver of the action button peeks at the card edge
@@ -2740,12 +3619,12 @@ When making changes, be aware of these high-impact files:
 - Do not reload a whole reference table on mount to notice a write — `useAirportDatabase` re-read all ~10k airports from IndexedDB every time it mounted, and the flight form mounts on every flight tap. Writers bump `getAirportsRevision()` and the hook reloads only on a mismatch. Every write to `referenceDb.airports` lives in `airports.store.ts` (rebuild / addCustom / toggleFavorite) — a NEW writer must bump it too, or a cached copy goes stale. Capture the revision BEFORE the read, so a write landing mid-load leaves the cache looking stale rather than falsely current
 - Do not compute a list twice in JSX — `xs.some(p)` for the section guard and `xs.filter(p)` for the rows is two full passes per render, and on the airports page that was two scans of the whole reference table for a handful of pinned entries. Derive it once in a `useMemo` and test `.length`
 - Do not pass a memoized list card an INLINE arrow (`onDelete={() => performDelete(item)}`) — it hands every row new props on each render of the page and defeats the `memo` outright, which is the whole reason the card is memoized. The card takes its own item back (`onDelete: (item) => void`) and the page passes ONE `useCallback`'d handler; a plain function declared in the page body is just as bad as the arrow, so the handler itself has to be stable. This bit the logbook, crew and aircraft lists independently
-- Do not put a `backdrop-filter` (`backdrop-blur-*`) on a surface whose backdrop is a FLAT colour — blurring a uniform field returns that same field, so it is pixel-identical to no filter while still forcing a backdrop root, a readback and a blur pass every frame the layer is painted. The dashboard's six widget cards each carried `backdrop-blur-sm` over `bg-background`, which has no gradient and nothing behind it (the grid is sequentially placed, so items never overlap). Glass surfaces, the chrome fade and the modal backdrops keep theirs — those sit over real, moving content, which is the case the filter exists for
+- Do not put a `backdrop-filter` (`backdrop-blur-*`) on a surface whose backdrop is a FLAT colour — blurring a uniform field returns that same field, so it is pixel-identical to no filter while still forcing a backdrop root, a readback and a blur pass every frame the layer is painted. The dashboard's widget cards each carried `backdrop-blur-sm` over `bg-background`, which has no gradient and nothing behind it (the blocks are stacked in one column, so they never overlap). Glass surfaces, the chrome fade and the modal backdrops keep theirs — those sit over real, moving content, which is the case the filter exists for
 - Do not hold gesture bookkeeping in React STATE when nothing renders it. The calendar kept `swipeStartY` / `isSwiping` / `hasTriggeredSwipeStart` as state and read them only inside its touch handlers, so putting a finger on it re-rendered the whole grid — 42 day cells, or 84 in dual mode — up to three times before anything visible happened. Refs, and the same for any drag box that can't move mid-gesture (`fast-scroll` caches the rail's rect for the drag's duration rather than reading it per `touchmove`, while that same drag is driving `scrollToIndex` on a virtualised list)
 - Do not do a gesture's work per POINTER EVENT — pointer events fire faster than frames (120Hz+, and coalesced besides) and nothing can show more than one position per frame. `GlassContainer`'s press-follow, the nav drag lens and the signature canvas each accumulate the latest point in a ref and apply it in ONE rAF pass. Within that pass, every layout READ comes before any WRITE: the drag lens used to write nine `left`/`top`/`width`/`height` values and then read a rect for the spotlight, which forces a synchronous layout flush on every event of the one gesture that has to feel stuck to the finger
 - Do not accumulate a signature stroke in React state — `signature-canvas.tsx` keeps the in-progress stroke in a REF and repaints once per frame, handing React ONE update when the stroke ends. As state, every point copied the whole array, re-rendered, took a `getBoundingClientRect`, forced a style flush via `getComputedStyle`, and redrew every stroke — so the cost per point grew with the stroke and the line visibly trailed the finger. The box and the resolved colour are cached for the stroke's duration; neither can change while a finger is down
 - Do not leave a `setState` in a rAF loop unguarded when the value it writes changes slower than the frame rate. `useCountdownConfirm` ticks at 60fps to drive a MotionValue (free) but `remaining` is whole SECONDS, so it compares before dispatching — ~60 scheduler entries a second for 59 non-changes, for the whole 10s a delete is armed, which is exactly when the user is scrolling the list it was armed from
-- Do not run a clock, poll or subscription that a keep-alive page owns without gating it on that page being the ACTIVE route. The dashboard's FDP stack ticks at 1Hz to drive one countdown; the dashboard is mounted forever after its first visit, so ungated it re-rendered four limit rows every second for the rest of the session while the user was somewhere else entirely. Gate on `usePageActive` AND on there being something to tick for
+- Do not run a clock, poll or subscription that a keep-alive page owns without gating it on that page being the ACTIVE route. The dashboard's legality panel ticks at 1Hz to drive one countdown; the dashboard is mounted forever after its first visit, so ungated it re-rendered the whole requirement grid every second for the rest of the session while the user was somewhere else entirely. Gate on `usePageActive` AND on there being something to tick for — the countdown only exists while rest is outstanding, which is most of the time not at all
 - Do not answer "is anything queued?" by reading a table — the sync trigger manager polls that every 10 seconds for the whole session, and `getSyncQueue().length` deserialised every pending row to compare a number against zero. Use `getSyncQueueCount()`, which counts off the index
 - Do not decide a `useBackDismiss` release is safe at the moment it is SCHEDULED — check at the moment it FIRES, against the shared marker stack (`lib/utils/history-markers.ts`). The release is deferred by a task precisely so other things can happen in between, and one of them is another overlay pushing its own marker: `history.back()` takes whatever is on TOP, so the outgoing dialog popped the incoming one's entry and the incoming one dismissed itself. That is what made a LogTen import report itself cancelled a moment after its review dialog opened. Two dialogs handing off in one commit is the ordinary case, not an exotic one — the import status dialog does it to every review modal it opens
 - Do not release a `useBackDismiss` marker without checking the URL is still the one it was pushed at. `history.back()` only takes the marker back while the marker is the TOP of the stack; if something navigated in the meantime — the sidebar's close-on-`pathname` effect is exactly that shape, a route change tears the overlay down — the marker is buried one entry below the new page and the `back()` undoes the navigation. A buried marker is left alone: it is a duplicate entry for a page the user was already on, which is invisible, where undoing a navigation is not

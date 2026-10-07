@@ -28,10 +28,18 @@
 
 import type { FlightLog } from "@/types/entities/flight.types";
 
+/**
+ * `scheduledOut` is OPTIONAL so a projection of a flown flight can be sorted by
+ * the same comparator. The dashboard's period list is one — it carries the
+ * actual out time and never a scheduled-only row — and the alternative was a
+ * second sort, which is exactly the drift this module exists to prevent.
+ * `effectiveOutTime` already falls back through a missing value.
+ */
 type SortableFlight = Pick<
   FlightLog,
-  "id" | "date" | "outTime" | "scheduledOut" | "departureIcao" | "departureIata"
->;
+  "id" | "date" | "outTime" | "departureIcao" | "departureIata"
+> &
+  Partial<Pick<FlightLog, "scheduledOut">>;
 
 /** When the aircraft actually left, or is planned to. "" when neither is set. */
 export function effectiveOutTime(flight: Pick<SortableFlight, "outTime" | "scheduledOut">): string {

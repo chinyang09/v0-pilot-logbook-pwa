@@ -2,6 +2,11 @@
 
 import { useMemo, useState, useEffect } from "react"
 import { useFlights } from "./use-flights"
+import { buildPlannedDuties } from "@/lib/utils/dashboard/planned-duties"
+import {
+  applyAcclimatisation,
+  truncateActivatedStandby,
+} from "@/lib/utils/roster/fdp-calculator"
 import { useScheduleEntries } from "./use-schedule"
 import { useDBReady } from "./use-db"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
@@ -35,6 +40,24 @@ const EMPTY_CAPACITY = {
 
 const EMPTY_RESULT = {
   allDutyPeriods: [] as DutyPeriod[],
+  /**
+   * The roster's own view, BEFORE it is merged with the logbook.
+   *
+   * `mergeDutyPeriods` prefers the logbook for any date that is not in the
+   * future, which is right for the cumulative and rolling calculations — flown
+   * hours are the truth. It is wrong for "am I still on duty": mid-duty the
+   * logbook only holds the sectors already flown, so a two-sector day with one
+   * sector logged looks like a duty that finished at lunchtime. The dashboard
+   * needs the PLAN alongside the record to tell the difference.
+   */
+  scheduleDutyPeriods: [] as DutyPeriod[],
+  /**
+   * The day's shape taken from the FLIGHTS, with each sector falling back to
+   * its scheduled times. The pipeline's own duty periods are built from flown
+   * flights only, so on a part-flown day nothing else knows the duty continues.
+   * Used for duty shape and FDP only — never for cumulative limits.
+   */
+  plannedDutyPeriods: [] as DutyPeriod[],
   pastDuties: [] as DutyPeriod[],
   futureDuties: [] as DutyPeriod[],
   cumulativeLimits: {
@@ -102,8 +125,18 @@ function computeFDPResult(
       getDutyPeriodsFromSchedule(scheduleEntries, airportTimezones)
     )
 
-    const merged = mergeDutyPeriods(logbookDPs, scheduleDPs)
-    const withRest = calculateAllRestPeriods(merged)
+    // Para 6(6): a standby ends the moment the crew member is activated, so a
+    // standby that was called out is cut back to the following duty's report.
+    // Left whole, those hours are counted twice — once at 20% as standby and
+    // again in full as the duty they turned into.
+    const merged = truncateActivatedStandby(mergeDutyPeriods(logbookDPs, scheduleDPs))
+    // Correct each duty's FDP table against the crew member's ACTUAL
+    // acclimatised zone, which only the whole timeline can tell us — a duty
+    // period is built before anything knows the three-nights history that
+    // decides it. Must run before the rest calculation, which reads the
+    // corrected duty figures.
+    const acclimatised = applyAcclimatisation(merged)
+    const withRest = calculateAllRestPeriods(acclimatised)
 
     const today = new Date()
     const limits = DEFAULT_FTL_LIMITS
@@ -128,11 +161,17 @@ function computeFDPResult(
     // Timeline chart data
     const timelineData = generateTimelineData(withRest, limits)
 
-    // Rest until legal for next duty
-    const restUntilLegal = calculateRestUntilLegal(currentDPs)
+    // Rest until legal for the next duty. Given the WHOLE timeline, not just
+    // the past: it picks the last COMPLETED duty itself, and para 4's 24-hour
+    // requirement turns on whether the duty AHEAD encompasses an early start,
+    // a late finish or a take-off or landing in the window of circadian low —
+    // which is invisible in a past-only list.
+    const restUntilLegal = calculateRestUntilLegal(withRest)
 
     const value: FDPResult = {
       allDutyPeriods: withRest,
+      scheduleDutyPeriods: scheduleDPs,
+      plannedDutyPeriods: buildPlannedDuties(flights),
       pastDuties,
       futureDuties,
       cumulativeLimits,

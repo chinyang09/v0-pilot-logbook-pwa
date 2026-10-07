@@ -21,8 +21,16 @@ import {
   Shield,
   TrendingUp,
   ArrowRight,
+  Plus,
+  Trash2,
 } from "lucide-react"
-import { useScheduleEntries, useCurrencies, useDiscrepancyCounts, refreshAllData } from "@/hooks/data"
+import {
+  useScheduleEntries,
+  useCurrencies,
+  useDiscrepancyCounts,
+  useFlights,
+  refreshAllData,
+} from "@/hooks/data"
 import { usePageActive } from "@/hooks/use-page-active"
 import { cn } from "@/lib/utils"
 import { formatYMD } from "@/lib/utils/date"
@@ -30,6 +38,11 @@ import Link from "next/link"
 import { DutyEntryCard, RosterCalendar } from "@/components/roster"
 import { FastScroll, generateYearItems } from "@/components/ui/fast-scroll"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
+import { DutyEntryDialog } from "@/components/roster/duty-entry-dialog"
+import { SwipeableCard } from "@/components/swipeable-card"
+import { deleteScheduleEntry } from "@/lib/db"
+import { standbyActivation } from "@/lib/utils/roster/standby-activation"
+import type { ScheduleEntry } from "@/types/entities/roster.types"
 
 type ViewMode = "list" | "calendar"
 
@@ -40,6 +53,53 @@ export default function RosterPage() {
   const { scheduleEntries, isLoading: entriesLoading, refresh: refreshEntries } = useScheduleEntries()
   const { currencies } = useCurrencies()
   const { counts: discrepancyCounts } = useDiscrepancyCounts()
+  const { flights } = useFlights()
+
+  // Add / edit. `editing` null with the dialog open means "add".
+  const [dutyDialogOpen, setDutyDialogOpen] = useState(false)
+  const [editingEntry, setEditingEntry] = useState<ScheduleEntry | null>(null)
+
+  const openAddDuty = useCallback(() => {
+    setEditingEntry(null)
+    setDutyDialogOpen(true)
+  }, [])
+
+  const openEditDuty = useCallback((entry: ScheduleEntry) => {
+    setEditingEntry(entry)
+    setDutyDialogOpen(true)
+  }, [])
+
+  const handleDeleteDuty = useCallback(
+    async (entry: ScheduleEntry) => {
+      await deleteScheduleEntry(entry.id)
+      await refreshEntries()
+    },
+    [refreshEntries]
+  )
+
+  const handleDutySaved = useCallback(async () => {
+    await refreshEntries()
+    // The FDP pipeline reads schedule entries, so a duty added or edited here
+    // has to reach the dashboard's caches too.
+    refreshAllData()
+  }, [refreshEntries])
+
+  /**
+   * Which standby duties were called out, and when (para 6(6)).
+   *
+   * Built once for the whole list rather than per card: `standbyActivation`
+   * walks the flights, and the roster renders one card per duty for the entire
+   * imported history.
+   */
+  const activations = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof standbyActivation>>()
+    for (const entry of scheduleEntries) {
+      if (entry.dutyType !== "standby") continue
+      const activation = standbyActivation(entry, flights)
+      if (activation) map.set(entry.id, activation)
+    }
+    return map
+  }, [scheduleEntries, flights])
 
   // Group schedule entries by date. Memoized on the data itself — without this,
   // sortedDates gets a new identity every render and every downstream
@@ -155,9 +215,12 @@ export default function RosterPage() {
             refreshAllData()
           }}
         />
+        <GlassGroupButton ariaLabel="Add duty" onClick={openAddDuty}>
+          <Plus className="h-5 w-5" />
+        </GlassGroupButton>
       </GlassButtonGroup>
     </>
-  ), [refreshEntries, entriesLoading, viewMode, setViewMode])
+  ), [refreshEntries, entriesLoading, viewMode, setViewMode, openAddDuty])
 
   // Keep-alive: only the active tab owns the header actions; re-activation
   // refreshes the schedule so the retained page stays accurate.
@@ -300,7 +363,24 @@ export default function RosterPage() {
                   </h2>
                 </div>
                 {selectedEntries.map((entry) => (
-                  <DutyEntryCard key={entry.id} entry={entry} />
+                  <SwipeableCard
+                    key={entry.id}
+                    id={entry.id}
+                    actions={[
+                      {
+                        icon: <Trash2 className="h-5 w-5" />,
+                        ariaLabel: "Delete duty",
+                        variant: "destructive",
+                        onClick: () => handleDeleteDuty(entry),
+                      },
+                    ]}
+                  >
+                    <DutyEntryCard
+                      entry={entry}
+                      activation={activations.get(entry.id) ?? null}
+                      onClick={() => openEditDuty(entry)}
+                    />
+                  </SwipeableCard>
                 ))}
               </>
             ) : (
@@ -333,7 +413,26 @@ export default function RosterPage() {
                       >
                         <div className="p-3 space-y-2">
                           {entriesByDate[date].map((entry) => (
-                            <DutyEntryCard key={entry.id} entry={entry} compact />
+                            <SwipeableCard
+                              key={entry.id}
+                              id={entry.id}
+                              variant="row"
+                              actions={[
+                                {
+                                  icon: <Trash2 className="h-5 w-5" />,
+                                  ariaLabel: "Delete duty",
+                                  variant: "destructive",
+                                  onClick: () => handleDeleteDuty(entry),
+                                },
+                              ]}
+                            >
+                              <DutyEntryCard
+                                entry={entry}
+                                activation={activations.get(entry.id) ?? null}
+                                onClick={() => openEditDuty(entry)}
+                                compact
+                              />
+                            </SwipeableCard>
                           ))}
                         </div>
                       </FormSection>
@@ -347,6 +446,17 @@ export default function RosterPage() {
 
       </div>
       </PageContainer>
+
+      <DutyEntryDialog
+        // Remount on the entry so the form re-seeds from its `useState`
+        // initialisers — no seeding effect, and no risk of a reactive rewrite
+        // of the same row clobbering an edit in progress.
+        key={editingEntry?.id ?? "new"}
+        open={dutyDialogOpen}
+        entry={editingEntry}
+        onClose={() => setDutyDialogOpen(false)}
+        onSaved={handleDutySaved}
+      />
     </>
   )
 }

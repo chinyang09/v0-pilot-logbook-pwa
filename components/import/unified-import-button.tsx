@@ -203,6 +203,10 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           parts.push(`${result.simSessionsCreated} sim sessions`);
         if (result.simDuplicatesRemoved)
           parts.push(`${result.simDuplicatesRemoved} duplicate sims removed`);
+        if (result.groundDutiesCreated || result.groundDutiesUpdated)
+          parts.push(
+            `${result.groundDutiesCreated + result.groundDutiesUpdated} standby/ground duties`
+          );
         if (result.aircraftCreated)
           parts.push(`${result.aircraftCreated} aircraft`);
         if (result.staleSkipped)
@@ -458,6 +462,9 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             crewMember: { crewId: "", name: "", base: "", role: "", aircraftType: "" },
             operations: acceptedOps,
             simSessions: [],
+            // A crew logbook report is flights only — it carries no standby or
+            // ground duties. Those come from the schedule report.
+            groundDuties: [],
             currencies: [],
             personnelToCreate: logbookPlan.personnelToCreate,
             personnelToUpdate: [],
