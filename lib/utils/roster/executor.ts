@@ -31,6 +31,7 @@ import {
   deleteFlight,
   isLiveFlight,
   getAirportByIata,
+  getAirportByIcao,
   getAirportTimeInfo,
   getCurrentUserPersonnel,
   getUserPreferences,
@@ -370,6 +371,21 @@ function buildUpdatePatch(op: AcceptableOperation): Partial<FlightLog> {
     assignFieldValue(patch, change.field, change.to);
   }
   return patch;
+}
+
+/**
+ * A flight written while its airport was unresolved got offset 0 along with
+ * its blank ICAO. When an update fills the ICAO in (the reconciler only ever
+ * fills it, never changes it), the offset that should have come with it is
+ * set from the same airport.
+ */
+async function backfillTimezones(patch: Partial<FlightLog>): Promise<void> {
+  const [dep, arr] = await Promise.all([
+    patch.departureIcao ? getAirportByIcao(patch.departureIcao) : undefined,
+    patch.arrivalIcao ? getAirportByIcao(patch.arrivalIcao) : undefined,
+  ]);
+  if (dep?.tz) patch.departureTimezone = getAirportTimeInfo(dep.tz).offset;
+  if (arr?.tz) patch.arrivalTimezone = getAirportTimeInfo(arr.tz).offset;
 }
 
 async function postWriteRecalculate(
@@ -826,6 +842,7 @@ export async function executeRosterImport(
         case "update_safe":
         case "update_consult": {
           const patch = buildUpdatePatch(op);
+          await backfillTimezones(patch);
           if (reportGeneratedAt) patch.reportGeneratedAt = reportGeneratedAt;
           patch.importSource = importSource;
           Object.assign(patch, reportStamps);

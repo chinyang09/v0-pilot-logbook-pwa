@@ -786,6 +786,25 @@ function diffSectorVsFlight(
     });
   }
 
+  // ICAO is only ever FILLED here, never changed. A flight written while its
+  // airport could not be resolved carries the IATA code alone (and offset 0),
+  // and reads in the user's ICAO display as a bare "CSX" beside a "WSSS"; the
+  // next report that does resolve it repairs the row.
+  if (sector.departureIcao && !flight.departureIcao) {
+    changes.push({
+      field: "departureIcao",
+      from: "",
+      to: sector.departureIcao,
+    });
+  }
+  if (sector.arrivalIcao && !flight.arrivalIcao) {
+    changes.push({
+      field: "arrivalIcao",
+      from: "",
+      to: sector.arrivalIcao,
+    });
+  }
+
   if (
     sector.isPilotFlying !== undefined &&
     sector.isPilotFlying !== flight.pilotFlying

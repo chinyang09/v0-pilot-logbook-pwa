@@ -503,9 +503,12 @@ function extractSectorsFromRow(
 
     // Parse actual-times line — may be scheduled-only, actual-only, or mixed.
     // Supports both day-shift markers: ⁺¹ rolls forward (late-night dep), ⁻¹
-    // rolls back (early-morning arr displayed under the next day's row).
+    // rolls back (early-morning arr displayed under the next day's row). The
+    // PDF prints the forward marker as a bare, space-separated "¹" — "02:05 ¹
+    // - 06:30 ¹" — which has to be accepted on the OUT side too, or the range
+    // never matches and the sector is dropped for want of an OUT time.
     const timeMatch = actualLine.match(
-      /(A?\d{2}:\d{2}(?:⁺¹|⁻¹|\+1|-1)?)\s*-\s*(A?\d{2}:\d{2}(?:⁺¹|⁻¹|\+1|-1)?)/
+      /(A?\d{2}:\d{2}(?:\s*(?:⁺¹|⁻¹|¹)|\+1|-1)?)\s*-\s*(A?\d{2}:\d{2}(?:\s*(?:⁺¹|⁻¹|¹)|\+1|-1)?)/
     );
 
     const sector: RawSector = {
@@ -1020,9 +1023,6 @@ export async function parseScheduleCSV(
       return plan;
     }
 
-    // Base airport TZ (required for LOCAL_BASE; informational otherwise)
-    const baseAirport = await getAirportByIata(header.crewInfo.base);
-    const baseTz = baseAirport?.tz;
 
     // Airport lookup with in-import cache. Carries ICAO through so the
     // sector record can render airport codes per the user's display
@@ -1167,6 +1167,33 @@ export async function parseScheduleCSV(
       // The in-import airportCache inside lookupAirport will pick up the
       // newly-written records on its next call — no need to invalidate it
       // because it hasn't been populated yet (Stage B hasn't started).
+    }
+
+    // Base airport TZ (required for LOCAL_BASE; informational otherwise).
+    // Read AFTER the enrichment above, which is what fetches the base when the
+    // local table does not have it — reading it first meant a device whose
+    // table was missing the base failed on the first import and worked on the
+    // second.
+    const baseAirport = header.crewInfo.base
+      ? await getAirportByIata(header.crewInfo.base)
+      : undefined;
+    const baseTz = baseAirport?.tz;
+
+    // A Local Base report cannot be read without the base's zone: every time
+    // in it converts to nothing. Carrying on dropped every sector one by one
+    // as "no parseable OUT time", and the reconciler then offered to DELETE
+    // the flights those sectors should have matched — while the sims, which
+    // fall back to offset 0, went in eight hours out. Refuse the whole report.
+    if (header.timeReference === "LOCAL_BASE" && !baseTz) {
+      plan.errors.push({
+        line: 0,
+        message:
+          `Could not find the timezone of your base airport (${
+            header.crewInfo.base || "not stated in the report"
+          }), which this Local Base report's times are written in. ` +
+          "Nothing was imported. Check your connection and try again.",
+      });
+      return plan;
     }
 
     onProgress?.(50, "Normalizing", "Converting times to UTC...");

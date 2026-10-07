@@ -62,6 +62,7 @@ import {
   getCurrentUserPersonnel,
   getUserPreferences,
   DEFAULT_IMPORT_DEFAULTS,
+  ensureAirportDatabase,
 } from "@/lib/db";
 import type { FlightLog } from "@/types/entities/flight.types";
 import type { NormalizedDocument } from "@/lib/utils/parsers/types";
@@ -241,7 +242,12 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
       setProgress({ percent: 5, stage: "Reading", detail: `${files.length} file(s)` });
 
       try {
+        // Every parser below resolves airports against the local reference
+        // table, which is otherwise only seeded when an airport list mounts.
+        // Loaded alongside the extraction, and awaited before any parse.
+        const airportsReady = ensureAirportDatabase();
         const docs = await extractDocuments(files);
+        await airportsReady;
 
         // ---- LogTen Pro migration ----
         // Routed before anything else because the two families share nothing

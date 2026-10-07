@@ -114,6 +114,43 @@ async function rebuildAirportsTable(rawData: Record<string, any>): Promise<Airpo
 }
 
 /**
+ * Make sure the bundled airport dataset is in IndexedDB, WITHOUT reading it
+ * back. The table is otherwise only seeded by the hooks that list airports
+ * (the airports page, the flight form), so a pilot who opened the app on the
+ * logbook and imported a report straight away ran every lookup against an
+ * empty table: a Local Base report could not resolve its own base, every
+ * sector failed to convert to UTC and was dropped in silence, and the review
+ * then offered to delete the flights it should have matched. Anything that
+ * resolves airports in bulk (the report imports) calls this first.
+ *
+ * Concurrent callers share one load. Never throws — a failed load leaves the
+ * table as it was, and the caller's own lookups decide what that means.
+ */
+let ensureAirportsInFlight: Promise<void> | null = null
+
+export function ensureAirportDatabase(): Promise<void> {
+  if (!ensureAirportsInFlight) {
+    ensureAirportsInFlight = (async () => {
+      try {
+        const [storedVersion, count] = await Promise.all([
+          referenceDb.getMetadata("airport_version"),
+          referenceDb.airports.count(),
+        ])
+        if (storedVersion === DATA_VERSION && count > 0) return
+        const response = await fetch(AIRPORT_SOURCE_URL)
+        if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
+        await rebuildAirportsTable(await response.json())
+      } catch (error) {
+        console.error("[Airport DB] Could not seed the airports table:", error)
+      }
+    })().finally(() => {
+      ensureAirportsInFlight = null
+    })
+  }
+  return ensureAirportsInFlight
+}
+
+/**
  * Get airports from cache or load from local public folder
  */
 export async function getAirportDatabase(): Promise<Airport[]> {
