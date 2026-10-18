@@ -66,13 +66,63 @@ class PageErrorBoundary extends Component<
  * remount was the dominant cost; its FDP data was already module-cached)
  * and the roster list is virtualized, so the retained DOM is bounded.
  */
-const PERSISTENT_PAGES: Record<KeepAliveRouteKey, React.LazyExoticComponent<React.ComponentType>> = {
-  "/": lazy(() => import("@/app/(app)/page")),
-  "/logbook": lazy(() => import("@/app/(app)/logbook/page")),
-  "/aircraft": lazy(() => import("@/app/(app)/aircraft/page")),
-  "/airports": lazy(() => import("@/app/(app)/airports/page")),
-  "/crew": lazy(() => import("@/app/(app)/crew/page")),
-  "/roster": lazy(() => import("@/app/(app)/roster/page")),
+type PageModule = { default: React.ComponentType }
+
+const PAGE_IMPORTERS: Record<KeepAliveRouteKey, () => Promise<PageModule>> = {
+  "/": () => import("@/app/(app)/page"),
+  "/logbook": () => import("@/app/(app)/logbook/page"),
+  "/aircraft": () => import("@/app/(app)/aircraft/page"),
+  "/airports": () => import("@/app/(app)/airports/page"),
+  "/crew": () => import("@/app/(app)/crew/page"),
+  "/roster": () => import("@/app/(app)/roster/page"),
+}
+
+/**
+ * Chunks already fetched, by route — filled by `preloadKeepAlivePages`.
+ *
+ * The FIRST visit to each tab used to show the Suspense spinner for ~300ms
+ * while its chunk downloaded (measured on a production build: 11–18 frames of
+ * spinner, the toolbar lagging behind). Fetching the chunks while the app is
+ * idle fixes the download — but not on its own: `lazy` still suspends for a
+ * frame on a promise that has ALREADY resolved, because a promise only ever
+ * settles asynchronously. So once a chunk is here, the lazy factory hands
+ * React a thenable that settles synchronously inside `then`, which React
+ * resolves on the spot (`lazy` checks its status right after calling `then`)
+ * and the page renders in the same commit as the navigation.
+ */
+const loadedPages = new Map<KeepAliveRouteKey, PageModule>()
+
+function loadPage(key: KeepAliveRouteKey): Promise<PageModule> {
+  return PAGE_IMPORTERS[key]().then((m) => {
+    loadedPages.set(key, m)
+    return m
+  })
+}
+
+const PERSISTENT_PAGES = Object.fromEntries(
+  (Object.keys(PAGE_IMPORTERS) as KeepAliveRouteKey[]).map((key) => [
+    key,
+    lazy(() => {
+      const ready = loadedPages.get(key)
+      if (!ready) return loadPage(key)
+      const settled = { then: (resolve: (m: PageModule) => void) => resolve(ready) }
+      return settled as unknown as Promise<PageModule>
+    }),
+  ]),
+) as Record<KeepAliveRouteKey, React.LazyExoticComponent<React.ComponentType>>
+
+/** Fetch every tab's chunk once the app has gone idle. Idempotent. */
+let preloadScheduled = false
+function preloadKeepAlivePages() {
+  if (preloadScheduled || typeof window === "undefined") return
+  preloadScheduled = true
+  const run = () => {
+    for (const key of Object.keys(PAGE_IMPORTERS) as KeepAliveRouteKey[]) {
+      if (!loadedPages.has(key)) loadPage(key).catch(() => {})
+    }
+  }
+  if ("requestIdleCallback" in window) window.requestIdleCallback(run, { timeout: 4000 })
+  else setTimeout(run, 2000)
 }
 
 /**
@@ -188,6 +238,10 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
       }
     })
   }, [routeKey])
+
+  useEffect(() => {
+    preloadKeepAlivePages()
+  }, [])
 
   // Focus management: blur elements inside hidden pages on route change
   const prevRouteRef = useRef(routeKey)
