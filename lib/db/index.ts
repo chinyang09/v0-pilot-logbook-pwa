@@ -145,6 +145,9 @@ export {
   bumpSyncAudit,
   getSyncAudit,
   reconcilePushedRecords,
+  getRoundTripSyncState,
+  setRoundTripSyncState,
+  requeueOrphanedRecords,
 } from "./stores/user/sync-queue.store";
 
 // Re-export roster stores - schedule entries

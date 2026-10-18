@@ -118,23 +118,21 @@ export async function getPersonnelByRole(
 }
 
 /**
- * Normalize a server personnel record, filling defaults for any missing fields
+ * Normalize a server personnel record, filling defaults for any missing fields.
+ *
+ * The server record is SPREAD FIRST. This used to be an explicit field list —
+ * the trap `normalizeFlightFromServer` was rebuilt to avoid — and the list did
+ * not include `deletedAt`, so a crew member binned on one device came back to
+ * life on every other one at the next pull.
  */
-function normalizePersonnelFromServer(serverPersonnel: Personnel): Personnel {
+export function normalizePersonnelFromServer(serverPersonnel: Personnel): Personnel {
   return {
+    ...serverPersonnel,
     id: serverPersonnel.id,
     userId: serverPersonnel.userId,
     name: serverPersonnel.name || "",
-    crewId: serverPersonnel.crewId,
-    organization: serverPersonnel.organization,
     roles: serverPersonnel.roles || [],
-    licenceNumber: serverPersonnel.licenceNumber,
     contact: serverPersonnel.contact || {},
-    comment: serverPersonnel.comment,
-    isMe: serverPersonnel.isMe,
-    favorite: serverPersonnel.favorite,
-    defaultPIC: serverPersonnel.defaultPIC,
-    defaultSIC: serverPersonnel.defaultSIC,
     createdAt: serverPersonnel.createdAt || Date.now(),
     updatedAt: serverPersonnel.updatedAt,
     syncStatus: "synced",

@@ -265,7 +265,7 @@ export async function getScheduleDateRange(): Promise<{ start: string; end: stri
 /**
  * Normalize a server schedule entry (fill required defaults).
  */
-function normalizeScheduleEntryFromServer(server: ScheduleEntry): ScheduleEntry {
+export function normalizeScheduleEntryFromServer(server: ScheduleEntry): ScheduleEntry {
   return {
     ...server,
     sectors: server.sectors || [],

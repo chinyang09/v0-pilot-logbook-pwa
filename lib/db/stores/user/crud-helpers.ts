@@ -6,6 +6,7 @@
 import type { Table } from "dexie"
 import { addToSyncQueue, enqueueMany, getDeviceId } from "./sync-queue.store"
 import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
+import { compareAuthorship as compareAuthorshipPure } from "@/lib/sync/authorship"
 
 /**
  * Base entity interface that all syncable entities must implement
@@ -49,18 +50,11 @@ export function isDeletedEntity<T extends SyncableEntity>(entity: T): boolean {
 }
 
 /**
- * Deterministic last-write-wins comparison. Orders by (updatedAt, deviceId) so
- * two concurrent edits with the same timestamp resolve identically on every
- * device instead of "whoever the server saw last" / "server always wins".
- * Returns > 0 if `a` wins, < 0 if `b` wins, 0 if identical authorship.
+ * Deterministic last-write-wins comparison — see `lib/sync/authorship.ts`,
+ * which the server uses too, so both ends always agree on the winner.
  */
 export function compareAuthorship(a: SyncableEntity, b: SyncableEntity): number {
-  const at = a.updatedAt ?? a.createdAt ?? 0
-  const bt = b.updatedAt ?? b.createdAt ?? 0
-  if (at !== bt) return at - bt
-  const ad = a.deviceId ?? ""
-  const bd = b.deviceId ?? ""
-  return ad < bd ? -1 : ad > bd ? 1 : 0
+  return compareAuthorshipPure(a, b)
 }
 
 /**

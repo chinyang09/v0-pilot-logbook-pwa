@@ -347,3 +347,72 @@ export async function reconcilePushedRecords(
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// Round-trip sync state (`/api/sync`)
+// ---------------------------------------------------------------------------
+
+/**
+ * What the single round-trip protocol keeps per device, beside the
+ * per-collection record cursors:
+ *
+ * - `tombSeq`  — the deletion cursor. Tombstones are sequenced on the same
+ *   per-user counter as records, so deletions no longer ride a wall clock.
+ * - `knownSeq` — the user's seq head as of the last COMPLETE pull. Sending it
+ *   lets the server answer "nothing changed" with one lookup.
+ * - `protocol` — which protocol this device last synced with. A device that
+ *   has never run this one re-pulls everything once (see `ensureProtocol` in
+ *   the sync service).
+ */
+export interface RoundTripSyncState {
+  tombSeq: number
+  knownSeq: number
+  protocol: number
+}
+
+export async function getRoundTripSyncState(): Promise<RoundTripSyncState> {
+  const v = await getMetaValue<Partial<RoundTripSyncState>>("roundTrip");
+  const num = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : 0);
+  return { tombSeq: num(v?.tombSeq), knownSeq: num(v?.knownSeq), protocol: num(v?.protocol) };
+}
+
+export async function setRoundTripSyncState(patch: Partial<RoundTripSyncState>): Promise<void> {
+  const current = await getRoundTripSyncState();
+  await setMetaValue("roundTrip", { ...current, ...patch });
+}
+
+/**
+ * Records that are marked as needing a push but have NO queue row behind them.
+ *
+ * Every store writes the record and THEN enqueues, in two separate IndexedDB
+ * writes; a tab closed between them leaves an edit that nothing will ever
+ * send. Re-enqueueing these each cycle is what makes "an offline edit gets
+ * pushed at the earliest opportunity" true even across a crash. `error` rows
+ * (dead-lettered after their retries) are included only when asked — re-trying
+ * a poison item every cycle is exactly what dead-lettering exists to stop.
+ */
+export async function requeueOrphanedRecords(
+  collections: readonly SyncCollection[],
+  { includeErrored = false }: { includeErrored?: boolean } = {}
+): Promise<number> {
+  const statuses = includeErrored ? ["pending", "error"] : ["pending"];
+  const toEnqueue: { type: SyncOperationType; collection: SyncCollection; data: SyncQueueData }[] = [];
+  for (const collection of collections) {
+    const table = userDb[collection] as unknown as {
+      where: (k: string) => { anyOf: (v: string[]) => { toArray: () => Promise<{ id: string }[]> } };
+    };
+    const candidates = await table.where("syncStatus").anyOf(statuses).toArray();
+    if (candidates.length === 0) continue;
+    const queued = new Set(
+      (await userDb.syncQueue.where("collection").equals(collection).toArray())
+        .map((row) => row.recordId ?? (row.data as { id?: string })?.id)
+    );
+    for (const record of candidates) {
+      if (!queued.has(record.id)) {
+        toEnqueue.push({ type: "update", collection, data: record as SyncQueueData });
+      }
+    }
+  }
+  if (toEnqueue.length > 0) await enqueueMany(toEnqueue);
+  return toEnqueue.length;
+}

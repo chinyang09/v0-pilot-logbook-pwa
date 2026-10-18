@@ -94,7 +94,7 @@ export async function getAircraftById(
 /**
  * Normalize a server aircraft record, filling defaults for any missing fields
  */
-function normalizeAircraftFromServer(serverAircraft: Aircraft): Aircraft {
+export function normalizeAircraftFromServer(serverAircraft: Aircraft): Aircraft {
   // The server record is SPREAD FIRST and the defaults applied over it — an
   // explicit field list silently drops every field added since it was written
   // (the same trap `normalizeFlightFromServer` was rebuilt to avoid, which is

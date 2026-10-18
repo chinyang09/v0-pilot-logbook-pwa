@@ -158,7 +158,7 @@ export async function getPendingFlights(): Promise<FlightLog[]> {
  * watermarks — and would have dropped `deletedAt` too, which would have meant
  * a flight in the recycle bin climbing back out on the next sync.
  */
-function normalizeFlightFromServer(serverFlight: FlightLog): FlightLog {
+export function normalizeFlightFromServer(serverFlight: FlightLog): FlightLog {
   return {
     ...serverFlight,
     id: serverFlight.id,

@@ -240,7 +240,7 @@ export async function getCurrenciesCount(): Promise<number> {
 /**
  * Normalize a server currency record (fill required defaults).
  */
-function normalizeCurrencyFromServer(server: Currency): Currency {
+export function normalizeCurrencyFromServer(server: Currency): Currency {
   return {
     ...server,
     warningDays: server.warningDays ?? 30,
