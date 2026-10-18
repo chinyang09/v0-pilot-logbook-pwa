@@ -391,7 +391,9 @@ export function FlightCardBody({
               crewNames.map((name, i) => (
                 <span
                   key={`${name}-${i}`}
-                  className="min-w-0 truncate"
+                  // The first name takes nearly all of the shrinking, so a
+                  // long captain's name truncates before "Self" is cut to "S…".
+                  className={cn("min-w-0 truncate", i === 0 && "shrink-[100]")}
                 >
                   {i > 0 ? ", " : ""}
                   {name}

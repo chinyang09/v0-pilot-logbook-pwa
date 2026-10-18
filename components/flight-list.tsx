@@ -78,6 +78,9 @@ interface FlightListProps {
 
 
 
+/** How long the list must be still before the year rail fades out. */
+const RAIL_IDLE_MS = 1500;
+
 /** How long after a dismissal an open request is treated as the same tap. */
 const CASCADE_REOPEN_GUARD_MS = 350;
 
@@ -513,6 +516,25 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       }
     }, [onScrollStart]);
 
+    // The year rail shows only while the list is MOVING, and fades out once it
+    // has been still for a moment. Parked permanently at the right edge it sat
+    // on top of the cards' right-hand column, so "TR602" and "1N" read as
+    // "TR60226" and "1N 25". It is written to the DOM directly — a scroll must
+    // not re-render the list to show a rail.
+    const railRef = useRef<HTMLDivElement>(null);
+    const railHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const hideRailSoon = useCallback(() => {
+      if (railHideRef.current) clearTimeout(railHideRef.current);
+      railHideRef.current = setTimeout(() => {
+        if (isFastScrollingRef.current) return; // a finger is still on it
+        railRef.current?.removeAttribute("data-shown");
+      }, RAIL_IDLE_MS);
+    }, []);
+    const revealRail = useCallback(() => {
+      railRef.current?.setAttribute("data-shown", "");
+      hideRailSoon();
+    }, [hideRailSoon]);
+
     useEffect(() => {
       const container = scrollContainerRef.current;
       if (!container) return;
@@ -521,6 +543,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       // calendar sync is the only work the list owes a scroll.
       let ticking = false;
       const scrollHandler = () => {
+        revealRail();
         if (ticking) return;
         ticking = true;
         requestAnimationFrame(() => {
@@ -534,7 +557,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       return () => {
         container.removeEventListener("scroll", scrollHandler);
       };
-    }, [handleScroll]);
+    }, [handleScroll, revealRail]);
+
+    useEffect(() => () => {
+      if (railHideRef.current) clearTimeout(railHideRef.current);
+    }, []);
 
     const handleEdit = useCallback(
       (flight: FlightLog) => onEdit?.(flight),
@@ -685,8 +712,9 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       // Delay resetting to allow final scroll position to settle
       setTimeout(() => {
         isFastScrollingRef.current = false;
+        hideRailSoon();
       }, 100);
-    }, []);
+    }, [hideRailSoon]);
 
     if (isLoading) {
       return (
@@ -865,10 +893,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           {/* FastScroll rail (year-based navigation) - positioned in visible area below calendar/header */}
           {fastScrollItems.length > 1 && (
             <div
-              className="absolute right-0 bottom-0 z-40 flex items-center pointer-events-none transition-[top] duration-300 ease-in-out"
+              ref={railRef}
+              className="group/rail absolute right-0 bottom-0 z-40 flex items-center pointer-events-none opacity-0 transition-[top,opacity] duration-300 ease-in-out data-[shown]:opacity-100"
               style={{ top: topSpacerHeight }}
             >
-              <div className="pointer-events-auto">
+              {/* Only hit-testable while shown: hidden, a tap at the card's
+                  right edge belongs to the card. */}
+              <div className="pointer-events-none group-data-[shown]/rail:pointer-events-auto">
                 <FastScroll
                   items={fastScrollItems}
                   activeKey={activeYearKey}
