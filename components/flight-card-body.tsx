@@ -238,7 +238,14 @@ export function FlightCardBody({
 
       <div className="flex-1 min-w-0 flex flex-col justify-between">
         <div className="flex flex-col">
-          <div className="flex items-center justify-between gap-1">
+          {/* Every row of this card has a FIXED line box, whatever it holds.
+              The logbook positions rows at one calibrated height (see
+              flight-list.tsx), so a card even 3px shorter than the first one
+              measured leaves a visibly wider gap beneath it. A row's height
+              must therefore never depend on its content: empty Slots collapse
+              to 0, and an icon or a span without its own `leading` inherits a
+              taller line box than its neighbours. */}
+          <div className="flex h-6 items-center justify-between gap-1 text-base leading-tight">
             <span
               className={cn(
                 "text-base font-semibold leading-tight",
@@ -254,7 +261,7 @@ export function FlightCardBody({
                   !hasTimeStrip && "invisible"
                 )}
               />
-              <span className="text-base font-medium whitespace-nowrap px-1">
+              <span className="text-base font-medium leading-tight whitespace-nowrap px-1">
                 {blockDiff ? (
                   <Slot diff={blockDiff} />
                 ) : (
@@ -281,7 +288,7 @@ export function FlightCardBody({
             </span>
           </div>
 
-          <div className="flex items-center justify-between -mt-0.5">
+          <div className="flex h-[calc(1.65rem*1.25)] items-center justify-between -mt-0.5 text-[1.65rem] leading-tight">
             {isSim ? (
               <span className="text-[1.65rem] font-bold leading-tight tracking-tight">
                 SIMULATOR
@@ -319,7 +326,7 @@ export function FlightCardBody({
             // heights exactly — a variable row makes it correct the scroll
             // offset as rows are measured, and a programmatic scroll cancels an
             // in-progress fling. 1.25em is `leading-tight` at this font size.
-            "flex min-h-[1.25em] items-center gap-1.5 text-[13px] leading-tight mt-0.5",
+            "flex h-[1.25em] items-center gap-1.5 text-[13px] leading-tight mt-0.5",
             isScheduled
               ? "text-orange-600/70 dark:text-orange-400/60"
               : "text-muted-foreground"
@@ -352,8 +359,12 @@ export function FlightCardBody({
         </div>
 
         {/* Reserves its line for the same reason as the row above — a flight
-            with no crew and no chips must not make the card shorter. */}
-        <div className="flex min-h-[1.25em] items-center justify-between mt-0.5 text-[13px]">
+            with no crew and no chips must not make the card shorter. The
+            `leading-tight` is on the ROW, not just the crew column: the chips
+            beside it used to inherit the page's taller line height, so a card
+            with a ☾ 1N chip came out ~3px taller than one without, and the
+            logbook showed two different gaps between cards. */}
+        <div className="flex h-[1.25em] items-center justify-between mt-0.5 text-[13px] leading-tight">
           <div
             className={cn(
               "flex flex-1 min-w-0 text-[13px] leading-tight",
@@ -372,8 +383,16 @@ export function FlightCardBody({
                 {d("sicName") ? <Slot diff={d("sicName")} /> : crewNames[1]}
               </span>
             ) : (
+              // Each name keeps its natural width and only SHRINKS (truncating)
+              // when the row runs out of room — a long captain's name gives way
+              // before "Self" does. They used to be `flex-1` each, which split
+              // the row into equal columns and stranded the comma half a row
+              // away from the name it follows ("Wang Tsan        , Self").
               crewNames.map((name, i) => (
-                <span key={`${name}-${i}`} className="flex-1 min-w-0 truncate">
+                <span
+                  key={`${name}-${i}`}
+                  className="min-w-0 truncate"
+                >
                   {i > 0 ? ", " : ""}
                   {name}
                 </span>
@@ -381,7 +400,7 @@ export function FlightCardBody({
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 text-[13px] font-medium shrink-0 ml-2">
+          <div className="flex items-center gap-1.5 text-[13px] font-medium leading-tight shrink-0 ml-2">
             {showPilotRole && (
               <span className="inline-flex items-baseline gap-1">
                 {pfDiff ? (
