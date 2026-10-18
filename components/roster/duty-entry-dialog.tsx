@@ -155,7 +155,11 @@ export function DutyEntryDialog({
     <div
       style={region}
       className={cn(
-        "fixed z-[65] flex flex-col bg-background",
+        // Above the app chrome (header z-99, nav pill z-100) — at z-[65] the
+        // nav pill covered Save/Cancel on a phone and the roster's header
+        // buttons drew over the dialog. Below Radix's popper layer (z-150), so
+        // the duty-type Select still opens in front. See signature-dialog.
+        "fixed z-[110] flex flex-col bg-background",
         isDesktop && "rounded-2xl border border-border overflow-hidden shadow-2xl"
       )}
     >

@@ -3,7 +3,9 @@
 import { useState, useEffect, useCallback } from "react"
 import { WheelPicker, WheelPickerWrapper } from "@ncdai/react-wheel-picker"
 import "@ncdai/react-wheel-picker/style.css"
+import { createPortal } from "react-dom"
 import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
+import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { cn } from "@/lib/utils"
 
 interface TimePickerProps {
@@ -64,11 +66,22 @@ export function TimePicker({
     }
   }, [isOpen])
 
+  // Every way out goes through the history marker, so Android's back gesture
+  // closes the sheet instead of navigating the page out from under it.
+  const dismiss = useBackDismiss(isOpen, onClose)
+
+  useEffect(() => {
+    if (!isOpen) return
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && dismiss()
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [isOpen, dismiss])
+
   const handleConfirm = useCallback(() => {
     const formatted = `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
     onSelect?.(formatted)
-    onClose()
-  }, [hours, minutes, onSelect, onClose])
+    dismiss()
+  }, [hours, minutes, onSelect, dismiss])
 
   const handleSetNow = useCallback(() => {
     const now = new Date()
@@ -84,13 +97,20 @@ export function TimePicker({
     return `${localHours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
   }, [hours, minutes, timezoneOffset])
 
-  if (!isOpen) return null
+  if (!isOpen || typeof document === "undefined") return null
 
-  return (
+  // Portalled, and above the app chrome (header z-99, nav pill z-100). It used
+  // to render in place at z-60: under the nav pill, which covered the bottom
+  // of the sheet and stayed tappable over the scrim — and inside the mobile
+  // flight overlay's own stacking context, so no z-index could lift it out.
+  // Below Radix's popper layer (z-150).
+  return createPortal(
     <div
-      className={cn("fixed inset-0 z-[60] flex items-end justify-center", MODAL_SCRIM)}
-      style={{ paddingBottom: "calc(4rem + env(safe-area-inset-bottom))" }}
-      onClick={onClose}
+      className={cn("fixed inset-0 z-[120] flex items-end justify-center px-2", MODAL_SCRIM)}
+      // Nothing covers the sheet now, so it only has to clear the home
+      // indicator — not the nav pill it used to be lifted 4rem above.
+      style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
+      onClick={() => dismiss()}
     >
       <div
         className="w-full max-w-md rounded-2xl bg-card animate-in slide-in-from-bottom duration-300"
@@ -99,7 +119,7 @@ export function TimePicker({
         {/* Header: Cancel | NOW | Save */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
           <button
-            onClick={onClose}
+            onClick={() => dismiss()}
             className="text-sm font-medium text-primary active:opacity-70"
           >
             Cancel
@@ -182,6 +202,7 @@ export function TimePicker({
           </WheelPickerWrapper>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
