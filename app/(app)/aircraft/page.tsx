@@ -772,6 +772,20 @@ export default function AircraftPage() {
                       <div className="border-t border-border my-4" />
                     </div>
                   )}
+
+                  {/* Nothing saved yet. Without this an empty fleet rendered
+                      as a blank page on a phone — the "No aircraft found"
+                      message only ever reached the desktop detail panel. */}
+                  {allSortedAircraft.length === 0 && (
+                    <div className="flex flex-col items-center gap-3 py-12">
+                      <Plane className="h-8 w-8 text-muted-foreground/50" />
+                      <p className="text-sm text-muted-foreground">No aircraft yet</p>
+                      <Button variant="outline" size="sm" onClick={handleAddClick}>
+                        <Plus className="h-4 w-4 mr-1" />
+                        Add Aircraft
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
 
