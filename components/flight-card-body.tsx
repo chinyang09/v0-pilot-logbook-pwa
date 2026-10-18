@@ -367,7 +367,7 @@ export function FlightCardBody({
         <div className="flex h-[1.25em] items-center justify-between mt-0.5 text-[13px] leading-tight">
           <div
             className={cn(
-              "flex flex-1 min-w-0 text-[13px] leading-tight",
+              "flex flex-1 min-w-0 overflow-hidden text-[13px] leading-tight",
               isScheduled
                 ? "text-orange-600/70 dark:text-orange-400/60"
                 : "text-muted-foreground"
@@ -391,9 +391,16 @@ export function FlightCardBody({
               crewNames.map((name, i) => (
                 <span
                   key={`${name}-${i}`}
-                  // The first name takes nearly all of the shrinking, so a
-                  // long captain's name truncates before "Self" is cut to "S…".
-                  className={cn("min-w-0 truncate", i === 0 && "shrink-[100]")}
+                  // Only the FIRST name shrinks, so a long captain's name
+                  // truncates before "Self" is cut to "S…". Weighting the
+                  // shrink is not enough: the later names still take a
+                  // sub-pixel share, and 0.05px is all an ellipsis needs. A
+                  // later name is capped at half the row instead, so a long
+                  // one still truncates rather than pushing the row out.
+                  className={cn(
+                    "min-w-0 truncate",
+                    i > 0 && "shrink-0 max-w-[50%]"
+                  )}
                 >
                   {i > 0 ? ", " : ""}
                   {name}
