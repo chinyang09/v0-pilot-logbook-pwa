@@ -111,6 +111,9 @@ export class FakeCollection {
   async updateOne(filter: Doc, update: Doc, opts: { upsert?: boolean } = {}) {
     await this.findOneAndUpdate(filter, update, opts)
   }
+  async insertMany(docs: Doc[]) {
+    for (const d of docs) this.docs.push({ _id: new ObjectId(), ...clone(d) })
+  }
   async updateMany() {
     // Only `ensureBackfilled` uses this, and the tests mark backfill done.
   }

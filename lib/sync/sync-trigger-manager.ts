@@ -14,7 +14,7 @@
  * |---|---|
  * | app opened / foregrounded / focused / back online / page restored | sync now (coalesced) |
  * | a local edit | push after `pushDebounceMs`, never later than `pushMaxWaitMs` |
- * | app visible and online | poll every `pollIntervalMs` — one tiny request when nothing changed |
+ * | app visible and online | poll every `pollIntervalMs` (15s) — one tiny request when nothing changed |
  * | a failed cycle with work left | retry with exponential back-off |
  * | app hidden / page hide / unload | keepalive flush of the queue |
  *
@@ -44,7 +44,7 @@ export interface SyncTriggerConfig {
 export const DEFAULT_SYNC_TRIGGER_CONFIG: SyncTriggerConfig = {
   pushDebounceMs: 1500,
   pushMaxWaitMs: 8000,
-  pollIntervalMs: 30000,
+  pollIntervalMs: 15000,
   lifecycleCoalesceMs: 2000,
   retryBaseMs: 5000,
   retryMaxMs: 5 * 60 * 1000,

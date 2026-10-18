@@ -47,6 +47,7 @@ import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
 import { parseUserAgent } from "@/lib/utils/user-agent"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
 import { cn } from "@/lib/utils"
+import { syncService } from "@/lib/sync"
 
 interface ProfileData {
   userId: string
@@ -386,7 +387,24 @@ export default function AccountPage() {
     }
   }
 
+  /**
+   * Signing out wipes this device's local data. Push first — while the session
+   * still works — and if anything could not be sent, ask before throwing it
+   * away. This is the one place a confirmation earns its keep: the loss has no
+   * undo, there is no Recently Deleted for an edit that never reached the
+   * server.
+   */
+  const confirmUnsyncedLoss = async (): Promise<boolean> => {
+    const left = await syncService.flushBeforeSignOut()
+    if (left === 0) return true
+    return window.confirm(
+      `${left} change${left === 1 ? "" : "s"} on this device ${left === 1 ? "hasn't" : "haven't"} synced yet ` +
+        `and will be lost if you sign out now. Sign out anyway?`
+    )
+  }
+
   const handleRevokeSession = async (session: SessionData) => {
+    if (session.isCurrent && !(await confirmUnsyncedLoss())) return
     setRevokingToken(session.id)
     try {
       const res = await fetch("/api/account/sessions", {
@@ -413,6 +431,7 @@ export default function AccountPage() {
   }
 
   const handleLogoutAll = async () => {
+    if (!(await confirmUnsyncedLoss())) return
     setIsLoggingOutAll(true)
     try {
       await fetch("/api/account/sessions", {

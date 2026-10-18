@@ -24,12 +24,24 @@ import {
   writeSource,
   type WriteMode,
 } from "../schema"
-import { decidePush, dedupeByRecord, writtenKey, type PushItem, type PushItemResult } from "./plan"
+import {
+  applyFieldPatch,
+  decidePush,
+  dedupeByRecord,
+  editTime,
+  stampChangedFields,
+  writtenKey,
+  type FieldConflict,
+  type PushItem,
+  type PushItemResult,
+} from "./plan"
 import { toTimestamp } from "../authorship"
 
 export const SYNC_DB = "skylog"
 const COUNTERS = "counters"
 const DELETIONS = "deletions"
+/** The losing side of every field conflict, kept so it can be put back (TTL 90 days). */
+export const SYNC_CONFLICTS = "syncConflicts"
 
 /** Tombstones live 30 days (TTL index); a watermark older than that may have missed one. */
 export const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
@@ -210,68 +222,125 @@ async function pushCollection(
       const existingDocs = await coll.find({ userId, id: { $in: recordIds } }, { session }).toArray()
       const existingById = new Map(existingDocs.map((d) => [d.id as string, d as Document]))
 
-      const decisions = kept.map((item) => ({
-        item,
-        existing: existingById.get(item.data.id),
-        decision: decidePush(item, existingById.get(item.data.id), tombstoned.has(item.data.id)),
-      }))
-
-      const seqNeeded = decisions.filter((d) => d.decision !== "stale" && d.decision !== "rejected").length
-      let nextSeq = seqNeeded > 0 ? await reserveSeqBlock(db, userId, seqNeeded, session) : 0
       const now = Date.now()
+      // Decide everything BEFORE reserving seqs, because a patch whose every
+      // field lost its conflict writes nothing and must not take a seq.
+      type Planned =
+        | { kind: "write"; item: PushItem; existing?: Document; source: Record<string, unknown>; patch?: ReturnType<typeof applyFieldPatch> }
+        | { kind: "delete"; item: PushItem }
+        | { kind: "rejected"; item: PushItem }
+        | { kind: "unchanged"; item: PushItem; existing: Document; conflicts?: FieldConflict[] }
+
+      const planned: Planned[] = kept.map((item) => {
+        const existing = existingById.get(item.data.id)
+        const decision = decidePush(item, existing, tombstoned.has(item.data.id))
+        switch (decision) {
+          case "delete":
+            return { kind: "delete", item }
+          case "rejected":
+            return { kind: "rejected", item }
+          case "stale":
+            return { kind: "unchanged", item, existing: existing! }
+          case "patch": {
+            const patch = applyFieldPatch({
+              existing: existing!,
+              incoming: item.data,
+              fields: item.changedFields ?? [],
+              baseSeq: item.baseSeq ?? 0,
+              deviceId: typeof item.data.deviceId === "string" ? item.data.deviceId : "",
+              editedAt: editTime(item, now),
+              seq: 0, // stamped once the seq is reserved
+            })
+            if (patch.applied.length === 0) {
+              return { kind: "unchanged", item, existing: existing!, conflicts: patch.conflicts }
+            }
+            return { kind: "write", item, existing, source: patch.doc, patch }
+          }
+          default:
+            return { kind: "write", item, existing, source: writeSource(collection, mode, item.data, existing) }
+        }
+      })
+
+      const seqNeeded = planned.filter((p) => p.kind === "write" || p.kind === "delete").length
+      let nextSeq = seqNeeded > 0 ? await reserveSeqBlock(db, userId, seqNeeded, session) : 0
 
       const dataOps: AnyBulkWriteOperation[] = []
       const tombstoneOps: AnyBulkWriteOperation[] = []
+      const conflictDocs: Document[] = []
 
-      for (const { item, existing, decision } of decisions) {
-        const id = item.data.id
-        switch (decision) {
-          case "insert":
-          case "update": {
-            const serverSeq = nextSeq++
-            const source = writeSource(collection, mode, item.data, existing)
-            const envelope = buildEnvelope({ id, userId, incoming: item.data, existing, serverSeq, now })
-            const replacement = canonicalizeDocument(collection, source, envelope)
-            dataOps.push({ replaceOne: { filter: { userId, id }, replacement, upsert: true } })
-            writes.push({ key: writtenKey(collection, id), seq: serverSeq })
-            results.push({ queueItemId: item.id, success: true })
-            break
+      for (const p of planned) {
+        const id = p.item.data.id
+        const deviceId = typeof p.item.data.deviceId === "string" ? p.item.data.deviceId : ""
+        if (p.kind === "write") {
+          const serverSeq = nextSeq++
+          const editedAt = editTime(p.item, now)
+          const stamp = { seq: serverSeq, at: editedAt, by: deviceId }
+          let fieldVersions: Record<string, unknown>
+          let author: Record<string, unknown> = p.item.data
+          if (p.patch) {
+            fieldVersions = { ...p.patch.fieldVersions }
+            for (const field of p.patch.applied) fieldVersions[field] = stamp
+            // A merged record keeps the LATER of the two edit times, so a
+            // whole-record comparison by an older build still orders it right.
+            const storedAt = toTimestamp(p.existing?.updatedAt) ?? 0
+            if (storedAt > editedAt) author = { ...p.item.data, updatedAt: storedAt }
+          } else {
+            fieldVersions = stampChangedFields(p.existing, p.source, stamp)
           }
-          case "delete": {
-            // Tombstone and delete commit together (one transaction), and the
-            // tombstone is sequenced so every device's cursor sees it.
-            tombstoneOps.push({
-              updateOne: {
-                filter: { userId, collection, recordId: id },
-                update: {
-                  $set: { userId, collection, recordId: id, deletedAt: new Date(now), serverSeq: nextSeq++ },
-                },
-                upsert: true,
-              },
-            })
-            dataOps.push({ deleteOne: { filter: { userId, id } } })
-            results.push({ queueItemId: item.id, success: true })
-            break
-          }
-          case "rejected":
-            results.push({
-              queueItemId: item.id,
-              success: true,
-              rejected: true,
-              reason: "Record was deleted on another device",
-            })
-            break
-          case "stale":
-            results.push({
-              queueItemId: item.id,
-              success: true,
-              stale: true,
-              record: existing ? toWireRecord(existing) : undefined,
-            })
-            break
+          const envelope = buildEnvelope({
+            id, userId, incoming: author, existing: p.existing, state: p.source, serverSeq, now, fieldVersions,
+          })
+          const replacement = canonicalizeDocument(collection, p.source, envelope)
+          dataOps.push({ replaceOne: { filter: { userId, id }, replacement, upsert: true } })
+          writes.push({ key: writtenKey(collection, id), seq: serverSeq })
+
+          const conflicts = p.patch?.conflicts ?? []
+          for (const c of conflicts) conflictDocs.push(conflictDoc(userId, collection, id, c, now))
+          // Send the record back when it is not what the client holds: another
+          // device changed other fields since its base, or a field went the
+          // other way. Otherwise the client's copy already IS the record.
+          const differs = !!p.patch && (p.patch.concurrent || conflicts.some((c) => c.winner === "server"))
+          results.push({
+            queueItemId: p.item.id,
+            success: true,
+            serverSeq,
+            ...(differs ? { record: toWireRecord(replacement) } : {}),
+            ...(conflicts.length ? { conflicts: conflicts.map((c) => ({ field: c.field, winner: c.winner })) } : {}),
+          })
+        } else if (p.kind === "delete") {
+          // Tombstone and delete commit together (one transaction), and the
+          // tombstone is sequenced so every device's cursor sees it.
+          tombstoneOps.push({
+            updateOne: {
+              filter: { userId, collection, recordId: id },
+              update: { $set: { userId, collection, recordId: id, deletedAt: new Date(now), serverSeq: nextSeq++ } },
+              upsert: true,
+            },
+          })
+          dataOps.push({ deleteOne: { filter: { userId, id } } })
+          results.push({ queueItemId: p.item.id, success: true })
+        } else if (p.kind === "rejected") {
+          results.push({
+            queueItemId: p.item.id,
+            success: true,
+            rejected: true,
+            reason: "Record was deleted on another device",
+          })
+        } else {
+          for (const c of p.conflicts ?? []) conflictDocs.push(conflictDoc(userId, collection, id, c, now))
+          results.push({
+            queueItemId: p.item.id,
+            success: true,
+            stale: true,
+            record: toWireRecord(p.existing),
+            ...(p.conflicts?.length ? { conflicts: p.conflicts.map((c) => ({ field: c.field, winner: c.winner })) } : {}),
+          })
         }
       }
 
+      if (conflictDocs.length > 0) {
+        await db.collection(SYNC_CONFLICTS).insertMany(conflictDocs, { session })
+      }
       if (tombstoneOps.length > 0) {
         await db.collection(DELETIONS).bulkWrite(tombstoneOps, { session, ordered: false })
       }
@@ -287,6 +356,23 @@ async function pushCollection(
     return items.map((i) => ({ queueItemId: i.id, success: false, reason: "Write transaction failed" }))
   } finally {
     await session.endSession()
+  }
+}
+
+function conflictDoc(userId: string, collection: SyncCollection, recordId: string, c: FieldConflict, now: number): Document {
+  return {
+    userId,
+    collection,
+    recordId,
+    field: c.field,
+    winner: c.winner,
+    kept: c.kept,
+    discarded: c.discarded,
+    serverBy: c.serverBy,
+    serverAt: c.serverAt,
+    incomingBy: c.incomingBy,
+    incomingAt: c.incomingAt,
+    createdAt: new Date(now),
   }
 }
 

@@ -148,6 +148,7 @@ export {
   getRoundTripSyncState,
   setRoundTripSyncState,
   requeueOrphanedRecords,
+  readSyncSnapshot,
 } from "./stores/user/sync-queue.store";
 
 // Re-export roster stores - schedule entries

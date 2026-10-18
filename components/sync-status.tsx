@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useSyncExternalStore } from "react"
 import { syncService } from "@/lib/sync"
 import { Cloud, CloudOff, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -8,12 +8,19 @@ import { useAuth } from "@/components/providers/auth-provider"
 
 export function SyncStatus({ className }: { className?: string }) {
   const { ensureValidSession } = useAuth()
-  const [status, setStatus] = useState<"online" | "offline" | "syncing">(() => syncService.getStatus())
+  // A store read, not state seeded from `getStatus()`: the server has no
+  // network to report and renders "offline", the browser knows it is online,
+  // and seeding state from the browser's answer made the very first render
+  // disagree with the HTML — a hydration error on every page load. The server
+  // snapshot is what hydration renders; the live value follows immediately.
+  const status = useSyncExternalStore(
+    (onChange) => syncService.subscribe(onChange),
+    () => syncService.getStatus(),
+    () => "offline" as const
+  )
   const [pendingCount, setPendingCount] = useState(0)
 
   useEffect(() => {
-    setStatus(syncService.getStatus())
-
     const checkPending = async () => {
       // Counted off the index. This runs three times per sync cycle (status
       // flips to syncing, back to online, then onDataChanged), and reading the
@@ -27,8 +34,7 @@ export function SyncStatus({ className }: { className?: string }) {
     // status flips on sync start/end (covers the pending count draining) and
     // onDataChanged fires after every completed cycle. A local write is picked
     // up when its debounced sync starts moments later.
-    const unsubscribeStatus = syncService.subscribe((s) => {
-      setStatus(s)
+    const unsubscribeStatus = syncService.subscribe(() => {
       void checkPending()
     })
     const unsubscribeData = syncService.onDataChanged(() => {

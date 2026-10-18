@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { decidePush, dedupeByRecord, validatePushItems, type PushItem } from "../server/plan"
+import { MAX_CLOCK_LEAD_MS, decidePush, dedupeByRecord, editTime, validatePushItems, type PushItem } from "../server/plan"
 import { keysetQuery, needsFullResync, sanitizeCursor, TOMBSTONE_RETENTION_MS } from "../server/engine"
 
 function item(p: Omit<Partial<PushItem>, "data"> & { data?: Record<string, unknown> } = {}): PushItem {
@@ -49,6 +49,23 @@ describe("decidePush", () => {
   })
 })
 
+describe("decidePush — field patches", () => {
+  it("is a patch when an update says which fields it changed", () => {
+    expect(decidePush(item({ changedFields: ["remarks"], data: { updatedAt: 1 } }), { updatedAt: 99 }, false)).toBe("patch")
+  })
+  it("is still an insert when the server has no such record", () => {
+    expect(decidePush(item({ changedFields: ["remarks"] }), undefined, false)).toBe("insert")
+  })
+})
+
+describe("editTime", () => {
+  it("caps a device clock running ahead of the server, so it can't win every conflict", () => {
+    const now = 1_000_000
+    expect(editTime(item({ data: { updatedAt: now - 10 } }), now)).toBe(now - 10)
+    expect(editTime(item({ data: { updatedAt: now + 3_600_000 } }), now)).toBe(now + MAX_CLOCK_LEAD_MS)
+  })
+})
+
 describe("validatePushItems", () => {
   it("buckets valid items by collection and reports the rest as failures", () => {
     const { byCollection, invalid } = validatePushItems([
@@ -58,10 +75,19 @@ describe("validatePushItems", () => {
       { id: "bad-type", type: "upsert", collection: "flights", data: { id: "x" } },
       { id: "no-record-id", type: "update", collection: "flights", data: {} },
       null,
+      { id: "bad-fields", type: "update", collection: "flights", data: { id: "x" }, changedFields: "remarks" },
+      { id: "bad-base", type: "update", collection: "flights", data: { id: "x" }, baseSeq: -1 },
     ])
     expect(byCollection.get("flights")?.map((i) => i.id)).toEqual(["ok-1"])
     expect(byCollection.get("aircraft")?.map((i) => i.id)).toEqual(["ok-2"])
-    expect(invalid.map((r) => r.queueItemId)).toEqual(["bad-collection", "bad-type", "no-record-id", "unknown"])
+    expect(invalid.map((r) => r.queueItemId)).toEqual([
+      "bad-collection",
+      "bad-type",
+      "no-record-id",
+      "unknown",
+      "bad-fields",
+      "bad-base",
+    ])
     expect(invalid.every((r) => r.success === false)).toBe(true)
   })
 })

@@ -1,0 +1,14 @@
+{
+  "name": "sync-live-test",
+  "private": true,
+  "type": "module",
+  "description": "Live multi-device sync test against a running app + real MongoDB. Not part of the app build.",
+  "scripts": {
+    "scenarios": "node scenarios.mjs",
+    "logout": "node logout.mjs"
+  },
+  "dependencies": {
+    "mongodb": "6.12.0",
+    "playwright-core": "1.56.1"
+  }
+}

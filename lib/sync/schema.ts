@@ -15,7 +15,7 @@
  *   _id                                            (Mongo)
  *   id, userId, schemaVersion,                     ┐
  *   createdAt, updatedAt, deletedAt,               │ the ENVELOPE — identical
- *   deviceId, serverSeq, syncedAt                  ┘ across all six collections
+ *   deviceId, serverSeq, syncedAt, fieldVersions   ┘ across all six collections
  *   …every field of the entity, in declared order  the PAYLOAD — per collection
  *
  * A field with no value is stored as its default — `""`, `0`, `[]`, or `null`
@@ -73,13 +73,14 @@ export const ENVELOPE_KEYS = [
   "deviceId",
   "serverSeq",
   "syncedAt",
+  "fieldVersions",
 ] as const
 
 /** Device-local bookkeeping — never stored on the server. */
 const CLIENT_ONLY_KEYS = ["syncStatus"] as const
 
 /** Server-only bookkeeping — never sent to a client. */
-const SERVER_ONLY_KEYS = ["_id", "syncedAt", "schemaVersion"] as const
+const SERVER_ONLY_KEYS = ["_id", "syncedAt", "schemaVersion", "fieldVersions"] as const
 
 const RESERVED = new Set<string>([...ENVELOPE_KEYS, ...CLIENT_ONLY_KEYS, "_id"])
 
@@ -265,6 +266,13 @@ export interface Envelope {
   deviceId: string | null
   serverSeq: number
   syncedAt: number
+  /**
+   * Which write last changed each field — `{ seq, at, by }` per field that has
+   * been edited since the record was created. It is what lets the server tell
+   * a genuine conflict (the same field edited on two devices) from two edits
+   * to different fields, which simply merge. Server-only: never sent down.
+   */
+  fieldVersions: Record<string, unknown>
 }
 
 type Doc = Record<string, unknown>
@@ -279,24 +287,33 @@ type Doc = Record<string, unknown>
 export function buildEnvelope(args: {
   id: string
   userId: string
+  /** The write's author side: `updatedAt` and `deviceId` come from here. */
   incoming: Doc
   existing?: Doc | null
+  /** The record's resulting state, for `deletedAt` (defaults to `incoming`). */
+  state?: Doc
   serverSeq: number
   now: number
+  fieldVersions?: Record<string, unknown>
 }): Envelope {
   const { id, userId, incoming, existing, serverSeq, now } = args
+  const state = args.state ?? incoming
   const createdAt =
     toTimestamp(existing?.createdAt) ?? toTimestamp(incoming.createdAt) ?? toTimestamp(incoming.updatedAt) ?? now
+  const existingFv = existing?.fieldVersions
   return {
     id,
     userId,
     schemaVersion: SYNC_SCHEMA_VERSION,
     createdAt,
     updatedAt: toTimestamp(incoming.updatedAt) ?? createdAt,
-    deletedAt: toTimestamp(incoming.deletedAt) ?? null,
+    deletedAt: toTimestamp(state.deletedAt) ?? null,
     deviceId: typeof incoming.deviceId === "string" && incoming.deviceId ? incoming.deviceId : null,
     serverSeq,
     syncedAt: now,
+    fieldVersions:
+      args.fieldVersions ??
+      (existingFv && typeof existingFv === "object" && !Array.isArray(existingFv) ? (existingFv as Record<string, unknown>) : {}),
   }
 }
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useSyncExternalStore } from "react"
 import { syncService } from "@/lib/sync"
 
 type SyncStatus = "online" | "offline" | "syncing"
@@ -9,12 +9,13 @@ type SyncStatus = "online" | "offline" | "syncing"
  * Hook to subscribe to sync status changes
  */
 export function useSyncStatus() {
-  const [status, setStatus] = useState<SyncStatus>(syncService.getStatus())
-
-  useEffect(() => {
-    const unsubscribe = syncService.subscribe(setStatus)
-    return unsubscribe
-  }, [])
+  // Store read with an "offline" server snapshot — see `SyncStatus`: seeding
+  // state from the browser's answer mismatches the server-rendered HTML.
+  const status = useSyncExternalStore<SyncStatus>(
+    (onChange) => syncService.subscribe(onChange),
+    () => syncService.getStatus(),
+    () => "offline"
+  )
 
   return {
     status,

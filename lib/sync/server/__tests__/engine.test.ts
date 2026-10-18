@@ -1,11 +1,16 @@
 /**
  * The server sync engine end to end — push, pull and the per-user migration —
- * against an in-memory stand-in for MongoDB, played as two devices.
+ * played as two devices.
+ *
+ * Runs against an in-memory stand-in for MongoDB by default. Set
+ * `SYNC_TEST_MONGO_URI` to a replica set (transactions need one) to run the
+ * same suite against a real server:
+ *
+ *   SYNC_TEST_MONGO_URI="mongodb://127.0.0.1:27017/?replicaSet=rs0" pnpm test lib/sync/server
  */
 
-import { beforeEach, describe, expect, it } from "vitest"
-import type { Db, MongoClient } from "mongodb"
-import { ObjectId } from "mongodb"
+import { afterAll, beforeEach, describe, expect, it } from "vitest"
+import { MongoClient, ObjectId, type Db } from "mongodb"
 import { applyPush, ensureCanonical, pullChanges, readHeadSeq, type Cursor } from "../engine"
 import { validatePushItems, type PushItem } from "../plan"
 import { ENVELOPE_KEYS, SYNC_FIELDS, SYNC_SCHEMA_VERSION } from "../../schema"
@@ -13,24 +18,79 @@ import type { SyncCollection } from "@/types/sync/sync.types"
 import { FakeDb, fakeClient } from "./fake-mongo"
 
 const USER = "user-1"
-let fake: FakeDb
-let db: Db
-const client = fakeClient as unknown as MongoClient
+const REAL_URI = process.env.SYNC_TEST_MONGO_URI
+const realClient = REAL_URI ? new MongoClient(REAL_URI) : null
 
-beforeEach(() => {
-  fake = new FakeDb()
-  db = fake as unknown as Db
-  // Legacy serverSeq backfill is a separate, older step — mark it done.
-  fake.collection("counters").docs.push({ _id: USER, seq: 0, backfillState: "done" })
+let db: Db
+let client: MongoClient
+
+/**
+ * The slice of the store the assertions read, whichever backend is in use.
+ * `docs` is the raw document list in insertion order.
+ */
+let fake: {
+  collection: (name: string) => {
+    docs: Record<string, unknown>[]
+    findOne: (q: Record<string, unknown>) => Promise<Record<string, unknown> | null>
+  }
+}
+
+beforeEach(async () => {
+  if (realClient) {
+    await realClient.connect()
+    client = realClient
+    db = realClient.db(`sync_engine_test_${process.pid}`)
+    await db.dropDatabase()
+    await db.collection("counters").insertOne({ _id: USER as unknown as ObjectId, seq: 0, backfillState: "done" })
+    const real = db
+    fake = {
+      collection: (name) => {
+        const coll = real.collection(name)
+        // `docs` is synchronous in the fake; for the real server the tests
+        // that need it seed through `seedDocs` and read through `allDocs`.
+        return {
+          get docs(): Record<string, unknown>[] {
+            throw new Error("use seedDocs/allDocs against a real server")
+          },
+          findOne: (q) => coll.findOne(q) as Promise<Record<string, unknown> | null>,
+        }
+      },
+    }
+  } else {
+    const memory = new FakeDb()
+    db = memory as unknown as Db
+    client = fakeClient as unknown as MongoClient
+    // Legacy serverSeq backfill is a separate, older step — mark it done.
+    memory.collection("counters").docs.push({ _id: USER, seq: 0, backfillState: "done" })
+    fake = memory as unknown as typeof fake
+  }
 })
+
+afterAll(async () => {
+  if (realClient) {
+    await db?.dropDatabase().catch(() => {})
+    await realClient.close()
+  }
+})
+
+async function seedDocs(collection: string, docs: Record<string, unknown>[]) {
+  if (realClient) await db.collection(collection).insertMany(docs)
+  else fake.collection(collection).docs.push(...docs)
+}
+
+async function allDocs(collection: string): Promise<Record<string, unknown>[]> {
+  if (realClient) return db.collection(collection).find({}).sort({ _id: 1 }).toArray()
+  return fake.collection(collection).docs
+}
 
 let q = 0
 function op(
   collection: SyncCollection,
   type: PushItem["type"],
-  data: Record<string, unknown> & { id: string }
+  data: Record<string, unknown> & { id: string },
+  patch?: { changedFields: string[]; baseSeq: number }
 ): PushItem {
-  return { id: `q${++q}`, type, timestamp: Date.now(), collection, data }
+  return { id: `q${++q}`, type, timestamp: Date.now(), collection, data, ...(patch ?? {}) }
 }
 
 async function push(...items: PushItem[]) {
@@ -143,6 +203,61 @@ describe("two devices", () => {
   })
 })
 
+describe("field-level merge — a device that has not caught up", () => {
+  async function seed() {
+    const { results } = await push(
+      op("flights", "create", { id: "f1", remarks: "original", flightNumber: "TR1", outTime: "01:00", updatedAt: 100, deviceId: "A" })
+    )
+    return results[0].serverSeq!
+  }
+
+  it("keeps BOTH devices' edits when they changed different fields", async () => {
+    const base = await seed()
+    // B (up to date) changes the remarks.
+    await push(op("flights", "update", { id: "f1", remarks: "B's remarks", flightNumber: "TR1", outTime: "01:00", updatedAt: 200, deviceId: "B" }, { changedFields: ["remarks"], baseSeq: base }))
+    // A never pulled that. It edits the flight number on its OLD copy — which
+    // still says "original" for the remarks — and pushes later.
+    const { results } = await push(
+      op("flights", "update", { id: "f1", remarks: "original", flightNumber: "TR999", outTime: "01:00", updatedAt: 300, deviceId: "A" }, { changedFields: ["flightNumber"], baseSeq: base })
+    )
+
+    const stored = await fake.collection("flights").findOne({ id: "f1" })
+    expect(stored?.remarks).toBe("B's remarks") // whole-record LWW would have reverted this
+    expect(stored?.flightNumber).toBe("TR999")
+    // A's copy is behind, so the merged record comes back for it to rebase.
+    expect(results[0].record).toMatchObject({ remarks: "B's remarks", flightNumber: "TR999" })
+    expect(results[0].record).not.toHaveProperty("fieldVersions")
+    expect(results[0].conflicts).toBeUndefined()
+  })
+
+  it("settles the SAME field by the later edit and keeps the value that lost", async () => {
+    const base = await seed()
+    await push(op("flights", "update", { id: "f1", remarks: "B's remarks", updatedAt: 500, deviceId: "B" }, { changedFields: ["remarks"], baseSeq: base }))
+    const { results } = await push(
+      op("flights", "update", { id: "f1", remarks: "A's older remarks", updatedAt: 300, deviceId: "A" }, { changedFields: ["remarks"], baseSeq: base })
+    )
+
+    expect((await fake.collection("flights").findOne({ id: "f1" }))?.remarks).toBe("B's remarks")
+    expect(results[0]).toMatchObject({ success: true, stale: true, conflicts: [{ field: "remarks", winner: "server" }] })
+    const conflict = await fake.collection("syncConflicts").findOne({ recordId: "f1" })
+    expect(conflict).toMatchObject({ field: "remarks", winner: "server", discarded: "A's older remarks", kept: "B's remarks" })
+  })
+
+  it("does not move the head for a patch that changed nothing", async () => {
+    const base = await seed()
+    const before = await readHeadSeq(db, USER)
+    await push(op("flights", "update", { id: "f1", remarks: "original", updatedAt: 999, deviceId: "B" }, { changedFields: ["remarks"], baseSeq: base }))
+    expect(await readHeadSeq(db, USER)).toBe(before)
+  })
+
+  it("records which write last touched each field (server-only bookkeeping)", async () => {
+    const base = await seed()
+    const { results } = await push(op("flights", "update", { id: "f1", outTime: "02:00", updatedAt: 200, deviceId: "B" }, { changedFields: ["outTime"], baseSeq: base }))
+    const stored = await fake.collection("flights").findOne({ id: "f1" })
+    expect(stored?.fieldVersions).toEqual({ outTime: { seq: results[0].serverSeq, at: 200, by: "B" } })
+  })
+})
+
 describe("the seq head", () => {
   it("moves on every write and every deletion — which is what the cheap poll compares", async () => {
     const h0 = await readHeadSeq(db, USER)
@@ -183,8 +298,7 @@ describe("paged pull", () => {
 
 describe("migration to the canonical shape", () => {
   it("rewrites legacy documents of different shapes to one key set, without bumping their seq", async () => {
-    const flights = fake.collection("flights")
-    flights.docs.push(
+    await seedDocs("flights", [
       { _id: new ObjectId(), userId: USER, id: "old1", date: "2024-01-01", serverSeq: 7, createdAt: 1 },
       {
         _id: new ObjectId(),
@@ -198,11 +312,11 @@ describe("migration to the canonical shape", () => {
         createdAt: 2,
         updatedAt: 3,
         syncedAt: 4,
-      }
-    )
+      },
+    ])
 
     expect(await ensureCanonical(client, db, USER)).toBe(true)
-    const [a, b] = flights.docs
+    const [a, b] = await allDocs("flights")
     expect(Object.keys(a)).toEqual(Object.keys(b))
     expect(Object.keys(a)).toEqual(["_id", ...ENVELOPE_KEYS, ...Object.keys(SYNC_FIELDS.flights)])
     expect(a.serverSeq).toBe(7)
@@ -216,13 +330,9 @@ describe("migration to the canonical shape", () => {
   })
 
   it("sequences legacy tombstones so a device pulling by seq receives them", async () => {
-    fake.collection("deletions").docs.push({
-      _id: new ObjectId(),
-      userId: USER,
-      collection: "flights",
-      recordId: "gone",
-      deletedAt: new Date(),
-    })
+    await seedDocs("deletions", [
+      { _id: new ObjectId(), userId: USER, collection: "flights", recordId: "gone", deletedAt: new Date() },
+    ])
     await ensureCanonical(client, db, USER)
     const b = device()
     await b.pull()
@@ -230,13 +340,13 @@ describe("migration to the canonical shape", () => {
   })
 
   it("works through a large logbook a chunk per request", async () => {
-    const flights = fake.collection("flights")
-    for (let i = 0; i < 2500; i++) {
-      flights.docs.push({ _id: new ObjectId(), userId: USER, id: `f${i}`, serverSeq: i + 1, createdAt: i })
-    }
+    await seedDocs(
+      "flights",
+      Array.from({ length: 2500 }, (_, i) => ({ _id: new ObjectId(), userId: USER, id: `f${i}`, serverSeq: i + 1, createdAt: i }))
+    )
     let calls = 0
     while (!(await ensureCanonical(client, db, USER))) calls++
     expect(calls).toBeGreaterThanOrEqual(2)
-    expect(flights.docs.every((d) => d.schemaVersion === SYNC_SCHEMA_VERSION)).toBe(true)
+    expect((await allDocs("flights")).every((d) => d.schemaVersion === SYNC_SCHEMA_VERSION)).toBe(true)
   })
 })

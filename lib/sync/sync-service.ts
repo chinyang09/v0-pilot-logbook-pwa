@@ -2,7 +2,6 @@ import {
   getSyncQueue,
   clearSyncQueueItem,
   incrementRetryCount,
-  getLastSyncTime,
   setLastSyncTime,
   initializeDB,
   getUserSession,
@@ -13,7 +12,6 @@ import {
   silentDeleteCurrency,
   silentDeleteDiscrepancy,
   bulkUpsertAircraftReferences,
-  getCollectionCursor,
   setCollectionCursor,
   resetAllCollectionCursors,
   reconcilePushedRecords,
@@ -21,6 +19,7 @@ import {
   getRoundTripSyncState,
   setRoundTripSyncState,
   requeueOrphanedRecords,
+  readSyncSnapshot,
   userDb,
 } from "@/lib/db"
 import { normalizeFlightFromServer } from "@/lib/db/stores/user/flights.store"
@@ -34,7 +33,7 @@ import type { SyncQueueItem, SyncCollection, CollectionCursor } from "@/types/sy
 import { getSyncTriggerManager } from "./sync-trigger-manager"
 import { compactSyncQueue } from "./compact"
 import { SYNC_COLLECTIONS, SYNC_SCHEMA_VERSION } from "./schema"
-import { recordKey, selectServerWinners, takePushBatch } from "./batch"
+import { pendingEdits, planLocalApply, recordKey, takePushBatch } from "./batch"
 import type { Authored } from "./authorship"
 
 // Max attempts before a per-item sync failure is dead-lettered so a poison item
@@ -60,6 +59,8 @@ const MAX_ROUNDS = 200
 // Abort any sync request that hangs, so a stalled fetch can't wedge the
 // in-flight mutex or the unload flush.
 const FETCH_TIMEOUT_MS = 30000
+
+const ORPHAN_SCAN_INTERVAL_MS = 60 * 1000
 
 /** The shared aircraft reference pool changes slowly; don't ask on every poll. */
 const AIRCRAFT_REF_INTERVAL_MS = 10 * 60 * 1000
@@ -120,7 +121,10 @@ interface PushItemResult {
   success: boolean
   rejected?: boolean
   stale?: boolean
+  /** The record as the server now holds it, when that differs from what was sent. */
   record?: ServerRecord
+  serverSeq?: number
+  conflicts?: { field: string; winner: "incoming" | "server" }[]
   reason?: string
 }
 
@@ -152,6 +156,9 @@ class SyncService {
   // Set when any sync request returns 401 during the current cycle.
   private got401 = false
   private lastAircraftRefPull = 0
+  private lastOrphanScan = 0
+  // A sync requested while one is running: run once more when it finishes.
+  private followUp: Promise<SyncRunResult> | null = null
   // Other TABS of the app on this device share the IndexedDB but not the SWR
   // caches — a sync in one has to tell the others their caches are stale.
   private channel: BroadcastChannel | null = null
@@ -189,6 +196,24 @@ class SyncService {
 
   async syncBeforeLogout() {
     await getSyncTriggerManager().syncBeforeLogout()
+  }
+
+  /**
+   * Push everything this device holds, and say how many changes are STILL
+   * unsynced afterwards. Signing out wipes local data, so anything counted
+   * here is lost if the sign-out goes ahead — the caller has to ask first.
+   *
+   * It must run while the session is still valid: the account page used to
+   * revoke the session and THEN sign out, so this push got a 401 and every
+   * unsynced edit went with the wipe, online or not.
+   */
+  async flushBeforeSignOut(): Promise<number> {
+    try {
+      await this.fullSync()
+    } catch (error) {
+      console.error("[Sync] pre-sign-out push failed:", error)
+    }
+    return userDb.syncQueue.count().catch(() => 0)
   }
 
   destroyTriggers() {
@@ -255,9 +280,20 @@ class SyncService {
     if (typeof navigator === "undefined" || !navigator.onLine) {
       return { pushed: 0, pulled: 0, failed: 0, ok: false }
     }
-    // Coalesce: if a sync is already running, return its in-flight promise so
-    // every caller awaits the same real result.
-    if (this.inFlight) return this.inFlight
+    // A sync is already running. It may have read the queue BEFORE whatever
+    // prompted this call (an edit made during the initial sync is the common
+    // case), so returning its promise would leave that edit for the next
+    // trigger — up to a poll interval later. Instead, every caller in the
+    // meantime shares ONE follow-up run that starts when this one ends.
+    if (this.inFlight) {
+      this.followUp ??= this.inFlight
+        .catch(() => undefined)
+        .then(() => {
+          this.followUp = null
+          return this.fullSync()
+        })
+      return this.followUp
+    }
     this.inFlight = this.withCrossTabLock(() => this.executeFullSync()).finally(() => {
       this.inFlight = null
     })
@@ -344,13 +380,6 @@ class SyncService {
     await setRoundTripSyncState({ protocol: SYNC_PROTOCOL, tombSeq: 0, knownSeq: 0 })
   }
 
-  private async readCursors(): Promise<Record<SyncCollection, CollectionCursor>> {
-    const entries = await Promise.all(
-      SYNC_COLLECTIONS.map(async (c) => [c, await getCollectionCursor(c)] as const)
-    )
-    return Object.fromEntries(entries) as Record<SyncCollection, CollectionCursor>
-  }
-
   /**
    * One sync cycle: as many round trips as it takes to push the whole queue
    * and drain every change — usually ONE. Each round trip pushes a batch and
@@ -359,7 +388,12 @@ class SyncService {
    */
   private async runCycle(correlationId: string): Promise<SyncRunResult> {
     await this.ensureProtocol(correlationId)
-    await requeueOrphanedRecords(SYNC_COLLECTIONS)
+    // Cheap but not free (an index query per table) — once a minute is plenty
+    // for something that only exists after a crash between two writes.
+    if (Date.now() - this.lastOrphanScan > ORPHAN_SCAN_INTERVAL_MS) {
+      this.lastOrphanScan = Date.now()
+      await requeueOrphanedRecords(SYNC_COLLECTIONS)
+    }
 
     let pushed = 0
     let failed = 0
@@ -382,9 +416,7 @@ class SyncService {
       const batch = takePushBatch(pending, PUSH_LIMITS)
       batch.forEach((item) => attempted.add(recordKey(item)))
 
-      const state = await getRoundTripSyncState()
-      const cursors = await this.readCursors()
-      const since = await getLastSyncTime()
+      const { state, cursors, since } = await readSyncSnapshot(SYNC_COLLECTIONS)
 
       // Only show "syncing" for real work — a background "anything new?" that
       // comes back empty should not flash the indicator every half minute.
@@ -511,13 +543,19 @@ class SyncService {
       }
 
       try {
-        await userDb.transaction("rw", userDb[collection], async () => {
+        // The queue is read in the SAME transaction as the write, so an edit
+        // made while this runs is either seen as pending (and kept) or lands
+        // after it — never lost under a pulled copy.
+        await userDb.transaction("rw", [userDb[collection], userDb.syncQueue], async () => {
           if (records.length > 0) {
             const normalized = records.map((r) => normalize(r))
             const existing = await table.bulkGet(normalized.map((r) => r.id))
-            const winners = selectServerWinners(normalized, existing)
-            if (winners.length > 0) await table.bulkPut(winners)
-            applied += winners.length
+            const pending = pendingEdits(
+              await userDb.syncQueue.where("collection").equals(collection).toArray()
+            )
+            const toWrite = planLocalApply(normalized, existing, pending)
+            if (toWrite.length > 0) await table.bulkPut(toWrite)
+            applied += toWrite.length
           }
           // Deletions after upserts, so a tombstone always wins.
           if (deletions.length > 0) {
@@ -542,7 +580,7 @@ class SyncService {
     let failed = 0
     const reconcileByCollection = new Map<
       SyncCollection,
-      { id: string; pushedUpdatedAt?: number; pushedTimestamp: number }[]
+      { id: string; pushedUpdatedAt?: number; pushedTimestamp: number; serverSeq?: number }[]
     >()
     const staleByCollection: Partial<Record<SyncCollection, { records: ServerRecord[] }>> = {}
     const byId = new Map(batch.map((b) => [b.id, b]))
@@ -559,16 +597,26 @@ class SyncService {
           // Purged on another device → delete locally and clear its rows.
           await COLLECTION_HANDLERS[original.collection].silentDelete(recordId)
         }
-        if (itemResult.stale && itemResult.record) {
-          // The server holds a newer version than the one pushed — take it now
+        if (itemResult.record) {
+          // The record as it now stands differs from what was pushed — another
+          // device changed other fields, a conflict went the other way, or the
+          // push was stale. Take it now (rebased under anything still pending)
           // rather than waiting for a pull that may already be past it.
           ;(staleByCollection[original.collection] ??= { records: [] }).records.push(itemResult.record)
+        }
+        if (itemResult.conflicts?.length) {
+          console.warn(
+            `[Sync] ${original.collection}/${recordId}: field conflict on ${itemResult.conflicts
+              .map((c) => `${c.field} (${c.winner === "incoming" ? "this device's edit kept" : "other device's edit kept"})`)
+              .join(", ")}`
+          )
         }
         const entries = reconcileByCollection.get(original.collection) ?? []
         entries.push({
           id: recordId,
           pushedUpdatedAt: (original.data as { updatedAt?: number }).updatedAt,
           pushedTimestamp: original.timestamp,
+          serverSeq: typeof itemResult.serverSeq === "number" ? itemResult.serverSeq : undefined,
         })
         reconcileByCollection.set(original.collection, entries)
         success++
@@ -586,8 +634,45 @@ class SyncService {
       await reconcilePushedRecords(collection, entries)
     }
     const applied = await this.applyServerChanges(staleByCollection)
+    const mergedFlights = (staleByCollection.flights?.records ?? []).map((r) => r.id)
+    if (mergedFlights.length > 0) await this.recomputeMergedFlights(mergedFlights)
     await bumpSyncAudit("pushConfirmed", success)
     return { success, failed, applied }
+  }
+
+  /**
+   * A merged flight's DERIVED times may be out of step with its inputs.
+   *
+   * Field-level merge keeps both devices' edits — A set the IN time while B set
+   * the OUT time — but each device computed block time, night time and the
+   * rest from its OWN half of the picture, so whichever derived value landed
+   * last describes neither. The device the merged record comes back to is the
+   * one whose view was behind; it recomputes from the combined record and
+   * pushes any correction as an ordinary edit (`updateFlight` writes nothing if
+   * nothing moved). `recalculateFlightFields` respects `manualOverrides`, so a
+   * figure the pilot typed is never replaced, and simulators are skipped the
+   * way every other recalculation pass skips them.
+   */
+  private async recomputeMergedFlights(ids: string[]) {
+    try {
+      const [{ recalculateFlightFields }, { isSimulatorEntry }, db] = await Promise.all([
+        import("@/lib/utils/flight-calculations"),
+        import("@/lib/utils/entry-type"),
+        import("@/lib/db"),
+      ])
+      for (const id of ids) {
+        const flight = await userDb.flights.get(id)
+        if (!flight || isSimulatorEntry(flight) || flight.deletedAt != null) continue
+        const [dep, arr] = await Promise.all([
+          flight.departureIcao ? db.getAirportByIcao(flight.departureIcao) : flight.departureIata ? db.getAirportByIata(flight.departureIata) : undefined,
+          flight.arrivalIcao ? db.getAirportByIcao(flight.arrivalIcao) : flight.arrivalIata ? db.getAirportByIata(flight.arrivalIata) : undefined,
+        ])
+        const updates = recalculateFlightFields(flight, dep ?? null, arr ?? null)
+        if (Object.keys(updates).length > 0) await db.updateFlight(id, updates)
+      }
+    } catch (error) {
+      console.error("[Sync] recomputing merged flights failed:", error)
+    }
   }
 
   /**
