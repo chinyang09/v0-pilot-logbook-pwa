@@ -80,7 +80,20 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
         },
       ]}
     >
-      <button
+      {/* A div, not a <button>: the favourite star inside is a button, and a
+          button inside a button is invalid HTML (React reports it as a
+          hydration error). Still a keyboard target — Enter/Space click it,
+          which bubbles to the SwipeableCard's onClick like a tap. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            e.currentTarget.click();
+          }
+        }}
         className={cn(
           "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all hover:bg-accent",
           isRecent &&
@@ -132,7 +145,7 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
             <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
           )}
         </div>
-      </button>
+      </div>
     </SwipeableCard>
   );
 });
