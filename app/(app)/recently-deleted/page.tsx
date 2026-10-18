@@ -265,7 +265,8 @@ export default function RecentlyDeletedPage() {
         {!isLoading && !isEmpty && (
           <p className="text-xs text-muted-foreground">
             Deleted items are kept for 30 days and count towards nothing while
-            they are here. After that they are gone for good.
+            they are here. After that they are gone for good. Swipe an item
+            left to restore it.
           </p>
         )}
 
