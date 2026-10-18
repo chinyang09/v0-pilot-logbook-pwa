@@ -70,8 +70,11 @@ export function FirstSyncSplash() {
 
   if (!isAuthenticated || dismissed || total !== 0) return null
 
+  // z-[130]: it covers the WHOLE app, chrome included. At z-[100] — the nav
+  // pill's own level — the pill came later in the DOM and drew over the
+  // splash, live and tappable, on both the phone and the iPad layouts.
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-background safe-area-inset">
+    <div className="fixed inset-0 z-[130] flex flex-col items-center justify-center bg-background safe-area-inset">
       <div className="flex flex-col items-center animate-in fade-in slide-in-from-bottom-3 duration-700">
         {/* OOOI brand */}
         <h1 className="text-5xl font-bold tracking-[0.3em] text-foreground">OOOI</h1>
