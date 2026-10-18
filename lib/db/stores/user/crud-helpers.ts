@@ -6,6 +6,8 @@
 import type { Table } from "dexie"
 import { addToSyncQueue, enqueueMany, getDeviceId } from "./sync-queue.store"
 import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
+import { compareAuthorship as compareAuthorshipPure } from "@/lib/sync/authorship"
+import { diffFields } from "@/lib/sync/changes"
 
 /**
  * Base entity interface that all syncable entities must implement
@@ -49,18 +51,11 @@ export function isDeletedEntity<T extends SyncableEntity>(entity: T): boolean {
 }
 
 /**
- * Deterministic last-write-wins comparison. Orders by (updatedAt, deviceId) so
- * two concurrent edits with the same timestamp resolve identically on every
- * device instead of "whoever the server saw last" / "server always wins".
- * Returns > 0 if `a` wins, < 0 if `b` wins, 0 if identical authorship.
+ * Deterministic last-write-wins comparison — see `lib/sync/authorship.ts`,
+ * which the server uses too, so both ends always agree on the winner.
  */
 export function compareAuthorship(a: SyncableEntity, b: SyncableEntity): number {
-  const at = a.updatedAt ?? a.createdAt ?? 0
-  const bt = b.updatedAt ?? b.createdAt ?? 0
-  if (at !== bt) return at - bt
-  const ad = a.deviceId ?? ""
-  const bd = b.deviceId ?? ""
-  return ad < bd ? -1 : ad > bd ? 1 : 0
+  return compareAuthorshipPure(a, b)
 }
 
 /**
@@ -95,7 +90,9 @@ export async function createEntity<T extends SyncableEntity>(
   } as unknown as T
 
   await table.put(newEntity)
-  await addToSyncQueue("create", tableName, newEntity)
+  // An empty field set: nothing has changed since the create. Edits that
+  // collapse into this row add to it.
+  await addToSyncQueue("create", tableName, newEntity, { changedFields: [] })
 
   return newEntity
 }
@@ -132,9 +129,24 @@ export async function putManyWithSync<T extends SyncableEntity>(
     syncStatus: "pending" as const,
   })) as T[]
 
+  // An UPDATE says which fields it changed, so the server applies only those
+  // (see lib/sync/changes.ts). That needs the rows as they were.
+  const before = type === "update" ? await table.bulkGet(stamped.map((e) => e.id)) : []
+
   await table.bulkPut(stamped)
   await enqueueMany(
-    stamped.map((data) => ({ type, collection: tableName, data }))
+    stamped.map((data, i) => {
+      const prior = before[i]
+      return prior
+        ? {
+            type,
+            collection: tableName,
+            data,
+            changedFields: diffFields(prior as never, data as never),
+            baseSeq: prior.serverSeq ?? 0,
+          }
+        : { type, collection: tableName, data, ...(type === "create" ? { changedFields: [] } : {}) }
+    })
   )
 
   return stamped
@@ -172,8 +184,17 @@ export async function updateEntity<T extends SyncableEntity>(
     syncStatus: "pending",
   } as T
 
+  // What this edit actually changes. The push carries only these fields and
+  // the server version they were made against, so a device that hasn't caught
+  // up cannot overwrite fields another device changed in the meantime.
+  const changedFields = diffFields(existing as never, updatedEntity as never)
+  if (changedFields.length === 0) return existing
+
   await table.put(updatedEntity)
-  await addToSyncQueue("update", tableName, updatedEntity)
+  await addToSyncQueue("update", tableName, updatedEntity, {
+    changedFields,
+    baseSeq: existing.serverSeq ?? 0,
+  })
 
   return updatedEntity
 }

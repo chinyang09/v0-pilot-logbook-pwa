@@ -1,349 +1,270 @@
-import { getSyncQueueCount, getLastSyncTime } from "@/lib/db"
-
 /**
- * Configuration for sync triggers
+ * When to sync.
+ *
+ * The old manager gated EVERY trigger on the local queue: "is there anything
+ * to push? no → don't sync". That made foreground, focus, network-online and
+ * the periodic check all no-ops on a device with nothing pending — which is
+ * exactly the device that needs to hear about edits made on another one. The
+ * only unconditional pull was the one at login, which is why logging in again
+ * was the reliable way to catch up.
+ *
+ * A sync is now a PULL as much as a push, and the triggers say so:
+ *
+ * | Trigger | What it does |
+ * |---|---|
+ * | app opened / foregrounded / focused / back online / page restored | sync now (coalesced) |
+ * | a local edit | push after `pushDebounceMs`, never later than `pushMaxWaitMs` |
+ * | app visible and online | poll every `pollIntervalMs` (15s) — one tiny request when nothing changed |
+ * | a failed cycle with work left | retry with exponential back-off |
+ * | app hidden / page hide / unload | keepalive flush of the queue |
+ *
+ * The poll is cheap because the server answers "nothing new since seq N"
+ * with a single lookup (`/api/sync` with `knownSeq`).
  */
+
+export interface SyncOutcome {
+  ok?: boolean
+  remaining?: number
+}
+
 export interface SyncTriggerConfig {
-  // Queue size threshold (trigger if queue >= this)
-  queueSizeThreshold: number
-  // Time since last sync in ms (trigger if > this)
-  timeSinceLastSyncThreshold: number
-  // Debounce delay after last change in ms
-  debounceDelay: number
-  // Enable lifecycle triggers
-  enableLifecycleTriggers: boolean
-  // Enable background sync
-  enableBackgroundSync: boolean
+  /** Quiet period after the last edit before pushing it. */
+  pushDebounceMs: number
+  /** An edit is pushed within this long even while edits keep coming. */
+  pushMaxWaitMs: number
+  /** Background "anything new?" while the app is visible. */
+  pollIntervalMs: number
+  /** Lifecycle triggers closer together than this collapse into one sync. */
+  lifecycleCoalesceMs: number
+  /** Retry back-off after a failed cycle with work left. */
+  retryBaseMs: number
+  retryMaxMs: number
+}
+
+export const DEFAULT_SYNC_TRIGGER_CONFIG: SyncTriggerConfig = {
+  pushDebounceMs: 1500,
+  pushMaxWaitMs: 8000,
+  pollIntervalMs: 15000,
+  lifecycleCoalesceMs: 2000,
+  retryBaseMs: 5000,
+  retryMaxMs: 5 * 60 * 1000,
+}
+
+/** Delay before the nth consecutive retry (0-based), doubling to a cap. */
+export function retryDelayMs(attempt: number, config: Pick<SyncTriggerConfig, "retryBaseMs" | "retryMaxMs">): number {
+  const delay = config.retryBaseMs * 2 ** Math.max(0, attempt)
+  return Math.min(delay, config.retryMaxMs)
 }
 
 /**
- * Default configuration matching user requirements
+ * How long to wait before pushing, given when the current burst of edits
+ * started: the debounce, but never past the burst's max-wait deadline.
  */
-const DEFAULT_CONFIG: SyncTriggerConfig = {
-  queueSizeThreshold: 20,
-  timeSinceLastSyncThreshold: 45000, // 45 seconds
-  debounceDelay: 8000, // 8 seconds
-  enableLifecycleTriggers: true,
-  enableBackgroundSync: true,
+export function pushDelayMs(
+  firstChangeAt: number,
+  now: number,
+  config: Pick<SyncTriggerConfig, "pushDebounceMs" | "pushMaxWaitMs">
+): number {
+  const deadline = firstChangeAt + config.pushMaxWaitMs
+  return Math.max(0, Math.min(config.pushDebounceMs, deadline - now))
 }
 
-/**
- * SyncTriggerManager manages intelligent sync triggers based on:
- * 1. Queue size (>= 20 items)
- * 2. Time since last sync (> 45s)
- * 3. Debounce after last change (8s)
- * 4. App lifecycle events (foreground, network online)
- * 5. Background sync via Service Worker
- */
 export class SyncTriggerManager {
   private config: SyncTriggerConfig
-  private debounceTimer: NodeJS.Timeout | null = null
-  private periodicTimer: NodeJS.Timeout | null = null
-  private lastChangeTime: number = 0
-  private appJustForegrounded: boolean = false
-  private networkJustOnline: boolean = false
-  private syncCallback: (() => Promise<void>) | null = null
+  private syncCallback: (() => Promise<SyncOutcome | void>) | null = null
   private unloadCallback: (() => void) | null = null
-  private isInitialized: boolean = false
+  private isInitialized = false
 
-  // Bound event listeners for proper cleanup
-  private onOnline = () => {
-    console.log("[v0] Network online - marking for sync")
-    this.networkJustOnline = true
-    this.checkAndTriggerSync("network-online")
-  }
+  private timer: ReturnType<typeof setTimeout> | null = null
+  private timerDueAt = 0
+  private timerReason = ""
+  private pollTimer: ReturnType<typeof setInterval> | null = null
+  private burstStartedAt = 0
+  private lastLifecycleSyncAt = 0
+  private retryAttempt = 0
+  private running = false
+  private rerun = false
+
+  private isVisible = () => typeof document === "undefined" || document.visibilityState === "visible"
+  private isOnline = () => typeof navigator === "undefined" || navigator.onLine
+
+  private onOnline = () => this.lifecycle("network-online")
+  private onFocus = () => this.lifecycle("window-focus")
+  private onPageShow = () => this.lifecycle("page-show")
   private onVisibilityChange = () => {
-    if (document.visibilityState === "visible") {
-      console.log("[v0] App foregrounded - marking for sync")
-      this.appJustForegrounded = true
-      this.checkAndTriggerSync("app-foreground")
-    }
-  }
-  private onFocus = () => {
-    console.log("[v0] Window focused - checking sync")
-    this.appJustForegrounded = true
-    this.checkAndTriggerSync("window-focus")
-  }
-  private onBeforeUnload = () => {
-    // Use the dedicated keepalive flush (a normal async fullSync would be
-    // aborted on unload). Falls back to a best-effort immediate sync.
-    if (this.unloadCallback) {
-      this.unloadCallback()
+    if (this.isVisible()) {
+      this.startPolling()
+      this.lifecycle("app-foreground")
     } else {
-      this.triggerSyncImmediate("app-closing")
+      // iOS rarely fires `beforeunload` for an installed PWA; going to the
+      // background is the last reliable moment to get an edit out.
+      this.stopPolling()
+      this.unloadCallback?.()
     }
   }
+  private onPageHide = () => this.unloadCallback?.()
 
   constructor(config: Partial<SyncTriggerConfig> = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config }
+    this.config = { ...DEFAULT_SYNC_TRIGGER_CONFIG, ...config }
   }
 
-  /**
-   * Initialize the trigger manager with a sync callback
-   */
-  initialize(syncCallback: () => Promise<void>, unloadCallback?: () => void) {
-    if (this.isInitialized) {
-      console.log("[v0] SyncTriggerManager already initialized")
-      return
-    }
-
+  initialize(syncCallback: () => Promise<SyncOutcome | void>, unloadCallback?: () => void) {
+    if (this.isInitialized) return
     this.syncCallback = syncCallback
     this.unloadCallback = unloadCallback ?? null
     this.isInitialized = true
 
-    console.log("[v0] Initializing SyncTriggerManager with config:", this.config)
-
-    // Setup lifecycle triggers
-    if (this.config.enableLifecycleTriggers) {
-      this.setupLifecycleTriggers()
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", this.onOnline)
+      window.addEventListener("focus", this.onFocus)
+      window.addEventListener("pageshow", this.onPageShow)
+      window.addEventListener("pagehide", this.onPageHide)
+      window.addEventListener("beforeunload", this.onPageHide)
+      document.addEventListener("visibilitychange", this.onVisibilityChange)
     }
-
-    // Setup periodic check (every 10 seconds)
-    this.startPeriodicCheck()
-
-    // Setup background sync registration
-    if (this.config.enableBackgroundSync && typeof window !== "undefined") {
-      this.registerBackgroundSync()
-    }
-
-    console.log("[v0] SyncTriggerManager initialized")
+    if (this.isVisible()) this.startPolling()
+    console.log("[Sync] trigger manager initialized")
   }
 
-  /**
-   * Setup app lifecycle event listeners
-   */
-  private setupLifecycleTriggers() {
-    if (typeof window === "undefined") return
-
-    window.addEventListener("online", this.onOnline)
-    document.addEventListener("visibilitychange", this.onVisibilityChange)
-    window.addEventListener("focus", this.onFocus)
-    window.addEventListener("beforeunload", this.onBeforeUnload)
-  }
-
-  private removeLifecycleTriggers() {
-    if (typeof window === "undefined") return
-
-    window.removeEventListener("online", this.onOnline)
-    document.removeEventListener("visibilitychange", this.onVisibilityChange)
-    window.removeEventListener("focus", this.onFocus)
-    window.removeEventListener("beforeunload", this.onBeforeUnload)
-  }
-
-  /**
-   * Start periodic check for sync conditions
-   */
-  private startPeriodicCheck() {
-    // Check every 10 seconds
-    this.periodicTimer = setInterval(() => {
-      this.checkAndTriggerSync("periodic-check")
-    }, 10000)
-  }
-
-  /**
-   * Register background sync with Service Worker
-   */
-  private async registerBackgroundSync() {
-    if (!("serviceWorker" in navigator) || !("sync" in ServiceWorkerRegistration.prototype)) {
-      console.log("[v0] Background Sync API not available")
-      return
-    }
-
-    try {
-      const registration = await navigator.serviceWorker.ready
-      // Background Sync API is not in the standard TS DOM lib; guarded by the
-      // feature check above.
-      await (registration as unknown as { sync: { register: (tag: string) => Promise<void> } }).sync.register("sync-flights")
-      console.log("[v0] Background sync registered")
-    } catch (error) {
-      console.error("[v0] Failed to register background sync:", error)
-    }
-  }
-
-  /**
-   * Notify that data has changed (for debounce trigger)
-   */
+  /** A local edit happened — push it soon. */
   notifyDataChanged() {
-    this.lastChangeTime = Date.now()
-    console.log("[v0] Data changed - starting debounce timer")
-
-    // Clear existing debounce timer
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer)
-    }
-
-    // Set new debounce timer
-    this.debounceTimer = setTimeout(() => {
-      console.log("[v0] Debounce timer expired - checking sync")
-      this.checkAndTriggerSync("debounce")
-    }, this.config.debounceDelay)
+    if (!this.isInitialized) return
+    const now = Date.now()
+    if (this.burstStartedAt === 0) this.burstStartedAt = now
+    this.schedule(pushDelayMs(this.burstStartedAt, now, this.config), "local-edit")
   }
 
-  /**
-   * Check if sync should be triggered based on all conditions
-   */
-  private async shouldSync(): Promise<{
-    should: boolean
-    reason?: string
-  }> {
-    // Queue SIZE only — counted off the index rather than read into memory.
-    // This runs on the 10s poll for the whole session, and materialising every
-    // pending row to compare a length against zero is the kind of work that
-    // lands in the middle of a scroll.
-    const queueSize = await getSyncQueueCount()
-    if (queueSize === 0) {
-      return { should: false, reason: "queue-empty" }
-    }
-
-    // Check queue size threshold
-    if (queueSize >= this.config.queueSizeThreshold) {
-      return { should: true, reason: "queue-size-threshold" }
-    }
-
-    // Check time since last sync
-    const lastSyncTime = await getLastSyncTime()
-    const timeSinceLastSync = Date.now() - (lastSyncTime ? Number(lastSyncTime) : 0)
-    if (timeSinceLastSync > this.config.timeSinceLastSyncThreshold) {
-      return { should: true, reason: "time-since-last-sync" }
-    }
-
-    // Check debounce (time since last change)
-    if (this.lastChangeTime > 0) {
-      const timeSinceLastChange = Date.now() - this.lastChangeTime
-      if (timeSinceLastChange > this.config.debounceDelay) {
-        return { should: true, reason: "debounce-expired" }
-      }
-    }
-
-    // Check app lifecycle flags
-    if (this.appJustForegrounded) {
-      return { should: true, reason: "app-foregrounded" }
-    }
-
-    if (this.networkJustOnline) {
-      return { should: true, reason: "network-online" }
-    }
-
-    return { should: false, reason: "no-condition-met" }
-  }
-
-  /**
-   * Check conditions and trigger sync if needed
-   */
-  private async checkAndTriggerSync(trigger: string) {
-    if (!this.syncCallback) {
-      console.warn("[v0] Sync callback not set")
-      return
-    }
-
-    if (!navigator.onLine) {
-      console.log("[v0] Offline - skipping sync check")
-      return
-    }
-
-    const { should, reason } = await this.shouldSync()
-
-    if (should) {
-      console.log(`[v0] Sync triggered by ${trigger} (reason: ${reason})`)
-      await this.executeSyncAndResetFlags()
-    } else {
-      console.log(`[v0] Sync check (${trigger}): No sync needed (${reason})`)
-    }
-  }
-
-  /**
-   * Execute sync and reset lifecycle flags
-   */
-  private async executeSyncAndResetFlags() {
-    if (!this.syncCallback) return
-
-    try {
-      await this.syncCallback()
-
-      // Reset lifecycle flags after successful sync
-      this.appJustForegrounded = false
-      this.networkJustOnline = false
-      this.lastChangeTime = 0
-    } catch (error) {
-      console.error("[v0] Sync execution failed:", error)
-    }
-  }
-
-  /**
-   * Trigger sync immediately (bypass checks)
-   */
-  private async triggerSyncImmediate(reason: string) {
-    if (!this.syncCallback) return
-
-    console.log(`[v0] Immediate sync triggered: ${reason}`)
-    try {
-      await this.syncCallback()
-    } catch (error) {
-      console.error("[v0] Immediate sync failed:", error)
-    }
-  }
-
-  /**
-   * Force sync (called manually by user)
-   */
+  /** The user asked for a sync. */
   async forceSyncNow() {
-    console.log("[v0] Force sync requested by user")
-    await this.triggerSyncImmediate("user-force-sync")
+    await this.runNow("user-force-sync")
   }
 
-  /**
-   * Trigger sync before logout
-   */
   async syncBeforeLogout() {
-    console.log("[v0] Syncing before logout")
-    await this.triggerSyncImmediate("before-logout")
+    await this.runNow("before-logout")
   }
 
-  /**
-   * Cleanup timers and listeners
-   */
   destroy() {
-    console.log("[v0] Destroying SyncTriggerManager")
-
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer)
-      this.debounceTimer = null
+    this.clearTimer()
+    this.stopPolling()
+    if (typeof window !== "undefined") {
+      window.removeEventListener("online", this.onOnline)
+      window.removeEventListener("focus", this.onFocus)
+      window.removeEventListener("pageshow", this.onPageShow)
+      window.removeEventListener("pagehide", this.onPageHide)
+      window.removeEventListener("beforeunload", this.onPageHide)
+      document.removeEventListener("visibilitychange", this.onVisibilityChange)
     }
-
-    if (this.periodicTimer) {
-      clearInterval(this.periodicTimer)
-      this.periodicTimer = null
-    }
-
-    this.removeLifecycleTriggers()
-
     this.isInitialized = false
     this.syncCallback = null
     this.unloadCallback = null
+    this.burstStartedAt = 0
+    this.retryAttempt = 0
   }
 
-  /**
-   * Get current configuration
-   */
   getConfig(): SyncTriggerConfig {
     return { ...this.config }
   }
 
-  /**
-   * Update configuration
-   */
   updateConfig(config: Partial<SyncTriggerConfig>) {
     this.config = { ...this.config, ...config }
-    console.log("[v0] SyncTriggerManager config updated:", this.config)
+  }
+
+  // -------------------------------------------------------------------------
+
+  /** Focus and visibility arrive together on most platforms — one sync. */
+  private lifecycle(reason: string) {
+    const now = Date.now()
+    if (now - this.lastLifecycleSyncAt < this.config.lifecycleCoalesceMs) return
+    this.lastLifecycleSyncAt = now
+    this.retryAttempt = 0
+    this.schedule(0, reason)
+  }
+
+  private startPolling() {
+    if (this.pollTimer || !this.isInitialized) return
+    this.pollTimer = setInterval(() => {
+      if (this.isVisible() && this.isOnline() && !this.timer) void this.execute("poll")
+    }, this.config.pollIntervalMs)
+  }
+
+  private stopPolling() {
+    if (this.pollTimer) clearInterval(this.pollTimer)
+    this.pollTimer = null
+  }
+
+  private clearTimer() {
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
+    this.timerDueAt = 0
+    this.timerReason = ""
+  }
+
+  /**
+   * Arrange a sync `delay` ms from now. A pending sync that is due SOONER is
+   * kept — except that a local edit re-arms its own debounce, so a burst of
+   * typing pushes once (the caller has already capped the delay at the
+   * burst's max-wait deadline).
+   */
+  private schedule(delay: number, reason: string) {
+    const dueAt = Date.now() + delay
+    if (this.timer) {
+      const rearmDebounce = reason === "local-edit" && this.timerReason === "local-edit"
+      if (!rearmDebounce && dueAt >= this.timerDueAt) return
+      this.clearTimer()
+    }
+    this.timerDueAt = dueAt
+    this.timerReason = reason
+    this.timer = setTimeout(() => {
+      this.clearTimer()
+      void this.execute(reason)
+    }, delay)
+  }
+
+  private async runNow(reason: string) {
+    this.clearTimer()
+    this.retryAttempt = 0
+    await this.execute(reason)
+  }
+
+  private async execute(reason: string) {
+    if (!this.syncCallback) return
+    if (!this.isOnline()) return
+    if (this.running) {
+      // Something asked while a cycle was in flight: run once more after it,
+      // so an edit made mid-sync is not left waiting for the next trigger.
+      if (reason !== "poll") this.rerun = true
+      return
+    }
+    this.running = true
+    // Whatever triggered it, this cycle pushes everything queued so far.
+    this.burstStartedAt = 0
+    let outcome: SyncOutcome | void = undefined
+    try {
+      outcome = await this.syncCallback()
+    } catch (error) {
+      console.error(`[Sync] cycle (${reason}) threw:`, error)
+      outcome = { ok: false, remaining: 1 }
+    } finally {
+      this.running = false
+    }
+
+    if (outcome && outcome.ok === false && (outcome.remaining ?? 0) > 0) {
+      // Work left and the cycle failed — back off and try again on our own,
+      // rather than waiting for the user to do something.
+      this.schedule(retryDelayMs(this.retryAttempt++, this.config), "retry")
+    } else if (outcome && outcome.ok !== false) {
+      this.retryAttempt = 0
+    }
+
+    if (this.rerun) {
+      this.rerun = false
+      this.schedule(0, "rerun")
+    }
   }
 }
 
-// Singleton instance
 let syncTriggerManagerInstance: SyncTriggerManager | null = null
 
-/**
- * Get or create singleton instance
- */
 export function getSyncTriggerManager(): SyncTriggerManager {
   if (!syncTriggerManagerInstance) {
     syncTriggerManagerInstance = new SyncTriggerManager()

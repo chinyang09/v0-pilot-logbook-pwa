@@ -91,7 +91,28 @@ export function getAirportsRevision(): number {
   return airportsRevision
 }
 
-async function rebuildAirportsTable(rawData: Record<string, any>): Promise<Airport[]> {
+/**
+ * Rows per write transaction while seeding. The bundled dataset is ~29k
+ * airports, and Chromium serves every IndexedDB database on an origin from ONE
+ * backing store: written as a single transaction it held EVERY request on the
+ * origin — the user database and the sync engine included — for the whole
+ * write. Measured on a fresh profile: ~26 seconds in which the first flight a
+ * new device created could not even be queued, let alone pushed. In chunks,
+ * anything else waits for one chunk at most.
+ */
+const SEED_CHUNK = 1000
+
+let rebuildInFlight: Promise<Airport[]> | null = null
+
+function rebuildAirportsTable(rawData: Record<string, any>): Promise<Airport[]> {
+  // Two hooks mounting together used to seed the table twice over.
+  rebuildInFlight ??= seedAirportsTable(rawData).finally(() => {
+    rebuildInFlight = null
+  })
+  return rebuildInFlight
+}
+
+async function seedAirportsTable(rawData: Record<string, any>): Promise<Airport[]> {
   const existing = await referenceDb.airports.toArray()
   const favoriteIcaos = new Set(existing.filter((a) => a.isFavorite).map((a) => a.icao))
   const customAirports = existing.filter((a) => a.isCustom === true)
@@ -99,15 +120,22 @@ async function rebuildAirportsTable(rawData: Record<string, any>): Promise<Airpo
   const airports = mapRawAirports(rawData, favoriteIcaos)
   const newIcaos = new Set(airports.map((a) => a.icao))
   const customToPreserve = customAirports.filter((a) => !newIcaos.has(a.icao))
+  const rows = [...airports, ...customToPreserve]
 
-  await referenceDb.transaction("rw", referenceDb.airports, referenceDb.metadata, async () => {
-    await referenceDb.airports.clear()
-    await referenceDb.airports.bulkPut(airports)
-    if (customToPreserve.length > 0) {
-      await referenceDb.airports.bulkPut(customToPreserve)
-    }
-    await referenceDb.setMetadata("airport_version", DATA_VERSION)
-  })
+  // Overwrite in place rather than clear-then-fill, so a reader during the
+  // seed sees old-or-new rows and never an empty table; drop the airports the
+  // dataset no longer has once every chunk is in.
+  for (let i = 0; i < rows.length; i += SEED_CHUNK) {
+    await referenceDb.airports.bulkPut(rows.slice(i, i + SEED_CHUNK))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  const keep = new Set(rows.map((a) => a.icao))
+  const stale = ((await referenceDb.airports.toCollection().primaryKeys()) as string[]).filter((k) => !keep.has(k))
+  if (stale.length > 0) await referenceDb.airports.bulkDelete(stale)
+
+  // The version is stamped LAST: a seed interrupted part-way is redone next
+  // time instead of being taken for a complete table.
+  await referenceDb.setMetadata("airport_version", DATA_VERSION)
   airportsRevision++
 
   return airports

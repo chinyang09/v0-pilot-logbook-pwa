@@ -54,7 +54,8 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts, from synthetic bounding boxes |
-| `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution |
+| `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution, the canonical document shape + write modes, push batching, the sync triggers |
+| `lib/sync/server/__tests__/` | the server engine end to end — two devices pushing and pulling, deletions, stale pushes, paging, the migration — against an in-memory Mongo stand-in (`fake-mongo.ts`; it implements only the operators the engine sends) |
 
 Tests that touch a parser must mock `@/lib/db` and
 `lib/utils/parsers/shared/airport-enricher` — both reach for IndexedDB at
@@ -72,7 +73,7 @@ app/                              # Next.js App Router
 ├── globals.css                   # Tailwind global styles
 ├── api/                          # API routes
 │   ├── auth/                     #   Registration, login, passkey, session
-│   ├── sync/                     #   Bulk sync, per-collection sync, TTL setup
+│   ├── sync/                     #   Round-trip sync (route.ts), legacy bulk + per-collection, TTL setup
 │   ├── ocr/                      #   Image OCR processing
 │   ├── search/                   #   FR24 proxy routes
 │   │   ├── aircraft/             #     Aircraft search + batch lookup
@@ -138,8 +139,11 @@ lib/                              # Core utilities and services
 ├── submissions/                  # Client-side submission helpers
 │   └── submit.ts                 #   Fire-and-forget aircraft/airport submissions
 ├── sync/                         # Cloud sync engine
-│   ├── sync-service.ts           #   Main sync orchestration
-│   └── sync-trigger-manager.ts   #   Intelligent sync scheduling
+│   ├── sync-service.ts           #   Client orchestration (one round trip per cycle)
+│   ├── sync-trigger-manager.ts   #   When to sync (lifecycle, debounce, poll, retry)
+│   ├── schema.ts                 #   Canonical server document shape (shared)
+│   ├── authorship.ts             #   Last-write-wins (shared client/server)
+│   └── server/engine.ts          #   Server push/pull/migration (server-only)
 ├── auth/                         # Authentication
 │   ├── server/                   #   Server-only (session, webauthn, totp)
 │   └── shared/                   #   Shared utilities (cuid)
@@ -179,23 +183,172 @@ All user data is stored locally in **IndexedDB via Dexie** and synced to **Mongo
 
 - Data hooks read from Dexie first, not the server
 - Mutations write to Dexie and enqueue a sync item
-- The sync engine batches and pushes changes to MongoDB
-- Last-write-wins conflict resolution. The delta-pull watermark is **server-authored**:
-  `/api/sync/[collection]` filters on the server-assigned `syncedAt` and returns
-  the server clock as the new `since`, so device clock skew can't drop updates.
-  The client only advances `lastSyncTime` when every collection pulled cleanly.
-- Tombstone records track deletions to prevent re-syncing. On the server, the
-  tombstone is written **before** the record is deleted (in `/api/sync/bulk`) —
-  if the tombstone write fails the delete is skipped and the client retries, so
-  a deletion can never be applied without a tombstone (which would resurrect the
-  record on other devices).
-- Failed push items are retried each cycle and **dead-lettered** after
+- The sync engine pushes the queue and pulls changes in **one round trip**
+  (`POST /api/sync`) — see "The Sync Protocol" below
+- Conflicts are resolved **per FIELD, not per record** — see "Field-Level
+  Sync" below. Whole-record last-write-wins (`lib/sync/authorship.ts`, one pure
+  function both ends import) survives only for creates and for pushes from
+  older builds
+- Deletions: a user delete is a SOFT delete (an ordinary update); only a purge
+  writes a tombstone, and the tombstone commits in the same transaction as the
+  record's removal, so a deletion can never apply without one (which would
+  resurrect the record on other devices)
+- Failed push items are retried and **dead-lettered** after
   `MAX_SYNC_RETRIES` (5) so a poison item can't loop forever; transient
-  network/offline failures are not counted toward the cap.
+  network/offline failures are not counted toward the cap
 
-### Sync Triggers
+### The Sync Protocol (`/api/sync`, `lib/sync/`)
 
-Sync runs automatically on: app focus, network online, debounced data changes (2-5s), manual trigger, and pre-logout.
+| | Where | What |
+|---|---|---|
+| request | `lib/sync/sync-service.ts` | `{ schemaVersion, items, cursors, tombSeq, since, knownSeq }` |
+| server | `app/api/sync/route.ts` → `lib/sync/server/engine.ts` | push (one transaction per collection), then pull every collection |
+| response | | `{ results, changes, cursors, tombSeq, hasMore, headSeq }` or `{ upToDate }` |
+
+- **Everything is on ONE per-user monotonic counter** (`counters.seq`, reserved
+  inside the write transaction). Records carry `serverSeq`; tombstones carry
+  one too, so deletions ride the same cursor as records instead of a wall
+  clock. Per-collection record cursors are keyset `(serverSeq, _id)`; deletions
+  use `tombSeq`.
+- **The cheap poll.** After a COMPLETE pull the client stores the seq head
+  (`knownSeq`). A request with nothing to push and that `knownSeq` is answered
+  `upToDate` after ONE `findOne` on the counter — no collection is queried. The
+  head is read BEFORE the pull's queries, which is what makes storing it safe.
+  Anything that reserves seqs outside a write transaction (the tombstone
+  migration) must reserve and write in one transaction, or the head can run
+  ahead of a row that isn't readable yet.
+- **A pusher doesn't download its own write.** Records this request just wrote
+  are left out of the pull payload while the cursor still advances past them
+  (matched on the exact seq written, so a concurrent overwrite still arrives).
+- **A stale push is answered with the winner** (`stale` + `record`), applied
+  immediately rather than left for a pull that may already be past it.
+- **Pulled changes are applied in BULK** — per collection one transaction,
+  one `bulkGet`, LWW in memory (`selectServerWinners`), one `bulkPut`, one
+  `bulkDelete`. A locally newer copy (an unpushed edit) is kept; a tie is
+  re-applied, which repairs a drifted local copy.
+- **Bounded both ways**: a push batch by count AND bytes (`takePushBatch` — a
+  signed flight is tens of KB), a pull page by records AND bytes (Vercel caps a
+  response at 4.5MB). Each always takes at least one item so an oversized
+  record cannot stall a queue.
+- **The client heals itself.** Every cycle re-enqueues records marked
+  `pending` with no queue row (`requeueOrphanedRecords` — a store writes the
+  record and THEN enqueues, so a tab killed between the two used to lose the
+  edit forever). The `SYNC_PROTOCOL` bump re-pulls everything once per device
+  and gives dead-lettered records one more chance.
+- **Tabs**: a Web Lock serialises sync across tabs (they share one queue) and a
+  `BroadcastChannel` tells the other tabs their SWR caches are stale.
+- `lastSyncTime` is the SERVER clock, advanced only on a clean drain (or an
+  `upToDate`); it drives the 30-day `requiresFullResync` gate, because a
+  tombstone expires after 30 days.
+
+**The legacy routes stay** (`/api/sync/bulk`, `/api/sync/[collection]`) for an
+installed PWA still on an older build; both go through the same engine, so
+their writes are canonical too.
+
+### Field-Level Sync (`lib/sync/changes.ts`)
+
+Whole-record last-write-wins corrupts data in the most ordinary situation: a
+device that has not caught up holds an OLD copy, the pilot edits one field on
+it, the whole record goes up with a newer timestamp, and every field another
+device changed in the meantime is reverted to the stale copy. So an edit is a
+PATCH, not a record:
+
+| | Client | Server |
+|---|---|---|
+| what changed | `updateEntity` diffs before/after → `changedFields`; a no-op edit writes nothing | applies ONLY those fields onto the stored document |
+| against what | `baseSeq` — the record's `serverSeq` when the first collapsed edit was made | `fieldVersions` — `{seq, at, by}` per field, which write last changed it |
+| conflict | — | the same field changed by ANOTHER device since `baseSeq`, to a different value |
+| resolution | — | the later edit wins (`editTime`, capped 5 min past the server clock); the loser is written to `syncConflicts` (TTL 90 days) |
+
+- A change since the base made by the SAME device is its own history, not a
+  conflict — which is why each push result carries the new `serverSeq` and
+  `reconcilePushedRecords` stores it.
+- Queue rows UNION their fields when edits collapse, and keep the EARLIEST
+  base (`addToSyncQueue`, `compactSyncQueue`). A create is a whole-record
+  write; edits that collapse into a create row still accumulate fields, and
+  once the create is confirmed the row becomes a field patch on the seq it
+  landed at.
+- **A pulled record is REBASED, not compared by clock** (`planLocalApply`): no
+  pending edit → the server's copy, whatever the timestamps say (it came off a
+  monotonic cursor, so it is newer than anything this device last saw); a
+  pending field edit → the server's copy with those fields laid over it; a
+  pending purge → not resurrected; a pending create or a dead-lettered
+  (`error`) row → last-write-wins.
+- When a push comes back MERGED (another device changed other fields), the
+  record is returned and the device recomputes a flight's DERIVED times from
+  the combined record (`recomputeMergedFlights`) — A set IN while B set OUT, and
+  each computed block time from half the picture. `manualOverrides` are
+  respected and simulators skipped, like every other recalculation pass.
+- Arrays and objects (`approaches`, `additionalCrew`, `signature`,
+  `importDecisions`) are ONE field each: two devices editing the same list
+  concurrently is a conflict, not an element merge.
+
+### The Canonical Document Shape (`lib/sync/schema.ts`)
+
+Every document in every synced collection has the SAME keys in the SAME order:
+the envelope (`id, userId, schemaVersion, createdAt, updatedAt, deletedAt,
+deviceId, serverSeq, syncedAt, fieldVersions`), then every field of the entity in declared
+order, missing ones written as their default (`""`, `0`, `"00:00"`, `[]`, or
+`null` for anything optional). Keys the table does not know are KEPT, at the
+end — a newer build's field or unexamined legacy data, and dropping either is
+data loss.
+
+- The field tables are **`satisfies`-checked against the entity types** — add a
+  field to `FlightLog` without adding it there and `tsc` fails.
+- **`null` is stripped again on the way down** (`toWireRecord`), and so are
+  the server-only keys (`syncedAt`, `schemaVersion`, `fieldVersions`), so a
+  client sees exactly the shape it always has. That is safe for `deletedAt`: a pulled
+  record REPLACES the local row whole.
+- **Write modes** (`writeMode`): a client that declares the current
+  `SYNC_SCHEMA_VERSION` sends complete entities, so its payload REPLACES the
+  stored document — an omitted key is cleared, which `$set` never allowed. A
+  client that declares nothing (an old build) is MERGED over the stored
+  document, because it may not know a field a newer device wrote.
+- **Migration is lazy and chunked** (`ensureCanonical`): each sync request
+  rewrites up to 1000 of the user's documents and sequences their legacy
+  tombstones, until the counter doc records the version. It does NOT bump
+  `serverSeq` (content is unchanged), and each rewrite is filtered on the seq
+  it read, so a push landing mid-migration is never overwritten.
+- Bump `SYNC_SCHEMA_VERSION` when a field table changes in a way existing
+  documents must be rewritten for.
+
+### Sync Triggers (`lib/sync/sync-trigger-manager.ts`)
+
+| Trigger | Does |
+|---|---|
+| app opened, foregrounded, focused, back online, page restored | sync now (coalesced within 2s) |
+| a local edit | push after 1.5s quiet, never later than 8s |
+| app visible + online | poll every 15s (the cheap `upToDate` request) |
+| a failed cycle with work left | retry, 5s doubling to 5min |
+| app hidden / `pagehide` / unload | keepalive flush (push only, under the 64KB keepalive cap) |
+
+**No trigger looks at the local queue.** The old manager returned "no sync
+needed" whenever THIS device had nothing to push — so foreground, focus,
+online and the periodic check never pulled another device's edits, and the
+only unconditional pull was the one at login. That is why logging in again was
+the reliable way to catch up. `sync-triggers.test.ts` pins it.
+
+The "syncing" status is only raised for real work (a push, a first pull, or a
+poll that came back with changes), and `onDataChanged` only fires when
+something changed — a poll every 15s must not flash the indicator or refresh
+every cache.
+
+A sync requested WHILE one is running (an edit during the initial sync) gets
+ONE shared follow-up run when it finishes (`fullSync`'s `followUp`). Returning
+the running sync's promise instead left the edit for the next poll, because
+that run had already read the queue.
+
+**Signing out pushes first and asks before discarding.** Both sign-out paths
+on the account page revoked the session and THEN ran the pre-logout sync, which
+then got a 401 — so every unsynced edit was wiped with the local data, online
+or not. `confirmUnsyncedLoss` pushes while the session still works
+(`flushBeforeSignOut`) and confirms if anything is left. It is a confirmation
+because the loss has no undo.
+
+**Live multi-device test** — `scripts/sync-live-test/` drives the real app in
+separate browser profiles against a real MongoDB replica set (README there).
+It is what found the trigger gating, the stale-device overwrite, the logout
+loss and the airport-seed stall; run it after changing anything here.
 
 **Initialization is auth-driven, not mount-driven.** `SyncProvider`
 (`components/providers/sync-provider.tsx`) is mounted once at the root and never
@@ -210,10 +363,11 @@ on a real user transition (a callsign change or silent reauth keeps the same
 triggers* whenever the app is cold-opened logged-out and the user then logs in
 (only the manual sync button worked).
 
-**Per-collection dispatch** (delete/upsert from the server) goes through the
-single `COLLECTION_HANDLERS` registry in `sync-service.ts`, keyed by the closed
-`SyncCollection` union — add a collection in one compile-checked place, not in
-parallel switch/if-else chains.
+**Per-collection dispatch** (delete + normalize for the server's records) goes
+through the single `COLLECTION_HANDLERS` registry in `sync-service.ts`, keyed by
+the closed `SyncCollection` union — add a collection in one compile-checked
+place (and its field table in `lib/sync/schema.ts`), not in parallel
+switch/if-else chains.
 
 **`SyncProvider` is the ONE `onDataChanged` → `refreshAllData` subscriber.**
 The dashboard and the logbook each had their own as well, and both of those
@@ -2670,21 +2824,24 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
   explicit time-frame header and is normalized via `time-reference-normalizer`.
   (An earlier audit guessed these were local station times; that was a false
   positive.)
-- **A sync push can add or change a field, but not REMOVE one** — `/api/sync/bulk`
-  applies an update as `$set: {...payload}`, and `JSON.stringify` drops keys
-  whose value is `undefined`, so a field the client cleared keeps its old value
-  on the server and comes back on the next pull. Worked around per-field with a
-  `null` sentinel (`FlightLog.deletedAt`, `Discrepancy.acceptedAt`), which is why
-  those test `== null`. **`unresolveDiscrepancy` still has the un-fixed form** —
-  it clears `resolvedAt`/`resolvedBy`/`resolutionNotes` with `undefined`, so a
-  reopened note keeps its resolution metadata server-side (harmless today: the
-  page keys off `resolved`, which is a real `false`).
-  The general fix is for the server to `$unset` the keys the payload omits — the
-  existing document is already in hand as `existingMap`, and both enqueue sites
-  send a COMPLETE entity, so replacement semantics are correct. Deferred because
-  a device running an older build sends the field set that build knows about: if
-  it pushes an edit before updating, `$unset` would wipe fields a newer device
-  had set. Needs a rollout story (and a real Mongo integration test) first.
+- **Clearing a field on the server needs a CURRENT client.** A push from a
+  build that declares `SYNC_SCHEMA_VERSION` replaces the stored document, so a
+  cleared key is cleared (this fixed `unresolveDiscrepancy`'s leftover
+  resolution metadata). A push from an OLDER build is merged, exactly as `$set`
+  was, so the `null` sentinel convention (`deletedAt`, `acceptedAt`) stays: it
+  is what makes a clear survive that path. Keep writing `null`, not `undefined`.
+- **A same-field conflict is settled by device clocks.** Only there: pulls
+  rebase and patches merge without consulting a clock. A fast clock is capped
+  5 minutes past the server's for the tiebreak; a slow one simply loses ties.
+  The losing value is in `syncConflicts` but nothing in the UI shows it yet.
+- **The flight form can lose an edit made in its first half-second.** Its
+  auto-save takes its "nothing changed" baseline from the FIRST debounced form
+  state (`components/flight-form.tsx`, `baselineFlightIdRef`), so an edit
+  typed before that debounce fires — or while `resolvedFlight` is still
+  loading — becomes the baseline and is never saved. Hard to hit with a fast
+  IndexedDB; easy while one was stalled (see the airport seed). Fixing it means
+  taking the baseline from the loaded flight AFTER the form's own calculations,
+  without saving those calculations on open — deferred, it is delicate.
 - **Service worker** (`public/sw.js`) — two items needing offline testing
   before any change (a bad SW is hard to roll back): (1) `install` calls
   `self.skipWaiting()` unconditionally while the registration
@@ -3392,7 +3549,15 @@ When making changes, be aware of these high-impact files:
 - Do not change sync conflict resolution strategy without understanding the tombstone system
 - Do not gate `SyncProvider`'s init on a one-shot `getUserSession()` check at mount — drive it off `useAuth().user` so a login *after* mount (cold-open-logged-out, or logout→login) still initializes triggers and runs the initial sync
 - Do not re-fork the per-collection delete/upsert dispatch into switch/if-else chains — extend the single `COLLECTION_HANDLERS` registry in `sync-service.ts` instead
-- Do not advance the sync watermark from the client clock — `lastSyncTime` must come from the server-returned `syncedAt`, and only after every collection pulls cleanly
+- Do not advance the sync watermark from the client clock — `lastSyncTime` must come from the server-returned `serverNow`, and only after a clean drain (or an `upToDate`)
+- Do not gate a sync trigger on the local queue being non-empty — a sync is a PULL as much as a push, and gating it is what made other devices' edits arrive only at login
+- Do not store `knownSeq` from anything but a COMPLETE pull's `headSeq`, and do not read the head AFTER the pull's queries — either lets the cheap poll answer `upToDate` past a change the device never received
+- Do not reserve seqs outside the transaction that writes them — the counter would show a seq whose row is not readable yet, and the poll can record a head past it
+- Do not write a synced document except through `canonicalizeDocument` — a raw `$set`/`insertOne` is how the collections ended up with records of different shapes. Add a field to the field table in `lib/sync/schema.ts` (the compiler insists), and bump `SYNC_SCHEMA_VERSION` when existing documents need rewriting
+- Do not treat an un-versioned push as complete — it may come from an older build that doesn't know a newer field; it is MERGED, only a client declaring the current schema REPLACES
+- Do not build a client normalizer from an explicit field list — spread the server record first. The crew normalizer was a list without `deletedAt`, so binned crew came back on every other device
+- Do not apply pulled records one at a time — `applyServerChanges` does one transaction, one `bulkGet` and one `bulkPut` per collection. The per-record double lookup + put was most of a first sync's cost
+- Do not raise the "syncing" status or fire `onDataChanged` for a poll that found nothing — it runs every 30s while the app is open
 - Do not delete a record on the server before its tombstone is written (`/api/sync/bulk`) — that order prevents deleted records resurrecting on other devices
 - Do not issue a session from a passkey route without calling `verifyAuthenticationResponse` — a `credential.id` lookup is not proof of possession (credential IDs aren't secret). Same for `register/complete`/`add-passkey`: bind the attestation to the server-issued challenge (`webauthn.create` + matching challenge)
 - Do not trust client-supplied `userId`/`callsign`/`totpSecret` in `register/complete` — read them from the consumed server-issued challenge doc
@@ -3618,6 +3783,11 @@ When making changes, be aware of these high-impact files:
 - Do not `refresh` a data hook with `mutate(undefined, { revalidate: true })` — clearing the cache first flips `isLoading` true and flashes the list's skeleton on every background refresh, and it hands out a NEW array even when nothing changed, which defeats SWR's default deep `compare` (`dequal`) and makes every downstream memo recompute (the FDP pipeline, the dashboard aggregates, the calendar's flight-date map). Bare `mutate()` revalidates in place. For the same reason `isLoading` must NOT be `isLoading || isValidating`: SWR's `isLoading` already means "no data yet", and folding in `isValidating` turns every revalidation into a skeleton
 - Do not construct an `Intl.DateTimeFormat` per call — go through `lib/utils/tz-format.ts` (`tzFormatter` / `tzOffsetName`). — resolving locale and timezone data is by far the most expensive part of formatting, and `getAirportTimeInfo` built TWO per call while the logbook parser and the roster executor each resolve a departure and an arrival offset PER SECTOR, and the schedule parser's `normalizeTimeToUTC` resolves one per TIME TOKEN (~six a row). Cache the FORMATTER (stateless, and every caller still hands it the current instant), never the resolved offset — a cached offset pins whatever DST was in force the first time that airport was seen. Measured on 800 lookups across 8 zones: 143ms → 8ms
 - Do not look a reference record up with `array.find(a => a.code.toUpperCase() === …)` — the airport table is ~10k rows and that allocates an uppercased string for every one of them, per lookup. `getAirportByICAO`/`getAirportByIATA` are backed by a `WeakMap` index keyed on the array itself (no invalidation to get wrong: a new array is a new key), and they must keep `find`'s FIRST-match rule, which `airport-code-index.test.ts` pins. The same shape appears wherever recents are resolved — build the Map once, then look up
+- Do not seed a reference table in ONE transaction — Chromium serves every IndexedDB database on an origin from one backing store, so writing the ~29k bundled airports in a single transaction held every request on the origin (the user DB and the sync engine included) for ~26 seconds on a fresh profile. `seedAirportsTable` writes 1000 rows per transaction with a yield between, overwrites in place (no empty-table window), and stamps the version LAST
+- Do not seed a `useState` from `syncService.getStatus()` (or any browser-only value) in a server-rendered component — the server renders "offline", the browser knows it is online, and the first render disagrees with the HTML. Read it with `useSyncExternalStore` and an "offline" server snapshot
+- Do not push a whole record for an edit — `updateEntity` sends `changedFields` + `baseSeq`, and the server applies only those fields. A whole-record push from a device that hadn't caught up is what reverted other devices' edits
+- Do not compare a pulled record against the local one by clock — rebase it (`planLocalApply`): the server's copy plus whatever this device has pending. Only a pending create or a dead-lettered row falls back to last-write-wins
+- Do not revoke a session before pushing — every sign-out path runs `confirmUnsyncedLoss` FIRST, while the session still works
 - Do not reload a whole reference table on mount to notice a write — `useAirportDatabase` re-read all ~10k airports from IndexedDB every time it mounted, and the flight form mounts on every flight tap. Writers bump `getAirportsRevision()` and the hook reloads only on a mismatch. Every write to `referenceDb.airports` lives in `airports.store.ts` (rebuild / addCustom / toggleFavorite) — a NEW writer must bump it too, or a cached copy goes stale. Capture the revision BEFORE the read, so a write landing mid-load leaves the cache looking stale rather than falsely current
 - Do not compute a list twice in JSX — `xs.some(p)` for the section guard and `xs.filter(p)` for the rows is two full passes per render, and on the airports page that was two scans of the whole reference table for a handful of pinned entries. Derive it once in a `useMemo` and test `.length`
 - Do not pass a memoized list card an INLINE arrow (`onDelete={() => performDelete(item)}`) — it hands every row new props on each render of the page and defeats the `memo` outright, which is the whole reason the card is memoized. The card takes its own item back (`onDelete: (item) => void`) and the page passes ONE `useCallback`'d handler; a plain function declared in the page body is just as bad as the arrow, so the handler itself has to be stable. This bit the logbook, crew and aircraft lists independently

@@ -207,7 +207,7 @@ export async function silentDeleteDiscrepancy(id: string): Promise<boolean> {
 /**
  * Normalize a server discrepancy record.
  */
-function normalizeDiscrepancyFromServer(server: Discrepancy): Discrepancy {
+export function normalizeDiscrepancyFromServer(server: Discrepancy): Discrepancy {
   return {
     ...server,
     resolved: server.resolved ?? false,

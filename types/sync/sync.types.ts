@@ -27,6 +27,21 @@ export interface SyncQueueItem {
   recordId?: string;
   data: FlightLog | Aircraft | Personnel | ScheduleEntry | Currency | Discrepancy | { id: string };
   retryCount?: number;
+  /**
+   * The fields this row changes (union across the edits collapsed into it).
+   * Absent means the WHOLE record — a create, or a write whose fields are not
+   * known — which the server falls back to last-write-wins for. See
+   * `lib/sync/changes.ts` for why an edit is a patch and not a record.
+   */
+  changedFields?: string[];
+  /** The record's `serverSeq` when the first collapsed edit was made. */
+  baseSeq?: number;
+}
+
+/** What an enqueue call knows about the edit, beyond the record itself. */
+export interface SyncChangeMeta {
+  changedFields?: string[];
+  baseSeq?: number;
 }
 
 export interface SyncMeta {

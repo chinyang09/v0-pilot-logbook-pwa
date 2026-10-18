@@ -8,7 +8,9 @@ import type {
   SyncCollection,
   SyncOperationType,
   CollectionCursor,
+  SyncChangeMeta,
 } from "@/types/sync/sync.types";
+import { earlierBase, unionFields } from "@/lib/sync/changes";
 
 type SyncQueueData = SyncQueueItem["data"];
 
@@ -34,7 +36,8 @@ function notifySyncService() {
 export async function addToSyncQueue(
   type: SyncOperationType,
   collection: SyncCollection,
-  data: SyncQueueData
+  data: SyncQueueData,
+  meta: SyncChangeMeta = {}
 ): Promise<void> {
   const recordId = (data as { id?: string }).id;
 
@@ -67,13 +70,22 @@ export async function addToSyncQueue(
     // create / update — collapse into an existing pending (non-delete) row.
     const existing = existingRows.find((r) => r.type !== "delete");
     if (existing) {
+      // A pending create stays a create even after later edits. Its field set
+      // is still tracked: a create is sent whole, but if the create is
+      // confirmed while a later edit sits in this row, the row becomes a
+      // field patch of exactly these fields (see reconcilePushedRecords).
+      const nextType = existing.type === "create" ? "create" : type;
+      const changedFields = unionFields(existing.changedFields, meta.changedFields);
+      const { changedFields: _c, baseSeq: _b, ...rest } = existing;
+      const baseSeq = earlierBase(existing.baseSeq, meta.baseSeq);
       await userDb.syncQueue.put({
-        ...existing,
-        // A pending create stays a create even after later edits.
-        type: existing.type === "create" ? "create" : type,
+        ...rest,
+        type: nextType,
         data,
         timestamp: Date.now(),
         retryCount: 0,
+        ...(changedFields !== undefined ? { changedFields } : {}),
+        ...(baseSeq !== undefined ? { baseSeq } : {}),
       });
       notifySyncService();
       return;
@@ -88,6 +100,8 @@ export async function addToSyncQueue(
     data,
     timestamp: Date.now(),
     retryCount: 0,
+    ...(type !== "delete" && meta.changedFields !== undefined ? { changedFields: meta.changedFields } : {}),
+    ...(meta.baseSeq !== undefined ? { baseSeq: meta.baseSeq } : {}),
   });
   notifySyncService();
 }
@@ -98,7 +112,7 @@ export async function addToSyncQueue(
  * Appends rows; the next push compaction collapses any same-record duplicates.
  */
 export async function enqueueMany(
-  items: { type: SyncOperationType; collection: SyncCollection; data: SyncQueueData }[]
+  items: ({ type: SyncOperationType; collection: SyncCollection; data: SyncQueueData } & SyncChangeMeta)[]
 ): Promise<void> {
   if (items.length === 0) return;
   const now = Date.now();
@@ -110,6 +124,8 @@ export async function enqueueMany(
     data: it.data,
     timestamp: now,
     retryCount: 0,
+    ...(it.type !== "delete" && it.changedFields !== undefined ? { changedFields: it.changedFields } : {}),
+    ...(it.baseSeq !== undefined ? { baseSeq: it.baseSeq } : {}),
   }));
   await userDb.syncQueue.bulkPut(rows);
   notifySyncService();
@@ -319,7 +335,7 @@ export async function markRecordSynced(
  */
 export async function reconcilePushedRecords(
   collection: SyncCollection,
-  entries: { id: string; pushedUpdatedAt?: number; pushedTimestamp: number }[]
+  entries: { id: string; pushedUpdatedAt?: number; pushedTimestamp: number; serverSeq?: number }[]
 ): Promise<void> {
   if (entries.length === 0) return;
   const table = userDb[collection];
@@ -327,23 +343,142 @@ export async function reconcilePushedRecords(
     for (const entry of entries) {
       const record = await table.get(entry.id);
       if (record) {
-        const current = record as { updatedAt?: number };
+        const current = record as { updatedAt?: number; serverSeq?: number };
+        // The record now stands at the seq this push was written at. Recording
+        // it is what makes this device's NEXT edit based on its own write —
+        // without it the server would see that write as someone else's.
+        const seq =
+          typeof entry.serverSeq === "number" && entry.serverSeq > (current.serverSeq ?? 0)
+            ? { serverSeq: entry.serverSeq }
+            : {};
         // Compare-and-set: only flip to synced if untouched since push.
         if (current.updatedAt === entry.pushedUpdatedAt) {
-          await table.put({ ...record, syncStatus: "synced" } as never);
+          await table.put({ ...record, ...seq, syncStatus: "synced" } as never);
+        } else if (seq.serverSeq !== undefined) {
+          await table.put({ ...record, ...seq } as never);
         }
       }
       // Clear only queue rows for this record that were part of (or older than)
       // what we pushed. Rows enqueued AFTER the push snapshot have a larger
       // timestamp and are intentionally preserved so the new edit re-syncs.
-      const staleRows = await userDb.syncQueue
+      const rows = await userDb.syncQueue
         .where("[collection+recordId]")
         .equals([collection, entry.id])
-        .filter((row) => row.timestamp <= entry.pushedTimestamp)
-        .primaryKeys();
+        .toArray();
+      const staleRows = rows.filter((row) => row.timestamp <= entry.pushedTimestamp).map((row) => row.id);
       if (staleRows.length > 0) {
         await userDb.syncQueue.bulkDelete(staleRows);
       }
+      // An edit made while the CREATE was in flight collapsed into the create
+      // row. The record exists on the server now, so what is left is an edit
+      // of it: a field patch based on the seq the create landed at, not a
+      // second whole-record write.
+      if (typeof entry.serverSeq === "number") {
+        for (const row of rows) {
+          if (row.timestamp > entry.pushedTimestamp && row.type === "create") {
+            await userDb.syncQueue.put({ ...row, type: "update", baseSeq: entry.serverSeq });
+          }
+        }
+      }
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Round-trip sync state (`/api/sync`)
+// ---------------------------------------------------------------------------
+
+/**
+ * What the single round-trip protocol keeps per device, beside the
+ * per-collection record cursors:
+ *
+ * - `tombSeq`  — the deletion cursor. Tombstones are sequenced on the same
+ *   per-user counter as records, so deletions no longer ride a wall clock.
+ * - `knownSeq` — the user's seq head as of the last COMPLETE pull. Sending it
+ *   lets the server answer "nothing changed" with one lookup.
+ * - `protocol` — which protocol this device last synced with. A device that
+ *   has never run this one re-pulls everything once (see `ensureProtocol` in
+ *   the sync service).
+ */
+export interface RoundTripSyncState {
+  tombSeq: number
+  knownSeq: number
+  protocol: number
+}
+
+export async function getRoundTripSyncState(): Promise<RoundTripSyncState> {
+  const v = await getMetaValue<Partial<RoundTripSyncState>>("roundTrip");
+  const num = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : 0);
+  return { tombSeq: num(v?.tombSeq), knownSeq: num(v?.knownSeq), protocol: num(v?.protocol) };
+}
+
+export async function setRoundTripSyncState(patch: Partial<RoundTripSyncState>): Promise<void> {
+  const current = await getRoundTripSyncState();
+  await setMetaValue("roundTrip", { ...current, ...patch });
+}
+
+/**
+ * Records that are marked as needing a push but have NO queue row behind them.
+ *
+ * Every store writes the record and THEN enqueues, in two separate IndexedDB
+ * writes; a tab closed between them leaves an edit that nothing will ever
+ * send. Re-enqueueing these each cycle is what makes "an offline edit gets
+ * pushed at the earliest opportunity" true even across a crash. `error` rows
+ * (dead-lettered after their retries) are included only when asked — re-trying
+ * a poison item every cycle is exactly what dead-lettering exists to stop.
+ */
+export async function requeueOrphanedRecords(
+  collections: readonly SyncCollection[],
+  { includeErrored = false }: { includeErrored?: boolean } = {}
+): Promise<number> {
+  const statuses = includeErrored ? ["pending", "error"] : ["pending"];
+  const toEnqueue: { type: SyncOperationType; collection: SyncCollection; data: SyncQueueData }[] = [];
+  const tables = collections.map((c) => userDb[c]);
+  // One read transaction for every table and the queue, not two per table.
+  await userDb.transaction("r", [...tables, userDb.syncQueue], async () => {
+    const queued = new Set(
+      (await userDb.syncQueue.toArray()).map(
+        (row) => `${row.collection}:${row.recordId ?? (row.data as { id?: string })?.id}`
+      )
+    );
+    for (const collection of collections) {
+      const table = userDb[collection] as unknown as {
+        where: (k: string) => { anyOf: (v: string[]) => { toArray: () => Promise<{ id: string }[]> } };
+      };
+      const candidates = await table.where("syncStatus").anyOf(statuses).toArray();
+      for (const record of candidates) {
+        if (!queued.has(`${collection}:${record.id}`)) {
+          toEnqueue.push({ type: "update", collection, data: record as SyncQueueData });
+        }
+      }
+    }
+  });
+  if (toEnqueue.length > 0) await enqueueMany(toEnqueue);
+  return toEnqueue.length;
+}
+
+/**
+ * Everything a sync round needs from `syncMeta` — the cursors, the round-trip
+ * state and the tombstone watermark — in ONE read. It was eight separate
+ * IndexedDB round trips per request, and on a phone each one is felt.
+ */
+export async function readSyncSnapshot(collections: readonly SyncCollection[]): Promise<{
+  state: RoundTripSyncState;
+  cursors: Record<SyncCollection, CollectionCursor>;
+  since: number;
+}> {
+  const keys = [...collections.map(cursorKey), "roundTrip", "lastSync"];
+  const rows = await userDb.syncMeta.bulkGet(keys);
+  const num = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : 0);
+  const cursors = {} as Record<SyncCollection, CollectionCursor>;
+  collections.forEach((c, i) => {
+    const v = rows[i]?.value as Partial<CollectionCursor> | undefined;
+    cursors[c] = { seq: num(v?.seq), id: typeof v?.id === "string" ? v.id : "" };
+  });
+  const rt = rows[collections.length]?.value as Partial<RoundTripSyncState> | undefined;
+  return {
+    state: { tombSeq: num(rt?.tombSeq), knownSeq: num(rt?.knownSeq), protocol: num(rt?.protocol) },
+    cursors,
+    since: num(rows[collections.length + 1]?.lastSyncAt),
+  };
 }

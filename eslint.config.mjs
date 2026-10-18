@@ -14,6 +14,8 @@ const eslintConfig = [
       "node_modules/**",
       // Separate Cloudflare Worker sub-project with its own tsconfig/runtime.
       "cloudflare-worker/**",
+      // Live multi-device harness — its own package, run by hand (README there).
+      "scripts/sync-live-test/**",
     ],
   },
   ...nextCoreWebVitals,

@@ -73,6 +73,18 @@ async function ensureIndexes(mongoClient: MongoClient): Promise<void> {
     safe("deletions.delta", () =>
       db.collection("deletions").createIndex({ userId: 1, collection: 1, deletedAt: 1 }),
     ),
+    // The losing side of field conflicts (lib/sync/server/engine.ts), kept 90
+    // days so a value overwritten by a concurrent edit can still be recovered.
+    safe("syncConflicts.ttl", () =>
+      db.collection("syncConflicts").createIndex({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 }),
+    ),
+    safe("syncConflicts.record", () =>
+      db.collection("syncConflicts").createIndex({ userId: 1, collection: 1, recordId: 1, createdAt: -1 }),
+    ),
+    // Tombstones ride the same per-user seq counter as records (/api/sync).
+    safe("deletions.seq", () =>
+      db.collection("deletions").createIndex({ userId: 1, serverSeq: 1 }),
+    ),
     // Auth: expire WebAuthn challenges automatically (they are also consumed via
     // findOneAndDelete, but this sweeps abandoned ceremonies). `expiresAt` is a
     // BSON Date, so a 0-second TTL deletes each doc at its own expiry instant.

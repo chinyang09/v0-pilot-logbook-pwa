@@ -9,6 +9,8 @@ import type {
   DutyType,
 } from "@/types/entities/roster.types"
 import { addToSyncQueue, enqueueMany, getDeviceId } from "./sync-queue.store"
+import { diffFields } from "@/lib/sync/changes"
+import type { SyncChangeMeta } from "@/types/sync/sync.types"
 import {
   updateEntity,
   deleteEntity,
@@ -184,7 +186,7 @@ export async function bulkUpsertScheduleEntries(
   let created = 0
   let updated = 0
   const deviceId = await getDeviceId()
-  const toEnqueue: { type: "create" | "update"; collection: "scheduleEntries"; data: ScheduleEntry }[] = []
+  const toEnqueue: ({ type: "create" | "update"; collection: "scheduleEntries"; data: ScheduleEntry } & SyncChangeMeta)[] = []
 
   await userDb.transaction("rw", [userDb.scheduleEntries], async () => {
     for (const entry of entries) {
@@ -207,8 +209,16 @@ export async function bulkUpsertScheduleEntries(
           deviceId,
           syncStatus: "pending",
         }
+        const changedFields = diffFields(existing as never, merged as never)
+        if (changedFields.length === 0) continue
         await userDb.scheduleEntries.put(merged)
-        toEnqueue.push({ type: "update", collection: "scheduleEntries", data: merged })
+        toEnqueue.push({
+          type: "update",
+          collection: "scheduleEntries",
+          data: merged,
+          changedFields,
+          baseSeq: existing.serverSeq ?? 0,
+        })
         updated++
       } else {
         const newEntry: ScheduleEntry = {
@@ -265,7 +275,7 @@ export async function getScheduleDateRange(): Promise<{ start: string; end: stri
 /**
  * Normalize a server schedule entry (fill required defaults).
  */
-function normalizeScheduleEntryFromServer(server: ScheduleEntry): ScheduleEntry {
+export function normalizeScheduleEntryFromServer(server: ScheduleEntry): ScheduleEntry {
   return {
     ...server,
     sectors: server.sectors || [],
