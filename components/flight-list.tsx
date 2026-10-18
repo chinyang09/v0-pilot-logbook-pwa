@@ -196,8 +196,10 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
       onPointerUp={cancelHold}
       onPointerCancel={cancelHold}
       // Stable across the virtualiser recycling this row, so an armed delete
-      // keeps its overlay while the list scrolls.
-      id={`flight-${flight.id}`}
+      // keeps its overlay while the list scrolls. NOT `flight-…`: that is the
+      // row wrapper's DOM id (performDelete measures it), and SwipeableCard
+      // puts this on its own root — the same id twice in the document.
+      id={`flight-card-${flight.id}`}
       onClick={() => {
         if (isLocked) return;
         // Hand the panel its data before it mounts — see primeFlightCache.
@@ -228,6 +230,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
         },
         {
           icon: <Trash2 className="h-5 w-5" />,
+          ariaLabel: "Delete flight",
           onClick: () => onDelete(flight),
           variant: "destructive",
           disabled: isLocked,

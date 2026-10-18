@@ -75,6 +75,7 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
       actions={[
         {
           icon: <Trash2 className="h-5 w-5" />,
+          ariaLabel: "Delete crew member",
           onClick: () => onDelete(crew),
           variant: "destructive",
         },

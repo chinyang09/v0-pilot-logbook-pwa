@@ -101,6 +101,11 @@ export const CalendarPanel = React.forwardRef<CalendarHandle, CalendarPanelProps
           willChange: "height",
         }}
         aria-hidden={!open}
+        // Collapsed to 0px but still MOUNTED (its height has to stay
+        // measurable), so without `inert` a keyboard user tabbed through 42
+        // invisible day buttons. aria-hidden alone hides them from a screen
+        // reader while leaving them focusable, which is worse than either.
+        inert={!open}
       >
         <div ref={contentRef} className="px-2 pb-2">
           <LogbookCalendar

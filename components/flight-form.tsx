@@ -343,7 +343,7 @@ function ToggleRow({
   return (
     <div className="flex items-center justify-between py-3.5 px-4 row-divider">
       <span className="text-foreground">{label}</span>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+      <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
     </div>
   );
 }

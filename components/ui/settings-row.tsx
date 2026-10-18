@@ -144,6 +144,7 @@ export function ToggleRow({
     <div className="flex items-center justify-between px-4 py-3.5 row-divider">
       <RowLabel label={label} description={description} disabled={disabled} />
       <Switch
+        aria-label={label}
         checked={checked}
         onCheckedChange={readOnly ? undefined : onCheckedChange}
         disabled={readOnly || disabled}

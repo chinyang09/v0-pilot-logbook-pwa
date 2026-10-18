@@ -571,6 +571,9 @@ export default function LogbookPage() {
             willChange: "height",
           }}
           aria-hidden={!showSearch}
+          // Stowed at 0px but mounted — inert keeps the hidden field out of
+          // the tab order (see CalendarPanel).
+          inert={!showSearch}
         >
           <div ref={searchBlockRef} className="px-2 pt-1 pb-2">
             <GlassContainer cornerRadius={20} className="w-full">

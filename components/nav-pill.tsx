@@ -972,6 +972,7 @@ function PillBarContent({
       {/* Sidebar toggle — fixed width bookend */}
       <button
         onClick={onToggleSidebar}
+        aria-label="Open sidebar"
         className="flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0"
       >
         <PanelLeft className="h-5 w-5" />
@@ -1152,6 +1153,7 @@ function SidebarTopStrip({ onToggle }: { onToggle: () => void }) {
       <div aria-hidden className="SidebarTopBlur" />
       <button
         onClick={onToggle}
+        aria-label="Close sidebar"
         className="relative flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0"
       >
         <PanelLeft className="h-5 w-5" />

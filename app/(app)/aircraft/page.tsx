@@ -69,6 +69,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
       actions={[
         {
           icon: <Trash2 className="h-5 w-5" />,
+          ariaLabel: "Delete aircraft",
           onClick: () => onDelete(aircraft),
           variant: "destructive",
         },
