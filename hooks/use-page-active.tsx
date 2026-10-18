@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -80,7 +81,14 @@ export function ActiveRouteProvider({
   // (some consumers see the new route, some the old, in the same pass). One
   // extra commit for the two pages that changed is cheaper than re-rendering
   // all six every time.
-  useEffect(() => {
+  //
+  // A LAYOUT effect, so that extra commit lands before the browser paints.
+  // As a passive effect the new page was painted first and only then told it
+  // was active — so it registered its header buttons a frame or two later,
+  // and every tab switch showed the new page under the OLD page's toolbar.
+  // An update scheduled in a layout effect is flushed synchronously, which
+  // still satisfies the rule above: the store changes after React rendered.
+  useLayoutEffect(() => {
     if (box.current === activeRoute) return
     box.current = activeRoute
     box.listeners.forEach((listener) => listener())

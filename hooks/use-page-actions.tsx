@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState, useEffect, useMemo, useRef, type ReactNode } from "react"
+import React, { createContext, useContext, useState, useLayoutEffect, useMemo, useRef, type ReactNode } from "react"
 
 /**
  * The action buttons the shell's header row renders for the active page.
@@ -71,7 +71,11 @@ function useRegisterActions(
   const actionsRef = useRef(actions)
   actionsRef.current = actions
 
-  useEffect(() => {
+  // LAYOUT effects, both of them: a page becoming active and its buttons
+  // arriving in the header must be the same painted frame. As passive effects
+  // the header lagged the page by a frame or two on every tab switch — the
+  // dashboard showed under the logbook's search/calendar/import buttons.
+  useLayoutEffect(() => {
     if (isActive) set(actionsRef.current)
     // Clears on unmount (non-keepalive) AND on inactive→active transition cleanup (keepalive).
     // This prevents stale actions persisting when lazy-loaded pages race during navigation.
@@ -84,7 +88,7 @@ function useRegisterActions(
 
   // Sync ref-held actions to context when the ReactNode identity changes
   // (separate from the mount/unmount effect to avoid cleanup flicker).
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isActive) set(actionsRef.current)
   }, [isActive, set, actions])
 }
