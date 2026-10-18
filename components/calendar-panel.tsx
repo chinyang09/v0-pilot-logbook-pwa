@@ -69,19 +69,24 @@ export const CalendarPanel = React.forwardRef<CalendarHandle, CalendarPanelProps
   ) {
     const contentRef = React.useRef<HTMLDivElement>(null)
     const [naturalHeight, setNaturalHeight] = React.useState(0)
+    const lastHeightRef = React.useRef(0)
 
     // Measured, not guessed: the height depends on how many week rows the month
     // has and on whether one pane or two are showing.
+    //
+    // The parent is told from the observer callback, never from inside a
+    // `setState` updater: React runs updaters DURING render, so a parent
+    // setState there is "Cannot update LogbookPage while rendering
+    // CalendarPanel" — logged on every logbook mount.
     React.useEffect(() => {
       const el = contentRef.current
       if (!el) return
       const observer = new ResizeObserver(() => {
         const h = el.offsetHeight
-        setNaturalHeight((prev) => {
-          if (prev === h) return prev
-          onNaturalHeight?.(h)
-          return h
-        })
+        if (h === lastHeightRef.current) return
+        lastHeightRef.current = h
+        setNaturalHeight(h)
+        onNaturalHeight?.(h)
       })
       observer.observe(el)
       return () => observer.disconnect()
