@@ -102,6 +102,21 @@ export function DutyEntryDialog({
     !wantsWindow || (isValidHHMM(start) && isValidHHMM(end) && start !== end);
   const canSave = Boolean(date) && Boolean(dutyCode.trim()) && timesValid && !saving;
 
+  // Why Save is disabled, said out loud. The rows' placeholders ("BKUP",
+  // "06:00", "18:00") read as filled-in values, so a disabled Save with no
+  // reason looked like the dialog was broken.
+  const missing: string[] = [];
+  if (!date) missing.push("a date");
+  if (!dutyCode.trim()) missing.push("a code");
+  if (wantsWindow) {
+    if (!isValidHHMM(start)) missing.push("a start time");
+    if (!isValidHHMM(end)) missing.push("an end time");
+    else if (isValidHHMM(start) && start === end) missing.push("an end time different from the start");
+  }
+  const blockedReason = missing.length
+    ? `Needs ${missing.length > 1 ? missing.slice(0, -1).join(", ") + " and " + missing[missing.length - 1] : missing[0]}`
+    : null;
+
   const region: React.CSSProperties = useMemo(() => {
     const pushedBy = canPushSidebar && sidebarOpen ? SIDEBAR_WIDTH_PX : 0;
     return isDesktop
@@ -241,6 +256,11 @@ export function DutyEntryDialog({
           !isDesktop && "pb-safe"
         )}
       >
+        {blockedReason && (
+          <p className="mr-auto min-w-0 text-xs text-muted-foreground" role="status">
+            {blockedReason}
+          </p>
+        )}
         <Button variant="ghost" onClick={() => dismiss()}>
           Cancel
         </Button>
