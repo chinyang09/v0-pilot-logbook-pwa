@@ -337,3 +337,55 @@ describe("parseLogtenExport", () => {
     expect(plan.warnings.some((w) => /local/i.test(w.message))).toBe(true);
   });
 });
+
+describe("a first migration on a fresh install (no profile yet)", () => {
+  // The Address Book's "This is Me" row IS the profile on a fresh install, so
+  // importing all three exports together must not refuse itself with "No pilot
+  // profile found" — which it did, because the check ran before the address
+  // book had been read.
+  it("takes the profile from the address book it is importing", async () => {
+    const { getCurrentUserPersonnel } = await import("@/lib/db");
+    vi.mocked(getCurrentUserPersonnel).mockResolvedValueOnce(null as never);
+
+    const plan = await parseLogtenExport(ALL_THREE(), { skipEnrichment: true });
+
+    expect(plan.errors).toEqual([]);
+    expect(plan.success).toBe(true);
+    const self = plan.crew.toCreate.find((r) => r.personnel.isMe)?.personnel;
+    expect(self?.name).toBe("Lim Chin Yang");
+    expect(plan.summary.flightsToCreate).toBe(2);
+
+    // The flights are logged from that profile's seat, by its planned id.
+    const tr118 = plan.flights.operations.find(
+      (op) => op.kind === "create" && op.flight.flightNumber === "TR118"
+    );
+    if (tr118?.kind !== "create") throw new Error("expected create");
+    expect(tr118.flight.sicName).toBe("Self");
+    expect(tr118.flight.sicId).toBe(self!.id);
+  });
+
+  it("still refuses flights with no profile anywhere", async () => {
+    const { getCurrentUserPersonnel } = await import("@/lib/db");
+    vi.mocked(getCurrentUserPersonnel).mockResolvedValueOnce(null as never);
+
+    const plan = await parseLogtenExport([fixture("flights.txt")], {
+      skipEnrichment: true,
+    });
+
+    expect(plan.success).toBe(false);
+    expect(plan.errors[0]?.message).toMatch(/No pilot profile found/);
+  });
+});
+
+describe("a migrated simulator session", () => {
+  it("writes 'Self' for the pilot's own seat, like a flight row", async () => {
+    const plan = await parseLogtenExport(ALL_THREE(), { skipEnrichment: true });
+    const sim = plan.flights.operations.find(
+      (op) => op.kind === "create" && op.flight.entryType === "simulator"
+    );
+    if (sim?.kind !== "create") throw new Error("expected a simulator create");
+    // The fixture's sim row names "Lim Chin Yang" — the pilot — in the SIC
+    // column; it used to be copied through verbatim.
+    expect(sim.flight.sicName).toBe("Self");
+  });
+});
