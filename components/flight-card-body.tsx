@@ -194,6 +194,23 @@ export function FlightCardBody({
     return names;
   }, [flight.picName, flight.sicName, flight.additionalCrew]);
 
+  // The two SEATS are named; anyone else on board is a count. With every
+  // name in one line, a flight carrying four extra crew squeezed the
+  // captain's name to nothing (", Chr… , Obs…").
+  const seatNames = crewNames.slice(0, 2);
+  const extraCrew = crewNames.slice(2);
+
+  const departureText = getDepartureDisplay(flight, displayPrefs?.airportIdentifier);
+  const arrivalText = getArrivalDisplay(flight, displayPrefs?.airportIdentifier);
+  // The route line is sized for two 4-letter codes. With the "both"
+  // identifier ("VHHH/HKG") at that size the two ran together and the arrival
+  // was cut off by the card edge on a phone, so longer codes step down a size.
+  // The row's height is fixed either way, so every card stays the same height.
+  const longRoute =
+    Math.max(departureText.length, arrivalText.length) > 4 ||
+    Boolean(diffs && (d("departureIata") || d("arrivalIata")));
+  const routeText = longRoute ? "text-[1.1rem]" : "text-[1.65rem]";
+
   const blockDiff = d("blockTime");
   const pfDiff = d("pilotFlying");
 
@@ -295,23 +312,11 @@ export function FlightCardBody({
               </span>
             ) : (
               <>
-                <span className="text-[1.65rem] font-bold leading-tight tracking-tight">
-                  <Slot
-                    diff={d("departureIata")}
-                    current={getDepartureDisplay(
-                      flight,
-                      displayPrefs?.airportIdentifier
-                    )}
-                  />
+                <span className={cn("min-w-0 truncate font-bold leading-tight tracking-tight", routeText)}>
+                  <Slot diff={d("departureIata")} current={departureText} />
                 </span>
-                <span className="text-[1.65rem] font-bold leading-tight tracking-tight">
-                  <Slot
-                    diff={d("arrivalIata")}
-                    current={getArrivalDisplay(
-                      flight,
-                      displayPrefs?.airportIdentifier
-                    )}
-                  />
+                <span className={cn("ml-2 min-w-0 truncate font-bold leading-tight tracking-tight", routeText)}>
+                  <Slot diff={d("arrivalIata")} current={arrivalText} />
                 </span>
               </>
             )}
@@ -388,7 +393,7 @@ export function FlightCardBody({
               // before "Self" does. They used to be `flex-1` each, which split
               // the row into equal columns and stranded the comma half a row
               // away from the name it follows ("Wang Tsan        , Self").
-              crewNames.map((name, i) => (
+              seatNames.map((name, i) => (
                 <span
                   key={`${name}-${i}`}
                   // Only the FIRST name shrinks, so a long captain's name
@@ -406,6 +411,15 @@ export function FlightCardBody({
                   {name}
                 </span>
               ))
+            )}
+            {extraCrew.length > 0 && (
+              <span
+                className="shrink-0 pl-1"
+                title={extraCrew.join(", ")}
+                aria-label={`and ${extraCrew.length} more crew: ${extraCrew.join(", ")}`}
+              >
+                +{extraCrew.length}
+              </span>
             )}
           </div>
 
