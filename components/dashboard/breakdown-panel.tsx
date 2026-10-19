@@ -93,7 +93,7 @@ export function BreakdownPanel({
       <div className="grid gap-x-6 gap-y-4 @[34rem]:grid-cols-2">
         {roles.length > 0 && (
           <div>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               Role &amp; conditions
             </p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 @[22rem]:grid-cols-3 @[34rem]:grid-cols-2">
@@ -112,7 +112,7 @@ export function BreakdownPanel({
         {(showEngineSplit || topTypes.length > 0) && (
           <div>
             <div className="mb-1.5 flex items-center justify-between gap-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Aircraft</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Aircraft</p>
               <Link
                 href="/aircraft"
                 className="group inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"

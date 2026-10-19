@@ -354,7 +354,7 @@ export default function RecentlyDeletedPage() {
                                     "tabular-nums",
                                     daysLeft <= 3
                                       ? "text-status-warning"
-                                      : "text-muted-foreground/70"
+                                      : "text-muted-foreground"
                                   )}
                                 >
                                   {retentionLabel(

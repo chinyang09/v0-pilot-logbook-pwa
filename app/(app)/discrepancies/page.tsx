@@ -332,7 +332,7 @@ export default function DiscrepanciesPage() {
                 are the same list in its settled state, not a separate concern. */}
             {handledNotes.length > 0 && (
               <>
-                <h2 className="pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
+                <h2 className="pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   Handled
                 </h2>
                 <AnimatePresence initial={false} mode="popLayout">

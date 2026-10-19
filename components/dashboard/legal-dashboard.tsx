@@ -275,7 +275,7 @@ function Annunciator({ status }: { status: PilotStatus }) {
           limit refills, so 41% of a 12-month allowance is not "tight". */}
       {status.governing && (
         <p className="mt-1 text-xs leading-tight text-muted-foreground">
-          <span className="text-muted-foreground/70">Tightest</span>{" "}
+          <span className="text-muted-foreground">Tightest</span>{" "}
           {status.governing.label}
           <span className="mx-1 text-muted-foreground/40">·</span>
           <span className="font-medium text-foreground/80 tabular-nums">
@@ -570,7 +570,7 @@ function DutyBand({
   return (
     <section className="px-4 py-2.5" aria-label="Duty">
       <div className="flex items-baseline justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           {view.state}
         </p>
         {view.chip && (
@@ -909,7 +909,7 @@ function LimitRow({ requirement }: { requirement: Requirement }) {
 
   return (
     <div className="flex items-center gap-2">
-      <span className="w-7 shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground/70">
+      <span className="w-7 shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground">
         {window}
       </span>
 
@@ -978,7 +978,7 @@ function Band({
       aria-label={label}
     >
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           {label}
         </p>
         <span className="flex items-center gap-2 text-[10px] tabular-nums">
@@ -1111,7 +1111,7 @@ function CurrencyDetail({ requirement }: { requirement: Requirement }) {
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
           {detail?.map((d) => (
             <React.Fragment key={d.label}>
-              <dt className="text-[11px] text-muted-foreground/70">{d.label}</dt>
+              <dt className="text-[11px] text-muted-foreground">{d.label}</dt>
               <dd className="text-[11px] font-medium tabular-nums text-foreground/90">
                 {d.value}
               </dd>

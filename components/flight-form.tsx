@@ -1481,7 +1481,7 @@ export function FlightForm({
                       "rounded-full px-3 py-1 text-sm font-medium transition-colors",
                       active
                         ? "bg-primary/15 text-primary"
-                        : "text-muted-foreground/60 hover:text-muted-foreground"
+                        : "text-muted-foreground hover:text-foreground"
                     )}
                   >
                     {label}

@@ -62,7 +62,7 @@ export function PeriodFlights({
       aria-label="Flights in period"
     >
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Flights</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Flights</p>
         <span className="text-[11px] tabular-nums text-muted-foreground">
           {flights.length}
         </span>
@@ -217,7 +217,7 @@ function FlightDetail({
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/70">
+      <dt className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </dt>
       <dd className="truncate text-[11px] font-semibold tabular-nums text-foreground">

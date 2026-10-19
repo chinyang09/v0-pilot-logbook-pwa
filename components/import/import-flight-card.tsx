@@ -333,7 +333,7 @@ function PilotFlyingChoice({
 
       {roleDiff && (
         <div className="mt-1 flex flex-wrap items-center gap-1">
-          <span className="mr-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+          <span className="mr-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
             Role
           </span>
           {allowedRolesFor(nowFlying).map((role) => {

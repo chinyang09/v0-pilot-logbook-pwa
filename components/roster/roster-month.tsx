@@ -26,10 +26,12 @@ export function itemTone(item: RosterItem): string {
     const c = DUTY_TYPE_COLORS[item.entry.dutyType] ?? DUTY_TYPE_COLORS.other
     return cn(c.bg, c.text)
   }
-  if (item.simulator) return "bg-purple-500/10 text-purple-600 dark:text-purple-400"
+  // -700 on the light theme, not the logbook card's -600: these labels are
+  // 9px, and blue-600 on its own 10% tint measured 4.1:1.
+  if (item.simulator) return "bg-purple-500/10 text-purple-700 dark:text-purple-400"
   return item.flown
-    ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
-    : "bg-orange-500/10 text-orange-600 dark:text-orange-400"
+    ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
+    : "bg-orange-500/10 text-orange-700 dark:text-orange-400"
 }
 
 interface RosterMonthProps {
@@ -127,7 +129,7 @@ export const RosterMonth = memo(function RosterMonth({
 
       <div className="grid grid-cols-7 gap-1 pb-1" aria-hidden="true">
         {WEEKDAYS.map((d) => (
-          <div key={d} className="text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+          <div key={d} className="text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
             {d}
           </div>
         ))}
@@ -173,7 +175,7 @@ export const RosterMonth = memo(function RosterMonth({
               onClick={() => onSelect(cell.key)}
               className={cn(
                 "flex min-h-[3.75rem] min-w-0 flex-col items-stretch gap-0.5 rounded-lg p-0.5 text-left transition-colors",
-                cell.inMonth ? "text-foreground" : "text-muted-foreground/40",
+                cell.inMonth ? "text-foreground" : "text-muted-foreground/60",
                 isSelected ? "bg-secondary ring-2 ring-primary/70" : "hover:bg-secondary/60"
               )}
             >

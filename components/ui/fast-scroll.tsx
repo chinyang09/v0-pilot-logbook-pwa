@@ -297,7 +297,7 @@ export function FastScroll({
               "transition-all duration-100",
               item.key === currentKey
                 ? "text-primary scale-125 font-bold"
-                : "text-muted-foreground/70 hover:text-foreground"
+                : "text-muted-foreground hover:text-foreground"
             )}
             role="option"
             aria-selected={item.key === currentKey}
