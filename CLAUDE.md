@@ -2214,6 +2214,26 @@ the sun timeline, the flight form's time rows) must go through
 `getAirportDisplayCode` — which needs BOTH codes populated on whatever it is
 given, or it silently falls back to the other one.
 
+### The Palette ("magenta line")
+
+ONE accent, magenta (`--primary`: `oklch(0.72 0.17 330)` dark /
+`oklch(0.52 0.2 330)` light). On a flight deck magenta is the planned path —
+the thing you follow — and it is the one hue the status ramp leaves free:
+green / yellow / orange / red already mean met / close / caution / not met.
+Scheduled flights take it too (planned = magenta).
+
+| | Dark — night-adapted | Light — daylight |
+|---|---|---|
+| ground | `0.13 0.008 20`, an ember black (no blue — blue-green is what dark-adapted eyes are most sensitive to) | `0.972 0.005 30` |
+| cards | `0.17`, a step above the ground | `0.995`, WHITER than the ground |
+| text | `0.89 0.012 50`, a dimmed warm white — never `#fff` | `0.22 0.014 20` |
+| status ramp | held under full brightness, like a dimmed panel | contrast-tuned for white |
+
+`themeColor` (`app/layout.tsx`), `public/manifest.json` and
+`public/offline.html` carry the two grounds as hex and must move with them.
+`--on-glass` is MEASURED off the rendered face (dark ~0.21, light ~0.995),
+not derived from `--card` — see the glass notes.
+
 ### State Management
 
 | State Type | Mechanism |
@@ -3167,7 +3187,7 @@ When making changes, be aware of these high-impact files:
     0.11 once `--glass-base` arrived: with an 82% card-coloured undercoat
     already giving the slab a face, the veil was pure lightening on top of an
     almost-solid surface and the material came out too pale and too warm for an
-    iOS-dark app. At 0.05 the face lands around oklch **0.23**, which is where
+    iOS-dark app. At 0.05 the face lands around oklch **0.21** on the magenta-line ground (it was 0.23 on the old one), which is where
     iOS's own dark chrome sits (systemGray6 `#1C1C1E` → systemGray5 `#2C2C2E`).
     Do not take it to zero — over pure black the base alone still needs the
     lift, and that is the whole reason this coat exists.
@@ -3777,7 +3797,7 @@ When making changes, be aware of these high-impact files:
 - Do not give `SwipeableCard` action panels horizontal padding — the panel must collapse to 0 width when closed (the left gap comes from `openWidth`/`justify-end`), otherwise a sliver of the action button peeks at the card edge
 - Do not put row dividers as a full-width `border-b` — use the inset `.row-divider` class so the line aligns with the `px-4` text
 - Do not give inline form inputs a visible box — keep `border-0 bg-transparent dark:bg-transparent shadow-none rounded-none` so they blend with the row (and `md:text-base` so the font doesn't shrink in edit mode)
-- Do not hardcode `orange-400` for scheduled flight cards — light and dark themes use separate colors (`orange-600` light / `orange-400` dark) for contrast
+- Do not give the accent a hue the status ramp uses, and do not paint a scheduled (unflown) flight anything but the accent. The accent is MAGENTA (`--primary`, hue 330) because magenta is the planned/managed path on a flight deck and is the one hue green/yellow/orange/red do not already mean something; the old bronze sat on the caution orange. Scheduled flights are `text-primary` (logbook card, roster chip) for the same reason — planned is magenta. And keep the dark theme NIGHT-ADAPTED: an ember-black ground (hue 20, never a blue black), text a dimmed warm white (never `#fff`), status colours held under full brightness. A large bright field is what costs a pilot their dark adaptation
 
 **Report import:**
 - Do not write an imported record with a bare `table.put()` — it is a raw Dexie write with NO sync-queue entry behind it, so the row lives only on the device that ran the import. The importers reached for it because their rows already carry the ids the flight rows point at, which rules out `addPersonnel`/`addCurrency`; `putManyWithSync` (`crud-helpers.ts`) is the shape that keeps the id AND enqueues, in one `bulkPut` + one `enqueueMany` rather than 2N round trips. Crew, currencies and discrepancies were all silently local for exactly this reason

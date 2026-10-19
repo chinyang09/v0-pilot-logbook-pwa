@@ -20,18 +20,19 @@ import { DUTY_TYPE_COLORS } from "@/components/roster/duty-entry-card"
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
-/** A cell label's tint. Flights follow the logbook: orange until flown. */
+/** A cell label's tint. Flights follow the logbook: magenta until flown. */
 export function itemTone(item: RosterItem): string {
   if (item.kind === "duty") {
     const c = DUTY_TYPE_COLORS[item.entry.dutyType] ?? DUTY_TYPE_COLORS.other
     return cn(c.bg, c.text)
   }
-  // -700 on the light theme, not the logbook card's -600: these labels are
-  // 9px, and blue-600 on its own 10% tint measured 4.1:1.
-  if (item.simulator) return "bg-purple-500/10 text-purple-700 dark:text-purple-400"
-  return item.flown
-    ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
-    : "bg-orange-500/10 text-orange-700 dark:text-orange-400"
+  // -700 on the light theme for the sim: these labels are 9px, and a -600 on
+  // its own 10% tint measured 4.1:1.
+  // A flight still to fly is PLANNED, and planned is magenta — the accent, the
+  // same as the logbook's scheduled card. Flown is the plain record, and the
+  // simulator takes the one hue nothing else here uses.
+  if (item.simulator) return "bg-teal-500/10 text-teal-700 dark:text-teal-300"
+  return item.flown ? "bg-secondary text-foreground" : "bg-primary/10 text-primary"
 }
 
 interface RosterMonthProps {

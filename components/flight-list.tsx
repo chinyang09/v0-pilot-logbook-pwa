@@ -267,7 +267,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           // colours ever wanted a transition here.
           "bg-card border-border cursor-pointer relative py-0 transition-colors",
           isLocked && "opacity-75",
-          isScheduled && "border-l-2 border-l-orange-600/70 dark:border-l-orange-400/70",
+          isScheduled && "border-l-2 border-l-primary/70",
           isSelected && "bg-primary/20 border-primary",
           !isSelected && "hover:bg-muted/50",
           // The preview opens as an exact copy of this card, ON this card, so

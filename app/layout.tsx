@@ -30,13 +30,13 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   // Exactly the app's own background in each theme — the sRGB of
-  // oklch(0.15 0.01 60) / oklch(0.975 0.005 75) in globals.css. Where a system
+  // oklch(0.13 0.008 20) / oklch(0.972 0.005 30) in globals.css. Where a system
   // bar is painted with this rather than left transparent, it has to be the
   // SAME colour as the page or it reads as a band bolted to the top. The old
   // values were cold near-blacks against a warm app.
   themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#0e0a07" },
-    { media: "(prefers-color-scheme: light)", color: "#f9f6f3" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0606" },
+    { media: "(prefers-color-scheme: light)", color: "#f9f5f4" },
   ],
   colorScheme: "dark light",
   width: "device-width",

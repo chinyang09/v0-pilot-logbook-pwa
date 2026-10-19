@@ -236,7 +236,7 @@ export function FlightCardBody({
     <div
       className={cn(
         "flex items-start gap-2",
-        isScheduled && "text-orange-600 dark:text-orange-400/80"
+        isScheduled && "text-primary dark:text-primary/85"
       )}
     >
       <div className="flex flex-col items-center justify-start shrink-0 w-16">
@@ -245,7 +245,7 @@ export function FlightCardBody({
           className={cn(
             "text-base mt-0.5 tracking-wide",
             isScheduled
-              ? "text-orange-600/70 dark:text-orange-400/60"
+              ? "text-primary/75 dark:text-primary/60"
               : "text-muted-foreground"
           )}
         >
@@ -333,7 +333,7 @@ export function FlightCardBody({
             // in-progress fling. 1.25em is `leading-tight` at this font size.
             "flex h-[1.25em] items-center gap-1.5 text-[13px] leading-tight mt-0.5",
             isScheduled
-              ? "text-orange-600/70 dark:text-orange-400/60"
+              ? "text-primary/75 dark:text-primary/60"
               : "text-muted-foreground"
           )}
         >
@@ -374,7 +374,7 @@ export function FlightCardBody({
             className={cn(
               "flex flex-1 min-w-0 overflow-hidden text-[13px] leading-tight",
               isScheduled
-                ? "text-orange-600/70 dark:text-orange-400/60"
+                ? "text-primary/75 dark:text-primary/60"
                 : "text-muted-foreground"
             )}
           >

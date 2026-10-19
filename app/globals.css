@@ -6,101 +6,123 @@
 /* Shared values */
 :root {
   --radius: 0.5rem;
-  --primary: oklch(0.55 0.10 55);
-  --ring: oklch(0.55 0.10 55);
 }
 
-/* Light theme — warm Claude-inspired palette (cream/sand/terra cotta) */
+/* ─── The palette: "magenta line" ───
+   ONE accent, and it is MAGENTA, for a reason a pilot already knows: on the
+   flight deck magenta is the managed path, the thing you follow. It is also
+   the one hue the status ramp does not use — green / yellow / orange / red mean
+   met / close / caution / not met on the legal page, and the old bronze accent
+   sat right on top of the caution orange, so a button and a caution read as
+   the same kind of thing.
+
+   The DARK theme is set up for a dark-adapted eye, the way a cockpit's night
+   lighting is: a near-black ground with an ember undertone rather than a blue
+   one, text a dimmed warm white instead of #fff (a large field of pure white
+   is what costs night vision), and the accent the one thing that glows.
+
+   The LIGHT theme follows suit for daylight: the same magenta, deep enough to
+   carry text on white, cards whiter than the page they sit on, and the same
+   faint warmth in the neutrals so the two themes read as one app. */
+
+/* Light theme — daylight */
 :root {
-  --background: oklch(0.975 0.005 75);
-  --foreground: oklch(0.25 0.02 55);
-  --card: oklch(0.955 0.006 75);
-  --card-foreground: oklch(0.25 0.02 55);
-  --popover: oklch(0.955 0.006 75);
-  --popover-foreground: oklch(0.25 0.02 55);
-  --primary-foreground: oklch(0.98 0.005 75);
-  --secondary: oklch(0.94 0.005 75);
-  --secondary-foreground: oklch(0.35 0.015 55);
-  --muted: oklch(0.94 0.005 75);
-  --muted-foreground: oklch(0.50 0.01 55);
-  --accent: oklch(0.94 0.005 75);
-  --accent-foreground: oklch(0.35 0.015 55);
+  --background: oklch(0.972 0.005 30);
+  --foreground: oklch(0.22 0.014 20);
+  --card: oklch(0.995 0.002 30);
+  --card-foreground: oklch(0.22 0.014 20);
+  --popover: oklch(0.995 0.002 30);
+  --popover-foreground: oklch(0.22 0.014 20);
+  --primary: oklch(0.52 0.2 330);
+  --primary-foreground: oklch(0.985 0.004 330);
+  --ring: oklch(0.52 0.2 330);
+  --secondary: oklch(0.945 0.006 30);
+  --secondary-foreground: oklch(0.32 0.014 20);
+  --muted: oklch(0.945 0.006 30);
+  --muted-foreground: oklch(0.47 0.014 20);
+  --accent: oklch(0.945 0.006 30);
+  --accent-foreground: oklch(0.32 0.014 20);
   --destructive: oklch(0.55 0.2 25);
-  --destructive-foreground: oklch(0.98 0.005 75);
-  --border: oklch(0.90 0.005 75);
-  --input: oklch(0.94 0.005 75);
-  --chart-1: oklch(0.55 0.10 55);
-  --chart-2: oklch(0.50 0.12 145);
-  --chart-3: oklch(0.55 0.10 280);
-  --chart-4: oklch(0.60 0.12 85);
-  --chart-5: oklch(0.50 0.15 25);
-  --sidebar: oklch(0.97 0.005 75);
-  --sidebar-foreground: oklch(0.25 0.02 55);
-  --sidebar-primary: oklch(0.50 0.10 55);
-  --sidebar-primary-foreground: oklch(0.98 0.005 75);
-  --sidebar-accent: oklch(0.94 0.005 75);
-  --sidebar-accent-foreground: oklch(0.25 0.02 55);
-  --sidebar-border: oklch(0.90 0.005 75);
-  --sidebar-ring: oklch(0.50 0.10 55);
+  --destructive-foreground: oklch(0.985 0.004 30);
+  --border: oklch(0.9 0.007 30);
+  --input: oklch(0.945 0.006 30);
+  --chart-1: oklch(0.52 0.2 330);
+  --chart-2: oklch(0.5 0.12 150);
+  --chart-3: oklch(0.52 0.1 210);
+  --chart-4: oklch(0.62 0.12 85);
+  --chart-5: oklch(0.52 0.15 25);
+  --sidebar: oklch(0.982 0.004 30);
+  --sidebar-foreground: oklch(0.22 0.014 20);
+  --sidebar-primary: oklch(0.52 0.2 330);
+  --sidebar-primary-foreground: oklch(0.985 0.004 330);
+  --sidebar-accent: oklch(0.945 0.006 30);
+  --sidebar-accent-foreground: oklch(0.22 0.014 20);
+  --sidebar-border: oklch(0.9 0.007 30);
+  --sidebar-ring: oklch(0.52 0.2 330);
 
   /* Status colors for sync */
-  --status-synced: oklch(0.50 0.18 145);
-  --status-pending: oklch(0.55 0.15 85);
-  --status-offline: oklch(0.45 0.15 25);
+  --status-synced: oklch(0.5 0.15 150);
+  --status-pending: oklch(0.56 0.14 85);
+  --status-offline: oklch(0.47 0.16 25);
 
   /* Semantic status palette — use these (never raw green-500/yellow-500/red-500,
      which aren't contrast-tuned for the light theme) */
-  --status-valid: oklch(0.50 0.18 145);
-  --status-warning: oklch(0.55 0.15 85);
-  --status-critical: oklch(0.58 0.16 60);
-  --status-error: oklch(0.55 0.2 25);
-  --status-info: oklch(0.50 0.12 250);
+  --status-valid: oklch(0.5 0.15 150);
+  --status-warning: oklch(0.56 0.14 85);
+  --status-critical: oklch(0.58 0.16 58);
+  --status-error: oklch(0.54 0.2 25);
+  --status-info: oklch(0.5 0.1 230);
 }
 
-/* Dark theme — warm Claude-inspired palette */
+/* Dark theme — night-adapted */
 .dark {
-  --background: oklch(0.15 0.01 60);
-  --foreground: oklch(0.93 0.005 75);
-  --card: oklch(0.19 0.01 60);
-  --card-foreground: oklch(0.93 0.005 75);
-  --popover: oklch(0.19 0.01 60);
-  --popover-foreground: oklch(0.93 0.005 75);
-  --primary-foreground: oklch(0.15 0.01 60);
-  --secondary: oklch(0.23 0.01 60);
-  --secondary-foreground: oklch(0.85 0.005 75);
-  --muted: oklch(0.23 0.01 60);
-  --muted-foreground: oklch(0.65 0.005 75);
-  --accent: oklch(0.60 0.10 55);
-  --accent-foreground: oklch(0.15 0.01 60);
-  --destructive: oklch(0.55 0.2 25);
-  --destructive-foreground: oklch(0.93 0.005 75);
-  --border: oklch(0.28 0.01 60);
-  --input: oklch(0.23 0.01 60);
-  --chart-1: oklch(0.60 0.10 55);
-  --chart-2: oklch(0.55 0.12 145);
-  --chart-3: oklch(0.60 0.10 280);
-  --chart-4: oklch(0.70 0.12 85);
-  --chart-5: oklch(0.60 0.15 25);
-  --sidebar: oklch(0.17 0.01 60);
-  --sidebar-foreground: oklch(0.93 0.005 75);
-  --sidebar-primary: oklch(0.60 0.10 55);
-  --sidebar-primary-foreground: oklch(0.15 0.01 60);
-  --sidebar-accent: oklch(0.23 0.01 60);
-  --sidebar-accent-foreground: oklch(0.93 0.005 75);
-  --sidebar-border: oklch(0.28 0.01 60);
-  --sidebar-ring: oklch(0.60 0.10 55);
+  --background: oklch(0.13 0.008 20);
+  --foreground: oklch(0.89 0.012 50);
+  --card: oklch(0.17 0.01 20);
+  --card-foreground: oklch(0.89 0.012 50);
+  --popover: oklch(0.18 0.011 20);
+  --popover-foreground: oklch(0.89 0.012 50);
+  --primary: oklch(0.72 0.17 330);
+  --primary-foreground: oklch(0.15 0.02 330);
+  --ring: oklch(0.72 0.17 330);
+  --secondary: oklch(0.21 0.012 20);
+  --secondary-foreground: oklch(0.82 0.012 50);
+  --muted: oklch(0.21 0.012 20);
+  --muted-foreground: oklch(0.66 0.014 40);
+  --accent: oklch(0.62 0.15 330);
+  --accent-foreground: oklch(0.15 0.02 330);
+  --destructive: oklch(0.6 0.19 25);
+  --destructive-foreground: oklch(0.92 0.01 50);
+  --border: oklch(0.255 0.013 20);
+  --input: oklch(0.21 0.012 20);
+  --chart-1: oklch(0.72 0.17 330);
+  --chart-2: oklch(0.66 0.13 150);
+  --chart-3: oklch(0.66 0.09 210);
+  --chart-4: oklch(0.76 0.12 85);
+  --chart-5: oklch(0.64 0.16 25);
+  --sidebar: oklch(0.15 0.009 20);
+  --sidebar-foreground: oklch(0.89 0.012 50);
+  --sidebar-primary: oklch(0.72 0.17 330);
+  --sidebar-primary-foreground: oklch(0.15 0.02 330);
+  --sidebar-accent: oklch(0.21 0.012 20);
+  --sidebar-accent-foreground: oklch(0.89 0.012 50);
+  --sidebar-border: oklch(0.255 0.013 20);
+  --sidebar-ring: oklch(0.72 0.17 330);
 
   /* Status colors for sync */
-  --status-synced: oklch(0.65 0.18 145);
-  --status-pending: oklch(0.70 0.15 85);
-  --status-offline: oklch(0.60 0.15 25);
+  --status-synced: oklch(0.68 0.15 150);
+  --status-pending: oklch(0.78 0.14 85);
+  --status-offline: oklch(0.62 0.17 25);
 
-  /* Semantic status palette (dark-tuned counterparts) */
-  --status-valid: oklch(0.65 0.18 145);
-  --status-warning: oklch(0.70 0.15 85);
-  --status-critical: oklch(0.70 0.15 60);
-  --status-error: oklch(0.62 0.19 25);
-  --status-info: oklch(0.65 0.12 250);
+  /* Semantic status palette (dark-tuned counterparts). Held a little under
+     full brightness, like a dimmed panel: they still separate cleanly from one
+     another and from the magenta, without being the brightest thing on a
+     night screen. */
+  --status-valid: oklch(0.68 0.15 150);
+  --status-warning: oklch(0.8 0.14 85);
+  --status-critical: oklch(0.73 0.15 58);
+  --status-error: oklch(0.64 0.19 25);
+  --status-info: oklch(0.68 0.08 230);
 }
 
 @theme inline {
@@ -692,13 +714,13 @@ textarea:focus-within {
   --modal-scrim-core: rgba(0, 0, 0, 0.14);
   /* The solid colour the finished face reads as, for anything painted ON the
      glass. See `--on-glass-*` below. */
-  --on-glass: oklch(0.965 0.005 75);
+  --on-glass: oklch(0.995 0.002 30);
   /* The label ON `--on-glass-active`. `--primary` itself is the same hue at a
      similar lightness to its own 32% tint, which is exactly why the active
      action button read as low-contrast — so this is the primary pushed away
      from the fill (darker on the light theme, lighter on the dark one) and
      stays recognisably the accent rather than going neutral. */
-  --on-glass-active-fg: oklch(0.44 0.12 55);
+  --on-glass-active-fg: oklch(0.44 0.19 330);
   --glass-shadow:
     0 1px 2px rgba(45, 38, 30, 0.05),
     0 8px 28px rgba(45, 38, 30, 0.10);
@@ -791,10 +813,10 @@ textarea:focus-within {
      With the veil at 0.11 the face was ~0.276 and the blob (0.292) was
      indistinguishable from it on a dark theme, which is exactly what the
      owner saw. */
-  --on-glass: oklch(0.235 0.008 60);
+  --on-glass: oklch(0.215 0.01 20);
   /* See the light theme: the label on `--on-glass-active`, pushed clear of the
      fill it sits on. */
-  --on-glass-active-fg: oklch(0.80 0.13 55);
+  --on-glass-active-fg: oklch(0.85 0.11 330);
   --glass-shadow:
     inset 0 -1px 1px rgba(0, 0, 0, 0.10),
     0 2px 6px rgba(0, 0, 0, 0.10),
