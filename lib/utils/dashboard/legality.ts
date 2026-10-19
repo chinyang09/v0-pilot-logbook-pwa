@@ -149,6 +149,13 @@ export interface LegalityInput {
   currencies: CurrencyWithStatus[]
   /** How many documents get their own cell before the rest are folded up. */
   documentRows?: number
+  /**
+   * Nothing in the logbook yet. Recency is then not ASSESSED rather than
+   * failed: 0 / 3 on a fresh install is not a pilot who lapsed, it is an app
+   * that has not been told anything, and it raised ACTION REQUIRED on the
+   * first screen a new user ever sees.
+   */
+  logbookEmpty?: boolean
   now?: Date
 }
 
@@ -169,6 +176,7 @@ export function buildLegalityModel({
   forecastBreaches = [],
   currencies,
   documentRows = DEFAULT_DOCUMENT_ROWS,
+  logbookEmpty = false,
   now = new Date(),
 }: LegalityInput): LegalityModel {
   const requirements: Requirement[] = []
@@ -187,7 +195,7 @@ export function buildLegalityModel({
   const lapsingSoon =
     recencyMet && daysToLapse !== undefined && daysToLapse <= RECENCY_CAUTION_DAYS
 
-  requirements.push({
+  if (!logbookEmpty) requirements.push({
     id: "recency",
     group: "currency",
     label: "90-day recency",

@@ -982,6 +982,17 @@ of the panel, so it takes on the mood of its own state before a word is read.
   the duty in progress → rest → the binding requirement → the next report →
   nothing required.
 
+#### An EMPTY logbook is not a lapsed pilot
+
+With nothing logged, 0 / 3 recency raised ACTION REQUIRED on the very first
+screen a new user saw. Recency is not ASSESSED then (`logbookEmpty` in
+`buildLegalityModel` leaves the cell out), and a clear verdict becomes the
+NEUTRAL `getting_started` state — "NO FLIGHTS YET · Add your first flights" —
+off the status ramp like an `unknown` cell, because nothing has passed either.
+Anything that can be judged still is: an expired document on a fresh install
+is ACTION REQUIRED. `logbookEmpty` is only true once the flight read has
+LANDED, or a pilot with thousands would see it flash while it loads.
+
 #### Nothing on this page navigates by default
 
 A cell EXPANDS in place and a second tap closes it. The reader came to check a
@@ -3727,6 +3738,7 @@ When making changes, be aware of these high-impact files:
 - Do not put a number inside a meter's fill without checking it fits — below `LABEL_FITS_INSIDE` it goes outside the fill instead. A figure clipped by its own bar is worse than no figure
 - Do not print "12 / 12 currencies current" — a pilot does not need telling about the eleven that are fine. The panel names the TIGHTEST constraint, and falls back to the fullest rolling limit only when nothing is flagged
 - Do not state a problem without its remedy on the legal page. The next-action line is the imperative ("2 landings required"), phrased in `legality.ts` where the shortfall is in hand — not the reading ("landings 1 / 3"), which the requirement cell already shows
+- Do not alarm on an empty logbook — 0 / 3 recency there is an app that has not been told anything, not a pilot who lapsed. `logbookEmpty` drops the recency cell and turns a clear verdict into the neutral `getting_started`; it must never mask a real failure (an expired document still raises ACTION REQUIRED)
 - Do not let a standing requirement outrank an exceeded FDP — that one is happening right now rather than being true today, and it is the only thing that overrides the legality verdict for the annunciator
 - Do not group the legal page's requirements under headings — they are sorted most-pressing-first so the top-left cell is always the thing closest to stopping the pilot. Headings cost four rules and ~56px to impose an order nobody is reading for on a no-scroll page
 - Do not put the period controls (calendar, period pills) on the legal page — they do nothing there, and the action bar is the one thing that can push a button under the centred nav pill

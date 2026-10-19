@@ -360,3 +360,33 @@ describe("buildPilotStatus — the clock is injected, not assumed", () => {
     expect(s.nextAction.headline).toBe("On standby to 18:00")
   })
 })
+
+describe("buildPilotStatus — a logbook with nothing in it", () => {
+  const EMPTY = { recency: { takeoffs: 0, landings: 0, current: false, lapseIso: null } }
+  const empty = (over: Partial<LegalityInput> = {}) =>
+    buildPilotStatus({
+      legality: buildLegalityModel({ ...CLEAR, ...EMPTY, ...over, logbookEmpty: true }),
+      duty: deriveDutyStatus([], NOW, null),
+      timeZone: "UTC",
+      logbookEmpty: true,
+      now: NOW,
+    })
+
+  it("is neutral, not an alarm, and says what to do first", () => {
+    const s = empty()
+    expect(s.state).toBe("getting_started")
+    expect(s.legality.requirements.some((r) => r.id === "recency")).toBe(false)
+    expect(s.nextAction.headline).toBe("Add your first flights")
+    expect(s.nextAction.href).toBe("/logbook")
+  })
+
+  it("still raises what CAN be judged — an expired document", () => {
+    const s = empty({ currencies: [currency({ code: "MEDIC", status: "expired", daysRemaining: -2 })] })
+    expect(s.state).toBe("action_required")
+  })
+
+  it("a pilot WITH flights and no recency still gets the alarm", () => {
+    const s = status(EMPTY)
+    expect(s.state).toBe("action_required")
+  })
+})

@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
-import { Check, TriangleAlert, OctagonAlert, ArrowUpRight } from "lucide-react"
+import { Check, TriangleAlert, OctagonAlert, ArrowUpRight, Info } from "lucide-react"
 
 import { usePilotStatus } from "@/hooks/data/use-pilot-status"
 import { usePageActive } from "@/hooks/use-page-active"
@@ -85,6 +85,14 @@ const TONE: Record<
     wash: "bg-destructive/10",
     glow: "from-destructive/[0.16]",
     icon: OctagonAlert,
+  },
+  // Not on the status ramp: nothing has been assessed, so it is neither a
+  // pass nor a fail. Neutral, like the `unknown` requirement cell.
+  getting_started: {
+    text: "text-muted-foreground",
+    wash: "bg-muted",
+    glow: "from-muted-foreground/[0.08]",
+    icon: Info,
   },
 }
 
@@ -273,7 +281,13 @@ function Annunciator({ status }: { status: PilotStatus }) {
       {/* The tightest constraint — never "12 / 12 current". When nothing is
           flagged this is the nearest EXPIRY, not the fullest rolling limit: a
           limit refills, so 41% of a 12-month allowance is not "tight". */}
-      {status.governing && (
+      {/* With nothing logged there is no constraint to name — a rolling limit
+          at 0 / 90h is not "tight" — so the line explains the first step. */}
+      {status.state === "getting_started" ? (
+        <p className="mt-1 text-xs leading-tight text-muted-foreground">
+          {status.nextAction.detail}
+        </p>
+      ) : status.governing && (
         <p className="mt-1 text-xs leading-tight text-muted-foreground">
           <span className="text-muted-foreground">Tightest</span>{" "}
           {status.governing.label}
@@ -820,6 +834,17 @@ function CurrencyBand({ requirements }: { requirements: Requirement[] }) {
 
   return (
     <Band label="Currency" requirements={ordered} flexible>
+      {/* Nothing to show only happens before anything has been logged or
+          added: say where the documents go rather than draw an empty band. */}
+      {ordered.length === 0 && (
+        <Link
+          href="/currencies"
+          className="flex items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <span>Track your medical, licence and checks</span>
+          <ArrowUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        </Link>
+      )}
       <div className="grid grid-cols-2 gap-1.5 @[26rem]:grid-cols-3 @[44rem]:grid-cols-4">
         {ordered.map((r) => (
           <CurrencyCell
@@ -994,7 +1019,9 @@ function Band({
               {caution}
             </span>
           )}
-          {fail === 0 && caution === 0 && (
+          {/* A tick says "everything here is met" — an empty band has
+              nothing to have met. */}
+          {fail === 0 && caution === 0 && requirements.length > 0 && (
             <Check className="h-3 w-3 text-chart-2" aria-hidden="true" />
           )}
         </span>

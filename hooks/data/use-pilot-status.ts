@@ -46,7 +46,11 @@ export function usePilotStatus(
     isLoading: fdpLoading,
   } = useFDPData()
   const { currencies, isLoading: currenciesLoading } = useCurrencies()
-  const { flights } = useFlights()
+  const { flights, isLoading: flightsLoading } = useFlights()
+  // Only once the read has landed: an empty array while loading is not an
+  // empty logbook, and treating it as one would flash "No flights yet" at a
+  // pilot with thousands.
+  const logbookEmpty = !flightsLoading && flights.length === 0
 
   /**
    * Flight id → on-blocks instant, so the sector chain can mark which legs of
@@ -113,6 +117,7 @@ export function usePilotStatus(
         capacity,
         forecastBreaches,
         currencies,
+        logbookEmpty,
         now: at,
       }),
       duty: deriveDutyStatus(
@@ -123,6 +128,7 @@ export function usePilotStatus(
         planDuties,
       ),
       formatClock,
+      logbookEmpty,
       now: at,
     })
   }, [
@@ -136,6 +142,7 @@ export function usePilotStatus(
     allDutyPeriods,
     planDuties,
     flightArrivals,
+    logbookEmpty,
   ])
 
   return { status, isLoading: fdpLoading || currenciesLoading }
