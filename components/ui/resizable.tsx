@@ -52,6 +52,10 @@ const ResizableHandle = ({
       toggle ? "cursor-default" : undefined,
       className
     )}
+    // A toggle divider is not a drag handle, so the 1px separator itself is
+    // not a keyboard stop — Tab used to land on it invisibly before reaching
+    // the toggle button inside it, which is the control.
+    {...(toggle ? { tabIndex: -1 } : {})}
     {...props}
   >
     {toggle && (
