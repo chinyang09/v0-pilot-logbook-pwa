@@ -180,13 +180,13 @@ function DisplaySection({ preferences, updateDisplay }: {
       <FormSection>
         <SelectRow<DisplayPreferences["timeFormat"]>
           label="Time Format"
-          description="How durations and block times are shown"
+          description="Durations as 2:30 or 02:30, or a 12-hour clock for times of day. Durations never show AM/PM."
           value={preferences.display.timeFormat}
           onValueChange={(value) => updateDisplay({ timeFormat: value })}
           options={[
             { value: "24h", label: "24h (2:30)" },
             { value: "24h-padded", label: "24h (02:30)" },
-            { value: "12h", label: "12h (2:30 PM)" },
+            { value: "12h", label: "12h clock (2:30 PM)" },
           ]}
         />
         <SelectRow<DisplayPreferences["clockSeparator"]>
