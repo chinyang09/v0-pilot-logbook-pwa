@@ -390,7 +390,7 @@ export function ImportReviewModalV2({
         // Reads as an app surface rather than a plain modal: translucent panel
         // over a blurred backdrop, matching the glass chrome used by the nav
         // pill and the floating action buttons.
-        className="z-[110] block max-w-3xl gap-0 overflow-hidden rounded-3xl border-white/10 bg-card/70 p-0 shadow-2xl backdrop-saturate-150 h-[calc(100dvh-7rem)] max-h-[46rem] top-[calc(env(safe-area-inset-top)+4.5rem)] translate-y-0 sm:top-[50%] sm:-translate-y-1/2"
+        className="z-[110] block max-w-[calc(100%-2rem)] sm:max-w-3xl gap-0 overflow-hidden rounded-3xl border-white/10 bg-card/95 p-0 shadow-2xl backdrop-saturate-150 h-[calc(100dvh-7rem)] max-h-[46rem] top-[calc(env(safe-area-inset-top)+4.5rem)] translate-y-0 sm:top-[50%] sm:-translate-y-1/2"
         // The backdrop blur is strongest around the dialog and clears toward
         // the screen edges, so the app stays readable behind it.
         overlayClassName={cn("z-[105]", MODAL_SCRIM)}

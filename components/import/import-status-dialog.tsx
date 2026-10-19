@@ -55,7 +55,7 @@ export function ImportStatusDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="z-[110] block max-w-sm gap-0 overflow-hidden rounded-3xl border-white/10 bg-card/70 p-5 shadow-2xl backdrop-saturate-150 sm:max-w-sm sm:p-6"
+        className="z-[110] block max-w-[calc(100%-2rem)] gap-0 overflow-hidden rounded-3xl border-white/10 bg-card/95 p-5 shadow-2xl backdrop-saturate-150 sm:max-w-sm sm:p-6"
         overlayClassName={cn("z-[105]", MODAL_SCRIM)}
         backdropSlot={<RadialBlurBackdrop className="fixed inset-0 z-[106]" />}
         showCloseButton={false}

@@ -102,6 +102,22 @@ export function getAirportsRevision(): number {
  */
 const SEED_CHUNK = 1000
 
+/**
+ * How far a seed has got, 0..1, for anyone waiting on it.
+ *
+ * A first seed takes seconds on a fresh device, and the import awaits it
+ * before parsing — so a new user's first import (a LogTen migration, very
+ * often) sat on an unmoving "Reading 5%" for ~14s. The import dialog
+ * subscribes and shows it; nothing else needs to.
+ */
+const seedListeners = new Set<(fraction: number) => void>()
+export function onAirportSeedProgress(listener: (fraction: number) => void): () => void {
+  seedListeners.add(listener)
+  return () => {
+    seedListeners.delete(listener)
+  }
+}
+
 let rebuildInFlight: Promise<Airport[]> | null = null
 
 function rebuildAirportsTable(rawData: Record<string, any>): Promise<Airport[]> {
@@ -127,6 +143,8 @@ async function seedAirportsTable(rawData: Record<string, any>): Promise<Airport[
   // dataset no longer has once every chunk is in.
   for (let i = 0; i < rows.length; i += SEED_CHUNK) {
     await referenceDb.airports.bulkPut(rows.slice(i, i + SEED_CHUNK))
+    const done = Math.min(1, (i + SEED_CHUNK) / rows.length)
+    seedListeners.forEach((listener) => listener(done))
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
   const keep = new Set(rows.map((a) => a.icao))

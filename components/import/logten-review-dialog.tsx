@@ -97,8 +97,11 @@ export function LogtenReviewDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !busy && onCancel()}>
+      {/* bg-card/95, as on the other import dialogs: the backdrop is a darken
+          now, not a blur, so at /70 the page behind read straight through
+          the panel — the logbook's empty state sat legibly between the rows. */}
       <DialogContent
-        className="z-[110] flex max-h-[85vh] max-w-md flex-col gap-0 overflow-hidden rounded-3xl border-white/10 bg-card/70 p-5 shadow-2xl backdrop-saturate-150 sm:p-6"
+        className="z-[110] flex max-h-[85vh] max-w-[calc(100%-2rem)] sm:max-w-md flex-col gap-0 overflow-hidden rounded-3xl border-white/10 bg-card/95 p-5 shadow-2xl backdrop-saturate-150 sm:p-6"
         overlayClassName={cn("z-[105]", MODAL_SCRIM)}
         backdropSlot={<RadialBlurBackdrop className="fixed inset-0 z-[106]" />}
         showCloseButton={false}
