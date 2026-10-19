@@ -25,8 +25,13 @@ export interface CrewFormData {
   comment: string
   isMe: boolean
   favorite: boolean
+  /** Self card: the seat — captain (`defaultPIC`) or first officer
+   *  (`defaultSIC`). See `seatOf`. */
   defaultPIC: boolean
   defaultSIC: boolean
+  /** Self card, first officer: a flown leg is logged as this. Null = never
+   *  set on the card (the old Import Defaults value still applies). */
+  pfRole: "SIC" | "PICUS" | null
 }
 
 const EMPTY_FORM: CrewFormData = {
@@ -42,6 +47,7 @@ const EMPTY_FORM: CrewFormData = {
   favorite: false,
   defaultPIC: false,
   defaultSIC: false,
+  pfRole: null,
 }
 
 function formFromCrew(data: Personnel): CrewFormData {
@@ -58,6 +64,7 @@ function formFromCrew(data: Personnel): CrewFormData {
     favorite: data.favorite || false,
     defaultPIC: data.defaultPIC || false,
     defaultSIC: data.defaultSIC || false,
+    pfRole: data.pfRole ?? null,
   }
 }
 
@@ -122,7 +129,7 @@ export function useCrewForm({
   }, [id, isNew])
 
   const updateField = useCallback(
-    (field: keyof CrewFormData, value: string | boolean | string[]) => {
+    (field: keyof CrewFormData, value: string | boolean | string[] | null) => {
       setFormData((prev) => ({ ...prev, [field]: value }))
     },
     []
@@ -171,8 +178,11 @@ export function useCrewForm({
         comment: formData.comment.trim() || undefined,
         isMe: formData.isMe,
         favorite: formData.favorite,
-        defaultPIC: formData.defaultPIC,
-        defaultSIC: formData.defaultSIC,
+        // The seat and the PF convention describe the PILOT, so they only
+        // mean anything on the self card.
+        defaultPIC: formData.isMe && formData.defaultPIC,
+        defaultSIC: formData.isMe && formData.defaultSIC,
+        pfRole: formData.isMe ? formData.pfRole : null,
       }
 
       let saved: Personnel | null = null

@@ -668,6 +668,35 @@ a source supplies it. `normalizeAircraftFromServer` had to stop being an
 explicit allowlist for them to survive a round trip (the same trap
 `normalizeFlightFromServer` was rebuilt to avoid).
 
+### The Pilot's Seat (`lib/utils/roster/pilot-role.ts`)
+
+What a pilot logs follows from ONE fact about them — are they a captain — and
+it lives on their own "This is me" crew card (**My seat**), not in Settings:
+
+| seat | monitoring | flying |
+|---|---|---|
+| captain | PIC | PIC |
+| first officer | SIC | SIC, or PICUS (**When pilot flying, log as**, on the same card) |
+
+A captain is PIC whoever has the controls; a first officer is never PIC.
+PICUS is co-pilot duties performed as PIC under the PIC's supervision, and is
+creditable only where the authority accepts the operator's supervision method
+(EASA states also want each entry countersigned) — so it is the pilot's own
+convention, never the default.
+
+- New flights (`useCreateFlight`) start in the seat's role with the pilot
+  written into that crew seat as "Self". With no seat on the card, the most
+  recent real flight's role is the fallback.
+- The flight form's **Pilot Flying** switch carries the role with it
+  (`reconcilePilotRole`): PICUS falls back to SIC when monitoring, a plain SIC
+  is promoted to the card's convention when flying, PIC never moves.
+- Imports read the same card (`nonPicPfRoleOf`, `seatOf`). The old Settings ›
+  Import Defaults section is gone; its stored value is only a fallback for a
+  card that never set its own.
+- The seat is stored as `defaultPIC`/`defaultSIC` on the SELF card only — on
+  anyone else's card those toggles never did anything and are no longer shown.
+  `seatOf` falls back to the card's `roles` for profiles created by an import.
+
 ### Entry Type (flight vs simulator)
 
 `FlightLog.entryType: "flight" | "simulator"` — a union rather than another

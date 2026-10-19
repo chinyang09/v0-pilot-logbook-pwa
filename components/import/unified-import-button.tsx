@@ -69,6 +69,7 @@ import type { FlightLog } from "@/types/entities/flight.types";
 import type { NormalizedDocument } from "@/lib/utils/parsers/types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
 import { ImportStatusDialog, type ImportStage } from "./import-status-dialog";
+import { nonPicPfRoleOf } from "@/lib/utils/roster/pilot-role";
 
 interface Props {
   /** Where the button is mounted — affects success-message wording. */
@@ -304,9 +305,13 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         // PICUS-vs-SIC convention, so a PF/PM change carries the matching
         // pilotRole correction.
         const storedPrefs = await getUserPreferences().catch(() => null);
-        const nonPicPfRole =
+        // The convention lives on the pilot's own crew card now; the old
+        // Import Defaults value is only a fallback for a card that predates it.
+        const nonPicPfRole = nonPicPfRoleOf(
+          currentUserForRecon,
           storedPrefs?.importDefaults?.nonPicPfRole ??
-          DEFAULT_IMPORT_DEFAULTS.nonPicPfRole;
+            DEFAULT_IMPORT_DEFAULTS.nonPicPfRole
+        );
 
         const logbooks = docs.filter((d) => d.reportType === "logbook");
         const schedules = docs.filter((d) => d.reportType === "schedule");

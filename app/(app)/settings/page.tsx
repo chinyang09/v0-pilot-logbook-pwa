@@ -16,7 +16,6 @@ import {
   Monitor, Clock, Plane, Sun, Moon, Laptop,
   LayoutDashboard, Book, Calendar, Users, MapPin, Award,
   Settings, UserCircle, Navigation, ChevronRight,
-  Upload,
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
@@ -59,7 +58,9 @@ const ALL_NAV_TABS: Array<{ value: BottomNavTab; label: string; icon: React.Comp
   { value: "account", label: "Account", icon: UserCircle },
 ]
 
-type SectionKey = "appearance" | "navigation" | "display" | "autofill" | "duty" | "imports"
+// No "imports" section: its one setting (what a first officer logs a flown leg
+// as) lives on the pilot's own crew card now, beside the seat it depends on.
+type SectionKey = "appearance" | "navigation" | "display" | "autofill" | "duty"
 
 interface SectionDef {
   key: SectionKey
@@ -74,7 +75,6 @@ const SECTIONS: SectionDef[] = [
   { key: "display", label: "Display Options", icon: Monitor, description: "Time, airport, coordinate format" },
   { key: "autofill", label: "Auto-Fill Fields", icon: Clock, description: "Auto-populate time fields" },
   { key: "duty", label: "Duty Time Defaults", icon: Plane, description: "Report and debrief times" },
-  { key: "imports", label: "Import Defaults", icon: Upload, description: "How CSV/PDF imports populate flights" },
 ]
 
 // ─── Detail panel wrapper with frosted header ───────────────
@@ -316,37 +316,6 @@ function DutyTimeSection({ preferences, updateDutyTimeDefaults }: {
   )
 }
 
-function ImportDefaultsSection({ preferences, updateImportDefaults }: {
-  preferences: ReturnType<typeof usePreferences>["preferences"]
-  updateImportDefaults: ReturnType<typeof usePreferences>["updateImportDefaults"]
-}) {
-  const role = preferences.importDefaults.nonPicPfRole
-  return (
-    <div className="px-panel py-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Import Defaults</h2>
-        <p className="text-sm text-muted-foreground">
-          Settings used by the Crew Logbook / Schedule importer when populating
-          flights on your behalf.
-        </p>
-      </div>
-
-      <FormSection>
-        <SelectRow<"PICUS" | "SIC">
-          label="Role when Pilot Flying but not PIC"
-          description="For imported flights where you logged a takeoff/landing but another pilot was PIC, log your role as PICUS (Pilot In Command Under Supervision) or SIC."
-          value={role}
-          onValueChange={(v) => updateImportDefaults({ nonPicPfRole: v })}
-          options={[
-            { value: "SIC", label: "SIC" },
-            { value: "PICUS", label: "PICUS" },
-          ]}
-        />
-      </FormSection>
-    </div>
-  )
-}
-
 // ─── Main page ──────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -378,8 +347,6 @@ export default function SettingsPage() {
         return wrap(<AutoFillSection preferences={preferences} updateAutoFill={prefs.updateAutoFill} />)
       case "duty":
         return wrap(<DutyTimeSection preferences={preferences} updateDutyTimeDefaults={prefs.updateDutyTimeDefaults} />)
-      case "imports":
-        return wrap(<ImportDefaultsSection preferences={preferences} updateImportDefaults={prefs.updateImportDefaults} />)
       default:
         return null
     }

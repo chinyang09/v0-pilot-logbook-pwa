@@ -65,6 +65,7 @@ import {
   minutesToHHMM,
 } from "@/lib/utils/time";
 import { usePersonnel } from "@/hooks/data";
+import { nonPicPfRoleOf, reconcilePilotRole } from "@/lib/utils/roster/pilot-role";
 import { usePreferences } from "@/components/providers/preferences-provider";
 import { ImageImportButton } from "@/components/image-import-button";
 import { GlassContainer } from "@/components/ui/glass-container";
@@ -1880,7 +1881,22 @@ export function FlightForm({
           <ToggleRow
             label="Pilot Flying"
             checked={formData.pilotFlying ?? true}
-            onCheckedChange={(checked) => updateField("pilotFlying", checked)}
+            onCheckedChange={(checked) => {
+              updateField("pilotFlying", checked);
+              // The role follows who had the controls: a first officer's
+              // flown leg takes their card's convention (SIC or PICUS), and
+              // PICUS falls back to SIC when they were monitoring. A captain
+              // stays PIC either way — see `reconcilePilotRole`.
+              const nextRole = reconcilePilotRole({
+                currentRole: formData.pilotRole || "PIC",
+                pilotFlying: checked,
+                nonPicPfRole: nonPicPfRoleOf(
+                  personnel.find((p) => p.isMe),
+                  preferences.importDefaults?.nonPicPfRole
+                ),
+              });
+              if (nextRole !== formData.pilotRole) updateField("pilotRole", nextRole);
+            }}
           />
 
           <SettingsRow label="Pilot Role">

@@ -23,8 +23,15 @@ export interface Personnel {
   comment?: string
   isMe?: boolean
   favorite?: boolean
+  /** On the "This is me" card: the pilot's SEAT — captain (`defaultPIC`) or
+   *  first officer (`defaultSIC`). New flights and imports take their role
+   *  from it (see `seatOf` in `lib/utils/roster/pilot-role.ts`). */
   defaultPIC?: boolean
   defaultSIC?: boolean
+  /** On the "This is me" card of a first officer: what a leg they FLEW is
+   *  logged as — SIC, or PICUS where their operator's supervision method
+   *  allows it. Replaces Settings › Import Defaults. */
+  pfRole?: "SIC" | "PICUS" | null
   createdAt: number
   updatedAt?: number
   /** Soft-delete stamp — the row is in Recently Deleted. `null` when cleared,

@@ -8,6 +8,9 @@ import {
   reconcilePilotRole,
   allowedRolesFor,
   isRoleConsistent,
+  seatOf,
+  nonPicPfRoleOf,
+  roleForSeat,
 } from "../pilot-role";
 
 describe("reconcilePilotRole", () => {
@@ -97,5 +100,33 @@ describe("isRoleConsistent", () => {
     expect(isRoleConsistent("PICUS", false)).toBe(false);
     expect(isRoleConsistent("PICUS", true)).toBe(true);
     expect(isRoleConsistent("SIC", false)).toBe(true);
+  });
+});
+
+describe("the pilot's seat (self crew card)", () => {
+  it("reads the seat control first, then the card's roles", () => {
+    expect(seatOf({ defaultPIC: true })).toBe("captain");
+    expect(seatOf({ defaultSIC: true, roles: ["PIC"] })).toBe("first_officer");
+    expect(seatOf({ roles: ["PIC"] })).toBe("captain");
+    expect(seatOf({ roles: ["SIC"] })).toBe("first_officer");
+    expect(seatOf({})).toBeNull();
+    expect(seatOf(null)).toBeNull();
+  });
+
+  it("a captain is PIC whoever has the controls", () => {
+    expect(roleForSeat("captain", true, "PICUS")).toBe("PIC");
+    expect(roleForSeat("captain", false, "PICUS")).toBe("PIC");
+  });
+
+  it("a first officer is never PIC: SIC monitoring, their convention flying", () => {
+    expect(roleForSeat("first_officer", false, "PICUS")).toBe("SIC");
+    expect(roleForSeat("first_officer", true, "SIC")).toBe("SIC");
+    expect(roleForSeat("first_officer", true, "PICUS")).toBe("PICUS");
+  });
+
+  it("takes the PF convention from the card, the old setting only as a fallback", () => {
+    expect(nonPicPfRoleOf({ pfRole: "PICUS" }, "SIC")).toBe("PICUS");
+    expect(nonPicPfRoleOf({ pfRole: null }, "PICUS")).toBe("PICUS");
+    expect(nonPicPfRoleOf(null)).toBe("SIC");
   });
 });
