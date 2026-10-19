@@ -2876,6 +2876,13 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
   IndexedDB; easy while one was stalled (see the airport seed). Fixing it means
   taking the baseline from the loaded flight AFTER the form's own calculations,
   without saving those calculations on open — deferred, it is delicate.
+- **Adding a flight slows down while sync is FAILING.** Measured on a
+  production build, tap → flight open: a flat ~350–450ms offline, but with
+  every `/api/sync` answered 503 it climbed each time — 0.4s, 1.2s, 1.2s,
+  1.8s, 1.9s over five adds. The failure/retry cycles contend with the write
+  on IndexedDB. A healthy server answers quickly, so this bites only during an
+  outage or behind a captive portal; the fix is in the sync engine's retry
+  path, which wants the live multi-device test, not a UI change.
 - **Service worker** (`public/sw.js`) — two items needing offline testing
   before any change (a bad SW is hard to roll back): (1) `install` calls
   `self.skipWaiting()` unconditionally while the registration
