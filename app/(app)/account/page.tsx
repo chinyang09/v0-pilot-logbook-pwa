@@ -713,7 +713,9 @@ export default function AccountPage() {
               <button
                 type="button"
                 onClick={() => copyToClipboard(profile?.userId || user?.userId || "", "userId")}
-                className="flex items-center gap-1.5 min-w-0 text-muted-foreground hover:text-foreground transition-colors"
+                // A 20px line of text is the whole target; the invisible
+                // extension takes it to ~44px tall without moving the row.
+                className="relative flex items-center gap-1.5 min-w-0 text-muted-foreground hover:text-foreground transition-colors after:absolute after:-inset-y-3 after:inset-x-0 after:content-['']"
                 aria-label="Copy User ID"
               >
                 <span className="text-sm truncate">{profile?.userId || user?.userId}</span>
