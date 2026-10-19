@@ -94,6 +94,10 @@ export function SettingsRow({
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
           placeholder={placeholder}
+          // The row's label is a sibling span, so the input needs its own name
+          // (the Switch and Select rows below say the same thing).
+          aria-label={label}
+          aria-required={required || undefined}
           className={cn(
             // Blend the input into the row: no box/shadow/border, and keep the
             // same font size as the read-only value (override the base md:text-sm).
@@ -179,6 +183,7 @@ export function SelectRow<T extends string>({
       <RowLabel label={label} description={description} disabled={disabled} />
       <Select value={value} onValueChange={(v) => onValueChange(v as T)} disabled={disabled}>
         <SelectTrigger
+          aria-label={label}
           className={cn(
             // Blend into the row like the inline text inputs — no box, right
             // aligned, same type size as the read-only value.

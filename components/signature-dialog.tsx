@@ -107,6 +107,9 @@ export function SignatureDialog({
   // drew over the dialog on a phone and hid its Save button.
   return createPortal(
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="signature-dialog-title"
       style={region}
       className={cn(
         "fixed z-[110] flex flex-col bg-background",
@@ -121,7 +124,7 @@ export function SignatureDialog({
           !isDesktop && "pt-safe"
         )}
       >
-        <h2 className="text-base font-semibold">Signature</h2>
+        <h2 id="signature-dialog-title" className="text-base font-semibold">Signature</h2>
         <button
           type="button"
           onClick={() => dismiss()}

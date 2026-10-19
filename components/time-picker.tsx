@@ -113,14 +113,20 @@ export function TimePicker({
       onClick={() => dismiss()}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={label || "Select time"}
         className="w-full max-w-md rounded-2xl bg-card animate-in slide-in-from-bottom duration-300"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header: Cancel | NOW | Save */}
+        {/* Each header button is a 20px line of text; the invisible ::after
+            takes the target to ~44px without moving anything.
+            Header: Cancel | NOW | Save */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
           <button
+            type="button"
             onClick={() => dismiss()}
-            className="text-sm font-medium text-primary active:opacity-70"
+            className="text-sm font-medium text-primary active:opacity-70 relative after:absolute after:-inset-3 after:content-['']"
           >
             Cancel
           </button>
@@ -130,8 +136,9 @@ export function TimePicker({
               <span className="text-xs text-muted-foreground mb-1">{label}</span>
             )}
             <button
+              type="button"
               onClick={handleSetNow}
-              className="text-sm font-medium text-primary active:opacity-70"
+              className="text-sm font-medium text-primary active:opacity-70 relative after:absolute after:-inset-3 after:content-['']"
             >
               NOW
             </button>
@@ -143,8 +150,9 @@ export function TimePicker({
           </div>
 
           <button
+            type="button"
             onClick={handleConfirm}
-            className="text-sm font-semibold text-primary active:opacity-70"
+            className="text-sm font-semibold text-primary active:opacity-70 relative after:absolute after:-inset-3 after:content-['']"
           >
             Save
           </button>

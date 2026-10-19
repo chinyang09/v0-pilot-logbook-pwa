@@ -171,6 +171,9 @@ export function DutyEntryDialog({
 
   return createPortal(
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="duty-dialog-title"
       style={region}
       className={cn(
         // Above the app chrome (header z-99, nav pill z-100) — at z-[65] the
@@ -187,7 +190,7 @@ export function DutyEntryDialog({
           !isDesktop && "pt-safe"
         )}
       >
-        <h2 className="text-base font-semibold">
+        <h2 id="duty-dialog-title" className="text-base font-semibold">
           {entry ? "Edit duty" : "Add duty"}
         </h2>
         <button
