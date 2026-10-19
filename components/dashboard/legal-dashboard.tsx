@@ -213,7 +213,13 @@ export function LegalDashboardView({
         aria-hidden="true"
       />
 
-      <div className="relative flex min-h-0 flex-col divide-y divide-border/40">
+      {/* Scrolls only as a LAST RESORT. Everything fits on a phone held
+          upright (measured: 360×780 and up), so this never moves there — but a
+          phone turned sideways gets the split layout at ~390px tall, and with
+          `overflow-hidden` alone the currency band was squeezed to nothing and
+          the limits band was clipped off the bottom: a pilot checking legality
+          sideways could see neither. */}
+      <div className="relative flex min-h-0 flex-col divide-y divide-border/40 overflow-y-auto overscroll-contain scrollbar-hide">
         <Annunciator status={status} />
         <DutyBand status={status} now={now} display={display} />
         <CurrencyBand requirements={currency} />
@@ -960,7 +966,14 @@ function Band({
     <section
       className={cn(
         "px-4 py-2.5",
-        flexible && "min-h-0 flex-1 overflow-y-auto scrollbar-hide",
+        // It absorbs the squeeze, but never below its first row of cells — at
+        // min-h-0 it collapsed to its label on a short screen and every
+        // currency vanished behind a hidden scrollbar.
+        flexible && "min-h-[6.5rem] flex-1 overflow-y-auto scrollbar-hide",
+        // On a SHORT screen (a phone held sideways) the whole surface scrolls
+        // instead, so this band takes its full height rather than being a
+        // second scroller nested inside the first.
+        flexible && "[@media(max-height:500px)]:flex-none [@media(max-height:500px)]:overflow-visible",
       )}
       aria-label={label}
     >
