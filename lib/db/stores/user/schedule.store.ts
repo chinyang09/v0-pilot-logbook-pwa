@@ -210,7 +210,11 @@ export async function bulkUpsertScheduleEntries(
           syncStatus: "pending",
         }
         const changedFields = diffFields(existing as never, merged as never)
-        if (changedFields.length === 0) continue
+        // `importedAt` is stamped fresh on every import, so on its own it is
+        // not a change. Counting it rewrote and re-queued EVERY duty on every
+        // re-upload of the same report — 22 sync rows for nothing, and an
+        // import summary claiming "22 standby/ground duties" changed.
+        if (changedFields.every((field) => field === "importedAt")) continue
         await userDb.scheduleEntries.put(merged)
         toEnqueue.push({
           type: "update",

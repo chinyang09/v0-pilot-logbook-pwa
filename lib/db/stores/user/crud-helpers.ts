@@ -133,23 +133,35 @@ export async function putManyWithSync<T extends SyncableEntity>(
   // (see lib/sync/changes.ts). That needs the rows as they were.
   const before = type === "update" ? await table.bulkGet(stamped.map((e) => e.id)) : []
 
-  await table.bulkPut(stamped)
-  await enqueueMany(
-    stamped.map((data, i) => {
+  // An update that changes nothing is not written at all — the same rule
+  // `updateEntity` applies to an edit. Re-uploading a report used to rewrite
+  // and queue every currency it named (ten empty patches per upload, each one
+  // a pending-sync count and a round trip for nothing).
+  const rows = stamped
+    .map((data, i) => {
       const prior = before[i]
-      return prior
+      const changedFields = prior ? diffFields(prior as never, data as never) : undefined
+      return { data, prior, changedFields }
+    })
+    .filter((row) => !row.prior || row.changedFields!.length > 0)
+  if (rows.length === 0) return []
+
+  await table.bulkPut(rows.map((row) => row.data))
+  await enqueueMany(
+    rows.map(({ data, prior, changedFields }) =>
+      prior
         ? {
             type,
             collection: tableName,
             data,
-            changedFields: diffFields(prior as never, data as never),
+            changedFields,
             baseSeq: prior.serverSeq ?? 0,
           }
         : { type, collection: tableName, data, ...(type === "create" ? { changedFields: [] } : {}) }
-    })
+    )
   )
 
-  return stamped
+  return rows.map((row) => row.data)
 }
 
 /** Single-row form of `putManyWithSync`, for a call site that has just one. */
@@ -160,7 +172,9 @@ export async function putWithSync<T extends SyncableEntity>(
   type: "create" | "update" = "create"
 ): Promise<T> {
   const [written] = await putManyWithSync(table, tableName, [entity], type)
-  return written
+  // Nothing changed, so nothing was written: the entity as it stands is the
+  // current row.
+  return written ?? entity
 }
 
 /**
