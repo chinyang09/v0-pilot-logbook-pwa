@@ -98,7 +98,13 @@ function AppearanceSection({ preferences, updateDisplay }: {
   preferences: ReturnType<typeof usePreferences>["preferences"]
   updateDisplay: ReturnType<typeof usePreferences>["updateDisplay"]
 }) {
-  const { setTheme } = useTheme()
+  // Highlight the theme ACTUALLY in force. The stored preference and
+  // next-themes' own storage can disagree — when the preference row is
+  // missing (signed out and back in, cleared site data) the preference fell
+  // back to its "dark" default while the screen was light, and this showed
+  // "Dark" selected over a light page.
+  const { theme, setTheme } = useTheme()
+  const activeTheme = (theme as ThemePreference | undefined) ?? preferences.display.theme
   return (
     <div className="px-panel py-4 space-y-4">
       <div>
@@ -115,13 +121,14 @@ function AppearanceSection({ preferences, updateDisplay }: {
           <button
             key={value}
             type="button"
+            aria-pressed={activeTheme === value}
             onClick={() => {
               setTheme(value)
               updateDisplay({ theme: value })
             }}
             className={cn(
               "flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-colors",
-              preferences.display.theme === value
+              activeTheme === value
                 ? "border-primary bg-primary/10"
                 : "border-border hover:border-primary/50"
             )}
