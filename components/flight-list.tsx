@@ -205,7 +205,20 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
       // puts this on its own root — the same id twice in the document.
       id={`flight-card-${flight.id}`}
       onClick={() => {
-        if (isLocked) return;
+        if (isLocked) {
+          // A locked flight cannot be EDITED, but it used to be a dead tap —
+          // no feedback, and no way to read the entry short of unlocking it.
+          // It opens the context preview instead: every field the card has no
+          // room for, plus the action row, which is where Unlock lives. The
+          // preview grows out of the card's own box, so measure that.
+          const surface = document
+            .getElementById(`flight-${flight.id}`)
+            ?.querySelector('[data-slot="card"]');
+          if (!surface) return;
+          const r = surface.getBoundingClientRect();
+          onHold(flight, { left: r.left, top: r.top, width: r.width, height: r.height });
+          return;
+        }
         // Hand the panel its data before it mounts — see primeFlightCache.
         primeFlightCache(flight);
         onEdit(flight);

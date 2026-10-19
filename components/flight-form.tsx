@@ -16,6 +16,7 @@ import {
   User,
   ArrowLeftRight,
   Plus,
+  Minus,
   Trash2,
   PenLine,
 } from "lucide-react";
@@ -307,24 +308,28 @@ function NumberRow({
     <div className="flex items-center justify-between py-3.5 px-4 row-divider">
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-3">
+        {/* Icons, not "-" and "+" typed as text: a hyphen is a hairline next
+            to a plus, so the two buttons looked unequal. 36px, a thumb's
+            target in a row that is tapped repeatedly. */}
         <Button
           variant="outline"
           size="icon"
           aria-label={`Decrease ${label}`}
-          className="h-8 w-8 rounded-full bg-transparent"
+          className="h-9 w-9 rounded-full bg-transparent"
+          disabled={value <= 0}
           onClick={() => onChange(Math.max(0, value - 1))}
         >
-          -
+          <Minus className="h-4 w-4" />
         </Button>
-        <span className="text-foreground w-8 text-center">{value}</span>
+        <span className="text-foreground w-6 text-center tabular-nums">{value}</span>
         <Button
           variant="outline"
           size="icon"
           aria-label={`Increase ${label}`}
-          className="h-8 w-8 rounded-full bg-transparent"
+          className="h-9 w-9 rounded-full bg-transparent"
           onClick={() => onChange(value + 1)}
         >
-          +
+          <Plus className="h-4 w-4" />
         </Button>
       </div>
     </div>

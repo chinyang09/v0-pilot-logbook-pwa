@@ -1595,6 +1595,11 @@ ten seconds every time you deleted something on purpose, and gave you nothing
 at all once the ten seconds were up; a holding area costs nothing on the way
 out and is still there tomorrow.
 
+**A locked flight opens its context preview on tap**, not nothing. It cannot be
+edited, but a dead tap gave no feedback and no way to READ the entry short of
+unlocking it; the preview shows the full detail and carries Unlock in its
+action row.
+
 **Every delete says so, with an Undo** (`lib/utils/undo-toast.ts`, rendered by
 `UndoToastHost` in the app layout). A row that simply vanished gave no sign the
 tap had landed or where the thing went, and a holding area nobody knows about
@@ -2113,7 +2118,7 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   below 720px (iPad Split View / resize). Only real user taps use the default
   explicit path
 - **System back undoes the last move.** OPENING a detail — meaning `?selected=`
-  is not already in the URL — `router.push`es it; the param going away again is
+  is not already in the URL — PUSHES it (`history.pushState`, see below); the param going away again is
   what closes it. "Is a detail open" must be read off the URL, NOT off the
   stored selection: a section remembers its last selection in state and
   sessionStorage while the detail is closed, so keying off that made the first
@@ -3706,7 +3711,8 @@ When making changes, be aware of these high-impact files:
 - Do not use `RETENTION_MS` for a deletion sweep or `DELETED_RETENTION_MS` for a decision — they are 90 and 30 days and the helpers take the window as an argument precisely so a caller has to say which
 - Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
 - Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
-- Do not open a detail with `router.replace` — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
+- Do not write `?selected=` through the ROUTER (`router.push`/`router.replace`) — use `window.history.pushState`/`replaceState`, which Next keeps `useSearchParams` in step with. A router navigation for a query change asks the server for the route's payload and commits the history entry only when it returns: measured ~1.5s after the tap on the dev server, so a back gesture in that window had nothing to pop and left the section, every flight opened was a server request, and opening a detail needed the network in an offline-first app. A change of PATHNAME still goes through the router
+- Do not open a detail with a REPLACE — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
 - Do not remove `overflow-anchor: none` from the logbook scroller — growing the top spacer is how the floating panels push the list, and scroll anchoring exists to cancel exactly that (it bumps `scrollTop` to keep the view still). With it on, the calendar only pushed the list when it was already scrolled to the top, and the compensating adjustment read as a downward scroll that hid the nav pill
 - Do not give the calendar's collapse and the list spacer separate animations — they share `PANEL_MOTION`, or the panel opens and the list catches up afterwards as a visible second stage. The calendar stays MOUNTED at `height: 0` so its natural height is measurable and the collapse is a px transition the spacer can match
 - Do not make the panel divider draggable again, and do not raise the main panel's `minSize` percent above what 360px needs — the two widths are a toggle, and a free drag flips the calendar's layout mid-gesture

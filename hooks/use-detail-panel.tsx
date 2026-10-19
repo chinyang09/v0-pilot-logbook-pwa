@@ -146,6 +146,25 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
    */
   const pendingUrlWriteRef = useRef(false)
 
+  /*
+   * `?selected=` is written with the NATIVE History API, not `router.push`.
+   *
+   * A router navigation for a search-param change is a full App Router
+   * navigation: it asks the server for the route's payload and only commits
+   * the history entry once that comes back. Measured on the dev server, the
+   * push landed ~1.5s after the tap while the flight itself was written in
+   * 55ms. Three costs followed:
+   *   - a back gesture inside that window had nothing to pop and left the
+   *     section, which is the exact failure the push exists to prevent;
+   *   - every flight opened was a server request for what is purely client
+   *     state;
+   *   - opening a detail needed the network at all, in an offline-first app.
+   * Next keeps `useSearchParams` in step with `history.pushState` and
+   * `history.replaceState` (supported since 14.1), so the URL changes in the
+   * same tick and the server is never asked. Only the QUERY changes here; a
+   * change of pathname still goes through the router.
+   */
+
   useEffect(() => {
     const urlSelected = searchParams.get("selected")
     const prev = lastUrlSelectedRef.current
@@ -202,7 +221,7 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
       if (id && !detailIsOpen) {
         // Opening a detail is a move, so it gets a history entry to undo.
         pushedBaseRef.current = currentBase
-        router.push(newUrl || "/", { scroll: false })
+        window.history.pushState(null, "", newUrl || "/")
       } else if (!id && pushedBaseRef.current === currentBase) {
         // Closing it in-app: go back rather than replace, so the entry we
         // pushed is consumed instead of lingering as a dead back press.
@@ -211,7 +230,7 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
       } else {
         // Switching between items isn't a new move — it would pile up an entry
         // per tap and turn back into a tour of everything you looked at.
-        router.replace(newUrl || "/", { scroll: false })
+        window.history.replaceState(null, "", newUrl || "/")
       }
     }
 
@@ -244,7 +263,7 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     if (!sel || sel.startsWith("__") || !explicitBases[currentBase]) return
     const params = new URLSearchParams(searchParams.toString())
     params.set("selected", sel)
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+    window.history.replaceState(null, "", `${pathname}?${params.toString()}`)
   }, [pathname, currentBase, searchParams, selections, explicitBases, router])
 
   // Reset detail content when the base route changes — EXCEPT between two
