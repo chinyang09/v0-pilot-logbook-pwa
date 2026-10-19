@@ -1,5 +1,6 @@
 "use client"
 
+import { CODE_INPUT_PROPS } from "@/lib/utils/input-props"
 import { useState, useEffect, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -237,6 +238,8 @@ export default function AircraftDetailPage() {
                     <span className="text-foreground">Type Code</span>
                     <Input
                       value={formData.typecode}
+                      {...CODE_INPUT_PROPS}
+                      aria-label="Type code"
                       onChange={(e) => {
                         const val = e.target.value.toUpperCase()
                         updateField("typecode", val)

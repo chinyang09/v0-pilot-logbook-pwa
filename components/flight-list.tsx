@@ -14,7 +14,8 @@ import {
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { FlightLog } from "@/lib/db";
-import { deleteFlight } from "@/lib/db";
+import { deleteFlight, restoreFlight } from "@/lib/db";
+import { showUndoToast } from "@/lib/utils/undo-toast";
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date";
 import { usePreferences } from "@/components/providers/preferences-provider";
 import type { DisplayPreferences } from "@/types/db/stores.types";
@@ -74,6 +75,9 @@ interface FlightListProps {
   topSpacerTransition?: string;
   headerContent?: React.ReactNode; // Height of the top bar (48px)
   selectedFlightId?: string | null; // Currently selected flight for visual highlighting
+  /** What an empty list says. The page knows WHY it is empty (nothing logged
+   *  yet, or a search that matched nothing) and the list does not. */
+  emptyState?: React.ReactNode;
 }
 
 
@@ -320,6 +324,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       topSpacerTransition,
       headerContent,
       selectedFlightId,
+      emptyState,
     },
     ref
   ) {
@@ -586,6 +591,12 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       await deleteFlight(flight.id);
       if (navigator.onLine) syncService.fullSync();
       onDeleted?.();
+      showUndoToast(`${flight.flightNumber || "Flight"} deleted`, async () => {
+        await restoreFlight(flight.id);
+        await mutate(CACHE_KEYS.flights);
+        if (navigator.onLine) syncService.fullSync();
+        onDeleted?.();
+      });
     }, [onDeleted]);
 
     const handleToggleLock = useCallback(async (flight: FlightLog) => {
@@ -703,8 +714,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     }, []);
 
     if (isLoading) {
+      // The same top spacer and gutter as the list itself: without them the
+      // skeleton sat under the header and the cards jumped down ~60px the
+      // moment the flights arrived.
       return (
-        <div className="h-full overflow-y-auto p-2 space-y-3">
+        <div className="h-full overflow-y-auto overscroll-contain scrollbar-hide">
+          <div style={{ height: topSpacerHeight }} />
+          <div className="px-panel pt-1 space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Card key={i} className="bg-card border-border">
               <CardContent className="p-4">
@@ -726,6 +742,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
               </CardContent>
             </Card>
           ))}
+          </div>
         </div>
       );
     }
@@ -748,11 +765,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             />
             {headerContent}
             <div className="px-panel pt-2">
-              <EmptyState
-                icon={Plane}
-                title="No flights logged"
-                description="Add your first flight to get started"
-              />
+              {emptyState ?? (
+                <EmptyState
+                  icon={Plane}
+                  title="No flights logged"
+                  description="Add your first flight to get started"
+                />
+              )}
             </div>
           </div>
         </>

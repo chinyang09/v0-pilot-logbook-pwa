@@ -31,7 +31,8 @@ import { UnifiedImportButton } from "@/components/import/unified-import-button"
 import { DutyEntryDialog } from "@/components/roster/duty-entry-dialog"
 import { RosterMonth } from "@/components/roster/roster-month"
 import { RosterAgenda } from "@/components/roster/roster-agenda"
-import { deleteScheduleEntry } from "@/lib/db"
+import { deleteScheduleEntry, restoreScheduleEntry } from "@/lib/db"
+import { showUndoToast } from "@/lib/utils/undo-toast"
 import { standbyActivation } from "@/lib/utils/roster/standby-activation"
 import { agendaFrom, buildRosterDays, dayKeyAt } from "@/lib/utils/roster/roster-days"
 import type { ScheduleEntry } from "@/types/entities/roster.types"
@@ -78,6 +79,11 @@ export default function RosterPage() {
       await deleteScheduleEntry(entry.id)
       await refreshEntries()
       refreshAllData()
+      showUndoToast(`${entry.dutyCode || "Duty"} deleted`, async () => {
+        await restoreScheduleEntry(entry.id)
+        await refreshEntries()
+        refreshAllData()
+      })
     },
     [refreshEntries]
   )

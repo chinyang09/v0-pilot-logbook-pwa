@@ -22,7 +22,8 @@ import { useCurrencies } from "@/hooks/data"
 import { CurrencyCard, CurrencyFormDialog } from "@/components/roster"
 import type { CurrencyWithStatus, CurrencyStatus } from "@/types/entities/roster.types"
 import { cn } from "@/lib/utils"
-import { deleteCurrency } from "@/lib/db"
+import { deleteCurrency, restoreCurrency } from "@/lib/db"
+import { showUndoToast } from "@/lib/utils/undo-toast"
 
 type FilterStatus = "all" | CurrencyStatus
 
@@ -56,6 +57,10 @@ export default function CurrenciesPage() {
     try {
       await deleteCurrency(currency.id)
       await refresh()
+      showUndoToast(`${currency.code || "Currency"} deleted`, async () => {
+        await restoreCurrency(currency.id)
+        await refresh()
+      })
     } catch (error) {
       console.error("Failed to delete currency:", error)
     }

@@ -5,6 +5,7 @@ import type React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { Plane, Loader2, Star, Plus, Trash2, ChevronRight } from "lucide-react"
+import { EmptyState } from "@/components/ui/empty-state"
 import { useDebounce } from "@/hooks/use-debounce"
 import {
   searchAircraftFromDB,
@@ -15,7 +16,9 @@ import {
   updateFlight,
   addCustomAircraftToDatabase,
   deleteAircraftFromDatabase,
+  restoreAircraftInDatabase,
 } from "@/lib/db"
+import { showUndoToast } from "@/lib/utils/undo-toast"
 import { useReferenceAircraft, useFlights } from "@/hooks/data"
 import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import { normalizeRegistration } from "@/lib/utils/string"
@@ -545,8 +548,13 @@ export default function AircraftPage() {
   // Stable, so the memoized cards actually hold — see AircraftCardProps.onDelete.
   const performDelete = useCallback(async (aircraft: NormalizedAircraft) => {
     if (aircraft.registration) {
-      await deleteAircraftFromDatabase(aircraft.registration)
+      const registration = aircraft.registration
+      await deleteAircraftFromDatabase(registration)
       await refreshAircraft()
+      showUndoToast(`${registration} deleted`, async () => {
+        await restoreAircraftInDatabase(registration)
+        await refreshAircraft()
+      })
     }
   }, [refreshAircraft])
 
@@ -778,14 +786,16 @@ export default function AircraftPage() {
                       as a blank page on a phone — the "No aircraft found"
                       message only ever reached the desktop detail panel. */}
                   {allSortedAircraft.length === 0 && (
-                    <div className="flex flex-col items-center gap-3 py-12">
-                      <Plane className="h-8 w-8 text-muted-foreground/50" />
-                      <p className="text-sm text-muted-foreground">No aircraft yet</p>
-                      <Button variant="outline" size="sm" onClick={handleAddClick}>
-                        <Plus className="h-4 w-4 mr-1" />
-                        Add Aircraft
-                      </Button>
-                    </div>
+                    <EmptyState
+                      icon={Plane}
+                      title="No aircraft yet"
+                      description="Aircraft are added as you log flights and import reports, or add one by registration."
+                      action={
+                        <Button variant="outline" size="sm" onClick={handleAddClick}>
+                          <Plus className="mr-1 h-4 w-4" /> Add aircraft
+                        </Button>
+                      }
+                    />
                   )}
                 </div>
               )}

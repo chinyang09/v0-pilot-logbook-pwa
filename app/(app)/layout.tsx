@@ -10,12 +10,14 @@ import { PreferencesProvider } from "@/components/providers/preferences-provider
 import { AppShell } from "@/components/desktop-layout"
 import { KeepAlivePages } from "@/components/keep-alive-pages"
 import { FirstSyncSplash } from "@/components/first-sync-splash"
+import { UndoToastHost } from "@/components/undo-toast"
 
 function AppLayoutContent({ children }: { children: React.ReactNode }) {
   return (
     <AppShell>
       <KeepAlivePages>{children}</KeepAlivePages>
       <FirstSyncSplash />
+      <UndoToastHost />
     </AppShell>
   )
 }

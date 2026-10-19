@@ -1,5 +1,6 @@
 "use client"
 
+import { SEARCH_INPUT_PROPS } from "@/lib/utils/input-props"
 import { useRef, useEffect, useCallback } from "react"
 import { Search, X } from "lucide-react"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -117,6 +118,7 @@ export function GlassSearchButton({
               onChange={(e) => onChange(e.target.value)}
               placeholder={placeholder}
               aria-label={placeholder}
+              {...SEARCH_INPUT_PROPS}
               tabIndex={isOpen ? 0 : -1}
               className="flex-1 bg-transparent text-sm outline-none min-w-0 placeholder:text-[var(--on-glass-muted)]"
             />

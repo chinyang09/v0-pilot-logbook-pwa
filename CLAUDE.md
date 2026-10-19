@@ -1595,6 +1595,15 @@ ten seconds every time you deleted something on purpose, and gave you nothing
 at all once the ten seconds were up; a holding area costs nothing on the way
 out and is still there tomorrow.
 
+**Every delete says so, with an Undo** (`lib/utils/undo-toast.ts`, rendered by
+`UndoToastHost` in the app layout). A row that simply vanished gave no sign the
+tap had landed or where the thing went, and a holding area nobody knows about
+is not much of an undo. For `UNDO_TOAST_MS` (5s) "TR600 deleted · Undo" sits
+above the bottom nav; Undo runs the same `restore*` Recently Deleted uses, plus
+the page's own refresh. It is NOT a confirmation — the delete has already
+happened — so it does not reopen the countdown question. A new delete path
+calls `showUndoToast` after the soft delete succeeds.
+
 **The one exception is "Log out of all devices"** (`app/(app)/account/page.tsx`),
 which still uses `CountdownConfirmButton`. It is not a delete: nothing is
 recoverable afterwards because there is nothing to recover — the only undo is
@@ -3596,6 +3605,7 @@ When making changes, be aware of these high-impact files:
 - Do not add pages to `PERSISTENT_PAGES` in `keep-alive-pages.tsx` without considering memory impact — only heavy virtualized pages should be persistent
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
 - Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
+- Do not add a delete path without `showUndoToast` after it — the toast is how a one-tap delete tells the user it happened and how to take it back. It runs AFTER the soft delete; it is never a gate in front of one
 - Do not put a confirmation in front of a delete — not a dialog, not a hold, not an armed countdown. Deleting is one tap and `Recently Deleted` is the undo (30 days). The countdown machinery survives for exactly ONE caller, "Log out of all devices", because that genuinely has no undo; do not wire `holdToConfirm` to a delete again
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not move the sidebar's gravity blob back into a non-scrolling overlay translated from a scroll listener — that is a main-thread reaction to a scroll that already happened, so the blob trails the items by a frame. It belongs inside the scroller, where it moves on the compositor; the top band is masked anyway, so there is no overshoot clipping to protect it from

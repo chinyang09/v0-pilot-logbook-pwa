@@ -1,5 +1,6 @@
 "use client"
 
+import { CODE_INPUT_PROPS } from "@/lib/utils/input-props"
 import type React from "react"
 import { useRef } from "react"
 import { Input } from "@/components/ui/input"
@@ -98,6 +99,7 @@ export function SettingsRow({
           // (the Switch and Select rows below say the same thing).
           aria-label={label}
           aria-required={required || undefined}
+          {...(uppercase ? CODE_INPUT_PROPS : null)}
           className={cn(
             // Blend the input into the row: no box/shadow/border, and keep the
             // same font size as the read-only value (override the base md:text-sm).

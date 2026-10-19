@@ -1,5 +1,6 @@
 "use client";
 
+import { CODE_INPUT_PROPS } from "@/lib/utils/input-props";
 import type React from "react";
 import { ScrollIndicator } from "@/components/ui/scroll-indicator";
 
@@ -1517,6 +1518,7 @@ export function FlightForm({
                 className="text-right bg-transparent outline-none text-foreground w-32 placeholder:text-muted-foreground"
                 placeholder="-"
                 aria-label="Flight number"
+                {...CODE_INPUT_PROPS}
                 value={formData.flightNumber || ""}
                 onChange={(e) => updateField("flightNumber", e.target.value.toUpperCase())}
               />
@@ -1998,6 +2000,7 @@ export function FlightForm({
                   }
                   placeholder="RWY"
                   aria-label="Runway"
+                  {...CODE_INPUT_PROPS}
                   className="bg-transparent text-foreground text-right outline-none w-16"
                 />
                 <button

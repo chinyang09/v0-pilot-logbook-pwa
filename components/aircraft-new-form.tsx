@@ -1,5 +1,6 @@
 "use client"
 
+import { CODE_INPUT_PROPS } from "@/lib/utils/input-props"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -377,6 +378,8 @@ export function AircraftNewForm({
                   <div className="flex items-center gap-2">
                     <Input
                       value={typecode}
+                      {...CODE_INPUT_PROPS}
+                      aria-label="Type code"
                       onChange={(e) => {
                         const val = e.target.value.toUpperCase()
                         setTypecode(val)
