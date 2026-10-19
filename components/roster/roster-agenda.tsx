@@ -73,9 +73,9 @@ export const RosterAgenda = memo(function RosterAgenda({
       {agenda.map(({ dayKey, items }) => {
         const rel = relativeDay(dayKey, todayKey)
         return (
-          <section key={dayKey} aria-label={dayKey} className="space-y-1.5">
+          <section key={dayKey} aria-labelledby={`roster-day-${dayKey}`} className="space-y-1.5">
             <div className="flex items-baseline justify-between px-1">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <h3 id={`roster-day-${dayKey}`} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {parseYMDLocal(dayKey).toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" })}
               </h3>
               {rel && <span className={cn("text-[11px]", rel === "Today" ? "font-semibold text-primary" : "text-muted-foreground")}>{rel}</span>}

@@ -129,6 +129,7 @@ export function ImageImportButton({
             size={size}
             className={className}
             disabled={loading}
+            aria-label="Read times from a photo"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
           </Button>

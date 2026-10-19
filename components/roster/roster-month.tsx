@@ -11,7 +11,7 @@
  * Weeks start on Sunday, like the logbook's calendar.
  */
 
-import { memo, useMemo, useRef } from "react"
+import { memo, useEffect, useMemo, useRef, type KeyboardEvent } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { parseYMDLocal, formatLocalYMD } from "@/lib/utils/date"
@@ -75,6 +75,24 @@ export const RosterMonth = memo(function RosterMonth({
   // that starts on the grid is left to the page.
   const swipeRef = useRef<{ x: number; y: number } | null>(null)
 
+  // Keyboard: ONE tab stop (the selected day), arrows move it — a day or a
+  // week — across month boundaries too. Focus follows the selection only when
+  // the keyboard moved it, so a tap never steals focus.
+  const gridRef = useRef<HTMLDivElement>(null)
+  const keyboardMoveRef = useRef(false)
+  useEffect(() => {
+    if (!keyboardMoveRef.current) return
+    keyboardMoveRef.current = false
+    gridRef.current?.querySelector<HTMLElement>(`[data-day="${selectedKey}"]`)?.focus()
+  }, [selectedKey])
+  const onGridKeyDown = (e: KeyboardEvent) => {
+    const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key]
+    if (!step) return
+    e.preventDefault()
+    keyboardMoveRef.current = true
+    onSelect(formatLocalYMD(new Date(year, month, anchor.getDate() + step)))
+  }
+
   return (
     <section aria-label="Roster calendar" className="rounded-2xl border border-border bg-card p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -116,8 +134,10 @@ export const RosterMonth = memo(function RosterMonth({
       </div>
 
       <div
-        role="grid"
+        ref={gridRef}
+        role="group"
         aria-label={title}
+        onKeyDown={onGridKeyDown}
         className="grid grid-cols-7 gap-1"
         style={{ touchAction: "pan-y" }}
         onPointerDown={(e) => {
@@ -145,8 +165,10 @@ export const RosterMonth = memo(function RosterMonth({
             <button
               key={cell.key}
               type="button"
-              role="gridcell"
-              aria-selected={isSelected}
+              data-day={cell.key}
+              tabIndex={isSelected ? 0 : -1}
+              aria-pressed={isSelected}
+              aria-current={isToday ? "date" : undefined}
               aria-label={`${parseYMDLocal(cell.key).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long" })}${items.length ? `, ${items.map(itemLabel).join(", ")}` : ", nothing rostered"}`}
               onClick={() => onSelect(cell.key)}
               className={cn(

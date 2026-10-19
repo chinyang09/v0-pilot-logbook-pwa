@@ -1516,6 +1516,7 @@ export function FlightForm({
                 type="text"
                 className="text-right bg-transparent outline-none text-foreground w-32 placeholder:text-muted-foreground"
                 placeholder="-"
+                aria-label="Flight number"
                 value={formData.flightNumber || ""}
                 onChange={(e) => updateField("flightNumber", e.target.value.toUpperCase())}
               />
@@ -1877,6 +1878,7 @@ export function FlightForm({
 
           <SettingsRow label="Pilot Role">
             <select
+              aria-label="Pilot role"
               value={formData.pilotRole || "PIC"}
               onChange={(e) =>
                 updateField(
@@ -1962,6 +1964,7 @@ export function FlightForm({
             >
               <div className="flex items-center gap-2 flex-1">
                 <select
+                  aria-label="Approach type"
                   value={approach.type}
                   onChange={(e) =>
                     updateApproach(approach.id, { type: e.target.value as Approach["type"] })
@@ -1994,11 +1997,14 @@ export function FlightForm({
                     })
                   }
                   placeholder="RWY"
+                  aria-label="Runway"
                   className="bg-transparent text-foreground text-right outline-none w-16"
                 />
                 <button
+                  type="button"
                   onClick={() => removeApproach(approach.id)}
-                  className="text-destructive"
+                  aria-label="Remove approach"
+                  className="-m-2 p-2 text-destructive"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>

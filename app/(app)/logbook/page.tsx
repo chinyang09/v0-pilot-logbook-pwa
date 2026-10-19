@@ -610,6 +610,7 @@ export default function LogbookPage() {
                   }}
                   enterKeyHint="done"
                   placeholder={searchTerms.length ? "Add filter…" : "Search flights…"}
+                  aria-label="Search flights"
                   className="min-w-[6rem] flex-1 border-0 bg-transparent p-0 text-sm outline-none placeholder:text-muted-foreground"
                 />
 
