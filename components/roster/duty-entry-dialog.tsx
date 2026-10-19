@@ -59,12 +59,15 @@ const todayUTC = () => new Date().toISOString().slice(0, 10);
 export function DutyEntryDialog({
   open,
   entry,
+  defaultDate,
   onClose,
   onSaved,
 }: {
   open: boolean;
   /** The duty being edited, or null to add a new one. */
   entry: ScheduleEntry | null;
+  /** A new duty's date (YYYY-MM-DD) — the day selected on the roster. */
+  defaultDate?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -78,7 +81,7 @@ export function DutyEntryDialog({
   // form state is a cascading render, and keying it on the entry object would
   // clobber an edit in progress every time a sync write handed back a fresh
   // row; keying the COMPONENT on the id gets the initialisation for free.
-  const [date, setDate] = useState(() => entry?.date ?? todayUTC());
+  const [date, setDate] = useState(() => entry?.date ?? defaultDate ?? todayUTC());
   const [dutyType, setDutyType] = useState<DutyType>(
     () => entry?.dutyType ?? "standby"
   );

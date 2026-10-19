@@ -2540,6 +2540,26 @@ Rest before a standby needs no special code: once the standby is a
 `DutyPeriod` in the merged timeline, `calculateAllRestPeriods` checks it like
 any other. That was the whole reason for tracking it.
 
+#### The roster page is CALENDAR FIRST
+
+`app/(app)/roster/page.tsx` is a month (`RosterMonth`) over an agenda
+(`RosterAgenda`) that runs **soonest first** from the selected day — today
+unless another is tapped. It used to be every imported date newest-first with
+the calendar behind a toggle, so the next duty, which is what a roster is
+opened for, sat at the far end of the history.
+
+- Each cell names what the day IS (`SBY1`, `OFF`, `TR602`, `SIM`) — two labels
+  and a count. A dot only said "busy" and had to be tapped to be read.
+- It shows the logbook's FLIGHTS beside the roster's own duties, read-only
+  (tapping one opens it in the logbook). That is a READ join in
+  `lib/utils/roster/roster-days.ts`, not a second copy — `scheduleEntries`
+  still holds non-flight duties only (below).
+- An item sits on the day its START falls on in the DISPLAY clock (Zulu → the
+  UTC date; local → the device zone). Both tables key on the UTC date, so a
+  06:00 SGT standby is stored on the previous day; with no start time (leave,
+  off) the stored date is the only fact there is.
+- Add duty pre-fills the selected day (`DutyEntryDialog`'s `defaultDate`).
+
 #### The roster holds NON-FLIGHT duties only
 
 `userDb.scheduleEntries` was never removed — the table, the store, the roster
@@ -2742,8 +2762,8 @@ Assessment on record:
 - **Populate the split-view detail panel on non-detail routes** (layout audit
   L·8): dashboard, roster, FDP, currencies, discrepancies, and account leave
   the ≥720px right panel on a permanent "Select an item to view details"
-  placeholder. Highest-value first step: roster's selected-day view should
-  render into the detail panel (today it replaces the main list). To be
+  placeholder. Highest-value first step: the roster's agenda (the selected
+  day onward) could render into the detail panel beside its month. To be
   designed together with the owner in a future session — do not implement
   piecemeal.
 

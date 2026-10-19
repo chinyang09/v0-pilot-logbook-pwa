@@ -3,7 +3,6 @@
  */
 
 export { DutyEntryCard } from "./duty-entry-card"
-export { RosterCalendar } from "./roster-calendar"
 export { CurrencyCard } from "./currency-card"
 export { CurrencyFormDialog } from "./currency-form-dialog"
 export { DiscrepancyCard } from "./discrepancy-card"

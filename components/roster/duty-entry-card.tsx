@@ -20,7 +20,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const DUTY_TYPE_ICONS: Record<DutyType, typeof Plane> = {
+export const DUTY_TYPE_ICONS: Record<DutyType, typeof Plane> = {
   flight: Plane,
   standby: Clock,
   training: GraduationCap,
@@ -35,7 +35,7 @@ const DUTY_TYPE_ICONS: Record<DutyType, typeof Plane> = {
 // light theme and a lighter `-400` in dark so the low-lightness hues (standby
 // yellow→amber, off/other grey) stay legible on the cream card instead of
 // washing out. Backgrounds/borders stay at the subtle `-500/10`–`/20` tints.
-const DUTY_TYPE_COLORS: Record<DutyType, { bg: string; text: string; border: string }> = {
+export const DUTY_TYPE_COLORS: Record<DutyType, { bg: string; text: string; border: string }> = {
   flight: { bg: "bg-blue-500/10", text: "text-blue-600 dark:text-blue-400", border: "border-blue-500/20" },
   standby: { bg: "bg-amber-500/10", text: "text-amber-600 dark:text-amber-400", border: "border-amber-500/20" },
   training: { bg: "bg-purple-500/10", text: "text-purple-600 dark:text-purple-400", border: "border-purple-500/20" },
