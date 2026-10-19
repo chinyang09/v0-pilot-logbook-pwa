@@ -6,7 +6,6 @@ import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassIconButton } from "@/components/ui/glass-icon-button"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FilterChips } from "@/components/ui/filter-chips"
@@ -84,46 +83,23 @@ export default function CurrenciesPage() {
     <PageContainer
     >
       <div className="px-panel pt-4 space-y-4">
-        {/* Status Cards */}
-        <div className="grid grid-cols-4 gap-2">
-          <Card>
-            <CardContent className="pt-4 pb-3 px-3">
-              <div className="text-2xl font-bold text-status-valid">{statusCounts.valid || 0}</div>
-              <div className="text-xs text-muted-foreground">Valid</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-3 px-3">
-              <div className="text-2xl font-bold text-status-warning">{statusCounts.warning || 0}</div>
-              <div className="text-xs text-muted-foreground">Warning</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-3 px-3">
-              <div className="text-2xl font-bold text-status-critical">{statusCounts.critical || 0}</div>
-              <div className="text-xs text-muted-foreground">Critical</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-3 px-3">
-              <div className="text-2xl font-bold text-status-error">{statusCounts.expired || 0}</div>
-              <div className="text-xs text-muted-foreground">Expired</div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Filter */}
-        <FilterChips<FilterStatus>
-          value={filterStatus}
-          onChange={setFilterStatus}
-          options={[
-            { value: "all", label: "All", count: currencies.length },
-            { value: "valid", label: "Valid", count: statusCounts.valid || 0 },
-            { value: "warning", label: "Warning", count: statusCounts.warning || 0 },
-            { value: "critical", label: "Critical", count: statusCounts.critical || 0 },
-            { value: "expired", label: "Expired", count: statusCounts.expired || 0 },
-          ]}
-        />
+        {/* The counts live on the filter chips below. A row of four status
+            cards above them printed the same four numbers twice, and painted
+            "0 Expired" in the alarm red on a pilot with nothing expired. With
+            nothing tracked yet there is nothing to filter, so no chips. */}
+        {currencies.length > 0 && (
+          <FilterChips<FilterStatus>
+            value={filterStatus}
+            onChange={setFilterStatus}
+            options={[
+              { value: "all", label: "All", count: currencies.length },
+              { value: "valid", label: "Valid", count: statusCounts.valid || 0 },
+              { value: "warning", label: "Warning", count: statusCounts.warning || 0 },
+              { value: "critical", label: "Critical", count: statusCounts.critical || 0 },
+              { value: "expired", label: "Expired", count: statusCounts.expired || 0 },
+            ]}
+          />
+        )}
 
         {/* First-load skeleton */}
         {isLoading && currencies.length === 0 && (
