@@ -1,5 +1,6 @@
 "use client"
 
+import { CODE_INPUT_PROPS } from "@/lib/utils/input-props"
 import type React from "react"
 import { useRef } from "react"
 import { Input } from "@/components/ui/input"
@@ -94,6 +95,11 @@ export function SettingsRow({
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
           placeholder={placeholder}
+          // The row's label is a sibling span, so the input needs its own name
+          // (the Switch and Select rows below say the same thing).
+          aria-label={label}
+          aria-required={required || undefined}
+          {...(uppercase ? CODE_INPUT_PROPS : null)}
           className={cn(
             // Blend the input into the row: no box/shadow/border, and keep the
             // same font size as the read-only value (override the base md:text-sm).
@@ -144,6 +150,7 @@ export function ToggleRow({
     <div className="flex items-center justify-between px-4 py-3.5 row-divider">
       <RowLabel label={label} description={description} disabled={disabled} />
       <Switch
+        aria-label={label}
         checked={checked}
         onCheckedChange={readOnly ? undefined : onCheckedChange}
         disabled={readOnly || disabled}
@@ -178,6 +185,7 @@ export function SelectRow<T extends string>({
       <RowLabel label={label} description={description} disabled={disabled} />
       <Select value={value} onValueChange={(v) => onValueChange(v as T)} disabled={disabled}>
         <SelectTrigger
+          aria-label={label}
           className={cn(
             // Blend into the row like the inline text inputs — no box, right
             // aligned, same type size as the read-only value.

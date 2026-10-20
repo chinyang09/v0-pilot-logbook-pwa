@@ -20,7 +20,7 @@ Deployed on **Vercel** and synced from [v0.app](https://v0.app/chat/eXgJay4h1Jy)
 | Auth | WebAuthn passkeys + TOTP 2FA |
 | Data Fetching | SWR + Dexie React hooks |
 | Forms | Custom hooks (`useFormSubmit`, `useCrewForm`) — no form library |
-| OCR | @gutenye/ocr-browser with ONNX Runtime |
+| OCR | PP-OCRv4 models (`@gutenye/ocr-models`) on ONNX Runtime — our own pipeline, `lib/ocr/engine/` |
 | Charts | Recharts |
 | Package Manager | pnpm (not npm) |
 | Bundler | Webpack (not Turbopack) |
@@ -53,7 +53,8 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
-| `lib/ocr/__tests__/` | both OCR screenshot layouts, from synthetic bounding boxes |
+| `lib/ocr/__tests__/` | both OCR screenshot layouts from synthetic boxes, the engine's plumbing with stand-in models (boxes, CTC decode, the keypad never recognised), and SEVEN REAL MCDU PHOTOS (`fixtures/mcdu/`) — what the engine actually reads from each, every slot checked; `OCR_ENGINE=1 pnpm test` runs the photos through the real server engine (`OCR_FIXTURE_WRITE=1` re-pins the reads) |
+| `lib/theme/__tests__/` | the palette generator — contrast and gamut for every preset in both modes and a sweep of custom seeds, and that globals.css carries the default palette exactly |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution, the canonical document shape + write modes, push batching, the sync triggers |
 | `lib/sync/server/__tests__/` | the server engine end to end — two devices pushing and pulling, deletions, stale pushes, paging, the migration — against an in-memory Mongo stand-in (`fake-mongo.ts`; it implements only the operators the engine sends) |
 
@@ -61,9 +62,11 @@ Tests that touch a parser must mock `@/lib/db` and
 `lib/utils/parsers/shared/airport-enricher` — both reach for IndexedDB at
 module scope. See `pdf-schedule-merge.test.ts` for the established stub set.
 
-Note the OCR tests build synthetic OCR boxes, so they catch a **geometry** or
-mapping regression but NOT a recognition regression. Changing OCR engine needs
-real screenshots as fixtures first.
+The synthetic-box OCR tests catch a **geometry** or mapping regression only.
+The real-photo fixtures pin what the engines READ, and the photos are
+committed at `OCR_MAX_SIDE` — run `OCR_ENGINE=1 pnpm test` before changing the
+engine, a model or the image size. (The Time Summary layout still has only a
+synthetic fixture.)
 
 ## Project Structure
 
@@ -149,6 +152,7 @@ lib/                              # Core utilities and services
 │   └── shared/                   #   Shared utilities (cuid)
 ├── mongodb/                      # MongoDB client (connection pooling)
 ├── ocr/                          # OCR service & flight data extraction
+├── theme/                        # Palettes: the generator (palette.ts) + applying/persisting one (apply.ts)
 └── utils/                        # Utility functions
     ├── flight-calculations.ts    #   Time calculations
     ├── night-time.ts             #   Night time rules + the single per-minute night-time calculator (calculateNightTimeComplete)
@@ -195,7 +199,20 @@ All user data is stored locally in **IndexedDB via Dexie** and synced to **Mongo
   resurrect the record on other devices)
 - Failed push items are retried and **dead-lettered** after
   `MAX_SYNC_RETRIES` (5) so a poison item can't loop forever; transient
-  network/offline failures are not counted toward the cap
+  network/offline failures are not counted toward the cap — and neither is a
+  REQUEST-level 4xx (a proxy's 403, a 413), which is no single item's fault.
+  Only a per-item `success:false`, or a batch of one, counts
+- **The fetch timeout covers the BODY** (`fetchWithTimeout`'s `read`). It used
+  to be cleared when the headers arrived, so a connection dropping mid-body
+  left `response.json()` pending forever: the cycle never settled, the Web
+  Lock was never released and every later sync chained onto it
+- **A purge carries the seq it saw the record BINNED at.** The server answers a
+  purge of a record that is now LIVE and past that base with the record
+  (`stale`), not a deletion — a device that had not caught up used to purge,
+  everywhere, a flight another device had restored
+- **A comparison's id is derived** (`mismatch:<flight>:<field>`), so a CREATE
+  of a tombstoned discrepancy id is a new record: inserted, with the tombstone
+  removed in the same commit. Random-id collections keep the rejection
 
 ### The Sync Protocol (`/api/sync`, `lib/sync/`)
 
@@ -281,7 +298,26 @@ PATCH, not a record:
   respected and simulators skipped, like every other recalculation pass.
 - Arrays and objects (`approaches`, `additionalCrew`, `signature`,
   `importDecisions`) are ONE field each: two devices editing the same list
-  concurrently is a conflict, not an element merge.
+  concurrently is a conflict, not an element merge. An EMPTY list or object
+  counts as no value (`sameValue`), the same as `null`/`undefined`.
+- **An edit FORM writes only what the user changed** (`lib/utils/form-patch.ts`).
+  The flight form saved its whole copy of the flight, and after a pull that
+  copy was stale — so an iPad with a flight open sent the phone's new OUT time
+  and signature straight back, with nobody touching the iPad, and the server
+  saw a genuine edit (diffed against the pulled row, based on the pulled seq).
+  The form keeps a BASELINE, saves `formPatch(form, baseline)`, and follows
+  the row underneath it with `rebaseForm` — every field the user has not
+  touched is adopted into form and baseline alike. The crew form does the same.
+- **A queue row an edit collapsed into mid-push is REBASED** when that push
+  is confirmed: the fields now on the server are dropped and its base moves to
+  the seq the push landed at (`reconcilePushedRecords`). Re-sending them
+  against the old base made another device's later edit look concurrent.
+- **An orphan is requeued as a field PATCH** of every field against its last
+  seq, not a whole record — a stale copy with a newer `updatedAt` used to win
+  every field by clock. Enqueueing is ONE transaction (read + write).
+- **A full resync keeps unsynced rows** (`clearDataTablesForResync`): pending,
+  dead-lettered and queued records survive the wipe; the server leaves a record
+  out of the pull of the request that pushed it, so wiping it lost it.
 
 ### The Canonical Document Shape (`lib/sync/schema.ts`)
 
@@ -343,7 +379,12 @@ on the account page revoked the session and THEN ran the pre-logout sync, which
 then got a 401 — so every unsynced edit was wiped with the local data, online
 or not. `confirmUnsyncedLoss` pushes while the session still works
 (`flushBeforeSignOut`) and confirms if anything is left. It is a confirmation
-because the loss has no undo.
+because the loss has no undo. It then signs out with `logout({ skipSync: true })`
+(the session is already revoked, so a second sync would only meet a 401), and
+`logout` waits for an in-flight cycle (`syncService.whenIdle`) before wiping —
+or that cycle wrote the previous user's records back into the wiped tables.
+"Log out of all devices" refuses offline and requires the revoke to succeed:
+it exists for a LOST device, and swallowing the failure signed out only this one.
 
 **Live multi-device test** — `scripts/sync-live-test/` drives the real app in
 separate browser profiles against a real MongoDB replica set (README there).
@@ -399,6 +440,24 @@ pages showed pre-sync numbers until they remounted. Every SWR key in
 - Challenges are **single-use**: consume them with `findOneAndDelete` (type + expiry checked) so they can't be replayed.
 - The WebAuthn signature counter is enforced as strictly-increasing **only when a counter is in use** (either side non-zero) — synced/platform passkeys report `signCount 0` permanently and must not be locked out on their second use.
 - TOTP is **single-use**: verify with `verifyTOTPWithCounter` and reject any code whose time-step `counter <= auth.lastTotpCounter` (shared across the TOTP login and callsign-change endpoints). Compare codes in constant time.
+- TOTP bookkeeping is **atomic** (`lib/auth/server/totp-attempts.ts`): `claimTotpCounter` is a conditional update only one request can win, and `recordTotpFailure` counts with `$inc`. Read-then-write let parallel guesses skip the 5-attempt lockout and one code log in twice. The callsign change shares the lockout.
+- Login challenges are typed `"login"` and consumed only as that type.
+- No route returns the session TOKEN in a body — it is the HttpOnly cookie's secret.
+- **A store error is not a missing session.** `validateSession` throws (`SessionStoreUnavailableError`) so the route answers 5xx; returning `null` turned a MongoDB cold start into a 401 the client read as "signed out". It also re-sets the cookie when it slides the session forward.
+
+**A 401 during sync is a claim, not proof** (`handleSyncReauth`): the session
+probe decides — `valid` retries, `unknown` changes nothing, only `invalid` marks
+the session expired. A passkey ceremony is attempted only with live user
+activation, and `silentReauth` shares ONE in-flight ceremony; from a background
+poll it used to raise the passkey sheet repeatedly. The login page returns to
+`/` when the session turns out to be fine, so a pilot sent there by a false
+alarm is not left signing in again.
+
+**One device, one account's data.** `syncMeta.dataOwner` records whose data the
+device holds. Signing in as a DIFFERENT account clears it first (asking if
+anything is unsynced) — it used to push the first account's queued edits into
+the second account and pull the second one from the first one's cursors. A
+silent reauth answered by another account's passkey is ignored.
 
 Sessions are stored in MongoDB (with TTL) and mirrored to IndexedDB. Cookies are HttpOnly + Secure + SameSite=Lax. Each session row also stores the request **`userAgent`** (set in `issueSession`) so the account page can label active sessions by device.
 
@@ -667,6 +726,35 @@ non-indexed fields for it — no Dexie migration, and nothing is populated unles
 a source supplies it. `normalizeAircraftFromServer` had to stop being an
 explicit allowlist for them to survive a round trip (the same trap
 `normalizeFlightFromServer` was rebuilt to avoid).
+
+### The Pilot's Seat (`lib/utils/roster/pilot-role.ts`)
+
+What a pilot logs follows from ONE fact about them — are they a captain — and
+it lives on their own "This is me" crew card (**My seat**), not in Settings:
+
+| seat | monitoring | flying |
+|---|---|---|
+| captain | PIC | PIC |
+| first officer | SIC | SIC, or PICUS (**When pilot flying, log as**, on the same card) |
+
+A captain is PIC whoever has the controls; a first officer is never PIC.
+PICUS is co-pilot duties performed as PIC under the PIC's supervision, and is
+creditable only where the authority accepts the operator's supervision method
+(EASA states also want each entry countersigned) — so it is the pilot's own
+convention, never the default.
+
+- New flights (`useCreateFlight`) start in the seat's role with the pilot
+  written into that crew seat as "Self". With no seat on the card, the most
+  recent real flight's role is the fallback.
+- The flight form's **Pilot Flying** switch carries the role with it
+  (`reconcilePilotRole`): PICUS falls back to SIC when monitoring, a plain SIC
+  is promoted to the card's convention when flying, PIC never moves.
+- Imports read the same card (`nonPicPfRoleOf`, `seatOf`). The old Settings ›
+  Import Defaults section is gone; its stored value is only a fallback for a
+  card that never set its own.
+- The seat is stored as `defaultPIC`/`defaultSIC` on the SELF card only — on
+  anyone else's card those toggles never did anything and are no longer shown.
+  `seatOf` falls back to the card's `roles` for profiles created by an import.
 
 ### Entry Type (flight vs simulator)
 
@@ -952,6 +1040,27 @@ of the panel, so it takes on the mood of its own state before a word is read.
   is actually in hand (`Requirement.action`). Triage order: something wrong with
   the duty in progress → rest → the binding requirement → the next report →
   nothing required.
+
+#### An EMPTY logbook is not a lapsed pilot
+
+With nothing logged, 0 / 3 recency raised ACTION REQUIRED on the very first
+screen a new user saw. Recency is not ASSESSED then (`logbookEmpty` in
+`buildLegalityModel` leaves the cell out), and a clear verdict becomes the
+NEUTRAL `getting_started` state — "NO FLIGHTS YET · Add your first flights" —
+off the status ramp like an `unknown` cell, because nothing has passed either.
+Anything that can be judged still is: an expired document on a fresh install
+is ACTION REQUIRED. `logbookEmpty` is only true once the flight read has
+LANDED, or a pilot with thousands would see it flash while it loads.
+
+#### A FAILED read is not a clear one
+
+The other half of that rule. When the FDP pipeline throws (`useFDPData`
+returns `failed: true`) or the flight read errors, the panel used to see empty
+duty periods and no flights and read **CURRENT** — the most dangerous wrong
+answer on the page. `buildLegalityModel` takes `unavailable: ("duty" |
+"logbook")[]` and adds an `unknown` requirement for each ("Duty limits
+unavailable — check manually"), which the annunciator reads as CAUTION. A
+logbook read that errored is also never `logbookEmpty`.
 
 #### Nothing on this page navigates by default
 
@@ -1595,6 +1704,20 @@ ten seconds every time you deleted something on purpose, and gave you nothing
 at all once the ten seconds were up; a holding area costs nothing on the way
 out and is still there tomorrow.
 
+**A locked flight opens its context preview on tap**, not nothing. It cannot be
+edited, but a dead tap gave no feedback and no way to READ the entry short of
+unlocking it; the preview shows the full detail and carries Unlock in its
+action row.
+
+**Every delete says so, with an Undo** (`lib/utils/undo-toast.ts`, rendered by
+`UndoToastHost` in the app layout). A row that simply vanished gave no sign the
+tap had landed or where the thing went, and a holding area nobody knows about
+is not much of an undo. For `UNDO_TOAST_MS` (5s) "TR600 deleted · Undo" sits
+above the bottom nav; Undo runs the same `restore*` Recently Deleted uses, plus
+the page's own refresh. It is NOT a confirmation — the delete has already
+happened — so it does not reopen the countdown question. A new delete path
+calls `showUndoToast` after the soft delete succeeds.
+
 **The one exception is "Log out of all devices"** (`app/(app)/account/page.tsx`),
 which still uses `CountdownConfirmButton`. It is not a delete: nothing is
 recoverable afterwards because there is nothing to recover — the only undo is
@@ -1614,7 +1737,7 @@ vs reported block) scores a nonsense parse near zero.
 
 | Source | Shape | Extractor |
 |---|---|---|
-| Airbus MCDU AOC VOYAGE RPT | label row above value row, two columns | `extractFromLayout` |
+| Airbus MCDU AOC VOYAGE RPT | two columns, each alternating label / value | `extractFromColumns`, `extractFromLayout` |
 | EFB flight-record **Time Summary** | one labelled row per event, PLANNED and ACTUAL columns | `extractFromTimeSummary` |
 
 Time Summary maps Off Block / Takeoff / Landing / On Block → OUT / OFF / ON /
@@ -1626,6 +1749,96 @@ arrive as one OCR box or three.
 
 The flight number is deliberately NOT read from the Time Summary header — it is
 the ICAO callsign (`TGW216`) where the logbook uses IATA (`TR216`).
+
+**The MCDU report is read PER COLUMN** (`extractFromColumns`). Each label finds
+its value on its OWN side of the screen, below it and above that side's next
+label. Reading it as rows — a label row, then the row under it — only works
+while every slot is filled, and a blank (`----`) is not read at all, so the two
+columns drift out of step: on a real photo the left door time and the right
+TAXI label came back as one line and IN was lost; with OUT and IN blank, a lone
+FLIGHT value had no row partner. A box can hold more than one token
+(`1232 0942` — the old library joined boxes, and detection can still merge
+two close values), so a token's x is estimated from its character position
+within the line's box. The row reader stays as a candidate; the best score still wins.
+
+#### The engine is OURS (`lib/ocr/engine/`)
+
+The same two PP-OCRv4 models the `@gutenye` packages ship, with their numerics
+(BGR, value/255, the 0.03 detection threshold, CTC greedy decode, reads below
+0.5 mean confidence dropped) — but not their plumbing. `core.ts` is written
+once for both runtimes; `node.ts` (onnxruntime-node + sharp) and `browser.ts`
+(onnxruntime-web + the browser's own image decoder) only supply the sessions
+and the pixels.
+
+- **The keypad is DETECTED but never READ.** Recognition is the expensive half
+  and scales with the number of boxes, and on an MCDU photo about half of them
+  are keys. Boxes are recognised top to bottom and reading stops at the
+  screen's last line (`MCDU_STOP`: `<AOC MENU` / `RETURN TO` / `SEND*` /
+  `PRINT*`) — measured, 20–24 of 37–70 boxes. That is the "crop to the screen"
+  without guessing where the screen is: a photo with no such line (a cropped
+  shot, the EFB Time Summary) is simply read in full.
+- **Detection runs at 800** (`DEFAULT_DET_SIDE`) while the boxes are cut from
+  the full 1024 image, so recognition loses no detail. All seven photos read
+  identically at 640, 800 and 1024.
+- **Recognition is BATCHED** (`DEFAULT_BATCH` 4 — measured best; 8+ pads every
+  line to the widest and gets slower). A batch may read past the stop line;
+  those reads are dropped.
+- **No OpenCV.** The library cut boxes out with opencv.js — 10MB the phone
+  parsed before its first photo — for what, on level text, is a flood fill
+  over a typed array (`boxesFromProbabilityMap`).
+- **Lines come back one per box, in reading order, NOT joined into rows** —
+  the extractors group rows themselves.
+- **Both runtimes are PRIMED on warm-up** (`primeServerModels` /
+  `primeBrowserModels`): a session's first run allocates its buffers and starts
+  its threads, which was most of a second of the first photo's time.
+
+#### Speed — where the time went, and the rules that keep it fast
+
+Measured on the seven real photos (`lib/ocr/__tests__/fixtures/mcdu/`):
+
+| | Was | Is |
+|---|---|---|
+| Server OCR in production | **never ran**: file tracing dropped `@gutenye/ocr-node`, so every photo was uploaded, refused, then read in the browser from cold | runs |
+| Server, 12MP photo | 19.4s (detection at 3072×4080) | ~0.43s (1024 image, detection at 800, keypad skipped; 4 cores) |
+| Upload | the photo at 2048px, 0.5–2MB | 150–220KB |
+| Browser engine runtime | 24MB JSEP build + 10MB opencv.js | 11.9MB WASM-only, no OpenCV |
+| Browser threads | 1 | up to 4 (cross-origin isolated) |
+| Browser, photo → form filled, cold / camera-menu warmed (4-core desktop Chromium) | 11.1s / 6.6s | 4.2s / 1.8–2.2s (engine itself ~1.3s) |
+| After the read | a fixed 600ms pause | straight into the form |
+
+- **Detection runs at whatever resolution it is handed.** `OCR_MAX_SIDE`
+  (1024) caps it on the client AND again in the route (an old client still
+  sends 2048).
+- **Resize on PIXELS, not bytes.** `compressImage` skipped anything under 1MB,
+  and a 12MP JPEG can be.
+- **Only the UPLOAD is re-encoded.** The service compresses inside
+  `processWithServerOCR`; the browser engine decodes the original straight to
+  `OCR_MAX_SIDE` (`createImageBitmap` + one canvas draw), with no JPEG
+  round trip in between.
+- **The engine is woken when the camera menu OPENS** (`warmOCR`): the health
+  check boots the function and primes its models while the pilot is still
+  taking the photo. If it reports no engine, the browser engine is loaded and
+  primed instead; offline, at once.
+- **A failed server is skipped for five minutes** — each attempt costs an upload
+  and a round trip before the fallback even starts. A 401 does not count. The
+  server request carries a 20s timeout over the BODY as well.
+- **The browser runtime is at STABLE URLs**, `/models/ort-wasm-simd-threaded.{wasm,mjs}`,
+  copied from the installed `onnxruntime-web` by `scripts/copy-ort-wasm.mjs` on
+  every `pnpm dev`/`pnpm build` (not committed — they must match the JS loading
+  them) and precached by the service worker beside the models. The `.mjs` is
+  the Emscripten glue AND the script every engine thread starts from, which is
+  why the alias is the NON-bundled `ort.wasm.min.mjs`: the bundle inlines the
+  glue and starts its threads from its own webpack-hashed URL, which nothing
+  can precache, so a threaded engine could not have started offline.
+- **Multi-threaded in the browser** (`ocrThreadCount`: up to 4). WASM threads
+  need SharedArrayBuffer, which needs `crossOriginIsolated`, which needs
+  `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy:
+  require-corp` on every response (`next.config.mjs` `headers()`). Everything
+  the app loads is same-origin except Google Fonts, fetched in CORS mode
+  (`crossOrigin="anonymous"`), which `require-corp` accepts. `credentialless`
+  would be laxer but Safari lacks it. A page served from a cache predating the
+  headers simply runs single-threaded.
+- **The server uses every core** (`intraOpNumThreads: availableParallelism()`).
 
 ### Component Architecture
 
@@ -2039,6 +2252,39 @@ identical:
   primitives and complex auto-save/calculation logic, but its `SwipeableRow`
   wraps the shared `SwipeableCard` and its rows use the same `.row-divider`.
 
+### Readability and Touch Targets
+
+- **Every control a thumb has to hit is at least 36px** (`h-9`). Where a row
+  must keep a fixed height (the virtualised lists' favourite star, a search
+  chip), grow the HIT AREA with an `after:` pseudo-element on the
+  `relative` control instead of the box — the logbook depends on every card
+  being one height.
+- **A licence-record choice is readable on BOTH sides.** `OptionPair` and the
+  import card's role chooser were 8–11px with the unselected side at 45%
+  opacity — the value a pilot may want back was the one they could not read.
+  Values are `text-xs`/`text-sm`, captions `text-[10px]`, the unselected side
+  plain `text-muted-foreground`.
+- **A flight-form row that opens something is a button** (`pressableRow`:
+  `role="button"`, `tabIndex`, Enter/Space, an accessible name), so the form
+  can be driven from a keyboard. A row with its own inner button (NOW, USE)
+  stops that button's keydown from bubbling to the row.
+- **Remarks is an inline auto-growing textarea**, not a `prompt()` — a native
+  prompt is a one-line box with no preview of what is already there.
+- **The Pilot Role row is the native select, laid over the whole row** at
+  opacity 0, so the whole row is the target and the platform's own picker
+  opens.
+- **No `alert()` for a form error** — an inline `role="alert"` line in the
+  dialog, cleared when it closes. Only "Log out of all devices" still uses a
+  native alert, because it is refusing an irreversible action.
+- **Every input has a label bound to it** (`htmlFor`/`id`, `useId` where a
+  component can appear twice), and the login callsign carries
+  `autoComplete="username"` with auto-capitalise and autocorrect off (the
+  server matches callsigns case-insensitively).
+- **A flight that is not there SAYS so.** The flight form's live query returns
+  `null` (not `undefined`) once it has answered "no such row", so a missing
+  flight reads "Flight not found" and a binned one "This flight is in Recently
+  Deleted" with a way there — instead of an empty panel forever.
+
 ### KeepAlive Navigation
 
 Four heavy pages are kept mounted across navigations for instant tab-switching and scroll preservation:
@@ -2104,7 +2350,7 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   below 720px (iPad Split View / resize). Only real user taps use the default
   explicit path
 - **System back undoes the last move.** OPENING a detail — meaning `?selected=`
-  is not already in the URL — `router.push`es it; the param going away again is
+  is not already in the URL — PUSHES it (`history.pushState`, see below); the param going away again is
   what closes it. "Is a detail open" must be read off the URL, NOT off the
   stored selection: a section remembers its last selection in state and
   sessionStorage while the detail is closed, so keying off that made the first
@@ -2159,6 +2405,73 @@ the sun timeline, the flight form's time rows) must go through
 `airportIdentifier` (`icao` / `iata` / `both`) goes through
 `getAirportDisplayCode` — which needs BOTH codes populated on whatever it is
 given, or it silently falls back to the other one.
+
+### Palettes (`lib/theme/`)
+
+The colour is DATA, and the pilot chooses it: six presets (**Graphite** —
+the default — **Horizon**, **Night Ops**, **Classic**, **Evergreen**, **Dusk**)
+plus **Custom**, all in Settings › Appearance beside the light/dark/system mode.
+The two are orthogonal: a palette has a light and a dark half.
+
+**ONE generator.** A palette is a `PaletteSeed` — accent hue + vividness, the
+hue the greys lean toward + how far, and how deep the dark ground is
+(`dim`/`deep`/`black`). `generatePalette(seed, mode)` builds every surface and
+text token from it. Presets are named seeds and Custom is a seed the pilot
+edits, so none of them can come out unreadable: the generator moves the
+accent's lightness until it clears 4.5:1 on every surface it lands on, keeps
+muted text at 4.5:1 and body text at 7:1, and pulls out-of-gamut colours in
+by CHROMA rather than letting the browser clip a channel.
+`palette.test.ts` pins all of that for every preset in both modes AND for a
+sweep of custom seeds across the whole hue circle at every depth.
+
+| What a palette owns | What it does not |
+|---|---|
+| background, cards, popovers, secondary/muted/input/border, the sidebar, foregrounds, `--primary`, `--ring`, `--chart-1` | the status ramp (met/close/caution/not met mean the same in every palette), `--destructive`, the other chart series |
+| | the glass: `--on-glass` / `--on-glass-active-fg` are DERIVED from `--card` / `--primary` with `color-mix`, so they follow any palette |
+
+**Every dark half is night-adapted**: a ground at or below L 0.17 and text a
+dimmed off-white (never `#fff`) — a large bright field is what costs a pilot
+their dark adaptation. Night Ops is the extreme: a `black` ground and a red
+accent.
+
+**Offline by construction — nothing is fetched.** `applyPalette`
+(`lib/theme/apply.ts`) writes the generated CSS into ONE
+`<style id="oooi-palette">` and into localStorage; `PALETTE_BOOT_SCRIPT`,
+inlined in the root layout's `<head>`, puts it back before the first paint on
+the next launch, so a cold start shows the chosen palette rather than
+flashing Graphite. localStorage holds the RESULT (CSS + the grounds' hex), so
+the boot script needs no generator. The preference itself (`display.palette`,
+`display.customPalette`) lives in the preferences row in IndexedDB, per
+device.
+
+- **The stylesheet wins on SPECIFICITY, not order** — `html:root` /
+  `html.dark` against globals.css's `:root` / `.dark` — so it does not matter
+  where the `<style>` lands.
+- **globals.css carries the DEFAULT palette, generated.** The two blocks
+  marked `palette:light` / `palette:dark` are Graphite exactly as the
+  generator builds it, and `palette.test.ts` fails if they drift: they are what
+  renders before a palette is applied, so a mismatch is a first frame in a
+  different colour. Change a colour in the generator or a seed, then
+  regenerate those blocks — never hand-edit them.
+- **The provider applies the palette only once preferences have LOADED.**
+  Before that the boot script has already painted the last palette; applying
+  the in-memory default over it flashed Graphite on every launch.
+- **The custom editor previews LIVE on the whole app** — rAF-batched
+  `applyPalette` while a slider moves — and commits to the preference 400ms
+  after it settles. Committing per step re-rendered every consumer of the
+  preferences context at slider rate.
+- **The status bar follows the mode actually on screen**: `syncThemeColor`
+  re-points both `<meta name="theme-color">` tags at the current mode's
+  ground (a light-mode pilot on a dark-mode phone would otherwise get a dark
+  bar over a light page). The static values in `app/layout.tsx`,
+  `public/manifest.json` and `public/offline.html` are Graphite's.
+- **A preferences row with no mode in it is NOT "dark".** The provider takes
+  the mode next-themes is actually showing; holding the in-memory default meant
+  the first unrelated setting saved (choosing a palette, say) wrote "dark" into
+  the row and the next launch flipped a light-mode pilot to dark.
+
+Scheduled (unflown) flights are drawn in the accent (`text-primary` on the
+logbook card and the roster chip): planned is the accent, whatever it is.
 
 ### State Management
 
@@ -2540,6 +2853,26 @@ Rest before a standby needs no special code: once the standby is a
 `DutyPeriod` in the merged timeline, `calculateAllRestPeriods` checks it like
 any other. That was the whole reason for tracking it.
 
+#### The roster page is CALENDAR FIRST
+
+`app/(app)/roster/page.tsx` is a month (`RosterMonth`) over an agenda
+(`RosterAgenda`) that runs **soonest first** from the selected day — today
+unless another is tapped. It used to be every imported date newest-first with
+the calendar behind a toggle, so the next duty, which is what a roster is
+opened for, sat at the far end of the history.
+
+- Each cell names what the day IS (`SBY1`, `OFF`, `TR602`, `SIM`) — two labels
+  and a count. A dot only said "busy" and had to be tapped to be read.
+- It shows the logbook's FLIGHTS beside the roster's own duties, read-only
+  (tapping one opens it in the logbook). That is a READ join in
+  `lib/utils/roster/roster-days.ts`, not a second copy — `scheduleEntries`
+  still holds non-flight duties only (below).
+- An item sits on the day its START falls on in the DISPLAY clock (Zulu → the
+  UTC date; local → the device zone). Both tables key on the UTC date, so a
+  06:00 SGT standby is stored on the previous day; with no start time (leave,
+  off) the stored date is the only fact there is.
+- Add duty pre-fills the selected day (`DutyEntryDialog`'s `defaultDate`).
+
 #### The roster holds NON-FLIGHT duties only
 
 `userDb.scheduleEntries` was never removed — the table, the store, the roster
@@ -2719,31 +3052,28 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
 local (`forecastExceedances`). For a non-UTC user a duty on the window boundary
 can be silently included or excluded. Settle on one date convention end to end.
 
-### OCR engine (owner is weighing a change)
+### OCR engine
 
-The offline engine is `@gutenye/ocr-browser` + ONNX (~16MB of models). The
-owner has asked about **PaddleOCR JS**, server-when-online / local-when-offline.
-Assessment on record:
+The engine is now the app's own pipeline over the PP-OCRv4 models (Camera OCR
+› The engine is ours). The owner had asked about **PaddleOCR JS**; the
+assessment on record:
 
 - The speed gap in the PaddleOCR web demo is mostly **server hardware**, not the
-  engine. Locally the cost is dominated by **model load**, and Paddle's JS
-  models are comparable in size — swapping engines does not fix that by itself.
-- Highest-value first step is **server-first routing**, which is largely already
-  built: `/api/ocr` exists and `checkServerOCRAvailability()` is wired. Route
-  online requests there, keep the local model as the offline fallback.
+  engine. Locally the cost is dominated by **model load** and by how many boxes
+  are RECOGNISED — which is why skipping the keypad was the win, not a new
+  engine. Paddle's JS models are the same family and comparable in size.
 - The extractors take `{text, box, confidence}` so they are engine-shaped, but
   the digit repair (`O`→`0`, `I`→`1`) and row-grouping tolerances are tuned to
-  gutenye's output. An engine swap needs **real screenshots as fixtures** first
-  — the current OCR tests use synthetic boxes and would not catch a recognition
-  regression.
+  these models' output. Real photos are fixtures (`OCR_ENGINE=1 pnpm test`) —
+  any change of model, detection size or threshold has to read all seven.
 
 ### Deferred design work (owner-approved to-do)
 
 - **Populate the split-view detail panel on non-detail routes** (layout audit
   L·8): dashboard, roster, FDP, currencies, discrepancies, and account leave
   the ≥720px right panel on a permanent "Select an item to view details"
-  placeholder. Highest-value first step: roster's selected-day view should
-  render into the detail panel (today it replaces the main list). To be
+  placeholder. Highest-value first step: the roster's agenda (the selected
+  day onward) could render into the detail panel beside its month. To be
   designed together with the owner in a future session — do not implement
   piecemeal.
 
@@ -2803,6 +3133,20 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
 
 ### Lower-priority items (not yet actioned)
 
+- **Multi-device gaps from the Oct 2026 audit.** Closed since: an IMPORTED
+  duty is created under a derived id (`importedDutyId` — `duty:<date>:<code>`),
+  so two devices importing one report before syncing land on one record (and
+  `decidePush` lets a purged derived id be recreated, as for comparisons); the
+  pilot's own card is chosen by ONE rule everywhere (`pickSelfCard` — the most
+  recently changed flagged card), and saving a self card clears every other
+  flag; `putManyWithSync` sends an update of a row this device does not hold
+  as a field PATCH from base 0, not a whole record that cleared every key the
+  import did not carry. Still open: the auto-fill switches are per device while
+  the times they produce are shared (with `formPatch` a form only sends a
+  recalculation the user's own edit caused, which narrows it), and the
+  keepalive flush on `pagehide` takes no lock (harmless — it never deletes
+  queue rows).
+
 - **`discrepancies.resolved` boolean secondary index** (`lib/db/user-db.ts`) —
   IndexedDB can't key a boolean, so the index is inert (same class as the
   airports `isFavorite` bug already fixed). Not a live bug today (all readers use
@@ -2842,18 +3186,45 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
   IndexedDB; easy while one was stalled (see the airport seed). Fixing it means
   taking the baseline from the loaded flight AFTER the form's own calculations,
   without saving those calculations on open — deferred, it is delicate.
-- **Service worker** (`public/sw.js`) — two items needing offline testing
-  before any change (a bad SW is hard to roll back): (1) `install` calls
-  `self.skipWaiting()` unconditionally while the registration
-  (`hooks/use-service-worker.ts`) is built around an update-*prompt* flow, so
-  the prompt is effectively dead and a background update can auto-reload the page
-  mid-edit (auto-save mitigates data loss); (2) the Strategy-6 catch-all caches
-  any cross-origin `ok` GET (no same-origin guard). Both are latent/hardening,
-  not active data bugs. (`DYNAMIC_CACHE` is now FIFO-capped at 150 entries via
-  `trimDynamicCache()` after each put — everything in it is re-fetchable, so an
-  eviction just falls through to network/shell fallbacks.)
+- **Service worker — still to verify on a real device, offline.** The Oct 2026
+  pass changed it (below); a bad SW is hard to roll back, so confirm a cold
+  offline start of every route and one update cycle on an installed iPhone
+  before trusting it. Still open: app deploys that do not change `sw.js`
+  install no new worker, and navigations are served cache-first, so the first
+  launch after a deploy runs the PREVIOUS build's HTML — a chunk of that build
+  not yet cached 404s on Vercel unless Skew Protection is on (a project
+  setting, not code). `STATIC_CACHE` is unbounded (one entry per full-URL
+  navigation).
 
 ## PWA Details
+
+**Offline and update rules (Oct 2026 audit):**
+
+- **A new service worker WAITS.** `install` no longer calls `skipWaiting()`:
+  it activated under every open tab and the page reloads on
+  `controllerchange`, so a deploy reloaded the app mid-edit. The page reloads
+  only for an update the user asked for (`applyServiceWorkerUpdate` sets
+  `reloadOnTakeover`), never on the FIRST install's `clients.claim` — that
+  restarted a new user's registration or passkey ceremony once the OCR models
+  had downloaded. A worker already waiting at load shows the update banner.
+- **`/_next/static` chunks live in `ASSET_CACHE`, apart from the 150-entry
+  dynamic FIFO.** A hit never re-puts, so the oldest entries were the
+  framework and main-app chunks, and a month of per-flight pages evicted them:
+  an offline cold start then got cached HTML and a 503 for main-app.js.
+- **The catch-all caches SAME-ORIGIN only.**
+- **The Inter stylesheet is fetched `crossOrigin="anonymous"`** — CORS mode, so
+  the SW can cache it; a no-cors response is opaque and was never stored.
+- **Every route is cached for an offline cold start** (`OFFLINE_PAGES` in
+  `auth-provider.tsx`), not just the five list tabs.
+- **`navigator.storage.persist()` is requested** at sign-in and boot. Without
+  it IndexedDB — and the sync queue in it — is best-effort and evictable.
+- **The offline OCR engine's code is fetched while online** (`warmBrowserOCR`,
+  at idle, after a 3s floor), and a failed load is retried rather than cached
+  as the answer. OCR goes to the server whenever online, so the browser
+  engine's chunk was only ever requested offline — when it could not load.
+- **A database that fails to open is retried and SAID** (`retryDBOpen`,
+  `StorageNotice`). It used to be final, and every page showed its EMPTY state
+  — "NO FLIGHTS YET" over a full logbook.
 
 - **Service worker** (`public/sw.js`): precaches static assets, login page, and OCR models; runtime caches app routes and CDN resources; versioned caches (v4)
 - **Manifest** (`public/manifest.json`): standalone display mode, window controls overlay for desktop
@@ -3093,7 +3464,7 @@ When making changes, be aware of these high-impact files:
     0.11 once `--glass-base` arrived: with an 82% card-coloured undercoat
     already giving the slab a face, the veil was pure lightening on top of an
     almost-solid surface and the material came out too pale and too warm for an
-    iOS-dark app. At 0.05 the face lands around oklch **0.23**, which is where
+    iOS-dark app. At 0.05 the face lands around oklch **0.21** on the default (Graphite) ground — `--on-glass` is derived from `--card` so it tracks every palette — which is where
     iOS's own dark chrome sits (systemGray6 `#1C1C1E` → systemGray5 `#2C2C2E`).
     Do not take it to zero — over pure black the base alone still needs the
     lift, and that is the whole reason this coat exists.
@@ -3576,6 +3947,7 @@ When making changes, be aware of these high-impact files:
 - Do not add pages to `PERSISTENT_PAGES` in `keep-alive-pages.tsx` without considering memory impact — only heavy virtualized pages should be persistent
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
 - Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
+- Do not add a delete path without `showUndoToast` after it — the toast is how a one-tap delete tells the user it happened and how to take it back. It runs AFTER the soft delete; it is never a gate in front of one
 - Do not put a confirmation in front of a delete — not a dialog, not a hold, not an armed countdown. Deleting is one tap and `Recently Deleted` is the undo (30 days). The countdown machinery survives for exactly ONE caller, "Log out of all devices", because that genuinely has no undo; do not wire `holdToConfirm` to a delete again
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not move the sidebar's gravity blob back into a non-scrolling overlay translated from a scroll listener — that is a main-thread reaction to a scroll that already happened, so the blob trails the items by a frame. It belongs inside the scroller, where it moves on the compositor; the top band is masked anyway, so there is no overshoot clipping to protect it from
@@ -3656,6 +4028,10 @@ When making changes, be aware of these high-impact files:
 - Do not put a number inside a meter's fill without checking it fits — below `LABEL_FITS_INSIDE` it goes outside the fill instead. A figure clipped by its own bar is worse than no figure
 - Do not print "12 / 12 currencies current" — a pilot does not need telling about the eleven that are fine. The panel names the TIGHTEST constraint, and falls back to the fullest rolling limit only when nothing is flagged
 - Do not state a problem without its remedy on the legal page. The next-action line is the imperative ("2 landings required"), phrased in `legality.ts` where the shortfall is in hand — not the reading ("landings 1 / 3"), which the requirement cell already shows
+- Do not let a FAILED duty computation or flight read reach the legality model as empty data — it reads CURRENT. Pass `unavailable` to `buildLegalityModel`, and never treat an errored read as `logbookEmpty`
+- Do not shrink a touch target below `h-9`, or dim the unselected side of a licence-record choice (`OptionPair`) below `text-muted-foreground` — where the row height is fixed, grow the hit area with an `after:` pseudo-element instead
+- Do not use `alert()`/`prompt()` for a form's errors or input — inline `role="alert"` text and inline fields. And do not let a flight form render nothing for a missing or binned flight; it says which
+- Do not alarm on an empty logbook — 0 / 3 recency there is an app that has not been told anything, not a pilot who lapsed. `logbookEmpty` drops the recency cell and turns a clear verdict into the neutral `getting_started`; it must never mask a real failure (an expired document still raises ACTION REQUIRED)
 - Do not let a standing requirement outrank an exceeded FDP — that one is happening right now rather than being true today, and it is the only thing that overrides the legality verdict for the annunciator
 - Do not group the legal page's requirements under headings — they are sorted most-pressing-first so the top-left cell is always the thing closest to stopping the pilot. Headings cost four rules and ~56px to impose an order nobody is reading for on a no-scroll page
 - Do not put the period controls (calendar, period pills) on the legal page — they do nothing there, and the action bar is the one thing that can push a button under the centred nav pill
@@ -3676,7 +4052,8 @@ When making changes, be aware of these high-impact files:
 - Do not use `RETENTION_MS` for a deletion sweep or `DELETED_RETENTION_MS` for a decision — they are 90 and 30 days and the helpers take the window as an argument precisely so a caller has to say which
 - Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
 - Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
-- Do not open a detail with `router.replace` — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
+- Do not write `?selected=` through the ROUTER (`router.push`/`router.replace`) — use `window.history.pushState`/`replaceState`, which Next keeps `useSearchParams` in step with. A router navigation for a query change asks the server for the route's payload and commits the history entry only when it returns: measured ~1.5s after the tap on the dev server, so a back gesture in that window had nothing to pop and left the section, every flight opened was a server request, and opening a detail needed the network in an offline-first app. A change of PATHNAME still goes through the router
+- Do not open a detail with a REPLACE — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
 - Do not remove `overflow-anchor: none` from the logbook scroller — growing the top spacer is how the floating panels push the list, and scroll anchoring exists to cancel exactly that (it bumps `scrollTop` to keep the view still). With it on, the calendar only pushed the list when it was already scrolled to the top, and the compensating adjustment read as a downward scroll that hid the nav pill
 - Do not give the calendar's collapse and the list spacer separate animations — they share `PANEL_MOTION`, or the panel opens and the list catches up afterwards as a visible second stage. The calendar stays MOUNTED at `height: 0` so its natural height is measurable and the collapse is a px transition the spacer can match
 - Do not make the panel divider draggable again, and do not raise the main panel's `minSize` percent above what 360px needs — the two widths are a toggle, and a free drag flips the calendar's layout mid-gesture
@@ -3700,7 +4077,8 @@ When making changes, be aware of these high-impact files:
 - Do not give `SwipeableCard` action panels horizontal padding — the panel must collapse to 0 width when closed (the left gap comes from `openWidth`/`justify-end`), otherwise a sliver of the action button peeks at the card edge
 - Do not put row dividers as a full-width `border-b` — use the inset `.row-divider` class so the line aligns with the `px-4` text
 - Do not give inline form inputs a visible box — keep `border-0 bg-transparent dark:bg-transparent shadow-none rounded-none` so they blend with the row (and `md:text-base` so the font doesn't shrink in edit mode)
-- Do not hardcode `orange-400` for scheduled flight cards — light and dark themes use separate colors (`orange-600` light / `orange-400` dark) for contrast
+- Do not hardcode a surface or accent colour, and do not hand-edit the `palette:light` / `palette:dark` blocks in globals.css — colour is generated from a `PaletteSeed` (`lib/theme/palette.ts`), and those blocks are the default palette's output, pinned by `palette.test.ts`. A new preset is a new SEED; a rule about colour goes into the generator, where every preset and every custom palette gets it. Keep every dark half night-adapted (ground ≤ L 0.17, text never `#fff`), keep the palette off the status ramp and `--destructive`, and keep a scheduled (unflown) flight in the accent
+- Do not fetch anything to choose, edit or restore a palette, and do not apply the stored palette before the preferences row has loaded — the boot script has already painted it from localStorage, and applying the in-memory default first flashes Graphite on every launch
 
 **Report import:**
 - Do not write an imported record with a bare `table.put()` — it is a raw Dexie write with NO sync-queue entry behind it, so the row lives only on the device that ran the import. The importers reached for it because their rows already carry the ids the flight rows point at, which rules out `addPersonnel`/`addCurrency`; `putManyWithSync` (`crud-helpers.ts`) is the shape that keeps the id AND enqueues, in one `bulkPut` + one `enqueueMany` rather than 2N round trips. Crew, currencies and discrepancies were all silently local for exactly this reason
@@ -3783,9 +4161,26 @@ When making changes, be aware of these high-impact files:
 - Do not `refresh` a data hook with `mutate(undefined, { revalidate: true })` — clearing the cache first flips `isLoading` true and flashes the list's skeleton on every background refresh, and it hands out a NEW array even when nothing changed, which defeats SWR's default deep `compare` (`dequal`) and makes every downstream memo recompute (the FDP pipeline, the dashboard aggregates, the calendar's flight-date map). Bare `mutate()` revalidates in place. For the same reason `isLoading` must NOT be `isLoading || isValidating`: SWR's `isLoading` already means "no data yet", and folding in `isValidating` turns every revalidation into a skeleton
 - Do not construct an `Intl.DateTimeFormat` per call — go through `lib/utils/tz-format.ts` (`tzFormatter` / `tzOffsetName`). — resolving locale and timezone data is by far the most expensive part of formatting, and `getAirportTimeInfo` built TWO per call while the logbook parser and the roster executor each resolve a departure and an arrival offset PER SECTOR, and the schedule parser's `normalizeTimeToUTC` resolves one per TIME TOKEN (~six a row). Cache the FORMATTER (stateless, and every caller still hands it the current instant), never the resolved offset — a cached offset pins whatever DST was in force the first time that airport was seen. Measured on 800 lookups across 8 zones: 143ms → 8ms
 - Do not look a reference record up with `array.find(a => a.code.toUpperCase() === …)` — the airport table is ~10k rows and that allocates an uppercased string for every one of them, per lookup. `getAirportByICAO`/`getAirportByIATA` are backed by a `WeakMap` index keyed on the array itself (no invalidation to get wrong: a new array is a new key), and they must keep `find`'s FIRST-match rule, which `airport-code-index.test.ts` pins. The same shape appears wherever recents are resolved — build the Map once, then look up
-- Do not seed a reference table in ONE transaction — Chromium serves every IndexedDB database on an origin from one backing store, so writing the ~29k bundled airports in a single transaction held every request on the origin (the user DB and the sync engine included) for ~26 seconds on a fresh profile. `seedAirportsTable` writes 1000 rows per transaction with a yield between, overwrites in place (no empty-table window), and stamps the version LAST
+- Do not seed a reference table in ONE transaction — Chromium serves every IndexedDB database on an origin from one backing store, so writing the ~29k bundled airports in a single transaction held every request on the origin (the user DB and the sync engine included) for ~26 seconds on a fresh profile. `seedAirportsTable` writes in chunks with a gap between, overwrites in place (no empty-table window), and stamps the version LAST — and do not pace the chunks with a bare `setTimeout(0)` either. Nothing in the app is ONE transaction: adding a flight is a chain of about eight, each started when the last finishes, and with no real gap the next chunk was always queued first, so the chain waited a whole chunk at EVERY step. At 1000-row chunks that made adding a flight take 2–6s for the ~15s after the first flight form opened on a new install (measured; it had been misread as "slow while sync is failing", because offline the seed's fetch fails and it never runs). `SEED_CHUNK` 250 with a `SEED_GAP_MS` 48 gap: adds 0.3–0.7s during the seed, and the seed itself finishes sooner
 - Do not seed a `useState` from `syncService.getStatus()` (or any browser-only value) in a server-rendered component — the server renders "offline", the browser knows it is online, and the first render disagrees with the HTML. Read it with `useSyncExternalStore` and an "offline" server snapshot
 - Do not push a whole record for an edit — `updateEntity` sends `changedFields` + `baseSeq`, and the server applies only those fields. A whole-record push from a device that hadn't caught up is what reverted other devices' edits
+- Do not save an edit form's whole copy of a record — diff it against the form's BASELINE (`formPatch`) and follow the live row with `rebaseForm`. A form open across a pull otherwise sends the stale copy back as an edit and reverts the other device's work with nobody touching the form
+- Do not clear a fetch timeout before the body is read — a stalled body wedged the sync lock forever. Read inside the timeout (`fetchWithTimeout(input, init, read)`, `authFetch`)
+- Do not dead-letter a batch for a request-level 4xx, and do not wipe unsynced rows in a full resync
+- Do not exclude `.pnpm/**/*@gutenye*` (or any pattern that catches `@gutenye/ocr-models`, `onnxruntime-node` or `sharp`) from file tracing — that is what made the deployed `/api/ocr` fail with "Cannot find package '@gutenye/ocr-node'" for months, so every photo paid an upload and a refusal before being read slowly in the browser. Trim onnxruntime-node's OTHER platforms' binaries instead (`next.config.mjs`), and check `GET /api/ocr` reports `available: true` after a deploy
+- Do not hand the OCR engine an image larger than `OCR_MAX_SIDE` — detection runs at whatever size it gets, and a 12MP photo took 19s where 1024px took 1s with identical results. Cap it on the client AND in the route, and decide on pixels, never file size
+- Do not let the browser OCR engine load its runtime from webpack's hashed URL, or import bare `onnxruntime-web` without the WASM-only alias — the hashed copy cannot be precached (the first offline OCR failed) and the default entry is 24MB of WebGPU build the engine never uses. And keep the alias on the NON-bundled `ort.wasm.min.mjs`: the bundle starts its threads from its own hashed URL, so a threaded engine could not start offline; the plain build takes the glue (and the thread script) from `wasmPaths.mjs` at `/models/`
+- Do not recognise every detected box — the OCR pipeline reads top to bottom and STOPS at the MCDU screen's last line (`MCDU_STOP`), so the keypad (half the boxes) never reaches the recognition model. A change that sorts, filters or batches the boxes must keep that order and the drop of anything read past the stop
+- Do not go back to `@gutenye/ocr-node` / `ocr-browser` — their plumbing recognised the keypad, pulled in 10MB of opencv.js for the browser, and had no way to stop early. The models are the same; `lib/ocr/engine/core.ts` is the plumbing, once for both runtimes
+- Do not load a cross-origin resource without CORS (`crossOrigin="anonymous"`, or a CORP header from its server) — every response carries `Cross-Origin-Embedder-Policy: require-corp` so the OCR engine can run multi-threaded, and a no-cors cross-origin image, script or iframe is now BLOCKED, not merely opaque. Do not drop the COOP/COEP headers to get one working, and do not switch to `credentialless` (Safari lacks it, so the platforms would diverge)
+- Do not call `skipWaiting()` on install or reload on every `controllerchange` — a new worker waits for the user's "Update"; and do not put `/_next/static` back in the trimmed dynamic cache
+- Do not read "today" in a memo keyed only on data — a dashboard left open overnight froze its recency and its period. Depend on `useDayKey()`
+- Do not let recency read as met on or after its lapse date, whatever the counts say, and do not count a flight exactly 90 days back — `lapseIso` is the first day NOT current
+- Do not parse a date-only string with `new Date("YYYY-MM-DD")` for a LOCAL comparison — it is UTC midnight, the previous day west of UTC. Build it from its parts
+- Do not compute night time against an airport without `hasCoordinates` — a blank custom airport is 0°N 0°E — and do not write 00:00 over a stored night when the position is missing
+- Do not recompute any role time once one of the five (PIC, SIC, PICUS, Dual, Instructor) is pinned
+- Do not mark a session expired on a 401 alone, and do not start a passkey ceremony from a background trigger — probe first, and require user activation
+- Do not let a sign-in as a different account inherit this device's data — `dataOwner` decides, and the switch clears it
 - Do not compare a pulled record against the local one by clock — rebase it (`planLocalApply`): the server's copy plus whatever this device has pending. Only a pending create or a dead-lettered row falls back to last-write-wins
 - Do not revoke a session before pushing — every sign-out path runs `confirmUnsyncedLoss` FIRST, while the session still works
 - Do not reload a whole reference table on mount to notice a write — `useAirportDatabase` re-read all ~10k airports from IndexedDB every time it mounted, and the flight form mounts on every flight tap. Writers bump `getAirportsRevision()` and the hook reloads only on a mismatch. Every write to `referenceDb.airports` lives in `airports.store.ts` (rebuild / addCustom / toggleFavorite) — a NEW writer must bump it too, or a cached copy goes stale. Capture the revision BEFORE the read, so a write landing mid-load leaves the cache looking stale rather than falsely current

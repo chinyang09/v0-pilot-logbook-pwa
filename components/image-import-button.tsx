@@ -7,6 +7,7 @@ import {
   extractTextFromImage,
   extractFlightData,
   validateExtractedData,
+  warmOCR,
   type ExtractedFlightData,
 } from "@/lib/ocr"
 import {
@@ -46,17 +47,13 @@ export function ImageImportButton({
   const processImage = async (file: File) => {
     setLoading(true)
     setShowDialog(true)
-    setProgress({ percent: 5, stage: "Compressing", detail: "Resizing image..." })
+    setProgress({ percent: 30, stage: "Reading", detail: "Reading times..." })
 
     try {
-      // Compress before OCR to prevent memory crashes on iPad/mobile
-      const { compressImage } = await import("@/lib/utils/image-compress")
-      const compressed = await compressImage(file, 2048, 0.8)
-
-      // Extract with geometry
-      setProgress({ percent: 10, stage: "Initializing", detail: "Loading OCR..." })
-      setProgress({ percent: 40, stage: "Processing", detail: "Reading image..." })
-      const ocrResults = await extractTextFromImage(compressed)
+      // Extract with geometry. The service caps the size itself — for an
+      // upload it re-encodes at OCR_MAX_SIDE, on the device it decodes
+      // straight to that size, without a JPEG round trip in between.
+      const ocrResults = await extractTextFromImage(file)
 
       // Parse layout
       setProgress({ percent: 70, stage: "Analyzing", detail: "Extracting times..." })
@@ -76,7 +73,8 @@ export function ImageImportButton({
         console.log("[OCR] Warnings:", validation.issues)
       }
 
-      await new Promise((r) => setTimeout(r, 600))
+      // Straight into the form — the filled rows ARE the confirmation. There
+      // used to be a 600ms pause here to show "Complete!".
       onDataExtracted(flightData)
     } catch (error) {
       console.error("OCR failed:", error)
@@ -122,18 +120,21 @@ export function ImageImportButton({
         onChange={handleFileChange}
       />
 
-      <DropdownMenu modal={false}>
+      {/* Opening the menu is the earliest sign a photo is coming: wake the
+          engine that will read it while the pilot is still taking it. */}
+      <DropdownMenu modal={false} onOpenChange={(open) => { if (open) warmOCR() }}>
         <DropdownMenuTrigger asChild>
           <Button
             variant={variant}
             size={size}
             className={className}
             disabled={loading}
+            aria-label="Read times from a photo"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="z-[70]">
+        <DropdownMenuContent align="end">
           <DropdownMenuItem asChild>
             <label htmlFor="ocr-camera-input" className="flex items-center cursor-pointer">
               <Camera className="mr-2 h-4 w-4" />

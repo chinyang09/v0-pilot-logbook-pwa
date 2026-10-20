@@ -12,6 +12,7 @@
 
 import type { PilotRole } from "@/types/entities/flight.types";
 import type { ImportDefaults } from "@/types/db/stores.types";
+import type { Personnel } from "@/types/entities/crew.types";
 
 /** Roles that inherently mean "this pilot was flying the aircraft". */
 const PF_ONLY_ROLES = new Set<PilotRole>(["PICUS"]);
@@ -66,4 +67,62 @@ export function isRoleConsistent(
   pilotFlying: boolean
 ): boolean {
   return pilotFlying || !PF_ONLY_ROLES.has(role);
+}
+
+// ── The pilot's own seat, from their "This is me" crew card ─────────────────
+//
+// What a pilot logs follows from ONE fact about them: are they a captain?
+//
+// | seat          | monitoring | flying                      |
+// |---------------|------------|-----------------------------|
+// | captain       | PIC        | PIC                         |
+// | first officer | SIC        | SIC, or PICUS (their call)  |
+//
+// A captain is PIC whichever pilot has the controls. A first officer is never
+// PIC; monitoring is co-pilot time (SIC). Flying, it is SIC unless they log
+// PICUS — co-pilot duties performed as PIC under the PIC's supervision. PICUS
+// is only creditable where the authority accepts the operator's method of
+// supervision (and EASA states want each entry countersigned by the PIC), so
+// it is a per-pilot convention, never the default. Instructor/Examiner/Dual
+// are per-flight capacities, picked on the flight, not defaults.
+
+export type Seat = "captain" | "first_officer";
+export type NonPicPfRole = ImportDefaults["nonPicPfRole"];
+
+type SelfCard = Pick<Personnel, "defaultPIC" | "defaultSIC" | "roles" | "pfRole">;
+
+/**
+ * The self card's seat. `defaultPIC`/`defaultSIC` are what the card's seat
+ * control writes; `roles` is the fallback for a card made before it existed
+ * (an import's profile, or the LogTen address book). Null when nothing says.
+ */
+export function seatOf(self: SelfCard | null | undefined): Seat | null {
+  if (!self) return null;
+  if (self.defaultPIC) return "captain";
+  if (self.defaultSIC) return "first_officer";
+  if (self.roles?.includes("PIC")) return "captain";
+  if (self.roles?.includes("SIC")) return "first_officer";
+  return null;
+}
+
+/**
+ * What a first officer logs a leg they flew as. The self card is the home of
+ * the setting; `fallback` is the old Settings › Import Defaults value, read
+ * only so a pilot who set it there before it moved keeps their choice.
+ */
+export function nonPicPfRoleOf(
+  self: SelfCard | null | undefined,
+  fallback?: NonPicPfRole | null
+): NonPicPfRole {
+  return self?.pfRole ?? fallback ?? "SIC";
+}
+
+/** The role a flight takes from the pilot's seat and who had the controls. */
+export function roleForSeat(
+  seat: Seat,
+  pilotFlying: boolean,
+  nonPicPfRole: NonPicPfRole
+): PilotRole {
+  if (seat === "captain") return "PIC";
+  return pilotFlying ? nonPicPfRole : "SIC";
 }

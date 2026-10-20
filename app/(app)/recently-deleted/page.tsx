@@ -265,7 +265,8 @@ export default function RecentlyDeletedPage() {
         {!isLoading && !isEmpty && (
           <p className="text-xs text-muted-foreground">
             Deleted items are kept for 30 days and count towards nothing while
-            they are here. After that they are gone for good.
+            they are here. After that they are gone for good. Swipe an item
+            left to restore it.
           </p>
         )}
 
@@ -353,7 +354,7 @@ export default function RecentlyDeletedPage() {
                                     "tabular-nums",
                                     daysLeft <= 3
                                       ? "text-status-warning"
-                                      : "text-muted-foreground/70"
+                                      : "text-muted-foreground"
                                   )}
                                 >
                                   {retentionLabel(

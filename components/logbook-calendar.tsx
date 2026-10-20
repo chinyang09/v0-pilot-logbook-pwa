@@ -476,7 +476,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
           {DAYS.map((day) => (
             <div
               key={day}
-              className="text-center text-[10px] font-medium text-[var(--on-glass-muted)] uppercase tracking-wider"
+              className="text-center text-[10px] font-medium text-[var(--on-glass-label)] uppercase tracking-wider"
             >
               {day}
             </div>

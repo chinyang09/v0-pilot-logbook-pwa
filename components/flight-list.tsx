@@ -14,7 +14,8 @@ import {
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { FlightLog } from "@/lib/db";
-import { deleteFlight } from "@/lib/db";
+import { deleteFlight, restoreFlight } from "@/lib/db";
+import { showUndoToast } from "@/lib/utils/undo-toast";
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date";
 import { usePreferences } from "@/components/providers/preferences-provider";
 import type { DisplayPreferences } from "@/types/db/stores.types";
@@ -74,9 +75,21 @@ interface FlightListProps {
   topSpacerTransition?: string;
   headerContent?: React.ReactNode; // Height of the top bar (48px)
   selectedFlightId?: string | null; // Currently selected flight for visual highlighting
+  /** What an empty list says. The page knows WHY it is empty (nothing logged
+   *  yet, or a search that matched nothing) and the list does not. */
+  emptyState?: React.ReactNode;
 }
 
 
+
+/**
+ * The year rail's own column. The rail is permanent, so the cards must END
+ * before it: parked on top of their right-hand column it turned "TR602" and
+ * "1N" into "TR60226" and "1N 25". The rail is drawn narrow (one 20px label
+ * cell, see `railClassName` below) and the cards give up this much on the
+ * right — the rail plus a 4px gap — instead of the shared panel gutter.
+ */
+const YEAR_RAIL_RESERVE = "24px";
 
 /** How long after a dismissal an open request is treated as the same tap. */
 const CASCADE_REOPEN_GUARD_MS = 350;
@@ -187,10 +200,25 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
       onPointerUp={cancelHold}
       onPointerCancel={cancelHold}
       // Stable across the virtualiser recycling this row, so an armed delete
-      // keeps its overlay while the list scrolls.
-      id={`flight-${flight.id}`}
+      // keeps its overlay while the list scrolls. NOT `flight-…`: that is the
+      // row wrapper's DOM id (performDelete measures it), and SwipeableCard
+      // puts this on its own root — the same id twice in the document.
+      id={`flight-card-${flight.id}`}
       onClick={() => {
-        if (isLocked) return;
+        if (isLocked) {
+          // A locked flight cannot be EDITED, but it used to be a dead tap —
+          // no feedback, and no way to read the entry short of unlocking it.
+          // It opens the context preview instead: every field the card has no
+          // room for, plus the action row, which is where Unlock lives. The
+          // preview grows out of the card's own box, so measure that.
+          const surface = document
+            .getElementById(`flight-${flight.id}`)
+            ?.querySelector('[data-slot="card"]');
+          if (!surface) return;
+          const r = surface.getBoundingClientRect();
+          onHold(flight, { left: r.left, top: r.top, width: r.width, height: r.height });
+          return;
+        }
         // Hand the panel its data before it mounts — see primeFlightCache.
         primeFlightCache(flight);
         onEdit(flight);
@@ -219,6 +247,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
         },
         {
           icon: <Trash2 className="h-5 w-5" />,
+          ariaLabel: "Delete flight",
           onClick: () => onDelete(flight),
           variant: "destructive",
           disabled: isLocked,
@@ -238,7 +267,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           // colours ever wanted a transition here.
           "bg-card border-border cursor-pointer relative py-0 transition-colors",
           isLocked && "opacity-75",
-          isScheduled && "border-l-2 border-l-orange-600/70 dark:border-l-orange-400/70",
+          isScheduled && "border-l-2 border-l-primary/70",
           isSelected && "bg-primary/20 border-primary",
           !isSelected && "hover:bg-muted/50",
           // The preview opens as an exact copy of this card, ON this card, so
@@ -308,6 +337,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       topSpacerTransition,
       headerContent,
       selectedFlightId,
+      emptyState,
     },
     ref
   ) {
@@ -326,6 +356,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
     // Generate FastScroll items from flights (year-based)
     const fastScrollItems = useMemo(() => generateFlightYearItems(flights), [flights]);
+    const hasYearRail = fastScrollItems.length > 1;
 
     // The row height, calibrated from the first card actually laid out.
     //
@@ -513,6 +544,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       }
     }, [onScrollStart]);
 
+
     useEffect(() => {
       const container = scrollContainerRef.current;
       if (!container) return;
@@ -572,6 +604,12 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       await deleteFlight(flight.id);
       if (navigator.onLine) syncService.fullSync();
       onDeleted?.();
+      showUndoToast(`${flight.flightNumber || "Flight"} deleted`, async () => {
+        await restoreFlight(flight.id);
+        await mutate(CACHE_KEYS.flights);
+        if (navigator.onLine) syncService.fullSync();
+        onDeleted?.();
+      });
     }, [onDeleted]);
 
     const handleToggleLock = useCallback(async (flight: FlightLog) => {
@@ -689,8 +727,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     }, []);
 
     if (isLoading) {
+      // The same top spacer and gutter as the list itself: without them the
+      // skeleton sat under the header and the cards jumped down ~60px the
+      // moment the flights arrived.
       return (
-        <div className="h-full overflow-y-auto p-2 space-y-3">
+        <div className="h-full overflow-y-auto overscroll-contain scrollbar-hide">
+          <div style={{ height: topSpacerHeight }} />
+          <div className="px-panel pt-1 space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Card key={i} className="bg-card border-border">
               <CardContent className="p-4">
@@ -712,6 +755,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
               </CardContent>
             </Card>
           ))}
+          </div>
         </div>
       );
     }
@@ -734,11 +778,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             />
             {headerContent}
             <div className="px-panel pt-2">
-              <EmptyState
-                icon={Plane}
-                title="No flights logged"
-                description="Add your first flight to get started"
-              />
+              {emptyState ?? (
+                <EmptyState
+                  icon={Plane}
+                  title="No flights logged"
+                  description="Add your first flight to get started"
+                />
+              )}
             </div>
           </div>
         </>
@@ -828,7 +874,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                             // logbook's cards line up with the detail panel
                             // and the sidebar. Bottom 8px is this list's
                             // per-row gap (its spacer subtracts it).
-                            padding: "0 var(--panel-gutter) 8px var(--panel-gutter)",
+                            padding: `0 ${hasYearRail ? YEAR_RAIL_RESERVE : "var(--panel-gutter)"} 8px var(--panel-gutter)`,
                             ...(isDeleting && {
                               opacity: 0,
                               transform: "translateX(-40px)",
@@ -863,7 +909,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           </div>
 
           {/* FastScroll rail (year-based navigation) - positioned in visible area below calendar/header */}
-          {fastScrollItems.length > 1 && (
+          {hasYearRail && (
             <div
               className="absolute right-0 bottom-0 z-40 flex items-center pointer-events-none transition-[top] duration-300 ease-in-out"
               style={{ top: topSpacerHeight }}
@@ -877,6 +923,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                   onScrollEnd={handleFastScrollEnd}
                   indicatorPosition="left"
                   className="py-8"
+                  railClassName="px-0"
                 />
               </div>
             </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useEffect, useCallback, useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -109,6 +109,7 @@ export function SignatureCanvas({
     initialSignature?.signerId || ""
   );
   const [licenseInput, setLicenseInput] = useState<string>("");
+  const fieldId = useId();
 
   const selectedCrew = flightCrew.find((c) => c.id === selectedCrewId);
 
@@ -454,7 +455,7 @@ export function SignatureCanvas({
               size="sm"
               onClick={handleResign}
               disabled={disabled}
-              className="text-xs h-7"
+              className="h-9 text-xs"
             >
               <PenLine className="h-3.5 w-3.5 mr-1" />
               Re-sign
@@ -527,7 +528,10 @@ export function SignatureCanvas({
         )}
       >
         <div className="space-y-1.5">
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <Label
+            htmlFor={`${fieldId}-signer`}
+            className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
+          >
             Signing Crew Member
           </Label>
           <Select
@@ -535,7 +539,7 @@ export function SignatureCanvas({
             onValueChange={handleCrewChange}
             disabled={disabled}
           >
-            <SelectTrigger className="w-full bg-background">
+            <SelectTrigger id={`${fieldId}-signer`} className="w-full bg-background">
               <SelectValue placeholder="Select who is signing..." />
             </SelectTrigger>
             <SelectContent>
@@ -554,11 +558,15 @@ export function SignatureCanvas({
         {/* License field - only show when crew is selected */}
         {selectedCrew && (
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <Label
+              htmlFor={`${fieldId}-license`}
+              className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
+            >
               License Number
             </Label>
             {showLicenseInput ? (
               <Input
+                id={`${fieldId}-license`}
                 type="text"
                 placeholder="Enter license number"
                 value={licenseInput}

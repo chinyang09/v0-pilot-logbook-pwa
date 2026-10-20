@@ -70,6 +70,18 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
    */
   const dismissingRef = useRef(false)
   /**
+   * `dismiss()` has called `history.back()` for our entry and it has not
+   * landed yet.
+   *
+   * A parent can unmount the overlay in the SAME tap that dismisses it — the
+   * time picker's Save calls `onSelect`, whose handler closes the picker
+   * itself, and then `dismiss()`. The cleanup below runs before that `back()`
+   * arrives, still believes it owns the entry, and used to issue a SECOND
+   * `back()` for it: the first popped the marker, the second popped the page
+   * underneath — saving a time in a phone's flight overlay closed the flight.
+   */
+  const backIssuedRef = useRef(false)
+  /**
    * The URL the marker was pushed at.
    *
    * `back()` only takes the marker back while the marker is the TOP of the
@@ -128,6 +140,7 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
     // across open/close cycles — its `active` merely goes false — so a
     // dismissal flag left set would make the SECOND open undismissable.
     dismissingRef.current = false
+    backIssuedRef.current = false
     afterRef.current = null
 
     // Same URL, so there is nothing to navigate to — `history.state` carries a
@@ -148,6 +161,7 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
       // Our entry is gone — either the user swiped back or `dismiss()` popped
       // it. Both mean the same thing from here.
       ownsEntryRef.current = false
+      backIssuedRef.current = false
       dropMarker(markerId)
       const after = afterRef.current
       afterRef.current = null
@@ -164,7 +178,11 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
       // the `back()` undoes whatever navigated. See hrefRef.
       if (ownsEntryRef.current) {
         ownsEntryRef.current = false
-        if (window.location.href === hrefRef.current) {
+        if (backIssuedRef.current) {
+          // `dismiss()` already sent the one `back()` this entry needs; it
+          // lands after we are gone. See backIssuedRef.
+          dropMarker(markerId)
+        } else if (window.location.href === hrefRef.current) {
           // Deferred and cancellable — see pendingReleaseRef.
           pendingReleaseRef.current = window.setTimeout(() => {
             pendingReleaseRef.current = undefined
@@ -193,6 +211,7 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
       // Do NOT close here. `onPop` is the one place that closes, so the entry
       // is always released before anything downstream navigates.
       afterRef.current = after ?? null
+      backIssuedRef.current = true
       window.history.back()
       return
     }

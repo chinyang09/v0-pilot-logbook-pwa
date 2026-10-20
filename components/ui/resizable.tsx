@@ -52,6 +52,10 @@ const ResizableHandle = ({
       toggle ? "cursor-default" : undefined,
       className
     )}
+    // A toggle divider is not a drag handle, so the 1px separator itself is
+    // not a keyboard stop — Tab used to land on it invisibly before reaching
+    // the toggle button inside it, which is the control.
+    {...(toggle ? { tabIndex: -1 } : {})}
     {...props}
   >
     {toggle && (
@@ -59,7 +63,11 @@ const ResizableHandle = ({
         type="button"
         onClick={toggle}
         aria-label={toggleLabel}
-        className="z-10 flex h-10 w-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+        // The pill is 20px wide — too narrow to hit with a finger on an iPad —
+        // so the hit area extends 20px further, RIGHTWARDS only: the logbook's
+        // year rail sits against the divider's left side at the same height,
+        // and growing this to the left would take its taps.
+        className="relative z-10 flex h-10 w-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:text-foreground after:absolute after:-inset-y-1 after:left-0 after:-right-5 after:content-['']"
       >
         {toggleActive ? (
           <ChevronLeft className="h-3.5 w-3.5" />

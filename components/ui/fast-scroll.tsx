@@ -15,6 +15,8 @@ interface FastScrollProps {
   onScrollStart?: () => void
   onScrollEnd?: () => void
   className?: string
+  /** Extra classes for the rail itself (e.g. a slimmer padding). */
+  railClassName?: string
   indicatorPosition?: "left" | "right"
   showIndicator?: boolean
   disabled?: boolean
@@ -33,6 +35,7 @@ export function FastScroll({
   onScrollStart,
   onScrollEnd,
   className,
+  railClassName,
   indicatorPosition = "right",
   showIndicator = true,
   disabled = false,
@@ -265,7 +268,8 @@ export function FastScroll({
           "transition-colors duration-150 cursor-pointer touch-none",
           isDragging
             ? "bg-muted/80 shadow-inner"
-            : "hover:bg-muted/40"
+            : "hover:bg-muted/40",
+          railClassName
         )}
         onPointerDown={(e) => {
           e.stopPropagation()
@@ -293,7 +297,7 @@ export function FastScroll({
               "transition-all duration-100",
               item.key === currentKey
                 ? "text-primary scale-125 font-bold"
-                : "text-muted-foreground/70 hover:text-foreground"
+                : "text-muted-foreground hover:text-foreground"
             )}
             role="option"
             aria-selected={item.key === currentKey}

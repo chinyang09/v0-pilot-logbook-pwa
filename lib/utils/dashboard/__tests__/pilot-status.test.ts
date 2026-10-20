@@ -95,6 +95,14 @@ describe("buildPilotStatus — annunciator", () => {
     expect(s.state).toBe("warning")
   })
 
+  it("does not read CURRENT when the duty limits could not be computed", () => {
+    // A failed pipeline comes back with no duties, no rest and no limits —
+    // exactly what a clear pilot looks like. It must say so instead.
+    const s = status({ unavailable: ["duty"] })
+    expect(s.state).toBe("warning")
+    expect(s.nextAction.headline).toMatch(/unavailable/i)
+  })
+
   it("an exceeded FDP outranks a clean requirement set", () => {
     // Everything standing is met, but the duty in progress has run past its
     // maximum. That is happening NOW, so it wins.
@@ -358,5 +366,35 @@ describe("buildPilotStatus — the clock is injected, not assumed", () => {
       now: NOW,
     })
     expect(s.nextAction.headline).toBe("On standby to 18:00")
+  })
+})
+
+describe("buildPilotStatus — a logbook with nothing in it", () => {
+  const EMPTY = { recency: { takeoffs: 0, landings: 0, current: false, lapseIso: null } }
+  const empty = (over: Partial<LegalityInput> = {}) =>
+    buildPilotStatus({
+      legality: buildLegalityModel({ ...CLEAR, ...EMPTY, ...over, logbookEmpty: true }),
+      duty: deriveDutyStatus([], NOW, null),
+      timeZone: "UTC",
+      logbookEmpty: true,
+      now: NOW,
+    })
+
+  it("is neutral, not an alarm, and says what to do first", () => {
+    const s = empty()
+    expect(s.state).toBe("getting_started")
+    expect(s.legality.requirements.some((r) => r.id === "recency")).toBe(false)
+    expect(s.nextAction.headline).toBe("Add your first flights")
+    expect(s.nextAction.href).toBe("/logbook")
+  })
+
+  it("still raises what CAN be judged — an expired document", () => {
+    const s = empty({ currencies: [currency({ code: "MEDIC", status: "expired", daysRemaining: -2 })] })
+    expect(s.state).toBe("action_required")
+  })
+
+  it("a pilot WITH flights and no recency still gets the alarm", () => {
+    const s = status(EMPTY)
+    expect(s.state).toBe("action_required")
   })
 })

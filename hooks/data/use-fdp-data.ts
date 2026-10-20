@@ -72,6 +72,8 @@ const EMPTY_RESULT = {
   restViolations: [] as DutyPeriod[],
   timelineData: [] as TimelineDataPoint[],
   restUntilLegal: null as RestUntilLegalResult | null,
+  /** The pipeline threw: the empty figures above are NOT a clear pilot. */
+  failed: false as boolean,
 }
 
 type FDPResult = typeof EMPTY_RESULT
@@ -180,12 +182,14 @@ function computeFDPResult(
       restViolations,
       timelineData,
       restUntilLegal,
+      failed: false,
     }
     fdpCache = { key: cacheKey, value }
     return value
   } catch (err) {
     console.error("[FDP] Error computing duty data:", err)
-    return EMPTY_RESULT
+    // Flagged, not just empty — the legal page reads empty as "all clear".
+    return { ...EMPTY_RESULT, failed: true }
   }
 }
 

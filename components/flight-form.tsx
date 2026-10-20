@@ -1,5 +1,6 @@
 "use client";
 
+import { CODE_INPUT_PROPS } from "@/lib/utils/input-props";
 import type React from "react";
 import { ScrollIndicator } from "@/components/ui/scroll-indicator";
 
@@ -8,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
 import {
+  ChevronDown,
   ChevronRight,
   Plane,
   PlaneTakeoff,
@@ -15,6 +17,7 @@ import {
   User,
   ArrowLeftRight,
   Plus,
+  Minus,
   Trash2,
   PenLine,
 } from "lucide-react";
@@ -41,6 +44,8 @@ import {
   isLiveFlight,
 } from "@/lib/db";
 import { useDebounce } from "@/hooks/use-debounce";
+import { formPatch, rebaseForm } from "@/lib/utils/form-patch";
+import { pickSelfCard } from "@/lib/utils/self-card";
 import { useAirportDatabase } from "@/hooks/data";
 import {
   createEmptyFlightLog,
@@ -50,6 +55,7 @@ import {
   calculateTakeoffsLandings,
   calculateRoleTimes,
   getApproachCategory,
+  hasCoordinates,
 } from "@/lib/utils/flight-calculations";
 import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
@@ -63,6 +69,7 @@ import {
   minutesToHHMM,
 } from "@/lib/utils/time";
 import { usePersonnel } from "@/hooks/data";
+import { nonPicPfRoleOf, reconcilePilotRole } from "@/lib/utils/roster/pilot-role";
 import { usePreferences } from "@/components/providers/preferences-provider";
 import { ImageImportButton } from "@/components/image-import-button";
 import { GlassContainer } from "@/components/ui/glass-container";
@@ -118,9 +125,9 @@ function SettingsRow({
   return (
     <div
       className={`flex items-center justify-between py-3.5 px-4 row-divider ${
-        onClick ? "cursor-pointer active:bg-muted/50" : ""
+        onClick ? "cursor-pointer active:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2" : ""
       }`}
-      onClick={onClick}
+      {...(onClick ? pressableRow(onClick, `${label}, ${value || placeholder || "not set"}`) : {})}
     >
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-2">
@@ -137,6 +144,23 @@ function SettingsRow({
     </div>
   );
 }
+
+/** Size a textarea to its content (no `field-sizing`: one engine lacks it). */
+function fitTextarea(el: HTMLTextAreaElement) {
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+/** Stable, so it runs on mount rather than on every render of the form. */
+const fitTextareaRef = (el: HTMLTextAreaElement | null) => {
+  if (el) fitTextarea(el);
+};
+
+/** Fields only ever written straight to the database, by the pickers. */
+const PICKER_FIELDS: ReadonlySet<string> = new Set([
+  "aircraftReg", "aircraftType",
+  "departureIcao", "departureIata", "arrivalIcao", "arrivalIata",
+  "picId", "picName", "sicId", "sicName",
+]);
 
 // Caches the last-known data for each flight at module scope so the form can
 // seed its initial state synchronously when it re-mounts (e.g. when switching
@@ -157,6 +181,29 @@ const flightDataCache = new Map<string, FlightLog>();
  */
 export function primeFlightCache(flight: FlightLog): void {
   flightDataCache.set(flight.id, flight);
+}
+
+/**
+ * What a tap-to-edit row needs to be a CONTROL rather than a painted div: a
+ * button role, a tab stop, Enter/Space, and a name read as "Out, 08:49". They
+ * were bare `div onClick`s, so VoiceOver did not announce them and an iPad
+ * keyboard could not reach Date, Aircraft, the airports, the crew or any of
+ * the OOOI times.
+ */
+function pressableRow(onActivate: () => void, name: string) {
+  return {
+    role: "button" as const,
+    tabIndex: 0,
+    "aria-label": name,
+    onClick: onActivate,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onActivate();
+      }
+    },
+  };
 }
 
 // Time row with UTC and Local display
@@ -189,11 +236,17 @@ function TimeRow({
   const hasValue = isValidHHMM(utcValue);
   const hasDerived = !hasValue && isValidHHMM(derivedValue || "");
 
+  const shown = hasValue ? utcValue : hasDerived ? derivedValue! : "not set";
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
+    // The WHOLE row opens the picker — it was only the time column, so a tap
+    // on "Out" itself did nothing.
+    <div
+      className="flex items-center justify-between py-3.5 px-4 row-divider cursor-pointer focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+      {...pressableRow(onTap, `${label}, ${shown} UTC`)}
+    >
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-3">
-        <div className="flex flex-col items-end cursor-pointer" onClick={onTap}>
+        <div className="flex flex-col items-end">
           <span
             className={`text-lg ${
               hasValue ? "text-foreground" : "text-muted-foreground"
@@ -212,11 +265,13 @@ function TimeRow({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 px-2 text-xs border-primary text-primary bg-transparent"
+              aria-label={`${label} now`}
+              className="h-9 min-w-11 px-2 text-xs border-primary text-primary bg-transparent"
               onClick={(e) => {
                 e.stopPropagation();
                 onNow?.();
               }}
+              onKeyDown={(e) => e.stopPropagation()}
             >
               NOW
             </Button>
@@ -279,7 +334,7 @@ function TimeDisplayRow({
           <Button
             variant="outline"
             size="sm"
-            className="h-7 px-2 text-xs border-primary text-primary bg-transparent"
+            className="h-9 min-w-11 px-2 text-xs border-primary text-primary bg-transparent"
             onClick={onUse}
           >
             {useLabel || "USE"}
@@ -306,24 +361,28 @@ function NumberRow({
     <div className="flex items-center justify-between py-3.5 px-4 row-divider">
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-3">
+        {/* Icons, not "-" and "+" typed as text: a hyphen is a hairline next
+            to a plus, so the two buttons looked unequal. 36px, a thumb's
+            target in a row that is tapped repeatedly. */}
         <Button
           variant="outline"
           size="icon"
           aria-label={`Decrease ${label}`}
-          className="h-8 w-8 rounded-full bg-transparent"
+          className="h-9 w-9 rounded-full bg-transparent"
+          disabled={value <= 0}
           onClick={() => onChange(Math.max(0, value - 1))}
         >
-          -
+          <Minus className="h-4 w-4" />
         </Button>
-        <span className="text-foreground w-8 text-center">{value}</span>
+        <span className="text-foreground w-6 text-center tabular-nums">{value}</span>
         <Button
           variant="outline"
           size="icon"
           aria-label={`Increase ${label}`}
-          className="h-8 w-8 rounded-full bg-transparent"
+          className="h-9 w-9 rounded-full bg-transparent"
           onClick={() => onChange(value + 1)}
         >
-          +
+          <Plus className="h-4 w-4" />
         </Button>
       </div>
     </div>
@@ -343,7 +402,7 @@ function ToggleRow({
   return (
     <div className="flex items-center justify-between py-3.5 px-4 row-divider">
       <span className="text-foreground">{label}</span>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+      <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
     </div>
   );
 }
@@ -382,8 +441,11 @@ export function FlightForm({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // --- useLiveQuery for reactive flight data (both desktop and mobile) ---
+  // `undefined` while the query is in flight, `null` once it has answered
+  // "no such row" — the two used to read the same, so a flight id that is not
+  // on this device left the panel blank forever.
   const liveFlight = useLiveQuery(
-    () => (flightIdProp ? userDb.flights.get(flightIdProp) : undefined),
+    async () => (flightIdProp ? (await userDb.flights.get(flightIdProp)) ?? null : undefined),
     [flightIdProp]
   );
 
@@ -407,6 +469,13 @@ export function FlightForm({
     }
     return createEmptyFlightLog();
   });
+  // The latest form state, for effects that must not re-run on every keystroke.
+  const formDataRef = useRef(formData);
+  useLayoutEffect(() => {
+    formDataRef.current = formData;
+  }, [formData]);
+  const baselineRef = useRef<Partial<FlightLog> | null>(null);
+  const baselineOverridesRef = useRef<FlightLog["manualOverrides"]>(undefined);
 
   // Track manual overrides state
   const [manualOverrides, setManualOverrides] = useState<
@@ -481,45 +550,36 @@ export function FlightForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedFlight?.id]);
 
-  // --- Detect external DB changes (picker writes) via useLiveQuery ---
-  // When a picker writes directly to Dexie, the liveFlight object updates.
-  // We compare picker-modifiable fields to detect external changes and
-  // merge them into formData without resetting user's in-progress edits.
-  // Works for both desktop (form stays mounted) and mobile (form remounts, reads latest).
+  // --- Follow the row underneath the form (picker writes AND sync pulls) ---
+  // Every field the database changed is adopted unless the user has changed
+  // it here since the baseline (see `lib/utils/form-patch.ts`). Following only
+  // the picker fields left the rest of the copy stale after a pull, and the
+  // next auto-save sent that stale copy back — reverting another device's
+  // OOOI times, signature and lock without anyone touching this form.
   const prevLiveFlightRef = useRef<FlightLog | undefined>(undefined);
   useEffect(() => {
     if (!liveFlight || !flightIdProp) return;
 
     // First load: already handled by initialization or the effect above
-    if (!prevLiveFlightRef.current || prevLiveFlightRef.current.id !== liveFlight.id) {
-      prevLiveFlightRef.current = liveFlight;
-      return;
-    }
-
-    // Check for external changes in picker-modifiable fields
-    const pickerFields = [
-      "aircraftReg", "aircraftType",
-      "departureIcao", "departureIata", "arrivalIcao", "arrivalIata",
-      "picId", "picName", "sicId", "sicName",
-    ] as const;
-
-    let hasExternalChange = false;
-    const updates: Partial<FlightLog> = {};
-
-    for (const field of pickerFields) {
-      const dbVal = liveFlight[field];
-      const prevVal = prevLiveFlightRef.current[field];
-      if (dbVal !== prevVal) {
-        (updates as any)[field] = dbVal;
-        hasExternalChange = true;
-      }
-    }
-
+    const previous = prevLiveFlightRef.current;
     prevLiveFlightRef.current = liveFlight;
+    if (!previous || previous.id !== liveFlight.id) return;
+    // The baseline is taken on the first debounced state; until then the form
+    // still IS the row it loaded, so only the pickers need following.
+    const baseline = baselineRef.current?.id === liveFlight.id ? baselineRef.current : null;
 
-    if (hasExternalChange) {
-      setFormData((prev) => ({ ...prev, ...updates }));
-    }
+    const current = formDataRef.current;
+    if (current.id !== liveFlight.id) return;
+    const next = rebaseForm<FlightLog>({
+      form: current,
+      baseline: baseline ?? current,
+      previous,
+      live: liveFlight,
+      alwaysAdopt: PICKER_FIELDS,
+    });
+    if (next.adopted.length === 0) return;
+    if (baseline) baselineRef.current = next.baseline;
+    setFormData(next.form);
   }, [liveFlight, flightIdProp]);
 
   useEffect(() => {
@@ -561,7 +621,7 @@ export function FlightForm({
   useEffect(() => {
     if (resolvedFlight || !personnel.length) return;
 
-    const selfCrew = personnel.find((p) => p.isMe);
+    const selfCrew = pickSelfCard(personnel);
     if (selfCrew) {
       if (selfCrew.defaultPIC) {
         setFormData((prev) => ({
@@ -639,14 +699,8 @@ export function FlightForm({
       const arrLon = arrAirport.longitude ?? (arrAirport as any).lon;
 
       if (
-        typeof depLat === "number" &&
-        !isNaN(depLat) &&
-        typeof depLon === "number" &&
-        !isNaN(depLon) &&
-        typeof arrLat === "number" &&
-        !isNaN(arrLat) &&
-        typeof arrLon === "number" &&
-        !isNaN(arrLon)
+        hasCoordinates({ latitude: depLat, longitude: depLon }) &&
+        hasCoordinates({ latitude: arrLat, longitude: arrLon })
       ) {
         // Pass the EFFECTIVE times to the calculator
         const nightResult = calculateNightTimeComplete(
@@ -672,8 +726,11 @@ export function FlightForm({
           result: nightResult,
         });
       } else {
-        // Airports are present but lack usable coordinates: still split day time
-        // from block − night instead of leaving dayTime at the "00:00" default.
+        // Airports are present but lack usable coordinates (a custom airport
+        // saved blank reads 0°N 0°E): there is no night time to compute, so
+        // keep the one the flight has rather than writing 00:00 over it, and
+        // split day time from block − that.
+        nightTime = formData.nightTime || "00:00";
         dayTime = calculateDayTime(blockTime, nightTime);
       }
     } else {
@@ -736,6 +793,7 @@ export function FlightForm({
     formData.pilotRole,
     formData.departureIcao,
     formData.arrivalIcao,
+    formData.nightTime,
     depAirport,
     arrAirport,
     preferences.autoFill,
@@ -754,6 +812,12 @@ export function FlightForm({
       if (!manualOverrides.nightTime) {
         if (prev.nightTime !== calculatedFields.nightTime) updates.nightTime = calculatedFields.nightTime;
         if (prev.dayTime !== calculatedFields.dayTime) updates.dayTime = calculatedFields.dayTime;
+      } else {
+        // A pinned night time still leaves DAY time derived: it is the rest of
+        // the block. Skipping it with the night meant an edited IN changed the
+        // block and left day + night no longer adding up to it.
+        const day = calculateDayTime(calculatedFields.blockTime, prev.nightTime || "00:00");
+        if (prev.dayTime !== day) updates.dayTime = day;
       }
 
       if (!manualOverrides.dayTakeoffs && !manualOverrides.nightTakeoffs) {
@@ -792,6 +856,9 @@ export function FlightForm({
 
   // Track the last saved state to avoid unnecessary saves
   const lastSavedStateRef = useRef<string | null>(null);
+  // The form as it stood when it last agreed with the database: what a save
+  // diffs against, so only what the user changed is written.
+  // (Declared above with formDataRef so the follow effect can reach it.)
   // Track which flight ID the baseline was captured for
   const baselineFlightIdRef = useRef<string | null>(null);
 
@@ -821,8 +888,18 @@ export function FlightForm({
       const stored = await getFlightById(data.id);
       if (!stored || !isLiveFlight(stored)) return false;
 
-      const { deletedAt: _binState, ...safe } = data;
-      await updateFlight(data.id, { ...safe, manualOverrides: overrides });
+      // Only what changed since the baseline. With no baseline for THIS flight
+      // (a flush in the first half-second after a swap) the stored row is the
+      // baseline, which is the same thing a moment earlier.
+      const baseline = baselineRef.current?.id === data.id ? baselineRef.current : stored;
+      const patch = formPatch<FlightLog>(
+        { ...data, manualOverrides: overrides },
+        { ...baseline, manualOverrides: baselineRef.current?.id === data.id ? baselineOverridesRef.current : stored.manualOverrides }
+      );
+      baselineRef.current = { ...data };
+      baselineOverridesRef.current = overrides;
+      if (Object.keys(patch).length === 0) return true;
+      await updateFlight(data.id, patch);
       return true;
     },
     []
@@ -851,6 +928,8 @@ export function FlightForm({
       if (baselineFlightIdRef.current !== debouncedFormData.id) {
         baselineFlightIdRef.current = debouncedFormData.id;
         lastSavedStateRef.current = currentState;
+        baselineRef.current = { ...debouncedFormData };
+        baselineOverridesRef.current = manualOverrides;
         return; // Don't save on initial load, just capture baseline
       }
 
@@ -1439,6 +1518,30 @@ export function FlightForm({
 
   useRegisterDetailActions(detailActions, true);
 
+  // A flight that is not on this device, or is in Recently Deleted, says so.
+  // Only once the query has ANSWERED (null), and never over a draft.
+  const missing = !editingFlight && flightIdProp && liveFlight === null;
+  const binned = !editingFlight && liveFlight != null && liveFlight.deletedAt != null;
+  if (missing || binned) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-panel pt-chrome pb-chrome text-center">
+        <p className="text-base font-semibold">
+          {binned ? "This flight is in Recently Deleted" : "Flight not found"}
+        </p>
+        <p className="max-w-xs text-sm text-muted-foreground">
+          {binned
+            ? "Restore it from Recently Deleted to view or edit it again."
+            : "It may have been deleted on another device, or not synced to this one yet."}
+        </p>
+        {binned && (
+          <Button variant="secondary" className="h-10" onClick={() => router.push("/recently-deleted")}>
+            Open Recently Deleted
+          </Button>
+        )}
+      </div>
+    );
+  }
+
   // Wait silently for useLiveQuery to resolve — returning null keeps the
   // previous panel content visible, avoiding a flash/spinner on selection change.
   if (flightIdProp && !resolvedFlight && !formData.id) {
@@ -1480,7 +1583,7 @@ export function FlightForm({
                       "rounded-full px-3 py-1 text-sm font-medium transition-colors",
                       active
                         ? "bg-primary/15 text-primary"
-                        : "text-muted-foreground/60 hover:text-muted-foreground"
+                        : "text-muted-foreground hover:text-foreground"
                     )}
                   >
                     {label}
@@ -1516,6 +1619,8 @@ export function FlightForm({
                 type="text"
                 className="text-right bg-transparent outline-none text-foreground w-32 placeholder:text-muted-foreground"
                 placeholder="-"
+                aria-label="Flight number"
+                {...CODE_INPUT_PROPS}
                 value={formData.flightNumber || ""}
                 onChange={(e) => updateField("flightNumber", e.target.value.toUpperCase())}
               />
@@ -1872,11 +1977,36 @@ export function FlightForm({
           <ToggleRow
             label="Pilot Flying"
             checked={formData.pilotFlying ?? true}
-            onCheckedChange={(checked) => updateField("pilotFlying", checked)}
+            onCheckedChange={(checked) => {
+              updateField("pilotFlying", checked);
+              // The role follows who had the controls: a first officer's
+              // flown leg takes their card's convention (SIC or PICUS), and
+              // PICUS falls back to SIC when they were monitoring. A captain
+              // stays PIC either way — see `reconcilePilotRole`.
+              const nextRole = reconcilePilotRole({
+                currentRole: formData.pilotRole || "PIC",
+                pilotFlying: checked,
+                nonPicPfRole: nonPicPfRoleOf(
+                  pickSelfCard(personnel),
+                  preferences.importDefaults?.nonPicPfRole
+                ),
+              });
+              if (nextRole !== formData.pilotRole) updateField("pilotRole", nextRole);
+            }}
           />
 
-          <SettingsRow label="Pilot Role">
+          {/* The native select covers the WHOLE row, invisibly, so a tap
+              anywhere on it opens the platform's own picker. As a bare select
+              it was the width of "PIC" — about 25px, with no chevron and a
+              label that did nothing when tapped. */}
+          <div className="relative flex items-center justify-between py-3.5 px-4 row-divider focus-within:outline-2 focus-within:outline-ring focus-within:-outline-offset-2">
+            <span className="text-foreground">Pilot Role</span>
+            <span className="flex items-center gap-1 text-foreground">
+              {formData.pilotRole || "PIC"}
+              <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden />
+            </span>
             <select
+              aria-label="Pilot role"
               value={formData.pilotRole || "PIC"}
               onChange={(e) =>
                 updateField(
@@ -1884,7 +2014,7 @@ export function FlightForm({
                   e.target.value as FlightLog["pilotRole"]
                 )
               }
-              className="bg-transparent text-foreground outline-none"
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
             >
               <option value="PIC">PIC</option>
               <option value="SIC">SIC</option>
@@ -1893,7 +2023,7 @@ export function FlightForm({
               <option value="Instructor">Instructor</option>
               <option value="Examiner">Examiner</option>
             </select>
-          </SettingsRow>
+          </div>
         </div>
 
         {/* LANDINGS Section */}
@@ -1962,6 +2092,7 @@ export function FlightForm({
             >
               <div className="flex items-center gap-2 flex-1">
                 <select
+                  aria-label="Approach type"
                   value={approach.type}
                   onChange={(e) =>
                     updateApproach(approach.id, { type: e.target.value as Approach["type"] })
@@ -1994,11 +2125,15 @@ export function FlightForm({
                     })
                   }
                   placeholder="RWY"
+                  aria-label="Runway"
+                  {...CODE_INPUT_PROPS}
                   className="bg-transparent text-foreground text-right outline-none w-16"
                 />
                 <button
+                  type="button"
                   onClick={() => removeApproach(approach.id)}
-                  className="text-destructive"
+                  aria-label="Remove approach"
+                  className="-m-2 p-2 text-destructive"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -2035,16 +2170,26 @@ export function FlightForm({
             </h2>
           </div>
 
+          {/* Typed IN the row, multi-line, and growing with what is written.
+              It was a native `prompt()`: one cramped line under the site's
+              origin, the old remark unreadable past its first words, and no
+              way to write a second line — on the field where a pilot records
+              what happened on the flight. */}
           <SwipeableRow onClear={() => clearField("remarks")}>
-            <SettingsRow
-              label="Comment"
-              value={formData.remarks}
-              onClick={() => {
-                const comment = prompt("Remarks:", formData.remarks);
-                if (comment !== null) updateField("remarks", comment);
-              }}
-              showChevron
-            />
+            <div className="px-4 py-3 row-divider">
+              <textarea
+                aria-label="Remarks"
+                placeholder="Add a remark"
+                rows={2}
+                value={formData.remarks || ""}
+                onChange={(e) => {
+                  updateField("remarks", e.target.value);
+                  fitTextarea(e.currentTarget);
+                }}
+                ref={fitTextareaRef}
+                className="block w-full resize-none bg-transparent text-base leading-snug text-foreground outline-none placeholder:text-muted-foreground"
+              />
+            </div>
           </SwipeableRow>
         </div>
 

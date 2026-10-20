@@ -52,7 +52,7 @@ export function PeriodSummary({
       aria-label="Period totals"
     >
       <div className="flex items-center justify-between gap-2">
-        <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+        <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           {resolved.rangeLabel}
         </p>
         <Link

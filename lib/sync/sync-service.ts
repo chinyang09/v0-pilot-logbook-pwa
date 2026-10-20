@@ -65,11 +65,24 @@ const ORPHAN_SCAN_INTERVAL_MS = 60 * 1000
 /** The shared aircraft reference pool changes slowly; don't ask on every poll. */
 const AIRCRAFT_REF_INTERVAL_MS = 10 * 60 * 1000
 
-async function fetchWithTimeout(input: RequestInfo, init?: RequestInit): Promise<Response> {
+/**
+ * A fetch whose timeout covers the BODY as well as the headers. The timer used
+ * to be cleared as soon as `fetch` resolved — which is when the headers arrive
+ * — so a connection that dropped mid-body (or a proxy trickling it) left
+ * `response.json()` waiting forever: the cycle never settled, the cross-tab
+ * Web Lock was never released, every later sync chained onto it, and sign-out
+ * hung on the pre-logout push. `read` runs inside the timeout, so the abort
+ * reaches the body stream too.
+ */
+async function fetchWithTimeout<T>(
+  input: RequestInfo,
+  init: RequestInit | undefined,
+  read: (response: Response) => Promise<T>
+): Promise<T> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
-    return await fetch(input, { ...init, signal: controller.signal })
+    return await read(await fetch(input, { ...init, signal: controller.signal }))
   } finally {
     clearTimeout(timer)
   }
@@ -218,6 +231,23 @@ class SyncService {
 
   destroyTriggers() {
     getSyncTriggerManager().destroy()
+  }
+
+  /**
+   * Resolves once no cycle is running (or after `maxWaitMs`). Sign-out awaits
+   * it before wiping the database: a cycle already in flight would otherwise
+   * write this user's records and cursors back into the wiped tables.
+   */
+  async whenIdle(maxWaitMs = 10_000): Promise<void> {
+    const deadline = new Promise<void>((resolve) => setTimeout(resolve, maxWaitMs))
+    while (this.inFlight || this.followUp) {
+      const running = (this.followUp ?? this.inFlight)!.then(
+        () => undefined,
+        () => undefined
+      )
+      const timedOut = await Promise.race([running.then(() => false), deadline.then(() => true)])
+      if (timedOut) return
+    }
   }
 
   /** Register a silent reauth handler (the auth provider's passkey reauth). */
@@ -423,7 +453,7 @@ class SyncService {
       if (batch.length > 0 || state.knownSeq === 0) this.setStatus("syncing")
       if (batch.length > 0) await bumpSyncAudit("pushAttempted", batch.length)
 
-      let response: Response
+      let response: { ok: boolean; status: number; data: RoundTripResponse | null }
       try {
         response = await fetchWithTimeout("/api/sync", {
           method: "POST",
@@ -437,9 +467,16 @@ class SyncService {
             knownSeq: state.knownSeq,
             limit: PULL_LIMIT,
           }),
-        })
+        }, async (res) => ({
+          ok: res.ok,
+          status: res.status,
+          // A truncated or non-JSON 200 (a captive portal) throws here, inside
+          // the timeout, and lands in the network-error branch below.
+          data: res.ok ? ((await res.json()) as RoundTripResponse) : null,
+        }))
       } catch (error) {
-        // Transient network failure / abort — keep the queue intact, no retries.
+        // Transient network failure / abort / unreadable body — keep the queue
+        // intact, no retries.
         console.warn(`[Sync ${correlationId}] network error (will retry):`, error)
         return { pushed, pulled, failed: failed + batch.length, ok: false }
       }
@@ -451,18 +488,22 @@ class SyncService {
           this.signalUnauthorized()
           return { pushed, pulled, failed: failed + batch.length, ok: false }
         }
+        // The server judges every item on its own and answers a bad one in
+        // `results`, so a REQUEST-level 4xx (a proxy's 403, a 408, a 413 on the
+        // body) is not any one item's fault — dead-lettering the whole batch
+        // for it dropped up to 200 good edits after five cycles. Only a batch
+        // of one, where the request IS the item, counts toward its cap.
         const transient = response.status >= 500 || response.status === 429
-        if (!transient && batch.length > 0) {
-          // Persistent 4xx → poison. Bump retry / dead-letter the batch.
+        if (!transient && batch.length === 1) {
           console.error(`[Sync ${correlationId}] push rejected ${response.status}`)
-          for (const item of batch) await this.retryOrDeadLetter(queue, item)
+          await this.retryOrDeadLetter(queue, batch[0])
         } else {
           console.warn(`[Sync ${correlationId}] server ${response.status} (will retry)`)
         }
         return { pushed, pulled, failed: failed + batch.length, ok: false }
       }
 
-      const data = (await response.json()) as RoundTripResponse
+      const data = response.data as RoundTripResponse
 
       if (batch.length > 0) {
         const outcome = await this.processPushResults(queue, batch, data.results ?? [])
@@ -580,7 +621,7 @@ class SyncService {
     let failed = 0
     const reconcileByCollection = new Map<
       SyncCollection,
-      { id: string; pushedUpdatedAt?: number; pushedTimestamp: number; serverSeq?: number }[]
+      { id: string; pushedUpdatedAt?: number; pushedTimestamp: number; serverSeq?: number; pushedData?: Record<string, unknown> }[]
     >()
     const staleByCollection: Partial<Record<SyncCollection, { records: ServerRecord[] }>> = {}
     const byId = new Map(batch.map((b) => [b.id, b]))
@@ -617,6 +658,7 @@ class SyncService {
           pushedUpdatedAt: (original.data as { updatedAt?: number }).updatedAt,
           pushedTimestamp: original.timestamp,
           serverSeq: typeof itemResult.serverSeq === "number" ? itemResult.serverSeq : undefined,
+          pushedData: original.data as unknown as Record<string, unknown>,
         })
         reconcileByCollection.set(original.collection, entries)
         success++
@@ -660,6 +702,10 @@ class SyncService {
         import("@/lib/utils/entry-type"),
         import("@/lib/db"),
       ])
+      // This device's auto-fill switches, as the flight form applies them —
+      // recomputing with every switch on wrote PIC/night times back that the
+      // pilot had turned off here, and the next form save zeroed them again.
+      const autoFill = (await db.getUserPreferences().catch(() => null))?.autoFill
       for (const id of ids) {
         const flight = await userDb.flights.get(id)
         if (!flight || isSimulatorEntry(flight) || flight.deletedAt != null) continue
@@ -667,7 +713,7 @@ class SyncService {
           flight.departureIcao ? db.getAirportByIcao(flight.departureIcao) : flight.departureIata ? db.getAirportByIata(flight.departureIata) : undefined,
           flight.arrivalIcao ? db.getAirportByIcao(flight.arrivalIcao) : flight.arrivalIata ? db.getAirportByIata(flight.arrivalIata) : undefined,
         ])
-        const updates = recalculateFlightFields(flight, dep ?? null, arr ?? null)
+        const updates = recalculateFlightFields(flight, dep ?? null, arr ?? null, autoFill)
         if (Object.keys(updates).length > 0) await db.updateFlight(id, updates)
       }
     } catch (error) {
@@ -740,12 +786,14 @@ class SyncService {
         const url =
           `/api/sync/aircraft-reference?since=${cursor.enrichedAt}` +
           `&sinceId=${encodeURIComponent(cursor.id)}`
-        const response = await fetchWithTimeout(url, { headers: this.getAuthHeaders() })
-        if (!response.ok) {
-          console.error("[Sync] aircraft reference pull failed:", response.status)
+        const { status, data } = await fetchWithTimeout(url, { headers: this.getAuthHeaders() }, async (res) => ({
+          status: res.status,
+          data: res.ok ? await res.json() : null,
+        }))
+        if (!data) {
+          console.error("[Sync] aircraft reference pull failed:", status)
           break
         }
-        const data = await response.json()
         const records = data.records || []
         if (records.length > 0) total += await bulkUpsertAircraftReferences(records)
 

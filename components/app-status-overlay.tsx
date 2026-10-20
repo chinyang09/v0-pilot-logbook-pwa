@@ -14,9 +14,11 @@ export function AppStatusOverlay({
   title: string
   description?: string
 }) {
+  // Above the app chrome (nav pill z-100): at the pill's own level the pill
+  // drew over this "Signing out…" cover and stayed tappable.
   return (
     <div
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-background/90 backdrop-blur-sm safe-area-inset"
+      className="fixed inset-0 z-[130] flex flex-col items-center justify-center gap-4 bg-background/90 backdrop-blur-sm safe-area-inset"
       role="status"
       aria-live="polite"
     >

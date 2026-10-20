@@ -1,5 +1,6 @@
 "use client"
 
+import { SEARCH_INPUT_PROPS } from "@/lib/utils/input-props"
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react"
 import { FlightList, type FlightListRef } from "@/components/flight-list"
 import { useDebounce } from "@/hooks/use-debounce"
@@ -14,7 +15,9 @@ import {
   CACHE_KEYS,
 } from "@/hooks/data"
 import { mutate } from "swr"
-import { Calendar, Plus, Search, X } from "lucide-react"
+import { Calendar, Plane, Plus, Search, SearchX, X } from "lucide-react"
+import { EmptyState } from "@/components/ui/empty-state"
+import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { usePanelDualMonth } from "@/lib/layout/panel-mode"
@@ -478,6 +481,57 @@ export default function LogbookPage() {
   // Re-entrancy guard: a second tap on [+] before the first create finishes
   // must not create a second blank flight.
   const creatingFlightRef = useRef(false)
+  const handleAddFlight = useCallback(async () => {
+    if (creatingFlightRef.current) return
+    creatingFlightRef.current = true
+    try {
+      const newFlight = await createFlight(selectedDateRef.current || undefined)
+      // Placed by the shared comparator, not prepended: a new flight
+      // belongs at its date and time straight away, or it sits at the
+      // top of the logbook until the next refetch and then jumps.
+      mutate(
+        CACHE_KEYS.flights,
+        (prev: FlightLog[] | undefined) =>
+          insertFlightSorted(prev ?? [], newFlight),
+        { revalidate: false }
+      )
+      setSelectedFlightId(newFlight.id)
+    } finally {
+      creatingFlightRef.current = false
+    }
+  }, [createFlight, setSelectedFlightId])
+
+  // Why the list is empty decides what it should offer. A search that matched
+  // nothing used to read "No flights logged — add your first flight" to a
+  // pilot with a thousand of them.
+  const emptyState = useMemo(
+    () =>
+      hasActiveFilters && flights.length > 0 ? (
+        <EmptyState
+          icon={SearchX}
+          title="No matching flights"
+          description="Every search term has to match. Remove one, or clear the search."
+          action={
+            <Button variant="outline" size="sm" onClick={clearAllFilters}>
+              Clear search
+            </Button>
+          }
+        />
+      ) : (
+        <EmptyState
+          icon={Plane}
+          title="No flights logged"
+          description="Add one by hand, or bring in your history with the upload button: a crew logbook report, a schedule, or a LogTen Pro export."
+          action={
+            <Button variant="outline" size="sm" onClick={handleAddFlight}>
+              <Plus className="mr-1 h-4 w-4" /> Add flight
+            </Button>
+          }
+        />
+      ),
+    [hasActiveFilters, flights.length, clearAllFilters, handleAddFlight]
+  )
+
   const logbookActions = useMemo(() => (
     <>
       <GlassButtonGroup>
@@ -518,30 +572,12 @@ export default function LogbookPage() {
 
       <GlassIconButton
         ariaLabel="Add flight"
-        onClick={async () => {
-          if (creatingFlightRef.current) return
-          creatingFlightRef.current = true
-          try {
-            const newFlight = await createFlight(selectedDateRef.current || undefined)
-            // Placed by the shared comparator, not prepended: a new flight
-            // belongs at its date and time straight away, or it sits at the
-            // top of the logbook until the next refetch and then jumps.
-            mutate(
-              CACHE_KEYS.flights,
-              (prev: FlightLog[] | undefined) =>
-                insertFlightSorted(prev ?? [], newFlight),
-              { revalidate: false }
-            )
-            setSelectedFlightId(newFlight.id)
-          } finally {
-            creatingFlightRef.current = false
-          }
-        }}
+        onClick={handleAddFlight}
       >
         <Plus className="h-5 w-5" />
       </GlassIconButton>
     </>
-  ), [showCalendar, toggleCalendar, createFlight, setSelectedFlightId, showSearch, toggleSearch])
+  ), [showCalendar, toggleCalendar, handleAddFlight, showSearch, toggleSearch])
 
   // Register actions for the desktop floating bar
   useRegisterMainActions(logbookActions, isActive)
@@ -571,6 +607,9 @@ export default function LogbookPage() {
             willChange: "height",
           }}
           aria-hidden={!showSearch}
+          // Stowed at 0px but mounted — inert keeps the hidden field out of
+          // the tab order (see CalendarPanel).
+          inert={!showSearch}
         >
           <div ref={searchBlockRef} className="px-2 pt-1 pb-2">
             <GlassContainer cornerRadius={20} className="w-full">
@@ -583,10 +622,11 @@ export default function LogbookPage() {
                     key={term}
                     type="button"
                     onClick={() => removeSearchTerm(term)}
-                    className="flex items-center gap-1 rounded-full bg-[var(--on-glass-accent)] px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-[var(--on-glass-accent-strong)]"
+                    aria-label={`Remove search term ${term}`}
+                    className="relative flex items-center gap-1 rounded-full after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] bg-[var(--on-glass-accent)] px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-[var(--on-glass-accent-strong)]"
                   >
                     {term}
-                    <X className="h-3 w-3" />
+                    <X className="h-3 w-3" aria-hidden />
                   </button>
                 ))}
 
@@ -607,6 +647,8 @@ export default function LogbookPage() {
                   }}
                   enterKeyHint="done"
                   placeholder={searchTerms.length ? "Add filter…" : "Search flights…"}
+                  aria-label="Search flights"
+                  {...SEARCH_INPUT_PROPS}
                   className="min-w-[6rem] flex-1 border-0 bg-transparent p-0 text-sm outline-none placeholder:text-muted-foreground"
                 />
 
@@ -678,6 +720,7 @@ export default function LogbookPage() {
           topSpacerHeight={`calc(var(--chrome-top) + ${(showSearch || showCalendar ? 0 : LIST_TOP_GAP) + (showSearch ? searchBlockHeight : 0) + (showCalendar ? calendarNaturalHeight : 0)}px)`}
           topSpacerTransition={spacerAnimated ? PANEL_MOTION : "none"}
           selectedFlightId={selectedFlightId}
+          emptyState={emptyState}
         />
       </main>
     </div>

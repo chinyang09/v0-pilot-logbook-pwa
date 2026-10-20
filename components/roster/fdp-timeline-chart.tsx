@@ -84,6 +84,14 @@ interface FDPTimelineChartProps {
   onClearScenario?: () => void
 }
 
+
+/**
+ * The chart toolbar's buttons are 22px — under a fingertip — and sit 2px
+ * apart, so their hit area grows VERTICALLY (to ~42px) and barely sideways:
+ * growing them sideways would make neighbouring targets overlap.
+ */
+const TOOL_HIT = "relative after:absolute after:-inset-y-2.5 after:-inset-x-0.5 after:content-['']"
+
 export function FDPTimelineChart({
   timelineData,
   limits,
@@ -311,7 +319,10 @@ export function FDPTimelineChart({
     return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
   }, [])
 
-  // Compact integer formatter — 1000 → "1k", 1500 → "1.5k" (for tight tab displays).
+  // Compact formatter — 1000 → "1k", 1500 → "1.5k" (for tight tab displays).
+  // Below 10 it keeps one decimal, the same rule as the dashboard's limits
+  // band (`legality.ts`): rounding 5.5h to "6" here while the dashboard read
+  // "5.5" showed one total two ways on two pages.
   const formatCap = useCallback((n: number): string => {
     if (!Number.isFinite(n)) return "0"
     const abs = Math.abs(n)
@@ -319,6 +330,7 @@ export function FDPTimelineChart({
       const v = n / 1000
       return `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}k`
     }
+    if (abs < 10 && Math.round(n) !== n) return n.toFixed(1)
     return `${Math.round(n)}`
   }, [])
 
@@ -872,6 +884,7 @@ export function FDPTimelineChart({
                 onClick={toggleMultiSelectMode}
                 className={cn(
                   "p-1 rounded transition-colors",
+                  TOOL_HIT,
                   multiSelectMode ? "text-primary" : "text-muted-foreground hover:bg-secondary"
                 )}
                 aria-label={multiSelectMode ? "Switch to single-select" : "Switch to multi-select"}
@@ -884,14 +897,14 @@ export function FDPTimelineChart({
               <div className="h-3.5 w-px bg-border mx-1" />
               <button
                 onClick={zoomIn}
-                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                className={cn("p-1 rounded hover:bg-secondary text-muted-foreground transition-colors", TOOL_HIT)}
                 aria-label="Zoom in"
               >
                 <ZoomIn className="h-3.5 w-3.5" />
               </button>
               <button
                 onClick={zoomOut}
-                className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                className={cn("p-1 rounded hover:bg-secondary text-muted-foreground transition-colors", TOOL_HIT)}
                 aria-label="Zoom out"
               >
                 <ZoomOut className="h-3.5 w-3.5" />
@@ -899,7 +912,7 @@ export function FDPTimelineChart({
               {viewWindow && (
                 <button
                   onClick={resetZoom}
-                  className="p-1 rounded hover:bg-secondary text-muted-foreground transition-colors"
+                  className={cn("p-1 rounded hover:bg-secondary text-muted-foreground transition-colors", TOOL_HIT)}
                   aria-label="Reset zoom"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />

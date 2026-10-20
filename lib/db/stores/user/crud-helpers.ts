@@ -97,6 +97,9 @@ export async function createEntity<T extends SyncableEntity>(
   return newEntity
 }
 
+/** Envelope keys a patch never claims to change. */
+const QUEUE_BOOKKEEPING = new Set(["id", "userId", "createdAt", "updatedAt", "deviceId", "syncStatus", "serverSeq"])
+
 /**
  * Write rows that ALREADY HAVE ids, and put them on the sync queue.
  *
@@ -133,23 +136,49 @@ export async function putManyWithSync<T extends SyncableEntity>(
   // (see lib/sync/changes.ts). That needs the rows as they were.
   const before = type === "update" ? await table.bulkGet(stamped.map((e) => e.id)) : []
 
-  await table.bulkPut(stamped)
-  await enqueueMany(
-    stamped.map((data, i) => {
+  // An update that changes nothing is not written at all — the same rule
+  // `updateEntity` applies to an edit. Re-uploading a report used to rewrite
+  // and queue every currency it named (ten empty patches per upload, each one
+  // a pending-sync count and a round trip for nothing).
+  const rows = stamped
+    .map((data, i) => {
       const prior = before[i]
-      return prior
+      const changedFields = prior ? diffFields(prior as never, data as never) : undefined
+      return { data, prior, changedFields }
+    })
+    .filter((row) => !row.prior || row.changedFields!.length > 0)
+  if (rows.length === 0) return []
+
+  await table.bulkPut(rows.map((row) => row.data))
+  await enqueueMany(
+    rows.map(({ data, prior, changedFields }) =>
+      prior
         ? {
             type,
             collection: tableName,
             data,
-            changedFields: diffFields(prior as never, data as never),
+            changedFields,
             baseSeq: prior.serverSeq ?? 0,
           }
-        : { type, collection: tableName, data, ...(type === "create" ? { changedFields: [] } : {}) }
-    })
+        : type === "create"
+          ? { type, collection: tableName, data, changedFields: [] }
+          : // An UPDATE of a row this device does not hold (another device
+            // created it). As a whole record it REPLACED the stored document,
+            // clearing every key the import does not carry — a comparison's
+            // `acceptedAt`, say. As a patch of exactly the keys it carries,
+            // from base 0, the rest of the record stands and any field another
+            // device set is arbitrated (and kept in syncConflicts if it loses).
+            {
+              type,
+              collection: tableName,
+              data,
+              changedFields: Object.keys(data).filter((k) => !QUEUE_BOOKKEEPING.has(k)),
+              baseSeq: 0,
+            }
+    )
   )
 
-  return stamped
+  return rows.map((row) => row.data)
 }
 
 /** Single-row form of `putManyWithSync`, for a call site that has just one. */
@@ -160,7 +189,9 @@ export async function putWithSync<T extends SyncableEntity>(
   type: "create" | "update" = "create"
 ): Promise<T> {
   const [written] = await putManyWithSync(table, tableName, [entity], type)
-  return written
+  // Nothing changed, so nothing was written: the entity as it stands is the
+  // current row.
+  return written ?? entity
 }
 
 /**
@@ -247,7 +278,14 @@ export async function purgeEntity<T extends SyncableEntity>(
   if (!existing) return false
 
   await table.delete(id)
-  await addToSyncQueue("delete", tableName, { id })
+  // The seq this device saw the record BINNED at. A device that has not
+  // caught up may purge a copy another device has since RESTORED — the
+  // server refuses a purge of a live record that moved on past this base and
+  // answers with the restored record instead (see `decidePush`).
+  const seen = (existing as { serverSeq?: number; deletedAt?: unknown }).deletedAt != null
+    ? (existing as { serverSeq?: number }).serverSeq
+    : undefined
+  await addToSyncQueue("delete", tableName, { id }, typeof seen === "number" ? { baseSeq: seen } : {})
 
   return true
 }

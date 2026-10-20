@@ -91,7 +91,15 @@ export function SyncStatus({ className }: { className?: string }) {
       {status === "offline" && <CloudOff className="h-5 w-5" />}
       {status === "syncing" && <RefreshCw className="h-5 w-5 animate-spin" />}
       {pendingCount > 0 && (
-        <span className="absolute -top-1 -right-1 bg-[var(--status-pending)] text-background text-[10px] leading-none min-w-[16px] h-[16px] flex items-center justify-center px-1 rounded-full font-medium">{pendingCount}</span>
+        // INSIDE the button's box, not hanging off its corner. The button is
+        // the last thing in the nav pill, so its top-right corner sits on the
+        // pill's rounded end — and the glass clips its content — so a badge at
+        // -top-1/-right-1 lost its right half to the curve ("128" read as
+        // "12"). This position clears the curve on both the 56px mobile bar
+        // and the 44px desktop pill. Capped at 99+ so it cannot grow back out.
+        <span className="pointer-events-none absolute top-0 right-1 bg-[var(--status-pending)] text-background text-[9px] leading-none min-w-[14px] h-[14px] flex items-center justify-center px-[3px] rounded-full font-semibold tabular-nums">
+          {pendingCount > 99 ? "99+" : pendingCount}
+        </span>
       )}
     </button>
   )

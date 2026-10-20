@@ -22,7 +22,7 @@ import type { DutyStatus } from "./duty-status"
  * Three states, not four — an "unknown" requirement is something the app cannot
  * answer for, which is a caution, not its own colour on a warning panel.
  */
-export type AnnunciatorState = "current" | "warning" | "action_required"
+export type AnnunciatorState = "current" | "warning" | "action_required" | "getting_started"
 
 export interface NextAction {
   tone: AnnunciatorState
@@ -64,6 +64,7 @@ export const ANNUNCIATOR_WORD: Record<AnnunciatorState, string> = {
   current: "CURRENT",
   warning: "CAUTION",
   action_required: "ACTION REQUIRED",
+  getting_started: "NO FLIGHTS YET",
 }
 
 /** "1:20" — a duration, for a shortfall the reader has to act on. */
@@ -91,6 +92,7 @@ export function buildPilotStatus({
   duty,
   timeZone,
   formatClock,
+  logbookEmpty = false,
   now = new Date(),
 }: {
   legality: LegalityModel
@@ -108,15 +110,25 @@ export function buildPilotStatus({
    * so the annunciator cannot disagree with the band beneath it.
    */
   formatClock?: (ms: number) => string
+  /**
+   * Nothing logged yet. A clear verdict then says nothing — the requirements
+   * that would have failed were never assessed (see `logbookEmpty` in
+   * legality.ts) — so the annunciator goes NEUTRAL rather than green, and the
+   * action is the first step. Anything that CAN be judged still is: an expired
+   * medical on a fresh install is still ACTION REQUIRED.
+   */
+  logbookEmpty?: boolean
   now?: Date
 }): PilotStatus {
   // An exceeded FDP outranks every standing requirement: it is the only thing
   // here that is happening RIGHT NOW rather than being true today.
   const fdpExceeded = duty.phase === "on_duty" && duty.active?.exceeded === true
 
-  const state: AnnunciatorState = fdpExceeded
+  const verdictState: AnnunciatorState = fdpExceeded
     ? "action_required"
     : VERDICT_TO_STATE[legality.verdict]
+  const state: AnnunciatorState =
+    logbookEmpty && verdictState === "current" ? "getting_started" : verdictState
 
   const governing = legality.binding
   const restOutstanding = duty.rest !== null && !duty.rest.isLegalNow
@@ -251,6 +263,15 @@ function deriveNextAction({
       headline: `Report ${clock(duty.next.reportMs)}`,
       detail: duty.next.route || `${duty.next.sectorCount} sectors`,
       href: "/roster",
+    }
+  }
+
+  if (state === "getting_started") {
+    return {
+      tone: state,
+      headline: "Add your first flights",
+      detail: "Recency is worked out from your logbook",
+      href: "/logbook",
     }
   }
 

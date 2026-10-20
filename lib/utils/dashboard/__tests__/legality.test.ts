@@ -54,6 +54,41 @@ describe("buildLegalityModel — verdict", () => {
     expect(model.counts.fail).toBe(1)
   })
 
+  it("fails recency on or after its lapse date, whatever the counts still say", () => {
+    // The counts are taken when the aggregate runs; a dashboard left open past
+    // the lapse still holds 3 / 3. The date is what decides.
+    for (const lapseIso of ["2026-08-13", "2026-08-11"]) {
+      const model = buildLegalityModel({ ...CLEAR, recency: { takeoffs: 3, landings: 3, current: true, lapseIso } })
+      const recency = model.requirements.find((r) => r.id === "recency")!
+      expect(recency.state).toBe("fail")
+      expect(recency.value).toBe("Lapsed")
+    }
+    const dayBefore = buildLegalityModel({
+      ...CLEAR,
+      recency: { takeoffs: 3, landings: 3, current: true, lapseIso: "2026-08-14" },
+    })
+    expect(dayBefore.requirements.find((r) => r.id === "recency")!.state).toBe("caution")
+  })
+
+  it("does not call a document that expires TODAY expired", () => {
+    const model = buildLegalityModel({
+      ...CLEAR,
+      currencies: [currency({ code: "MEDIC", status: "critical", daysRemaining: 0 })],
+    })
+    const doc = model.requirements.find((r) => r.label === "MEDIC")!
+    expect(doc.state).toBe("caution")
+    expect(doc.value).toBe("Today")
+  })
+
+  it("never reads a failed duty computation or logbook read as clear", () => {
+    const model = buildLegalityModel({ ...CLEAR, unavailable: ["duty", "logbook"] })
+    expect(model.verdict).toBe("unknown")
+    expect(model.requirements.filter((r) => r.state === "unknown").map((r) => r.id)).toEqual([
+      "unavailable-duty",
+      "unavailable-logbook",
+    ])
+  })
+
   it("is ok when every requirement is met", () => {
     const model = buildLegalityModel(CLEAR)
     expect(model.verdict).toBe("ok")

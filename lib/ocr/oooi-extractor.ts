@@ -338,6 +338,118 @@ function extractFromLayout(results: OcrResult[]): ExtractedFlightData {
 }
 
 // ============================================
+// Column Extraction (MCDU, per side)
+// ============================================
+
+/**
+ * The voyage report is TWO independent columns, each alternating label and
+ * value:
+ *
+ *   DOOR CLS          OUT
+ *   0930              ----
+ *   IN               TAXI
+ *   1237              ----
+ *
+ * `extractFromLayout` reads it as rows instead — a label row, then the row
+ * under it — and that only holds while every slot is filled. A blank slot
+ * ("----") is not read at all, so the two columns drift out of step: on a real
+ * photo the left value "0930" and the right label "TAXI" came back as ONE line
+ * and the "IN … TAXI" label row never formed, losing IN; with OUT and IN both
+ * blank a lone "0248" under "BLOCK FLIGHT" had no row partner and FLIGHT was
+ * lost. Here every label finds its value on its OWN side, below it and above
+ * that side's next label, so a blank slot costs only itself.
+ *
+ * The engine joins boxes that share a line ("1232 0942"), so a token's x is
+ * estimated from its character position within the line's box — enough to
+ * tell the two halves of the screen apart, which is all this needs.
+ */
+interface PlacedToken {
+  text: string
+  x: number
+  y: number
+  h: number
+}
+
+function placeTokens(results: OcrResult[]): PlacedToken[] {
+  const out: PlacedToken[] = []
+  for (const r of results) {
+    const text = r.text.trim()
+    if (!text) continue
+    const x0 = Math.min(r.box[0][0], r.box[3][0])
+    const x1 = Math.max(r.box[1][0], r.box[2][0])
+    const y = getBoxMidY(r.box)
+    const h = getBoxHeight(r.box)
+    for (const m of text.matchAll(/\S+/g)) {
+      const centre = (m.index! + m[0].length / 2) / text.length
+      out.push({ text: m[0].toUpperCase(), x: x0 + centre * (x1 - x0), y, h })
+    }
+  }
+  return out
+}
+
+const LEFT_LABELS: Record<string, keyof ExtractedFlightData | null> = {
+  DOOR: null,
+  IN: "inTime",
+  ON: "onTime",
+  "0N": "onTime",
+  BLOCK: "blockTime",
+}
+const RIGHT_LABELS: Record<string, keyof ExtractedFlightData | null> = {
+  OUT: "outTime",
+  TAXI: null,
+  OFF: "offTime",
+  "0FF": "offTime",
+  FLIGHT: "flightTime",
+}
+
+/** A value slot holds four digits; letters only where OCR confuses them. */
+function isTimeToken(text: string): boolean {
+  return /^[\dOoQIilLSsB]{4}$/.test(text) && /\d.*\d/.test(text)
+}
+
+function extractFromColumns(results: OcrResult[]): ExtractedFlightData {
+  const data: ExtractedFlightData = { confidence: 0 }
+  const tokens = placeTokens(results)
+
+  type Label = PlacedToken & { side: "left" | "right"; field: keyof ExtractedFlightData | null }
+  const labels = tokens.flatMap((t): Label[] => {
+    if (t.text in LEFT_LABELS) return [{ ...t, side: "left", field: LEFT_LABELS[t.text] }]
+    if (t.text in RIGHT_LABELS) return [{ ...t, side: "right", field: RIGHT_LABELS[t.text] }]
+    return []
+  })
+  const left = labels.filter((l) => l.side === "left")
+  const right = labels.filter((l) => l.side === "right")
+  // Both columns must be present to know where the screen divides.
+  if (left.length === 0 || right.length === 0) return data
+
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
+  const divide = (mean(left.map((l) => l.x)) + mean(right.map((l) => l.x))) / 2
+  const lineH = [...labels.map((l) => l.h)].sort((a, b) => a - b)[Math.floor(labels.length / 2)]
+
+  const values = tokens.filter((t) => isTimeToken(t.text))
+
+  for (const column of [left, right]) {
+    const sorted = [...column].sort((a, b) => a.y - b.y)
+    sorted.forEach((label, i) => {
+      if (!label.field) return
+      // The slot under a label runs to the next label on the SAME side; the
+      // last one gets two and a half lines (it is followed by the UTC clock).
+      const top = label.y + lineH * 0.3
+      const bottom = i + 1 < sorted.length ? sorted[i + 1].y : label.y + lineH * 2.5
+      const hit = values
+        .filter((v) => (label.side === "left" ? v.x < divide : v.x >= divide))
+        .filter((v) => v.y > top && v.y < bottom)
+        .sort((a, b) => a.y - b.y)[0]
+      const time = hit && formatTime(hit.text)
+      if (time && !data[label.field]) (data as unknown as Record<string, unknown>)[label.field] = time
+    })
+  }
+
+  data.confidence = validateTimes(data)
+  return data
+}
+
+// ============================================
 // String Extraction (Fallback)
 // ============================================
 
@@ -563,6 +675,7 @@ export function extractFlightData(input: OcrResult[] | string): ExtractedFlightD
   const candidates = [
     extractFromTimeSummary(input),
     extractFromLayout(input),
+    extractFromColumns(input),
     extractFromText(input.map((r) => r.text).join("\n")),
   ]
 

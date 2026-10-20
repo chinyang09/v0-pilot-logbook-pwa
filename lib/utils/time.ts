@@ -100,12 +100,9 @@ export function formatHHMMDisplay(
     return `${hours.toString().padStart(2, "0")}:${minutes}`
   }
 
-  if (format === "12h") {
-    const period = hours >= 12 ? "PM" : "AM"
-    const h12 = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours
-    return `${h12}:${minutes} ${period}`
-  }
-
+  // "12h" is a CLOCK convention (formatInstant reads it for times of day). A
+  // DURATION has no AM or PM — this used to turn a 3h56 block into
+  // "3:56 AM hrs" on every flight card — so it reads like plain 24h here.
   return `${hours}:${minutes}`
 }
 

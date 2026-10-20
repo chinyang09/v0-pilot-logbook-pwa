@@ -3,12 +3,28 @@ const STATIC_CACHE = `skylog-static-${CACHE_VERSION}`
 const DYNAMIC_CACHE = `skylog-dynamic-${CACHE_VERSION}`
 const CDN_CACHE = `skylog-cdn-${CACHE_VERSION}`
 const MODELS_CACHE = `skylog-models-${CACHE_VERSION}`
+// Hashed /_next/static chunks, kept APART from the dynamic cache. They shared
+// it once, under a 150-entry FIFO: a hit never re-puts, so the oldest entries
+// were exactly the framework and main-app chunks loaded first, and a month of
+// per-flight pages and RSC payloads pushed them out — after which an offline
+// cold start got cached HTML and a 503 for main-app.js, i.e. a blank app.
+const ASSET_CACHE = `skylog-assets-${CACHE_VERSION}`
+// Generous: one build is a few hundred chunks at most, and FIFO drops older
+// builds' chunks first because the current build's were inserted after them.
+const ASSET_CACHE_MAX_ENTRIES = 1200
 
 // OCR model files for offline support (critical for offline OCR functionality)
 const OCR_MODEL_FILES = [
   "/models/ch_PP-OCRv4_det_infer.onnx",
   "/models/ch_PP-OCRv4_rec_infer.onnx",
   "/models/ppocr_keys_v1.txt",
+  // The in-browser engine's runtime (copied in at build time by
+  // scripts/copy-ort-wasm.mjs). Without it precached, the first OCR made
+  // offline asked the network for 12MB and failed.
+  "/models/ort-wasm-simd-threaded.wasm",
+  // Its JavaScript half — also the script every engine THREAD starts from,
+  // so offline OCR needs it as much as the binary.
+  "/models/ort-wasm-simd-threaded.mjs",
 ]
 
 // Static assets to precache during install (these don't require auth)
@@ -37,17 +53,19 @@ const DYNAMIC_CACHE_MAX_ENTRIES = 150
 
 // Fire-and-forget FIFO trim, called after DYNAMIC_CACHE writes. Never blocks
 // or fails a response.
-async function trimDynamicCache() {
+async function trimCache(name, max) {
   try {
-    const cache = await caches.open(DYNAMIC_CACHE)
+    const cache = await caches.open(name)
     const keys = await cache.keys()
-    if (keys.length <= DYNAMIC_CACHE_MAX_ENTRIES) return
-    const excess = keys.slice(0, keys.length - DYNAMIC_CACHE_MAX_ENTRIES)
+    if (keys.length <= max) return
+    const excess = keys.slice(0, keys.length - max)
     await Promise.all(excess.map((key) => cache.delete(key)))
   } catch (e) {
     // Trimming is best-effort — never let it surface.
   }
 }
+const trimDynamicCache = () => trimCache(DYNAMIC_CACHE, DYNAMIC_CACHE_MAX_ENTRIES)
+const trimAssetCache = () => trimCache(ASSET_CACHE, ASSET_CACHE_MAX_ENTRIES)
 
 // Dynamic routes whose page shell is identical for all IDs (client-rendered).
 // We cache one shell instance and serve it for any matching request.
@@ -64,9 +82,11 @@ const DYNAMIC_SHELL_ROUTES = [
 // Install event - precache static assets only (not protected routes)
 self.addEventListener("install", (event) => {
   console.log("[SW] Installing version:", CACHE_VERSION)
-  // Take over immediately so bug fixes reach the user on their next page
-  // load instead of waiting until every previously-controlled tab is closed.
-  self.skipWaiting()
+  // NO skipWaiting here. Taking over immediately activated the new worker
+  // under every open tab, and the page reloads on `controllerchange` — so a
+  // deploy reloaded the app mid-edit, mid-signature or mid-import. A new
+  // worker now WAITS: the page offers "Update" (`applyServiceWorkerUpdate`
+  // posts SKIP_WAITING), and otherwise it takes over on the next launch.
   event.waitUntil(
     (async () => {
       const staticCache = await caches.open(STATIC_CACHE)
@@ -105,8 +125,6 @@ self.addEventListener("install", (event) => {
       console.log("[SW] Install complete - static assets and models cached")
     })()
   )
-  // Don't skip waiting - let the new SW wait until pages are closed
-  // This prevents disrupting users mid-session
 })
 
 // Activate event - clean up old caches and claim clients
@@ -116,7 +134,7 @@ self.addEventListener("activate", (event) => {
     (async () => {
       // Clean up old caches
       const cacheNames = await caches.keys()
-      const validCaches = [STATIC_CACHE, DYNAMIC_CACHE, CDN_CACHE, MODELS_CACHE]
+      const validCaches = [STATIC_CACHE, DYNAMIC_CACHE, CDN_CACHE, MODELS_CACHE, ASSET_CACHE]
       await Promise.all(
         cacheNames
           .filter((name) => {
@@ -157,7 +175,7 @@ function isNextStaticAsset(url) {
 
 // Helper: Check if URL is an OCR model file
 function isOCRModelRequest(url) {
-  return url.includes("/models/") && (url.endsWith(".onnx") || url.endsWith(".txt"))
+  return url.includes("/models/") && (url.endsWith(".onnx") || url.endsWith(".txt") || url.endsWith(".wasm") || url.endsWith(".mjs"))
 }
 
 // Helper: Check if this is a cacheable app route
@@ -409,12 +427,14 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // Strategy 3: Next.js static assets - Cache first
+  // Strategy 3: Next.js static assets - Cache first, in their own cache
   if (isNextStaticAsset(url)) {
     event.respondWith(
       (async () => {
-        const cache = await caches.open(DYNAMIC_CACHE)
-        const cachedResponse = await cache.match(request)
+        const cache = await caches.open(ASSET_CACHE)
+        // An install from before ASSET_CACHE kept chunks in the dynamic cache.
+        const cachedResponse =
+          (await cache.match(request)) || (await (await caches.open(DYNAMIC_CACHE)).match(request))
 
         if (cachedResponse) {
           return cachedResponse
@@ -423,7 +443,7 @@ self.addEventListener("fetch", (event) => {
         try {
           const response = await fetch(request)
           if (response.ok) {
-            cache.put(request, response.clone()).then(() => trimDynamicCache())
+            cache.put(request, response.clone()).then(() => trimAssetCache())
           }
           return response
         } catch (e) {
@@ -548,7 +568,10 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // Strategy 6: Other requests - Stale while revalidate
+  // Strategy 6: Other requests - Stale while revalidate. SAME-ORIGIN only:
+  // a cross-origin GET is passed straight through rather than cached, so a
+  // third-party response can never be stored and replayed from here.
+  if (new URL(url).origin !== self.location.origin) return
   event.respondWith(
     (async () => {
       const cache = await caches.open(DYNAMIC_CACHE)

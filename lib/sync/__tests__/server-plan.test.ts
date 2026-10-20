@@ -40,6 +40,15 @@ describe("decidePush", () => {
     )
   })
 
+  it("refuses a purge of a record restored since the purging device saw it binned", () => {
+    const del = (baseSeq?: number) => item({ type: "delete", ...(baseSeq !== undefined ? { baseSeq } : {}) })
+    expect(decidePush(del(5), { deletedAt: null, serverSeq: 9 }, false)).toBe("stale")
+    expect(decidePush(del(5), { deletedAt: 40, serverSeq: 9 }, false)).toBe("delete")
+    expect(decidePush(del(9), { deletedAt: null, serverSeq: 9 }, false)).toBe("delete")
+    // An older build sends no base: unchanged behaviour.
+    expect(decidePush(del(), { deletedAt: null, serverSeq: 9 }, false)).toBe("delete")
+  })
+
   it("rejects a write to a purged (tombstoned) record instead of resurrecting it", () => {
     expect(decidePush(item({ data: { updatedAt: 99 } }), undefined, true)).toBe("rejected")
   })

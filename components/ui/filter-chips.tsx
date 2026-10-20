@@ -56,7 +56,7 @@ export function FilterChips<T extends string>({
           >
             {option.label}
             {option.count !== undefined && (
-              <span className={cn("ml-1 tabular-nums", active ? "text-primary/70" : "text-muted-foreground/60")}>
+              <span className={cn("ml-1 tabular-nums", active ? "text-primary" : "text-muted-foreground")}>
                 {option.count}
               </span>
             )}

@@ -7,7 +7,8 @@ import { PageContainer } from "@/components/page-container";
 import { useDebounce } from "@/hooks/use-debounce";
 import { Button } from "@/components/ui/button";
 import { usePersonnel, useFlights } from "@/hooks/data";
-import { deletePersonnel, updateFlight, updatePersonnel, type Personnel } from "@/lib/db";
+import { deletePersonnel, restorePersonnel, updateFlight, updatePersonnel, type Personnel } from "@/lib/db";
+import { showUndoToast } from "@/lib/utils/undo-toast";
 import { syncService } from "@/lib/sync";
 import {
   Loader2,
@@ -17,6 +18,7 @@ import {
   ChevronRight,
   Star,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { mutate } from "swr";
@@ -75,12 +77,26 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
       actions={[
         {
           icon: <Trash2 className="h-5 w-5" />,
+          ariaLabel: "Delete crew member",
           onClick: () => onDelete(crew),
           variant: "destructive",
         },
       ]}
     >
-      <button
+      {/* A div, not a <button>: the favourite star inside is a button, and a
+          button inside a button is invalid HTML (React reports it as a
+          hydration error). Still a keyboard target — Enter/Space click it,
+          which bubbles to the SwipeableCard's onClick like a tap. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            e.currentTarget.click();
+          }
+        }}
         className={cn(
           "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all hover:bg-accent",
           isRecent &&
@@ -112,7 +128,7 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
               size="icon"
               aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
               aria-pressed={isFavorite}
-              className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
+              className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0 after:absolute after:-inset-1.5 after:content-['']"
               onClick={(e: React.MouseEvent) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -124,7 +140,7 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
                   "h-4 w-4",
                   isFavorite
                     ? "fill-yellow-400 text-yellow-400"
-                    : "text-muted-foreground/40"
+                    : "text-muted-foreground/70"
                 )}
               />
             </Button>
@@ -132,7 +148,7 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
             <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
           )}
         </div>
-      </button>
+      </div>
     </SwipeableCard>
   );
 });
@@ -528,6 +544,10 @@ export default function CrewPage() {
   const performDelete = useCallback(async (crew: CrewCardItem) => {
     await deletePersonnel(crew.id);
     await mutate(CACHE_KEYS.personnel);
+    showUndoToast(`${crew.name || "Crew member"} deleted`, async () => {
+      await restorePersonnel(crew.id);
+      await mutate(CACHE_KEYS.personnel);
+    });
   }, []);
 
   const pageTitle = fieldType
@@ -665,15 +685,32 @@ export default function CrewPage() {
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : displayPersonnel.length === 0 ? (
-            <div className="text-center py-12">
-              <User className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-sm text-muted-foreground mb-4">
-                No results found.
-              </p>
-              <Button onClick={handleAddCrew} variant="outline">
-                <Plus className="h-4 w-4 mr-2" /> Add Crew Member
-              </Button>
-            </div>
+            // "No results found." read as a failed search to a pilot who had
+            // never searched — an empty crew list and a search that matched
+            // nobody are different situations and say different things.
+            debouncedSearchQuery.trim() ? (
+              <EmptyState
+                icon={User}
+                title="No crew match"
+                description={`Nobody called “${debouncedSearchQuery.trim()}”. Add them as a new crew member?`}
+                action={
+                  <Button onClick={handleAddCrew} variant="outline" size="sm">
+                    <Plus className="mr-1 h-4 w-4" /> Add crew member
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={User}
+                title="No crew yet"
+                description="Crew are added as you log flights and import reports, or add one by hand."
+                action={
+                  <Button onClick={handleAddCrew} variant="outline" size="sm">
+                    <Plus className="mr-1 h-4 w-4" /> Add crew member
+                  </Button>
+                }
+              />
+            )
           ) : (
             /* Virtualized crew list */
             <div>

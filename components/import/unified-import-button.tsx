@@ -63,11 +63,13 @@ import {
   getUserPreferences,
   DEFAULT_IMPORT_DEFAULTS,
   ensureAirportDatabase,
+  onAirportSeedProgress,
 } from "@/lib/db";
 import type { FlightLog } from "@/types/entities/flight.types";
 import type { NormalizedDocument } from "@/lib/utils/parsers/types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
 import { ImportStatusDialog, type ImportStage } from "./import-status-dialog";
+import { nonPicPfRoleOf } from "@/lib/utils/roster/pilot-role";
 
 interface Props {
   /** Where the button is mounted — affects success-message wording. */
@@ -75,6 +77,9 @@ interface Props {
   /** Triggered after a successful execution so the page can refresh. */
   onComplete?: () => void;
 }
+
+/** "1 flight", "2 flights" — the summary line read "1 sim sessions". */
+const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -160,9 +165,9 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           setProgress({ percent, stage, detail }),
       });
       const parts: string[] = [];
-      if (result.flightsCreated) parts.push(`${result.flightsCreated} flights`);
+      if (result.flightsCreated) parts.push(count(result.flightsCreated, "flight"));
       if (result.simulatorsCreated)
-        parts.push(`${result.simulatorsCreated} sim sessions`);
+        parts.push(count(result.simulatorsCreated, "sim session"));
       if (result.flightsUpdated) parts.push(`${result.flightsUpdated} completed`);
       if (result.flightsSkipped)
         parts.push(`${result.flightsSkipped} already present`);
@@ -170,8 +175,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
       if (result.aircraftCreated)
         parts.push(`${result.aircraftCreated} aircraft`);
       if (result.flightsBackTagged)
-        parts.push(`${result.flightsBackTagged} flights linked to aircraft`);
-      if (result.errors.length) parts.push(`${result.errors.length} error(s)`);
+        parts.push(`${count(result.flightsBackTagged, "flight")} linked to aircraft`);
+      if (result.errors.length) parts.push(count(result.errors.length, "error"));
       setSummary(parts.join(", ") || "No changes applied");
       setErrorMsg(null);
       onComplete?.();
@@ -201,9 +206,9 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         if (result.updated) parts.push(`${result.updated} updated`);
         if (result.deleted) parts.push(`${result.deleted} deleted`);
         if (result.simSessionsCreated)
-          parts.push(`${result.simSessionsCreated} sim sessions`);
+          parts.push(count(result.simSessionsCreated, "sim session"));
         if (result.simDuplicatesRemoved)
-          parts.push(`${result.simDuplicatesRemoved} duplicate sims removed`);
+          parts.push(`${count(result.simDuplicatesRemoved, "duplicate sim")} removed`);
         if (result.groundDutiesCreated || result.groundDutiesUpdated)
           parts.push(
             `${result.groundDutiesCreated + result.groundDutiesUpdated} standby/ground duties`
@@ -214,7 +219,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           parts.push(`${result.staleSkipped} skipped (older report)`);
         if (result.identical) parts.push(`${result.identical} unchanged`);
         if (result.errors.length)
-          parts.push(`${result.errors.length} error(s)`);
+          parts.push(count(result.errors.length, "error"));
         setSummary(parts.join(", ") || "No changes applied");
         setErrorMsg(null);
         onComplete?.();
@@ -247,7 +252,20 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         // Loaded alongside the extraction, and awaited before any parse.
         const airportsReady = ensureAirportDatabase();
         const docs = await extractDocuments(files);
-        await airportsReady;
+        // A first seed on a fresh device takes seconds; say so rather than
+        // leave the bar frozen at 5%. Fires only while a seed is running.
+        const stopSeedProgress = onAirportSeedProgress((fraction) =>
+          setProgress({
+            percent: 5 + Math.round(fraction * 5),
+            stage: "Preparing",
+            detail: `Airport database ${Math.round(fraction * 100)}%`,
+          })
+        );
+        try {
+          await airportsReady;
+        } finally {
+          stopSeedProgress();
+        }
 
         // ---- LogTen Pro migration ----
         // Routed before anything else because the two families share nothing
@@ -267,8 +285,12 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           });
           logtenDocsRef.current = logtenDocs;
           setLogtenPlan(await runLogtenParse(logtenDocs));
+          // Progress is NOT cleared here: the status dialog is closing, and
+          // Radix keeps it on screen for its fade-out — with progress cleared
+          // it fell back to its idle face ("Import · Select a report file")
+          // for that moment, between the progress and the review. The cancel
+          // and execute paths both overwrite it.
           setShowLogtenReview(true);
-          setProgress(null);
           return;
         }
 
@@ -283,9 +305,13 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         // PICUS-vs-SIC convention, so a PF/PM change carries the matching
         // pilotRole correction.
         const storedPrefs = await getUserPreferences().catch(() => null);
-        const nonPicPfRole =
+        // The convention lives on the pilot's own crew card now; the old
+        // Import Defaults value is only a fallback for a card that predates it.
+        const nonPicPfRole = nonPicPfRoleOf(
+          currentUserForRecon,
           storedPrefs?.importDefaults?.nonPicPfRole ??
-          DEFAULT_IMPORT_DEFAULTS.nonPicPfRole;
+            DEFAULT_IMPORT_DEFAULTS.nonPicPfRole
+        );
 
         const logbooks = docs.filter((d) => d.reportType === "logbook");
         const schedules = docs.filter((d) => d.reportType === "schedule");
@@ -510,8 +536,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           await handleExecute(plan);
         } else {
           setPendingPlan(plan);
+          // Not cleared — see the LogTen hand-off above.
           setShowReview(true);
-          setProgress(null);
         }
       } catch (error) {
         setErrorMsg(
@@ -592,6 +618,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           setShowReview(false);
           setPendingPlan(null);
           setSummary(null);
+          setProgress(null);
           setIsOpen(false);
         }}
       />
@@ -610,6 +637,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           logtenDocsRef.current = [];
           setIsOpen(false);
           setSummary(null);
+          setProgress(null);
         }}
         onTimeReferenceChange={handleLogtenTimeReference}
       />

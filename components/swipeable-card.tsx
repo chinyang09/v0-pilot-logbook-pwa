@@ -182,7 +182,12 @@ function SwipeActionButton({
       style={{ scale, opacity, width: BUTTON_WIDTH, touchAction: "manipulation" }}
       className={cn(
         "shrink-0 self-stretch flex flex-col items-center justify-center gap-0.5",
-        "rounded-lg overflow-hidden disabled:opacity-50 select-none",
+        "rounded-lg overflow-hidden select-none",
+        // NOT `disabled:opacity-50`: the reveal drives `opacity` as an inline
+        // style, which always beats the class, so a disabled action (Delete on
+        // a LOCKED flight) looked exactly as live as an enabled one. A filter
+        // is not animated, so it holds.
+        "disabled:grayscale disabled:brightness-[0.6] disabled:cursor-not-allowed",
         variantClasses(action.variant),
         action.className
       )}
@@ -272,6 +277,33 @@ export function SwipeableCard({
   )
 
   const close = useCallback(() => settle(0), [settle])
+
+  // A keyboard user tabbing along the list reaches the action buttons, which
+  // rest at opacity 0 behind the content — so Tab used to stop, invisibly, on
+  // "More actions" and "Delete" under every row. Keyboard focus now OPENS the
+  // panel (closing any other), and focus leaving it closes it again. Only
+  // keyboard focus (:focus-visible) does this, and only a panel opened this
+  // way closes on blur, so a tap's "keepOpen" (the … cascade) is untouched.
+  const openedByFocusRef = useRef(false)
+  const onActionsFocus = useCallback(
+    (e: React.FocusEvent) => {
+      if (!(e.target as HTMLElement).matches?.(":focus-visible")) return
+      if (Math.abs(x.get()) >= openWidth - 1) return
+      openedByFocusRef.current = true
+      window.dispatchEvent(new CustomEvent(SWIPE_CLOSE_EVENT, { detail: { id: cardId.current } }))
+      settle(-openWidth)
+    },
+    [openWidth, settle, x]
+  )
+  const onActionsBlur = useCallback(
+    (e: React.FocusEvent) => {
+      if (!openedByFocusRef.current) return
+      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+      openedByFocusRef.current = false
+      close()
+    },
+    [close]
+  )
 
 
   // Close this card's SWIPE PANEL when another card opens or is tapped.
@@ -436,6 +468,8 @@ export function SwipeableCard({
           // Marked so a consumer's own gesture can tell "the row" from "the
           // row's controls" — see the flight card's hold.
           data-swipe-actions
+          onFocus={onActionsFocus}
+          onBlur={onActionsBlur}
           className="absolute inset-y-0 right-0 flex items-stretch justify-end gap-2 overflow-hidden"
           style={{ width: panelWidth }}
         >

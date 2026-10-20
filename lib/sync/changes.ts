@@ -43,8 +43,16 @@ const META_KEYS = new Set([
 ])
 
 function stable(value: unknown): string {
-  // Absent, undefined and null all mean "no value" across the wire.
+  // Absent, undefined and null all mean "no value" across the wire — and so
+  // does an EMPTY list or object. The canonical shape writes a missing list as
+  // `[]` and a form may hand back `undefined` for the same nothing; counted as
+  // different, every save of a crew card "changed" its roles and contact, and
+  // a real edit to them on another device became a spurious conflict.
   if (value === undefined || value === null) return "∅"
+  if (Array.isArray(value) && value.length === 0) return "∅"
+  if (typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype && Object.keys(value).length === 0) {
+    return "∅"
+  }
   return JSON.stringify(value, (_k, v) =>
     v && typeof v === "object" && !Array.isArray(v)
       ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]]))

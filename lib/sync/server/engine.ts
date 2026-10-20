@@ -293,6 +293,12 @@ async function pushCollection(
           const replacement = canonicalizeDocument(collection, p.source, envelope)
           dataOps.push({ replaceOne: { filter: { userId, id }, replacement, upsert: true } })
           writes.push({ key: writtenKey(collection, id), seq: serverSeq })
+          // A recreated derived id (see `decidePush`): the old tombstone goes
+          // in the same commit, or a device that has not yet pulled it would
+          // apply the deletion over the new record.
+          if (tombstoned.has(id)) {
+            tombstoneOps.push({ deleteOne: { filter: { userId, collection, recordId: id } } })
+          }
 
           const conflicts = p.patch?.conflicts ?? []
           for (const c of conflicts) conflictDocs.push(conflictDoc(userId, collection, id, c, now))

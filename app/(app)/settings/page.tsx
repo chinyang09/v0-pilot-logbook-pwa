@@ -10,17 +10,16 @@ import { FormSection } from "@/components/ui/form-section"
 import { SettingsRow, ToggleRow, SelectRow } from "@/components/ui/settings-row"
 import { PageLoading } from "@/components/ui/page-loading"
 import { SortableNavList } from "@/components/sortable-nav-list"
+import { AppearanceSettings } from "@/components/appearance-settings"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import {
-  Monitor, Clock, Plane, Sun, Moon, Laptop,
+  Monitor, Clock, Plane, Sun,
   LayoutDashboard, Book, Calendar, Users, MapPin, Award,
   Settings, UserCircle, Navigation, ChevronRight,
-  Upload,
 } from "lucide-react"
-import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
-import type { DisplayPreferences, AutoFillPreferences, ThemePreference, BottomNavTab } from "@/types/db/stores.types"
+import type { DisplayPreferences, AutoFillPreferences, BottomNavTab } from "@/types/db/stores.types"
 
 // ─── Data ────────────────────────────────────────────────────
 
@@ -59,7 +58,9 @@ const ALL_NAV_TABS: Array<{ value: BottomNavTab; label: string; icon: React.Comp
   { value: "account", label: "Account", icon: UserCircle },
 ]
 
-type SectionKey = "appearance" | "navigation" | "display" | "autofill" | "duty" | "imports"
+// No "imports" section: its one setting (what a first officer logs a flown leg
+// as) lives on the pilot's own crew card now, beside the seat it depends on.
+type SectionKey = "appearance" | "navigation" | "display" | "autofill" | "duty"
 
 interface SectionDef {
   key: SectionKey
@@ -69,12 +70,11 @@ interface SectionDef {
 }
 
 const SECTIONS: SectionDef[] = [
-  { key: "appearance", label: "Appearance", icon: Sun, description: "Theme" },
+  { key: "appearance", label: "Appearance", icon: Sun, description: "Mode and palette" },
   { key: "navigation", label: "Navigation", icon: Navigation, description: "Bottom tab bar" },
   { key: "display", label: "Display Options", icon: Monitor, description: "Time, airport, coordinate format" },
   { key: "autofill", label: "Auto-Fill Fields", icon: Clock, description: "Auto-populate time fields" },
   { key: "duty", label: "Duty Time Defaults", icon: Plane, description: "Report and debrief times" },
-  { key: "imports", label: "Import Defaults", icon: Upload, description: "How CSV/PDF imports populate flights" },
 ]
 
 // ─── Detail panel wrapper with frosted header ───────────────
@@ -93,48 +93,6 @@ function SettingsDetailPanel({ children }: { children: React.ReactNode }) {
 }
 
 // ─── Detail panel content for each section ──────────────────
-
-function AppearanceSection({ preferences, updateDisplay }: {
-  preferences: ReturnType<typeof usePreferences>["preferences"]
-  updateDisplay: ReturnType<typeof usePreferences>["updateDisplay"]
-}) {
-  const { setTheme } = useTheme()
-  return (
-    <div className="px-panel py-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Appearance</h2>
-        <p className="text-sm text-muted-foreground">Choose your preferred theme.</p>
-      </div>
-      <FormSection>
-        <div className="grid grid-cols-3 gap-2 p-3">
-        {([
-          { value: "light" as ThemePreference, label: "Light", icon: Sun },
-          { value: "dark" as ThemePreference, label: "Dark", icon: Moon },
-          { value: "system" as ThemePreference, label: "System", icon: Laptop },
-        ]).map(({ value, label, icon: Icon }) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => {
-              setTheme(value)
-              updateDisplay({ theme: value })
-            }}
-            className={cn(
-              "flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-colors",
-              preferences.display.theme === value
-                ? "border-primary bg-primary/10"
-                : "border-border hover:border-primary/50"
-            )}
-          >
-            <Icon className="h-6 w-6" />
-            <span className="text-sm font-medium">{label}</span>
-          </button>
-        ))}
-        </div>
-      </FormSection>
-    </div>
-  )
-}
 
 function NavigationSection({ preferences, updateNavigation }: {
   preferences: ReturnType<typeof usePreferences>["preferences"]
@@ -173,13 +131,13 @@ function DisplaySection({ preferences, updateDisplay }: {
       <FormSection>
         <SelectRow<DisplayPreferences["timeFormat"]>
           label="Time Format"
-          description="How durations and block times are shown"
+          description="Durations as 2:30 or 02:30, or a 12-hour clock for times of day. Durations never show AM/PM."
           value={preferences.display.timeFormat}
           onValueChange={(value) => updateDisplay({ timeFormat: value })}
           options={[
             { value: "24h", label: "24h (2:30)" },
             { value: "24h-padded", label: "24h (02:30)" },
-            { value: "12h", label: "12h (2:30 PM)" },
+            { value: "12h", label: "12h clock (2:30 PM)" },
           ]}
         />
         <SelectRow<DisplayPreferences["clockSeparator"]>
@@ -309,37 +267,6 @@ function DutyTimeSection({ preferences, updateDutyTimeDefaults }: {
   )
 }
 
-function ImportDefaultsSection({ preferences, updateImportDefaults }: {
-  preferences: ReturnType<typeof usePreferences>["preferences"]
-  updateImportDefaults: ReturnType<typeof usePreferences>["updateImportDefaults"]
-}) {
-  const role = preferences.importDefaults.nonPicPfRole
-  return (
-    <div className="px-panel py-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Import Defaults</h2>
-        <p className="text-sm text-muted-foreground">
-          Settings used by the Crew Logbook / Schedule importer when populating
-          flights on your behalf.
-        </p>
-      </div>
-
-      <FormSection>
-        <SelectRow<"PICUS" | "SIC">
-          label="Role when Pilot Flying but not PIC"
-          description="For imported flights where you logged a takeoff/landing but another pilot was PIC, log your role as PICUS (Pilot In Command Under Supervision) or SIC."
-          value={role}
-          onValueChange={(v) => updateImportDefaults({ nonPicPfRole: v })}
-          options={[
-            { value: "SIC", label: "SIC" },
-            { value: "PICUS", label: "PICUS" },
-          ]}
-        />
-      </FormSection>
-    </div>
-  )
-}
-
 // ─── Main page ──────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -362,7 +289,7 @@ export default function SettingsPage() {
     )
     switch (key) {
       case "appearance":
-        return wrap(<AppearanceSection preferences={preferences} updateDisplay={prefs.updateDisplay} />)
+        return wrap(<AppearanceSettings />)
       case "navigation":
         return wrap(<NavigationSection preferences={preferences} updateNavigation={prefs.updateNavigation} />)
       case "display":
@@ -371,8 +298,6 @@ export default function SettingsPage() {
         return wrap(<AutoFillSection preferences={preferences} updateAutoFill={prefs.updateAutoFill} />)
       case "duty":
         return wrap(<DutyTimeSection preferences={preferences} updateDutyTimeDefaults={prefs.updateDutyTimeDefaults} />)
-      case "imports":
-        return wrap(<ImportDefaultsSection preferences={preferences} updateImportDefaults={prefs.updateImportDefaults} />)
       default:
         return null
     }

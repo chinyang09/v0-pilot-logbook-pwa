@@ -2,6 +2,7 @@
  * Store and preference types
  */
 
+import { DEFAULT_PALETTE_ID, type PaletteSeed } from "@/lib/theme/palette"
 import type { DraftGenerationConfig } from "@/types/entities/roster.types"
 
 export interface FieldOrder {
@@ -25,7 +26,15 @@ export interface DisplayPreferences {
   useZuluTime: boolean
   airportIdentifier: "icao" | "iata" | "both"
   coordinateFormat: "decimal" | "dms"
+  /** Light / dark / follow the OS. Orthogonal to the palette. */
   theme: ThemePreference
+  /**
+   * Which palette — a preset id from `lib/theme/palette.ts`, or "custom" for
+   * `customPalette`. An id this build does not know falls back to the default.
+   */
+  palette: string
+  /** The pilot's own palette, kept even while a preset is selected. */
+  customPalette?: PaletteSeed
 }
 
 export interface AutoFillPreferences {
@@ -72,6 +81,7 @@ export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   airportIdentifier: "icao",
   coordinateFormat: "decimal",
   theme: "dark",
+  palette: DEFAULT_PALETTE_ID,
 }
 
 export const DEFAULT_AUTO_FILL_PREFERENCES: AutoFillPreferences = {

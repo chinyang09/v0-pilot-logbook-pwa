@@ -42,8 +42,16 @@ const stepVariants = {
 
 export default function LoginPage() {
   const router = useRouter()
-  const { login } = useAuth()
+  const { login, user, sessionExpired, isLoading: authLoading } = useAuth()
   const [step, setStep] = useState<Step>("initial")
+
+  // Sent here because the session looked dead, and it turned out not to be
+  // (the monitor's next check cleared it): go back. Nothing else on this page
+  // reads auth state, so the pilot used to be left signing in again — and,
+  // offline by then, locked out of a logbook that was never signed out.
+  useEffect(() => {
+    if (!authLoading && user && !sessionExpired && step === "initial") router.replace("/")
+  }, [authLoading, user, sessionExpired, step, router])
   const [callsign, setCallsign] = useState("")
   const [totpCode, setTotpCode] = useState("")
   const [totpSecret, setTotpSecret] = useState("")
@@ -742,6 +750,11 @@ export default function LoginPage() {
                   <div className="space-y-2">
                     <Input
                       placeholder="Callsign"
+                      autoComplete="username"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      aria-label="Callsign"
                       value={callsign}
                       onChange={(e) => setCallsign(e.target.value)}
                       className="h-12 text-base bg-white/10 border-white/20 text-white placeholder:text-white/40 focus-visible:ring-white/30"
@@ -809,6 +822,11 @@ export default function LoginPage() {
                   <div className="space-y-2">
                     <Input
                       placeholder="Callsign"
+                      autoComplete="username"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      aria-label="Callsign"
                       value={callsign}
                       onChange={(e) => setCallsign(e.target.value)}
                       className="h-12 text-base bg-white/10 border-white/20 text-white placeholder:text-white/40 focus-visible:ring-white/30"
@@ -879,17 +897,19 @@ export default function LoginPage() {
                     </div>
                     <div className="text-center">
                       <p className="text-xs text-white/50 mb-1">Or enter manually:</p>
-                      <code
+                      <button
+                        type="button"
                         onClick={copyToClipboard}
-                        className="flex justify-center gap-2 max-w-full text-xs bg-white/10 px-3 py-2 rounded-md break-all text-white/80 hover:bg-white/15 transition-colors cursor-pointer"
+                        className="mx-auto flex min-h-9 max-w-full items-center justify-center gap-2 rounded-md bg-white/10 px-3 py-2 text-xs text-white/80 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-white/60"
                       >
-                        {totpSecret}
+                        <span className="sr-only">{copied ? "Copied setup key" : "Copy setup key"}</span>
+                        <code className="break-all">{totpSecret}</code>
                         {copied ? (
                           <CheckCircle2 className="h-3 w-3 text-emerald-400 flex-shrink-0" />
                         ) : (
                           <Copy className="h-3 w-3 text-white/50 flex-shrink-0" />
                         )}
-                      </code>
+                      </button>
                     </div>
                   </div>
 

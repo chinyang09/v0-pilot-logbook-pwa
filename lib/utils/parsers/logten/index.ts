@@ -136,14 +136,6 @@ export async function parseLogtenExport(
   };
 
   const currentUser = await getCurrentUserPersonnel();
-  if (!currentUser && flightsDoc) {
-    plan.errors.push({
-      line: 0,
-      message:
-        "No pilot profile found. Create a crew member with 'This is me' enabled before importing flights.",
-    });
-    return plan;
-  }
 
   // ---- 1. Address Book ----
   onProgress?.(10, "Reading", "Address book");
@@ -153,6 +145,26 @@ export async function parseLogtenExport(
       existingPersonnel,
       currentUser,
     });
+  }
+
+  // The flights are logged FROM someone's seat, so they need a profile — but
+  // on a fresh install the Address Book is where it comes from: its "This is
+  // Me" row is planned as a new self (see parseLogtenAddressBook). This check
+  // used to run BEFORE the address book was read, so a first-time migration of
+  // all three exports refused itself with "No pilot profile found" while
+  // carrying the profile in the very same import. The executor writes crew
+  // first and keeps the planned id, so the flight rows can point at it.
+  const incomingSelf = currentUser
+    ? null
+    : plan.crew.toCreate.find((row) => row.personnel.isMe)?.personnel ?? null;
+  const flightsUser = currentUser ?? incomingSelf;
+  if (!flightsUser && flightsDoc) {
+    plan.errors.push({
+      line: 0,
+      message:
+        "No pilot profile found. Create a crew member with 'This is me' enabled, or include the LogTen Address Book export, before importing flights.",
+    });
+    return plan;
   }
 
   // ---- 2. Aircraft ----
@@ -222,7 +234,7 @@ export async function parseLogtenExport(
   }
 
   // ---- 3. Flights ----
-  if (flightsDoc && currentUser) {
+  if (flightsDoc && flightsUser) {
     onProgress?.(35, "Resolving", "Airports");
 
     const airportCodes = collectAirportCodes(flightsDoc);
@@ -266,7 +278,7 @@ export async function parseLogtenExport(
     plan.flights = parseLogtenFlights(
       flightsDoc,
       {
-        currentUser,
+        currentUser: flightsUser,
         existingPersonnel: personnelPool,
         existingFlights,
         airports,

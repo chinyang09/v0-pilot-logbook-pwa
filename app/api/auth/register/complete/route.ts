@@ -112,9 +112,9 @@ export async function POST(request: NextRequest) {
         id: userId,
         callsign: user.identity.callsign,
       },
-      // Include session info for frontend sync
+      // Session expiry for the client's mirror — never the token, which is
+      // the HttpOnly cookie's secret.
       session: {
-        token: sessionId,
         expiresAt: sessionExpiry.getTime()
       }
     })

@@ -5,6 +5,7 @@ import type React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { Plane, Loader2, Star, Plus, Trash2, ChevronRight } from "lucide-react"
+import { EmptyState } from "@/components/ui/empty-state"
 import { useDebounce } from "@/hooks/use-debounce"
 import {
   searchAircraftFromDB,
@@ -15,7 +16,9 @@ import {
   updateFlight,
   addCustomAircraftToDatabase,
   deleteAircraftFromDatabase,
+  restoreAircraftInDatabase,
 } from "@/lib/db"
+import { showUndoToast } from "@/lib/utils/undo-toast"
 import { useReferenceAircraft, useFlights } from "@/hooks/data"
 import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import { normalizeRegistration } from "@/lib/utils/string"
@@ -69,12 +72,26 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
       actions={[
         {
           icon: <Trash2 className="h-5 w-5" />,
+          ariaLabel: "Delete aircraft",
           onClick: () => onDelete(aircraft),
           variant: "destructive",
         },
       ]}
     >
-      <button
+      {/* A div, not a <button>: the favourite star inside is a button, and a
+          button inside a button is invalid HTML (React reports it as a
+          hydration error). Still a keyboard target — Enter/Space click it,
+          which bubbles to the SwipeableCard's onClick like a tap. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            e.currentTarget.click();
+          }
+        }}
         className={cn(
           "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all hover:bg-accent",
           isRecent &&
@@ -107,7 +124,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
               size="icon"
               aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
               aria-pressed={isFavorite}
-              className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
+              className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0 after:absolute after:-inset-1.5 after:content-['']"
               onClick={(e: React.MouseEvent) => {
                 e.preventDefault()
                 e.stopPropagation()
@@ -121,7 +138,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
                   "h-4 w-4",
                   isFavorite
                     ? "fill-yellow-400 text-yellow-400"
-                    : "text-muted-foreground/40"
+                    : "text-muted-foreground/70"
                 )}
               />
             </Button>
@@ -129,7 +146,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
             <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
           )}
         </div>
-      </button>
+      </div>
     </SwipeableCard>
   )
 })
@@ -531,8 +548,13 @@ export default function AircraftPage() {
   // Stable, so the memoized cards actually hold — see AircraftCardProps.onDelete.
   const performDelete = useCallback(async (aircraft: NormalizedAircraft) => {
     if (aircraft.registration) {
-      await deleteAircraftFromDatabase(aircraft.registration)
+      const registration = aircraft.registration
+      await deleteAircraftFromDatabase(registration)
       await refreshAircraft()
+      showUndoToast(`${registration} deleted`, async () => {
+        await restoreAircraftInDatabase(registration)
+        await refreshAircraft()
+      })
     }
   }, [refreshAircraft])
 
@@ -758,6 +780,22 @@ export default function AircraftPage() {
                       </div>
                       <div className="border-t border-border my-4" />
                     </div>
+                  )}
+
+                  {/* Nothing saved yet. Without this an empty fleet rendered
+                      as a blank page on a phone — the "No aircraft found"
+                      message only ever reached the desktop detail panel. */}
+                  {allSortedAircraft.length === 0 && (
+                    <EmptyState
+                      icon={Plane}
+                      title="No aircraft yet"
+                      description="Aircraft are added as you log flights and import reports, or add one by registration."
+                      action={
+                        <Button variant="outline" size="sm" onClick={handleAddClick}>
+                          <Plus className="mr-1 h-4 w-4" /> Add aircraft
+                        </Button>
+                      }
+                    />
                   )}
                 </div>
               )}

@@ -71,12 +71,19 @@ export function DiscrepancyResolutionDialog({
   const [notes, setNotes] = useState("")
   const [isResolving, setIsResolving] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleOpenChange = (next: boolean) => {
+    if (!next) setError(null)
+    onOpenChange(next)
+  }
 
   const handleResolve = async () => {
     if (!discrepancy || !resolution) return
 
     try {
       setIsResolving(true)
+      setError(null)
       await resolveDiscrepancy(discrepancy.id, resolution, notes || undefined)
 
       setShowSuccess(true)
@@ -90,7 +97,7 @@ export function DiscrepancyResolutionDialog({
       }, 1000)
     } catch (error) {
       console.error("Failed to resolve discrepancy:", error)
-      alert("Failed to resolve discrepancy")
+      setError("Couldn't resolve this discrepancy. Try again.")
     } finally {
       setIsResolving(false)
     }
@@ -102,7 +109,7 @@ export function DiscrepancyResolutionDialog({
   const SelectedIcon = selectedOption?.icon || FileText
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Resolve Discrepancy</DialogTitle>
@@ -188,11 +195,17 @@ export function DiscrepancyResolutionDialog({
             />
           </div>
 
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+
           {/* Action Buttons */}
           <div className="flex items-center gap-2 pt-4">
             <Button
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={() => handleOpenChange(false)}
               disabled={isResolving}
               className="flex-1"
             >

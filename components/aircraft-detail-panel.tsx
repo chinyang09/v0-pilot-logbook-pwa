@@ -1,5 +1,6 @@
 "use client"
 
+import { CODE_INPUT_PROPS } from "@/lib/utils/input-props"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { ScrollIndicator } from "@/components/ui/scroll-indicator"
 import { Input } from "@/components/ui/input"
@@ -192,6 +193,8 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
                   <span className="text-foreground">Type Code</span>
                   <Input
                     value={formData.typecode}
+                    {...CODE_INPUT_PROPS}
+                    aria-label="Type code"
                     onChange={(e) => {
                       const val = e.target.value.toUpperCase()
                       updateField("typecode", val)

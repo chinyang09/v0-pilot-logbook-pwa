@@ -418,7 +418,7 @@ export default function AccountPage() {
         // Revoking the current device's session is allowed — when it's the one
         // backing this request, finish by clearing local data + signing out.
         if (data.loggedOutCurrent || session.isCurrent) {
-          await logout()
+          await logout({ skipSync: true })
           return
         }
         setSessions((prev) => prev.filter((s) => s.id !== session.id))
@@ -431,15 +431,29 @@ export default function AccountPage() {
   }
 
   const handleLogoutAll = async () => {
+    // This exists for a LOST device, so it has to actually reach the server.
+    // The request's failure used to be swallowed and this device wiped anyway:
+    // offline, the pilot was signed out here believing the lost phone was too,
+    // while its session stayed perfectly valid.
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      window.alert("You're offline. Signing out of all devices needs a connection — try again once you're back online.")
+      return
+    }
     if (!(await confirmUnsyncedLoss())) return
     setIsLoggingOutAll(true)
     try {
-      await fetch("/api/account/sessions", {
+      const res = await fetch("/api/account/sessions", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ all: true }),
-      }).catch(() => {})
-      await logout()
+      }).catch(() => null)
+      if (!res?.ok) {
+        window.alert("Couldn't sign out your other devices — nothing was changed. Check your connection and try again.")
+        return
+      }
+      // confirmUnsyncedLoss already pushed; the session is revoked now, so a
+      // second pre-logout sync would only meet a 401.
+      await logout({ skipSync: true })
     } finally {
       setIsLoggingOutAll(false)
     }
@@ -617,7 +631,7 @@ export default function AccountPage() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground"
+                  className="h-9 w-9 text-muted-foreground"
                   aria-label={isEditingCallsign ? "Cancel editing callsign" : "Edit callsign"}
                   onClick={openCallsignEditor}
                 >
@@ -713,7 +727,9 @@ export default function AccountPage() {
               <button
                 type="button"
                 onClick={() => copyToClipboard(profile?.userId || user?.userId || "", "userId")}
-                className="flex items-center gap-1.5 min-w-0 text-muted-foreground hover:text-foreground transition-colors"
+                // A 20px line of text is the whole target; the invisible
+                // extension takes it to ~44px tall without moving the row.
+                className="relative flex items-center gap-1.5 min-w-0 text-muted-foreground hover:text-foreground transition-colors after:absolute after:-inset-y-3 after:inset-x-0 after:content-['']"
                 aria-label="Copy User ID"
               >
                 <span className="text-sm truncate">{profile?.userId || user?.userId}</span>
@@ -741,7 +757,7 @@ export default function AccountPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 text-xs text-muted-foreground"
+                className="h-9 px-2.5 text-xs text-muted-foreground"
                 onClick={handleRevealTotp}
                 disabled={isRevealing}
                 aria-label="Re-add authenticator"
@@ -771,7 +787,7 @@ export default function AccountPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-muted-foreground shrink-0"
+                        className="h-9 w-9 text-muted-foreground shrink-0"
                         aria-label="Hide authenticator code"
                         onClick={() => setTotpReveal(null)}
                       >

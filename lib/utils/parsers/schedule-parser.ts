@@ -19,6 +19,7 @@
  * and always proceed — only flight operations go through the review modal.
  */
 
+import { nonPicPfRoleOf } from "@/lib/utils/roster/pilot-role";
 import type {
   ScheduledCrewMember,
   Currency,
@@ -1244,7 +1245,7 @@ export async function parseScheduleCSV(
       reportSource: "schedule",
       scheduleGeneratedAt: plan.generatedAt,
       currentUser: { id: currentUser.id, crewId: currentUser.crewId },
-      nonPicPfRole: importDefaults.nonPicPfRole,
+      nonPicPfRole: nonPicPfRoleOf(currentUser, importDefaults.nonPicPfRole),
       // Use the v2 safe/consult split so crew-only changes (incl. the
       // truncated→full name upgrade) auto-apply, while time/route changes on
       // already-flown flights still ask for confirmation.

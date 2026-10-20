@@ -4,12 +4,15 @@ import type React from "react"
 import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { useTheme } from "next-themes"
 import { getUserPreferences, saveUserPreferences } from "@/lib/db"
+import { resolveSeed } from "@/lib/theme/palette"
+import { applyPalette, syncThemeColor } from "@/lib/theme/apply"
 import type {
   DisplayPreferences,
   AutoFillPreferences,
   DutyTimeDefaults,
   NavigationPreferences,
   ImportDefaults,
+  ThemePreference,
 } from "@/types/db/stores.types"
 import {
   DEFAULT_DISPLAY_PREFERENCES,
@@ -51,18 +54,34 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   const [preferences, setPreferences] = useState<ResolvedPreferences>(defaultResolved)
   const [isLoading, setIsLoading] = useState(true)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const { setTheme } = useTheme()
+  const { setTheme, resolvedTheme } = useTheme()
 
   useEffect(() => {
     getUserPreferences().then((prefs) => {
+      // The mode next-themes is ACTUALLY showing (its own localStorage key).
+      // When the stored row carries no mode — a fresh install, or a row
+      // written before one was ever chosen — that is the truth, and the
+      // in-memory "dark" default is not: holding the default meant the first
+      // unrelated setting saved (a palette, say) wrote "dark" into the row and
+      // the next launch flipped a light-mode pilot to dark.
+      const shownTheme = (): ThemePreference => {
+        try {
+          const t = localStorage.getItem("theme")
+          if (t === "light" || t === "dark" || t === "system") return t
+        } catch {
+          // storage unavailable
+        }
+        return DEFAULT_DISPLAY_PREFERENCES.theme
+      }
       if (prefs) {
         // The short-lived "night" theme was removed — map any stored value to
         // dark so next-themes never receives an unknown theme name.
         if (prefs.display && (prefs.display.theme as string) === "night") {
           prefs.display = { ...prefs.display, theme: "dark" }
         }
+        const storedTheme = prefs.display?.theme
         const resolved = {
-          display: { ...DEFAULT_DISPLAY_PREFERENCES, ...prefs.display },
+          display: { ...DEFAULT_DISPLAY_PREFERENCES, ...prefs.display, theme: storedTheme ?? shownTheme() },
           autoFill: { ...DEFAULT_AUTO_FILL_PREFERENCES, ...prefs.autoFill },
           dutyTimeDefaults: { ...DEFAULT_DUTY_TIME_DEFAULTS, ...prefs.dutyTimeDefaults },
           navigation: { ...DEFAULT_NAVIGATION_PREFERENCES, ...prefs.navigation },
@@ -70,10 +89,10 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
         }
         setPreferences(resolved)
 
-        // Sync persisted theme preference with next-themes on mount
-        if (resolved.display.theme) {
-          setTheme(resolved.display.theme)
-        }
+        // Sync a persisted mode with next-themes on mount
+        if (storedTheme) setTheme(storedTheme)
+      } else {
+        setPreferences((prev) => ({ ...prev, display: { ...prev.display, theme: shownTheme() } }))
       }
       setIsLoading(false)
     }).catch(() => {
@@ -81,6 +100,21 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // The palette is applied only once the stored preference has LOADED. Until
+  // then the boot script has already put the last palette on screen, and
+  // applying the in-memory default over it would flash Graphite on every
+  // launch for whoever chose something else.
+  const { palette, customPalette } = preferences.display
+  useEffect(() => {
+    if (isLoading) return
+    applyPalette(resolveSeed(palette, customPalette))
+  }, [isLoading, palette, customPalette])
+
+  // The status bar follows the mode actually on screen.
+  useEffect(() => {
+    syncThemeColor()
+  }, [resolvedTheme])
 
   const persistPreferences = useCallback((updated: ResolvedPreferences) => {
     if (debounceRef.current) clearTimeout(debounceRef.current)

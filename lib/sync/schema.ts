@@ -195,6 +195,7 @@ const PERSONNEL_FIELDS = {
   favorite: null,
   defaultPIC: null,
   defaultSIC: null,
+  pfRole: null,
 } satisfies FieldTable<Personnel>
 
 const SCHEDULE_ENTRY_FIELDS = {

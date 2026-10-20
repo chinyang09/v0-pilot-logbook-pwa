@@ -256,14 +256,26 @@ export function calculateNightTimeComplete(
   const effectiveOff = offTime ? offTime : outTime
   const effectiveOn = onTime ? onTime : inTime
 
-  if (!date || !outTime || !inTime || isNaN(dep.lat) || isNaN(arr.lat)) {
+  if (!date || !outTime || !inTime || [dep.lat, dep.lon, arr.lat, arr.lon].some((n) => !Number.isFinite(n))) {
     return zeroResult
   }
 
   const outUTC = parseTimeToUTC(date, outTime)
-  const offUTC = parseTimeToUTC(date, effectiveOff, outUTC)
-  const onUTC = parseTimeToUTC(date, effectiveOn, offUTC)
-  const inUTC = parseTimeToUTC(date, inTime, onUTC)
+  let offUTC = parseTimeToUTC(date, effectiveOff, outUTC)
+  let onUTC = parseTimeToUTC(date, effectiveOn, offUTC)
+  let inUTC = parseTimeToUTC(date, inTime, onUTC)
+
+  // The four times must fall IN ORDER within one block. Each is placed after
+  // the one before, so an OFF typed a few minutes before OUT was pushed a
+  // whole day on, dragging ON and IN with it: night time came out as 11:12 on
+  // a 1:10 block. When the chain lands IN anywhere but where OUT→IN alone puts
+  // it, OFF/ON are not trustworthy — fall back to the gate times.
+  const directIn = parseTimeToUTC(date, inTime, outUTC)
+  if (inUTC.getTime() !== directIn.getTime()) {
+    offUTC = outUTC
+    onUTC = directIn
+    inUTC = directIn
+  }
 
   if ([outUTC, offUTC, onUTC, inUTC].some((d) => isNaN(d.getTime()))) {
     return zeroResult

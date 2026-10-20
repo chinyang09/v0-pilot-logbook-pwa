@@ -29,6 +29,9 @@ export async function GET(request: Request) {
     await db.collection<{ _id: string; [key: string]: unknown }>("challenges").insertOne({
       _id: challengeBase64,
       challenge: challengeBase64,
+      // Typed, and consumed only as this type: a step-up or registration
+      // challenge must not be spendable on a login (CLAUDE.md, auth invariants).
+      type: "login",
       expiresAt: new Date(Date.now() + 60000),
     })
 
@@ -53,6 +56,7 @@ export async function POST(request: NextRequest) {
     // ✅ Find and delete using Date object comparison
     const storedChallenge = await db.collection("challenges").findOneAndDelete({
       _id: challenge,
+      type: "login",
       expiresAt: { $gt: new Date() },
     })
 
@@ -137,8 +141,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       user: { id: user._id, callsign: user.identity.callsign },
+      // Never the token: it is the HttpOnly cookie's secret, and a copy in a
+      // response body is readable by any script on the page.
       session: {
-        token: sessionId,
         expiresAt: sessionExpiry.getTime(), // Send as number (timestamp) to frontend
       },
     })

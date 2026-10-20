@@ -13,6 +13,7 @@
  *     honoring manualOverrides natively
  */
 
+import { nonPicPfRoleOf, seatOf } from "@/lib/utils/roster/pilot-role";
 import type {
   PlannedImport,
   AcceptableOperation,
@@ -169,9 +170,12 @@ async function hydrateFlightFromSector(
     pilotRole = "PIC";
   } else if (sector.isUserPic === false || sector.isPilotFlying !== undefined) {
     // Logbook-derived path: we know the user's flying status.
-    pilotRole = pilotFlying ? importDefaults.nonPicPfRole : "SIC";
+    pilotRole = pilotFlying
+      ? nonPicPfRoleOf(currentUser, importDefaults.nonPicPfRole)
+      : "SIC";
   } else {
-    pilotRole = currentUser.roles?.includes("PIC") ? "PIC" : "SIC";
+    // No sector hint: the seat on the pilot's own crew card decides.
+    pilotRole = seatOf(currentUser) === "captain" ? "PIC" : "SIC";
   }
 
   // Remarks belong to the user. We only carry through what the source report

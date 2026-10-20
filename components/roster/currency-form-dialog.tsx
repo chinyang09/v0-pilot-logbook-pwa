@@ -74,6 +74,15 @@ export function CurrencyFormDialog({
 
   const [isSaving, setIsSaving] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
+  // Inline, not `alert()`: a native alert blocks the page, reads as a system
+  // fault rather than a missing field, and is not shown at all in some
+  // installed-PWA contexts.
+  const [error, setError] = useState<string | null>(null)
+
+  const handleOpenChange = (next: boolean) => {
+    if (!next) setError(null)
+    onOpenChange(next)
+  }
 
   // Load currency data when editing
   useEffect(() => {
@@ -119,16 +128,17 @@ export function CurrencyFormDialog({
   const handleSave = async () => {
     try {
       setIsSaving(true)
+      setError(null)
 
       const finalDescription = isCustom ? customDescription : description
 
       if (!finalDescription.trim()) {
-        alert("Please enter a description")
+        setError("Enter a description.")
         return
       }
 
       if (!expiryDate) {
-        alert("Please enter an expiry date")
+        setError("Enter an expiry date.")
         return
       }
 
@@ -158,14 +168,14 @@ export function CurrencyFormDialog({
       }, 1000)
     } catch (error) {
       console.error("Failed to save currency:", error)
-      alert("Failed to save currency")
+      setError("Couldn't save this currency. Try again.")
     } finally {
       setIsSaving(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit Currency" : "Add Currency"}</DialogTitle>
@@ -280,6 +290,12 @@ export function CurrencyFormDialog({
               onCheckedChange={setAutoUpdate}
             />
           </div>
+
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
 
           {/* Save Button */}
           <div className="flex items-center gap-2 pt-4">

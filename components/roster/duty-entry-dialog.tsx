@@ -59,12 +59,15 @@ const todayUTC = () => new Date().toISOString().slice(0, 10);
 export function DutyEntryDialog({
   open,
   entry,
+  defaultDate,
   onClose,
   onSaved,
 }: {
   open: boolean;
   /** The duty being edited, or null to add a new one. */
   entry: ScheduleEntry | null;
+  /** A new duty's date (YYYY-MM-DD) — the day selected on the roster. */
+  defaultDate?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -78,7 +81,7 @@ export function DutyEntryDialog({
   // form state is a cascading render, and keying it on the entry object would
   // clobber an edit in progress every time a sync write handed back a fresh
   // row; keying the COMPONENT on the id gets the initialisation for free.
-  const [date, setDate] = useState(() => entry?.date ?? todayUTC());
+  const [date, setDate] = useState(() => entry?.date ?? defaultDate ?? todayUTC());
   const [dutyType, setDutyType] = useState<DutyType>(
     () => entry?.dutyType ?? "standby"
   );
@@ -101,6 +104,21 @@ export function DutyEntryDialog({
   const timesValid =
     !wantsWindow || (isValidHHMM(start) && isValidHHMM(end) && start !== end);
   const canSave = Boolean(date) && Boolean(dutyCode.trim()) && timesValid && !saving;
+
+  // Why Save is disabled, said out loud. The rows' placeholders ("BKUP",
+  // "06:00", "18:00") read as filled-in values, so a disabled Save with no
+  // reason looked like the dialog was broken.
+  const missing: string[] = [];
+  if (!date) missing.push("a date");
+  if (!dutyCode.trim()) missing.push("a code");
+  if (wantsWindow) {
+    if (!isValidHHMM(start)) missing.push("a start time");
+    if (!isValidHHMM(end)) missing.push("an end time");
+    else if (isValidHHMM(start) && start === end) missing.push("an end time different from the start");
+  }
+  const blockedReason = missing.length
+    ? `Needs ${missing.length > 1 ? missing.slice(0, -1).join(", ") + " and " + missing[missing.length - 1] : missing[0]}`
+    : null;
 
   const region: React.CSSProperties = useMemo(() => {
     const pushedBy = canPushSidebar && sidebarOpen ? SIDEBAR_WIDTH_PX : 0;
@@ -153,9 +171,16 @@ export function DutyEntryDialog({
 
   return createPortal(
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="duty-dialog-title"
       style={region}
       className={cn(
-        "fixed z-[65] flex flex-col bg-background",
+        // Above the app chrome (header z-99, nav pill z-100) — at z-[65] the
+        // nav pill covered Save/Cancel on a phone and the roster's header
+        // buttons drew over the dialog. Below Radix's popper layer (z-150), so
+        // the duty-type Select still opens in front. See signature-dialog.
+        "fixed z-[110] flex flex-col bg-background",
         isDesktop && "rounded-2xl border border-border overflow-hidden shadow-2xl"
       )}
     >
@@ -165,7 +190,7 @@ export function DutyEntryDialog({
           !isDesktop && "pt-safe"
         )}
       >
-        <h2 className="text-base font-semibold">
+        <h2 id="duty-dialog-title" className="text-base font-semibold">
           {entry ? "Edit duty" : "Add duty"}
         </h2>
         <button
@@ -237,6 +262,11 @@ export function DutyEntryDialog({
           !isDesktop && "pb-safe"
         )}
       >
+        {blockedReason && (
+          <p className="mr-auto min-w-0 text-xs text-muted-foreground" role="status">
+            {blockedReason}
+          </p>
+        )}
         <Button variant="ghost" onClick={() => dismiss()}>
           Cancel
         </Button>

@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
-import { Check, TriangleAlert, OctagonAlert, ArrowUpRight } from "lucide-react"
+import { Check, TriangleAlert, OctagonAlert, ArrowUpRight, Info } from "lucide-react"
 
 import { usePilotStatus } from "@/hooks/data/use-pilot-status"
 import { usePageActive } from "@/hooks/use-page-active"
@@ -85,6 +85,14 @@ const TONE: Record<
     wash: "bg-destructive/10",
     glow: "from-destructive/[0.16]",
     icon: OctagonAlert,
+  },
+  // Not on the status ramp: nothing has been assessed, so it is neither a
+  // pass nor a fail. Neutral, like the `unknown` requirement cell.
+  getting_started: {
+    text: "text-muted-foreground",
+    wash: "bg-muted",
+    glow: "from-muted-foreground/[0.08]",
+    icon: Info,
   },
 }
 
@@ -213,7 +221,13 @@ export function LegalDashboardView({
         aria-hidden="true"
       />
 
-      <div className="relative flex min-h-0 flex-col divide-y divide-border/40">
+      {/* Scrolls only as a LAST RESORT. Everything fits on a phone held
+          upright (measured: 360×780 and up), so this never moves there — but a
+          phone turned sideways gets the split layout at ~390px tall, and with
+          `overflow-hidden` alone the currency band was squeezed to nothing and
+          the limits band was clipped off the bottom: a pilot checking legality
+          sideways could see neither. */}
+      <div className="relative flex min-h-0 flex-col divide-y divide-border/40 overflow-y-auto overscroll-contain scrollbar-hide">
         <Annunciator status={status} />
         <DutyBand status={status} now={now} display={display} />
         <CurrencyBand requirements={currency} />
@@ -267,9 +281,15 @@ function Annunciator({ status }: { status: PilotStatus }) {
       {/* The tightest constraint — never "12 / 12 current". When nothing is
           flagged this is the nearest EXPIRY, not the fullest rolling limit: a
           limit refills, so 41% of a 12-month allowance is not "tight". */}
-      {status.governing && (
+      {/* With nothing logged there is no constraint to name — a rolling limit
+          at 0 / 90h is not "tight" — so the line explains the first step. */}
+      {status.state === "getting_started" ? (
         <p className="mt-1 text-xs leading-tight text-muted-foreground">
-          <span className="text-muted-foreground/70">Tightest</span>{" "}
+          {status.nextAction.detail}
+        </p>
+      ) : status.governing && (
+        <p className="mt-1 text-xs leading-tight text-muted-foreground">
+          <span className="text-muted-foreground">Tightest</span>{" "}
           {status.governing.label}
           <span className="mx-1 text-muted-foreground/40">·</span>
           <span className="font-medium text-foreground/80 tabular-nums">
@@ -564,11 +584,14 @@ function DutyBand({
   return (
     <section className="px-4 py-2.5" aria-label="Duty">
       <div className="flex items-baseline justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+        <p className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           {view.state}
         </p>
         {view.chip && (
           <p
+            // A long multi-sector route can still truncate on a 360px phone;
+            // the full text stays reachable.
+            title={view.chip}
             className={cn(
               "min-w-0 truncate text-[10px] font-medium tabular-nums",
               view.chipTone ? RAMP[view.chipTone].text : "text-muted-foreground",
@@ -814,6 +837,17 @@ function CurrencyBand({ requirements }: { requirements: Requirement[] }) {
 
   return (
     <Band label="Currency" requirements={ordered} flexible>
+      {/* Nothing to show only happens before anything has been logged or
+          added: say where the documents go rather than draw an empty band. */}
+      {ordered.length === 0 && (
+        <Link
+          href="/currencies"
+          className="flex items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <span>Track your medical, licence and checks</span>
+          <ArrowUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        </Link>
+      )}
       <div className="grid grid-cols-2 gap-1.5 @[26rem]:grid-cols-3 @[44rem]:grid-cols-4">
         {ordered.map((r) => (
           <CurrencyCell
@@ -903,7 +937,7 @@ function LimitRow({ requirement }: { requirement: Requirement }) {
 
   return (
     <div className="flex items-center gap-2">
-      <span className="w-7 shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground/70">
+      <span className="w-7 shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground">
         {window}
       </span>
 
@@ -960,12 +994,19 @@ function Band({
     <section
       className={cn(
         "px-4 py-2.5",
-        flexible && "min-h-0 flex-1 overflow-y-auto scrollbar-hide",
+        // It absorbs the squeeze, but never below its first row of cells — at
+        // min-h-0 it collapsed to its label on a short screen and every
+        // currency vanished behind a hidden scrollbar.
+        flexible && "min-h-[6.5rem] flex-1 overflow-y-auto scrollbar-hide",
+        // On a SHORT screen (a phone held sideways) the whole surface scrolls
+        // instead, so this band takes its full height rather than being a
+        // second scroller nested inside the first.
+        flexible && "[@media(max-height:500px)]:flex-none [@media(max-height:500px)]:overflow-visible",
       )}
       aria-label={label}
     >
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           {label}
         </p>
         <span className="flex items-center gap-2 text-[10px] tabular-nums">
@@ -981,7 +1022,9 @@ function Band({
               {caution}
             </span>
           )}
-          {fail === 0 && caution === 0 && (
+          {/* A tick says "everything here is met" — an empty band has
+              nothing to have met. */}
+          {fail === 0 && caution === 0 && requirements.length > 0 && (
             <Check className="h-3 w-3 text-chart-2" aria-hidden="true" />
           )}
         </span>
@@ -1098,7 +1141,7 @@ function CurrencyDetail({ requirement }: { requirement: Requirement }) {
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
           {detail?.map((d) => (
             <React.Fragment key={d.label}>
-              <dt className="text-[11px] text-muted-foreground/70">{d.label}</dt>
+              <dt className="text-[11px] text-muted-foreground">{d.label}</dt>
               <dd className="text-[11px] font-medium tabular-nums text-foreground/90">
                 {d.value}
               </dd>

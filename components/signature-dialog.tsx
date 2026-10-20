@@ -100,14 +100,19 @@ export function SignatureDialog({
       }
     : { inset: 0 };
 
-  // z-[65]: above the nav pill (60) and BELOW Radix's popper layer (70). At
-  // z-[200] the crew `Select` opened *behind* the dialog, which is why picking
-  // a signer looked broken and intermittent.
+  // z-[110]: above the app chrome (header z-99, nav pill z-100) and BELOW
+  // Radix's popper layer (z-150). At z-[200] the crew `Select` opened *behind*
+  // the dialog, which is why picking a signer looked broken and intermittent;
+  // at z-[65] — written when the nav pill was 60 — the pill and the header
+  // drew over the dialog on a phone and hid its Save button.
   return createPortal(
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="signature-dialog-title"
       style={region}
       className={cn(
-        "fixed z-[65] flex flex-col bg-background",
+        "fixed z-[110] flex flex-col bg-background",
         isDesktop && "rounded-2xl border border-border overflow-hidden shadow-2xl"
       )}
     >
@@ -119,7 +124,7 @@ export function SignatureDialog({
           !isDesktop && "pt-safe"
         )}
       >
-        <h2 className="text-base font-semibold">Signature</h2>
+        <h2 id="signature-dialog-title" className="text-base font-semibold">Signature</h2>
         <button
           type="button"
           onClick={() => dismiss()}

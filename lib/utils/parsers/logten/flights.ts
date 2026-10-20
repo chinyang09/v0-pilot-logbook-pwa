@@ -840,6 +840,12 @@ function buildSimulator(
     raw.remarks.slice(0, 24) || raw.flightNumber || "SIM"
   );
 
+  // The pilot's own name in a seat is "Self", as on every flight row. The sim
+  // path copied the raw column, so a migrated session read "Lim Chin Yang" in
+  // the SIC seat while the flights either side of it read "Self".
+  const me = normalize(ctx.currentUser.name);
+  const simSeat = (name: string) => (name && normalize(name) === me ? "Self" : name);
+
   return {
     date: raw.date,
     flightNumber: "",
@@ -862,9 +868,9 @@ function buildSimulator(
     nightTime: "00:00",
     dayTime: "00:00",
     picId: "",
-    picName: raw.picName,
+    picName: simSeat(raw.picName),
     sicId: ctx.currentUser.id,
-    sicName: raw.sicName || "Self",
+    sicName: simSeat(raw.sicName) || "Self",
     additionalCrew: [],
     pilotFlying: raw.isPF ?? false,
     pilotRole: derivePilotRole(raw, "Dual"),

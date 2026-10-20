@@ -149,6 +149,21 @@ export interface LegalityInput {
   currencies: CurrencyWithStatus[]
   /** How many documents get their own cell before the rest are folded up. */
   documentRows?: number
+  /**
+   * Nothing in the logbook yet. Recency is then not ASSESSED rather than
+   * failed: 0 / 3 on a fresh install is not a pilot who lapsed, it is an app
+   * that has not been told anything, and it raised ACTION REQUIRED on the
+   * first screen a new user ever sees.
+   */
+  logbookEmpty?: boolean
+  /**
+   * What could NOT be read or computed — the duty-limit pipeline threw, or the
+   * logbook read failed. Each becomes an `unknown` requirement, which the
+   * annunciator reads as a caution. Without it a failure looked exactly like a
+   * legal pilot: no duty, no rest owed, no limits — "all clear" by default,
+   * which is a number somebody might fly to.
+   */
+  unavailable?: Array<"duty" | "logbook">
   now?: Date
 }
 
@@ -169,6 +184,8 @@ export function buildLegalityModel({
   forecastBreaches = [],
   currencies,
   documentRows = DEFAULT_DOCUMENT_ROWS,
+  logbookEmpty = false,
+  unavailable = [],
   now = new Date(),
 }: LegalityInput): LegalityModel {
   const requirements: Requirement[] = []
@@ -182,17 +199,24 @@ export function buildLegalityModel({
   // question. The cell answers it with the binding half; expanding shows both.
   const toShort = Math.max(0, RECENCY_REQUIRED - recency.takeoffs)
   const ldgShort = Math.max(0, RECENCY_REQUIRED - recency.landings)
-  const recencyMet = toShort === 0 && ldgShort === 0
   const daysToLapse = recency.lapseIso ? daysBetween(todayIso, recency.lapseIso) : undefined
+  // The lapse DATE outranks the counts. The counts are taken when the
+  // aggregate runs; on a dashboard left open past the lapse they still read
+  // 3 / 3, and this showed a lapsed pilot CAUTION "T/O + landing in -2d".
+  // `lapseIso` is the first day NOT current, so 0 days to it is lapsed.
+  const lapsedByDate = daysToLapse !== undefined && daysToLapse <= 0
+  const recencyMet = toShort === 0 && ldgShort === 0 && !lapsedByDate
   const lapsingSoon =
     recencyMet && daysToLapse !== undefined && daysToLapse <= RECENCY_CAUTION_DAYS
 
-  requirements.push({
+  if (!logbookEmpty) requirements.push({
     id: "recency",
     group: "currency",
     label: "90-day recency",
     state: !recencyMet ? "fail" : lapsingSoon ? "caution" : "ok",
-    value: !recencyMet
+    value: lapsedByDate
+      ? "Lapsed"
+      : !recencyMet
       ? `${Math.min(recency.takeoffs, recency.landings)} / 3`
       : daysToLapse !== undefined
         ? `${daysToLapse}d`
@@ -208,12 +232,29 @@ export function buildLegalityModel({
     ],
     href: "/logbook",
     urgency: !recencyMet ? 900 : lapsingSoon ? 400 - Math.min(399, daysToLapse ?? 0) : undefined,
-    action: !recencyMet
+    action: lapsedByDate
+      ? "Recency lapsed: 3 takeoffs and landings required"
+      : !recencyMet
       ? shortfallAction(toShort, ldgShort)
       : lapsingSoon
         ? `T/O + landing in ${daysToLapse}d`
         : undefined,
   })
+
+  // ── Inputs that could not be read ───────────────────────────────────────
+  for (const what of unavailable) {
+    requirements.push({
+      id: `unavailable-${what}`,
+      group: "currency",
+      label: what === "duty" ? "Duty limits" : "Logbook",
+      state: "unknown",
+      value: "—",
+      detail: [{ label: "Status", value: what === "duty" ? "Could not be computed" : "Could not be read" }],
+      href: what === "duty" ? "/fdp" : "/logbook",
+      urgency: 850,
+      action: what === "duty" ? "Duty limits unavailable — check manually" : "Logbook could not be read — reload",
+    })
+  }
 
   // ── Documents ───────────────────────────────────────────────────────────
   // Nearest expiry first. An EXPIRED document is a hard stop; one inside its own
@@ -233,13 +274,16 @@ export function buildLegalityModel({
       group: "currency",
       label: doc.code,
       state,
-      value: doc.daysRemaining <= 0 ? "Expired" : `${doc.daysRemaining}d`,
+      // An expiry date is a VALID day — it lapses tomorrow. `daysRemaining 0`
+      // is "expires today" (status critical, a caution), and printing
+      // "Expired" beside "expires in 0d" contradicted itself.
+      value: doc.daysRemaining < 0 ? "Expired" : doc.daysRemaining === 0 ? "Today" : `${doc.daysRemaining}d`,
       // Metered against its own warning window: a document is "filling up" only
       // once it enters the window its owner chose to be warned at. Against the
       // whole validity period every document sits near full for a year and the
       // meter says nothing.
       progress:
-        doc.daysRemaining <= 0
+        doc.daysRemaining < 0
           ? 1
           : doc.warningDays > 0
             ? Math.max(0, 1 - doc.daysRemaining / doc.warningDays)

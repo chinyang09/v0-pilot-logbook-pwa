@@ -237,6 +237,7 @@ export {
   getAirportLocalTime,
   getAirportDatabase,
   ensureAirportDatabase,
+  onAirportSeedProgress,
   searchAirports,
   hasExactAirportCodeMatch,
   getAirportTimeInfo,

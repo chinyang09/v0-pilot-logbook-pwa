@@ -92,15 +92,45 @@ export function getAirportsRevision(): number {
 }
 
 /**
- * Rows per write transaction while seeding. The bundled dataset is ~29k
- * airports, and Chromium serves every IndexedDB database on an origin from ONE
- * backing store: written as a single transaction it held EVERY request on the
- * origin — the user database and the sync engine included — for the whole
- * write. Measured on a fresh profile: ~26 seconds in which the first flight a
- * new device created could not even be queued, let alone pushed. In chunks,
- * anything else waits for one chunk at most.
+ * Rows per write transaction while seeding, and the pause between them. The
+ * bundled dataset is ~29k airports, and Chromium serves every IndexedDB
+ * database on an origin from ONE backing store: written as a single
+ * transaction it held EVERY request on the origin — the user database and the
+ * sync engine included — for the whole write. Measured on a fresh profile:
+ * ~26 seconds in which the first flight a new device created could not even
+ * be queued, let alone pushed.
+ *
+ * Chunking alone was not enough, because nothing in the app is ONE
+ * transaction. Adding a flight is a chain of about eight (the crew card, the
+ * preferences, the flight, the queue …), each started when the last one
+ * finishes — and with only a `setTimeout(0)` between chunks the next chunk was
+ * always queued first, so the chain waited a whole chunk at EVERY step. At
+ * 1000 rows (~550ms a chunk in headless Chromium) adding a flight took 2–6s
+ * for the 15-odd seconds after the first flight form opened on a new install,
+ * which is what read as "adding gets slower while sync is failing".
+ *
+ * Smaller chunks bound each wait, and the gap is long enough for a whole
+ * chain to run between two of them. The seed takes a few seconds longer; it
+ * is a once-per-install background job and the pilot is not waiting on it.
  */
-const SEED_CHUNK = 1000
+const SEED_CHUNK = 250
+const SEED_GAP_MS = 48
+
+/**
+ * How far a seed has got, 0..1, for anyone waiting on it.
+ *
+ * A first seed takes seconds on a fresh device, and the import awaits it
+ * before parsing — so a new user's first import (a LogTen migration, very
+ * often) sat on an unmoving "Reading 5%" for ~14s. The import dialog
+ * subscribes and shows it; nothing else needs to.
+ */
+const seedListeners = new Set<(fraction: number) => void>()
+export function onAirportSeedProgress(listener: (fraction: number) => void): () => void {
+  seedListeners.add(listener)
+  return () => {
+    seedListeners.delete(listener)
+  }
+}
 
 let rebuildInFlight: Promise<Airport[]> | null = null
 
@@ -127,7 +157,9 @@ async function seedAirportsTable(rawData: Record<string, any>): Promise<Airport[
   // dataset no longer has once every chunk is in.
   for (let i = 0; i < rows.length; i += SEED_CHUNK) {
     await referenceDb.airports.bulkPut(rows.slice(i, i + SEED_CHUNK))
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    const done = Math.min(1, (i + SEED_CHUNK) / rows.length)
+    seedListeners.forEach((listener) => listener(done))
+    await new Promise((resolve) => setTimeout(resolve, SEED_GAP_MS))
   }
   const keep = new Set(rows.map((a) => a.icao))
   const stale = ((await referenceDb.airports.toCollection().primaryKeys()) as string[]).filter((k) => !keep.has(k))

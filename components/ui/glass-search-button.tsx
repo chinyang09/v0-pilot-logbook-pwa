@@ -1,5 +1,6 @@
 "use client"
 
+import { SEARCH_INPUT_PROPS } from "@/lib/utils/input-props"
 import { useRef, useEffect, useCallback } from "react"
 import { Search, X } from "lucide-react"
 import { GlassContainer } from "@/components/ui/glass-container"
@@ -93,6 +94,9 @@ export function GlassSearchButton({
           <button
             type="button"
             onClick={isOpen ? undefined : onToggle}
+            aria-label="Search"
+            aria-expanded={isOpen}
+            tabIndex={isOpen ? -1 : 0}
             className="absolute left-0 top-0 h-11 w-11 flex items-center justify-center flex-shrink-0"
             style={{ pointerEvents: isOpen ? "none" : "auto" }}
           >
@@ -113,6 +117,8 @@ export function GlassSearchButton({
               value={value}
               onChange={(e) => onChange(e.target.value)}
               placeholder={placeholder}
+              aria-label={placeholder}
+              {...SEARCH_INPUT_PROPS}
               tabIndex={isOpen ? 0 : -1}
               className="flex-1 bg-transparent text-sm outline-none min-w-0 placeholder:text-[var(--on-glass-muted)]"
             />
@@ -120,7 +126,10 @@ export function GlassSearchButton({
               type="button"
               onClick={handleClose}
               tabIndex={isOpen ? 0 : -1}
-              className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Close search"
+              // The icon is 16px; the padding takes the target to 32 and the
+              // negative margin keeps the icon where it was.
+              className="-m-2 flex-shrink-0 p-2 text-muted-foreground hover:text-foreground transition-colors"
             >
               <X className="h-4 w-4" />
             </button>

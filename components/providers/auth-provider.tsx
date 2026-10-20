@@ -4,6 +4,7 @@ import type React from "react"
 import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { getUserSession, saveUserSession, clearAllUserData, type UserSession } from "@/lib/db"
+import { userDb } from "@/lib/db/user-db"
 import { resetDBState } from "@/hooks/data/use-db"
 import { startAuthentication } from "@simplewebauthn/browser"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
@@ -19,25 +20,110 @@ import { AppStatusOverlay } from "@/components/app-status-overlay"
  * `lib/auth/shared/session-verdict.ts` for why that distinction is the whole
  * reason an offline app stopped kicking itself back to /login.
  */
+/**
+ * Auth requests get a deadline. `navigator.onLine` reports true on a captive
+ * portal or a dead cell link, and with no timeout the sync button waited on
+ * the session probe — and the "Signing out…" overlay on the session DELETE —
+ * until the browser's own TCP timeout. `read` runs inside the deadline so the
+ * body is covered too.
+ */
+const AUTH_FETCH_TIMEOUT_MS = 15_000
+
+/**
+ * Every route the app can be COLD-started on offline. The service worker
+ * caches each one's HTML once signed in. It used to be the five list tabs, so
+ * Roster, Settings, Account, Currencies, Discrepancies, FDP and Recently
+ * Deleted were each cached only after a full page load of that URL online —
+ * client-side navigation never fetches their HTML — and offline the app fell
+ * back to the dashboard's HTML under the wrong URL.
+ */
+const OFFLINE_PAGES = [
+  "/", "/logbook", "/aircraft", "/airports", "/crew", "/roster", "/settings", "/account",
+  "/currencies", "/discrepancies", "/fdp", "/recently-deleted",
+]
+
+/**
+ * Ask the browser to keep this origin's storage. Without it IndexedDB is
+ * "best effort": Safari in a tab wipes it after 7 days without a visit and
+ * Chrome evicts under storage pressure — and the sync queue, i.e. every edit
+ * not yet pushed, lives there. Installed PWAs are usually granted it; asking
+ * is free and silent, and the answer is only logged.
+ */
+async function requestPersistentStorage(): Promise<void> {
+  try {
+    const storage = typeof navigator !== "undefined" ? navigator.storage : undefined
+    if (!storage?.persist || (await storage.persisted?.())) return
+    const granted = await storage.persist()
+    if (!granted) console.log("[Auth] persistent storage not granted - data may be evicted under pressure")
+  } catch {
+    // Best effort.
+  }
+}
+async function authFetch<T>(input: string, init: RequestInit, read: (res: Response) => Promise<T>): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), AUTH_FETCH_TIMEOUT_MS)
+  try {
+    return await read(await fetch(input, { ...init, signal: controller.signal }))
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Whose data this device holds. An expired session keeps its local data on
+ * purpose (signing back in carries on where it left off), so a DIFFERENT
+ * account signing in on the same device used to inherit it: the first
+ * account's queued edits were pushed into the second account, and the second
+ * account's pull ran from the first one's cursors and could be told it was
+ * up to date. Recorded beside the sync state, so a sign-out's wipe clears it.
+ */
+const DATA_OWNER_KEY = "dataOwner"
+interface DataOwner {
+  userId: string
+  callsign?: string
+}
+async function readDataOwner(): Promise<DataOwner | null> {
+  try {
+    const row = await userDb.syncMeta.get(DATA_OWNER_KEY)
+    const v = row?.value as Partial<DataOwner> | undefined
+    if (v && typeof v.userId === "string") return { userId: v.userId, callsign: v.callsign }
+    // An install from before this was recorded: any record says whose it is.
+    const flight = await userDb.flights.limit(1).first()
+    return flight?.userId ? { userId: flight.userId } : null
+  } catch {
+    return null
+  }
+}
+async function writeDataOwner(owner: DataOwner): Promise<void> {
+  try {
+    await userDb.syncMeta.put({ key: DATA_OWNER_KEY, value: owner })
+  } catch (error) {
+    console.error("[Auth] failed to record data owner:", error)
+  }
+}
+
 async function probeSession(): Promise<{ verdict: SessionVerdict; expiresAt?: number }> {
   if (typeof navigator !== "undefined" && !navigator.onLine) return { verdict: "unknown" }
 
-  let res: Response
+  let res: { ok: boolean; swOffline: string | null; body: unknown }
   try {
-    res = await fetch("/api/auth/session", { cache: "no-store" })
+    res = await authFetch("/api/auth/session", { cache: "no-store" }, async (r) => ({
+      ok: r.ok,
+      swOffline: r.headers.get("X-SW-Offline"),
+      // `navigator.onLine` above is not enough on its own: it reports true on
+      // a captive portal or an attached-but-dead cell/aircraft network, which
+      // is precisely where this app is used.
+      body: await r.json().catch(() => undefined),
+    }))
   } catch {
-    // Genuine network failure — inconclusive, never a logout.
+    // Genuine network failure or timeout — inconclusive, never a logout.
     return { verdict: "unknown" }
   }
-
-  // `navigator.onLine` above is not enough on its own: it reports true on a
-  // captive portal or an attached-but-dead cell/aircraft network, which is
-  // precisely where this app is used.
-  const body = await res.json().catch(() => undefined)
+  const body = res.body
 
   const verdict = classifySessionResponse({
     ok: res.ok,
-    swOffline: res.headers.get("X-SW-Offline"),
+    swOffline: res.swOffline,
     body,
   })
 
@@ -85,7 +171,8 @@ interface AuthContextType {
    */
   sessionExpired: boolean
   login: (session: Omit<UserSession, "id" | "createdAt">) => Promise<void>
-  logout: () => Promise<void>
+  /** `skipSync` when the caller already pushed and revoked the session. */
+  logout: (opts?: { skipSync?: boolean }) => Promise<void>
   silentReauth: () => Promise<boolean>
   /**
    * Ensure the server session is valid before a privileged action (e.g. a manual
@@ -108,19 +195,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const authCheckDone = useRef(false)
 
   const login = useCallback(async (session: Omit<UserSession, "id" | "createdAt">) => {
+    const owner = await readDataOwner()
+    if (owner && owner.userId !== session.userId) {
+      // Another account's data. What it has not pushed cannot be pushed from
+      // here (that account is signed out), so it would be lost — ask first,
+      // the same way signing out does.
+      const unsynced = await userDb.syncQueue.count().catch(() => 0)
+      if (
+        unsynced > 0 &&
+        !window.confirm(
+          `This device still holds ${unsynced} unsynced change${unsynced === 1 ? "" : "s"} from ` +
+            `${owner.callsign ? owner.callsign : "another account"}. Signing in as ${session.callsign} ` +
+            `removes them from this device.\n\nContinue?`
+        )
+      ) {
+        throw new Error(
+          `Sign-in cancelled. Sign in as ${owner.callsign ?? "the previous account"} to keep its unsynced changes.`
+        )
+      }
+      await clearAllUserData()
+      resetDBState()
+    }
     await saveUserSession(session)
+    await writeDataOwner({ userId: session.userId, callsign: session.callsign })
     const savedSession = await getUserSession()
     setUser(savedSession || null)
     // A fresh login always clears any stale "expired" state.
     setSessionExpired(false)
 
     // After successful login, trigger proactive caching of app pages
+    if (savedSession) void requestPersistentStorage()
     if (savedSession && "serviceWorker" in navigator) {
       navigator.serviceWorker.ready.then((registration) => {
         if (registration.active) {
           registration.active.postMessage({
             type: "CACHE_PAGES",
-            pages: ["/", "/logbook", "/aircraft", "/airports", "/crew"],
+            pages: OFFLINE_PAGES,
           })
           console.log("[Auth] Triggered proactive page caching after login")
         }
@@ -128,22 +238,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(async (opts?: { skipSync?: boolean }) => {
     // Show immediate feedback — the pre-logout sync + session-delete below are
     // async and otherwise leave the UI looking frozen / the tap ignored.
     setIsLoggingOut(true)
 
-    // Sync pending changes before logout to prevent data loss
-    try {
-      const { syncService } = await import("@/lib/sync")
-      await syncService.syncBeforeLogout()
-    } catch (error) {
-      console.error("[Auth] Pre-logout sync failed:", error)
+    const { syncService } = await import("@/lib/sync")
+    // Sync pending changes before logout to prevent data loss. Skipped when
+    // the caller has already pushed AND revoked the session (the account
+    // page): a second sync then only meets a 401 behind the overlay.
+    if (!opts?.skipSync) {
+      try {
+        await syncService.syncBeforeLogout()
+      } catch (error) {
+        console.error("[Auth] Pre-logout sync failed:", error)
+      }
     }
 
     // Clear server session cookie
     try {
-      await fetch("/api/auth/session", { method: "DELETE" })
+      await authFetch("/api/auth/session", { method: "DELETE" }, async () => undefined)
     } catch (error) {
       console.error("Failed to clear server session:", error)
     }
@@ -154,7 +268,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null)
     router.push("/login")
 
-    // Clear local data after navigation has started (KeepAlivePages unmounting)
+    // Clear local data after navigation has started (KeepAlivePages unmounting).
+    // A cycle still in flight (a poll that started before the tap) would
+    // otherwise write this user's records and cursors back into the freshly
+    // wiped database — for the next person to sign in on this device.
+    syncService.destroyTriggers()
+    await syncService.whenIdle()
     try {
       await clearAllUserData()
     } catch (error) {
@@ -180,8 +299,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(updatedSession || null)
   }, [])
 
-  // Silent re-authentication using discoverable credentials (passkey)
-  const silentReauth = useCallback(async (): Promise<boolean> => {
+  // Silent re-authentication using discoverable credentials (passkey). ONE
+  // ceremony at a time: a second call (a double tap on sync, a 401 landing
+  // mid-ceremony) used to start its own, which failed with "a request is
+  // already pending", marked the session expired and sent the user to /login
+  // while the first passkey sheet was still open.
+  const reauthInFlight = useRef<Promise<boolean> | null>(null)
+  const runSilentReauth = useCallback(async (): Promise<boolean> => {
     // A WebAuthn ceremony with no network cannot succeed — the challenge has to
     // come from the server and the assertion has to go back to it. Attempting it
     // offline only throws up a biometric prompt that is guaranteed to fail, and
@@ -195,17 +319,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log("[v0] Attempting silent re-auth with passkey...")
 
       // Get authentication options from server (GET request, not POST)
-      const optionsRes = await fetch("/api/auth/login/passkey", {
-        method: "GET",
-        cache: "no-store",
-      })
+      const options = await authFetch(
+        "/api/auth/login/passkey",
+        { method: "GET", cache: "no-store" },
+        async (res) => (res.ok ? res.json() : null)
+      )
 
-      if (!optionsRes.ok) {
+      if (!options) {
         console.log("[v0] Silent re-auth: no passkey options available")
         return false
       }
 
-      const options = await optionsRes.json()
       const rpId = window.location.hostname
 
       // Trigger WebAuthn - this will use resident/discoverable credentials
@@ -219,7 +343,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
 
       // Verify with server - match the expected payload format
-      const verifyRes = await fetch("/api/auth/login/passkey", {
+      const verified = await authFetch("/api/auth/login/passkey", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -240,14 +364,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // independent source of "it logged me out on its own".
           deviceId: getOrCreateDeviceId(),
         }),
-      })
+      }, async (res) => (res.ok ? res.json() : null))
 
-      if (!verifyRes.ok) {
+      if (!verified) {
         console.log("[v0] Silent re-auth: verification failed")
         return false
       }
 
-      const { user: userData, session } = await verifyRes.json()
+      const { user: userData, session } = verified
+
+      // A passkey for a DIFFERENT account answered (a shared device). Its
+      // session is valid, but this device's data is not its data — leave that
+      // to the explicit sign-in, which asks before replacing it.
+      const owner = await readDataOwner()
+      if (owner && owner.userId !== userData.id) {
+        console.warn("[Auth] silent re-auth answered for another account - ignoring")
+        return false
+      }
 
       // Save session locally
       await saveUserSession({
@@ -268,22 +401,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return false
     }
   }, [])
+  const silentReauth = useCallback((): Promise<boolean> => {
+    reauthInFlight.current ??= runSilentReauth().finally(() => {
+      reauthInFlight.current = null
+    })
+    return reauthInFlight.current
+  }, [runSilentReauth])
 
   // The reauth handler the sync engine calls on a 401 (background DB access or a
   // manual resync). It runs the custom passkey flow; if that can't recover the
   // session, it flips the reactive `sessionExpired` flag so the UI updates and
   // the route guard sends the user through the custom login flow.
+  //
+  // A 401 is a CLAIM, not proof: the server's own probe decides. A transient
+  // fault (a cookie dropped by a proxy, a deploy mid-request) used to go
+  // straight to a passkey ceremony with no user gesture — which iOS refuses
+  // outright — and its failure marked the session expired and parked the
+  // pilot on /login with a session that was fine. And the ceremony itself is
+  // only attempted when the user has just tapped something: from a 15-second
+  // background poll it could raise the passkey sheet over and over.
+  const sessionExpiredRef = useRef(false)
+  useEffect(() => {
+    sessionExpiredRef.current = sessionExpired
+  }, [sessionExpired])
   const handleSyncReauth = useCallback(async (): Promise<boolean> => {
-    const ok = await silentReauth()
+    // Already known to be dead: the login screen is handling it.
+    if (sessionExpiredRef.current) return false
+    const { verdict, expiresAt } = await probeSession()
+    if (verdict === "valid") {
+      await refreshLocalSessionExpiry(expiresAt)
+      return true
+    }
+    // Offline / no answer: not evidence of anything, leave the session alone.
+    if (verdict === "unknown") {
+      console.warn("[Auth] 401 during sync but the session check was inconclusive - session left intact")
+      return false
+    }
+    const gestured =
+      typeof navigator !== "undefined" &&
+      (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive === true
+    const ok = gestured ? await silentReauth() : false
     if (!ok) {
-      // Only an ONLINE failure is evidence the session is really gone. Offline,
-      // the reauth could not even be attempted, so treating it as expired would
-      // bounce a working offline app to the login screen.
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        console.warn("[Auth] reauth skipped during sync - offline, session left intact")
-        return false
-      }
-      console.warn("[Auth] reauth failed during sync - marking session expired")
+      console.warn("[Auth] session expired - routing to sign-in")
       setSessionExpired(true)
     }
     return ok
@@ -426,21 +585,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authCheckDone.current = true
 
       try {
-        // First check IndexedDB for existing session
-        const localSession = await getUserSession()
+        // First check IndexedDB for existing session. One retry: an installed
+        // iOS app resumed from the background can find the IndexedDB
+        // connection dropped ("Connection to Indexed Database server lost"),
+        // and reading that as "no session" sent an offline pilot to a login
+        // screen that needs the network.
+        const localSession = await getUserSession().catch(async (error) => {
+          console.warn("[Auth] session read failed, retrying once:", error)
+          await new Promise((r) => setTimeout(r, 300))
+          return getUserSession()
+        })
 
         if (localSession) {
           console.log("[v0] Found valid local session for:", localSession.callsign)
+          // Record whose data this is, for installs from before it was kept.
+          if (!(await userDb.syncMeta.get(DATA_OWNER_KEY).catch(() => undefined))) {
+            void writeDataOwner({ userId: localSession.userId, callsign: localSession.callsign })
+          }
           setUser(localSession)
           setIsLoading(false)
 
+          void requestPersistentStorage()
           // Proactively cache pages in background for offline access
           if ("serviceWorker" in navigator) {
             navigator.serviceWorker.ready.then((registration) => {
               if (registration.active) {
                 registration.active.postMessage({
                   type: "CACHE_PAGES",
-                  pages: ["/", "/logbook", "/aircraft", "/airports", "/crew"],
+                  pages: OFFLINE_PAGES,
                 })
               }
             })

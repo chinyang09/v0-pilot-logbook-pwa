@@ -36,7 +36,7 @@ export async function addScheduleEntry(entry: ScheduleEntryCreate): Promise<Sche
   }
 
   await userDb.scheduleEntries.put(newEntry)
-  await addToSyncQueue("create", "scheduleEntries", newEntry)
+  await addToSyncQueue("create", "scheduleEntries", newEntry, { changedFields: [] })
 
   return newEntry
 }
@@ -175,6 +175,19 @@ export async function linkFlightsToScheduleEntry(
 }
 
 /**
+ * The id an IMPORTED duty is created under — derived from what identifies it
+ * (its date and duty code), not random. Two devices importing the same report
+ * before either has synced each matched against their own table, found
+ * nothing and created the duty under a random id, so every standby arrived
+ * twice. Under one derived id the second create lands on the first as the
+ * same record. Hand-added duties keep random ids; a re-import still matches
+ * any live row by date + code first, whatever its id.
+ */
+export function importedDutyId(date: string, dutyCode: string | undefined): string {
+  return `duty:${date}:${dutyCode ?? ""}`
+}
+
+/**
  * Bulk upsert schedule entries
  */
 export async function bulkUpsertScheduleEntries(
@@ -210,7 +223,11 @@ export async function bulkUpsertScheduleEntries(
           syncStatus: "pending",
         }
         const changedFields = diffFields(existing as never, merged as never)
-        if (changedFields.length === 0) continue
+        // `importedAt` is stamped fresh on every import, so on its own it is
+        // not a change. Counting it rewrote and re-queued EVERY duty on every
+        // re-upload of the same report — 22 sync rows for nothing, and an
+        // import summary claiming "22 standby/ground duties" changed.
+        if (changedFields.every((field) => field === "importedAt")) continue
         await userDb.scheduleEntries.put(merged)
         toEnqueue.push({
           type: "update",
@@ -223,14 +240,17 @@ export async function bulkUpsertScheduleEntries(
       } else {
         const newEntry: ScheduleEntry = {
           ...entry,
-          id: crypto.randomUUID(),
+          id: importedDutyId(entry.date, entry.dutyCode),
           createdAt: Date.now(),
           updatedAt: Date.now(),
           deviceId,
           syncStatus: "pending",
         }
-        await userDb.scheduleEntries.add(newEntry)
-        toEnqueue.push({ type: "create", collection: "scheduleEntries", data: newEntry })
+        // `put`, not `add`: the derived id can belong to a BINNED copy of
+        // this duty, which the live-only match above deliberately skipped.
+        // The report says the duty exists, so the new row takes its place.
+        await userDb.scheduleEntries.put(newEntry)
+        toEnqueue.push({ type: "create", collection: "scheduleEntries", data: newEntry, changedFields: [] })
         created++
       }
     }

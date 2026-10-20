@@ -173,28 +173,32 @@ class UserDatabase extends Dexie {
    * here is still re-pushed from its queue row and re-pulled from the server —
    * a full resync therefore never destroys un-synced local edits.
    */
+  /**
+   * Drop every SYNCED row so a full resync can rebuild the tables from the
+   * server — and keep everything that is not on the server yet. A row with a
+   * queue entry or a non-"synced" status (pending, or dead-lettered as
+   * "error") is this device's unsynced work: the resync's later rounds push
+   * it, and the server leaves a record it was just pushed OUT of that
+   * request's pull, so wiping it here deleted it from this device for good.
+   */
   async clearDataTablesForResync(): Promise<void> {
-    await this.transaction(
-      "rw",
-      [
-        this.flights,
-        this.aircraft,
-        this.personnel,
-        this.scheduleEntries,
-        this.currencies,
-        this.discrepancies,
-      ],
-      async () => {
-        await Promise.all([
-          this.flights.clear(),
-          this.aircraft.clear(),
-          this.personnel.clear(),
-          this.scheduleEntries.clear(),
-          this.currencies.clear(),
-          this.discrepancies.clear(),
-        ])
+    const tables = [
+      ["flights", this.flights],
+      ["aircraft", this.aircraft],
+      ["personnel", this.personnel],
+      ["scheduleEntries", this.scheduleEntries],
+      ["currencies", this.currencies],
+      ["discrepancies", this.discrepancies],
+    ] as const
+    await this.transaction("rw", [...tables.map(([, t]) => t), this.syncQueue], async () => {
+      const queued = new Set((await this.syncQueue.toArray()).map((q) => `${q.collection}:${q.recordId ?? q.data?.id}`))
+      for (const [collection, table] of tables) {
+        const t = table as unknown as Table<{ id: string; syncStatus?: string }, string>
+        await t
+          .filter((row) => (row.syncStatus ?? "synced") === "synced" && !queued.has(`${collection}:${row.id}`))
+          .delete()
       }
-    )
+    })
     console.log("[UserDB] Cleared data tables for full resync (queue preserved)")
   }
 }

@@ -3,11 +3,40 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#05080B">
+    <meta name="theme-color" content="#06070a" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#f5f6f7" media="(prefers-color-scheme: light)">
     <title>Offline - OOOI</title>
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="/icon-192.png">
     <style>
+      /* The app's own palette (app/globals.css), as plain values: this page is
+         served when the app itself could not load, so it cannot read them. */
+      :root {
+        --bg: #06070a;
+        --fg: #dddee0;
+        --muted: #919294;
+        --card: #0e0f13;
+        --card-hover: #16181c;
+        --primary: #6baffa;
+        --primary-hover: #89c2ff;
+        --primary-fg: #020e1e;
+        --ok: #45b164;
+        color-scheme: dark light;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f5f6f7;
+          --fg: #1a1b1b;
+          --muted: #5a5b5b;
+          --card: #ecedee;
+          --card-hover: #dddedf;
+          --primary: #256bb1;
+          --primary-hover: #0e599d;
+          --primary-fg: #ffffff;
+          --ok: #00792f;
+        }
+      }
+
       * {
         margin: 0;
         padding: 0;
@@ -22,8 +51,8 @@
         min-height: 100vh;
         min-height: 100dvh;
         margin: 0;
-        background: #05080B;
-        color: #ffffff;
+        background: var(--bg);
+        color: var(--fg);
         text-align: center;
         padding: 20px;
         padding-top: env(safe-area-inset-top);
@@ -39,7 +68,7 @@
         width: 80px;
         height: 80px;
         margin: 0 auto 24px;
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        background: var(--card);
         border-radius: 20px;
         display: flex;
         align-items: center;
@@ -49,18 +78,18 @@
       .icon svg {
         width: 40px;
         height: 40px;
-        color: #64748b;
+        color: var(--muted);
       }
 
       h1 {
         font-size: 24px;
         font-weight: 600;
         margin-bottom: 12px;
-        color: #ffffff;
+        color: var(--fg);
       }
 
       p {
-        color: #94a3b8;
+        color: var(--muted);
         font-size: 16px;
         line-height: 1.5;
         margin-bottom: 32px;
@@ -75,8 +104,8 @@
       button {
         width: 100%;
         padding: 14px 24px;
-        background: #3b82f6;
-        color: white;
+        background: var(--primary);
+        color: var(--primary-fg);
         border: none;
         border-radius: 12px;
         font-size: 16px;
@@ -86,7 +115,7 @@
       }
 
       button:hover {
-        background: #2563eb;
+        background: var(--primary-hover);
       }
 
       button:active {
@@ -94,23 +123,22 @@
       }
 
       .secondary-button {
-        background: #1e293b;
-        color: #94a3b8;
+        background: var(--card);
+        color: var(--fg);
       }
 
       .secondary-button:hover {
-        background: #334155;
-        color: #ffffff;
+        background: var(--card-hover);
       }
 
       .status {
         margin-top: 32px;
         font-size: 14px;
-        color: #64748b;
+        color: var(--muted);
       }
 
       .status.online {
-        color: #22c55e;
+        color: var(--ok);
       }
 
       .hidden {

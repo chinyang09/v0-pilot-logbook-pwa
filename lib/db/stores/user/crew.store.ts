@@ -2,6 +2,7 @@
  * Crew/Personnel store operations
  */
 
+import { pickSelfCard } from "@/lib/utils/self-card";
 import { userDb } from "../../user-db";
 import type {
   Personnel,
@@ -100,10 +101,9 @@ export async function getPersonnelById(
  * Get the current user's personnel record
  */
 export async function getCurrentUserPersonnel(): Promise<Personnel | null> {
-  const meRecord = await userDb.personnel
-    .filter((p) => p.isMe === true && isLiveEntity(p))
-    .first();
-  return meRecord || null;
+  // Every flagged card, then ONE rule for which is the pilot (`pickSelfCard`):
+  // `.first()` was table order, which differs per device.
+  return pickSelfCard(await userDb.personnel.filter((p) => p.isMe === true).toArray());
 }
 
 /**
