@@ -622,10 +622,11 @@ export default function LogbookPage() {
                     key={term}
                     type="button"
                     onClick={() => removeSearchTerm(term)}
-                    className="flex items-center gap-1 rounded-full bg-[var(--on-glass-accent)] px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-[var(--on-glass-accent-strong)]"
+                    aria-label={`Remove search term ${term}`}
+                    className="relative flex items-center gap-1 rounded-full after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] bg-[var(--on-glass-accent)] px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-[var(--on-glass-accent-strong)]"
                   >
                     {term}
-                    <X className="h-3 w-3" />
+                    <X className="h-3 w-3" aria-hidden />
                   </button>
                 ))}
 

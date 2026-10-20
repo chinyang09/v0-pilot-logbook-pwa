@@ -124,7 +124,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
               size="icon"
               aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
               aria-pressed={isFavorite}
-              className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
+              className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0 after:absolute after:-inset-1.5 after:content-['']"
               onClick={(e: React.MouseEvent) => {
                 e.preventDefault()
                 e.stopPropagation()
@@ -138,7 +138,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
                   "h-4 w-4",
                   isFavorite
                     ? "fill-yellow-400 text-yellow-400"
-                    : "text-muted-foreground/40"
+                    : "text-muted-foreground/70"
                 )}
               />
             </Button>

@@ -88,7 +88,7 @@ const AirportCard = memo(function AirportCard({
           size="icon"
           aria-label={airport.isFavorite ? "Remove from favorites" : "Add to favorites"}
           aria-pressed={!!airport.isFavorite}
-          className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0"
+          className="h-7 w-7 hover:bg-primary/20 relative z-10 flex-shrink-0 after:absolute after:-inset-1.5 after:content-['']"
           onClick={(e: React.MouseEvent) => onToggleFavorite(e, airport.icao)}
         >
           <Star
@@ -96,7 +96,7 @@ const AirportCard = memo(function AirportCard({
               "h-4 w-4",
               airport.isFavorite
                 ? "fill-yellow-400 text-yellow-400"
-                : "text-muted-foreground/40"
+                : "text-muted-foreground/70"
             )}
           />
         </Button>

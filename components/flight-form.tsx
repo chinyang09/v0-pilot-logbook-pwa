@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
 import {
+  ChevronDown,
   ChevronRight,
   Plane,
   PlaneTakeoff,
@@ -124,9 +125,9 @@ function SettingsRow({
   return (
     <div
       className={`flex items-center justify-between py-3.5 px-4 row-divider ${
-        onClick ? "cursor-pointer active:bg-muted/50" : ""
+        onClick ? "cursor-pointer active:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2" : ""
       }`}
-      onClick={onClick}
+      {...(onClick ? pressableRow(onClick, `${label}, ${value || placeholder || "not set"}`) : {})}
     >
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-2">
@@ -143,6 +144,16 @@ function SettingsRow({
     </div>
   );
 }
+
+/** Size a textarea to its content (no `field-sizing`: one engine lacks it). */
+function fitTextarea(el: HTMLTextAreaElement) {
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+/** Stable, so it runs on mount rather than on every render of the form. */
+const fitTextareaRef = (el: HTMLTextAreaElement | null) => {
+  if (el) fitTextarea(el);
+};
 
 /** Fields only ever written straight to the database, by the pickers. */
 const PICKER_FIELDS: ReadonlySet<string> = new Set([
@@ -170,6 +181,29 @@ const flightDataCache = new Map<string, FlightLog>();
  */
 export function primeFlightCache(flight: FlightLog): void {
   flightDataCache.set(flight.id, flight);
+}
+
+/**
+ * What a tap-to-edit row needs to be a CONTROL rather than a painted div: a
+ * button role, a tab stop, Enter/Space, and a name read as "Out, 08:49". They
+ * were bare `div onClick`s, so VoiceOver did not announce them and an iPad
+ * keyboard could not reach Date, Aircraft, the airports, the crew or any of
+ * the OOOI times.
+ */
+function pressableRow(onActivate: () => void, name: string) {
+  return {
+    role: "button" as const,
+    tabIndex: 0,
+    "aria-label": name,
+    onClick: onActivate,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onActivate();
+      }
+    },
+  };
 }
 
 // Time row with UTC and Local display
@@ -202,11 +236,17 @@ function TimeRow({
   const hasValue = isValidHHMM(utcValue);
   const hasDerived = !hasValue && isValidHHMM(derivedValue || "");
 
+  const shown = hasValue ? utcValue : hasDerived ? derivedValue! : "not set";
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
+    // The WHOLE row opens the picker — it was only the time column, so a tap
+    // on "Out" itself did nothing.
+    <div
+      className="flex items-center justify-between py-3.5 px-4 row-divider cursor-pointer focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+      {...pressableRow(onTap, `${label}, ${shown} UTC`)}
+    >
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-3">
-        <div className="flex flex-col items-end cursor-pointer" onClick={onTap}>
+        <div className="flex flex-col items-end">
           <span
             className={`text-lg ${
               hasValue ? "text-foreground" : "text-muted-foreground"
@@ -225,11 +265,13 @@ function TimeRow({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 px-2 text-xs border-primary text-primary bg-transparent"
+              aria-label={`${label} now`}
+              className="h-9 min-w-11 px-2 text-xs border-primary text-primary bg-transparent"
               onClick={(e) => {
                 e.stopPropagation();
                 onNow?.();
               }}
+              onKeyDown={(e) => e.stopPropagation()}
             >
               NOW
             </Button>
@@ -292,7 +334,7 @@ function TimeDisplayRow({
           <Button
             variant="outline"
             size="sm"
-            className="h-7 px-2 text-xs border-primary text-primary bg-transparent"
+            className="h-9 min-w-11 px-2 text-xs border-primary text-primary bg-transparent"
             onClick={onUse}
           >
             {useLabel || "USE"}
@@ -399,8 +441,11 @@ export function FlightForm({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // --- useLiveQuery for reactive flight data (both desktop and mobile) ---
+  // `undefined` while the query is in flight, `null` once it has answered
+  // "no such row" — the two used to read the same, so a flight id that is not
+  // on this device left the panel blank forever.
   const liveFlight = useLiveQuery(
-    () => (flightIdProp ? userDb.flights.get(flightIdProp) : undefined),
+    async () => (flightIdProp ? (await userDb.flights.get(flightIdProp)) ?? null : undefined),
     [flightIdProp]
   );
 
@@ -1473,6 +1518,30 @@ export function FlightForm({
 
   useRegisterDetailActions(detailActions, true);
 
+  // A flight that is not on this device, or is in Recently Deleted, says so.
+  // Only once the query has ANSWERED (null), and never over a draft.
+  const missing = !editingFlight && flightIdProp && liveFlight === null;
+  const binned = !editingFlight && liveFlight != null && liveFlight.deletedAt != null;
+  if (missing || binned) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-panel pt-chrome pb-chrome text-center">
+        <p className="text-base font-semibold">
+          {binned ? "This flight is in Recently Deleted" : "Flight not found"}
+        </p>
+        <p className="max-w-xs text-sm text-muted-foreground">
+          {binned
+            ? "Restore it from Recently Deleted to view or edit it again."
+            : "It may have been deleted on another device, or not synced to this one yet."}
+        </p>
+        {binned && (
+          <Button variant="secondary" className="h-10" onClick={() => router.push("/recently-deleted")}>
+            Open Recently Deleted
+          </Button>
+        )}
+      </div>
+    );
+  }
+
   // Wait silently for useLiveQuery to resolve — returning null keeps the
   // previous panel content visible, avoiding a flash/spinner on selection change.
   if (flightIdProp && !resolvedFlight && !formData.id) {
@@ -1926,7 +1995,16 @@ export function FlightForm({
             }}
           />
 
-          <SettingsRow label="Pilot Role">
+          {/* The native select covers the WHOLE row, invisibly, so a tap
+              anywhere on it opens the platform's own picker. As a bare select
+              it was the width of "PIC" — about 25px, with no chevron and a
+              label that did nothing when tapped. */}
+          <div className="relative flex items-center justify-between py-3.5 px-4 row-divider focus-within:outline-2 focus-within:outline-ring focus-within:-outline-offset-2">
+            <span className="text-foreground">Pilot Role</span>
+            <span className="flex items-center gap-1 text-foreground">
+              {formData.pilotRole || "PIC"}
+              <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden />
+            </span>
             <select
               aria-label="Pilot role"
               value={formData.pilotRole || "PIC"}
@@ -1936,7 +2014,7 @@ export function FlightForm({
                   e.target.value as FlightLog["pilotRole"]
                 )
               }
-              className="bg-transparent text-foreground outline-none"
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
             >
               <option value="PIC">PIC</option>
               <option value="SIC">SIC</option>
@@ -1945,7 +2023,7 @@ export function FlightForm({
               <option value="Instructor">Instructor</option>
               <option value="Examiner">Examiner</option>
             </select>
-          </SettingsRow>
+          </div>
         </div>
 
         {/* LANDINGS Section */}
@@ -2092,16 +2170,26 @@ export function FlightForm({
             </h2>
           </div>
 
+          {/* Typed IN the row, multi-line, and growing with what is written.
+              It was a native `prompt()`: one cramped line under the site's
+              origin, the old remark unreadable past its first words, and no
+              way to write a second line — on the field where a pilot records
+              what happened on the flight. */}
           <SwipeableRow onClear={() => clearField("remarks")}>
-            <SettingsRow
-              label="Comment"
-              value={formData.remarks}
-              onClick={() => {
-                const comment = prompt("Remarks:", formData.remarks);
-                if (comment !== null) updateField("remarks", comment);
-              }}
-              showChevron
-            />
+            <div className="px-4 py-3 row-divider">
+              <textarea
+                aria-label="Remarks"
+                placeholder="Add a remark"
+                rows={2}
+                value={formData.remarks || ""}
+                onChange={(e) => {
+                  updateField("remarks", e.target.value);
+                  fitTextarea(e.currentTarget);
+                }}
+                ref={fitTextareaRef}
+                className="block w-full resize-none bg-transparent text-base leading-snug text-foreground outline-none placeholder:text-muted-foreground"
+              />
+            </div>
           </SwipeableRow>
         </div>
 

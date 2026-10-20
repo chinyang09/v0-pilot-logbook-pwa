@@ -8,6 +8,7 @@ import { syncService } from "@/lib/sync"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useEffect } from "react"
 import type { FlightLog } from "@/lib/db"
+import { insertFlightSorted } from "@/lib/utils/flight-sort"
 
 export default function FlightDetailPage() {
   const params = useParams()
@@ -31,19 +32,10 @@ export default function FlightDetailPage() {
     // revalidate: true runs a background confirm from Dexie.
     mutate(
       CACHE_KEYS.flights,
-      (prev: FlightLog[] | undefined) => {
-        const existing = prev ?? []
-        const idx = existing.findIndex((f) => f.id === savedFlight.id)
-        const updated =
-          idx >= 0
-            ? existing.map((f) => (f.id === savedFlight.id ? savedFlight : f))
-            : [savedFlight, ...existing]
-        // Re-sort: newest date first, then latest outTime within the same date
-        return [...updated].sort((a, b) => {
-          const d = b.date.localeCompare(a.date)
-          return d !== 0 ? d : (b.outTime ?? "").localeCompare(a.outTime ?? "")
-        })
-      },
+      // ONE order, the logbook's own (`flight-sort.ts`): a hand-rolled
+      // comparator here sorted unflown sectors as 00:00 and left same-day
+      // rows to move when the list next refetched.
+      (prev: FlightLog[] | undefined) => insertFlightSorted(prev ?? [], savedFlight),
       { revalidate: true }
     )
     if (navigator.onLine) {

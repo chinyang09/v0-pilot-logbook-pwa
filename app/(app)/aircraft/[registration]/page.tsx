@@ -178,7 +178,8 @@ export default function AircraftDetailPage() {
                 variant="ghost"
                 size="sm"
                 onClick={handleCancel}
-                className="text-primary h-8 px-2"
+                aria-label={isEditing ? undefined : "Back"}
+                className="text-primary h-9 min-w-9 px-2"
               >
                 {isEditing ? "Cancel" : <ArrowLeft className="h-4 w-4" />}
               </Button>

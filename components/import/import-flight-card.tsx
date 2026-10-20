@@ -352,10 +352,12 @@ function PilotFlyingChoice({
                   onRoleChange?.(role);
                 }}
                 className={cn(
-                  "rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+                  "min-h-8 min-w-9 rounded-md px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary",
                   active
                     ? "bg-primary/15 text-primary"
-                    : "text-muted-foreground/45",
+                    : rolesEnabled
+                      ? "text-muted-foreground"
+                      : "text-muted-foreground/60",
                   rolesEnabled && !active && "hover:bg-muted/60 hover:text-muted-foreground",
                   !rolesEnabled && "cursor-default"
                 )}

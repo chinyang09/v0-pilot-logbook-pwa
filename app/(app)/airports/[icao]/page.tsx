@@ -64,7 +64,8 @@ export default function AirportDetailPage() {
                   variant="ghost"
                   size="sm"
                   onClick={() => router.back()}
-                  className="h-8 w-8 p-0"
+                  aria-label="Back"
+                  className="h-9 w-9 p-0"
                 >
                   <ArrowLeft className="h-4 w-4" />
                 </Button>

@@ -267,7 +267,7 @@ export const DiscrepancyCard = memo(function DiscrepancyCard({
                   variant="ghost"
                   size="sm"
                   onClick={() => onReopen(discrepancy)}
-                  className="h-7 text-xs"
+                  className="h-9 px-3 text-xs"
                 >
                   Reopen
                 </Button>
@@ -278,7 +278,7 @@ export const DiscrepancyCard = memo(function DiscrepancyCard({
                   variant="default"
                   size="sm"
                   onClick={() => onResolve(discrepancy)}
-                  className="h-7 text-xs"
+                  className="h-9 px-3 text-xs"
                 >
                   Resolve
                 </Button>

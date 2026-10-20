@@ -260,16 +260,19 @@ export function QuickCheckPanel({
               <div key={entry.id} className="relative bg-secondary/30 rounded-md p-2.5 space-y-2">
                 {addEntries.length > 1 && (
                   <button
+                    type="button"
+                    aria-label="Remove this flight"
                     onClick={() => removeChange(entry.id)}
-                    className="absolute top-1.5 right-1.5 p-0.5 rounded text-muted-foreground hover:text-status-error transition-colors"
+                    className="absolute top-0 right-0 flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:text-status-error transition-colors"
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 )}
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <Label className="text-[10px] text-muted-foreground">Date</Label>
+                    <Label htmlFor={`qc-${entry.id}-date`} className="text-[10px] text-muted-foreground">Date</Label>
                     <Input
+                      id={`qc-${entry.id}-date`}
                       type="date"
                       value={entry.date}
                       onChange={(e) => updateChange(entry.id, { date: e.target.value })}
@@ -277,8 +280,9 @@ export function QuickCheckPanel({
                     />
                   </div>
                   <div>
-                    <Label className="text-[10px] text-muted-foreground">Report</Label>
+                    <Label htmlFor={`qc-${entry.id}-report`} className="text-[10px] text-muted-foreground">Report</Label>
                     <Input
+                      id={`qc-${entry.id}-report`}
                       type="time"
                       value={entry.reportTime}
                       onChange={(e) => updateChange(entry.id, { reportTime: e.target.value })}
@@ -286,8 +290,9 @@ export function QuickCheckPanel({
                     />
                   </div>
                   <div>
-                    <Label className="text-[10px] text-muted-foreground">Debrief</Label>
+                    <Label htmlFor={`qc-${entry.id}-debrief`} className="text-[10px] text-muted-foreground">Debrief</Label>
                     <Input
+                      id={`qc-${entry.id}-debrief`}
                       type="time"
                       value={entry.debriefTime}
                       onChange={(e) => updateChange(entry.id, { debriefTime: e.target.value })}
@@ -297,8 +302,9 @@ export function QuickCheckPanel({
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <Label className="text-[10px] text-muted-foreground">Flight (h)</Label>
+                    <Label htmlFor={`qc-${entry.id}-flight`} className="text-[10px] text-muted-foreground">Flight (h)</Label>
                     <Input
+                      id={`qc-${entry.id}-flight`}
                       type="number"
                       step="0.5"
                       min="0"
@@ -309,8 +315,9 @@ export function QuickCheckPanel({
                     />
                   </div>
                   <div>
-                    <Label className="text-[10px] text-muted-foreground">Sectors</Label>
+                    <Label htmlFor={`qc-${entry.id}-sectors`} className="text-[10px] text-muted-foreground">Sectors</Label>
                     <Input
+                      id={`qc-${entry.id}-sectors`}
                       type="number"
                       min="1"
                       inputMode="numeric"

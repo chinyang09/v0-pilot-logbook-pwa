@@ -80,6 +80,15 @@ describe("buildLegalityModel — verdict", () => {
     expect(doc.value).toBe("Today")
   })
 
+  it("never reads a failed duty computation or logbook read as clear", () => {
+    const model = buildLegalityModel({ ...CLEAR, unavailable: ["duty", "logbook"] })
+    expect(model.verdict).toBe("unknown")
+    expect(model.requirements.filter((r) => r.state === "unknown").map((r) => r.id)).toEqual([
+      "unavailable-duty",
+      "unavailable-logbook",
+    ])
+  })
+
   it("is ok when every requirement is met", () => {
     const model = buildLegalityModel(CLEAR)
     expect(model.verdict).toBe("ok")

@@ -1050,6 +1050,16 @@ Anything that can be judged still is: an expired document on a fresh install
 is ACTION REQUIRED. `logbookEmpty` is only true once the flight read has
 LANDED, or a pilot with thousands would see it flash while it loads.
 
+#### A FAILED read is not a clear one
+
+The other half of that rule. When the FDP pipeline throws (`useFDPData`
+returns `failed: true`) or the flight read errors, the panel used to see empty
+duty periods and no flights and read **CURRENT** — the most dangerous wrong
+answer on the page. `buildLegalityModel` takes `unavailable: ("duty" |
+"logbook")[]` and adds an `unknown` requirement for each ("Duty limits
+unavailable — check manually"), which the annunciator reads as CAUTION. A
+logbook read that errored is also never `logbookEmpty`.
+
 #### Nothing on this page navigates by default
 
 A cell EXPANDS in place and a second tap closes it. The reader came to check a
@@ -2149,6 +2159,39 @@ identical:
 - The flight form (`components/flight-form.tsx`) keeps its own inline row
   primitives and complex auto-save/calculation logic, but its `SwipeableRow`
   wraps the shared `SwipeableCard` and its rows use the same `.row-divider`.
+
+### Readability and Touch Targets
+
+- **Every control a thumb has to hit is at least 36px** (`h-9`). Where a row
+  must keep a fixed height (the virtualised lists' favourite star, a search
+  chip), grow the HIT AREA with an `after:` pseudo-element on the
+  `relative` control instead of the box — the logbook depends on every card
+  being one height.
+- **A licence-record choice is readable on BOTH sides.** `OptionPair` and the
+  import card's role chooser were 8–11px with the unselected side at 45%
+  opacity — the value a pilot may want back was the one they could not read.
+  Values are `text-xs`/`text-sm`, captions `text-[10px]`, the unselected side
+  plain `text-muted-foreground`.
+- **A flight-form row that opens something is a button** (`pressableRow`:
+  `role="button"`, `tabIndex`, Enter/Space, an accessible name), so the form
+  can be driven from a keyboard. A row with its own inner button (NOW, USE)
+  stops that button's keydown from bubbling to the row.
+- **Remarks is an inline auto-growing textarea**, not a `prompt()` — a native
+  prompt is a one-line box with no preview of what is already there.
+- **The Pilot Role row is the native select, laid over the whole row** at
+  opacity 0, so the whole row is the target and the platform's own picker
+  opens.
+- **No `alert()` for a form error** — an inline `role="alert"` line in the
+  dialog, cleared when it closes. Only "Log out of all devices" still uses a
+  native alert, because it is refusing an irreversible action.
+- **Every input has a label bound to it** (`htmlFor`/`id`, `useId` where a
+  component can appear twice), and the login callsign carries
+  `autoComplete="username"` with auto-capitalise and autocorrect off (the
+  server matches callsigns case-insensitively).
+- **A flight that is not there SAYS so.** The flight form's live query returns
+  `null` (not `undefined`) once it has answered "no such row", so a missing
+  flight reads "Flight not found" and a binned one "This flight is in Recently
+  Deleted" with a way there — instead of an empty panel forever.
 
 ### KeepAlive Navigation
 
@@ -3896,6 +3939,9 @@ When making changes, be aware of these high-impact files:
 - Do not put a number inside a meter's fill without checking it fits — below `LABEL_FITS_INSIDE` it goes outside the fill instead. A figure clipped by its own bar is worse than no figure
 - Do not print "12 / 12 currencies current" — a pilot does not need telling about the eleven that are fine. The panel names the TIGHTEST constraint, and falls back to the fullest rolling limit only when nothing is flagged
 - Do not state a problem without its remedy on the legal page. The next-action line is the imperative ("2 landings required"), phrased in `legality.ts` where the shortfall is in hand — not the reading ("landings 1 / 3"), which the requirement cell already shows
+- Do not let a FAILED duty computation or flight read reach the legality model as empty data — it reads CURRENT. Pass `unavailable` to `buildLegalityModel`, and never treat an errored read as `logbookEmpty`
+- Do not shrink a touch target below `h-9`, or dim the unselected side of a licence-record choice (`OptionPair`) below `text-muted-foreground` — where the row height is fixed, grow the hit area with an `after:` pseudo-element instead
+- Do not use `alert()`/`prompt()` for a form's errors or input — inline `role="alert"` text and inline fields. And do not let a flight form render nothing for a missing or binned flight; it says which
 - Do not alarm on an empty logbook — 0 / 3 recency there is an app that has not been told anything, not a pilot who lapsed. `logbookEmpty` drops the recency cell and turns a clear verdict into the neutral `getting_started`; it must never mask a real failure (an expired document still raises ACTION REQUIRED)
 - Do not let a standing requirement outrank an exceeded FDP — that one is happening right now rather than being true today, and it is the only thing that overrides the legality verdict for the annunciator
 - Do not group the legal page's requirements under headings — they are sorted most-pressing-first so the top-left cell is always the thing closest to stopping the pilot. Headings cost four rules and ~56px to impose an order nobody is reading for on a no-scroll page

@@ -54,7 +54,7 @@ async function requestPersistentStorage(): Promise<void> {
     const storage = typeof navigator !== "undefined" ? navigator.storage : undefined
     if (!storage?.persist || (await storage.persisted?.())) return
     const granted = await storage.persist()
-    if (!granted) console.warn("[Auth] persistent storage not granted - data may be evicted under pressure")
+    if (!granted) console.log("[Auth] persistent storage not granted - data may be evicted under pressure")
   } catch {
     // Best effort.
   }

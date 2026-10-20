@@ -95,6 +95,14 @@ describe("buildPilotStatus — annunciator", () => {
     expect(s.state).toBe("warning")
   })
 
+  it("does not read CURRENT when the duty limits could not be computed", () => {
+    // A failed pipeline comes back with no duties, no rest and no limits —
+    // exactly what a clear pilot looks like. It must say so instead.
+    const s = status({ unavailable: ["duty"] })
+    expect(s.state).toBe("warning")
+    expect(s.nextAction.headline).toMatch(/unavailable/i)
+  })
+
   it("an exceeded FDP outranks a clean requirement set", () => {
     // Everything standing is met, but the duty in progress has run past its
     // maximum. That is happening NOW, so it wins.

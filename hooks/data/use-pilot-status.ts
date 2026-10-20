@@ -43,14 +43,20 @@ export function usePilotStatus(
     allDutyPeriods,
     scheduleDutyPeriods,
     plannedDutyPeriods,
+    failed: fdpFailed,
     isLoading: fdpLoading,
   } = useFDPData()
   const { currencies, isLoading: currenciesLoading } = useCurrencies()
-  const { flights, isLoading: flightsLoading } = useFlights()
+  const { flights, isLoading: flightsLoading, error: flightsError } = useFlights()
   // Only once the read has landed: an empty array while loading is not an
   // empty logbook, and treating it as one would flash "No flights yet" at a
-  // pilot with thousands.
-  const logbookEmpty = !flightsLoading && flights.length === 0
+  // pilot with thousands. Nor is a FAILED read — that comes back as an empty
+  // array too, and called a lapsed pilot "NO FLIGHTS YET".
+  const logbookEmpty = !flightsLoading && !flightsError && flights.length === 0
+  const unavailable = useMemo(
+    () => [...(fdpFailed ? (["duty"] as const) : []), ...(flightsError ? (["logbook"] as const) : [])],
+    [fdpFailed, flightsError],
+  )
 
   /**
    * Flight id → on-blocks instant, so the sector chain can mark which legs of
@@ -118,6 +124,7 @@ export function usePilotStatus(
         forecastBreaches,
         currencies,
         logbookEmpty,
+        unavailable,
         now: at,
       }),
       duty: deriveDutyStatus(
@@ -143,6 +150,7 @@ export function usePilotStatus(
     planDuties,
     flightArrivals,
     logbookEmpty,
+    unavailable,
   ])
 
   return { status, isLoading: fdpLoading || currenciesLoading }

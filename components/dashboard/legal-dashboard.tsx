@@ -584,11 +584,14 @@ function DutyBand({
   return (
     <section className="px-4 py-2.5" aria-label="Duty">
       <div className="flex items-baseline justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        <p className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           {view.state}
         </p>
         {view.chip && (
           <p
+            // A long multi-sector route can still truncate on a 360px phone;
+            // the full text stays reachable.
+            title={view.chip}
             className={cn(
               "min-w-0 truncate text-[10px] font-medium tabular-nums",
               view.chipTone ? RAMP[view.chipTone].text : "text-muted-foreground",

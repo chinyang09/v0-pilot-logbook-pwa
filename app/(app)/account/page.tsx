@@ -631,7 +631,7 @@ export default function AccountPage() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground"
+                  className="h-9 w-9 text-muted-foreground"
                   aria-label={isEditingCallsign ? "Cancel editing callsign" : "Edit callsign"}
                   onClick={openCallsignEditor}
                 >
@@ -757,7 +757,7 @@ export default function AccountPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 text-xs text-muted-foreground"
+                className="h-9 px-2.5 text-xs text-muted-foreground"
                 onClick={handleRevealTotp}
                 disabled={isRevealing}
                 aria-label="Re-add authenticator"
@@ -787,7 +787,7 @@ export default function AccountPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-muted-foreground shrink-0"
+                        className="h-9 w-9 text-muted-foreground shrink-0"
                         aria-label="Hide authenticator code"
                         onClick={() => setTotpReveal(null)}
                       >

@@ -44,18 +44,20 @@ function OptionSide({
         onChange?.(isRight);
       }}
       className={cn(
-        "flex-1 rounded-md text-left transition-colors",
-        size === "sm" ? "px-1.5 py-0.5" : "px-2 py-1",
+        // A licence-record choice: the unselected side stays READABLE (it is
+        // the value the pilot may want back), and each side is a real target.
+        "flex min-h-9 flex-1 flex-col justify-center rounded-md text-left transition-colors focus-visible:outline-2 focus-visible:outline-primary",
+        size === "sm" ? "px-2 py-1" : "px-2.5 py-1.5",
         active
           ? "bg-primary/15 text-primary"
-          : "text-muted-foreground/45 hover:text-muted-foreground"
+          : "text-muted-foreground hover:text-foreground"
       )}
     >
       <span
         className={cn(
           "block uppercase leading-none tracking-wide",
-          size === "sm" ? "text-[8px]" : "text-[9px]",
-          active ? "opacity-70" : "opacity-60"
+          "text-[10px]",
+          active ? "opacity-80" : "opacity-70"
         )}
       >
         {side.caption}
@@ -63,7 +65,7 @@ function OptionSide({
       <span
         className={cn(
           "block font-semibold leading-tight",
-          size === "sm" ? "text-[10px]" : "text-[11px]"
+          size === "sm" ? "text-xs" : "text-sm"
         )}
       >
         {side.value}

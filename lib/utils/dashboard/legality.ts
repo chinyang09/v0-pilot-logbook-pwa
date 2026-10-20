@@ -156,6 +156,14 @@ export interface LegalityInput {
    * first screen a new user ever sees.
    */
   logbookEmpty?: boolean
+  /**
+   * What could NOT be read or computed — the duty-limit pipeline threw, or the
+   * logbook read failed. Each becomes an `unknown` requirement, which the
+   * annunciator reads as a caution. Without it a failure looked exactly like a
+   * legal pilot: no duty, no rest owed, no limits — "all clear" by default,
+   * which is a number somebody might fly to.
+   */
+  unavailable?: Array<"duty" | "logbook">
   now?: Date
 }
 
@@ -177,6 +185,7 @@ export function buildLegalityModel({
   currencies,
   documentRows = DEFAULT_DOCUMENT_ROWS,
   logbookEmpty = false,
+  unavailable = [],
   now = new Date(),
 }: LegalityInput): LegalityModel {
   const requirements: Requirement[] = []
@@ -231,6 +240,21 @@ export function buildLegalityModel({
         ? `T/O + landing in ${daysToLapse}d`
         : undefined,
   })
+
+  // ── Inputs that could not be read ───────────────────────────────────────
+  for (const what of unavailable) {
+    requirements.push({
+      id: `unavailable-${what}`,
+      group: "currency",
+      label: what === "duty" ? "Duty limits" : "Logbook",
+      state: "unknown",
+      value: "—",
+      detail: [{ label: "Status", value: what === "duty" ? "Could not be computed" : "Could not be read" }],
+      href: what === "duty" ? "/fdp" : "/logbook",
+      urgency: 850,
+      action: what === "duty" ? "Duty limits unavailable — check manually" : "Logbook could not be read — reload",
+    })
+  }
 
   // ── Documents ───────────────────────────────────────────────────────────
   // Nearest expiry first. An EXPIRED document is a hard stop; one inside its own
