@@ -88,8 +88,15 @@ export function validatePushItems(raw: unknown[]): {
   return { byCollection, invalid }
 }
 
-/** Collections whose ids are derived from content, so a purged id can legitimately come back. */
-const RECREATABLE: ReadonlySet<SyncCollection> = new Set<SyncCollection>(["discrepancies"])
+/**
+ * Ids derived from content, so a purged one can legitimately come back: every
+ * comparison (`mismatch:<flight>:<field>`), and an IMPORTED duty
+ * (`duty:<date>:<code>`, see `importedDutyId`). Random ids never recur.
+ */
+function isRecreatable(item: PushItem): boolean {
+  if (item.collection === "discrepancies") return true
+  return item.collection === "scheduleEntries" && item.data.id.startsWith("duty:")
+}
 
 export type PushDecision = "insert" | "update" | "patch" | "delete" | "stale" | "rejected"
 
@@ -135,7 +142,7 @@ export function decidePush(
     // — on every device, silently. A CREATE of such an id is a new record,
     // not a stale write; the engine clears the tombstone in the same
     // transaction. Random-id collections keep the rejection.
-    if (item.type === "create" && RECREATABLE.has(item.collection)) return "insert"
+    if (item.type === "create" && isRecreatable(item)) return "insert"
     return "rejected"
   }
   if (!existing) return "insert"

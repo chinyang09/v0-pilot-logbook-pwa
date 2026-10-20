@@ -97,6 +97,9 @@ export async function createEntity<T extends SyncableEntity>(
   return newEntity
 }
 
+/** Envelope keys a patch never claims to change. */
+const QUEUE_BOOKKEEPING = new Set(["id", "userId", "createdAt", "updatedAt", "deviceId", "syncStatus", "serverSeq"])
+
 /**
  * Write rows that ALREADY HAVE ids, and put them on the sync queue.
  *
@@ -157,7 +160,21 @@ export async function putManyWithSync<T extends SyncableEntity>(
             changedFields,
             baseSeq: prior.serverSeq ?? 0,
           }
-        : { type, collection: tableName, data, ...(type === "create" ? { changedFields: [] } : {}) }
+        : type === "create"
+          ? { type, collection: tableName, data, changedFields: [] }
+          : // An UPDATE of a row this device does not hold (another device
+            // created it). As a whole record it REPLACED the stored document,
+            // clearing every key the import does not carry — a comparison's
+            // `acceptedAt`, say. As a patch of exactly the keys it carries,
+            // from base 0, the rest of the record stands and any field another
+            // device set is arbitrated (and kept in syncConflicts if it loses).
+            {
+              type,
+              collection: tableName,
+              data,
+              changedFields: Object.keys(data).filter((k) => !QUEUE_BOOKKEEPING.has(k)),
+              baseSeq: 0,
+            }
     )
   )
 

@@ -3001,15 +3001,19 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
 
 ### Lower-priority items (not yet actioned)
 
-- **Multi-device gaps found in the Oct 2026 audit, left open:** two devices
-  importing the same roster before syncing each create its duties under random
-  ids (the date+code match is local), so they duplicate — a deterministic id
-  would fix it but changes every existing row's key; two devices can each mark
-  a different crew card "This is me" and `getCurrentUserPersonnel` takes the
-  first; the auto-fill switches are per device while the times they produce are
-  shared; `putManyWithSync` with type `update` and no local row is a whole-
-  record write; and the keepalive flush on `pagehide` takes no lock, so it can
-  race an in-flight cycle on a create (harmless — it never deletes queue rows).
+- **Multi-device gaps from the Oct 2026 audit.** Closed since: an IMPORTED
+  duty is created under a derived id (`importedDutyId` — `duty:<date>:<code>`),
+  so two devices importing one report before syncing land on one record (and
+  `decidePush` lets a purged derived id be recreated, as for comparisons); the
+  pilot's own card is chosen by ONE rule everywhere (`pickSelfCard` — the most
+  recently changed flagged card), and saving a self card clears every other
+  flag; `putManyWithSync` sends an update of a row this device does not hold
+  as a field PATCH from base 0, not a whole record that cleared every key the
+  import did not carry. Still open: the auto-fill switches are per device while
+  the times they produce are shared (with `formPatch` a form only sends a
+  recalculation the user's own edit caused, which narrows it), and the
+  keepalive flush on `pagehide` takes no lock (harmless — it never deletes
+  queue rows).
 
 - **`discrepancies.resolved` boolean secondary index** (`lib/db/user-db.ts`) —
   IndexedDB can't key a boolean, so the index is inert (same class as the

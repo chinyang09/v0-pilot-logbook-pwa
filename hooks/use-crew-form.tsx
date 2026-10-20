@@ -11,6 +11,7 @@ import {
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
 import { formPatch } from "@/lib/utils/form-patch"
+import { pickSelfCard } from "@/lib/utils/self-card"
 
 export const CREW_ROLE_OPTIONS = ["PIC", "SIC", "Instructor", "Examiner"] as const
 export type CrewRole = (typeof CREW_ROLE_OPTIONS)[number]
@@ -130,7 +131,7 @@ export function useCrewForm({
     const load = async () => {
       const all = await getAllPersonnel()
       if (!mounted) return
-      setExistingSelfId(all.find((p) => p.isMe && p.id !== id)?.id || null)
+      setExistingSelfId(pickSelfCard(all.filter((p) => p.id !== id))?.id || null)
       if (isNew) {
         setIsLoading(false)
         return
@@ -186,8 +187,11 @@ export function useCrewForm({
     if (!formData.name.trim()) return null
     setIsSaving(true)
     try {
-      if (formData.isMe && existingSelfId) {
-        await updatePersonnel(existingSelfId, { isMe: false })
+      if (formData.isMe) {
+        // EVERY other flagged card, not just the one this page found: two
+        // devices can each have chosen a different one before syncing.
+        const others = (await getAllPersonnel()).filter((p) => p.isMe && p.id !== (crew?.id ?? id))
+        for (const other of others) await updatePersonnel(other.id, { isMe: false })
       }
       const personnelData = personnelFromForm(formData)
       let saved: Personnel | null = null
@@ -215,7 +219,7 @@ export function useCrewForm({
     } finally {
       setIsSaving(false)
     }
-  }, [formData, existingSelfId, isNew, crew, id, onSaved])
+  }, [formData, isNew, crew, id, onSaved])
 
   const resetForm = useCallback(() => {
     if (crew) setFormData(formFromCrew(crew))

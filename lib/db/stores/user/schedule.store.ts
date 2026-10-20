@@ -175,6 +175,19 @@ export async function linkFlightsToScheduleEntry(
 }
 
 /**
+ * The id an IMPORTED duty is created under — derived from what identifies it
+ * (its date and duty code), not random. Two devices importing the same report
+ * before either has synced each matched against their own table, found
+ * nothing and created the duty under a random id, so every standby arrived
+ * twice. Under one derived id the second create lands on the first as the
+ * same record. Hand-added duties keep random ids; a re-import still matches
+ * any live row by date + code first, whatever its id.
+ */
+export function importedDutyId(date: string, dutyCode: string | undefined): string {
+  return `duty:${date}:${dutyCode ?? ""}`
+}
+
+/**
  * Bulk upsert schedule entries
  */
 export async function bulkUpsertScheduleEntries(
@@ -227,13 +240,16 @@ export async function bulkUpsertScheduleEntries(
       } else {
         const newEntry: ScheduleEntry = {
           ...entry,
-          id: crypto.randomUUID(),
+          id: importedDutyId(entry.date, entry.dutyCode),
           createdAt: Date.now(),
           updatedAt: Date.now(),
           deviceId,
           syncStatus: "pending",
         }
-        await userDb.scheduleEntries.add(newEntry)
+        // `put`, not `add`: the derived id can belong to a BINNED copy of
+        // this duty, which the live-only match above deliberately skipped.
+        // The report says the duty exists, so the new row takes its place.
+        await userDb.scheduleEntries.put(newEntry)
         toEnqueue.push({ type: "create", collection: "scheduleEntries", data: newEntry, changedFields: [] })
         created++
       }

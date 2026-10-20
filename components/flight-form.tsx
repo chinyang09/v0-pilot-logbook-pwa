@@ -44,6 +44,7 @@ import {
 } from "@/lib/db";
 import { useDebounce } from "@/hooks/use-debounce";
 import { formPatch, rebaseForm } from "@/lib/utils/form-patch";
+import { pickSelfCard } from "@/lib/utils/self-card";
 import { useAirportDatabase } from "@/hooks/data";
 import {
   createEmptyFlightLog,
@@ -574,7 +575,7 @@ export function FlightForm({
   useEffect(() => {
     if (resolvedFlight || !personnel.length) return;
 
-    const selfCrew = personnel.find((p) => p.isMe);
+    const selfCrew = pickSelfCard(personnel);
     if (selfCrew) {
       if (selfCrew.defaultPIC) {
         setFormData((prev) => ({
@@ -1912,7 +1913,7 @@ export function FlightForm({
                 currentRole: formData.pilotRole || "PIC",
                 pilotFlying: checked,
                 nonPicPfRole: nonPicPfRoleOf(
-                  personnel.find((p) => p.isMe),
+                  pickSelfCard(personnel),
                   preferences.importDefaults?.nonPicPfRole
                 ),
               });

@@ -202,6 +202,12 @@ describe("two devices", () => {
     expect(fresh.state.records.has(`discrepancies:${id}`)).toBe(true)
     expect(fresh.state.deleted.has(`discrepancies:${id}`)).toBe(false)
 
+    // An imported duty's id is derived too (`importedDutyId`).
+    await push(op("scheduleEntries", "create", { id: "duty:2026-10-20:SBY1", updatedAt: 1 }))
+    await push(op("scheduleEntries", "delete", { id: "duty:2026-10-20:SBY1" }))
+    const duty = await push(op("scheduleEntries", "create", { id: "duty:2026-10-20:SBY1", updatedAt: 9 }))
+    expect(duty.results[0].rejected).toBeFalsy()
+
     // A random-id record keeps the rejection that stops a resurrection.
     await push(op("flights", "create", { id: "f9", updatedAt: 1 }))
     await push(op("flights", "delete", { id: "f9" }))
