@@ -10,16 +10,16 @@ import { FormSection } from "@/components/ui/form-section"
 import { SettingsRow, ToggleRow, SelectRow } from "@/components/ui/settings-row"
 import { PageLoading } from "@/components/ui/page-loading"
 import { SortableNavList } from "@/components/sortable-nav-list"
+import { AppearanceSettings } from "@/components/appearance-settings"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import {
-  Monitor, Clock, Plane, Sun, Moon, Laptop,
+  Monitor, Clock, Plane, Sun,
   LayoutDashboard, Book, Calendar, Users, MapPin, Award,
   Settings, UserCircle, Navigation, ChevronRight,
 } from "lucide-react"
-import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
-import type { DisplayPreferences, AutoFillPreferences, ThemePreference, BottomNavTab } from "@/types/db/stores.types"
+import type { DisplayPreferences, AutoFillPreferences, BottomNavTab } from "@/types/db/stores.types"
 
 // ─── Data ────────────────────────────────────────────────────
 
@@ -70,7 +70,7 @@ interface SectionDef {
 }
 
 const SECTIONS: SectionDef[] = [
-  { key: "appearance", label: "Appearance", icon: Sun, description: "Theme" },
+  { key: "appearance", label: "Appearance", icon: Sun, description: "Mode and palette" },
   { key: "navigation", label: "Navigation", icon: Navigation, description: "Bottom tab bar" },
   { key: "display", label: "Display Options", icon: Monitor, description: "Time, airport, coordinate format" },
   { key: "autofill", label: "Auto-Fill Fields", icon: Clock, description: "Auto-populate time fields" },
@@ -93,55 +93,6 @@ function SettingsDetailPanel({ children }: { children: React.ReactNode }) {
 }
 
 // ─── Detail panel content for each section ──────────────────
-
-function AppearanceSection({ preferences, updateDisplay }: {
-  preferences: ReturnType<typeof usePreferences>["preferences"]
-  updateDisplay: ReturnType<typeof usePreferences>["updateDisplay"]
-}) {
-  // Highlight the theme ACTUALLY in force. The stored preference and
-  // next-themes' own storage can disagree — when the preference row is
-  // missing (signed out and back in, cleared site data) the preference fell
-  // back to its "dark" default while the screen was light, and this showed
-  // "Dark" selected over a light page.
-  const { theme, setTheme } = useTheme()
-  const activeTheme = (theme as ThemePreference | undefined) ?? preferences.display.theme
-  return (
-    <div className="px-panel py-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Appearance</h2>
-        <p className="text-sm text-muted-foreground">Choose your preferred theme.</p>
-      </div>
-      <FormSection>
-        <div className="grid grid-cols-3 gap-2 p-3">
-        {([
-          { value: "light" as ThemePreference, label: "Light", icon: Sun },
-          { value: "dark" as ThemePreference, label: "Dark", icon: Moon },
-          { value: "system" as ThemePreference, label: "System", icon: Laptop },
-        ]).map(({ value, label, icon: Icon }) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={activeTheme === value}
-            onClick={() => {
-              setTheme(value)
-              updateDisplay({ theme: value })
-            }}
-            className={cn(
-              "flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-colors",
-              activeTheme === value
-                ? "border-primary bg-primary/10"
-                : "border-border hover:border-primary/50"
-            )}
-          >
-            <Icon className="h-6 w-6" />
-            <span className="text-sm font-medium">{label}</span>
-          </button>
-        ))}
-        </div>
-      </FormSection>
-    </div>
-  )
-}
 
 function NavigationSection({ preferences, updateNavigation }: {
   preferences: ReturnType<typeof usePreferences>["preferences"]
@@ -338,7 +289,7 @@ export default function SettingsPage() {
     )
     switch (key) {
       case "appearance":
-        return wrap(<AppearanceSection preferences={preferences} updateDisplay={prefs.updateDisplay} />)
+        return wrap(<AppearanceSettings />)
       case "navigation":
         return wrap(<NavigationSection preferences={preferences} updateNavigation={prefs.updateNavigation} />)
       case "display":

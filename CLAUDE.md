@@ -54,6 +54,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts, from synthetic bounding boxes |
+| `lib/theme/__tests__/` | the palette generator — contrast and gamut for every preset in both modes and a sweep of custom seeds, and that globals.css carries the default palette exactly |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution, the canonical document shape + write modes, push batching, the sync triggers |
 | `lib/sync/server/__tests__/` | the server engine end to end — two devices pushing and pulling, deletions, stale pushes, paging, the migration — against an in-memory Mongo stand-in (`fake-mongo.ts`; it implements only the operators the engine sends) |
 
@@ -149,6 +150,7 @@ lib/                              # Core utilities and services
 │   └── shared/                   #   Shared utilities (cuid)
 ├── mongodb/                      # MongoDB client (connection pooling)
 ├── ocr/                          # OCR service & flight data extraction
+├── theme/                        # Palettes: the generator (palette.ts) + applying/persisting one (apply.ts)
 └── utils/                        # Utility functions
     ├── flight-calculations.ts    #   Time calculations
     ├── night-time.ts             #   Night time rules + the single per-minute night-time calculator (calculateNightTimeComplete)
@@ -2214,25 +2216,72 @@ the sun timeline, the flight form's time rows) must go through
 `getAirportDisplayCode` — which needs BOTH codes populated on whatever it is
 given, or it silently falls back to the other one.
 
-### The Palette ("magenta line")
+### Palettes (`lib/theme/`)
 
-ONE accent, magenta (`--primary`: `oklch(0.72 0.17 330)` dark /
-`oklch(0.52 0.2 330)` light). On a flight deck magenta is the planned path —
-the thing you follow — and it is the one hue the status ramp leaves free:
-green / yellow / orange / red already mean met / close / caution / not met.
-Scheduled flights take it too (planned = magenta).
+The colour is DATA, and the pilot chooses it: six presets (**Graphite** —
+the default — **Horizon**, **Night Ops**, **Classic**, **Evergreen**, **Dusk**)
+plus **Custom**, all in Settings › Appearance beside the light/dark/system mode.
+The two are orthogonal: a palette has a light and a dark half.
 
-| | Dark — night-adapted | Light — daylight |
-|---|---|---|
-| ground | `0.13 0.008 20`, an ember black (no blue — blue-green is what dark-adapted eyes are most sensitive to) | `0.972 0.005 30` |
-| cards | `0.17`, a step above the ground | `0.995`, WHITER than the ground |
-| text | `0.89 0.012 50`, a dimmed warm white — never `#fff` | `0.22 0.014 20` |
-| status ramp | held under full brightness, like a dimmed panel | contrast-tuned for white |
+**ONE generator.** A palette is a `PaletteSeed` — accent hue + vividness, the
+hue the greys lean toward + how far, and how deep the dark ground is
+(`dim`/`deep`/`black`). `generatePalette(seed, mode)` builds every surface and
+text token from it. Presets are named seeds and Custom is a seed the pilot
+edits, so none of them can come out unreadable: the generator moves the
+accent's lightness until it clears 4.5:1 on every surface it lands on, keeps
+muted text at 4.5:1 and body text at 7:1, and pulls out-of-gamut colours in
+by CHROMA rather than letting the browser clip a channel.
+`palette.test.ts` pins all of that for every preset in both modes AND for a
+sweep of custom seeds across the whole hue circle at every depth.
 
-`themeColor` (`app/layout.tsx`), `public/manifest.json` and
-`public/offline.html` carry the two grounds as hex and must move with them.
-`--on-glass` is MEASURED off the rendered face (dark ~0.21, light ~0.995),
-not derived from `--card` — see the glass notes.
+| What a palette owns | What it does not |
+|---|---|
+| background, cards, popovers, secondary/muted/input/border, the sidebar, foregrounds, `--primary`, `--ring`, `--chart-1` | the status ramp (met/close/caution/not met mean the same in every palette), `--destructive`, the other chart series |
+| | the glass: `--on-glass` / `--on-glass-active-fg` are DERIVED from `--card` / `--primary` with `color-mix`, so they follow any palette |
+
+**Every dark half is night-adapted**: a ground at or below L 0.17 and text a
+dimmed off-white (never `#fff`) — a large bright field is what costs a pilot
+their dark adaptation. Night Ops is the extreme: a `black` ground and a red
+accent.
+
+**Offline by construction — nothing is fetched.** `applyPalette`
+(`lib/theme/apply.ts`) writes the generated CSS into ONE
+`<style id="oooi-palette">` and into localStorage; `PALETTE_BOOT_SCRIPT`,
+inlined in the root layout's `<head>`, puts it back before the first paint on
+the next launch, so a cold start shows the chosen palette rather than
+flashing Graphite. localStorage holds the RESULT (CSS + the grounds' hex), so
+the boot script needs no generator. The preference itself (`display.palette`,
+`display.customPalette`) lives in the preferences row in IndexedDB, per
+device.
+
+- **The stylesheet wins on SPECIFICITY, not order** — `html:root` /
+  `html.dark` against globals.css's `:root` / `.dark` — so it does not matter
+  where the `<style>` lands.
+- **globals.css carries the DEFAULT palette, generated.** The two blocks
+  marked `palette:light` / `palette:dark` are Graphite exactly as the
+  generator builds it, and `palette.test.ts` fails if they drift: they are what
+  renders before a palette is applied, so a mismatch is a first frame in a
+  different colour. Change a colour in the generator or a seed, then
+  regenerate those blocks — never hand-edit them.
+- **The provider applies the palette only once preferences have LOADED.**
+  Before that the boot script has already painted the last palette; applying
+  the in-memory default over it flashed Graphite on every launch.
+- **The custom editor previews LIVE on the whole app** — rAF-batched
+  `applyPalette` while a slider moves — and commits to the preference 400ms
+  after it settles. Committing per step re-rendered every consumer of the
+  preferences context at slider rate.
+- **The status bar follows the mode actually on screen**: `syncThemeColor`
+  re-points both `<meta name="theme-color">` tags at the current mode's
+  ground (a light-mode pilot on a dark-mode phone would otherwise get a dark
+  bar over a light page). The static values in `app/layout.tsx`,
+  `public/manifest.json` and `public/offline.html` are Graphite's.
+- **A preferences row with no mode in it is NOT "dark".** The provider takes
+  the mode next-themes is actually showing; holding the in-memory default meant
+  the first unrelated setting saved (choosing a palette, say) wrote "dark" into
+  the row and the next launch flipped a light-mode pilot to dark.
+
+Scheduled (unflown) flights are drawn in the accent (`text-primary` on the
+logbook card and the roster chip): planned is the accent, whatever it is.
 
 ### State Management
 
@@ -3187,7 +3236,7 @@ When making changes, be aware of these high-impact files:
     0.11 once `--glass-base` arrived: with an 82% card-coloured undercoat
     already giving the slab a face, the veil was pure lightening on top of an
     almost-solid surface and the material came out too pale and too warm for an
-    iOS-dark app. At 0.05 the face lands around oklch **0.21** on the magenta-line ground (it was 0.23 on the old one), which is where
+    iOS-dark app. At 0.05 the face lands around oklch **0.21** on the default (Graphite) ground — `--on-glass` is derived from `--card` so it tracks every palette — which is where
     iOS's own dark chrome sits (systemGray6 `#1C1C1E` → systemGray5 `#2C2C2E`).
     Do not take it to zero — over pure black the base alone still needs the
     lift, and that is the whole reason this coat exists.
@@ -3797,7 +3846,8 @@ When making changes, be aware of these high-impact files:
 - Do not give `SwipeableCard` action panels horizontal padding — the panel must collapse to 0 width when closed (the left gap comes from `openWidth`/`justify-end`), otherwise a sliver of the action button peeks at the card edge
 - Do not put row dividers as a full-width `border-b` — use the inset `.row-divider` class so the line aligns with the `px-4` text
 - Do not give inline form inputs a visible box — keep `border-0 bg-transparent dark:bg-transparent shadow-none rounded-none` so they blend with the row (and `md:text-base` so the font doesn't shrink in edit mode)
-- Do not give the accent a hue the status ramp uses, and do not paint a scheduled (unflown) flight anything but the accent. The accent is MAGENTA (`--primary`, hue 330) because magenta is the planned/managed path on a flight deck and is the one hue green/yellow/orange/red do not already mean something; the old bronze sat on the caution orange. Scheduled flights are `text-primary` (logbook card, roster chip) for the same reason — planned is magenta. And keep the dark theme NIGHT-ADAPTED: an ember-black ground (hue 20, never a blue black), text a dimmed warm white (never `#fff`), status colours held under full brightness. A large bright field is what costs a pilot their dark adaptation
+- Do not hardcode a surface or accent colour, and do not hand-edit the `palette:light` / `palette:dark` blocks in globals.css — colour is generated from a `PaletteSeed` (`lib/theme/palette.ts`), and those blocks are the default palette's output, pinned by `palette.test.ts`. A new preset is a new SEED; a rule about colour goes into the generator, where every preset and every custom palette gets it. Keep every dark half night-adapted (ground ≤ L 0.17, text never `#fff`), keep the palette off the status ramp and `--destructive`, and keep a scheduled (unflown) flight in the accent
+- Do not fetch anything to choose, edit or restore a palette, and do not apply the stored palette before the preferences row has loaded — the boot script has already painted it from localStorage, and applying the in-memory default first flashes Graphite on every launch
 
 **Report import:**
 - Do not write an imported record with a bare `table.put()` — it is a raw Dexie write with NO sync-queue entry behind it, so the row lives only on the device that ran the import. The importers reached for it because their rows already carry the ids the flight rows point at, which rules out `addPersonnel`/`addCurrency`; `putManyWithSync` (`crud-helpers.ts`) is the shape that keeps the id AND enqueues, in one `bulkPut` + one `enqueueMany` rather than 2N round trips. Crew, currencies and discrepancies were all silently local for exactly this reason

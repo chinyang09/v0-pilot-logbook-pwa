@@ -6,6 +6,7 @@ import { AuthProvider } from "@/components/providers/auth-provider"
 import { ThemeProvider } from "@/components/providers/theme-provider"
 
 import { OCRModelsPreloader } from "@/components/ocr-models-preloader"
+import { PALETTE_BOOT_SCRIPT } from "@/lib/theme/apply"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -29,14 +30,15 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  // Exactly the app's own background in each theme — the sRGB of
-  // oklch(0.13 0.008 20) / oklch(0.972 0.005 30) in globals.css. Where a system
+  // Exactly the DEFAULT palette's background in each theme (Graphite, as
+  // `lib/theme/palette.ts` generates it). A chosen palette re-points these at
+  // runtime (`syncThemeColor`). Where a system
   // bar is painted with this rather than left transparent, it has to be the
   // SAME colour as the page or it reads as a band bolted to the top. The old
   // values were cold near-blacks against a warm app.
   themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#0a0606" },
-    { media: "(prefers-color-scheme: light)", color: "#f9f5f4" },
+    { media: "(prefers-color-scheme: dark)", color: "#06070a" },
+    { media: "(prefers-color-scheme: light)", color: "#f5f6f7" },
   ],
   colorScheme: "dark light",
   width: "device-width",
@@ -54,6 +56,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        {/* The chosen palette, back on screen before the first paint — from
+            localStorage, so it needs no network (see lib/theme/apply.ts). */}
+        <script dangerouslySetInnerHTML={{ __html: PALETTE_BOOT_SCRIPT }} />
         {/* Windows tile color */}
         <meta name="msapplication-TileColor" content="#05080B" />
         {/* Inter is the single app typeface (sans + numbers). */}
