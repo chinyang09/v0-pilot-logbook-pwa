@@ -4,6 +4,7 @@ import { verifyTOTPWithCounter } from "@/lib/auth/server/totp"
 import { normalizeCallsign } from "@/lib/auth/shared/cuid"
 import { getDB } from "@/lib/mongodb/client"
 import { verifyStepUpAssertion, type StepUpAssertion } from "@/lib/auth/server/step-up"
+import { claimTotpCounter, recordTotpFailure } from "@/lib/auth/server/totp-attempts"
 
 export async function PUT(request: Request) {
   if (!assertSameOrigin(request)) {
@@ -54,19 +55,19 @@ export async function PUT(request: Request) {
     if (!user.auth?.totpSecret) {
       return NextResponse.json({ error: "TOTP not configured" }, { status: 400 })
     }
-    // Verify TOTP code (with single-use replay protection shared across flows)
+    // The same throttle as the TOTP login: this endpoint accepts a code too,
+    // and without one it was an unlimited guessing oracle for a signed-in
+    // session.
+    if (((user.auth?.totpLockUntil as number | undefined) ?? 0) > Date.now()) {
+      return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 })
+    }
+    // Verify TOTP code, then claim its time-step — single use, shared with the
+    // TOTP login, and atomic (see totp-attempts.ts).
     const { valid, counter } = await verifyTOTPWithCounter(user.auth.totpSecret, totpCode as string)
-    if (!valid) {
+    if (!valid || !(await claimTotpCounter(db, user._id, counter, { clearFailures: true }))) {
+      await recordTotpFailure(db, user._id)
       return NextResponse.json({ error: "Invalid TOTP code" }, { status: 403 })
     }
-    const lastCounter = (user.auth?.lastTotpCounter as number | undefined) ?? -1
-    if (counter <= lastCounter) {
-      return NextResponse.json({ error: "Invalid TOTP code" }, { status: 403 })
-    }
-    await db.collection("users").updateOne(
-      { _id: session.userId as unknown as import("mongodb").ObjectId },
-      { $set: { "auth.lastTotpCounter": counter } }
-    )
   }
 
   // Check if callsign is already taken by another user

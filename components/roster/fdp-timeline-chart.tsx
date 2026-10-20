@@ -319,7 +319,10 @@ export function FDPTimelineChart({
     return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
   }, [])
 
-  // Compact integer formatter — 1000 → "1k", 1500 → "1.5k" (for tight tab displays).
+  // Compact formatter — 1000 → "1k", 1500 → "1.5k" (for tight tab displays).
+  // Below 10 it keeps one decimal, the same rule as the dashboard's limits
+  // band (`legality.ts`): rounding 5.5h to "6" here while the dashboard read
+  // "5.5" showed one total two ways on two pages.
   const formatCap = useCallback((n: number): string => {
     if (!Number.isFinite(n)) return "0"
     const abs = Math.abs(n)
@@ -327,6 +330,7 @@ export function FDPTimelineChart({
       const v = n / 1000
       return `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}k`
     }
+    if (abs < 10 && Math.round(n) !== n) return n.toFixed(1)
     return `${Math.round(n)}`
   }, [])
 

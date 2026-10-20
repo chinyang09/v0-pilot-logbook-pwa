@@ -43,6 +43,7 @@ import {
   isLiveFlight,
 } from "@/lib/db";
 import { useDebounce } from "@/hooks/use-debounce";
+import { formPatch, rebaseForm } from "@/lib/utils/form-patch";
 import { useAirportDatabase } from "@/hooks/data";
 import {
   createEmptyFlightLog,
@@ -140,6 +141,13 @@ function SettingsRow({
     </div>
   );
 }
+
+/** Fields only ever written straight to the database, by the pickers. */
+const PICKER_FIELDS: ReadonlySet<string> = new Set([
+  "aircraftReg", "aircraftType",
+  "departureIcao", "departureIata", "arrivalIcao", "arrivalIata",
+  "picId", "picName", "sicId", "sicName",
+]);
 
 // Caches the last-known data for each flight at module scope so the form can
 // seed its initial state synchronously when it re-mounts (e.g. when switching
@@ -414,6 +422,13 @@ export function FlightForm({
     }
     return createEmptyFlightLog();
   });
+  // The latest form state, for effects that must not re-run on every keystroke.
+  const formDataRef = useRef(formData);
+  useLayoutEffect(() => {
+    formDataRef.current = formData;
+  }, [formData]);
+  const baselineRef = useRef<Partial<FlightLog> | null>(null);
+  const baselineOverridesRef = useRef<FlightLog["manualOverrides"]>(undefined);
 
   // Track manual overrides state
   const [manualOverrides, setManualOverrides] = useState<
@@ -488,45 +503,36 @@ export function FlightForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedFlight?.id]);
 
-  // --- Detect external DB changes (picker writes) via useLiveQuery ---
-  // When a picker writes directly to Dexie, the liveFlight object updates.
-  // We compare picker-modifiable fields to detect external changes and
-  // merge them into formData without resetting user's in-progress edits.
-  // Works for both desktop (form stays mounted) and mobile (form remounts, reads latest).
+  // --- Follow the row underneath the form (picker writes AND sync pulls) ---
+  // Every field the database changed is adopted unless the user has changed
+  // it here since the baseline (see `lib/utils/form-patch.ts`). Following only
+  // the picker fields left the rest of the copy stale after a pull, and the
+  // next auto-save sent that stale copy back — reverting another device's
+  // OOOI times, signature and lock without anyone touching this form.
   const prevLiveFlightRef = useRef<FlightLog | undefined>(undefined);
   useEffect(() => {
     if (!liveFlight || !flightIdProp) return;
 
     // First load: already handled by initialization or the effect above
-    if (!prevLiveFlightRef.current || prevLiveFlightRef.current.id !== liveFlight.id) {
-      prevLiveFlightRef.current = liveFlight;
-      return;
-    }
-
-    // Check for external changes in picker-modifiable fields
-    const pickerFields = [
-      "aircraftReg", "aircraftType",
-      "departureIcao", "departureIata", "arrivalIcao", "arrivalIata",
-      "picId", "picName", "sicId", "sicName",
-    ] as const;
-
-    let hasExternalChange = false;
-    const updates: Partial<FlightLog> = {};
-
-    for (const field of pickerFields) {
-      const dbVal = liveFlight[field];
-      const prevVal = prevLiveFlightRef.current[field];
-      if (dbVal !== prevVal) {
-        (updates as any)[field] = dbVal;
-        hasExternalChange = true;
-      }
-    }
-
+    const previous = prevLiveFlightRef.current;
     prevLiveFlightRef.current = liveFlight;
+    if (!previous || previous.id !== liveFlight.id) return;
+    // The baseline is taken on the first debounced state; until then the form
+    // still IS the row it loaded, so only the pickers need following.
+    const baseline = baselineRef.current?.id === liveFlight.id ? baselineRef.current : null;
 
-    if (hasExternalChange) {
-      setFormData((prev) => ({ ...prev, ...updates }));
-    }
+    const current = formDataRef.current;
+    if (current.id !== liveFlight.id) return;
+    const next = rebaseForm<FlightLog>({
+      form: current,
+      baseline: baseline ?? current,
+      previous,
+      live: liveFlight,
+      alwaysAdopt: PICKER_FIELDS,
+    });
+    if (next.adopted.length === 0) return;
+    if (baseline) baselineRef.current = next.baseline;
+    setFormData(next.form);
   }, [liveFlight, flightIdProp]);
 
   useEffect(() => {
@@ -799,6 +805,9 @@ export function FlightForm({
 
   // Track the last saved state to avoid unnecessary saves
   const lastSavedStateRef = useRef<string | null>(null);
+  // The form as it stood when it last agreed with the database: what a save
+  // diffs against, so only what the user changed is written.
+  // (Declared above with formDataRef so the follow effect can reach it.)
   // Track which flight ID the baseline was captured for
   const baselineFlightIdRef = useRef<string | null>(null);
 
@@ -828,8 +837,18 @@ export function FlightForm({
       const stored = await getFlightById(data.id);
       if (!stored || !isLiveFlight(stored)) return false;
 
-      const { deletedAt: _binState, ...safe } = data;
-      await updateFlight(data.id, { ...safe, manualOverrides: overrides });
+      // Only what changed since the baseline. With no baseline for THIS flight
+      // (a flush in the first half-second after a swap) the stored row is the
+      // baseline, which is the same thing a moment earlier.
+      const baseline = baselineRef.current?.id === data.id ? baselineRef.current : stored;
+      const patch = formPatch<FlightLog>(
+        { ...data, manualOverrides: overrides },
+        { ...baseline, manualOverrides: baselineRef.current?.id === data.id ? baselineOverridesRef.current : stored.manualOverrides }
+      );
+      baselineRef.current = { ...data };
+      baselineOverridesRef.current = overrides;
+      if (Object.keys(patch).length === 0) return true;
+      await updateFlight(data.id, patch);
       return true;
     },
     []
@@ -858,6 +877,8 @@ export function FlightForm({
       if (baselineFlightIdRef.current !== debouncedFormData.id) {
         baselineFlightIdRef.current = debouncedFormData.id;
         lastSavedStateRef.current = currentState;
+        baselineRef.current = { ...debouncedFormData };
+        baselineOverridesRef.current = manualOverrides;
         return; // Don't save on initial load, just capture baseline
       }
 

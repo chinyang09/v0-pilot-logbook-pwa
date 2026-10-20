@@ -88,12 +88,16 @@ export function validatePushItems(raw: unknown[]): {
   return { byCollection, invalid }
 }
 
+/** Collections whose ids are derived from content, so a purged id can legitimately come back. */
+const RECREATABLE: ReadonlySet<SyncCollection> = new Set<SyncCollection>(["discrepancies"])
+
 export type PushDecision = "insert" | "update" | "patch" | "delete" | "stale" | "rejected"
 
 /**
  * What to do with one pushed item, given what the server holds.
  *
- * - a delete always applies (tombstone first, then the record)
+ * - a delete applies (tombstone first, then the record) — unless it is a
+ *   purge of a record another device has since RESTORED, which is `stale`
  * - a write for a TOMBSTONED id is rejected — it was purged elsewhere, and
  *   re-creating it would resurrect it on every device
  * - a write for a record the server doesn't have is an insert
@@ -107,8 +111,33 @@ export function decidePush(
   existing: Record<string, unknown> | undefined,
   tombstoned: boolean
 ): PushDecision {
-  if (item.type === "delete") return "delete"
-  if (tombstoned) return "rejected"
+  if (item.type === "delete") {
+    // A purge says "destroy what I saw binned at baseSeq". If the record is
+    // LIVE on the server and has moved on since, another device restored it
+    // and this one never heard — purging would delete the restored record
+    // everywhere. Answer with the record instead. A delete without a base (an
+    // older build, or a record this device never saw synced) applies as ever.
+    if (
+      existing &&
+      typeof item.baseSeq === "number" &&
+      existing.deletedAt == null &&
+      typeof existing.serverSeq === "number" &&
+      existing.serverSeq > item.baseSeq
+    ) {
+      return "stale"
+    }
+    return "delete"
+  }
+  if (tombstoned) {
+    // A comparison's id is DERIVED (`mismatch:<flight>:<field>`), so a
+    // re-import within the tombstone's 30 days recreates the same id on
+    // purpose. Rejecting it deleted the new comparison — the licence record
+    // — on every device, silently. A CREATE of such an id is a new record,
+    // not a stale write; the engine clears the tombstone in the same
+    // transaction. Random-id collections keep the rejection.
+    if (item.type === "create" && RECREATABLE.has(item.collection)) return "insert"
+    return "rejected"
+  }
   if (!existing) return "insert"
   if (item.type === "update" && Array.isArray(item.changedFields)) return "patch"
   return compareAuthorship(item.data as never, existing as never) > 0 ? "update" : "stale"

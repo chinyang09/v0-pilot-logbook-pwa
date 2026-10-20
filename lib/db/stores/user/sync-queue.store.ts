@@ -10,7 +10,7 @@ import type {
   CollectionCursor,
   SyncChangeMeta,
 } from "@/types/sync/sync.types";
-import { earlierBase, unionFields } from "@/lib/sync/changes";
+import { earlierBase, sameValue, unionFields } from "@/lib/sync/changes";
 
 type SyncQueueData = SyncQueueItem["data"];
 
@@ -39,6 +39,20 @@ export async function addToSyncQueue(
   data: SyncQueueData,
   meta: SyncChangeMeta = {}
 ): Promise<void> {
+  // ONE transaction for the read and the write. Between them, a reconcile of
+  // the previous push (or another tab's enqueue) could delete or rewrite the
+  // row this edit collapses into — the put then resurrected a confirmed
+  // CREATE row, which the server decides by clock rather than by field.
+  await userDb.transaction("rw", userDb.syncQueue, () => enqueueInTransaction(type, collection, data, meta));
+  notifySyncService();
+}
+
+async function enqueueInTransaction(
+  type: SyncOperationType,
+  collection: SyncCollection,
+  data: SyncQueueData,
+  meta: SyncChangeMeta
+): Promise<void> {
   const recordId = (data as { id?: string }).id;
 
   if (recordId) {
@@ -61,9 +75,9 @@ export async function addToSyncQueue(
           data: { id: recordId },
           timestamp: Date.now(),
           retryCount: 0,
+          ...(meta.baseSeq !== undefined ? { baseSeq: meta.baseSeq } : {}),
         });
       }
-      notifySyncService();
       return;
     }
 
@@ -87,7 +101,6 @@ export async function addToSyncQueue(
         ...(changedFields !== undefined ? { changedFields } : {}),
         ...(baseSeq !== undefined ? { baseSeq } : {}),
       });
-      notifySyncService();
       return;
     }
   }
@@ -103,7 +116,6 @@ export async function addToSyncQueue(
     ...(type !== "delete" && meta.changedFields !== undefined ? { changedFields: meta.changedFields } : {}),
     ...(meta.baseSeq !== undefined ? { baseSeq: meta.baseSeq } : {}),
   });
-  notifySyncService();
 }
 
 /**
@@ -335,7 +347,14 @@ export async function markRecordSynced(
  */
 export async function reconcilePushedRecords(
   collection: SyncCollection,
-  entries: { id: string; pushedUpdatedAt?: number; pushedTimestamp: number; serverSeq?: number }[]
+  entries: {
+    id: string;
+    pushedUpdatedAt?: number;
+    pushedTimestamp: number;
+    serverSeq?: number;
+    /** The record as it was pushed, to tell which kept fields are now on the server. */
+    pushedData?: Record<string, unknown>;
+  }[]
 ): Promise<void> {
   if (entries.length === 0) return;
   const table = userDb[collection];
@@ -375,8 +394,29 @@ export async function reconcilePushedRecords(
       // second whole-record write.
       if (typeof entry.serverSeq === "number") {
         for (const row of rows) {
-          if (row.timestamp > entry.pushedTimestamp && row.type === "create") {
+          if (row.timestamp <= entry.pushedTimestamp) continue;
+          if (row.type === "create") {
             await userDb.syncQueue.put({ ...row, type: "update", baseSeq: entry.serverSeq });
+            continue;
+          }
+          // An UPDATE row an edit collapsed into while this push was in flight
+          // carries the union of both edits' fields and the FIRST edit's base.
+          // The pushed fields are on the server now, at `serverSeq`: re-sending
+          // them against the old base made a later edit to them on another
+          // device look concurrent with ours, and the clock could hand the
+          // field back to our older value. Keep only what changed since the
+          // push, based on the seq the push landed at.
+          if (row.type !== "update" || !row.changedFields || !entry.pushedData) continue;
+          const data = row.data as unknown as Record<string, unknown>;
+          const remaining = row.changedFields.filter((f) => !sameValue(data[f], entry.pushedData![f]));
+          if (remaining.length === 0) {
+            await userDb.syncQueue.delete(row.id);
+            const latest = await table.get(entry.id);
+            if (latest && (latest as { updatedAt?: number }).updatedAt === (data.updatedAt as number | undefined)) {
+              await table.put({ ...latest, syncStatus: "synced" } as never);
+            }
+          } else {
+            await userDb.syncQueue.put({ ...row, changedFields: remaining, baseSeq: entry.serverSeq });
           }
         }
       }
@@ -417,6 +457,11 @@ export async function setRoundTripSyncState(patch: Partial<RoundTripSyncState>):
   await setMetaValue("roundTrip", { ...current, ...patch });
 }
 
+/** Bookkeeping keys an orphan's field patch never claims to have changed. */
+const QUEUE_META_FIELDS = new Set([
+  "id", "userId", "createdAt", "updatedAt", "deviceId", "syncStatus", "serverSeq", "syncedAt", "schemaVersion", "fieldVersions",
+]);
+
 /**
  * Records that are marked as needing a push but have NO queue row behind them.
  *
@@ -432,7 +477,7 @@ export async function requeueOrphanedRecords(
   { includeErrored = false }: { includeErrored?: boolean } = {}
 ): Promise<number> {
   const statuses = includeErrored ? ["pending", "error"] : ["pending"];
-  const toEnqueue: { type: SyncOperationType; collection: SyncCollection; data: SyncQueueData }[] = [];
+  const toEnqueue: ({ type: SyncOperationType; collection: SyncCollection; data: SyncQueueData } & SyncChangeMeta)[] = [];
   const tables = collections.map((c) => userDb[c]);
   // One read transaction for every table and the queue, not two per table.
   await userDb.transaction("r", [...tables, userDb.syncQueue], async () => {
@@ -447,7 +492,19 @@ export async function requeueOrphanedRecords(
       };
       const candidates = await table.where("syncStatus").anyOf(statuses).toArray();
       for (const record of candidates) {
-        if (!queued.has(`${collection}:${record.id}`)) {
+        if (queued.has(`${collection}:${record.id}`)) continue;
+        // Which fields the lost edit touched is not known, but WHERE it started
+        // is: the seq the record last stood at here. Pushed as a patch of every
+        // field against that base, the server keeps whatever another device
+        // changed since and arbitrates only the fields genuinely contested —
+        // where a whole-record write is decided by clock, and a stale copy
+        // with a newer `updatedAt` reverts every field it never saw. A record
+        // that never reached the server has no base and goes up whole.
+        const seq = (record as { serverSeq?: number }).serverSeq;
+        if (typeof seq === "number") {
+          const changedFields = Object.keys(record).filter((k) => !QUEUE_META_FIELDS.has(k));
+          toEnqueue.push({ type: "update", collection, data: record as SyncQueueData, changedFields, baseSeq: seq });
+        } else {
           toEnqueue.push({ type: "update", collection, data: record as SyncQueueData });
         }
       }

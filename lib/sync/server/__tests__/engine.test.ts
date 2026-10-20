@@ -169,6 +169,46 @@ describe("two devices", () => {
     expect(await fake.collection("personnel").findOne({ id: "p1" })).toBeNull()
   })
 
+  it("a stale device's purge cannot destroy a record another device has since restored", async () => {
+    await push(op("flights", "create", { id: "f1", remarks: "x", updatedAt: 1 }))
+    const binned = await push(op("flights", "update", { id: "f1", remarks: "x", deletedAt: 50, updatedAt: 2 }))
+    const seenBinnedAt = binned.results[0].serverSeq as number
+    // Device A restores it; device C never heard and its 30-day sweep purges.
+    await push(op("flights", "update", { id: "f1", remarks: "x", deletedAt: null, updatedAt: 3 }))
+    const { results } = await push({ ...op("flights", "delete", { id: "f1" }), baseSeq: seenBinnedAt })
+    expect(results[0]).toMatchObject({ success: true, stale: true })
+    expect(results[0].record?.id).toBe("f1")
+    expect(await fake.collection("flights").findOne({ id: "f1" })).not.toBeNull()
+
+    // Still binned where the purge saw it: the purge applies as ever.
+    await push(op("flights", "update", { id: "f1", remarks: "x", deletedAt: 60, updatedAt: 4 }))
+    const stored = await fake.collection("flights").findOne({ id: "f1" })
+    const purge = await push({ ...op("flights", "delete", { id: "f1" }), baseSeq: stored!.serverSeq as number })
+    expect(purge.results[0]).toMatchObject({ success: true })
+    expect(purge.results[0].stale).toBeFalsy()
+    expect(await fake.collection("flights").findOne({ id: "f1" })).toBeNull()
+  })
+
+  it("a comparison purged and then re-imported comes back, on every device", async () => {
+    const id = "mismatch:f1:pilotFlying"
+    await push(op("discrepancies", "create", { id, holding: "logbook", updatedAt: 1 }))
+    await push(op("discrepancies", "delete", { id }))
+    const { results } = await push(op("discrepancies", "create", { id, holding: "logbook", updatedAt: 9 }))
+    expect(results[0]).toMatchObject({ success: true })
+    expect(results[0].rejected).toBeFalsy()
+
+    const fresh = device()
+    await fresh.pull()
+    expect(fresh.state.records.has(`discrepancies:${id}`)).toBe(true)
+    expect(fresh.state.deleted.has(`discrepancies:${id}`)).toBe(false)
+
+    // A random-id record keeps the rejection that stops a resurrection.
+    await push(op("flights", "create", { id: "f9", updatedAt: 1 }))
+    await push(op("flights", "delete", { id: "f9" }))
+    const again = await push(op("flights", "create", { id: "f9", updatedAt: 9 }))
+    expect(again.results[0]).toMatchObject({ success: true, rejected: true })
+  })
+
   it("a soft delete and a restore both travel as ordinary updates", async () => {
     const b = device()
     await push(op("aircraft", "create", { id: "a1", registration: "9V-TNK", updatedAt: 1 }))

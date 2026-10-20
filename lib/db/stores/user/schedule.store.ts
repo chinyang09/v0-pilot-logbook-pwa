@@ -36,7 +36,7 @@ export async function addScheduleEntry(entry: ScheduleEntryCreate): Promise<Sche
   }
 
   await userDb.scheduleEntries.put(newEntry)
-  await addToSyncQueue("create", "scheduleEntries", newEntry)
+  await addToSyncQueue("create", "scheduleEntries", newEntry, { changedFields: [] })
 
   return newEntry
 }
@@ -234,7 +234,7 @@ export async function bulkUpsertScheduleEntries(
           syncStatus: "pending",
         }
         await userDb.scheduleEntries.add(newEntry)
-        toEnqueue.push({ type: "create", collection: "scheduleEntries", data: newEntry })
+        toEnqueue.push({ type: "create", collection: "scheduleEntries", data: newEntry, changedFields: [] })
         created++
       }
     }

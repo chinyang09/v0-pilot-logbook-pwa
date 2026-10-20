@@ -42,8 +42,16 @@ const stepVariants = {
 
 export default function LoginPage() {
   const router = useRouter()
-  const { login } = useAuth()
+  const { login, user, sessionExpired, isLoading: authLoading } = useAuth()
   const [step, setStep] = useState<Step>("initial")
+
+  // Sent here because the session looked dead, and it turned out not to be
+  // (the monitor's next check cleared it): go back. Nothing else on this page
+  // reads auth state, so the pilot used to be left signing in again — and,
+  // offline by then, locked out of a logbook that was never signed out.
+  useEffect(() => {
+    if (!authLoading && user && !sessionExpired && step === "initial") router.replace("/")
+  }, [authLoading, user, sessionExpired, step, router])
   const [callsign, setCallsign] = useState("")
   const [totpCode, setTotpCode] = useState("")
   const [totpSecret, setTotpSecret] = useState("")

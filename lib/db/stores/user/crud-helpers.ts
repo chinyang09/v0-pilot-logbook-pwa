@@ -261,7 +261,14 @@ export async function purgeEntity<T extends SyncableEntity>(
   if (!existing) return false
 
   await table.delete(id)
-  await addToSyncQueue("delete", tableName, { id })
+  // The seq this device saw the record BINNED at. A device that has not
+  // caught up may purge a copy another device has since RESTORED — the
+  // server refuses a purge of a live record that moved on past this base and
+  // answers with the restored record instead (see `decidePush`).
+  const seen = (existing as { serverSeq?: number; deletedAt?: unknown }).deletedAt != null
+    ? (existing as { serverSeq?: number }).serverSeq
+    : undefined
+  await addToSyncQueue("delete", tableName, { id }, typeof seen === "number" ? { baseSeq: seen } : {})
 
   return true
 }

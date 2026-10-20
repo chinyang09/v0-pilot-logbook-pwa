@@ -197,7 +197,20 @@ All user data is stored locally in **IndexedDB via Dexie** and synced to **Mongo
   resurrect the record on other devices)
 - Failed push items are retried and **dead-lettered** after
   `MAX_SYNC_RETRIES` (5) so a poison item can't loop forever; transient
-  network/offline failures are not counted toward the cap
+  network/offline failures are not counted toward the cap — and neither is a
+  REQUEST-level 4xx (a proxy's 403, a 413), which is no single item's fault.
+  Only a per-item `success:false`, or a batch of one, counts
+- **The fetch timeout covers the BODY** (`fetchWithTimeout`'s `read`). It used
+  to be cleared when the headers arrived, so a connection dropping mid-body
+  left `response.json()` pending forever: the cycle never settled, the Web
+  Lock was never released and every later sync chained onto it
+- **A purge carries the seq it saw the record BINNED at.** The server answers a
+  purge of a record that is now LIVE and past that base with the record
+  (`stale`), not a deletion — a device that had not caught up used to purge,
+  everywhere, a flight another device had restored
+- **A comparison's id is derived** (`mismatch:<flight>:<field>`), so a CREATE
+  of a tombstoned discrepancy id is a new record: inserted, with the tombstone
+  removed in the same commit. Random-id collections keep the rejection
 
 ### The Sync Protocol (`/api/sync`, `lib/sync/`)
 
@@ -283,7 +296,26 @@ PATCH, not a record:
   respected and simulators skipped, like every other recalculation pass.
 - Arrays and objects (`approaches`, `additionalCrew`, `signature`,
   `importDecisions`) are ONE field each: two devices editing the same list
-  concurrently is a conflict, not an element merge.
+  concurrently is a conflict, not an element merge. An EMPTY list or object
+  counts as no value (`sameValue`), the same as `null`/`undefined`.
+- **An edit FORM writes only what the user changed** (`lib/utils/form-patch.ts`).
+  The flight form saved its whole copy of the flight, and after a pull that
+  copy was stale — so an iPad with a flight open sent the phone's new OUT time
+  and signature straight back, with nobody touching the iPad, and the server
+  saw a genuine edit (diffed against the pulled row, based on the pulled seq).
+  The form keeps a BASELINE, saves `formPatch(form, baseline)`, and follows
+  the row underneath it with `rebaseForm` — every field the user has not
+  touched is adopted into form and baseline alike. The crew form does the same.
+- **A queue row an edit collapsed into mid-push is REBASED** when that push
+  is confirmed: the fields now on the server are dropped and its base moves to
+  the seq the push landed at (`reconcilePushedRecords`). Re-sending them
+  against the old base made another device's later edit look concurrent.
+- **An orphan is requeued as a field PATCH** of every field against its last
+  seq, not a whole record — a stale copy with a newer `updatedAt` used to win
+  every field by clock. Enqueueing is ONE transaction (read + write).
+- **A full resync keeps unsynced rows** (`clearDataTablesForResync`): pending,
+  dead-lettered and queued records survive the wipe; the server leaves a record
+  out of the pull of the request that pushed it, so wiping it lost it.
 
 ### The Canonical Document Shape (`lib/sync/schema.ts`)
 
@@ -345,7 +377,12 @@ on the account page revoked the session and THEN ran the pre-logout sync, which
 then got a 401 — so every unsynced edit was wiped with the local data, online
 or not. `confirmUnsyncedLoss` pushes while the session still works
 (`flushBeforeSignOut`) and confirms if anything is left. It is a confirmation
-because the loss has no undo.
+because the loss has no undo. It then signs out with `logout({ skipSync: true })`
+(the session is already revoked, so a second sync would only meet a 401), and
+`logout` waits for an in-flight cycle (`syncService.whenIdle`) before wiping —
+or that cycle wrote the previous user's records back into the wiped tables.
+"Log out of all devices" refuses offline and requires the revoke to succeed:
+it exists for a LOST device, and swallowing the failure signed out only this one.
 
 **Live multi-device test** — `scripts/sync-live-test/` drives the real app in
 separate browser profiles against a real MongoDB replica set (README there).
@@ -401,6 +438,24 @@ pages showed pre-sync numbers until they remounted. Every SWR key in
 - Challenges are **single-use**: consume them with `findOneAndDelete` (type + expiry checked) so they can't be replayed.
 - The WebAuthn signature counter is enforced as strictly-increasing **only when a counter is in use** (either side non-zero) — synced/platform passkeys report `signCount 0` permanently and must not be locked out on their second use.
 - TOTP is **single-use**: verify with `verifyTOTPWithCounter` and reject any code whose time-step `counter <= auth.lastTotpCounter` (shared across the TOTP login and callsign-change endpoints). Compare codes in constant time.
+- TOTP bookkeeping is **atomic** (`lib/auth/server/totp-attempts.ts`): `claimTotpCounter` is a conditional update only one request can win, and `recordTotpFailure` counts with `$inc`. Read-then-write let parallel guesses skip the 5-attempt lockout and one code log in twice. The callsign change shares the lockout.
+- Login challenges are typed `"login"` and consumed only as that type.
+- No route returns the session TOKEN in a body — it is the HttpOnly cookie's secret.
+- **A store error is not a missing session.** `validateSession` throws (`SessionStoreUnavailableError`) so the route answers 5xx; returning `null` turned a MongoDB cold start into a 401 the client read as "signed out". It also re-sets the cookie when it slides the session forward.
+
+**A 401 during sync is a claim, not proof** (`handleSyncReauth`): the session
+probe decides — `valid` retries, `unknown` changes nothing, only `invalid` marks
+the session expired. A passkey ceremony is attempted only with live user
+activation, and `silentReauth` shares ONE in-flight ceremony; from a background
+poll it used to raise the passkey sheet repeatedly. The login page returns to
+`/` when the session turns out to be fine, so a pilot sent there by a false
+alarm is not left signing in again.
+
+**One device, one account's data.** `syncMeta.dataOwner` records whose data the
+device holds. Signing in as a DIFFERENT account clears it first (asking if
+anything is unsynced) — it used to push the first account's queued edits into
+the second account and pull the second one from the first one's cursors. A
+silent reauth answered by another account's passkey is ignored.
 
 Sessions are stored in MongoDB (with TTL) and mirrored to IndexedDB. Cookies are HttpOnly + Secure + SameSite=Lax. Each session row also stores the request **`userAgent`** (set in `issueSession`) so the account page can label active sessions by device.
 
@@ -2946,6 +3001,16 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
 
 ### Lower-priority items (not yet actioned)
 
+- **Multi-device gaps found in the Oct 2026 audit, left open:** two devices
+  importing the same roster before syncing each create its duties under random
+  ids (the date+code match is local), so they duplicate — a deterministic id
+  would fix it but changes every existing row's key; two devices can each mark
+  a different crew card "This is me" and `getCurrentUserPersonnel` takes the
+  first; the auto-fill switches are per device while the times they produce are
+  shared; `putManyWithSync` with type `update` and no local row is a whole-
+  record write; and the keepalive flush on `pagehide` takes no lock, so it can
+  race an in-flight cycle on a create (harmless — it never deletes queue rows).
+
 - **`discrepancies.resolved` boolean secondary index** (`lib/db/user-db.ts`) —
   IndexedDB can't key a boolean, so the index is inert (same class as the
   airports `isFavorite` bug already fixed). Not a live bug today (all readers use
@@ -3933,6 +3998,11 @@ When making changes, be aware of these high-impact files:
 - Do not seed a reference table in ONE transaction — Chromium serves every IndexedDB database on an origin from one backing store, so writing the ~29k bundled airports in a single transaction held every request on the origin (the user DB and the sync engine included) for ~26 seconds on a fresh profile. `seedAirportsTable` writes in chunks with a gap between, overwrites in place (no empty-table window), and stamps the version LAST — and do not pace the chunks with a bare `setTimeout(0)` either. Nothing in the app is ONE transaction: adding a flight is a chain of about eight, each started when the last finishes, and with no real gap the next chunk was always queued first, so the chain waited a whole chunk at EVERY step. At 1000-row chunks that made adding a flight take 2–6s for the ~15s after the first flight form opened on a new install (measured; it had been misread as "slow while sync is failing", because offline the seed's fetch fails and it never runs). `SEED_CHUNK` 250 with a `SEED_GAP_MS` 48 gap: adds 0.3–0.7s during the seed, and the seed itself finishes sooner
 - Do not seed a `useState` from `syncService.getStatus()` (or any browser-only value) in a server-rendered component — the server renders "offline", the browser knows it is online, and the first render disagrees with the HTML. Read it with `useSyncExternalStore` and an "offline" server snapshot
 - Do not push a whole record for an edit — `updateEntity` sends `changedFields` + `baseSeq`, and the server applies only those fields. A whole-record push from a device that hadn't caught up is what reverted other devices' edits
+- Do not save an edit form's whole copy of a record — diff it against the form's BASELINE (`formPatch`) and follow the live row with `rebaseForm`. A form open across a pull otherwise sends the stale copy back as an edit and reverts the other device's work with nobody touching the form
+- Do not clear a fetch timeout before the body is read — a stalled body wedged the sync lock forever. Read inside the timeout (`fetchWithTimeout(input, init, read)`, `authFetch`)
+- Do not dead-letter a batch for a request-level 4xx, and do not wipe unsynced rows in a full resync
+- Do not mark a session expired on a 401 alone, and do not start a passkey ceremony from a background trigger — probe first, and require user activation
+- Do not let a sign-in as a different account inherit this device's data — `dataOwner` decides, and the switch clears it
 - Do not compare a pulled record against the local one by clock — rebase it (`planLocalApply`): the server's copy plus whatever this device has pending. Only a pending create or a dead-lettered row falls back to last-write-wins
 - Do not revoke a session before pushing — every sign-out path runs `confirmUnsyncedLoss` FIRST, while the session still works
 - Do not reload a whole reference table on mount to notice a write — `useAirportDatabase` re-read all ~10k airports from IndexedDB every time it mounted, and the flight form mounts on every flight tap. Writers bump `getAirportsRevision()` and the hook reloads only on a mismatch. Every write to `referenceDb.airports` lives in `airports.store.ts` (rebuild / addCustom / toggleFavorite) — a NEW writer must bump it too, or a cached copy goes stale. Capture the revision BEFORE the read, so a write landing mid-load leaves the cache looking stale rather than falsely current

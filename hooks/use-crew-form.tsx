@@ -10,6 +10,7 @@ import {
 } from "@/lib/db"
 import { mutate } from "swr"
 import { CACHE_KEYS } from "@/hooks/data"
+import { formPatch } from "@/lib/utils/form-patch"
 
 export const CREW_ROLE_OPTIONS = ["PIC", "SIC", "Instructor", "Examiner"] as const
 export type CrewRole = (typeof CREW_ROLE_OPTIONS)[number]
@@ -65,6 +66,32 @@ function formFromCrew(data: Personnel): CrewFormData {
     defaultPIC: data.defaultPIC || false,
     defaultSIC: data.defaultSIC || false,
     pfRole: data.pfRole ?? null,
+  }
+}
+
+/** The record a crew form describes — one mapping for the save and its baseline. */
+function personnelFromForm(formData: CrewFormData) {
+  return {
+    name: formData.name.trim(),
+    crewId: formData.crewId.trim() || undefined,
+    organization: formData.organization.trim() || undefined,
+    roles: formData.roles.length > 0 ? formData.roles : undefined,
+    licenceNumber: formData.licenceNumber.trim() || undefined,
+    contact:
+      formData.email.trim() || formData.phone.trim()
+        ? {
+            email: formData.email.trim() || undefined,
+            phone: formData.phone.trim() || undefined,
+          }
+        : undefined,
+    comment: formData.comment.trim() || undefined,
+    isMe: formData.isMe,
+    favorite: formData.favorite,
+    // The seat and the PF convention describe the PILOT, so they only
+    // mean anything on the self card.
+    defaultPIC: formData.isMe && formData.defaultPIC,
+    defaultSIC: formData.isMe && formData.defaultSIC,
+    pfRole: formData.isMe ? formData.pfRole : null,
   }
 }
 
@@ -162,34 +189,17 @@ export function useCrewForm({
       if (formData.isMe && existingSelfId) {
         await updatePersonnel(existingSelfId, { isMe: false })
       }
-      const personnelData = {
-        name: formData.name.trim(),
-        crewId: formData.crewId.trim() || undefined,
-        organization: formData.organization.trim() || undefined,
-        roles: formData.roles.length > 0 ? formData.roles : undefined,
-        licenceNumber: formData.licenceNumber.trim() || undefined,
-        contact:
-          formData.email.trim() || formData.phone.trim()
-            ? {
-                email: formData.email.trim() || undefined,
-                phone: formData.phone.trim() || undefined,
-              }
-            : undefined,
-        comment: formData.comment.trim() || undefined,
-        isMe: formData.isMe,
-        favorite: formData.favorite,
-        // The seat and the PF convention describe the PILOT, so they only
-        // mean anything on the self card.
-        defaultPIC: formData.isMe && formData.defaultPIC,
-        defaultSIC: formData.isMe && formData.defaultSIC,
-        pfRole: formData.isMe ? formData.pfRole : null,
-      }
-
+      const personnelData = personnelFromForm(formData)
       let saved: Personnel | null = null
       if (isNew) {
         saved = await addPersonnel(personnelData)
       } else if (crew) {
-        saved = await updatePersonnel(crew.id, personnelData)
+        // Only what was edited HERE. The card was loaded when the page
+        // opened, and saving that whole copy put back anything another device
+        // had changed on it since — the same stale-snapshot overwrite the
+        // flight form had (see `lib/utils/form-patch.ts`).
+        const patch = formPatch(personnelData, personnelFromForm(formFromCrew(crew)))
+        saved = Object.keys(patch).length > 0 ? await updatePersonnel(crew.id, patch) : crew
         setCrew(saved)
       } else {
         saved = await updatePersonnel(id, personnelData)

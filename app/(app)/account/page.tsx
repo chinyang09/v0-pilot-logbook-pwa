@@ -418,7 +418,7 @@ export default function AccountPage() {
         // Revoking the current device's session is allowed — when it's the one
         // backing this request, finish by clearing local data + signing out.
         if (data.loggedOutCurrent || session.isCurrent) {
-          await logout()
+          await logout({ skipSync: true })
           return
         }
         setSessions((prev) => prev.filter((s) => s.id !== session.id))
@@ -431,15 +431,29 @@ export default function AccountPage() {
   }
 
   const handleLogoutAll = async () => {
+    // This exists for a LOST device, so it has to actually reach the server.
+    // The request's failure used to be swallowed and this device wiped anyway:
+    // offline, the pilot was signed out here believing the lost phone was too,
+    // while its session stayed perfectly valid.
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      window.alert("You're offline. Signing out of all devices needs a connection — try again once you're back online.")
+      return
+    }
     if (!(await confirmUnsyncedLoss())) return
     setIsLoggingOutAll(true)
     try {
-      await fetch("/api/account/sessions", {
+      const res = await fetch("/api/account/sessions", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ all: true }),
-      }).catch(() => {})
-      await logout()
+      }).catch(() => null)
+      if (!res?.ok) {
+        window.alert("Couldn't sign out your other devices — nothing was changed. Check your connection and try again.")
+        return
+      }
+      // confirmUnsyncedLoss already pushed; the session is revoked now, so a
+      // second pre-logout sync would only meet a 401.
+      await logout({ skipSync: true })
     } finally {
       setIsLoggingOutAll(false)
     }

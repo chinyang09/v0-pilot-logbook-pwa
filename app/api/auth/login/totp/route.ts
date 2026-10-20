@@ -4,6 +4,7 @@ import { verifyTOTPWithCounter } from "@/lib/auth/server/totp";
 import { normalizeCallsign } from "@/lib/auth/shared/cuid";
 import type { User } from "@/lib/auth/types";
 import { issueSession, setSessionCookie } from "@/lib/auth/server/session";
+import { claimTotpCounter, recordTotpFailure } from "@/lib/auth/server/totp-attempts";
 
 // POST /api/auth/login/totp - Recovery login with TOTP
 export async function POST(request: NextRequest) {
@@ -31,9 +32,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Throttle brute-force: a 6-digit code with a ±1 window leaves only a
-    // handful of valid values at any instant, so cap wrong guesses.
-    const MAX_TOTP_ATTEMPTS = 5;
-    const LOCKOUT_MS = 15 * 60 * 1000;
+    // handful of valid values at any instant, so cap wrong guesses. The count
+    // and the replay claim are atomic (see totp-attempts.ts) — read-then-write
+    // let parallel guesses skip the lockout and one code log in twice.
     const lockUntil = user.auth.totpLockUntil ?? 0;
     if (lockUntil > Date.now()) {
       return NextResponse.json(
@@ -42,36 +43,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify TOTP code
+    // Verify TOTP code, then claim its time-step (single use).
     const { valid, counter } = await verifyTOTPWithCounter(user.auth.totpSecret, code);
-
-    // Replay protection: reject a code whose time-step was already used.
-    const lastCounter = user.auth.lastTotpCounter ?? -1;
-    if (!valid || counter <= lastCounter) {
-      const failCount = (user.auth.totpFailCount ?? 0) + 1;
-      const lock = failCount >= MAX_TOTP_ATTEMPTS;
-      await db.collection<User>("users").updateOne(
-        { _id: user._id },
-        {
-          $set: lock
-            ? { "auth.totpFailCount": 0, "auth.totpLockUntil": Date.now() + LOCKOUT_MS }
-            : { "auth.totpFailCount": failCount },
-        }
-      );
+    if (!valid || !(await claimTotpCounter(db, user._id, counter, { clearFailures: true }))) {
+      await recordTotpFailure(db, user._id);
       return NextResponse.json(
         { error: "Invalid verification code" },
         { status: 401 }
       );
     }
-
-    // Success: advance the replay counter and clear any failure state.
-    await db.collection<User>("users").updateOne(
-      { _id: user._id },
-      {
-        $set: { "auth.lastTotpCounter": counter },
-        $unset: { "auth.totpFailCount": "", "auth.totpLockUntil": "" },
-      }
-    );
 
     // Issue a recovery session (drives the "add a passkey" nudge afterwards).
     const userIdString = user._id.toString();
@@ -90,8 +70,9 @@ export async function POST(request: NextRequest) {
         id: userIdString,
         callsign: user.identity.callsign,
       },
+      // Never the token: it is the HttpOnly cookie's secret, and a copy in a
+      // response body is readable by any script on the page.
       session: {
-        token: sessionId,
         expiresAt: sessionExpiry.getTime(), // Send as number (timestamp) to frontend
       },
       shouldRegisterPasskey: true,

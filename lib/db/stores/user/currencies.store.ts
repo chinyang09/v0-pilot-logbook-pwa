@@ -69,7 +69,7 @@ export async function addCurrency(currency: CurrencyCreate): Promise<Currency> {
   }
 
   await userDb.currencies.put(newCurrency)
-  await addToSyncQueue("create", "currencies", newCurrency)
+  await addToSyncQueue("create", "currencies", newCurrency, { changedFields: [] })
 
   return newCurrency
 }

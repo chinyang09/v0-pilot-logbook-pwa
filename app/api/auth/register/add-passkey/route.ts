@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
       expiresAt: { $gt: new Date() },
     })
 
-    console.log("[v0] Session lookup result:", session ? { userId: session.userId, token: session.token } : "null")
+    console.log("[v0] Session lookup result:", session ? { userId: session.userId } : "null")
 
     if (!session) {
       return NextResponse.json({ error: "Session expired" }, { status: 401 })

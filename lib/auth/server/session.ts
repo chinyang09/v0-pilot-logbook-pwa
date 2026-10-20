@@ -126,6 +126,11 @@ export async function validateSession(): Promise<SessionData | null> {
         { token: sessionToken }, 
         { $set: { lastAccessedAt: now, expiresAt: newExpiresAt } }
       );
+      // The cookie's own expiry has to slide with the row. Extending only the
+      // row here also SUPPRESSED the session route's refresh (it keys off the
+      // same lastAccessedAt), so on a device whose daily first request was a
+      // sync the cookie expired 30 days after login with the session alive.
+      await setSessionCookie(sessionToken).catch(() => {});
     }
 
     return {
@@ -134,8 +139,20 @@ export async function validateSession(): Promise<SessionData | null> {
       expiresAt: session.expiresAt,
     };
   } catch (error) {
+    // A database that did not answer is NOT a missing session. Returning null
+    // turned a MongoDB cold start into a 401 on /api/sync, which the client
+    // reads as "signed out" — reauth, `sessionExpired`, the login screen. It
+    // throws instead, so the route answers 5xx and the client retries.
     console.error("Session validation error:", error);
-    return null;
+    throw new SessionStoreUnavailableError(error);
+  }
+}
+
+/** The session store could not be consulted — a server fault, never a 401. */
+export class SessionStoreUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super("Session store unavailable", { cause });
+    this.name = "SessionStoreUnavailableError";
   }
 }
 

@@ -26,7 +26,7 @@ export async function addDiscrepancy(discrepancy: DiscrepancyCreate): Promise<Di
   }
 
   await userDb.discrepancies.put(newDiscrepancy)
-  await addToSyncQueue("create", "discrepancies", newDiscrepancy)
+  await addToSyncQueue("create", "discrepancies", newDiscrepancy, { changedFields: [] })
   return newDiscrepancy
 }
 
@@ -49,7 +49,7 @@ export async function bulkAddDiscrepancies(
 
   await userDb.discrepancies.bulkPut(newDiscrepancies)
   await enqueueMany(
-    newDiscrepancies.map((data) => ({ type: "create" as const, collection: "discrepancies" as const, data }))
+    newDiscrepancies.map((data) => ({ type: "create" as const, collection: "discrepancies" as const, data, changedFields: [] }))
   )
   return newDiscrepancies
 }
