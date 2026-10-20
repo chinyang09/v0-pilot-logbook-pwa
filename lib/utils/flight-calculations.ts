@@ -40,13 +40,27 @@ export function calculateDayTime(blockTime: string, nightTime: string): string {
 }
 
 /**
+ * Whether an airport carries a usable position. A custom airport saved with
+ * its coordinates left blank is stored as 0 / 0 (`parseFloat("") || 0`) — a
+ * point in the Gulf of Guinea — and a type check alone accepted it, so a
+ * Singapore departure at 20:00 local was classified by the sun off West
+ * Africa: day, not night. A missing longitude was not checked at all.
+ */
+export function hasCoordinates(airport: Pick<Airport, "latitude" | "longitude"> | null | undefined): boolean {
+  if (!airport) return false
+  const { latitude: lat, longitude: lon } = airport
+  if (typeof lat !== "number" || typeof lon !== "number") return false
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false
+  return !(lat === 0 && lon === 0)
+}
+
+/**
  * Check if takeoff is at night
  */
 export function isTakeoffAtNight(date: string, offTime: string, airport: Airport | null): boolean {
-  if (!date || !offTime || !airport || !isValidHHMM(offTime)) return false
-  const lat = airport.latitude
-  const lon = airport.longitude
-  if (typeof lat !== "number" || typeof lon !== "number") return false
+  if (!date || !offTime || !airport || !isValidHHMM(offTime) || !hasCoordinates(airport)) return false
+  const lat = airport.latitude as number
+  const lon = airport.longitude as number
 
   const [hours, mins] = offTime.split(":").map(Number)
   const [y, m, d] = date.split("-").map(Number)
@@ -64,10 +78,9 @@ export function isLandingAtNight(
   onTime: string,
   airport: Airport | null
 ): boolean {
-  if (!date || !onTime || !offTime || !airport || !isValidHHMM(onTime)) return false
-  const lat = airport.latitude
-  const lon = airport.longitude
-  if (typeof lat !== "number" || typeof lon !== "number") return false
+  if (!date || !onTime || !offTime || !airport || !isValidHHMM(onTime) || !hasCoordinates(airport)) return false
+  const lat = airport.latitude as number
+  const lon = airport.longitude as number
 
   const [y, m, d] = date.split("-").map(Number)
   const [offH, offM] = offTime.split(":").map(Number)
@@ -268,8 +281,11 @@ export function recalculateFlightFields(
     flight.date &&
     flight.outTime &&
     flight.inTime &&
-    depAirport &&
-    arrAirport
+    // Without a real position at BOTH ends there is no night time to compute
+    // — leave the stored figure alone rather than writing a sun-angle answer
+    // for 0°N 0°E, or 00:00 over a value the pilot already has.
+    hasCoordinates(depAirport) &&
+    hasCoordinates(arrAirport)
   ) {
     const nightResult = calculateNightTimeComplete(
       flight.date,
@@ -277,8 +293,8 @@ export function recalculateFlightFields(
       flight.offTime || "",
       flight.onTime || "",
       flight.inTime,
-      { lat: depAirport.latitude ?? NaN, lon: depAirport.longitude ?? NaN },
-      { lat: arrAirport.latitude ?? NaN, lon: arrAirport.longitude ?? NaN }
+      { lat: depAirport!.latitude as number, lon: depAirport!.longitude as number },
+      { lat: arrAirport!.latitude as number, lon: arrAirport!.longitude as number }
     )
     updates.nightTime = nightResult.nightTimeHHMM
   }
@@ -313,8 +329,18 @@ export function recalculateFlightFields(
   }
 
   // Role times - use BLOCK TIME not flight time
-  // Gated by individual auto-fill preferences
-  if (!overrides.picTime && !overrides.sicTime && !overrides.picusTime) {
+  // Gated by individual auto-fill preferences. The five role times are ONE
+  // split of the block: a pilot who pinned any of them owns the split, so
+  // none is recomputed. Dual and instructor were left out of this gate, so a
+  // pinned Dual (a LogTen training flight, say) was zeroed or replaced by the
+  // block time on the next recalculation pass.
+  if (
+    !overrides.picTime &&
+    !overrides.sicTime &&
+    !overrides.picusTime &&
+    !overrides.dualTime &&
+    !overrides.instructorTime
+  ) {
     const shouldAutoFillRoles =
       autoFill?.pic !== false ||
       autoFill?.sic !== false ||

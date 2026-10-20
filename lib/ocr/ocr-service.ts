@@ -46,8 +46,24 @@ async function initializeBrowserOCR(): Promise<OcrInstance> {
     browserOcrInstance = instance
     return instance
   })()
+  // A failed load (the chunk or a model missing offline) must not be the
+  // answer for the rest of the session: the next attempt tries again.
+  browserInitPromise.catch(() => {
+    browserInitPromise = null
+  })
 
   return browserInitPromise!
+}
+
+/**
+ * Fetch the offline OCR engine's CODE while the network is up, so the service
+ * worker has it cached. OCR goes to the server whenever the device is online,
+ * so the browser engine's chunk was only ever requested OFFLINE — the one
+ * moment it could not be fetched — and offline OCR failed on first use.
+ */
+export function warmBrowserOCR(): void {
+  if (typeof window === "undefined" || !isOnline()) return
+  void import("@gutenye/ocr-browser").catch(() => {})
 }
 
 /**

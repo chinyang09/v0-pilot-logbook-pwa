@@ -6,6 +6,7 @@ import useSWR from "swr"
 import { useFlights } from "./use-flights"
 import { useAircraft } from "./use-aircraft"
 import { useDBReady } from "./use-db"
+import { useDayKey } from "@/hooks/use-day-key"
 import { getAircraftTypeIndex } from "@/lib/db/stores/reference/aircraft.store"
 import {
   aggregateDashboard,
@@ -38,9 +39,13 @@ export function useDashboardAggregates({
     { revalidateOnFocus: false },
   )
 
+  // Recency is measured against TODAY, so the memo has to know when today
+  // changes — keyed on data alone it froze on the day it first ran.
+  const dayKey = useDayKey()
   const aggregates = useMemo(
     () => aggregateDashboard({ flights, aircraft, referenceTypes, fromIso, toIso }),
-    [flights, aircraft, referenceTypes, fromIso, toIso],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dayKey is the "now" input
+    [flights, aircraft, referenceTypes, fromIso, toIso, dayKey],
   )
 
   return {

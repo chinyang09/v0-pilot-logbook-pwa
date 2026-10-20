@@ -28,6 +28,37 @@ import { AppStatusOverlay } from "@/components/app-status-overlay"
  * body is covered too.
  */
 const AUTH_FETCH_TIMEOUT_MS = 15_000
+
+/**
+ * Every route the app can be COLD-started on offline. The service worker
+ * caches each one's HTML once signed in. It used to be the five list tabs, so
+ * Roster, Settings, Account, Currencies, Discrepancies, FDP and Recently
+ * Deleted were each cached only after a full page load of that URL online —
+ * client-side navigation never fetches their HTML — and offline the app fell
+ * back to the dashboard's HTML under the wrong URL.
+ */
+const OFFLINE_PAGES = [
+  "/", "/logbook", "/aircraft", "/airports", "/crew", "/roster", "/settings", "/account",
+  "/currencies", "/discrepancies", "/fdp", "/recently-deleted",
+]
+
+/**
+ * Ask the browser to keep this origin's storage. Without it IndexedDB is
+ * "best effort": Safari in a tab wipes it after 7 days without a visit and
+ * Chrome evicts under storage pressure — and the sync queue, i.e. every edit
+ * not yet pushed, lives there. Installed PWAs are usually granted it; asking
+ * is free and silent, and the answer is only logged.
+ */
+async function requestPersistentStorage(): Promise<void> {
+  try {
+    const storage = typeof navigator !== "undefined" ? navigator.storage : undefined
+    if (!storage?.persist || (await storage.persisted?.())) return
+    const granted = await storage.persist()
+    if (!granted) console.warn("[Auth] persistent storage not granted - data may be evicted under pressure")
+  } catch {
+    // Best effort.
+  }
+}
 async function authFetch<T>(input: string, init: RequestInit, read: (res: Response) => Promise<T>): Promise<T> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), AUTH_FETCH_TIMEOUT_MS)
@@ -193,12 +224,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSessionExpired(false)
 
     // After successful login, trigger proactive caching of app pages
+    if (savedSession) void requestPersistentStorage()
     if (savedSession && "serviceWorker" in navigator) {
       navigator.serviceWorker.ready.then((registration) => {
         if (registration.active) {
           registration.active.postMessage({
             type: "CACHE_PAGES",
-            pages: ["/", "/logbook", "/aircraft", "/airports", "/crew"],
+            pages: OFFLINE_PAGES,
           })
           console.log("[Auth] Triggered proactive page caching after login")
         }
@@ -573,13 +605,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(localSession)
           setIsLoading(false)
 
+          void requestPersistentStorage()
           // Proactively cache pages in background for offline access
           if ("serviceWorker" in navigator) {
             navigator.serviceWorker.ready.then((registration) => {
               if (registration.active) {
                 registration.active.postMessage({
                   type: "CACHE_PAGES",
-                  pages: ["/", "/logbook", "/aircraft", "/airports", "/crew"],
+                  pages: OFFLINE_PAGES,
                 })
               }
             })

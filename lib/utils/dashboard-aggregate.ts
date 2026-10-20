@@ -309,16 +309,26 @@ export function aggregateDashboard({
 
   // Recency is computed against the full flown history, independent of the
   // period filter — a 7-day period does not make a pilot un-current.
-  const ninetyDaysAgo = new Date(now)
-  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - RECENCY_DAYS)
-  const ninetyAgoIso = `${ninetyDaysAgo.getFullYear()}-${(ninetyDaysAgo.getMonth() + 1)
-    .toString()
-    .padStart(2, "0")}-${ninetyDaysAgo.getDate().toString().padStart(2, "0")}`
+  //
+  // In UTC, because `flight.date` is the UTC date of OUT and `legality.ts`
+  // reads the lapse against the UTC date too — a local "90 days ago" moved the
+  // window a day either side of the lapse it is compared with. And EXCLUSIVE of
+  // the day exactly 90 days back: `lapseIso` (below) is the first day the
+  // pilot is NOT current, D + 90, so on that day flight D must already be out
+  // of the window. Counting it as well made the window 91 days and left the
+  // pilot current on the very day the panel says they lapse.
+  const ninetyAgoIso = isoPlusDays(
+    `${now.getUTCFullYear()}-${(now.getUTCMonth() + 1).toString().padStart(2, "0")}-${now
+      .getUTCDate()
+      .toString()
+      .padStart(2, "0")}`,
+    -RECENCY_DAYS,
+  )
 
   // Newest first, so the walk below meets the third event in recency order.
   const recentEvents: Array<{ date: string; takeoffs: number; landings: number }> = []
   for (const flight of flights) {
-    if (!flight.date || flight.date < ninetyAgoIso) continue
+    if (!flight.date || flight.date <= ninetyAgoIso) continue
     if (!isFlownFlight(flight)) continue
     const to = (flight.dayTakeoffs || 0) + (flight.nightTakeoffs || 0)
     const ldg = (flight.dayLandings || 0) + (flight.nightLandings || 0)

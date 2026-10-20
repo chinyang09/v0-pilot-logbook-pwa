@@ -64,7 +64,14 @@ export default function RootLayout({
         {/* Inter is the single app typeface (sans + numbers). */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet" />
+        {/* crossOrigin: fetched in CORS mode the response is readable, so the
+            service worker can cache it (an opaque no-cors response is never
+            stored) and the app keeps Inter offline. */}
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap"
+          rel="stylesheet"
+          crossOrigin="anonymous"
+        />
       </head>
       <body className="bg-background font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>

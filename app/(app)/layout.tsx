@@ -11,6 +11,7 @@ import { AppShell } from "@/components/desktop-layout"
 import { KeepAlivePages } from "@/components/keep-alive-pages"
 import { FirstSyncSplash } from "@/components/first-sync-splash"
 import { UndoToastHost } from "@/components/undo-toast"
+import { StorageNotice } from "@/components/storage-notice"
 
 function AppLayoutContent({ children }: { children: React.ReactNode }) {
   return (
@@ -18,6 +19,7 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
       <KeepAlivePages>{children}</KeepAlivePages>
       <FirstSyncSplash />
       <UndoToastHost />
+      <StorageNotice />
     </AppShell>
   )
 }

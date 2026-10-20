@@ -38,15 +38,55 @@ export const CACHE_KEYS = {
 // only rebuilt on an actual transition.
 let dbInitialized = false
 let dbInitPromise: Promise<boolean> | null = null
-let dbSnapshot = { isReady: false, isLoading: true }
+interface DBSnapshot {
+  isReady: boolean
+  isLoading: boolean
+  /** The database could not be opened (yet) — NOT an empty logbook. */
+  failed?: boolean
+}
+let dbSnapshot: DBSnapshot = { isReady: false, isLoading: true }
 const dbListeners = new Set<() => void>()
 
-const SERVER_SNAPSHOT = { isReady: false, isLoading: true }
+const SERVER_SNAPSHOT: DBSnapshot = { isReady: false, isLoading: true }
 
-function setDBSnapshot(next: { isReady: boolean; isLoading: boolean }) {
-  if (next.isReady === dbSnapshot.isReady && next.isLoading === dbSnapshot.isLoading) return
+function setDBSnapshot(next: DBSnapshot) {
+  if (
+    next.isReady === dbSnapshot.isReady &&
+    next.isLoading === dbSnapshot.isLoading &&
+    !!next.failed === !!dbSnapshot.failed
+  ) {
+    return
+  }
   dbSnapshot = next
   dbListeners.forEach((l) => l())
+}
+
+/**
+ * A failed open is retried, not final. It was final: a database slow to open
+ * (a resumed iOS app, another tab mid-upgrade) missed the 10s deadline once
+ * and every page showed its EMPTY state for the rest of the session — the
+ * dashboard read "NO FLIGHTS YET" over a full logbook. `failed` lets the shell
+ * say what is actually wrong while the retries run.
+ */
+const DB_RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000]
+let dbRetryCount = 0
+
+function scheduleDBRetry() {
+  if (dbRetryCount >= DB_RETRY_DELAYS_MS.length) return
+  const delay = DB_RETRY_DELAYS_MS[dbRetryCount++]
+  setTimeout(() => {
+    dbInitPromise = null
+    void checkDBReady()
+  }, delay)
+}
+
+/** Try to open the database again now (the "Retry" in the storage notice). */
+export function retryDBOpen() {
+  if (dbInitialized) return
+  dbRetryCount = 0
+  dbInitPromise = null
+  setDBSnapshot({ isReady: false, isLoading: true })
+  void checkDBReady()
 }
 
 /**
@@ -55,6 +95,7 @@ function setDBSnapshot(next: { isReady: boolean; isLoading: boolean }) {
 export function resetDBState() {
   dbInitialized = false
   dbInitPromise = null
+  dbRetryCount = 0
   setDBSnapshot({ isReady: false, isLoading: true })
 }
 
@@ -71,15 +112,16 @@ export async function checkDBReady(): Promise<boolean> {
     dbInitPromise = initializeDB()
       .then((ready) => {
         dbInitialized = ready
-        setDBSnapshot({ isReady: ready, isLoading: false })
+        if (ready) dbRetryCount = 0
+        setDBSnapshot({ isReady: ready, isLoading: false, failed: !ready })
+        if (!ready) scheduleDBRetry()
         return ready
       })
       .catch((error) => {
-        // Stop reporting "loading" — a page that can never become ready should
-        // show its empty state, not a skeleton forever. Leaves `dbInitPromise`
-        // set so we don't hammer a database that is failing to open.
+        // Stop reporting "loading", report FAILED, and retry on a backoff.
         console.error("[UserDB] Initialization failed:", error)
-        setDBSnapshot({ isReady: false, isLoading: false })
+        setDBSnapshot({ isReady: false, isLoading: false, failed: true })
+        scheduleDBRetry()
         return false
       })
   }

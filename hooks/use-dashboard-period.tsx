@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useDayKey } from "@/hooks/use-day-key"
 
 export type DashboardPreset = "7d" | "28d" | "1y" | "all"
 
@@ -52,12 +53,20 @@ const PRESET_CONFIG: Record<DashboardPreset, { short: string; days: number | "al
  *  before real flight dates is fine. */
 const ALL_TIME_FROM_ISO = "1970-01-01"
 
+/**
+ * The end of a preset period: the LATER of today's local and UTC dates. A
+ * flight is keyed on the UTC date of its OUT, so west of UTC an evening
+ * departure is already "tomorrow" — ending the period on the local date left
+ * it out of every period until local midnight.
+ */
 function todayIso(): string {
   const now = new Date()
   const y = now.getFullYear()
   const m = (now.getMonth() + 1).toString().padStart(2, "0")
   const d = now.getDate().toString().padStart(2, "0")
-  return `${y}-${m}-${d}`
+  const local = `${y}-${m}-${d}`
+  const utc = now.toISOString().slice(0, 10)
+  return utc > local ? utc : local
 }
 
 function isoDaysAgo(days: number): string {
@@ -139,7 +148,11 @@ export function DashboardPeriodProvider({
     if (!open) setMonthYearView(false)
   }, [])
 
-  const resolved = React.useMemo(() => resolvePeriod(period), [period])
+  // A preset is relative to TODAY: re-resolve when the date turns, or the
+  // window stops rolling on a dashboard left open overnight.
+  const dayKey = useDayKey()
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- dayKey is the "now" input
+  const resolved = React.useMemo(() => resolvePeriod(period), [period, dayKey])
 
   const value = React.useMemo<DashboardPeriodContextValue>(
     () => ({

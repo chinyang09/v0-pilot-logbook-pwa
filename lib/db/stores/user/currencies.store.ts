@@ -28,7 +28,13 @@ export function getCurrencyStatus(currency: Currency): CurrencyWithStatus {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  const expiryDate = new Date(currency.expiryDate)
+  // From its parts, in LOCAL time. `new Date("YYYY-MM-DD")` is UTC midnight,
+  // which west of UTC is the PREVIOUS local day — so a document read as
+  // expired on its last valid day, and every count was a day short.
+  const [ey, em, ed] = String(currency.expiryDate).slice(0, 10).split("-").map(Number)
+  const expiryDate = [ey, em, ed].every(Number.isFinite)
+    ? new Date(ey, em - 1, ed)
+    : new Date(currency.expiryDate)
   expiryDate.setHours(0, 0, 0, 0)
 
   const diffTime = expiryDate.getTime() - today.getTime()

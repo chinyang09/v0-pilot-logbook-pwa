@@ -54,6 +54,7 @@ import {
   calculateTakeoffsLandings,
   calculateRoleTimes,
   getApproachCategory,
+  hasCoordinates,
 } from "@/lib/utils/flight-calculations";
 import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
@@ -653,14 +654,8 @@ export function FlightForm({
       const arrLon = arrAirport.longitude ?? (arrAirport as any).lon;
 
       if (
-        typeof depLat === "number" &&
-        !isNaN(depLat) &&
-        typeof depLon === "number" &&
-        !isNaN(depLon) &&
-        typeof arrLat === "number" &&
-        !isNaN(arrLat) &&
-        typeof arrLon === "number" &&
-        !isNaN(arrLon)
+        hasCoordinates({ latitude: depLat, longitude: depLon }) &&
+        hasCoordinates({ latitude: arrLat, longitude: arrLon })
       ) {
         // Pass the EFFECTIVE times to the calculator
         const nightResult = calculateNightTimeComplete(
@@ -686,8 +681,11 @@ export function FlightForm({
           result: nightResult,
         });
       } else {
-        // Airports are present but lack usable coordinates: still split day time
-        // from block − night instead of leaving dayTime at the "00:00" default.
+        // Airports are present but lack usable coordinates (a custom airport
+        // saved blank reads 0°N 0°E): there is no night time to compute, so
+        // keep the one the flight has rather than writing 00:00 over it, and
+        // split day time from block − that.
+        nightTime = formData.nightTime || "00:00";
         dayTime = calculateDayTime(blockTime, nightTime);
       }
     } else {
@@ -750,6 +748,7 @@ export function FlightForm({
     formData.pilotRole,
     formData.departureIcao,
     formData.arrivalIcao,
+    formData.nightTime,
     depAirport,
     arrAirport,
     preferences.autoFill,
@@ -768,6 +767,12 @@ export function FlightForm({
       if (!manualOverrides.nightTime) {
         if (prev.nightTime !== calculatedFields.nightTime) updates.nightTime = calculatedFields.nightTime;
         if (prev.dayTime !== calculatedFields.dayTime) updates.dayTime = calculatedFields.dayTime;
+      } else {
+        // A pinned night time still leaves DAY time derived: it is the rest of
+        // the block. Skipping it with the night meant an edited IN changed the
+        // block and left day + night no longer adding up to it.
+        const day = calculateDayTime(calculatedFields.blockTime, prev.nightTime || "00:00");
+        if (prev.dayTime !== day) updates.dayTime = day;
       }
 
       if (!manualOverrides.dayTakeoffs && !manualOverrides.nightTakeoffs) {

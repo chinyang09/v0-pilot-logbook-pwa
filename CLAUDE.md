@@ -3054,18 +3054,45 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
   IndexedDB; easy while one was stalled (see the airport seed). Fixing it means
   taking the baseline from the loaded flight AFTER the form's own calculations,
   without saving those calculations on open — deferred, it is delicate.
-- **Service worker** (`public/sw.js`) — two items needing offline testing
-  before any change (a bad SW is hard to roll back): (1) `install` calls
-  `self.skipWaiting()` unconditionally while the registration
-  (`hooks/use-service-worker.ts`) is built around an update-*prompt* flow, so
-  the prompt is effectively dead and a background update can auto-reload the page
-  mid-edit (auto-save mitigates data loss); (2) the Strategy-6 catch-all caches
-  any cross-origin `ok` GET (no same-origin guard). Both are latent/hardening,
-  not active data bugs. (`DYNAMIC_CACHE` is now FIFO-capped at 150 entries via
-  `trimDynamicCache()` after each put — everything in it is re-fetchable, so an
-  eviction just falls through to network/shell fallbacks.)
+- **Service worker — still to verify on a real device, offline.** The Oct 2026
+  pass changed it (below); a bad SW is hard to roll back, so confirm a cold
+  offline start of every route and one update cycle on an installed iPhone
+  before trusting it. Still open: app deploys that do not change `sw.js`
+  install no new worker, and navigations are served cache-first, so the first
+  launch after a deploy runs the PREVIOUS build's HTML — a chunk of that build
+  not yet cached 404s on Vercel unless Skew Protection is on (a project
+  setting, not code). `STATIC_CACHE` is unbounded (one entry per full-URL
+  navigation).
 
 ## PWA Details
+
+**Offline and update rules (Oct 2026 audit):**
+
+- **A new service worker WAITS.** `install` no longer calls `skipWaiting()`:
+  it activated under every open tab and the page reloads on
+  `controllerchange`, so a deploy reloaded the app mid-edit. The page reloads
+  only for an update the user asked for (`applyServiceWorkerUpdate` sets
+  `reloadOnTakeover`), never on the FIRST install's `clients.claim` — that
+  restarted a new user's registration or passkey ceremony once the OCR models
+  had downloaded. A worker already waiting at load shows the update banner.
+- **`/_next/static` chunks live in `ASSET_CACHE`, apart from the 150-entry
+  dynamic FIFO.** A hit never re-puts, so the oldest entries were the
+  framework and main-app chunks, and a month of per-flight pages evicted them:
+  an offline cold start then got cached HTML and a 503 for main-app.js.
+- **The catch-all caches SAME-ORIGIN only.**
+- **The Inter stylesheet is fetched `crossOrigin="anonymous"`** — CORS mode, so
+  the SW can cache it; a no-cors response is opaque and was never stored.
+- **Every route is cached for an offline cold start** (`OFFLINE_PAGES` in
+  `auth-provider.tsx`), not just the five list tabs.
+- **`navigator.storage.persist()` is requested** at sign-in and boot. Without
+  it IndexedDB — and the sync queue in it — is best-effort and evictable.
+- **The offline OCR engine's code is fetched while online** (`warmBrowserOCR`,
+  at idle, after a 3s floor), and a failed load is retried rather than cached
+  as the answer. OCR goes to the server whenever online, so the browser
+  engine's chunk was only ever requested offline — when it could not load.
+- **A database that fails to open is retried and SAID** (`retryDBOpen`,
+  `StorageNotice`). It used to be final, and every page showed its EMPTY state
+  — "NO FLIGHTS YET" over a full logbook.
 
 - **Service worker** (`public/sw.js`): precaches static assets, login page, and OCR models; runtime caches app routes and CDN resources; versioned caches (v4)
 - **Manifest** (`public/manifest.json`): standalone display mode, window controls overlay for desktop
@@ -4005,6 +4032,12 @@ When making changes, be aware of these high-impact files:
 - Do not save an edit form's whole copy of a record — diff it against the form's BASELINE (`formPatch`) and follow the live row with `rebaseForm`. A form open across a pull otherwise sends the stale copy back as an edit and reverts the other device's work with nobody touching the form
 - Do not clear a fetch timeout before the body is read — a stalled body wedged the sync lock forever. Read inside the timeout (`fetchWithTimeout(input, init, read)`, `authFetch`)
 - Do not dead-letter a batch for a request-level 4xx, and do not wipe unsynced rows in a full resync
+- Do not call `skipWaiting()` on install or reload on every `controllerchange` — a new worker waits for the user's "Update"; and do not put `/_next/static` back in the trimmed dynamic cache
+- Do not read "today" in a memo keyed only on data — a dashboard left open overnight froze its recency and its period. Depend on `useDayKey()`
+- Do not let recency read as met on or after its lapse date, whatever the counts say, and do not count a flight exactly 90 days back — `lapseIso` is the first day NOT current
+- Do not parse a date-only string with `new Date("YYYY-MM-DD")` for a LOCAL comparison — it is UTC midnight, the previous day west of UTC. Build it from its parts
+- Do not compute night time against an airport without `hasCoordinates` — a blank custom airport is 0°N 0°E — and do not write 00:00 over a stored night when the position is missing
+- Do not recompute any role time once one of the five (PIC, SIC, PICUS, Dual, Instructor) is pinned
 - Do not mark a session expired on a 401 alone, and do not start a passkey ceremony from a background trigger — probe first, and require user activation
 - Do not let a sign-in as a different account inherit this device's data — `dataOwner` decides, and the switch clears it
 - Do not compare a pulled record against the local one by clock — rebase it (`planLocalApply`): the server's copy plus whatever this device has pending. Only a pending create or a dead-lettered row falls back to last-write-wins

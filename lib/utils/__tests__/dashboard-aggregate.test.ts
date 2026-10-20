@@ -280,6 +280,20 @@ describe("aggregateDashboard — 90-day recency", () => {
     expect(result.ninetyDayCurrency.current).toBe(false)
   })
 
+  it("drops a flight on the day its lapse falls — the window is 90 days, not 91", () => {
+    // NOW is 2026-08-13; 2026-05-15 + 90 = 2026-08-13, the first day it no
+    // longer counts.
+    const result = aggregateDashboard({
+      flights: [landing("2026-05-15", 3), landing("2026-05-16", 0)],
+      aircraft: [],
+      fromIso: "2026-08-01",
+      toIso: "2026-08-31",
+      now: NOW,
+    })
+    expect(result.ninetyDayCurrency.landings).toBe(0)
+    expect(result.ninetyDayCurrency.current).toBe(false)
+  })
+
   it("takes the EARLIER of the takeoff and landing lapses", () => {
     // A pilot can be current on landings longer than takeoffs (a sector flown
     // as PM lands but does not take off). Recency ends with whichever runs out

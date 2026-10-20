@@ -2,6 +2,7 @@
 
 import { useEffect } from "react"
 import { checkOCRModelsCached, ensureOCRModelsCached } from "@/lib/ocr"
+import { warmBrowserOCR } from "@/lib/ocr/ocr-service"
 
 export function OCRModelsPreloader() {
   useEffect(() => {
@@ -12,6 +13,9 @@ export function OCRModelsPreloader() {
     }
 
     const preloadModels = async () => {
+      // The engine's code as well as its models: neither is any use offline
+      // unless it was fetched while online.
+      warmBrowserOCR()
       try {
         // Check if already cached
         const { allCached } = await checkOCRModelsCached()
@@ -33,9 +37,21 @@ export function OCRModelsPreloader() {
       }
     }
 
-    // Delay to not block initial render and allow service worker to register
-    const timer = setTimeout(preloadModels, 3000)
-    return () => clearTimeout(timer)
+    // Not before 3s (let the first render and the SW registration go first),
+    // and then only when the main thread is idle — a fixed timer landed on
+    // the user's first interactions. The idle deadline guarantees it runs.
+    let idle: number | undefined
+    const timer = setTimeout(() => {
+      if (typeof window.requestIdleCallback === "function") {
+        idle = window.requestIdleCallback(() => void preloadModels(), { timeout: 5000 })
+      } else {
+        void preloadModels()
+      }
+    }, 3000)
+    return () => {
+      clearTimeout(timer)
+      if (idle !== undefined) window.cancelIdleCallback?.(idle)
+    }
   }, [])
 
   return null

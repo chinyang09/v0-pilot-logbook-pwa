@@ -190,8 +190,13 @@ export function buildLegalityModel({
   // question. The cell answers it with the binding half; expanding shows both.
   const toShort = Math.max(0, RECENCY_REQUIRED - recency.takeoffs)
   const ldgShort = Math.max(0, RECENCY_REQUIRED - recency.landings)
-  const recencyMet = toShort === 0 && ldgShort === 0
   const daysToLapse = recency.lapseIso ? daysBetween(todayIso, recency.lapseIso) : undefined
+  // The lapse DATE outranks the counts. The counts are taken when the
+  // aggregate runs; on a dashboard left open past the lapse they still read
+  // 3 / 3, and this showed a lapsed pilot CAUTION "T/O + landing in -2d".
+  // `lapseIso` is the first day NOT current, so 0 days to it is lapsed.
+  const lapsedByDate = daysToLapse !== undefined && daysToLapse <= 0
+  const recencyMet = toShort === 0 && ldgShort === 0 && !lapsedByDate
   const lapsingSoon =
     recencyMet && daysToLapse !== undefined && daysToLapse <= RECENCY_CAUTION_DAYS
 
@@ -200,7 +205,9 @@ export function buildLegalityModel({
     group: "currency",
     label: "90-day recency",
     state: !recencyMet ? "fail" : lapsingSoon ? "caution" : "ok",
-    value: !recencyMet
+    value: lapsedByDate
+      ? "Lapsed"
+      : !recencyMet
       ? `${Math.min(recency.takeoffs, recency.landings)} / 3`
       : daysToLapse !== undefined
         ? `${daysToLapse}d`
@@ -216,7 +223,9 @@ export function buildLegalityModel({
     ],
     href: "/logbook",
     urgency: !recencyMet ? 900 : lapsingSoon ? 400 - Math.min(399, daysToLapse ?? 0) : undefined,
-    action: !recencyMet
+    action: lapsedByDate
+      ? "Recency lapsed: 3 takeoffs and landings required"
+      : !recencyMet
       ? shortfallAction(toShort, ldgShort)
       : lapsingSoon
         ? `T/O + landing in ${daysToLapse}d`
@@ -241,13 +250,16 @@ export function buildLegalityModel({
       group: "currency",
       label: doc.code,
       state,
-      value: doc.daysRemaining <= 0 ? "Expired" : `${doc.daysRemaining}d`,
+      // An expiry date is a VALID day — it lapses tomorrow. `daysRemaining 0`
+      // is "expires today" (status critical, a caution), and printing
+      // "Expired" beside "expires in 0d" contradicted itself.
+      value: doc.daysRemaining < 0 ? "Expired" : doc.daysRemaining === 0 ? "Today" : `${doc.daysRemaining}d`,
       // Metered against its own warning window: a document is "filling up" only
       // once it enters the window its owner chose to be warned at. Against the
       // whole validity period every document sits near full for a year and the
       // meter says nothing.
       progress:
-        doc.daysRemaining <= 0
+        doc.daysRemaining < 0
           ? 1
           : doc.warningDays > 0
             ? Math.max(0, 1 - doc.daysRemaining / doc.warningDays)

@@ -170,7 +170,7 @@ export function PWAInstallPrompt() {
             <Button
               size="sm"
               variant="default"
-              className="h-7 px-3 text-xs font-semibold rounded-full"
+              className="h-9 px-4 text-xs font-semibold rounded-full"
               onClick={applyUpdate}
             >
               Update

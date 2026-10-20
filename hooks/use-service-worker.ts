@@ -7,6 +7,8 @@ let updateAvailable = false
 let registration: ServiceWorkerRegistration | null = null
 let listeners = new Set<() => void>()
 let initialized = false
+// Set only by `applyServiceWorkerUpdate` — the one takeover worth a reload.
+let reloadOnTakeover = false
 
 function notify() {
   listeners.forEach((l) => l())
@@ -32,11 +34,23 @@ export function initServiceWorker() {
   if (initialized || typeof window === "undefined" || !("serviceWorker" in navigator)) return
   initialized = true
 
+  // Whether a worker controlled this page when it loaded. The FIRST install
+  // takes control mid-visit (`clients.claim`), which fires `controllerchange`
+  // too — reloading on that restarted a brand-new user's registration or
+  // passkey ceremony 10–60s in, once the OCR models had downloaded.
+  const hadController = !!navigator.serviceWorker.controller
+
   navigator.serviceWorker
     .register("/sw.js")
     .then((reg) => {
       console.log("[SW] Registered:", reg.scope)
       registration = reg
+      // A worker that finished installing in an EARLIER visit is already
+      // waiting; `updatefound` will not fire for it again.
+      if (reg.waiting && navigator.serviceWorker.controller) {
+        updateAvailable = true
+        notify()
+      }
 
       reg.addEventListener("updatefound", () => {
         const newWorker = reg.installing
@@ -69,8 +83,12 @@ export function initServiceWorker() {
     }
   })
 
-  // Handle controller change (new SW activated)
+  // Reload only for an update the user ASKED for. Any other takeover — the
+  // first install, or a worker activated by another tab — keeps this page as
+  // it is: a reload here lands mid-edit with no warning.
   navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || !reloadOnTakeover) return
+    reloadOnTakeover = false
     window.location.reload()
   })
 
@@ -93,6 +111,7 @@ export function initServiceWorker() {
 
 export function applyServiceWorkerUpdate() {
   if (registration?.waiting) {
+    reloadOnTakeover = true
     registration.waiting.postMessage({ type: "SKIP_WAITING" })
   }
 }
