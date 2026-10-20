@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { Camera, Loader2, ImageIcon } from "lucide-react"
+import { Camera, ImageIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   extractTextFromImage,
@@ -131,7 +131,10 @@ export function ImageImportButton({
             disabled={loading}
             aria-label="Read times from a photo"
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+            {/* No spinner: the processing dialog covers this button and says
+                what is happening, and a spinning icon behind it is a repaint
+                every frame while the photo is being read. */}
+            <Camera className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">

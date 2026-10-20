@@ -657,6 +657,30 @@ function extractFromTimeSummary(results: OcrResult[]): ExtractedFlightData {
  *
  * Uses layout-aware extraction with string fallback
  */
+/**
+ * A blank slot on the MCDU is a row of dashes (`----`), and the recogniser
+ * can read one as digits: on a real photo the empty IN slot came back as
+ * "1000". Two things give it away, and real values show neither — measured
+ * across all seven photos and every engine, a real time reads at 0.88+
+ * confidence and its box is at least ~0.6 of the median line height, while
+ * the dashes read at 0.64 in a box under half of it (a dash is a thin
+ * stroke, so the detector draws a flat box around it).
+ */
+const MIN_DIGIT_CONFIDENCE = 0.75
+const MIN_DIGIT_HEIGHT = 0.55
+
+function dropDashReads(input: OcrResult[]): OcrResult[] {
+  const heights = input.map((r) => r.box[2][1] - r.box[0][1]).filter((h) => h > 0).sort((a, b) => a - b)
+  const median = heights.length ? heights[heights.length >> 1] : 0
+  return input.filter((r) => {
+    if (!/\d/.test(r.text)) return true
+    // 0 means "not reported" (a hand-built result), not "certainly wrong".
+    if (r.confidence > 0 && r.confidence < MIN_DIGIT_CONFIDENCE) return false
+    const h = r.box[2][1] - r.box[0][1]
+    return !(median > 0 && h > 0 && h < median * MIN_DIGIT_HEIGHT)
+  })
+}
+
 export function extractFlightData(input: OcrResult[] | string): ExtractedFlightData {
   // String input → use text extraction
   if (typeof input === "string") {
@@ -664,6 +688,11 @@ export function extractFlightData(input: OcrResult[] | string): ExtractedFlightD
   }
 
   // Empty input
+  if (input.length === 0) {
+    return { confidence: 0 }
+  }
+
+  input = dropDashReads(input)
   if (input.length === 0) {
     return { confidence: 0 }
   }

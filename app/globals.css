@@ -871,6 +871,17 @@ textarea:focus-within {
   --on-glass-active: color-mix(in oklab, var(--primary) 32%, var(--on-glass));
 }
 
+/* Held still while the device reads a photo (`data-busy` on <html>, set by
+   lib/ocr/ocr-service.ts). The drift repaints every glass surface every frame,
+   and each repaint re-runs the backdrop-filters around it — on a phone that
+   is the same cores the OCR engine is computing on. Measured: a read took
+   ~2.6s with it running and ~1.5s with it held. Paused, not removed, so it
+   resumes from the same angle: over two seconds of a 60-second drift there is
+   nothing to see, and the material is unchanged. */
+html[data-busy] .GlassContainer {
+  animation-play-state: paused;
+}
+
 .GlassContainer {
   /* Ambient specular drift — see @property above. Long period, alternate. */
   animation: glass-specular-drift 60s ease-in-out infinite alternate;

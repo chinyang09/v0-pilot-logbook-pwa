@@ -25,7 +25,7 @@ export const BROWSER_MODEL_URLS = {
 export function ocrThreadCount(): number {
   if (typeof self === "undefined" || !self.crossOriginIsolated) return 1
   const cores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 2 : 2
-  return Math.max(1, Math.min(4, cores))
+  return Math.max(1, Math.min(4, cores - 1))
 }
 
 let modelsPromise: Promise<OcrModels> | null = null
