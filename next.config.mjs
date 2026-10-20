@@ -1,3 +1,25 @@
+import { createRequire } from "node:module";
+import path from "node:path";
+
+/**
+ * The in-browser OCR engine imports bare `onnxruntime-web`, whose default
+ * entry is the JSEP build: WebGPU + WebNN on top of WebAssembly, with a 24MB
+ * binary. The engine only ever creates plain WASM sessions, so the extra 12MB
+ * was downloaded and compiled for nothing. `./wasm` is the same runtime
+ * without them (11.9MB). Resolved from ocr-browser, whose dependency it is;
+ * if the layout ever changes the build simply keeps the default entry.
+ */
+function ortWasmOnlyEntry() {
+  try {
+    const fromApp = createRequire(import.meta.url);
+    const fromOcr = createRequire(fromApp.resolve("@gutenye/ocr-browser"));
+    return path.join(path.dirname(fromOcr.resolve("onnxruntime-web/wasm")), "ort.wasm.bundle.min.mjs");
+  } catch {
+    return null;
+  }
+}
+const ORT_WASM_ONLY = ortWasmOnlyEntry();
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {
@@ -42,6 +64,9 @@ const nextConfig = {
         path: false,
         crypto: false,
       };
+      if (ORT_WASM_ONLY) {
+        config.resolve.alias = { ...config.resolve.alias, "onnxruntime-web$": ORT_WASM_ONLY };
+      }
     }
 
     // Ignore ONNX and large binary files from webpack processing
@@ -55,18 +80,40 @@ const nextConfig = {
 
     return config;
   },
-  // Exclude certain files from file tracing
-  // Note: We keep ocr-node models included for server-side OCR
+  // File tracing decides what ships inside each serverless function.
+  //
+  // Server OCR (`/api/ocr`) needs @gutenye/ocr-node, ocr-common, ocr-models,
+  // onnxruntime-node, sharp and @techstark/opencv-js (ocr-common's line
+  // splitter). These used to be excluded wholesale — `.pnpm/**/*@gutenye*`
+  // matches every gutenye package in pnpm's store, ocr-node included — so the
+  // deployed route failed with "Cannot find package '@gutenye/ocr-node'" and
+  // EVERY photo was uploaded, refused, and then read by the slow in-browser
+  // engine from cold. The weight that exclusion was avoiding is
+  // onnxruntime-node's binaries for six platforms (~247MB); a function only
+  // ever runs linux-x64 (32MB), so only the other five are dropped.
   outputFileTracingExcludes: {
     "*": [
-      // Browser OCR (client handles this via service worker)
+      // Browser OCR (the client loads it; the service worker caches it)
       "node_modules/@gutenye/ocr-browser/**/*",
-      "node_modules/@techstark/opencv-js/**/*",
-      // Other exclusions
+      "node_modules/.pnpm/@gutenye+ocr-browser@*/**/*",
       "node_modules/kerberos/**/*",
-      "node_modules/.pnpm/**/*@gutenye*/**/*",
       // Browser model files (served via public/)
       "public/models/**/*",
+      // onnxruntime-node ships every platform's binary; Vercel runs linux-x64.
+      "node_modules/.pnpm/onnxruntime-node@*/node_modules/onnxruntime-node/bin/napi-v*/darwin/**/*",
+      "node_modules/.pnpm/onnxruntime-node@*/node_modules/onnxruntime-node/bin/napi-v*/win32/**/*",
+      "node_modules/.pnpm/onnxruntime-node@*/node_modules/onnxruntime-node/bin/napi-v*/linux/arm64/**/*",
+    ],
+  },
+  // What the tracer cannot see: the models are opened by a path computed at
+  // runtime (`@gutenye/ocr-models/node`), and the native library is loaded by
+  // the binding rather than imported.
+  outputFileTracingIncludes: {
+    "/api/ocr": [
+      "node_modules/.pnpm/@gutenye+ocr-models@*/node_modules/@gutenye/ocr-models/assets/ch_PP-OCRv4_det_infer.onnx",
+      "node_modules/.pnpm/@gutenye+ocr-models@*/node_modules/@gutenye/ocr-models/assets/ch_PP-OCRv4_rec_infer.onnx",
+      "node_modules/.pnpm/@gutenye+ocr-models@*/node_modules/@gutenye/ocr-models/assets/ppocr_keys_v1.txt",
+      "node_modules/.pnpm/onnxruntime-node@*/node_modules/onnxruntime-node/bin/napi-v*/linux/x64/**/*",
     ],
   },
   // Enable server external packages for ocr-node dependencies.

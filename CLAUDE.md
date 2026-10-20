@@ -53,7 +53,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
-| `lib/ocr/__tests__/` | both OCR screenshot layouts, from synthetic bounding boxes |
+| `lib/ocr/__tests__/` | both OCR screenshot layouts from synthetic boxes, and SEVEN REAL MCDU PHOTOS (`fixtures/mcdu/`) — what both engines actually read from each, every slot checked; `OCR_ENGINE=1 pnpm test` runs the photos through the real server engine |
 | `lib/theme/__tests__/` | the palette generator — contrast and gamut for every preset in both modes and a sweep of custom seeds, and that globals.css carries the default palette exactly |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution, the canonical document shape + write modes, push batching, the sync triggers |
 | `lib/sync/server/__tests__/` | the server engine end to end — two devices pushing and pulling, deletions, stale pushes, paging, the migration — against an in-memory Mongo stand-in (`fake-mongo.ts`; it implements only the operators the engine sends) |
@@ -62,9 +62,11 @@ Tests that touch a parser must mock `@/lib/db` and
 `lib/utils/parsers/shared/airport-enricher` — both reach for IndexedDB at
 module scope. See `pdf-schedule-merge.test.ts` for the established stub set.
 
-Note the OCR tests build synthetic OCR boxes, so they catch a **geometry** or
-mapping regression but NOT a recognition regression. Changing OCR engine needs
-real screenshots as fixtures first.
+The synthetic-box OCR tests catch a **geometry** or mapping regression only.
+The real-photo fixtures pin what the engines READ, and the photos are
+committed at `OCR_MAX_SIDE` — run `OCR_ENGINE=1 pnpm test` before changing the
+engine, a model or the image size. (The Time Summary layout still has only a
+synthetic fixture.)
 
 ## Project Structure
 
@@ -1735,7 +1737,7 @@ vs reported block) scores a nonsense parse near zero.
 
 | Source | Shape | Extractor |
 |---|---|---|
-| Airbus MCDU AOC VOYAGE RPT | label row above value row, two columns | `extractFromLayout` |
+| Airbus MCDU AOC VOYAGE RPT | two columns, each alternating label / value | `extractFromColumns`, `extractFromLayout` |
 | EFB flight-record **Time Summary** | one labelled row per event, PLANNED and ACTUAL columns | `extractFromTimeSummary` |
 
 Time Summary maps Off Block / Takeoff / Landing / On Block → OUT / OFF / ON /
@@ -1747,6 +1749,56 @@ arrive as one OCR box or three.
 
 The flight number is deliberately NOT read from the Time Summary header — it is
 the ICAO callsign (`TGW216`) where the logbook uses IATA (`TR216`).
+
+**The MCDU report is read PER COLUMN** (`extractFromColumns`). Each label finds
+its value on its OWN side of the screen, below it and above that side's next
+label. Reading it as rows — a label row, then the row under it — only works
+while every slot is filled, and a blank (`----`) is not read at all, so the two
+columns drift out of step: on a real photo the left door time and the right
+TAXI label came back as one line and IN was lost; with OUT and IN blank, a lone
+FLIGHT value had no row partner. The engine also JOINS boxes on one line
+(`1232 0942`), so a token's x is estimated from its character position within
+the line's box. The row reader stays as a candidate; the best score still wins.
+
+#### Speed — where the time went, and the rules that keep it fast
+
+Measured on the seven real photos (`lib/ocr/__tests__/fixtures/mcdu/`):
+
+| | Was | Is |
+|---|---|---|
+| Server OCR in production | **never ran**: file tracing dropped `@gutenye/ocr-node`, so every photo was uploaded, refused, then read in the browser from cold | runs (function ~82MB) |
+| Server, 12MP photo | 19.4s (detection at 3072×4080) | ~1s at 1024 |
+| Upload | the photo at 2048px, 0.5–2MB | 150–220KB |
+| Browser engine runtime | 24MB JSEP build (WebGPU + WebNN, never used) | 11.9MB WASM-only |
+| Browser, cold / engine loaded (4-core desktop Chromium) | 11.1s / 6.6s | 5.9s / 3.5s (4.3s when the menu warmed it) |
+| After the read | a fixed 600ms pause | straight into the form |
+
+- **Detection runs at whatever resolution it is handed** — the library has no
+  ceiling, and a phone photo is 12MP. `OCR_MAX_SIDE` (1024) caps it on the
+  client AND again in the route (an old client still sends 2048). Every slot of
+  every photo reads identically at 800, 1024, 1280 and full size. Recognition
+  cost does not depend on image size (each line is resized to 48px high); it
+  scales with the number of boxes, and on an MCDU photo about half of those are
+  KEYPAD keys. Skipping them needs the library's Detection/Recognition split,
+  which it does not export — that is the next win, and it needs a patch.
+- **Resize on PIXELS, not bytes.** `compressImage` skipped anything under 1MB,
+  and a 12MP JPEG can be.
+- **The server is woken when the camera menu OPENS** (`warmOCR`): the health
+  check boots the function and loads its models while the pilot is still taking
+  the photo. If it reports no engine, the browser engine starts loading
+  instead; offline, it starts at once.
+- **A failed server is skipped for five minutes** — each attempt costs an upload
+  and a round trip before the fallback even starts. A 401 does not count. The
+  server request carries a 20s timeout over the BODY as well.
+- **The browser runtime is at a STABLE URL**, `/models/ort-wasm-simd-threaded.wasm`,
+  copied from the installed `onnxruntime-web` by `scripts/copy-ort-wasm.mjs` on
+  every `pnpm dev`/`pnpm build` (not committed — it must match the JS loading
+  it) and precached by the service worker beside the models. Webpack's hashed
+  copy could not be fetched ahead of time, so the first OCR made offline failed.
+- **Still single-threaded in the browser.** Multi-threaded WASM needs
+  `crossOriginIsolated` (COOP/COEP headers), which is an app-wide change to how
+  every cross-origin resource loads. Not done; it is the browser path's biggest
+  remaining lever.
 
 ### Component Architecture
 
@@ -2969,14 +3021,13 @@ Assessment on record:
 - The speed gap in the PaddleOCR web demo is mostly **server hardware**, not the
   engine. Locally the cost is dominated by **model load**, and Paddle's JS
   models are comparable in size — swapping engines does not fix that by itself.
-- Highest-value first step is **server-first routing**, which is largely already
-  built: `/api/ocr` exists and `checkServerOCRAvailability()` is wired. Route
-  online requests there, keep the local model as the offline fallback.
+- **Server-first routing was always the design and never worked in
+  production** until Oct 2026 (see Camera OCR › Speed): the deployed route
+  could not load its engine. Fix that before judging any engine.
 - The extractors take `{text, box, confidence}` so they are engine-shaped, but
   the digit repair (`O`→`0`, `I`→`1`) and row-grouping tolerances are tuned to
-  gutenye's output. An engine swap needs **real screenshots as fixtures** first
-  — the current OCR tests use synthetic boxes and would not catch a recognition
-  regression.
+  gutenye's output. Real photos are now fixtures (`OCR_ENGINE=1 pnpm test`) —
+  a candidate engine has to read all seven.
 
 ### Deferred design work (owner-approved to-do)
 
@@ -4078,6 +4129,9 @@ When making changes, be aware of these high-impact files:
 - Do not save an edit form's whole copy of a record — diff it against the form's BASELINE (`formPatch`) and follow the live row with `rebaseForm`. A form open across a pull otherwise sends the stale copy back as an edit and reverts the other device's work with nobody touching the form
 - Do not clear a fetch timeout before the body is read — a stalled body wedged the sync lock forever. Read inside the timeout (`fetchWithTimeout(input, init, read)`, `authFetch`)
 - Do not dead-letter a batch for a request-level 4xx, and do not wipe unsynced rows in a full resync
+- Do not exclude `.pnpm/**/*@gutenye*` (or any pattern that catches `@gutenye/ocr-node`, `ocr-common`, `ocr-models`, `onnxruntime-node`, `sharp` or `@techstark/opencv-js`) from file tracing — that is what made the deployed `/api/ocr` fail with "Cannot find package '@gutenye/ocr-node'" for months, so every photo paid an upload and a refusal before being read slowly in the browser. Trim onnxruntime-node's OTHER platforms' binaries instead (`next.config.mjs`), and check `GET /api/ocr` reports `available: true` after a deploy
+- Do not hand the OCR engine an image larger than `OCR_MAX_SIDE` — detection runs at whatever size it gets, and a 12MP photo took 19s where 1024px took 1s with identical results. Cap it on the client AND in the route, and decide on pixels, never file size
+- Do not let the browser OCR engine load its runtime from webpack's hashed URL, or import bare `onnxruntime-web` without the WASM-only alias — the hashed copy cannot be precached (the first offline OCR failed) and the default entry is 24MB of WebGPU build the engine never uses
 - Do not call `skipWaiting()` on install or reload on every `controllerchange` — a new worker waits for the user's "Update"; and do not put `/_next/static` back in the trimmed dynamic cache
 - Do not read "today" in a memo keyed only on data — a dashboard left open overnight froze its recency and its period. Depend on `useDayKey()`
 - Do not let recency read as met on or after its lapse date, whatever the counts say, and do not count a flight exactly 90 days back — `lapseIso` is the first day NOT current

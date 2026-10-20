@@ -11,6 +11,7 @@ export {
   resetOCR,
   checkOCRModelsCached,
   ensureOCRModelsCached,
+  warmOCR,
 } from "./ocr-service"
 
 export {

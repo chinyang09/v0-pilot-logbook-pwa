@@ -6,11 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server"
-import { writeFile, unlink, mkdir } from "fs/promises"
-import { join } from "path"
-import { randomUUID } from "crypto"
-import { tmpdir } from "os"
 import { validateSession } from "@/lib/auth/server/session"
+import { OCR_MAX_SIDE } from "@/lib/ocr/limits"
 
 // Bound execution (also gives the cold ONNX model load enough headroom vs the
 // short serverless default).
@@ -25,7 +22,9 @@ interface OcrLine {
 }
 
 // Lazy-loaded OCR instance (singleton)
-type OcrInstance = { detect: (image: string) => Promise<OcrLine[]> }
+// ocr-node hands its input straight to `sharp()`, which takes a Buffer as
+// readily as a path — so the image never touches the disk.
+type OcrInstance = { detect: (image: string | Buffer) => Promise<OcrLine[]> }
 let ocrInstance: OcrInstance | null = null
 let ocrInitPromise: Promise<OcrInstance | null> | null = null
 
@@ -67,8 +66,6 @@ export async function POST(request: NextRequest) {
       { status: 413 }
     )
   }
-
-  let tempFilePath: string | null = null
 
   try {
     const contentType = request.headers.get("content-type") || ""
@@ -118,11 +115,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Write image to temp file (ocr-node requires file path)
-    const tempDir = join(tmpdir(), "ocr-uploads")
-    await mkdir(tempDir, { recursive: true })
-    tempFilePath = join(tempDir, `${randomUUID()}.jpg`)
-    await writeFile(tempFilePath, imageBuffer)
+    // Cap the size HERE as well as on the client: detection runs at whatever
+    // resolution it is handed (the library has no ceiling), and a phone photo
+    // is 12MP. Measured on real MCDU photos: 19.4s at 3072x4080, ~1s at 1024,
+    // with identical times extracted. An older client build still uploads at
+    // 2048, so the server cannot rely on the client having done it. `rotate()`
+    // applies the EXIF orientation, which the raw pixels do not carry.
+    const { default: sharp } = await import("sharp")
+    const prepared = await sharp(imageBuffer)
+      .rotate()
+      .resize({ width: OCR_MAX_SIDE, height: OCR_MAX_SIDE, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 90 })
+      .toBuffer()
 
     // Get OCR instance and process image
     const ocr = await getOcrInstance()
@@ -133,7 +137,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const results = await ocr.detect(tempFilePath)
+    const results = await ocr.detect(prepared)
 
     // Transform results to match expected format
     const transformedResults = results
@@ -165,15 +169,6 @@ export async function POST(request: NextRequest) {
       { error: `OCR processing failed: ${errorMessage}` },
       { status: 500 }
     )
-  } finally {
-    // Clean up temp file
-    if (tempFilePath) {
-      try {
-        await unlink(tempFilePath)
-      } catch {
-        // Ignore cleanup errors
-      }
-    }
   }
 }
 

@@ -7,6 +7,7 @@ import {
   extractTextFromImage,
   extractFlightData,
   validateExtractedData,
+  warmOCR,
   type ExtractedFlightData,
 } from "@/lib/ocr"
 import {
@@ -46,16 +47,17 @@ export function ImageImportButton({
   const processImage = async (file: File) => {
     setLoading(true)
     setShowDialog(true)
-    setProgress({ percent: 5, stage: "Compressing", detail: "Resizing image..." })
+    setProgress({ percent: 5, stage: "Preparing", detail: "Resizing image..." })
 
     try {
-      // Compress before OCR to prevent memory crashes on iPad/mobile
+      // Downscale before OCR (OCR_MAX_SIDE): detection runs at whatever
+      // resolution it is handed, and a phone photo is 12MP. It also keeps the
+      // upload to a few hundred KB.
       const { compressImage } = await import("@/lib/utils/image-compress")
-      const compressed = await compressImage(file, 2048, 0.8)
+      const compressed = await compressImage(file)
 
       // Extract with geometry
-      setProgress({ percent: 10, stage: "Initializing", detail: "Loading OCR..." })
-      setProgress({ percent: 40, stage: "Processing", detail: "Reading image..." })
+      setProgress({ percent: 30, stage: "Reading", detail: "Reading times..." })
       const ocrResults = await extractTextFromImage(compressed)
 
       // Parse layout
@@ -76,7 +78,8 @@ export function ImageImportButton({
         console.log("[OCR] Warnings:", validation.issues)
       }
 
-      await new Promise((r) => setTimeout(r, 600))
+      // Straight into the form — the filled rows ARE the confirmation. There
+      // used to be a 600ms pause here to show "Complete!".
       onDataExtracted(flightData)
     } catch (error) {
       console.error("OCR failed:", error)
@@ -122,7 +125,9 @@ export function ImageImportButton({
         onChange={handleFileChange}
       />
 
-      <DropdownMenu modal={false}>
+      {/* Opening the menu is the earliest sign a photo is coming: wake the
+          engine that will read it while the pilot is still taking it. */}
+      <DropdownMenu modal={false} onOpenChange={(open) => { if (open) warmOCR() }}>
         <DropdownMenuTrigger asChild>
           <Button
             variant={variant}

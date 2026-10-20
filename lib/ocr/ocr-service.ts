@@ -25,6 +25,34 @@ interface OcrInstance {
 let browserOcrInstance: OcrInstance | null = null
 let browserInitPromise: Promise<OcrInstance> | null = null
 
+/** The runtime binary, at the URL the service worker precaches. */
+const ORT_WASM_URL = "/models/ort-wasm-simd-threaded.wasm"
+
+/**
+ * How long the server may take before the browser engine is used instead.
+ * Covers a cold start (the function boots and loads two models, ~3-5s) with
+ * room to spare; past that the connection is the problem, and waiting longer
+ * only delays the fallback.
+ */
+const SERVER_TIMEOUT_MS = 20_000
+
+/**
+ * After the server fails, skip it for a while. Every attempt costs an upload
+ * and a round trip BEFORE the fallback starts, so retrying a server that just
+ * refused made every photo pay twice — which is what each one did while the
+ * deployed route could not load its engine.
+ */
+const SERVER_RETRY_AFTER_MS = 5 * 60_000
+let serverDownUntil = 0
+
+function serverUsable(): boolean {
+  return isOnline() && Date.now() >= serverDownUntil
+}
+
+function markServerDown(): void {
+  serverDownUntil = Date.now() + SERVER_RETRY_AFTER_MS
+}
+
 /**
  * Initialize browser-based OCR (fallback)
  */
@@ -33,6 +61,13 @@ async function initializeBrowserOCR(): Promise<OcrInstance> {
   if (browserInitPromise) return browserInitPromise
 
   browserInitPromise = (async () => {
+    // Load the runtime binary from the stable URL the service worker
+    // precaches beside the models (scripts/copy-ort-wasm.mjs), rather than
+    // the hashed copy webpack emits, which nothing can fetch ahead of time.
+    // `onnxruntime-web` is aliased to its WASM-only build (next.config.mjs),
+    // so this is the same module instance ocr-browser imports.
+    const ort = await import("onnxruntime-web")
+    ort.env.wasm.wasmPaths = { wasm: ORT_WASM_URL }
     const { default: Ocr } = await import("@gutenye/ocr-browser")
 
     const instance = (await Ocr.create({
@@ -64,6 +99,38 @@ async function initializeBrowserOCR(): Promise<OcrInstance> {
 export function warmBrowserOCR(): void {
   if (typeof window === "undefined" || !isOnline()) return
   void import("@gutenye/ocr-browser").catch(() => {})
+  void import("onnxruntime-web").catch(() => {})
+}
+
+let lastWarmAt = 0
+
+/**
+ * Get the engine that WILL read the photo ready while the pilot is still
+ * taking it — called when the camera menu opens, which is several seconds
+ * before a photo arrives.
+ *
+ * Online, that is the server: the health check boots the function and loads
+ * its models, so a cold start (~3-5s) is spent behind the camera instead of
+ * in front of a progress bar. If the server says it has no engine, it is
+ * marked down and the browser engine is started instead. Offline, the browser
+ * engine is created now rather than after the photo.
+ */
+export function warmOCR(): void {
+  if (typeof window === "undefined") return
+  if (!serverUsable()) {
+    void initializeBrowserOCR().catch(() => {})
+    return
+  }
+  if (Date.now() - lastWarmAt < 60_000) return
+  lastWarmAt = Date.now()
+  void fetch("/api/ocr", { method: "GET", cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d: { available?: boolean } | null) => {
+      if (d?.available) return
+      markServerDown()
+      void initializeBrowserOCR().catch(() => {})
+    })
+    .catch(() => {})
 }
 
 /**
@@ -95,17 +162,32 @@ async function processWithServerOCR(
   const formData = new FormData()
   formData.append("image", file)
 
-  const response = await fetch("/api/ocr", {
-    method: "POST",
-    body: formData,
-  })
+  // The timeout covers the BODY too: a connection dropping mid-response would
+  // otherwise leave `response.json()` pending and the fallback never start.
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), SERVER_TIMEOUT_MS)
+  let data: { success?: boolean; results?: import("./oooi-extractor").OcrResult[] }
+  try {
+    const response = await fetch("/api/ocr", {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    })
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: "Unknown error" }))
-    throw new Error(error.error || `Server OCR failed: ${response.status}`)
+    if (!response.ok) {
+      // A 401 is this session, not the engine — the next photo may succeed.
+      if (response.status !== 401) markServerDown()
+      const error = await response.json().catch(() => ({ error: "Unknown error" }))
+      throw new Error(error.error || `Server OCR failed: ${response.status}`)
+    }
+
+    data = await response.json()
+  } catch (error) {
+    if (controller.signal.aborted) markServerDown()
+    throw error
+  } finally {
+    clearTimeout(timer)
   }
-
-  const data = await response.json()
 
   if (!data.success || !data.results) {
     throw new Error("Invalid server OCR response")
@@ -150,7 +232,7 @@ export async function extractTextFromImage(
   file: File
 ): Promise<import("./oooi-extractor").OcrResult[]> {
   // Try server-side OCR first if online
-  if (isOnline()) {
+  if (serverUsable()) {
     try {
       console.log("[OCR] Attempting server-side OCR...")
       const results = await processWithServerOCR(file)
@@ -161,7 +243,7 @@ export async function extractTextFromImage(
       // Fall through to browser OCR
     }
   } else {
-    console.log("[OCR] Offline - using browser-based OCR")
+    console.log("[OCR] Offline or server unavailable - using browser-based OCR")
   }
 
   // Fallback to browser-based OCR

@@ -18,6 +18,10 @@ const OCR_MODEL_FILES = [
   "/models/ch_PP-OCRv4_det_infer.onnx",
   "/models/ch_PP-OCRv4_rec_infer.onnx",
   "/models/ppocr_keys_v1.txt",
+  // The in-browser engine's runtime (copied in at build time by
+  // scripts/copy-ort-wasm.mjs). Without it precached, the first OCR made
+  // offline asked the network for 12MB and failed.
+  "/models/ort-wasm-simd-threaded.wasm",
 ]
 
 // Static assets to precache during install (these don't require auth)
@@ -168,7 +172,7 @@ function isNextStaticAsset(url) {
 
 // Helper: Check if URL is an OCR model file
 function isOCRModelRequest(url) {
-  return url.includes("/models/") && (url.endsWith(".onnx") || url.endsWith(".txt"))
+  return url.includes("/models/") && (url.endsWith(".onnx") || url.endsWith(".txt") || url.endsWith(".wasm"))
 }
 
 // Helper: Check if this is a cacheable app route

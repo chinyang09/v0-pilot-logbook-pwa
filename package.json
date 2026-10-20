@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "NODE_OPTIONS='--max-old-space-size=8192' next build --webpack",
-    "dev": "next dev --webpack",
+    "build": "node scripts/copy-ort-wasm.mjs && NODE_OPTIONS='--max-old-space-size=8192' next build --webpack",
+    "dev": "node scripts/copy-ort-wasm.mjs && next dev --webpack",
     "lint": "eslint .",
     "start": "next start",
     "test": "vitest run",
@@ -36,6 +36,7 @@
     "mongodb": "6.12.0",
     "next": "16.0.10",
     "next-themes": "latest",
+    "onnxruntime-web": "1.23.2",
     "qrcode.react": "4.2.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
