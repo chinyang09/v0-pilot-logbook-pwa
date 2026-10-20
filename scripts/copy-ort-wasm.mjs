@@ -1,7 +1,7 @@
 /**
- * Put the in-browser OCR engine's WebAssembly binary at a STABLE URL —
- * `/models/ort-wasm-simd-threaded.wasm`, beside the models — so the service
- * worker can precache it at install, the same as the models.
+ * Put the in-browser OCR engine's runtime at STABLE URLs —
+ * `/models/ort-wasm-simd-threaded.{wasm,mjs}`, beside the models — so the
+ * service worker can precache it at install, the same as the models.
  *
  * Left to webpack it is emitted under a content hash nobody knows until the
  * build has run, so nothing could fetch it ahead of time: the first OCR made
@@ -16,13 +16,14 @@ import { fileURLToPath } from "node:url"
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const fromApp = createRequire(path.join(root, "package.json"))
-// onnxruntime-web is ocr-browser's dependency, not the app's, so resolve it
-// from there. Its `./wasm` entry's CommonJS file sits in dist/ with the binary.
-const fromOcr = createRequire(fromApp.resolve("@gutenye/ocr-browser"))
-const dist = path.dirname(fromOcr.resolve("onnxruntime-web/wasm"))
-const src = path.join(dist, "ort-wasm-simd-threaded.wasm")
-const dest = path.join(root, "public", "models", "ort-wasm-simd-threaded.wasm")
-
-mkdirSync(path.dirname(dest), { recursive: true })
-copyFileSync(src, dest)
-console.log(`[ocr] copied ${path.basename(src)} (${(statSync(dest).size / 1e6).toFixed(1)}MB) -> public/models/`)
+// The `./wasm` entry's CommonJS file sits in dist/ with the binary.
+const dist = path.dirname(fromApp.resolve("onnxruntime-web/wasm"))
+const out = path.join(root, "public", "models")
+mkdirSync(out, { recursive: true })
+// The binary, and the JavaScript that instantiates it — which is also the
+// script each engine thread is started from.
+for (const name of ["ort-wasm-simd-threaded.wasm", "ort-wasm-simd-threaded.mjs"]) {
+  const dest = path.join(out, name)
+  copyFileSync(path.join(dist, name), dest)
+  console.log(`[ocr] copied ${name} (${(statSync(dest).size / 1e6).toFixed(2)}MB) -> public/models/`)
+}

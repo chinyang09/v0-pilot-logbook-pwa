@@ -1,32 +1,15 @@
 /**
- * OCR Service - Hybrid implementation
+ * OCR Service — server when online, the browser when not.
  *
- * Primary: Server-side OCR using gutenye/ocr-node (when online)
- * Fallback: Browser-based OCR using gutenye/ocr-browser (when offline)
- *
- * The server-side OCR is faster and more reliable, but requires network.
- * Browser-based OCR works completely offline using WebAssembly.
+ * Both run the SAME pipeline (`./engine/core`) over the same PP-OCRv4 models;
+ * only the runtime differs (onnxruntime-node vs onnxruntime-web). The server
+ * is preferred because it has more cores and no model download, but the
+ * browser engine is a complete offline answer, not a degraded one.
  */
 
 // Re-export type from extractor (single source of truth)
 export type { OcrResult } from "./oooi-extractor"
-
-interface OcrRawResult {
-  text: string
-  mean: number
-  box: number[][]
-}
-
-interface OcrInstance {
-  detect: (input: string) => Promise<OcrRawResult[]>
-}
-
-// Browser OCR singleton
-let browserOcrInstance: OcrInstance | null = null
-let browserInitPromise: Promise<OcrInstance> | null = null
-
-/** The runtime binary, at the URL the service worker precaches. */
-const ORT_WASM_URL = "/models/ort-wasm-simd-threaded.wasm"
+import type { OcrResult } from "./oooi-extractor"
 
 /**
  * How long the server may take before the browser engine is used instead.
@@ -53,41 +36,13 @@ function markServerDown(): void {
   serverDownUntil = Date.now() + SERVER_RETRY_AFTER_MS
 }
 
-/**
- * Initialize browser-based OCR (fallback)
- */
-async function initializeBrowserOCR(): Promise<OcrInstance> {
-  if (browserOcrInstance) return browserOcrInstance
-  if (browserInitPromise) return browserInitPromise
+/** Load the browser engine's two models (cached by the service worker). */
+let browserReady = false
 
-  browserInitPromise = (async () => {
-    // Load the runtime binary from the stable URL the service worker
-    // precaches beside the models (scripts/copy-ort-wasm.mjs), rather than
-    // the hashed copy webpack emits, which nothing can fetch ahead of time.
-    // `onnxruntime-web` is aliased to its WASM-only build (next.config.mjs),
-    // so this is the same module instance ocr-browser imports.
-    const ort = await import("onnxruntime-web")
-    ort.env.wasm.wasmPaths = { wasm: ORT_WASM_URL }
-    const { default: Ocr } = await import("@gutenye/ocr-browser")
-
-    const instance = (await Ocr.create({
-      models: {
-        detectionPath: "/models/ch_PP-OCRv4_det_infer.onnx",
-        recognitionPath: "/models/ch_PP-OCRv4_rec_infer.onnx",
-        dictionaryPath: "/models/ppocr_keys_v1.txt",
-      },
-    })) as unknown as OcrInstance
-
-    browserOcrInstance = instance
-    return instance
-  })()
-  // A failed load (the chunk or a model missing offline) must not be the
-  // answer for the rest of the session: the next attempt tries again.
-  browserInitPromise.catch(() => {
-    browserInitPromise = null
-  })
-
-  return browserInitPromise!
+async function initializeBrowserOCR(): Promise<void> {
+  const { primeBrowserModels } = await import("./engine/browser")
+  await primeBrowserModels()
+  browserReady = true
 }
 
 /**
@@ -98,7 +53,7 @@ async function initializeBrowserOCR(): Promise<OcrInstance> {
  */
 export function warmBrowserOCR(): void {
   if (typeof window === "undefined" || !isOnline()) return
-  void import("@gutenye/ocr-browser").catch(() => {})
+  void import("./engine/browser").catch(() => {})
   void import("onnxruntime-web").catch(() => {})
 }
 
@@ -142,31 +97,20 @@ function isOnline(): boolean {
 }
 
 /**
- * Convert File to base64 data URL
- */
-async function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (e) => resolve(e.target?.result as string)
-    reader.onerror = () => reject(new Error("Failed to read file"))
-    reader.readAsDataURL(file)
-  })
-}
-
-/**
  * Process image with server-side OCR (primary)
  */
-async function processWithServerOCR(
-  file: File
-): Promise<import("./oooi-extractor").OcrResult[]> {
+async function processWithServerOCR(file: File): Promise<OcrResult[]> {
+  // Downscale before the upload (OCR_MAX_SIDE): a phone photo is 12MP and
+  // several MB, and the server would only shrink it again. A few hundred KB.
+  const { compressImage } = await import("@/lib/utils/image-compress")
   const formData = new FormData()
-  formData.append("image", file)
+  formData.append("image", await compressImage(file))
 
   // The timeout covers the BODY too: a connection dropping mid-response would
   // otherwise leave `response.json()` pending and the fallback never start.
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), SERVER_TIMEOUT_MS)
-  let data: { success?: boolean; results?: import("./oooi-extractor").OcrResult[] }
+  let data: { success?: boolean; results?: OcrResult[] }
   try {
     const response = await fetch("/api/ocr", {
       method: "POST",
@@ -199,27 +143,10 @@ async function processWithServerOCR(
 /**
  * Process image with browser-based OCR (fallback)
  */
-async function processWithBrowserOCR(
-  file: File
-): Promise<import("./oooi-extractor").OcrResult[]> {
-  const ocr = await initializeBrowserOCR()
-  const dataUrl = await fileToDataUrl(file)
-  const rawResults = await ocr.detect(dataUrl)
-
-  return rawResults
-    .map((item) => ({
-      text: item.text.trim(),
-      confidence: item.mean,
-      box: item.box,
-    }))
-    .filter((item) => item.text.length > 0)
-    .sort((a, b) => {
-      // Sort by Y then X
-      const ay = (a.box[0][1] + a.box[2][1]) / 2
-      const by = (b.box[0][1] + b.box[2][1]) / 2
-      if (Math.abs(ay - by) > 10) return ay - by
-      return a.box[0][0] - b.box[0][0]
-    })
+async function processWithBrowserOCR(file: File): Promise<OcrResult[]> {
+  const { readImageInBrowser } = await import("./engine/browser")
+  const { lines } = await readImageInBrowser(file)
+  return lines
 }
 
 /**
@@ -230,7 +157,7 @@ async function processWithBrowserOCR(
  */
 export async function extractTextFromImage(
   file: File
-): Promise<import("./oooi-extractor").OcrResult[]> {
+): Promise<OcrResult[]> {
   // Try server-side OCR first if online
   if (serverUsable()) {
     try {
@@ -265,7 +192,7 @@ export async function extractTextAsString(file: File): Promise<string> {
  * Initialize OCR for preloading
  * This primarily preloads the browser OCR for offline use
  */
-export async function initializeOCR(): Promise<OcrInstance> {
+export async function initializeOCR(): Promise<void> {
   return initializeBrowserOCR()
 }
 
@@ -284,15 +211,14 @@ export async function preloadOCR(): Promise<void> {
  * Check if browser OCR is ready
  */
 export function isOCRReady(): boolean {
-  return browserOcrInstance !== null
+  return browserReady
 }
 
 /**
  * Reset OCR instances
  */
 export function resetOCR(): void {
-  browserOcrInstance = null
-  browserInitPromise = null
+  browserReady = false
 }
 
 /**

@@ -20,7 +20,7 @@ Deployed on **Vercel** and synced from [v0.app](https://v0.app/chat/eXgJay4h1Jy)
 | Auth | WebAuthn passkeys + TOTP 2FA |
 | Data Fetching | SWR + Dexie React hooks |
 | Forms | Custom hooks (`useFormSubmit`, `useCrewForm`) — no form library |
-| OCR | @gutenye/ocr-browser with ONNX Runtime |
+| OCR | PP-OCRv4 models (`@gutenye/ocr-models`) on ONNX Runtime — our own pipeline, `lib/ocr/engine/` |
 | Charts | Recharts |
 | Package Manager | pnpm (not npm) |
 | Bundler | Webpack (not Turbopack) |
@@ -53,7 +53,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
-| `lib/ocr/__tests__/` | both OCR screenshot layouts from synthetic boxes, and SEVEN REAL MCDU PHOTOS (`fixtures/mcdu/`) — what both engines actually read from each, every slot checked; `OCR_ENGINE=1 pnpm test` runs the photos through the real server engine |
+| `lib/ocr/__tests__/` | both OCR screenshot layouts from synthetic boxes, the engine's plumbing with stand-in models (boxes, CTC decode, the keypad never recognised), and SEVEN REAL MCDU PHOTOS (`fixtures/mcdu/`) — what the engine actually reads from each, every slot checked; `OCR_ENGINE=1 pnpm test` runs the photos through the real server engine (`OCR_FIXTURE_WRITE=1` re-pins the reads) |
 | `lib/theme/__tests__/` | the palette generator — contrast and gamut for every preset in both modes and a sweep of custom seeds, and that globals.css carries the default palette exactly |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution, the canonical document shape + write modes, push batching, the sync triggers |
 | `lib/sync/server/__tests__/` | the server engine end to end — two devices pushing and pulling, deletions, stale pushes, paging, the migration — against an in-memory Mongo stand-in (`fake-mongo.ts`; it implements only the operators the engine sends) |
@@ -1756,9 +1756,41 @@ label. Reading it as rows — a label row, then the row under it — only works
 while every slot is filled, and a blank (`----`) is not read at all, so the two
 columns drift out of step: on a real photo the left door time and the right
 TAXI label came back as one line and IN was lost; with OUT and IN blank, a lone
-FLIGHT value had no row partner. The engine also JOINS boxes on one line
-(`1232 0942`), so a token's x is estimated from its character position within
-the line's box. The row reader stays as a candidate; the best score still wins.
+FLIGHT value had no row partner. A box can hold more than one token
+(`1232 0942` — the old library joined boxes, and detection can still merge
+two close values), so a token's x is estimated from its character position
+within the line's box. The row reader stays as a candidate; the best score still wins.
+
+#### The engine is OURS (`lib/ocr/engine/`)
+
+The same two PP-OCRv4 models the `@gutenye` packages ship, with their numerics
+(BGR, value/255, the 0.03 detection threshold, CTC greedy decode, reads below
+0.5 mean confidence dropped) — but not their plumbing. `core.ts` is written
+once for both runtimes; `node.ts` (onnxruntime-node + sharp) and `browser.ts`
+(onnxruntime-web + the browser's own image decoder) only supply the sessions
+and the pixels.
+
+- **The keypad is DETECTED but never READ.** Recognition is the expensive half
+  and scales with the number of boxes, and on an MCDU photo about half of them
+  are keys. Boxes are recognised top to bottom and reading stops at the
+  screen's last line (`MCDU_STOP`: `<AOC MENU` / `RETURN TO` / `SEND*` /
+  `PRINT*`) — measured, 20–24 of 37–70 boxes. That is the "crop to the screen"
+  without guessing where the screen is: a photo with no such line (a cropped
+  shot, the EFB Time Summary) is simply read in full.
+- **Detection runs at 800** (`DEFAULT_DET_SIDE`) while the boxes are cut from
+  the full 1024 image, so recognition loses no detail. All seven photos read
+  identically at 640, 800 and 1024.
+- **Recognition is BATCHED** (`DEFAULT_BATCH` 4 — measured best; 8+ pads every
+  line to the widest and gets slower). A batch may read past the stop line;
+  those reads are dropped.
+- **No OpenCV.** The library cut boxes out with opencv.js — 10MB the phone
+  parsed before its first photo — for what, on level text, is a flood fill
+  over a typed array (`boxesFromProbabilityMap`).
+- **Lines come back one per box, in reading order, NOT joined into rows** —
+  the extractors group rows themselves.
+- **Both runtimes are PRIMED on warm-up** (`primeServerModels` /
+  `primeBrowserModels`): a session's first run allocates its buffers and starts
+  its threads, which was most of a second of the first photo's time.
 
 #### Speed — where the time went, and the rules that keep it fast
 
@@ -1766,39 +1798,47 @@ Measured on the seven real photos (`lib/ocr/__tests__/fixtures/mcdu/`):
 
 | | Was | Is |
 |---|---|---|
-| Server OCR in production | **never ran**: file tracing dropped `@gutenye/ocr-node`, so every photo was uploaded, refused, then read in the browser from cold | runs (function ~82MB) |
-| Server, 12MP photo | 19.4s (detection at 3072×4080) | ~1s at 1024 |
+| Server OCR in production | **never ran**: file tracing dropped `@gutenye/ocr-node`, so every photo was uploaded, refused, then read in the browser from cold | runs |
+| Server, 12MP photo | 19.4s (detection at 3072×4080) | ~0.43s (1024 image, detection at 800, keypad skipped; 4 cores) |
 | Upload | the photo at 2048px, 0.5–2MB | 150–220KB |
-| Browser engine runtime | 24MB JSEP build (WebGPU + WebNN, never used) | 11.9MB WASM-only |
-| Browser, cold / engine loaded (4-core desktop Chromium) | 11.1s / 6.6s | 5.9s / 3.5s (4.3s when the menu warmed it) |
+| Browser engine runtime | 24MB JSEP build + 10MB opencv.js | 11.9MB WASM-only, no OpenCV |
+| Browser threads | 1 | up to 4 (cross-origin isolated) |
+| Browser, photo → form filled, cold / camera-menu warmed (4-core desktop Chromium) | 11.1s / 6.6s | 4.2s / 1.8–2.2s (engine itself ~1.3s) |
 | After the read | a fixed 600ms pause | straight into the form |
 
-- **Detection runs at whatever resolution it is handed** — the library has no
-  ceiling, and a phone photo is 12MP. `OCR_MAX_SIDE` (1024) caps it on the
-  client AND again in the route (an old client still sends 2048). Every slot of
-  every photo reads identically at 800, 1024, 1280 and full size. Recognition
-  cost does not depend on image size (each line is resized to 48px high); it
-  scales with the number of boxes, and on an MCDU photo about half of those are
-  KEYPAD keys. Skipping them needs the library's Detection/Recognition split,
-  which it does not export — that is the next win, and it needs a patch.
+- **Detection runs at whatever resolution it is handed.** `OCR_MAX_SIDE`
+  (1024) caps it on the client AND again in the route (an old client still
+  sends 2048).
 - **Resize on PIXELS, not bytes.** `compressImage` skipped anything under 1MB,
   and a 12MP JPEG can be.
-- **The server is woken when the camera menu OPENS** (`warmOCR`): the health
-  check boots the function and loads its models while the pilot is still taking
-  the photo. If it reports no engine, the browser engine starts loading
-  instead; offline, it starts at once.
+- **Only the UPLOAD is re-encoded.** The service compresses inside
+  `processWithServerOCR`; the browser engine decodes the original straight to
+  `OCR_MAX_SIDE` (`createImageBitmap` + one canvas draw), with no JPEG
+  round trip in between.
+- **The engine is woken when the camera menu OPENS** (`warmOCR`): the health
+  check boots the function and primes its models while the pilot is still
+  taking the photo. If it reports no engine, the browser engine is loaded and
+  primed instead; offline, at once.
 - **A failed server is skipped for five minutes** — each attempt costs an upload
   and a round trip before the fallback even starts. A 401 does not count. The
   server request carries a 20s timeout over the BODY as well.
-- **The browser runtime is at a STABLE URL**, `/models/ort-wasm-simd-threaded.wasm`,
+- **The browser runtime is at STABLE URLs**, `/models/ort-wasm-simd-threaded.{wasm,mjs}`,
   copied from the installed `onnxruntime-web` by `scripts/copy-ort-wasm.mjs` on
-  every `pnpm dev`/`pnpm build` (not committed — it must match the JS loading
-  it) and precached by the service worker beside the models. Webpack's hashed
-  copy could not be fetched ahead of time, so the first OCR made offline failed.
-- **Still single-threaded in the browser.** Multi-threaded WASM needs
-  `crossOriginIsolated` (COOP/COEP headers), which is an app-wide change to how
-  every cross-origin resource loads. Not done; it is the browser path's biggest
-  remaining lever.
+  every `pnpm dev`/`pnpm build` (not committed — they must match the JS loading
+  them) and precached by the service worker beside the models. The `.mjs` is
+  the Emscripten glue AND the script every engine thread starts from, which is
+  why the alias is the NON-bundled `ort.wasm.min.mjs`: the bundle inlines the
+  glue and starts its threads from its own webpack-hashed URL, which nothing
+  can precache, so a threaded engine could not have started offline.
+- **Multi-threaded in the browser** (`ocrThreadCount`: up to 4). WASM threads
+  need SharedArrayBuffer, which needs `crossOriginIsolated`, which needs
+  `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy:
+  require-corp` on every response (`next.config.mjs` `headers()`). Everything
+  the app loads is same-origin except Google Fonts, fetched in CORS mode
+  (`crossOrigin="anonymous"`), which `require-corp` accepts. `credentialless`
+  would be laxer but Safari lacks it. A page served from a cache predating the
+  headers simply runs single-threaded.
+- **The server uses every core** (`intraOpNumThreads: availableParallelism()`).
 
 ### Component Architecture
 
@@ -3012,22 +3052,20 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
 local (`forecastExceedances`). For a non-UTC user a duty on the window boundary
 can be silently included or excluded. Settle on one date convention end to end.
 
-### OCR engine (owner is weighing a change)
+### OCR engine
 
-The offline engine is `@gutenye/ocr-browser` + ONNX (~16MB of models). The
-owner has asked about **PaddleOCR JS**, server-when-online / local-when-offline.
-Assessment on record:
+The engine is now the app's own pipeline over the PP-OCRv4 models (Camera OCR
+› The engine is ours). The owner had asked about **PaddleOCR JS**; the
+assessment on record:
 
 - The speed gap in the PaddleOCR web demo is mostly **server hardware**, not the
-  engine. Locally the cost is dominated by **model load**, and Paddle's JS
-  models are comparable in size — swapping engines does not fix that by itself.
-- **Server-first routing was always the design and never worked in
-  production** until Oct 2026 (see Camera OCR › Speed): the deployed route
-  could not load its engine. Fix that before judging any engine.
+  engine. Locally the cost is dominated by **model load** and by how many boxes
+  are RECOGNISED — which is why skipping the keypad was the win, not a new
+  engine. Paddle's JS models are the same family and comparable in size.
 - The extractors take `{text, box, confidence}` so they are engine-shaped, but
   the digit repair (`O`→`0`, `I`→`1`) and row-grouping tolerances are tuned to
-  gutenye's output. Real photos are now fixtures (`OCR_ENGINE=1 pnpm test`) —
-  a candidate engine has to read all seven.
+  these models' output. Real photos are fixtures (`OCR_ENGINE=1 pnpm test`) —
+  any change of model, detection size or threshold has to read all seven.
 
 ### Deferred design work (owner-approved to-do)
 
@@ -4129,9 +4167,12 @@ When making changes, be aware of these high-impact files:
 - Do not save an edit form's whole copy of a record — diff it against the form's BASELINE (`formPatch`) and follow the live row with `rebaseForm`. A form open across a pull otherwise sends the stale copy back as an edit and reverts the other device's work with nobody touching the form
 - Do not clear a fetch timeout before the body is read — a stalled body wedged the sync lock forever. Read inside the timeout (`fetchWithTimeout(input, init, read)`, `authFetch`)
 - Do not dead-letter a batch for a request-level 4xx, and do not wipe unsynced rows in a full resync
-- Do not exclude `.pnpm/**/*@gutenye*` (or any pattern that catches `@gutenye/ocr-node`, `ocr-common`, `ocr-models`, `onnxruntime-node`, `sharp` or `@techstark/opencv-js`) from file tracing — that is what made the deployed `/api/ocr` fail with "Cannot find package '@gutenye/ocr-node'" for months, so every photo paid an upload and a refusal before being read slowly in the browser. Trim onnxruntime-node's OTHER platforms' binaries instead (`next.config.mjs`), and check `GET /api/ocr` reports `available: true` after a deploy
+- Do not exclude `.pnpm/**/*@gutenye*` (or any pattern that catches `@gutenye/ocr-models`, `onnxruntime-node` or `sharp`) from file tracing — that is what made the deployed `/api/ocr` fail with "Cannot find package '@gutenye/ocr-node'" for months, so every photo paid an upload and a refusal before being read slowly in the browser. Trim onnxruntime-node's OTHER platforms' binaries instead (`next.config.mjs`), and check `GET /api/ocr` reports `available: true` after a deploy
 - Do not hand the OCR engine an image larger than `OCR_MAX_SIDE` — detection runs at whatever size it gets, and a 12MP photo took 19s where 1024px took 1s with identical results. Cap it on the client AND in the route, and decide on pixels, never file size
-- Do not let the browser OCR engine load its runtime from webpack's hashed URL, or import bare `onnxruntime-web` without the WASM-only alias — the hashed copy cannot be precached (the first offline OCR failed) and the default entry is 24MB of WebGPU build the engine never uses
+- Do not let the browser OCR engine load its runtime from webpack's hashed URL, or import bare `onnxruntime-web` without the WASM-only alias — the hashed copy cannot be precached (the first offline OCR failed) and the default entry is 24MB of WebGPU build the engine never uses. And keep the alias on the NON-bundled `ort.wasm.min.mjs`: the bundle starts its threads from its own hashed URL, so a threaded engine could not start offline; the plain build takes the glue (and the thread script) from `wasmPaths.mjs` at `/models/`
+- Do not recognise every detected box — the OCR pipeline reads top to bottom and STOPS at the MCDU screen's last line (`MCDU_STOP`), so the keypad (half the boxes) never reaches the recognition model. A change that sorts, filters or batches the boxes must keep that order and the drop of anything read past the stop
+- Do not go back to `@gutenye/ocr-node` / `ocr-browser` — their plumbing recognised the keypad, pulled in 10MB of opencv.js for the browser, and had no way to stop early. The models are the same; `lib/ocr/engine/core.ts` is the plumbing, once for both runtimes
+- Do not load a cross-origin resource without CORS (`crossOrigin="anonymous"`, or a CORP header from its server) — every response carries `Cross-Origin-Embedder-Policy: require-corp` so the OCR engine can run multi-threaded, and a no-cors cross-origin image, script or iframe is now BLOCKED, not merely opaque. Do not drop the COOP/COEP headers to get one working, and do not switch to `credentialless` (Safari lacks it, so the platforms would diverge)
 - Do not call `skipWaiting()` on install or reload on every `controllerchange` — a new worker waits for the user's "Update"; and do not put `/_next/static` back in the trimmed dynamic cache
 - Do not read "today" in a memo keyed only on data — a dashboard left open overnight froze its recency and its period. Depend on `useDayKey()`
 - Do not let recency read as met on or after its lapse date, whatever the counts say, and do not count a flight exactly 90 days back — `lapseIso` is the first day NOT current

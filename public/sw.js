@@ -22,6 +22,9 @@ const OCR_MODEL_FILES = [
   // scripts/copy-ort-wasm.mjs). Without it precached, the first OCR made
   // offline asked the network for 12MB and failed.
   "/models/ort-wasm-simd-threaded.wasm",
+  // Its JavaScript half — also the script every engine THREAD starts from,
+  // so offline OCR needs it as much as the binary.
+  "/models/ort-wasm-simd-threaded.mjs",
 ]
 
 // Static assets to precache during install (these don't require auth)
@@ -172,7 +175,7 @@ function isNextStaticAsset(url) {
 
 // Helper: Check if URL is an OCR model file
 function isOCRModelRequest(url) {
-  return url.includes("/models/") && (url.endsWith(".onnx") || url.endsWith(".txt") || url.endsWith(".wasm"))
+  return url.includes("/models/") && (url.endsWith(".onnx") || url.endsWith(".txt") || url.endsWith(".wasm") || url.endsWith(".mjs"))
 }
 
 // Helper: Check if this is a cacheable app route

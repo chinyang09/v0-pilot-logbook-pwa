@@ -4,3 +4,4 @@ tsconfig.tsbuildinfo
 
 # Copied from onnxruntime-web at build/dev start (scripts/copy-ort-wasm.mjs)
 public/models/ort-wasm-simd-threaded.wasm
+public/models/ort-wasm-simd-threaded.mjs

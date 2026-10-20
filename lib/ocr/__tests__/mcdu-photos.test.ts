@@ -3,10 +3,12 @@
  * seven of them, across screen tints, angles, glare and distance, two with
  * blank ("----") slots.
  *
- * Each fixture pins what BOTH engines actually returned for that photo at
- * `OCR_MAX_SIDE`: the server's (ocr-node) and the in-browser one
- * (ocr-browser), which differ slightly in how they resize and so in what they
- * read. The extractor has to get every slot right from either.
+ * Each fixture pins what the engine actually returned for that photo at
+ * `OCR_MAX_SIDE`: `pipeline` is the app's own engine (lib/ocr/engine — one
+ * box per line, keypad never read), and `node` / `browser` are what the
+ * @gutenye library it replaced returned on each runtime, which joined boxes
+ * into rows and read the keypad too. Those are kept as harder inputs: the
+ * extractor has to get every slot right from all three.
  *
  * Unlike the synthetic-box tests, these catch a change in what the engine
  * READS, not just in how the geometry is mapped. The photos themselves are
@@ -51,13 +53,13 @@ function slotsOf(data: ReturnType<typeof extractFlightData>): Slots {
   return Object.fromEntries(SLOTS.map((k) => [k, data[k]])) as Slots
 }
 
-function fixture(n: number): { node: OcrResult[]; browser: OcrResult[] } {
+function fixture(n: number): { pipeline: OcrResult[]; node: OcrResult[]; browser: OcrResult[] } {
   return JSON.parse(fs.readFileSync(path.join(DIR, `mcdu-${n}.ocr.json`), "utf8"))
 }
 
 describe("MCDU voyage report — real photos", () => {
   for (const [n, expected] of Object.entries(EXPECTED)) {
-    for (const engine of ["node", "browser"] as const) {
+    for (const engine of ["pipeline", "node", "browser"] as const) {
       it(`photo ${n}, ${engine} engine: every slot, and nothing invented for a blank`, () => {
         expect(slotsOf(extractFlightData(fixture(Number(n))[engine]))).toEqual(expected)
       })
@@ -72,18 +74,21 @@ describe("MCDU voyage report — real photos", () => {
 
 // The real engine over the real photos. Opt-in: it loads ~15MB of models and
 // takes a few seconds, and onnxruntime-node is a native module.
+// `OCR_FIXTURE_WRITE=1` as well re-pins each fixture's `pipeline` read.
 describe.runIf(process.env.OCR_ENGINE === "1")("MCDU photos through the server engine", () => {
-  it("reads every slot of every photo", async () => {
-    const { default: Ocr } = await import("@gutenye/ocr-node")
-    const ocr = await Ocr.create()
+  it("reads every slot of every photo, and never the keypad", async () => {
+    const { readImageOnServer } = await import("../engine/node")
     for (const [n, expected] of Object.entries(EXPECTED)) {
-      const lines = await ocr.detect(path.join(DIR, `mcdu-${n}.jpg`))
-      const results: OcrResult[] = lines.map((l: { text: string; mean: number; box?: number[][] }) => ({
-        text: l.text.trim(),
-        confidence: l.mean,
-        box: l.box ?? [[0, 0], [0, 0], [0, 0], [0, 0]],
-      }))
-      expect({ photo: n, ...slotsOf(extractFlightData(results)) }).toEqual({ photo: n, ...expected })
+      const { lines, stats } = await readImageOnServer(fs.readFileSync(path.join(DIR, `mcdu-${n}.jpg`)))
+      expect({ photo: n, ...slotsOf(extractFlightData(lines)) }).toEqual({ photo: n, ...expected })
+      // Detection finds the keys; recognition stops at the screen's last line.
+      expect(stats.recognised).toBeLessThan(stats.boxes)
+      if (process.env.OCR_FIXTURE_WRITE === "1") {
+        const file = path.join(DIR, `mcdu-${n}.ocr.json`)
+        const round = (l: OcrResult) => ({ ...l, confidence: Math.round(l.confidence * 1e4) / 1e4 })
+        const current = JSON.parse(fs.readFileSync(file, "utf8"))
+        fs.writeFileSync(file, JSON.stringify({ ...current, pipeline: lines.map(round) }))
+      }
     }
   }, 120_000)
 })

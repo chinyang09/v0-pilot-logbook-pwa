@@ -6,14 +6,20 @@ import path from "node:path";
  * entry is the JSEP build: WebGPU + WebNN on top of WebAssembly, with a 24MB
  * binary. The engine only ever creates plain WASM sessions, so the extra 12MB
  * was downloaded and compiled for nothing. `./wasm` is the same runtime
- * without them (11.9MB). Resolved from ocr-browser, whose dependency it is;
- * if the layout ever changes the build simply keeps the default entry.
+ * without them (11.9MB).
+ *
+ * And the NON-bundled build of it: the bundle inlines the Emscripten glue and
+ * starts each engine thread from its own URL, which webpack emits under a
+ * content hash nothing can precache — so a threaded engine could not start
+ * offline. The plain build imports the glue from `env.wasm.wasmPaths.mjs`, a
+ * stable `/models/` URL the service worker holds (scripts/copy-ort-wasm.mjs),
+ * and the threads start from there. If the layout ever changes the build
+ * simply keeps the default entry.
  */
 function ortWasmOnlyEntry() {
   try {
     const fromApp = createRequire(import.meta.url);
-    const fromOcr = createRequire(fromApp.resolve("@gutenye/ocr-browser"));
-    return path.join(path.dirname(fromOcr.resolve("onnxruntime-web/wasm")), "ort.wasm.bundle.min.mjs");
+    return path.join(path.dirname(fromApp.resolve("onnxruntime-web/wasm")), "ort.wasm.min.mjs");
   } catch {
     return null;
   }
@@ -43,18 +49,29 @@ const nextConfig = {
   },
   // Empty turbopack config to allow webpack config for builds
   turbopack: {},
+  // Cross-origin ISOLATION, which is what hands the page SharedArrayBuffer
+  // and so lets the in-browser OCR engine run on several threads
+  // (lib/ocr/engine/browser.ts). Everything the app loads is same-origin
+  // except Google Fonts, which is fetched in CORS mode (crossOrigin=
+  // "anonymous") and so satisfies `require-corp`. `credentialless` would be
+  // laxer but Safari does not support it, and both platforms must behave the
+  // same. A page served from an older cache without these headers simply
+  // runs the engine single-threaded.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
+        ],
+      },
+    ];
+  },
   webpack: (config, { isServer }) => {
     if (isServer) {
-      // Server-side: Exclude browser-only OCR packages
-      // Keep ocr-node available for server-side API routes
       config.externals = config.externals || [];
-      config.externals.push({
-        // Browser OCR - not needed on server
-        '@gutenye/ocr-browser': 'commonjs @gutenye/ocr-browser',
-        '@techstark/opencv-js': 'commonjs @techstark/opencv-js',
-        // Sharp is used by ocr-node, handle it specially
-        'sharp': 'commonjs sharp',
-      });
+      config.externals.push({ sharp: "commonjs sharp" });
     } else {
       // Client-side: provide fallbacks for Node.js modules
       config.resolve = config.resolve || {};
@@ -82,20 +99,15 @@ const nextConfig = {
   },
   // File tracing decides what ships inside each serverless function.
   //
-  // Server OCR (`/api/ocr`) needs @gutenye/ocr-node, ocr-common, ocr-models,
-  // onnxruntime-node, sharp and @techstark/opencv-js (ocr-common's line
-  // splitter). These used to be excluded wholesale — `.pnpm/**/*@gutenye*`
-  // matches every gutenye package in pnpm's store, ocr-node included — so the
-  // deployed route failed with "Cannot find package '@gutenye/ocr-node'" and
-  // EVERY photo was uploaded, refused, and then read by the slow in-browser
-  // engine from cold. The weight that exclusion was avoiding is
+  // Server OCR (`/api/ocr`) needs onnxruntime-node, sharp and the two models
+  // in @gutenye/ocr-models. Those used to be excluded wholesale (a
+  // `.pnpm/**/*@gutenye*` pattern), so the deployed route could not load its
+  // engine and EVERY photo was uploaded, refused, and then read by the slow
+  // in-browser engine from cold. The weight that exclusion was avoiding is
   // onnxruntime-node's binaries for six platforms (~247MB); a function only
   // ever runs linux-x64 (32MB), so only the other five are dropped.
   outputFileTracingExcludes: {
     "*": [
-      // Browser OCR (the client loads it; the service worker caches it)
-      "node_modules/@gutenye/ocr-browser/**/*",
-      "node_modules/.pnpm/@gutenye+ocr-browser@*/**/*",
       "node_modules/kerberos/**/*",
       // Browser model files (served via public/)
       "public/models/**/*",
@@ -116,14 +128,8 @@ const nextConfig = {
       "node_modules/.pnpm/onnxruntime-node@*/node_modules/onnxruntime-node/bin/napi-v*/linux/x64/**/*",
     ],
   },
-  // Enable server external packages for ocr-node dependencies.
-  serverExternalPackages: [
-    '@gutenye/ocr-node',
-    '@gutenye/ocr-common',
-    '@gutenye/ocr-models',
-    'onnxruntime-node',
-    'sharp',
-  ],
+  // Native modules and runtime-resolved model paths: loaded by Node, not bundled.
+  serverExternalPackages: ["@gutenye/ocr-models", "onnxruntime-node", "sharp"],
 };
 
 export default nextConfig;

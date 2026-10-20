@@ -47,18 +47,13 @@ export function ImageImportButton({
   const processImage = async (file: File) => {
     setLoading(true)
     setShowDialog(true)
-    setProgress({ percent: 5, stage: "Preparing", detail: "Resizing image..." })
+    setProgress({ percent: 30, stage: "Reading", detail: "Reading times..." })
 
     try {
-      // Downscale before OCR (OCR_MAX_SIDE): detection runs at whatever
-      // resolution it is handed, and a phone photo is 12MP. It also keeps the
-      // upload to a few hundred KB.
-      const { compressImage } = await import("@/lib/utils/image-compress")
-      const compressed = await compressImage(file)
-
-      // Extract with geometry
-      setProgress({ percent: 30, stage: "Reading", detail: "Reading times..." })
-      const ocrResults = await extractTextFromImage(compressed)
+      // Extract with geometry. The service caps the size itself — for an
+      // upload it re-encodes at OCR_MAX_SIDE, on the device it decodes
+      // straight to that size, without a JPEG round trip in between.
+      const ocrResults = await extractTextFromImage(file)
 
       // Parse layout
       setProgress({ percent: 70, stage: "Analyzing", detail: "Extracting times..." })
