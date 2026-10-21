@@ -37,7 +37,6 @@ import {
   getCurrentUserPersonnel,
   getLoggingProfile,
   getUserPreferences,
-  getAllAircraft,
   bulkUpsertScheduleEntries,
   addAircraft,
   updateAircraft,
@@ -46,6 +45,7 @@ import {
   DEFAULT_IMPORT_DEFAULTS,
 } from "@/lib/db";
 import { putManyWithSync } from "@/lib/db/stores/user/crud-helpers";
+import { missingFleetRegistrations } from "@/lib/utils/record-references";
 import {
   toEngineType,
   toDashboardCategory,
@@ -418,15 +418,17 @@ async function postWriteRecalculate(
 }
 
 /**
- * Ensure a user `Aircraft` record exists for every registration flown in
- * this import, deriving engine group + category from the ICAO type so the
- * dashboard's by-engine / by-category rings populate. New records are
- * created; existing records are only BACKFILLED where a field is blank —
- * user-entered values are never clobbered.
+ * Ensure a user `Aircraft` record exists for every registration given,
+ * deriving engine group + category from the ICAO type so the dashboard's
+ * by-engine / by-category rings populate. New records are created; existing
+ * records are only BACKFILLED where a field is blank — user-entered values are
+ * never clobbered. A registration whose record is in Recently Deleted is left
+ * alone: it was binned by hand, and a second record beside it would be a
+ * duplicate the moment it was restored.
  */
-async function ensureAircraftForFlights(
+export async function ensureAircraftForFlights(
   pairs: Array<{ reg: string; type: string }>,
-  result: ExecutionResult
+  result: Pick<ExecutionResult, "aircraftCreated" | "aircraftUpdated" | "errors">
 ): Promise<void> {
   const wanted = new Map<string, string>(); // REG → type designator
   for (const { reg, type } of pairs) {
@@ -438,13 +440,23 @@ async function ensureAircraftForFlights(
 
   let existing: Aircraft[] = [];
   try {
-    existing = await getAllAircraft();
+    existing = await userDb.aircraft.toArray();
   } catch {
     return;
   }
-  const byReg = new Map(existing.map((a) => [a.registration.toUpperCase(), a]));
+  const byReg = new Map(
+    existing
+      .filter((a) => a.deletedAt == null)
+      .map((a) => [a.registration.toUpperCase(), a])
+  );
+  const binned = new Set(
+    existing
+      .filter((a) => a.deletedAt != null)
+      .map((a) => a.registration.toUpperCase())
+  );
 
   for (const [reg, type] of wanted) {
+    if (!byReg.has(reg) && binned.has(reg)) continue;
     try {
       const doc = type ? await getAircraftType(type).catch(() => null) : null;
       const engineType = doc
@@ -460,10 +472,10 @@ async function ensureAircraftForFlights(
           type: type || "",
           typeDesignator: type || "",
           model,
-          // Airline schedule imports are jets by domain; DOC 8643 lookup
-          // refines this when the designator resolves.
           category: category || "Airplane",
-          engineType: engineType || "JET",
+          // From DOC 8643 when the designator resolves; otherwise left
+          // unknown rather than assumed.
+          engineType,
           isComplex: false,
           isHighPerformance: false,
         });
@@ -1102,7 +1114,16 @@ export async function executeRosterImport(
 
   // ----- 7. Correlate flights with aircraft records (engine/category) so
   //          the dashboard reflects 2-engine / jet totals correctly. --------
+  //          Every registration the logbook flies is covered, not only the
+  //          flights this import touched: a sector the report repeated
+  //          unchanged (`skip_identical`) is never touched, so its aircraft
+  //          used to be left without a record for good.
   try {
+    const [allFlights, fleet] = await Promise.all([
+      userDb.flights.toArray(),
+      userDb.aircraft.toArray(),
+    ]);
+    aircraftPairs.push(...missingFleetRegistrations(allFlights, fleet));
     await ensureAircraftForFlights(aircraftPairs, result);
   } catch {
     // Non-fatal — flights are already written.

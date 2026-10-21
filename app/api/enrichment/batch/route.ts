@@ -1,12 +1,14 @@
 /**
  * Batch enrichment API
  *
- * POST /api/enrichment/batch
+ * GET  /api/enrichment/batch  — Vercel Cron (`vercel.json`; Cron only sends GET)
+ * POST /api/enrichment/batch  — manual invocation (admin)
  *
  * Processes pending aircraft and airport submissions.
- * Designed to be triggered by:
- *   - Vercel cron
- *   - Manual invocation (admin)
+ *
+ * There was no cron behind this for its whole life — no `vercel.json`, and the
+ * route took POST only, which Vercel Cron never sends — so a registration FR24
+ * missed at submission stayed `pending` and out of the shared pool for good.
  *
  * Aircraft: FR24 enrichment with retry tracking
  * Airports: geo-tz timezone derivation from coordinates
@@ -29,8 +31,16 @@ const MAX_RETRIES = 3
 // within maxDuration; unprocessed pending docs are simply retried next run.
 const AIRCRAFT_TIME_BUDGET_MS = 45_000
 
+export async function GET(request: Request) {
+  return runBatch(request)
+}
+
 export async function POST(request: Request) {
-  // Auth: check cron secret or admin session
+  return runBatch(request)
+}
+
+async function runBatch(request: Request) {
+  // Auth: Vercel Cron sends `Authorization: Bearer $CRON_SECRET`.
   const authHeader = request.headers.get("authorization")
   const cronSecret = process.env.CRON_SECRET
 

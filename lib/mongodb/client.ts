@@ -5,6 +5,7 @@
 
 import { MongoClient, type Db } from "mongodb"
 import { SYNC_COLLECTIONS } from "@/lib/sync/schema"
+import { newestCopies } from "@/lib/sync/server/plan"
 
 const uri = process.env.MONGODB_URI || ""
 
@@ -22,6 +23,34 @@ const options = {
 }
 
 let indexesEnsured = false
+
+/**
+ * Remove every superseded copy of a record, keeping the one the engine already
+ * treats as the record (`newestCopies` — highest `serverSeq`). Every read and
+ * write has gone to that copy since the engine learned about duplicates, so
+ * the others are stale by construction; they are only what stops the unique
+ * index being built. Each delete is by `_id` AND the seq it was read at, so a
+ * copy written to in the meantime is left for the next attempt.
+ */
+async function collapseDuplicateCopies(db: Db, coll: string): Promise<number> {
+  const groups = await db
+    .collection(coll)
+    .aggregate<{ _id: { userId: string; id: string } }>([
+      { $group: { _id: { userId: "$userId", id: "$id" }, copies: { $sum: 1 } } },
+      { $match: { copies: { $gt: 1 } } },
+    ])
+    .toArray()
+  let removed = 0
+  for (const { _id: key } of groups) {
+    const copies = await db.collection(coll).find({ userId: key.userId, id: key.id }).toArray()
+    const { superseded } = newestCopies(copies)
+    for (const stale of superseded) {
+      const res = await db.collection(coll).deleteOne({ _id: stale._id, serverSeq: stale.serverSeq })
+      removed += res.deletedCount
+    }
+  }
+  return removed
+}
 
 /**
  * Idempotently create the indexes the sync/submission paths rely on.
@@ -49,31 +78,34 @@ async function ensureIndexes(mongoClient: MongoClient): Promise<void> {
       // scanning the user's documents and nothing stops two concurrent first
       // pushes inserting a copy each — which is how production came to hold
       // duplicates in the first place. The engine copes with them
-      // (`newestCopies`); this says which ids are blocking the index.
+      // (`newestCopies`); here the superseded copies are removed and the
+      // index built.
       safe(`${coll}.userId+id`, async () => {
         try {
           await db.collection(coll).createIndex({ userId: 1, id: 1 }, { unique: true })
         } catch (err) {
-          if ((err as { code?: number }).code === 11000) {
-            const dupes = await db
-              .collection(coll)
-              .aggregate([
-                { $group: { _id: { userId: "$userId", id: "$id" }, copies: { $sum: 1 } } },
-                { $match: { copies: { $gt: 1 } } },
-                { $limit: 20 },
-              ])
-              .toArray()
-            console.error(`[Mongo] ${coll}: duplicate { userId, id } blocks the unique index:`, JSON.stringify(dupes))
-          }
-          throw err
+          if ((err as { code?: number }).code !== 11000) throw err
+          const removed = await collapseDuplicateCopies(db, coll)
+          console.warn(`[Mongo] ${coll}: removed ${removed} superseded duplicate copies to build the unique index`)
+          await db.collection(coll).createIndex({ userId: 1, id: 1 }, { unique: true })
         }
       }),
       // Server-authored monotonic version — the delta-pull keyset cursor.
-      // (The old `userId+syncedAt` and `userId+createdAt` indexes backed the
-      // wall-clock delta query every route has since moved off; nothing reads
-      // them, so they are no longer created. Existing ones are harmless.)
       safe(`${coll}.userId+serverSeq+_id`, () =>
         db.collection(coll).createIndex({ userId: 1, serverSeq: 1, _id: 1 }),
+      ),
+      // The `userId+syncedAt` and `userId+createdAt` indexes backed the
+      // wall-clock delta query every route has since moved off. No query
+      // filters or sorts on either field; the planner only ever picked them
+      // for a bare `userId` prefix, where the serverSeq index (and `userId+id`)
+      // tie with them exactly (explained 21 Oct 2026). Every write still paid
+      // to maintain them, so they go.
+      ...["userId_1_syncedAt_1", "userId_1_createdAt_1"].map((name) =>
+        safe(`${coll}.drop ${name}`, () =>
+          db.collection(coll).dropIndex(name).catch((err: { codeName?: string }) => {
+            if (err?.codeName !== "IndexNotFound" && err?.codeName !== "NamespaceNotFound") throw err
+          }),
+        ),
       ),
     ]),
     // Tombstones — TTL + delta-sync lookups (mirrors /api/sync/setup-ttl).
@@ -107,6 +139,11 @@ async function ensureIndexes(mongoClient: MongoClient): Promise<void> {
     // BSON Date, so a 0-second TTL deletes each doc at its own expiry instant.
     safe("challenges.ttl", () =>
       db.collection("challenges").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    ),
+    // A TTL index only expires a BSON Date. An early build stored a challenge's
+    // `expiresAt` as epoch millis, so those rows were never going to go.
+    safe("challenges.legacy", () =>
+      db.collection("challenges").deleteMany({ expiresAt: { $type: "number", $lt: Date.now() } }),
     ),
     // Auth: enforce one account per normalized callsign atomically (registration
     // also checks, but the unique index closes the begin→complete race).

@@ -112,6 +112,26 @@ describe("canonical document shape", () => {
     expect(doc.importedAt).toBe(123)
   })
 
+  it("fills a flight's missing PF/PM and role from the record's own figures, not a constant", () => {
+    // A takeoff logged and SIC time: monitoring was NOT the claim, nor PIC.
+    const flown = write("flights", { id: "a", dayTakeoffs: 1, sicTime: "1:45", sicName: "Self" })
+    expect(flown.pilotFlying).toBe(true)
+    expect(flown.pilotRole).toBe("SIC")
+    // Nothing logged: not filed as flown.
+    const silent = write("flights", { id: "b", sicName: "Self" })
+    expect(silent.pilotFlying).toBe(false)
+    expect(silent.pilotRole).toBe("SIC")
+    // A value the record states is never second-guessed.
+    const stated = write("flights", { id: "c", pilotFlying: true, pilotRole: "PICUS" })
+    expect(stated.pilotFlying).toBe(true)
+    expect(stated.pilotRole).toBe("PICUS")
+  })
+
+  it("leaves an aircraft's engine type unknown rather than calling it a piston single", () => {
+    expect(write("aircraft", { id: "a", registration: "9V-TNK" }).engineType).toBeNull()
+    expect(write("aircraft", { id: "b", registration: "9V-TNK", engineType: "JET" }).engineType).toBe("JET")
+  })
+
   it("keeps a field the table does not know, after the known ones", () => {
     const doc = write("aircraft", { id: "a", registration: "9V-TNK", futureField: "keep me" })
     expect(doc.futureField).toBe("keep me")

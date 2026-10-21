@@ -163,6 +163,16 @@ function LoggingSection({ preferences, updateLogging }: {
             type="date"
           />
         )}
+        <SelectRow<"pf" | "pm">
+          label="New flights start as"
+          description="A flight you add, or a next leg or return. A recorded flight keeps what was recorded, and an import takes the report's."
+          value={preferences.logging.newFlightPilotFlying ? "pf" : "pm"}
+          onValueChange={(v) => updateLogging({ newFlightPilotFlying: v === "pf" })}
+          options={[
+            { value: "pf", label: "Pilot flying" },
+            { value: "pm", label: "Pilot monitoring" },
+          ]}
+        />
       </FormSection>
     </div>
   )

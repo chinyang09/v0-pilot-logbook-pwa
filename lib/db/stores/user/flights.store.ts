@@ -22,6 +22,7 @@ import { sortFlights } from "@/lib/utils/flight-sort"
 import { isSimulatorEntry, simulatorRepairPatch } from "@/lib/utils/entry-type"
 import { timezoneRepairPatch } from "@/lib/utils/flight-timezone"
 import { flightTimeRepairPatch } from "@/lib/utils/flight-calculations"
+import { inferPilotFlying, inferPilotRole } from "@/lib/utils/flight-evidence"
 import { getAirportByIcao, getAirportTimeInfo, isAirportTableSeeded } from "../reference/airports.store"
 
 /**
@@ -258,8 +259,10 @@ export function normalizeFlightFromServer(serverFlight: FlightLog): FlightLog {
     sicId: serverFlight.sicId || "",
     sicName: serverFlight.sicName || "",
     additionalCrew: serverFlight.additionalCrew || [],
-    pilotFlying: serverFlight.pilotFlying ?? true,
-    pilotRole: serverFlight.pilotRole || "PIC",
+    // A gap is filled from the record's own figures — the same rule the server
+    // applies (`lib/utils/flight-evidence.ts`) — never a constant claim.
+    pilotFlying: serverFlight.pilotFlying ?? inferPilotFlying(serverFlight),
+    pilotRole: serverFlight.pilotRole || inferPilotRole(serverFlight),
     picTime: serverFlight.picTime || "00:00",
     sicTime: serverFlight.sicTime || "00:00",
     picusTime: serverFlight.picusTime || "00:00",

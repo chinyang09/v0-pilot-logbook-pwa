@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { validateSession, assertSameOrigin } from "@/lib/auth/server/session"
+import { validateSession, assertSameOrigin, isSessionRowFor } from "@/lib/auth/server/session"
 import { getDB } from "@/lib/mongodb/client"
 import { cookies } from "next/headers"
 import { ObjectId } from "mongodb"
@@ -29,7 +29,7 @@ export async function GET() {
   // client-side for the "Active Sessions" list.
   const sanitized = sessions.map((s) => ({
     id: s._id.toString(),
-    isCurrent: s.token === currentToken,
+    isCurrent: isSessionRowFor(s, currentToken),
     createdAt: s.createdAt,
     lastAccessedAt: s.lastAccessedAt || s.createdAt,
     expiresAt: s.expiresAt,
@@ -84,6 +84,6 @@ export async function DELETE(request: Request) {
 
   await db.collection("sessions").deleteOne({ _id: objectId, userId: session.userId })
 
-  const loggedOutCurrent = !!currentToken && target.token === currentToken
+  const loggedOutCurrent = isSessionRowFor(target, currentToken)
   return NextResponse.json({ success: true, loggedOutCurrent })
 }

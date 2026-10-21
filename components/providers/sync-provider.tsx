@@ -25,6 +25,21 @@ async function repairStoredFlights(): Promise<number> {
     console.error("[Sync] timezone repair failed:", error)
   }
   try {
+    // Loaded on demand: it reaches into the import executor, which the root
+    // provider has no reason to put in the first bundle.
+    const { repairRecordReferences } = await import("@/lib/utils/roster/reference-repairs")
+    const refs = await repairRecordReferences()
+    const fixed = refs.cardsCreated + refs.flightsRepointed + refs.aircraftCreated
+    if (fixed > 0) {
+      console.warn(
+        `[Sync] restored ${refs.cardsCreated} crew cards, repointed ${refs.flightsRepointed} flights, added ${refs.aircraftCreated} aircraft`,
+      )
+    }
+    repaired += fixed
+  } catch (error) {
+    console.error("[Sync] reference repair failed:", error)
+  }
+  try {
     const times = await repairMissingFlightTimes()
     if (times > 0) console.warn(`[Sync] gave ${times} flights without OFF/ON their OUT→IN flight time`)
     repaired += times

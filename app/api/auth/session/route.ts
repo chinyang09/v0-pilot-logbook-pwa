@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDB } from "@/lib/mongodb";
 import { cookies } from "next/headers";
-import { setSessionCookie, clearSessionCookie, assertSameOrigin } from "@/lib/auth/server/session";
+import { setSessionCookie, clearSessionCookie, assertSameOrigin, sessionTokenFilter, upgradeLegacySessionRow } from "@/lib/auth/server/session";
 
 // This endpoint is per-request and must never be cached by a CDN, a proxy or
 // the browser — a cached "authenticated: true" would outlive a revoked session.
@@ -22,9 +22,8 @@ export async function GET() {
 
     const db = await getDB();
 
-    // ✅ FIX 1: Search by 'token' and compare using BSON Date
     const session = await db.collection("sessions").findOne({
-      token: sessionId,
+      ...sessionTokenFilter(sessionId),
       expiresAt: { $gt: new Date() },
     });
 
@@ -33,6 +32,8 @@ export async function GET() {
       await clearSessionCookie();
       return NextResponse.json({ authenticated: false }, { headers: NO_STORE });
     }
+
+    await upgradeLegacySessionRow(db, session, sessionId);
 
     const now = new Date();
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -50,7 +51,7 @@ export async function GET() {
       const newExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
       await db.collection("sessions").updateOne(
-        { token: sessionId },
+        { _id: session._id },
         {
           $set: {
             expiresAt: newExpiry,
@@ -115,7 +116,7 @@ export async function DELETE(request: Request) {
 
     if (sessionId) {
       const db = await getDB();
-      await db.collection("sessions").deleteOne({ token: sessionId });
+      await db.collection("sessions").deleteOne(sessionTokenFilter(sessionId));
       await clearSessionCookie();
     }
 

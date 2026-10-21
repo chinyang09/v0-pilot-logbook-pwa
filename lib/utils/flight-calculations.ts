@@ -7,7 +7,8 @@ import { calculateDuration, subtractHHMM, isValidHHMM, hhmmToMinutes } from "./t
 import { isNight, calculateNightTimeComplete } from "./night-time"
 import type { Airport } from "@/types/entities/airport.types"
 import type { FlightLog, Approach, PilotRole, ManualOverrides } from "@/types/entities/flight.types"
-import type { AutoFillPreferences } from "@/types/db/stores.types"
+import { DEFAULT_LOGGING_PREFERENCES, type AutoFillPreferences } from "@/types/db/stores.types"
+import { inferPilotFlying, inferPilotRole, UNSTATED_ROLE } from "./flight-evidence"
 import { isSimulatorEntry, simulatorRepairPatch } from "./entry-type"
 
 /**
@@ -236,10 +237,20 @@ export function getApproachCategory(type: string): Approach["category"] {
   return precisionApproaches.includes(type.toUpperCase()) ? "precision" : "non-precision"
 }
 
+/** How a flight the pilot creates starts — from Settings › Logging. */
+export interface NewFlightStart {
+  pilotFlying?: boolean
+  pilotRole?: PilotRole
+}
+
 /**
- * Create a default/empty flight log
+ * An empty flight log. Who flew it and in what role are the pilot's settings
+ * (`start`, from Settings › Logging); with none given, the settings' own
+ * defaults apply — never a constant chosen here.
  */
-export function createEmptyFlightLog(): Omit<FlightLog, "id" | "createdAt" | "updatedAt" | "syncStatus"> {
+export function createEmptyFlightLog(
+  start: NewFlightStart = {}
+): Omit<FlightLog, "id" | "createdAt" | "updatedAt" | "syncStatus"> {
   return {
     date: new Date().toISOString().split("T")[0],
     flightNumber: "",
@@ -266,8 +277,8 @@ export function createEmptyFlightLog(): Omit<FlightLog, "id" | "createdAt" | "up
     sicId: "",
     sicName: "",
     additionalCrew: [],
-    pilotFlying: true,
-    pilotRole: "PIC",
+    pilotFlying: start.pilotFlying ?? DEFAULT_LOGGING_PREFERENCES.newFlightPilotFlying,
+    pilotRole: start.pilotRole ?? UNSTATED_ROLE,
     picTime: "00:00",
     sicTime: "00:00",
     picusTime: "00:00",
@@ -363,7 +374,7 @@ export function recalculateFlightFields(
       airborne.on,
       depAirport,
       arrAirport,
-      flight.pilotFlying ?? true,
+      flight.pilotFlying ?? inferPilotFlying(flight),
       flight.outTime
     )
 
@@ -398,7 +409,7 @@ export function recalculateFlightFields(
       autoFill?.dualGiven !== false
 
     if (shouldAutoFillRoles) {
-      const roleTimes = calculateRoleTimes(blockTime, flight.pilotRole || "PIC")
+      const roleTimes = calculateRoleTimes(blockTime, flight.pilotRole || inferPilotRole(flight))
 
       if (autoFill?.pic !== false) updates.picTime = roleTimes.picTime
       if (autoFill?.sic !== false) updates.sicTime = roleTimes.sicTime

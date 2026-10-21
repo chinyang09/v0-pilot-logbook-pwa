@@ -35,16 +35,17 @@ async function lastPilotRole() {
 
 export function useCreateFlight() {
   return useCallback(async (date?: string) => {
-    const emptyFlight = createEmptyFlightLog()
+    const prefs = await getUserPreferences().catch(() => null)
+    // PF or PM is the pilot's own setting (Settings › Logging).
+    const emptyFlight = createEmptyFlightLog({ pilotFlying: prefs?.logging?.newFlightPilotFlying })
     const flightDate = date || new Date().toISOString().split("T")[0]
     const self = await getLoggingProfile().catch(() => null)
     const seat = seatOf(self)
     let seating: Partial<typeof emptyFlight> = {}
     if (self && seat) {
-      const prefs = await getUserPreferences().catch(() => null)
       const pilotRole = roleForSeat(
         seat,
-        emptyFlight.pilotFlying ?? true,
+        emptyFlight.pilotFlying,
         nonPicPfRoleOf(self, prefs?.importDefaults?.nonPicPfRole, flightDate)
       )
       seating =

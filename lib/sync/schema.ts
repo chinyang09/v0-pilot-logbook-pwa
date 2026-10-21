@@ -34,6 +34,7 @@ import type { ScheduleEntry, Currency, Discrepancy } from "@/types/entities/rost
 import type { SyncCollection } from "@/types/sync/sync.types"
 import { toTimestamp } from "./authorship"
 import { getEntryType } from "@/lib/utils/entry-type"
+import { inferPilotFlying, inferPilotRole } from "@/lib/utils/flight-evidence"
 import { SETTINGS_FIELD_KEYS } from "@/lib/settings/user-settings"
 
 /**
@@ -204,8 +205,10 @@ const FLIGHT_FIELDS = {
   sicId: "",
   sicName: "",
   additionalCrew: emptyArray,
-  pilotFlying: true,
-  pilotRole: "PIC",
+  // Filled from the record's own figures when a push omits them — a constant
+  // here filed every such flight as flown, in command (`flight-evidence.ts`).
+  pilotFlying: (src) => inferPilotFlying(src),
+  pilotRole: (src) => inferPilotRole(src),
   picTime: ZERO_TIME,
   sicTime: ZERO_TIME,
   picusTime: ZERO_TIME,
@@ -246,7 +249,10 @@ const AIRCRAFT_FIELDS = {
   typeDesignator: "",
   model: "",
   category: "",
-  engineType: "SEP",
+  // Unknown until the type says (DOC 8643). A constant "SEP" filed an
+  // unclassified airliner as a single-engine piston, where the dashboard would
+  // otherwise have read the engine off the type's description.
+  engineType: opt("string"),
   isComplex: false,
   isHighPerformance: false,
   serialNumber: opt("string"),

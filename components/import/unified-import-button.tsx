@@ -40,6 +40,7 @@ import {
 import { parseLogbookV2 } from "@/lib/utils/parsers/logbook-parser-v2";
 import {
   crossHydrate,
+  mergeImportPersonnel,
   logbookSectorToParsedSector,
 } from "@/lib/utils/parsers/cross-hydrate";
 import { reconcileRoster } from "@/lib/utils/roster/reconciler";
@@ -378,7 +379,14 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             stage: "Merging",
             detail: "Hydrating logbook actuals into schedule rows...",
           });
-          const merged = crossHydrate(logbookPlan, schedulePlan);
+          const hydrated = crossHydrate(logbookPlan, schedulePlan);
+          // One card per person — see `mergeImportPersonnel`.
+          const crew = mergeImportPersonnel(
+            hydrated.sectors,
+            schedulePlan.personnelToCreate,
+            logbookPlan.personnelToCreate
+          );
+          const merged = { ...hydrated, sectors: crew.sectors };
 
           // Simulator sessions: prefer the schedule's richer EBT/Training
           // Details entries; add any logbook-only sim dates the schedule
@@ -446,10 +454,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             generatedAt: reportGeneratedAt ?? null,
             dateRange,
             operations: acceptedOps,
-            personnelToCreate: [
-              ...schedulePlan.personnelToCreate,
-              ...logbookPlan.personnelToCreate,
-            ],
+            personnelToCreate: crew.personnelToCreate,
             errors: [...schedulePlan.errors, ...logbookPlan.errors],
             warnings: [...schedulePlan.warnings, ...logbookPlan.warnings],
             summary: summarizeOperations(acceptedOps),

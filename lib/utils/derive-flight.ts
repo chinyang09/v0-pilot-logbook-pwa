@@ -1,5 +1,6 @@
 import type { FlightLog } from "@/lib/db"
-import { createEmptyFlightLog } from "@/lib/utils/flight-calculations"
+import { createEmptyFlightLog, type NewFlightStart } from "@/lib/utils/flight-calculations"
+import { reconcilePilotRole } from "@/lib/utils/roster/pilot-role"
 
 export type DeriveKind = "next-leg" | "return-trip" | "duplicate"
 
@@ -23,9 +24,11 @@ export type DeriveKind = "next-leg" | "return-trip" | "duplicate"
  */
 export function deriveFlight(
   source: FlightLog,
-  kind: DeriveKind
+  kind: DeriveKind,
+  start: NewFlightStart = {}
 ): Omit<FlightLog, "id" | "createdAt" | "updatedAt" | "syncStatus"> {
-  const empty = createEmptyFlightLog()
+  const empty = createEmptyFlightLog(start)
+  const pilotFlying = kind === "duplicate" ? source.pilotFlying : empty.pilotFlying
 
   const route =
     kind === "return-trip"
@@ -68,11 +71,18 @@ export function deriveFlight(
     sicId: source.sicId,
     sicName: source.sicName,
     additionalCrew: source.additionalCrew ? [...source.additionalCrew] : [],
-    pilotRole: source.pilotRole,
+    // The role follows the PF/PM the new leg starts with — a PICUS leg's next
+    // leg starting as Pilot Monitoring is SIC. The source's own convention
+    // stands in for the pilot's (a flying SIC leg stays SIC).
+    pilotRole: reconcilePilotRole({
+      currentRole: source.pilotRole,
+      pilotFlying,
+      nonPicPfRole: source.pilotRole === "PICUS" ? "PICUS" : "SIC",
+    }),
     // A duplicate repeats the sector as flown, so it keeps who was flying;
     // a next leg or a return normally swaps, and guessing wrong writes a
-    // claim about the pilot's own record. Left at the form's default there.
-    pilotFlying: kind === "duplicate" ? source.pilotFlying : empty.pilotFlying,
+    // claim about the pilot's own record. It starts as Settings › Logging says.
+    pilotFlying,
     entryType: source.entryType,
     isSimulator: source.isSimulator,
   }

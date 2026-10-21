@@ -38,6 +38,8 @@ import {
   type ScoredPair,
 } from "./match-assign";
 import type { ImportDefaults } from "@/types/db/stores.types";
+import { isSamePersonName } from "@/lib/utils/parsers/shared/name-normalize";
+import { inferPilotFlying } from "@/lib/utils/flight-evidence";
 
 // ============================================================
 // Public types
@@ -378,26 +380,6 @@ export function deriveSectorCrew(
   }
 
   return { picId, picName, sicId, sicName, isSelfCPT, isSelfFO };
-}
-
-/** Alphanumeric-only lowercase form for tolerant crew-name comparison. */
-function normPersonName(s: string): string {
-  return s ? s.toLowerCase().replace(/[^a-z0-9]/g, "") : "";
-}
-
-/**
- * Two crew names refer to the same person when their normalized forms are
- * equal OR one is a prefix of the other (the Crew Logbook Report truncates
- * names to 20 chars; the Schedule Report carries the full form).
- */
-function isSamePersonName(a: string, b: string): boolean {
-  const na = normPersonName(a);
-  const nb = normPersonName(b);
-  if (!na || !nb) return false;
-  if (na === nb) return true;
-  if (na.length > nb.length && na.startsWith(nb)) return true;
-  if (nb.length > na.length && nb.startsWith(na)) return true;
-  return false;
 }
 
 /**
@@ -819,7 +801,7 @@ function diffSectorVsFlight(
   ) {
     changes.push({
       field: "pilotFlying",
-      from: String(flight.pilotFlying ?? true),
+      from: String(flight.pilotFlying ?? inferPilotFlying(flight)),
       to: String(sector.isPilotFlying),
     });
 
@@ -983,7 +965,7 @@ function diffSectorVsFlight(
     if (role !== -1) suppressed.push(...visible.splice(role, 1));
     const kept = settledRole({
       currentRole: flight.pilotRole,
-      pilotFlying: flight.pilotFlying ?? true,
+      pilotFlying: flight.pilotFlying ?? inferPilotFlying(flight),
       convention,
       onDate: conventionOnDate,
     });

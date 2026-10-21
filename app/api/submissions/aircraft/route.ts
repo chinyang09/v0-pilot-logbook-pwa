@@ -12,11 +12,28 @@
  */
 
 import { NextResponse } from "next/server"
+import type { Document } from "mongodb"
 import { getMongoClient } from "@/lib/mongodb"
 import { validateRequestSession, assertSameOrigin } from "@/lib/auth/server/session"
 import { enrichAircraftFromFR24 } from "@/lib/enrichment/aircraft-enrichment"
 import { getICAOTypeByDesignator } from "@/lib/icao-types/icao-types-server"
 import { normalizeRegistration } from "@/lib/utils/string"
+
+/** How long a lookup that came back empty is left before a submit retries it. */
+const RETRY_AFTER_MS = 60 * 60 * 1000
+
+/**
+ * An existing submission that never enriched is looked up again when it is
+ * submitted again, at most hourly. It used to be answered `pending` from the
+ * stored doc forever: the batch job that was meant to retry it had no cron
+ * behind it, so a registration FR24 missed once (9V-TNL, four months) never
+ * reached the shared pool — and so never reached any device's aircraft list.
+ */
+function dueForRetry(doc: Document, now: number): boolean {
+  if (doc.status === "enriched") return false
+  const last = Number(doc.lastRetryAt ?? doc.submittedAt ?? 0)
+  return now - last >= RETRY_AFTER_MS
+}
 
 export async function POST(request: Request) {
   if (!assertSameOrigin(request)) {
@@ -109,19 +126,31 @@ export async function POST(request: Request) {
     throw err
   })
 
+  // The submission this request answers for: the new one, or the one that
+  // already holds this registration.
+  let canonicalId = submissionId
   if (!upsertResult || upsertResult.upsertedCount === 0) {
-    // Already existed (or lost the insert race) — return the canonical doc.
+    // Already existed (or lost the insert race).
     const existing = await collection.findOne({ registrationNormalized: regNormalized })
-    if (existing) return existingResponse(existing)
+    if (existing && !dueForRetry(existing, now)) return existingResponse(existing)
+    if (existing) canonicalId = existing.submissionId
   }
 
   // Attempt real-time FR24 enrichment (includes ICAO type hydration)
   const enriched = await enrichAircraftFromFR24(registration)
+  if (!enriched && canonicalId !== submissionId) {
+    // A retry that found nothing still counts, so a registration FR24 does
+    // not know is not looked up on every submit.
+    await collection.updateOne(
+      { registrationNormalized: regNormalized },
+      { $set: { lastRetryAt: now }, $inc: { retryCount: 1 } }
+    )
+  }
   if (enriched) {
     const finalTypecode = enriched.typecode || typecode || ""
 
     await collection.updateOne(
-      { submissionId },
+      { registrationNormalized: regNormalized },
       {
         $set: {
           registration: enriched.registration,
@@ -142,7 +171,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       data: {
-        submissionId,
+        submissionId: canonicalId,
         status: "enriched",
         enrichedData: {
           registration: enriched.registration,
@@ -162,7 +191,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     success: true,
     data: {
-      submissionId,
+      submissionId: canonicalId,
       status: "pending",
       enrichedData: null,
     },

@@ -53,6 +53,7 @@ import {
   getApproachCategory,
   hasCoordinates,
 } from "@/lib/utils/flight-calculations";
+import { inferPilotFlying, inferPilotRole } from "@/lib/utils/flight-evidence";
 import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
   formatClockDisplay,
@@ -650,6 +651,11 @@ export function FlightForm({
   }, [resolvedFlight?.id, personnel]);
 
   // Calculate derived fields
+  // A stored flight carries its own PF/PM and role; the evidence fallback only
+  // covers a row written without them (`lib/utils/flight-evidence.ts`).
+  const formPilotFlying = formData.pilotFlying ?? inferPilotFlying(formData);
+  const formPilotRole = formData.pilotRole || inferPilotRole(formData);
+
   const calculatedFields = useMemo(() => {
     // A simulator derives nothing from its OUT/IN: its duration is
     // `simulatedInstrumentTime`, and a block time computed here was written
@@ -759,7 +765,7 @@ export function FlightForm({
             airborne.on,
             depAirport,
             arrAirport,
-            formData.pilotFlying ?? true,
+            formPilotFlying,
             formData.outTime
           )
         : {
@@ -771,7 +777,7 @@ export function FlightForm({
 
     const roleTimes = calculateRoleTimes(
       blockTime,
-      formData.pilotRole || "PIC"
+      formPilotRole
     );
 
     // Gate role times by auto-fill preferences
@@ -803,8 +809,8 @@ export function FlightForm({
     formData.offTime,
     formData.onTime,
     formData.inTime,
-    formData.pilotFlying,
-    formData.pilotRole,
+    formPilotFlying,
+    formPilotRole,
     formData.departureIcao,
     formData.arrivalIcao,
     formData.nightTime,
@@ -2025,7 +2031,7 @@ export function FlightForm({
 
           <ToggleRow
             label="Pilot Flying"
-            checked={formData.pilotFlying ?? true}
+            checked={formPilotFlying}
             onCheckedChange={(checked) => {
               updateField("pilotFlying", checked);
               // The role follows who had the controls: a first officer's
@@ -2033,7 +2039,7 @@ export function FlightForm({
               // PICUS falls back to SIC when they were monitoring. A captain
               // stays PIC either way — see `reconcilePilotRole`.
               const nextRole = reconcilePilotRole({
-                currentRole: formData.pilotRole || "PIC",
+                currentRole: formPilotRole,
                 pilotFlying: checked,
                 nonPicPfRole: nonPicPfRoleOf(
                   withLoggingPreferences(pickSelfCard(personnel), preferences.logging),
@@ -2052,12 +2058,12 @@ export function FlightForm({
           <div className="relative flex items-center justify-between py-3.5 px-4 row-divider focus-within:outline-2 focus-within:outline-ring focus-within:-outline-offset-2">
             <span className="text-foreground">Pilot Role</span>
             <span className="flex items-center gap-1 text-foreground">
-              {formData.pilotRole || "PIC"}
+              {formPilotRole}
               <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden />
             </span>
             <select
               aria-label="Pilot role"
-              value={formData.pilotRole || "PIC"}
+              value={formPilotRole}
               onChange={(e) =>
                 updateField(
                   "pilotRole",

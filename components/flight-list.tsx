@@ -342,6 +342,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     ref
   ) {
     const { preferences } = usePreferences();
+    const newFlightPilotFlying = preferences.logging.newFlightPilotFlying;
 
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const isExternalScrollRef = useRef(false);
@@ -677,7 +678,9 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           return;
         }
         const { addFlight } = await import("@/lib/db");
-        const created = await addFlight(deriveFlight(source, action as DeriveKind));
+        const created = await addFlight(
+          deriveFlight(source, action as DeriveKind, { pilotFlying: newFlightPilotFlying })
+        );
         // Placed by the shared comparator, never prepended — see flight-sort.
         mutate(
           CACHE_KEYS.flights,
@@ -687,7 +690,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
         primeFlightCache(created);
         onEdit?.(created);
       },
-      [held, handleToggleLock, onEdit]
+      [held, handleToggleLock, onEdit, newFlightPilotFlying]
     );
 
     // FastScroll selection handler (year-based) with instant scrolling

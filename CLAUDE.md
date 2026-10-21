@@ -221,8 +221,9 @@ All user data is stored locally in **IndexedDB via Dexie** and synced to **Mongo
   whichever copy matched FIRST — the older one — and a purge's `deleteOne`
   left the other standing. Now the newest copy (highest `serverSeq`) is the
   record: a write replaces it by `_id` and deletes the superseded copies in the
-  same commit, and a purge is a `deleteMany`. `ensureIndexes` logs which ids
-  block the index
+  same commit, and a purge is a `deleteMany`. `ensureIndexes` removes the
+  superseded copies (`collapseDuplicateCopies` — each delete pinned to the seq
+  it read) and then builds the index
 
 ### The Sync Protocol (`/api/sync`, `lib/sync/`)
 
@@ -476,6 +477,11 @@ pages showed pre-sync numbers until they remounted. Every SWR key in
 - TOTP bookkeeping is **atomic** (`lib/auth/server/totp-attempts.ts`): `claimTotpCounter` is a conditional update only one request can win, and `recordTotpFailure` counts with `$inc`. Read-then-write let parallel guesses skip the 5-attempt lockout and one code log in twice. The callsign change shares the lockout.
 - Login challenges are typed `"login"` and consumed only as that type.
 - No route returns the session TOKEN in a body — it is the HttpOnly cookie's secret.
+- **A session row stores the SHA-256 of the token, never the token**
+  (`hashSessionToken`, in the row's `token` field so the unique index still
+  holds). Look a row up with `sessionTokenFilter` and recognise the current one
+  with `isSessionRowFor` — both also accept a row written before hashing, which
+  `upgradeLegacySessionRow` rewrites to the hash on its first use.
 - **A store error is not a missing session.** `validateSession` throws (`SessionStoreUnavailableError`) so the route answers 5xx; returning `null` turned a MongoDB cold start into a 401 the client read as "signed out". It also re-sets the cookie when it slides the session forward.
 
 **A 401 during sync is a claim, not proof** (`handleSyncReauth`): the session
@@ -527,7 +533,12 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 **Enrichment Pipeline:**
 - Custom aircraft/airports are submitted fire-and-forget to `/api/submissions/aircraft` or `/api/submissions/airport`
 - Server attempts real-time enrichment (FR24 for aircraft, geo-tz for airports)
-- Failed enrichments are retried by `/api/enrichment/batch` (cron, max 3 retries)
+- Failed enrichments are retried by `/api/enrichment/batch` (cron, max 3 retries) —
+  scheduled daily in `vercel.json`. Vercel Cron sends **GET** with
+  `Authorization: Bearer $CRON_SECRET`; the route took POST only and there was
+  no `vercel.json`, so for months nothing retried (9V-TNL sat `pending` from
+  June). A re-submitted registration that never enriched is also looked up
+  again inline, at most hourly (`dueForRetry`)
 - Enriched data is shared across all users via batch lookup API
 
 **Form UX Pattern:**
@@ -4275,6 +4286,10 @@ When making changes, be aware of these high-impact files:
 - Do not fetch anything to choose, edit or restore a palette, and do not apply the stored palette before the preferences row has loaded — the boot script has already painted it from localStorage, and applying the in-memory default first flashes Graphite on every launch
 
 **Report import:**
+- Do not concatenate the two parsers' new crew cards in a cross-hydrated import — each invents a card for a captain it cannot find (the logbook from a truncated name, the schedule from the full one), so the same person got two. `mergeImportPersonnel` keeps the schedule's card, points the logbook's sectors at it, and drops a logbook card nothing uses
+- Do not leave a flight pointing at a crew card or a fleet record nobody holds — `repairRecordReferences` (`lib/utils/roster/reference-repairs.ts`, run after the initial sync) repoints a dangling seat to a live card for the same person or creates the card under the id the flights carry, and gives every flown registration a fleet record. It runs only after a COMPLETE pull: before it a card not yet received looks missing, and recreating it would overwrite the real one. A binned card or fleet record counts as held — never resurrected
+- Do not create fleet records only for the flights an import TOUCHED — a sector the report repeated unchanged is never touched, so its aircraft never got one (9 registrations in production). The executor covers every flown registration (`missingFleetRegistrations`)
+- Do not give a flight's `pilotFlying`/`pilotRole` or an aircraft's `engineType` a constant default — not in the schema, a normalizer or a form. A missing PF/PM or role is filled from the record's own figures (`lib/utils/flight-evidence.ts`: takeoffs/landings, role times, a simulator, the "Self" seat), the same rule on server and client; a NEW flight starts as Settings › Logging says (`newFlightPilotFlying`, the seat); an engine type the type data cannot classify stays UNKNOWN, because the dashboard then reads it off the DOC 8643 description, where a constant "SEP" would have counted an airliner as a piston single
 - Do not write an imported record with a bare `table.put()` — it is a raw Dexie write with NO sync-queue entry behind it, so the row lives only on the device that ran the import. The importers reached for it because their rows already carry the ids the flight rows point at, which rules out `addPersonnel`/`addCurrency`; `putManyWithSync` (`crud-helpers.ts`) is the shape that keeps the id AND enqueues, in one `bulkPut` + one `enqueueMany` rather than 2N round trips. Crew, currencies and discrepancies were all silently local for exactly this reason
 - Do not close the import status dialog when an execution finishes — it is the ONLY surface that renders the summary and the error message, and closing it in the `finally` meant every eCrew import ended in silence with the work done and nothing said. `onDone` closes it; a cancel closes it without setting a summary nobody will see
 - Do not fan a per-item enrichment leg out with `Promise.allSettled(remaining.map(…))` — that is every unresolved registration or airport at once, each holding an 8s timeout through one proxy route. Go through `pooledForEach` (`shared/pooled-map.ts`); a roster's handful behaves identically and a career's logbook gets a queue instead of a stampede

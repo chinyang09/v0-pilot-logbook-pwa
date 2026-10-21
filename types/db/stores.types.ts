@@ -76,9 +76,13 @@ export interface ImportDefaults {
 
 /**
  * How the pilot logs their own seat — a USER setting (synced), not a device
- * one. Every value is nullable: null is "not set here", and the pilot's "This
- * is me" crew card answers instead, which is where these lived before
+ * one. The seat values are nullable: null is "not set here", and the pilot's
+ * "This is me" crew card answers instead, which is where these lived before
  * (`withLoggingPreferences` in lib/utils/roster/pilot-role.ts).
+ *
+ * This is also where a NEW flight's starting values live. Nothing about a
+ * pilot's flight is a fixed default in code — the app starts a flight the way
+ * the pilot said to, and follows when they change it.
  */
 export interface LoggingPreferences {
   /** Captain logs PIC whoever flies; a first officer logs SIC (or PICUS when flying). */
@@ -90,12 +94,19 @@ export interface LoggingPreferences {
    * `""` says "no date" explicitly, so the card's date does not show through.
    */
   pfRoleFrom: string | null
+  /**
+   * Whether a flight the pilot CREATES (new, next leg, return trip) starts as
+   * Pilot Flying or Pilot Monitoring. Only a starting value: a recorded flight
+   * keeps what was recorded, and an import takes the report's PF/PM.
+   */
+  newFlightPilotFlying: boolean
 }
 
 export const DEFAULT_LOGGING_PREFERENCES: LoggingPreferences = {
   seat: null,
   pfRole: null,
   pfRoleFrom: null,
+  newFlightPilotFlying: true,
 }
 
 export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {

@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { cookies } from "next/headers";
-import type { Db } from "mongodb";
+import type { Db, Document } from "mongodb";
 import { getMongoClient } from "@/lib/mongodb";
 import { createId } from "@/lib/auth/shared/cuid";
 
@@ -35,6 +36,42 @@ export async function clearSessionCookie(): Promise<void> {
   cookieStore.delete(SESSION_COOKIE_NAME);
 }
 
+/**
+ * The session row stores a SHA-256 of the cookie's secret, never the secret
+ * itself, so a read of the `sessions` collection (a backup, a leaked
+ * connection string, an admin query) yields nothing that signs anyone in. The
+ * cookie still carries the raw value; each lookup hashes it first.
+ *
+ * The hash lives in the row's `token` field, which keeps the existing unique
+ * index meaningful without a migration. Rows written before hashing still hold
+ * the raw value there, so a lookup accepts either (`sessionTokenFilter`) and
+ * the first hit rewrites the row to the hash (`upgradeLegacySessionRow`); the
+ * rest expire within the 30-day TTL. A raw token is a 25-character cuid and a
+ * hash 64 hex characters, so the two can never be confused.
+ */
+export function hashSessionToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/** Matches the session row for a cookie value — hashed, or written before hashing. */
+export function sessionTokenFilter(token: string): { token: { $in: string[] } } {
+  return { token: { $in: [hashSessionToken(token), token] } };
+}
+
+/** Whether `row` is the session `token` (the raw cookie value) belongs to. */
+export function isSessionRowFor(row: Document, token: string | undefined): boolean {
+  return !!token && (row.token === hashSessionToken(token) || row.token === token);
+}
+
+/** Replace a pre-hashing row's raw token with its hash. Best-effort. */
+export async function upgradeLegacySessionRow(db: Db, row: Document, token: string): Promise<void> {
+  if (row.token !== token) return;
+  await db
+    .collection("sessions")
+    .updateOne({ _id: row._id, token }, { $set: { token: hashSessionToken(token) } })
+    .catch((err) => console.warn("[Auth] session token upgrade failed:", err));
+}
+
 export interface IssueSessionInput {
   userId: string;
   callsign: string;
@@ -59,7 +96,7 @@ export async function issueSession(
   const now = new Date();
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
   const base = {
-    token,
+    token: hashSessionToken(token),
     userId,
     callsign,
     expiresAt,
@@ -104,13 +141,14 @@ export async function validateSession(): Promise<SessionData | null> {
 
     
     const session = await db.collection("sessions").findOne({
-      token: sessionToken,
+      ...sessionTokenFilter(sessionToken),
       expiresAt: { $gt: new Date() },
     });
 
     if (!session) {
       return null;
     }
+    await upgradeLegacySessionRow(db, session, sessionToken);
 
     // Extend session if it's been more than a day since last access
     const now = new Date();
@@ -123,7 +161,7 @@ export async function validateSession(): Promise<SessionData | null> {
     if (lastAccess < oneDayAgo) {
       const newExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
       await db.collection("sessions").updateOne(
-        { token: sessionToken }, 
+        { _id: session._id },
         { $set: { lastAccessedAt: now, expiresAt: newExpiresAt } }
       );
       // The cookie's own expiry has to slide with the row. Extending only the
@@ -180,7 +218,7 @@ export async function validateSessionFromHeader(
   const db = client.db("skylog");
 
   const session = await db.collection("sessions").findOne({
-    token: token,
+    ...sessionTokenFilter(token),
     expiresAt: { $gt: new Date() },
   });
 
