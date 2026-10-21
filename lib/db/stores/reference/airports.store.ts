@@ -16,7 +16,7 @@ import {
   type AirportSeedMessage,
 } from "./airport-seed"
 import type { Airport } from "@/types/entities/airport.types"
-import { tzFormatter, tzOffsetName } from "@/lib/utils/tz-format"
+import { tzFormatter, tzOffsetName, offsetHoursFromName } from "@/lib/utils/tz-format"
 
 // ============================================
 // Types (re-export for convenience)
@@ -405,16 +405,14 @@ export function getAirportLocalTime(tz: string): string {
 
 /**
  * Get numeric timezone offset for an airport timezone
- * Returns offset in hours (e.g., +8 for Singapore, -5 for New York)
+ * Returns offset in hours (e.g., +8 for Singapore, -5 for New York, +5.5 for
+ * India), as at `at` (default now — pass the flight's instant where DST could
+ * differ).
  */
-export function getAirportTimeInfo(tz: string): { offset: number; offsetStr: string } {
+export function getAirportTimeInfo(tz: string, at: Date = new Date()): { offset: number; offsetStr: string } {
   try {
-    const now = new Date()
-    const offsetPart = tzOffsetName(tz, "longOffset", now)
-    const match = offsetPart.match(/([+-]\d+)/)
-    const offset = match ? Number.parseInt(match[1]) : 0
-
-    const offsetStr = tzOffsetName(tz, "shortOffset", now) || "UTC"
+    const offset = offsetHoursFromName(tzOffsetName(tz, "longOffset", at))
+    const offsetStr = tzOffsetName(tz, "shortOffset", at) || "UTC"
 
     return { offset, offsetStr }
   } catch {

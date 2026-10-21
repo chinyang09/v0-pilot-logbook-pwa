@@ -47,6 +47,36 @@ describe("canonical document shape", () => {
     expect(Object.keys(sparse)).toEqual(Object.keys(rich))
   })
 
+  it("says one thing one way: a flight's type and lock are never null (v3)", () => {
+    // Production held entryType on 14 flights and null on 307, isLocked as
+    // false on 250 and null on 71 — three spellings of "an ordinary flight".
+    const legacy = write("flights", { id: "a", isSimulator: null, entryType: null, isLocked: null })
+    expect([legacy.entryType, legacy.isSimulator, legacy.isLocked]).toEqual(["flight", false, false])
+    const oldSim = write("flights", { id: "b", isSimulator: true })
+    expect([oldSim.entryType, oldSim.isSimulator]).toEqual(["simulator", true])
+    const newSim = write("flights", { id: "c", entryType: "simulator" })
+    expect([newSim.entryType, newSim.isSimulator]).toEqual(["simulator", true])
+    const locked = write("flights", { id: "d", isLocked: true })
+    expect(locked.isLocked).toBe(true)
+  })
+
+  it("drops a RETIRED key and keeps an unknown one", () => {
+    const doc = write("flights", { id: "a", isDraft: false, someNewerField: 1 })
+    expect("isDraft" in doc).toBe(false)
+    expect(doc.someNewerField).toBe(1)
+    // Also on a replace over a stored document that still has it.
+    const over = write("flights", { id: "a" }, { id: "a", isDraft: false, createdAt: 1 })
+    expect("isDraft" in over).toBe(false)
+  })
+
+  it("gives every crew card the dated PF convention", () => {
+    const card = write("personnel", { id: "p", name: "Self" })
+    expect(card.pfRole).toBeNull()
+    expect(card.pfRoleFrom).toBeNull()
+    expect([card.isMe, card.favorite, card.defaultPIC, card.defaultSIC]).toEqual([false, false, false, false])
+    expect(write("personnel", { id: "q", isMe: true, defaultSIC: true }).defaultSIC).toBe(true)
+  })
+
   it("starts every collection with the same envelope", () => {
     for (const collection of SYNC_COLLECTIONS) {
       const doc = write(collection, { id: "x" })

@@ -20,6 +20,8 @@ import { createEntity, updateEntity, purgeEntity, silentDeleteEntity, upsertFrom
 import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
 import { sortFlights } from "@/lib/utils/flight-sort"
 import { isSimulatorEntry, simulatorRepairPatch } from "@/lib/utils/entry-type"
+import { timezoneRepairPatch } from "@/lib/utils/flight-timezone"
+import { getAirportByIcao, getAirportTimeInfo, isAirportTableSeeded } from "../reference/airports.store"
 
 /**
  * Not in the recycle bin — i.e. a flight that still counts for anything.
@@ -143,6 +145,34 @@ export async function repairSimulatorEntries(): Promise<number> {
     const patch = simulatorRepairPatch(sim)
     if (Object.keys(patch).length === 0) continue
     if (await updateFlight(sim.id, patch)) repaired++
+  }
+  return repaired
+}
+
+/**
+ * Puts each flight's stored UTC offsets right against its airports' zones
+ * (`timezoneRepairPatch`) — India had been stored as +5 for +5:30, and a flight
+ * written before its airport resolved kept 0. Like the simulator repair it runs
+ * through `updateFlight`, so the fix is an ordinary field patch every device
+ * pulls. Waits for the airport table: an unseeded table answers every lookup
+ * with nothing, which is a reason to try again next launch, not a zone.
+ */
+export async function repairFlightTimezones(): Promise<number> {
+  if (!isAirportTableSeeded()) return 0
+  const flights = await userDb.flights
+    .filter((f: FlightLog) => isLiveFlight(f) && !isSimulatorEntry(f) && !!f.departureIcao && !!f.arrivalIcao)
+    .toArray()
+  const zones = new Map<string, string | null>()
+  const zoneOf = async (icao: string) => {
+    if (!zones.has(icao)) zones.set(icao, (await getAirportByIcao(icao))?.tz || null)
+    return zones.get(icao) ?? null
+  }
+  const offsetAt = (tz: string, at: Date) => getAirportTimeInfo(tz, at).offset
+  let repaired = 0
+  for (const flight of flights) {
+    const patch = timezoneRepairPatch(flight, await zoneOf(flight.departureIcao), await zoneOf(flight.arrivalIcao), offsetAt)
+    if (Object.keys(patch).length === 0) continue
+    if (await updateFlight(flight.id, patch)) repaired++
   }
   return repaired
 }

@@ -33,6 +33,7 @@ import type { Personnel } from "@/types/entities/crew.types"
 import type { ScheduleEntry, Currency, Discrepancy } from "@/types/entities/roster.types"
 import type { SyncCollection } from "@/types/sync/sync.types"
 import { toTimestamp } from "./authorship"
+import { getEntryType } from "@/lib/utils/entry-type"
 
 /**
  * Bump when a field table below changes in a way the server must rewrite
@@ -42,8 +43,13 @@ import { toTimestamp } from "./authorship"
  * so the server knows whether the payload is COMPLETE (see `writeMode`).
  *
  * 1 is the implicit legacy version: no envelope, no defaults.
+ * 2 is the canonical envelope + field tables.
+ * 3 fills the self card's `pfRole`/`pfRoleFrom` (added after 2 had already
+ *   run, so no stored crew card carried them), settles a flight's
+ *   `entryType`/`isSimulator`/`isLocked` and a crew card's switches to one
+ *   representation each (`NORMALIZE`), and retires the dead `isDraft` key (`RETIRED_KEYS`).
  */
-export const SYNC_SCHEMA_VERSION = 2
+export const SYNC_SCHEMA_VERSION = 3
 
 /**
  * Push/pull order: dependency-light collections first, so a flight never
@@ -249,6 +255,40 @@ const DISCREPANCY_FIELDS = {
   resolutionNotes: null,
 } satisfies FieldTable<Discrepancy>
 
+/**
+ * Fields a table cannot give ONE default, because the right value follows from
+ * another field — applied to every document written, so a collection never
+ * holds the same fact two ways. Production carried `entryType` on 14 flights
+ * and `null` on 307, `isSimulator` the same, and `isLocked` as `false` on 250
+ * and `null` on 71: three ways of saying "an ordinary unlocked flight", which
+ * any query on those fields had to know about.
+ */
+const NORMALIZE: Partial<Record<SyncCollection, (doc: Doc) => void>> = {
+  flights: (doc) => {
+    const type = getEntryType(doc as Pick<FlightLog, "entryType" | "isSimulator">)
+    doc.entryType = type
+    doc.isSimulator = type === "simulator"
+    if (typeof doc.isLocked !== "boolean") doc.isLocked = false
+  },
+  // A crew card's switches were `null` on 70 cards and a boolean on 5.
+  personnel: (doc) => {
+    for (const key of ["isMe", "favorite", "defaultPIC", "defaultSIC"]) {
+      if (typeof doc[key] !== "boolean") doc[key] = false
+    }
+  },
+}
+
+/**
+ * Keys a collection once carried that nothing reads or writes any more. The
+ * rule is that an UNKNOWN key is kept (it may be a newer build's field), so a
+ * key is only dropped by being named here — after checking it is dead. `isDraft`
+ * was on 213 flights, every one of them `false`, and no code in this repo
+ * mentions it.
+ */
+const RETIRED_KEYS: Partial<Record<SyncCollection, ReadonlySet<string>>> = {
+  flights: new Set(["isDraft"]),
+}
+
 export const SYNC_FIELDS: Record<SyncCollection, Record<string, FieldDefault>> = {
   flights: FLIGHT_FIELDS,
   aircraft: AIRCRAFT_FIELDS,
@@ -334,17 +374,20 @@ export function canonicalizeDocument(collection: SyncCollection, source: Doc, en
     const value = source[key]
     out[key] = value !== undefined ? value : typeof def === "function" ? def(source) : def
   }
+  const retired = RETIRED_KEYS[collection]
   for (const [key, value] of Object.entries(source)) {
-    if (value === undefined || RESERVED.has(key) || key in out) continue
+    if (value === undefined || RESERVED.has(key) || key in out || retired?.has(key)) continue
     out[key] = value
   }
+  NORMALIZE[collection]?.(out)
   return out
 }
 
 /** The keys of `doc` that the field table does not know (excluding reserved). */
 export function extraKeys(collection: SyncCollection, doc: Doc): string[] {
   const fields = SYNC_FIELDS[collection]
-  return Object.keys(doc).filter((k) => !RESERVED.has(k) && !(k in fields))
+  const retired = RETIRED_KEYS[collection]
+  return Object.keys(doc).filter((k) => !RESERVED.has(k) && !(k in fields) && !retired?.has(k))
 }
 
 /**

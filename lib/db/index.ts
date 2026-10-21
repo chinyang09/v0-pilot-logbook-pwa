@@ -64,6 +64,7 @@ export {
   permanentlyDeleteFlight,
   purgeExpiredDeletedFlights,
   repairSimulatorEntries,
+  repairFlightTimezones,
   getDeletedFlights,
   isLiveFlight,
   silentDeleteFlight,

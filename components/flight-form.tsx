@@ -35,6 +35,7 @@ import {
   updatePersonnel,
   getFlightById,
   isLiveFlight,
+  getAirportTimeInfo,
 } from "@/lib/db";
 import { useDebounce } from "@/hooks/use-debounce";
 import { formPatch, rebaseForm } from "@/lib/utils/form-patch";
@@ -74,6 +75,7 @@ import {
   ENTRY_TYPES,
   entryTypePatch,
   getEntryType,
+  withoutSimulatorPins,
 } from "@/lib/utils/entry-type";
 import type { EntryType } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
@@ -517,21 +519,8 @@ export function FlightForm({
     (!!formData.arrivalIcao && arrLookup === undefined);
 
   // Helper to get numeric offset from IANA string
-  const getNumericOffset = (tzString?: string) => {
-    if (!tzString) return 0;
-    try {
-      const parts = new Intl.DateTimeFormat("en-US", {
-        timeZone: tzString,
-        timeZoneName: "longOffset",
-      }).formatToParts(new Date());
-      const offsetPart =
-        parts.find((p) => p.type === "timeZoneName")?.value || "";
-      const match = offsetPart.match(/([+-]\d+)/);
-      return match ? parseInt(match[1]) : 0;
-    } catch {
-      return 0;
-    }
-  };
+  const getNumericOffset = (tzString?: string) =>
+    tzString ? getAirportTimeInfo(tzString).offset : 0;
 
   // Replace your old timezone constants with these dynamic ones
   const depTimezone = useMemo(
@@ -1140,6 +1129,10 @@ export function FlightForm({
         ...patch,
         blockTime: duration,
         simulatedInstrumentTime: "00:00",
+        // A simulator pins its session time and its night time (00:00 — a
+        // sim has no sky). Carried into a FLIGHT those pins hold night at
+        // zero for good, because every recalculation respects a pin.
+        manualOverrides: withoutSimulatorPins(prev.manualOverrides ?? {}, prev.nightTime),
       };
     });
   }, []);

@@ -4,19 +4,27 @@ import type React from "react"
 import { useEffect, useRef } from "react"
 import { syncService } from "@/lib/sync"
 import { refreshAllData } from "@/hooks/data"
-import { repairSimulatorEntries } from "@/lib/db"
+import { repairFlightTimezones, repairSimulatorEntries } from "@/lib/db"
 import { useAuth } from "@/components/providers/auth-provider"
 
-/** One pass per sign-in or launch; the repair is idempotent and never fatal. */
-async function repairSimulators(): Promise<number> {
+/** One pass per sign-in or launch; each repair is idempotent and never fatal. */
+async function repairStoredFlights(): Promise<number> {
+  let repaired = 0
   try {
-    const repaired = await repairSimulatorEntries()
-    if (repaired > 0) console.warn(`[Sync] repaired ${repaired} simulator entries carrying block or role time`)
-    return repaired
+    const sims = await repairSimulatorEntries()
+    if (sims > 0) console.warn(`[Sync] repaired ${sims} simulator entries carrying block or role time`)
+    repaired += sims
   } catch (error) {
     console.error("[Sync] simulator repair failed:", error)
-    return 0
   }
+  try {
+    const zones = await repairFlightTimezones()
+    if (zones > 0) console.warn(`[Sync] repaired ${zones} flights carrying a wrong UTC offset`)
+    repaired += zones
+  } catch (error) {
+    console.error("[Sync] timezone repair failed:", error)
+  }
+  return repaired
 }
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
@@ -72,12 +80,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           // Continue regardless - offline mode still works.
         }
         // After the pull, so the rows patched are the ones the server has.
-        await repairSimulators()
+        await repairStoredFlights()
         await refreshAllData()
       })()
     } else {
       console.log("[v0] Offline - skipping initial sync, triggers will handle it when online")
-      void repairSimulators().then((n) => (n > 0 ? refreshAllData() : undefined))
+      void repairStoredFlights().then((n) => (n > 0 ? refreshAllData() : undefined))
     }
   }, [userId])
 

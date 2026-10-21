@@ -101,3 +101,17 @@ export function formatInstant(
     display?.clockSeparator === "none" ? text.replace(":", "") : text
   return zulu ? `${bare}Z` : bare
 }
+
+/**
+ * Hours east of UTC from an `Intl` long offset name — `GMT+05:30` → 5.5,
+ * `GMT-03:30` → −3.5, `GMT` → 0. The MINUTES matter: reading only the hours
+ * stored every Indian airport as UTC+5, half an hour out, which moves a
+ * report time across a Table A band and puts a landing on the wrong side of
+ * dusk in any local-time reading.
+ */
+export function offsetHoursFromName(name: string): number {
+  const match = name.match(/([+-])(\d{1,2})(?::?(\d{2}))?/)
+  if (!match) return 0
+  const hours = Number(match[2]) + (match[3] ? Number(match[3]) / 60 : 0)
+  return match[1] === "-" ? -hours : hours
+}

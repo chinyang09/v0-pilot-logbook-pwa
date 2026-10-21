@@ -346,7 +346,18 @@ data loss.
   `serverSeq` (content is unchanged), and each rewrite is filtered on the seq
   it read, so a push landing mid-migration is never overwritten.
 - Bump `SYNC_SCHEMA_VERSION` when a field table changes in a way existing
-  documents must be rewritten for.
+  documents must be rewritten for — and ADDING a field is such a change. `pfRole`
+  went into the personnel table after version 2 had already migrated, so not one
+  stored crew card carried it until version 3.
+- **One fact, one spelling** (`NORMALIZE`, v3). A field whose right value follows
+  from another is settled on every write: a flight's `entryType` and
+  `isSimulator` always agree and are never `null`, `isLocked` and a crew card's
+  switches are booleans. Production held "an ordinary unlocked flight" three
+  ways (`entryType` on 14 flights and `null` on 307; `isLocked` `false` on 250
+  and `null` on 71), which every query on those fields had to know about.
+- **A key is only dropped by name** (`RETIRED_KEYS`). Unknown keys are kept,
+  because one may be a newer build's field; `isDraft` (213 flights, all `false`,
+  referenced nowhere) was checked dead first, then listed.
 
 ### Sync Triggers (`lib/sync/sync-trigger-manager.ts`)
 
@@ -4227,6 +4238,8 @@ When making changes, be aware of these high-impact files:
 - Do not resolve the pilot's PF convention without the flight's DATE — `pfRoleFrom` is the PICUS check-out, and a flown leg before it is SIC. And do not let an import apply a `pilotRole` change whose `pilotFlying` half was withheld or declined: the role follows the PF the flight ends up with (`settledRole`), or a PM leg is logged PICUS
 - Do not take an eCrew report's day/night takeoff and landing split as fact — audited against a real year it disagrees with the sun on 86 of 283 events (a "day" landing with the sun 78° down). The sun's answer is applied to creates (`suggested*` in `hydrateFlightFromSector`) as it already was to updates, and a PF sector carries BOTH a takeoff and a landing even where the report recorded only one (`suggestToLdg`)
 - Do not read an OFF or ON on the flight's own date when it is earlier in the day than OUT — the flight is keyed on OUT's UTC date, so it is the NEXT day (`instantOnFlight`; pass `outTime` to `calculateTakeoffsLandings`). And civil twilight is GEOMETRIC: the sun's centre 6° below the horizon with no refraction term, which moved every dusk ~13 seconds and called a −6.02° takeoff "day"
+- Do not parse a UTC offset as an integer — `GMT+05:30` is 5.5. `getAirportTimeInfo` read the hours only, so every Indian airport was stored as UTC+5 on its flights, half an hour out for the FDP calculator's local report time and anything else reading local time. `offsetHoursFromName` (`lib/utils/tz-format.ts`) is the one parser, `getAirportTimeInfo(tz, at)` takes the flight's instant where DST could differ, and `repairFlightTimezones` puts stored offsets right once per launch through `updateFlight`
+- Do not leave a simulator's pins on an entry that becomes a FLIGHT — a sim pins `simulatedInstrumentTime` and its 00:00 `nightTime`, and carried into a flight the night pin holds night at zero through every recalculation (four production flights carried them). `withoutSimulatorPins` drops both on the switch, keeping a night pin only when it holds a real figure
 - Do not let a simulator's duration reach `blockTime` — it belongs in `simulatedInstrumentTime`, which is what keeps sims out of flight-hour totals — and do not let any RECALCULATION put it there. `recalculateFlightFields` returns `simulatorRepairPatch` for a simulator instead of deriving anything, and the flight form's `calculatedFields` returns zeros for one; both used to compute a block time from the session's OUT/IN and a role time from that block. Production carried seven sessions at 4–6h of block and two at 4h of SIC from exactly that (the form on every open, the roster import's `postWriteRecalculate`). `repairSimulatorEntries` puts such rows right once per launch, AFTER the initial sync and through `updateFlight`, so the fix is an ordinary field patch every device pulls — never correct synced data by writing to MongoDB directly, which skips the sequence the devices pull from
 
 **LogTen Pro migration:**

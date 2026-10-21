@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { simulatorRepairPatch } from "../entry-type"
+import { simulatorRepairPatch, withoutSimulatorPins } from "../entry-type"
 import { recalculateFlightFields } from "../flight-calculations"
 import type { FlightLog } from "@/types/entities/flight.types"
 
@@ -78,5 +78,17 @@ describe("recalculateFlightFields on a simulator", () => {
 
   it("repairs one that already carries a block time", () => {
     expect(recalculateFlightFields(sim({ blockTime: "06:00" }), null, null)).toEqual({ blockTime: "00:00" })
+  })
+})
+
+describe("withoutSimulatorPins", () => {
+  it("drops the session and zero-night pins when an entry becomes a flight", () => {
+    expect(
+      withoutSimulatorPins({ simulatedInstrumentTime: true, nightTime: true, sicTime: true }, "00:00")
+    ).toEqual({ sicTime: true })
+  })
+
+  it("keeps a night pin that holds a real figure", () => {
+    expect(withoutSimulatorPins({ simulatedInstrumentTime: true, nightTime: true }, "01:12")).toEqual({ nightTime: true })
   })
 })

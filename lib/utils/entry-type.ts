@@ -96,3 +96,19 @@ export function entryDuration(
     ? flight.simulatedInstrumentTime || flight.blockTime || ""
     : flight.blockTime || "";
 }
+
+/**
+ * A flight's overrides without the two a SIMULATOR sets on itself — its
+ * session time and its night time. They mean "this is not a flight", so they
+ * have to go when an entry becomes one, or night time stays pinned at the
+ * simulator's 00:00 through every recalculation. A night pin holding a real
+ * figure is the pilot's own and stays.
+ */
+export function withoutSimulatorPins(
+  overrides: FlightLog["manualOverrides"],
+  nightTime?: string
+): FlightLog["manualOverrides"] {
+  if (!overrides) return overrides
+  const { simulatedInstrumentTime: _sim, nightTime: night, ...rest } = overrides
+  return hasDuration(nightTime) && night ? { ...rest, nightTime: night } : rest
+}
